@@ -43,9 +43,11 @@
  * - **No committed position is kept.** The read position a run commits is
  *   stored on `sys_sync_run` (ADR-0153 D7), which lands in its own change. Until
  *   then every run reads from `watermark.start`, so an incremental pull reads
- *   what a `full` one reads; the keyed upsert makes the re-read harmless, and
- *   no row is ever passed. The result still reports the position this run
- *   would commit.
+ *   what a `full` one reads. The keyed upsert keeps the rows right, and no row
+ *   is ever passed, but every run rewrites every row of the target: record
+ *   automations run, audit rows are written and `updated_at` moves for each
+ *   one, on every run. The result still reports the position this run would
+ *   commit.
  * - Delete marking (D3), the provenance columns (D4) and drift (D6) are later
  *   changes; their keys stay `planned` in the liveness ledger.
  *
@@ -104,7 +106,10 @@ export interface DatasourcePullResult {
     watermark: { field: string; from: string | number; committed?: string | number };
     /** Rows the windows answered. */
     pulled: number;
-    /** The import runner's reports for every batch, summed. */
+    /**
+     * The import runner's counters for every batch, summed. `results` holds at
+     * most {@link REFUSED_ROW_SAMPLE} refused rows, never one result per row read.
+     */
     summary: ImportRunSummary;
 }
 
@@ -172,7 +177,8 @@ export async function pullDatasourceSource(
     const sourceObject = typeof ds.object === 'string' ? ds.object : undefined;
     const wmName = typeof wm?.field === 'string' ? wm.field : undefined;
     if (!sourceObject || !wmName || wm?.start === undefined) {
-        return invalid('no_connector_source',
+        // [N4] The binding is there but unusable: the datasource source's own reason.
+        return invalid('source_binding_invalid',
             'datasourceSource names no object or no watermark { field, start }, so there is nothing to read; '
             + "write datasourceSource: { object: '<federated object>', watermark: { field, start } }");
     }
@@ -291,6 +297,11 @@ export async function pullDatasourceSource(
                 where: query.where,
                 ...(query.orderBy ? { orderBy: query.orderBy } : {}),
                 limit: query.limit ?? windowLimit,
+                // [S3] The pull reads `records` only. Without this the data door
+                // runs `engine.count` over the same `where` beside every read that
+                // names a `limit` — on the floored path the floor's count is the
+                // window fetched from the remote a second time.
+                count: false,
             },
             context: readContext,
             ...(environmentId ? { environmentId } : {}),
@@ -298,7 +309,10 @@ export async function pullDatasourceSource(
         return Array.isArray(res) ? res : Array.isArray(res?.records) ? res.records : [];
     };
 
-    let summary: ImportRunSummary | undefined;
+    // [S2] The run's report: the counters of every batch summed, and at most
+    // REFUSED_ROW_SAMPLE refused rows kept for the log — never one result per
+    // source row, which would grow with the table and be copied on every batch.
+    const summary = emptySummary();
     const trimWhitespace = true;
     const metaMap = buildFieldMetaMap(target);
     const write = async (rows: Rec[]): Promise<boolean[]> => {
@@ -323,7 +337,7 @@ export async function pullDatasourceSource(
             skipBlankMatchKey: true,
         });
         const batch = refuseBlankMatchKeys(ran, mapping, matchFields).summary;
-        summary = summary ? sumSummaries(summary, batch) : batch;
+        addBatch(summary, batch);
         return rows.map((_, i) => isWritten(batch.results[i]));
     };
 
@@ -348,7 +362,7 @@ export async function pullDatasourceSource(
             ...(report.committed !== undefined ? { committed: spellCanon(kind, report.committed) } : {}),
         },
         pulled: report.read,
-        summary: summary ?? emptySummary(),
+        summary,
     };
 }
 
@@ -387,23 +401,35 @@ function isWritten(result: ImportRowResult | undefined): boolean {
     return result?.ok === true && (result.action === 'created' || result.action === 'updated');
 }
 
+/**
+ * [S2] The most refused rows a pull's summary keeps, in read order — enough
+ * for the log line and a caller that wants an example of what was refused; the
+ * counters carry every row. `ConnectorSourcePullSummary`, the part of the
+ * report the contract hands a caller, is the counters alone.
+ */
+export const REFUSED_ROW_SAMPLE = 20;
+
 function emptySummary(): ImportRunSummary {
     return { total: 0, processed: 0, created: 0, updated: 0, skipped: 0, errors: 0, ok: 0, results: [], cancelled: false } as ImportRunSummary;
 }
 
-/** Two batches' reports as one: counters summed, results renumbered after the first's. */
-function sumSummaries(a: ImportRunSummary, b: ImportRunSummary): ImportRunSummary {
-    const offset = a.results.length;
-    return {
-        ...a,
-        total: a.total + b.total,
-        processed: a.processed + b.processed,
-        created: a.created + b.created,
-        updated: a.updated + b.updated,
-        skipped: a.skipped + b.skipped,
-        errors: a.errors + b.errors,
-        ok: a.ok + b.ok,
-        cancelled: a.cancelled || b.cancelled,
-        results: [...a.results, ...b.results.map((r) => ({ ...r, row: r.row + offset }))],
-    };
+/**
+ * Fold one batch's report into the run's: the counters summed, and the batch's
+ * refused rows added to the sample until it holds {@link REFUSED_ROW_SAMPLE},
+ * renumbered to their place in the run. Nothing else of the batch is kept.
+ */
+function addBatch(run: ImportRunSummary, batch: ImportRunSummary): void {
+    const offset = run.total;
+    run.total += batch.total;
+    run.processed += batch.processed;
+    run.created += batch.created;
+    run.updated += batch.updated;
+    run.skipped += batch.skipped;
+    run.errors += batch.errors;
+    run.ok += batch.ok;
+    run.cancelled = run.cancelled || batch.cancelled;
+    for (const r of batch.results) {
+        if (run.results.length >= REFUSED_ROW_SAMPLE) break;
+        if (r.ok === false) run.results.push({ ...r, row: r.row + offset });
+    }
 }

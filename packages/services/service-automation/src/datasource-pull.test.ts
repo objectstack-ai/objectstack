@@ -13,11 +13,13 @@
  * the ADR-0112 `code` + `status` and the `reason`.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { pullConnectorSource, type ConnectorPullDeps, type ConnectorPullProtocol } from './connector-pull.js';
+import { REFUSED_ROW_SAMPLE } from './datasource-pull.js';
 import { ConnectorPullError } from './pull-refusal.js';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -80,6 +82,7 @@ afterEach(async () => {
     await open?.erp?.disconnect?.();
     open = undefined;
     delete process.env.OS_TENANCY_POSTURE;
+    delete process.env.OS_DATA_MAX_PAGE_SIZE;
 });
 
 /** The engine's own protocol, adapted as the connector pull's integration test adapts it; metadata from `meta`. */
@@ -330,5 +333,92 @@ describe('[ADR-0153 D1] the floored read path, through the pull', () => {
         const h = await floored(Array.from({ length: 6 }, (_, i) => ({ id: `W-${i}`, updated_at: at(i), amount: i })));
         const err = await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM }));
         expect([err.code, err.status, err.reason]).toEqual(['EXTERNAL_ROW_CAP_EXCEEDED', 422, 'sync_bounds_not_pushed']);
+    });
+});
+
+describe('[S2] a pull reports counters, never one result per row read', () => {
+    it('a multi-batch pull of refused rows keeps at most the bounded sample of them, numbered in read order', async () => {
+        process.env.OS_DATA_MAX_PAGE_SIZE = '3';
+        // AMOUNT holds text no number field accepts: every row is refused by the runner.
+        const h = await harness([]);
+        for (let i = 0; i < 25; i++) {
+            await h.erp.knex.raw('insert into ERP_ORDERS values (?, ?, ?, ?)', [`R-${String(i).padStart(2, '0')}`, at(i), 'not-a-number', DEFAULT_ORGANIZATION_ID]);
+        }
+        let reads = 0;
+        const findData = h.deps.protocol.findData.bind(h.deps.protocol);
+        h.deps.protocol.findData = async (req) => { if (req.object === 'erp_order') reads++; return findData(req); };
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(reads).toBeGreaterThan(5);
+        expect({ total: result.summary.total, errors: result.summary.errors, created: result.summary.created })
+            .toEqual({ total: 25, errors: 25, created: 0 });
+        expect(result.summary.results).toHaveLength(REFUSED_ROW_SAMPLE);
+        expect(result.summary.results.every((r) => r.ok === false)).toBe(true);
+        expect(result.summary.results.map((r) => r.row)).toEqual(Array.from({ length: REFUSED_ROW_SAMPLE }, (_, i) => i + 1));
+    });
+
+    it('a multi-batch pull that writes every row carries no per-row results at all', async () => {
+        process.env.OS_DATA_MAX_PAGE_SIZE = '3';
+        const h = await harness(Array.from({ length: 10 }, (_, i) => ({ no: `G-${i}`, at: at(i), amount: i })));
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect({ total: result.summary.total, created: result.summary.created, errors: result.summary.errors })
+            .toEqual({ total: 10, created: 10, errors: 0 });
+        expect(result.summary.results).toEqual([]);
+    });
+});
+
+describe('[S3] through the real data door: no count beside a read, and every read names its limit', () => {
+    async function overRealDoor(h: Harness) {
+        const door = new ObjectStackProtocolImplementation(h.ql as never) as unknown as ConnectorPullProtocol;
+        h.deps.protocol.findData = (req) => door.findData(req);
+        const count = vi.spyOn(h.ql, 'count');
+        const find = vi.spyOn(h.ql, 'find');
+        return { count, find };
+    }
+    const sourceReads = (find: ReturnType<typeof vi.spyOn>, object: string) =>
+        find.mock.calls.filter((c: unknown[]) => c[0] === object).map((c: unknown[]) => c[1] as Record<string, unknown>);
+
+    it('built-in path: pages read through findData run no engine.count, and each names its own limit', async () => {
+        process.env.OS_DATA_MAX_PAGE_SIZE = '3';
+        const h = await harness(Array.from({ length: 7 }, (_, i) => ({ no: `P-${i}`, at: at(i), amount: i })));
+        const { count, find } = await overRealDoor(h);
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(result.summary.created).toBe(7);
+        const reads = sourceReads(find, 'erp_order');
+        expect(reads.length).toBeGreaterThan(3);
+        expect(reads.every((q) => typeof q.limit === 'number' && q.limit <= 3)).toBe(true);
+        expect(count.mock.calls.filter((c: unknown[]) => c[0] === 'erp_order')).toEqual([]);
+    });
+
+    it('floored path: a window read through findData runs no engine.count, so the remote is asked once per window', async () => {
+        const rows = [{ id: 'W-1', updated_at: at(1), amount: 1 }, { id: 'W-2', updated_at: at(2), amount: 2 }];
+        const remoteFinds: unknown[] = [];
+        const h = await harness(
+            [],
+            { source: { ...SOURCE, name: 'wh_order', datasource: 'wh', external: { remoteName: 'orders', columnMap: { ORDER_NO: 'id' } } },
+              mapping: { ...MAPPING, datasourceSource: { ...MAPPING.datasourceSource, object: 'wh_order' } } },
+            (ql) => {
+                ql.registerDriver({
+                    name: 'wh', version: '0.0.1', supports: { transactionsUnsupported: true },
+                    async connect() {}, async disconnect() {}, async syncSchema() {},
+                    async find(_object: string, query: Rec = {}) {
+                        remoteFinds.push(query);
+                        const page = rows.map((r) => ({ ...r }));
+                        return typeof query.limit === 'number' ? page.slice(0, query.limit) : page;
+                    },
+                } as never);
+                ql.registerDatasourceDef({ name: 'wh', driver: 'com_vendor_wh', schemaMode: 'external', external: { rowCap: 4 } } as never);
+            },
+        );
+        h.meta.datasource.set('wh', { name: 'wh', driver: 'com_vendor_wh', schemaMode: 'external', external: { rowCap: 4 } });
+        const { count, find } = await overRealDoor(h);
+        const result = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(result.source === 'datasource' && result.readPath).toBe('floored');
+        expect(result.summary.created).toBe(2);
+        const reads = sourceReads(find, 'wh_order');
+        expect(reads).toHaveLength(1);
+        expect(reads[0].limit).toBe(4);
+        expect(count.mock.calls.filter((c: unknown[]) => c[0] === 'wh_order')).toEqual([]);
+        // One window, one remote fetch: the floor was not asked to count it a second time.
+        expect(remoteFinds).toHaveLength(1);
     });
 });

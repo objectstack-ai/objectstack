@@ -960,8 +960,9 @@ export async function scheduleAppArtifactJobs(
         let form: 'body' | 'handler' | 'pull';
         if (job.pull !== undefined) {
             // The declarative run form. Judged against the artifact first: a
-            // pull whose mapping is missing (or has no `connectorSource`)
-            // could only ever be refused, so it is not scheduled.
+            // pull whose mapping is missing, or has no source (`connectorSource`
+            // or `datasourceSource`), could only ever be refused, so it is not
+            // scheduled.
             const judged = judgeJobPull(job, bundle);
             if (!judged.binds) {
                 logger.warn(`${tag} job pull does not bind — the job is NOT scheduled: ${judged.refusal}`, {
