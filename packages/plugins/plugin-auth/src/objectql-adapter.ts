@@ -20,6 +20,8 @@ import {
 } from './sso-client-secret.js';
 import {
   applyIdpInitiatedToOidcConfigOnRead,
+  applyUserInfoOptOutOnRead,
+  restoreUserInfoEndpointOnWrite,
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options.js';
 import {
@@ -937,6 +939,7 @@ export function createObjectQLAdapterFactory(
         // The provider's IdP-initiated toggle lives on its own column, never
         // in the blob (`sso-sign-in-options.ts`).
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, row);
+        restoreUserInfoEndpointOnWrite(objectName, row);
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
@@ -1010,6 +1013,7 @@ export function createObjectQLAdapterFactory(
         await injectClientSecretOnRead(secretEngine, objectName, result);
         // The vendor reads `oidcConfig.allowIdpInitiated`; the column answers it.
         applyIdpInitiatedToOidcConfigOnRead(objectName, result);
+        applyUserInfoOptOutOnRead(objectName, result);
         // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
         // text column holding JSON, and better-auth decodes it on its two
         // write echoes only. Decode it here so all four READ routes
@@ -1060,6 +1064,7 @@ export function createObjectQLAdapterFactory(
         for (const r of results) {
           await injectClientSecretOnRead(secretEngine, objectName, r);
           applyIdpInitiatedToOidcConfigOnRead(objectName, r);
+          applyUserInfoOptOutOnRead(objectName, r);
         }
 
         return results.map((r) => {
@@ -1098,6 +1103,7 @@ export function createObjectQLAdapterFactory(
         // first config edit, leaving a column that only LOOKS protected.
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
+        restoreUserInfoEndpointOnWrite(objectName, patch);
         // [#17440] Write door #2 again, for a different column. Account
         // identity is `(provider_id, account_id)` since better-auth 1.7.3, and
         // no column records which IdP vouched for a row — so re-pointing a
@@ -1126,6 +1132,7 @@ export function createObjectQLAdapterFactory(
         // is required". Same two read halves as `findOne`, same order.
         await injectClientSecretOnRead(secretEngine, objectName, result);
         applyIdpInitiatedToOidcConfigOnRead(objectName, result);
+        applyUserInfoOptOutOnRead(objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1145,6 +1152,7 @@ export function createObjectQLAdapterFactory(
         // be the one path that writes the secret back in cleartext.
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
+        restoreUserInfoEndpointOnWrite(objectName, patch);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.
