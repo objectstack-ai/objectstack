@@ -187,20 +187,18 @@ export function buildServedReadonlyIndex(stack: AnyRec): Map<string, Map<string,
  * `packages/objectql/src/validation/rule-validator.ts` (#15719). ⛔ Not derived
  * from it: this package is dependency-free by design and objectql does not
  * export the set, so the two are held equal by
- * `validate-readonly-flow-writes.test.ts` naming the same three buckets and the
+ * `validate-readonly-flow-writes.test.ts` naming the same four buckets and the
  * engine's own tests pinning them against the `@objectstack/spec` enum.
  *
  * The split is the enum's own (`object.zod.ts`, "Enforcement happens in three
- * places", item 3): these three fail closed on a user-context generic write —
- * `better-auth` via ADR-0092, `engine-owned` / `append-only` via ADR-0103 —
+ * places", item 3): these four fail closed on a user-context generic write —
+ * `better-auth` via ADR-0092, `engine-owned` / `append-only` / `synced` via
+ * ADR-0103 (`synced` since ADR-0153 D4) —
  * while `platform` / `config` / `system-data` are writable by default and carry
  * no such guard.
  */
-const PLATFORM_INTERNAL_MANAGED_BUCKETS: ReadonlySet<string> = new Set([
-  'engine-owned',
-  'append-only',
-  'better-auth',
-]);
+ * | `synced`       | ADR-0103 guard, `userActions` locked (ADR-0153 D4) | steps around |
+ * | `better-auth`  | ADR-0092 identity write guard                 | steps around |
 
 /**
  * Objects the engine's CREATE-side static strip does not judge at all — the

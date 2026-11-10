@@ -3146,6 +3146,48 @@ function refuseExternalBindingOnPrimaryDatasource(
 }
 
 /**
+ * [ADR-0153 D4] On a write-locked bucket (`synced`,
+ * {@link MANAGED_BY_WRITE_LOCKED_BUCKETS}) `userActions` may not open a write
+ * verb — a named exception to ADR-0103 D1. One located issue per opened verb,
+ * at `['userActions', <verb>]`: a bare `true`, or the object form with
+ * `enabled: true`. Closing a verb (`false`) restates the default and is
+ * accepted, as is any `exportCsv`, which is not a write.
+ *
+ * Refused at parse on every door, not only at `create()`: the bucket is new,
+ * so no stored object carries the shape. {@link resolveCrudAffordances}
+ * keeps the four verbs closed on the bucket anyway, so a document that reached
+ * a reader without this parse still offers no member write.
+ *
+ * Kept in the existing callback beside {@link refuseExternalBindingOnPrimaryDatasource}
+ * so it adds no check node the JSON Schema projection would have to drop.
+ */
+function refuseWriteLockedUserActions(
+  objectName: unknown,
+  managedBy: unknown,
+  userActions: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof managedBy !== 'string' || !MANAGED_BY_WRITE_LOCKED_BUCKETS.has(managedBy)) return;
+  if (userActions === null || typeof userActions !== 'object') return;
+  const name = typeof objectName === 'string' && objectName.length > 0 ? objectName : 'this object';
+  for (const verb of ['create', 'import', 'edit', 'delete'] as const) {
+    const flag = (userActions as Record<string, unknown>)[verb];
+    const opens = flag === true
+      || (flag !== null && typeof flag === 'object' && (flag as { enabled?: unknown }).enabled === true);
+    if (!opens) continue;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['userActions', verb],
+      message:
+        `Object '${name}' is managedBy: '${managedBy}', whose rows a pull copies from their source, and ` +
+        `userActions.${verb} may not open a write on it: a member's edit would be kept or overwritten by the ` +
+        'next pull with no word. Remove the entry. A change to the data belongs in the source, through a ' +
+        'declared action that calls it; the next pull brings the change home.',
+    });
+  }
+}
+
+/**
  * [#26725] An object's `actions` array declares each action name once. One
  * located issue per repeated name, at `['actions', <index>]` of its SECOND
  * declaration, naming the name and every index. Before this, the object save
@@ -3181,6 +3223,32 @@ function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: 
  */
 const FieldNameKeySchema = z.string().regex(/^[a-z_][a-z0-9_]*$/, {
   message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+});
+
+/**
+ * [ADR-0153 D4] The field-name prefix reserved for the platform's sync-in
+ * provenance columns (`_sync_source`, `_sync_external_id`, `_sync_pulled_at`,
+ * `_sync_run_id`, `_sync_deleted_at`), which the pull stamps on a `synced`
+ * object. An author field may not take it, on any object: field keys may
+ * start with `_`, and an author's own `_sync_…` column would collide with
+ * the platform's or be read as one. The underscore keeps the platform's
+ * columns apart from an author's `synced_at` or `external_id`.
+ */
+const SYNC_RESERVED_FIELD_PREFIX_REFUSED =
+  'Field names starting with "_sync_" are reserved for the platform\'s sync-in provenance columns, which a '
+  + 'pull stamps on a synced object; no author field may take the prefix. Rename the field (e.g. "synced_at", '
+  + '"external_id").';
+
+/**
+ * The key grammar of a field an AUTHOR declares: {@link FieldNameKeySchema},
+ * minus the reserved `_sync_` prefix. Read by the two records that declare
+ * fields (`ObjectSchema.fields`, `ObjectExtensionSchema.fields`); a display
+ * patch (`fieldPatches`) declares no field and keeps the plain grammar. A
+ * second `.regex()`, so the published JSON Schema states the reservation too
+ * (an `allOf` of the two patterns), not only the parse.
+ */
+const AuthorFieldNameKeySchema = FieldNameKeySchema.regex(/^(?!_sync_)/, {
+  message: SYNC_RESERVED_FIELD_PREFIX_REFUSED,
 });
 
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
@@ -3277,6 +3345,16 @@ const ObjectSchemaBase = strictObject(
    * - `append-only`  — Immutable audit log. No New / Import / Edit /
    *   Delete; only View and Export. Example: `sys_approval_action`,
    *   `sys_audit_log`, `sys_activity`, `sys_email`, `sys_presence`.
+   * - `synced`       — An ordinary business object whose rows are COPIED by a
+   *   pull (ADR-0153 D4): a `mapping` carrying a `connectorSource` or a
+   *   `datasourceSource` fills it on a `job`'s schedule, as the system. Read
+   *   like any object (permissions, RLS, reports, flows), read-only to members:
+   *   the default row is `engine-owned`'s, and — the one bucket where this is
+   *   so, a named exception to ADR-0103 D1 — `userActions` may not open a
+   *   write verb on it (refused at parse). A change to the source data goes
+   *   through a declared action that calls the source; the next pull brings it
+   *   home. Unlike `engine-owned`, its rows are the organization's business
+   *   data, and its `sharingModel` is authored like any custom object's.
    * - `better-auth`  — Identity tables owned by the better-auth driver
    *   (sys_user, sys_session, sys_account, sys_member, sys_organization,
    *   sys_api_key, sys_jwks, sys_verification, sys_two_factor,
@@ -3296,8 +3374,9 @@ const ObjectSchemaBase = strictObject(
    *   3. Engine write guards fail-closed on user-context generic writes to a
    *      managed object whose resolved affordances forbid the verb —
    *      `better-auth` via plugin-auth's identity write guard (ADR-0092),
-   *      `engine-owned` / `append-only` via plugin-security's engine-owned
-   *      write guard (ADR-0103). `isSystem` / context-less engine writes bypass.
+   *      `engine-owned` / `append-only` / `synced` via plugin-security's
+   *      engine-owned write guard (ADR-0103, ADR-0153 D4). `isSystem` /
+   *      context-less engine writes bypass — which is how a pull writes.
    *      `system-data` — like `platform` / `config` — is writable by default and
    *      carries no such guard; its writes are adjudicated by the delegated-admin
    *      gate / RLS / permission sets.
@@ -3305,14 +3384,14 @@ const ObjectSchemaBase = strictObject(
    * Use {@link userActions} to override the default matrix for a single
    * field (e.g. an "append-only" table that should still allow Export).
    */
-  managedBy: z.enum(['platform', 'config', 'system-data', 'engine-owned', 'append-only', 'better-auth'], {
+  managedBy: z.enum(['platform', 'config', 'system-data', 'engine-owned', 'append-only', 'synced', 'better-auth'], {
     // Only the value that USED to be legal gets the retirement prescription —
     // telling the author of `managedBy: 'sytem'` that their value "was removed"
     // would misinform. Everything else keeps zod's own enum message, which
     // already lists the legal values.
     error: (issue) => (issue.input === 'system' ? MANAGED_BY_SYSTEM_RETIRED : undefined),
   }).optional().describe(
-    'Lifecycle bucket — platform (user CRUD) | config (admin authored) | system-data (platform-defined schema, admin/user-writable data) | engine-owned (engine owns the lifecycle, no user writes) | append-only (audit) | better-auth (identity). UI clients honour the resolved affordance matrix.',
+    'Lifecycle bucket — platform (user CRUD) | config (admin authored) | system-data (platform-defined schema, admin/user-writable data) | engine-owned (engine owns the lifecycle, no user writes) | append-only (audit) | synced (rows copied by a pull from a connector or federated source; read-only to members, and userActions cannot open a write) | better-auth (identity). UI clients honour the resolved affordance matrix.',
   ),
 
   /**
@@ -3604,10 +3683,10 @@ const ObjectSchemaBase = strictObject(
           message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
           path: [reserved],
         }),
-      z.record(FieldNameKeySchema, FieldSchema),
+      z.record(AuthorFieldNameKeySchema, FieldSchema),
     ),
     'fields',
-  ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
+  ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused, and so is the "_sync_" prefix, reserved for the platform\'s sync-in columns.'),
 
   /**
    * Read attachments — the blocks a service attaches to the rows it serves,
@@ -4346,6 +4425,9 @@ const ObjectSchemaBase = strictObject(
   // [#26725] Each action name once in this object's `actions` — the name is the
   // key the action runs under. See the helper's docblock.
   refuseDuplicateActionNames(object.name, object.actions, ctx);
+  // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
+  // the helper's docblock.
+  refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author
@@ -5024,6 +5106,9 @@ export interface RowCrudPredicates {
  *                  The explicit, self-documenting successor to the old
  *                  engine-owned DEFAULT of `system`
  *   append-only  — audit log: View + Export only
+ *   synced       — rows copied by a pull (ADR-0153 D4): the engine-owned
+ *                  row, and `userActions` cannot open a write on it
+ *                  ({@link MANAGED_BY_WRITE_LOCKED_BUCKETS})
  *   better-auth  — identity tables owned by better-auth driver; CRUD
  *                  routed through purpose-built actions (Invite, Reset
  *                  PW, Revoke, …)
@@ -5034,8 +5119,24 @@ const CRUD_AFFORDANCE_DEFAULTS: Record<NonNullable<ServiceObject['managedBy']> |
   'system-data':  { create: true,  import: false, edit: true,  delete: true,  exportCsv: true },
   'engine-owned': { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'append-only':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
+  synced:         { create: false, import: false, edit: false, delete: false, exportCsv: true },
   'better-auth':  { create: false, import: false, edit: false, delete: false, exportCsv: true },
 };
+
+/**
+ * [ADR-0153 D4] The buckets on which `userActions` may not open a write verb —
+ * a named exception to ADR-0103 D1 ("the resolved affordance is the policy"),
+ * where on every other bucket `userActions` overrides the default row.
+ *
+ * `synced` alone: no member writer is the point of the bucket, since a member's
+ * edit to a pulled row is kept or overwritten by the next pull with no word.
+ * Read by {@link resolveCrudAffordances}, which keeps `create` / `import` /
+ * `edit` / `delete` at the bucket's closed default whatever `userActions` says;
+ * by `ObjectSchema`, which refuses a `userActions` that opens one at parse;
+ * and by the `/me/permissions` clamp (`@objectstack/core`), which reads
+ * `userActions` directly. `exportCsv` is not a write and is not locked.
+ */
+export const MANAGED_BY_WRITE_LOCKED_BUCKETS: ReadonlySet<string> = new Set(['synced']);
 
 /**
  * Resolve the effective CRUD affordance matrix for an object schema.
@@ -5055,7 +5156,13 @@ export function resolveCrudAffordances(
 ): CrudAffordances {
   const bucket = (obj?.managedBy ?? 'platform') as keyof typeof CRUD_AFFORDANCE_DEFAULTS;
   const base = CRUD_AFFORDANCE_DEFAULTS[bucket] ?? CRUD_AFFORDANCE_DEFAULTS.platform;
-  const overrides = obj?.userActions ?? {};
+  const authored = obj?.userActions ?? {};
+  // [ADR-0153 D4] On a write-locked bucket the four write verbs stay at the
+  // bucket's closed default whatever `userActions` says; only `exportCsv`,
+  // which is not a write, is still the author's.
+  const overrides = MANAGED_BY_WRITE_LOCKED_BUCKETS.has(bucket)
+    ? { exportCsv: authored.exportCsv }
+    : authored;
   const create = normalizeRowCrudOverride(overrides.create, base.create);
   const imp = normalizeRowCrudOverride(overrides.import, base.import);
   const edit = normalizeRowCrudOverride(overrides.edit, base.edit);
@@ -5476,11 +5583,16 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
    * `ObjectSchema.fields`: zod's record parser skips it, so the save door
    * would store a key the registered extension lacks.
    */
-  fields: refuseRecordProtoKey(z.record(FieldNameKeySchema, FieldSchema, {
+  fields: refuseRecordProtoKey(z.record(AuthorFieldNameKeySchema, FieldSchema, {
     // [#29523] Keyed by the field map's own key grammar: a key no field name
     // can be (`Region Code`, `region-code`) is refused here, where it is
     // written, instead of parsing and being merged into the target's map.
     error: (issue) => {
+      // [ADR-0153 D4] A grammatical key under the reserved prefix gets the
+      // reservation's own sentence, not the grammar's.
+      if (issue.code === 'invalid_key' && /^_sync_[a-z0-9_]*$/.test(String(issue.input))) {
+        return SYNC_RESERVED_FIELD_PREFIX_REFUSED;
+      }
       if (issue.code === 'invalid_key') {
         return `\`${String(issue.input)}\` cannot be a field name: an extension's \`fields\` is keyed by the ` +
           'name of each field it adds to the extended object, lowercase snake_case such as `region_code` ' +
