@@ -113,6 +113,14 @@ export async function aggregateSummaryValue(
   execCtx?: unknown,
 ): Promise<unknown> {
   const fkMatch = { [desc.fkField]: parentId };
+  // [ADR-0144 D6, amended] The channel claims "these rows are one parent's",
+  // so it rides only an equality on one concrete id. This function is a public
+  // export: a `parentId` that is an operator object (`{ $ne: null }`) or an
+  // empty value would turn the one-parent premise into a sum across parents,
+  // so such a call asks the aggregate as any caller does, and the
+  // record-currency door judges it as it judges any caller.
+  const id: unknown = parentId;
+  const oneParent = (typeof id === 'string' && id !== '') || (typeof id === 'number' && Number.isFinite(id));
   const where = desc.filter ? { $and: [fkMatch, desc.filter] } : fkMatch;
   const rows = await engine.aggregate(desc.childObject, {
     where,
@@ -125,7 +133,7 @@ export async function aggregateSummaryValue(
   // [ADR-0144 D6, amended] The rows are one parent's, through `fkField`: a
   // child amount that follows that parent's currency through it is one
   // currency, which the record-currency door admits on this channel alone.
-  }, { [ROLLUP_AGGREGATE_OPTION]: desc.fkField });
+  }, oneParent ? { [ROLLUP_AGGREGATE_OPTION]: desc.fkField } : undefined);
   const value = rows?.[0]?.value;
   return value == null ? summaryEmptySetValue(desc.fn) : value;
 }

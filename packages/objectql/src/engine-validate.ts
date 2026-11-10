@@ -580,6 +580,7 @@ export async function validate(
         assertRecordCurrencyCodes(
           object, currencyFields,
           followCodes && currencyImage ? followCodes(currencyImage) : currencyImage, mode, mode === 'insert' ? undefined : row, storedIds[i],
+          messages,
         );
         // [ADR-0144 D2, amended] …and the write's parent-code lock, on the
         // stored row the by-id update writes: a record a child row follows

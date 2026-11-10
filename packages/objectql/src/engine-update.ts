@@ -1521,7 +1521,7 @@ export class UpdateFacet {
                    : undefined;
                  assertRecordCurrencyCodes(
                    object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
-                   'update', currencyPayload, hookContext.input.id,
+                   'update', currencyPayload, hookContext.input.id, updateMsgCtx,
                  );
                }
                // [ADR-0144 D2, amended] …and a record a child row follows the
@@ -1934,7 +1934,7 @@ export class UpdateFacet {
                          recordCurrencyPairs(currencyFields), images.map((i) => i.image), this.homeAmountServing(opCtx.context).parentRows,
                        );
                        for (const { row, image } of images) {
-                           assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id);
+                           assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx);
                        }
                    }
                    // [ADR-0144 D2, amended] The predicate-path twin of the

@@ -62,6 +62,7 @@
 import { isValueDomainMember } from '@objectstack/spec/shared';
 import { CURRENCY_FRACTION_DIGITS } from '@objectstack/spec/data';
 import {
+  PARENT_CODE_UNREAD,
   followParentCurrencyCodes,
   isRecordCurrencyBlank,
   recordCurrencyFieldOf,
@@ -209,10 +210,13 @@ export interface HomeAmountServing {
   /**
    * [ADR-0144 D2, amended] The parent rows a child amount following its
    * parent's code reads that code from: `ids` of `master`, each with
-   * `fields`, read under the write's elevated, organization-kept authority. A
-   * row not read has no entry. Optional only so a serving built by hand for a
-   * sibling-code amount needs none: without it a following amount's parent
-   * reads as not found, and is neither converted nor judged for its code.
+   * `fields`. A parent the writer's read door does not return answers
+   * `PARENT_CODE_UNREAD` and is never read elevated; the others are read
+   * under the write's elevated, organization-kept authority, and one not
+   * found has no entry (see `ParentRowsReader`). Optional only so a serving
+   * built by hand for a sibling-code amount needs none: without it every
+   * following amount reads as having no code, so it is never converted and
+   * its write is refused `ERR_CURRENCY_CODE_REQUIRED`.
    */
   parentRows?: ParentRowsReader;
 }
@@ -244,7 +248,7 @@ export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmount
   const homes = new Map<string, Promise<string | undefined>>();
   const zones = new Map<string, Promise<string | undefined>>();
   const rates = new Map<string, Promise<ExchangeRateRow | undefined>>();
-  const parents = new Map<string, Promise<Record<string, unknown> | undefined>>();
+  const parents = new Map<string, Promise<Record<string, unknown> | typeof PARENT_CODE_UNREAD | undefined>>();
   const readParents = serving.parentRows;
   return {
     homeCurrency(organizationId) {
@@ -284,7 +288,7 @@ export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmount
             const read = readParents(master, missing, fields);
             for (const id of missing) parents.set(scope + id, read.then((rows) => rows.get(id)));
           }
-          const out = new Map<string, Record<string, unknown>>();
+          const out = new Map<string, Record<string, unknown> | typeof PARENT_CODE_UNREAD>();
           for (const id of ids) {
             const row = await parents.get(scope + id);
             if (row !== undefined) out.set(id, row);

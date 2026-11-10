@@ -48,12 +48,29 @@
  * read it. A field's machine name never holds a dot, so that key can never be
  * a stored column. A parent with a blank code refuses the child's amount here,
  * as a blank sibling code does ("a child amount beside a blank code is
- * refused at its own write", the D2 note). A parent the read did not find (a
- * dangling reference, a row outside the writer's organization) is not judged
- * here: the reference check answers for it. On an update the pair's input is
- * the `master_detail` field, not the dotted pointer, so re-parenting a child
- * is judged as writing a sibling code is.
+ * refused at its own write", the D2 note).
+ *
+ * The parent is read the way the write's other header reads are: first
+ * through the WRITER's read door, then elevated, keeping the organization. A
+ * parent the writer's read door does not return (one it may not read, one in
+ * another organization, one that does not exist) is never read elevated. A
+ * child amount naming such a parent is answered here with the reference
+ * check's own `reference_not_found` on the `master_detail` field, before any
+ * currency verdict (a blank code, a missing rate), so no answer of this write
+ * says anything about a row its writer cannot read. A system writer has no
+ * read door: a parent its elevated read does not find, or a value that is no
+ * row id, reads as no code, and the amount is refused
+ * `ERR_CURRENCY_CODE_REQUIRED`. Either way a following amount is never stored
+ * without a currency.
+ *
+ * On an update the pair's inputs are the amount, the `master_detail` field
+ * (re-parenting a child is judged as writing a sibling code is) and, when the
+ * amount declares `homeAmount`, the inputs of its projection (the document
+ * date and the two projected fields): whenever the write converts the amount,
+ * this guard has judged the parent it converts from.
  */
+
+import { ValidationError, buildFieldError, type ValidationMessageContext } from './record-validator.js';
 
 /** The ADR-0112 `code` {@link RecordCurrencyCodeRequiredError} carries. */
 export const CURRENCY_CODE_REQUIRED_CODE = 'ERR_CURRENCY_CODE_REQUIRED' as const;
@@ -87,6 +104,12 @@ export interface RecordCurrencyPair {
   readonly codeField: string;
   /** Set when {@link codeField} is a `MASTER_DETAIL.CODE` path the amount follows. */
   readonly path?: RecordCurrencyPath;
+  /**
+   * For a path pair whose amount declares `homeAmount`: the projection's other
+   * inputs (`rateDate`, `field`, `rateField`). An update touching any of them
+   * converts the amount, so it is judged too.
+   */
+  readonly projectionInputs?: readonly string[];
 }
 
 /**
@@ -142,6 +165,19 @@ export function recordCurrencyInputOf(pair: { readonly codeField: string; readon
   return pair.path ? pair.path.via : pair.codeField;
 }
 
+/** Every payload key whose presence makes an update judge `pair`. */
+function pairInputsOf(pair: RecordCurrencyPair): readonly string[] {
+  return [pair.amountField, recordCurrencyInputOf(pair), ...(pair.projectionInputs ?? [])];
+}
+
+/** A path amount's `homeAmount` inputs, when it declares one. */
+function homeAmountInputsOf(def: unknown): string[] {
+  const home = (def as { currencyConfig?: { homeAmount?: unknown } } | null)?.currencyConfig?.homeAmount;
+  if (home === null || typeof home !== 'object') return [];
+  const { field, rateDate, rateField } = home as { field?: unknown; rateDate?: unknown; rateField?: unknown };
+  return [rateDate, field, rateField].filter((k): k is string => typeof k === 'string' && k !== '');
+}
+
 /** Every record-mode amount an object's field map declares, in declaration order. */
 export function recordCurrencyPairs(fields: unknown): RecordCurrencyPair[] {
   if (fields === null || typeof fields !== 'object' || Array.isArray(fields)) return [];
@@ -150,31 +186,36 @@ export function recordCurrencyPairs(fields: unknown): RecordCurrencyPair[] {
     const codeField = recordCurrencyFieldOf(def);
     if (codeField === undefined) continue;
     const path = recordCurrencyPathOf(codeField, fields);
-    pairs.push(path ? { amountField, codeField, path } : { amountField, codeField });
+    pairs.push(path
+      ? { amountField, codeField, path, projectionInputs: homeAmountInputsOf(def) }
+      : { amountField, codeField });
   }
   return pairs;
 }
 
 /**
  * [ADR-0144 D2, amended] The value laid on an image under a path pointer when
- * the parent the row names was not read: no row by that id in the writer's
- * organization. Module-private in spirit (a `unique symbol`, never a stored
- * value): the guard below and the home projection skip such a pair, so the
- * reference check answers instead of a currency refusal about a parent that is
- * not there.
+ * the WRITER's read door did not return the parent the row names (a row it may
+ * not read, one in another organization, one that does not exist). Never a
+ * stored value. The home projection reads no rate for it, and the guard below
+ * answers it with the reference check's `reference_not_found`, so no currency
+ * verdict is ever given about a parent the writer cannot read.
  */
 export const PARENT_CODE_UNREAD: unique symbol = Symbol('objectstack.objectql.recordCurrencyParentCodeUnread');
 
 /**
  * Reads the parent rows a write's children follow: `ids` of `master`, each
- * with `fields`. A row not read has no entry. The engine supplies it under the
- * write's elevated, organization-kept authority (`HomeAmountServing.parentRows`).
+ * with `fields`. The engine supplies it (`HomeAmountServing.parentRows`): each
+ * id the writer's read door returns is read elevated, keeping the
+ * organization, and answers its row; an id the read door does not return
+ * answers {@link PARENT_CODE_UNREAD}; an id the elevated read does not find
+ * (a system writer's dangling reference) has no entry.
  */
 export type ParentRowsReader = (
   master: string,
   ids: readonly string[],
   fields: readonly string[],
-) => Promise<ReadonlyMap<string, Record<string, unknown>>>;
+) => Promise<ReadonlyMap<string, Record<string, unknown> | typeof PARENT_CODE_UNREAD>>;
 
 /** Lays the followed parent codes on a COPY of one image; never mutates it. */
 export type FollowParentCodes = (image: Record<string, unknown>) => Record<string, unknown>;
@@ -191,11 +232,12 @@ const identityFollow: FollowParentCodes = (image) => image;
  * Per path source, the value laid is:
  * - the parent's code (`null` when the parent holds none) — the guard judges it
  *   blank or not, and the projection converts from it;
- * - `null` when the row names no parent, or the path's first segment is no
- *   `master_detail` naming an object (a declaration the spec refuses), so an
- *   amount there is refused as having no currency;
- * - {@link PARENT_CODE_UNREAD} when the row names a parent the read did not
- *   return, which the reference check answers for.
+ * - `null` when the row names no parent, names it by a value that is no row id
+ *   (an object, an array), names one the elevated read does not find, or the
+ *   path's first segment is no `master_detail` naming an object (a declaration
+ *   the spec refuses): an amount there is refused as having no currency;
+ * - {@link PARENT_CODE_UNREAD} when the writer's read door did not return the
+ *   parent: the guard answers it `reference_not_found`.
  *
  * @param images the row images the follower will be asked about; a later image
  *   naming a parent outside them reads as unread.
@@ -224,7 +266,7 @@ export async function followParentCurrencyCodes(
     }
     entry.codes.add(path.code);
   }
-  const parents = new Map<string, ReadonlyMap<string, Record<string, unknown>>>();
+  const parents = new Map<string, ReadonlyMap<string, Record<string, unknown> | typeof PARENT_CODE_UNREAD>>();
   for (const [via, { master, ids, codes }] of byVia) {
     parents.set(via, ids.size === 0 || !readParents ? new Map() : await readParents(master, [...ids], [...codes]));
   }
@@ -232,12 +274,12 @@ export async function followParentCurrencyCodes(
     const out: Record<string, unknown> = { ...image };
     for (const [pointer, path] of paths) {
       const id = image[path.via];
-      if (path.master === undefined || isRecordCurrencyBlank(id)) {
+      if (path.master === undefined || isRecordCurrencyBlank(id) || (typeof id !== 'string' && typeof id !== 'number')) {
         out[pointer] = null;
         continue;
       }
       const parent = parents.get(path.via)?.get(String(id));
-      out[pointer] = parent === undefined ? PARENT_CODE_UNREAD : (parent[path.code] ?? null);
+      out[pointer] = parent === undefined ? null : parent === PARENT_CODE_UNREAD ? PARENT_CODE_UNREAD : (parent[path.code] ?? null);
     }
     return out;
   };
@@ -310,11 +352,19 @@ export class RecordCurrencyCodeRequiredError extends Error {
  * Refuse a row image whose record-mode amount holds a value beside a blank
  * currency code — see the module header.
  *
- * @param image   the row as it will be stored (insert row, or stored row ⊕ payload),
- *                with each followed parent code laid on it ({@link followParentCurrencyCodes});
- *                a path pair whose code was never laid reads as blank and is refused
- * @param touched an update's payload: only the pairs it carries a key of are judged;
- *                omitted on insert, where every pair is judged
+ * An amount that follows a parent the writer's read door did not return
+ * ({@link PARENT_CODE_UNREAD}) is refused first, with the reference check's
+ * own finding (`VALIDATION_FAILED`, `reference_not_found` on the
+ * `master_detail` field, built by `buildFieldError` in the caller's locale):
+ * the writer learns of that parent exactly what a reference to it would tell
+ * it, and nothing of its currency.
+ *
+ * @param image    the row as it will be stored (insert row, or stored row ⊕ payload),
+ *                 with each followed parent code laid on it ({@link followParentCurrencyCodes});
+ *                 a path pair whose code was never laid reads as blank and is refused
+ * @param touched  an update's payload: only the pairs it carries an input of are judged;
+ *                 omitted on insert, where every pair is judged
+ * @param messages the write's validation message context, for the reference finding's locale
  */
 export function assertRecordCurrencyCodes(
   object: string,
@@ -323,17 +373,29 @@ export function assertRecordCurrencyCodes(
   operation: 'insert' | 'update',
   touched?: Record<string, unknown> | null,
   recordId?: unknown,
+  messages?: ValidationMessageContext,
 ): void {
   if (!image) return;
   const pairs = recordCurrencyPairs(fields);
   if (pairs.length === 0) return;
   const has = (key: string) => touched != null && Object.prototype.hasOwnProperty.call(touched, key);
-  const hits = pairs.filter((p) => {
-    if (operation === 'update' && !has(p.amountField) && !has(recordCurrencyInputOf(p))) return false;
-    // A parent the read did not find is the reference check's to answer.
-    if (p.path && image[p.codeField] === PARENT_CODE_UNREAD) return false;
-    return !isBlank(image[p.amountField]) && isBlank(image[p.codeField]);
-  });
+  const judged = operation === 'update' ? pairs.filter((p) => pairInputsOf(p).some(has)) : pairs;
+  const unread = judged.filter((p) => p.path && image[p.codeField] === PARENT_CODE_UNREAD && !isBlank(image[p.amountField]));
+  if (unread.length > 0) {
+    const defs = fields as Record<string, { label?: string } | undefined>;
+    const vias = [...new Map(unread.map((p) => [p.path!.via, p.path!])).values()];
+    throw new ValidationError(vias.map((path) => buildFieldError(
+      {
+        field: path.via,
+        code: 'reference_not_found',
+        def: defs[path.via],
+        value: String(image[path.via]),
+        constraint: { target: path.master },
+      },
+      messages,
+    )));
+  }
+  const hits = judged.filter((p) => !isBlank(image[p.amountField]) && isBlank(image[p.codeField]));
   if (hits.length > 0) throw new RecordCurrencyCodeRequiredError(object, operation, hits, recordId);
 }
 
@@ -344,7 +406,6 @@ export function assertRecordCurrencyCodes(
 export function touchesRecordCurrency(fields: unknown, payload: Record<string, unknown> | null | undefined): boolean {
   if (!payload) return false;
   return recordCurrencyPairs(fields).some(
-    (p) => Object.prototype.hasOwnProperty.call(payload, p.amountField)
-      || Object.prototype.hasOwnProperty.call(payload, recordCurrencyInputOf(p)),
+    (p) => pairInputsOf(p).some((key) => Object.prototype.hasOwnProperty.call(payload, key)),
   );
 }
