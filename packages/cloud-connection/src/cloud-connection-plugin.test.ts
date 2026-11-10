@@ -864,14 +864,14 @@ describe('[#32083] GET /install-namespace — the control plane\'s default names
     const ENV = 'env-123';
     const ROUTE = 'GET /api/v1/cloud-connection/install-namespace';
     const URL_BASE = 'https://t1.example.com/api/v1/cloud-connection/install-namespace';
-    const services = (userId?: string, environmentId: string | undefined = ENV) => ({
+    const services = (userId: string | undefined, environmentId: string | null) => ({
         'env-registry': { resolveByHostname: async () => (environmentId ? { environmentId } : null) },
         'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => sessionAuth(userId) }) },
     });
 
-    async function mount(opts: { userId?: string; environmentId?: string; apiKey?: string; answer?: () => Promise<Response> } = {}) {
+    async function mount(opts: { userId?: string; environmentId?: string | null; apiKey?: string; answer?: () => Promise<Response> } = {}) {
         const rawApp = makeRawApp();
-        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: services(opts.userId, 'environmentId' in opts ? opts.environmentId : ENV) });
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: services(opts.userId, opts.environmentId === undefined ? ENV : opts.environmentId) });
         const fetchSpy = vi.fn(async (_url: string, _init?: RequestInit) => (opts.answer
             ? opts.answer()
             : new Response(JSON.stringify({ success: true, data: { namespace: 'crm_copy' } }), { status: 200 })));
@@ -912,7 +912,7 @@ describe('[#32083] GET /install-namespace — the control plane\'s default names
     });
 
     it('refuses a host that resolves to no environment 404 ENVIRONMENT_NOT_FOUND', async () => {
-        const { drive, fetchSpy } = await mount({ userId: 'user-1', environmentId: undefined });
+        const { drive, fetchSpy } = await mount({ userId: 'user-1', environmentId: null });
         const res = await drive('?package_id=pkg_1');
         expect(res.status).toBe(404);
         expect(res.payload.error.code).toBe('ENVIRONMENT_NOT_FOUND');
