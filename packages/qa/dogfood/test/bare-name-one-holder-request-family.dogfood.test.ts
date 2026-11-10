@@ -197,6 +197,54 @@ describe('one package holder per API, object-less action and function name, on a
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
   });
 
+  // [#32069, ADR-0150 D3/D5] The api reads of the clash the cold boot keeps.
+  // On main ff04ad81 the metadata store held one item per api name (the last
+  // registered), so `/apps/alpha/feed` answered 404 and the qualified read of
+  // alpha served beta's body stamped `_packageId: com.qa.bare.alpha`.
+  const metaApi = async (path: string) => {
+    const r = await stack.apiAs(admin, 'GET', path);
+    const body = (await r.json()) as any;
+    return { status: r.status, body, item: body?.item ?? body?.data?.item };
+  };
+
+  it('each package\'s qualified api read serves its own body under its own stamp; the bare read is 409 naming both', async () => {
+    for (const p of ['alpha', 'beta'] as const) {
+      for (const path of [`/meta/api/${p}/${API}`, `/meta/api/${API}?package=com.qa.bare.${p}`]) {
+        const { status, item } = await metaApi(path);
+        expect([status, item?.path, item?.summary, item?._packageId], path)
+          .toEqual([200, `/api/v1/apps/${p}/feed`, `${p} feed`, `com.qa.bare.${p}`]);
+      }
+    }
+    const bare = await metaApi(`/meta/api/${API}`);
+    expect([bare.status, codeOf(bare.body)], JSON.stringify(bare.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    const message = String(bare.body?.error?.message ?? bare.body?.error ?? '');
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+  });
+
+  it('each package\'s declared endpoint path is served from its own declaration', async () => {
+    for (const p of ['alpha', 'beta'] as const) {
+      const r = await stack.apiAs(admin, 'GET', `/apps/${p}/feed`);
+      const body = (await r.json()) as any;
+      expect([r.status, body?.data?.object], `/apps/${p}/feed`).toEqual([200, `${p}_item`]);
+    }
+  });
+
+  it('CONTROL — the showcase\'s one-holder api reads as before: bare, by its namespace and by its package', async () => {
+    for (const path of [`/meta/api/${SHOWCASE_API}`, `/meta/api/showcase/${SHOWCASE_API}`, `/meta/api/${SHOWCASE_API}?package=${SHOWCASE_PKG}`]) {
+      const { status, item } = await metaApi(path);
+      expect([status, item?.path, item?._packageId], path).toEqual([200, '/api/v1/apps/showcase/tasks', SHOWCASE_PKG]);
+    }
+  });
+
+  it('narrowing — a one-holder api read at a package or `_env` that does not hold it is 409 naming the holder (it was served the holder\'s item)', async () => {
+    for (const path of [`/meta/api/${SHOWCASE_API}?package=com.qa.bare.alpha`, `/meta/api/alpha/${SHOWCASE_API}`, `/meta/api/_env/${SHOWCASE_API}`]) {
+      const { status, body } = await metaApi(path);
+      expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(String(body?.error?.message ?? body?.error ?? ''), path).toContain(SHOWCASE_PKG);
+    }
+  });
+
   it('install-local of a third package declaring a held API name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed or served', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('gamma', { apis: [api('gamma')] }));

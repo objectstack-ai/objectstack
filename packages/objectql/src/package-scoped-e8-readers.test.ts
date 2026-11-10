@@ -115,8 +115,8 @@ beforeEach(() => {
 });
 
 describe('E8 wires exactly the nine types, every one of them package-scoped', () => {
-  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine, each one R addresses by package', () => {
-    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES].sort());
+  it('PACKAGE_SCOPED_READ_TYPES is the card\'s nine plus api (#32069), each one R addresses by package', () => {
+    expect([...PACKAGE_SCOPED_READ_TYPES].sort()).toEqual([...E8_TYPES, 'api'].sort());
     for (const type of PACKAGE_SCOPED_READ_TYPES) expect(isPackageScopedType(type), type).toBe(true);
   });
 });

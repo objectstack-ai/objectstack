@@ -494,6 +494,38 @@ export interface SettingsLiveStatus {
   /** Banner body (markdown). */
   bannerText: string;
   bannerSeverity: 'info' | 'success' | 'warning' | 'error';
+  /**
+   * The value some of the namespace's keys have in the RUNNING system, keyed
+   * by key, for a reader that needs the answer and not the banner's prose (the
+   * console's first-run checklist asks whether the built-in AI is set up, and
+   * `values.provider` of the page only says what is saved). The settings `GET`
+   * route serves it as the page's `live` field.
+   *
+   * Only an option-bearing key may be named, and only with a value its option
+   * table admits (the declared `options`, or a registered option source's
+   * answer), so what is served is always one of the page's own options and
+   * never free text a runtime might fill with a credential. Each entry is
+   * served as `{ value, source }` and nothing else. An entry that breaks this
+   * is left out, so its key reads as not stated, and the server logs it once
+   * per read without the value; the banner and the other entries stand.
+   *
+   * A key not named here is not stated, which a reader must tell from
+   * `source: 'none'`: "unknown" is not "nothing is in use".
+   */
+  values?: Record<string, SettingsLiveValue>;
+}
+
+/** One key's value in the running system — see {@link SettingsLiveStatus.values}. */
+export interface SettingsLiveValue {
+  /** The value in use, one of the key's options; `null` exactly when `source` is `'none'`. */
+  value: string | null;
+  /**
+   * Where the running system took it from: `'settings'` (what this namespace
+   * resolves, saved or `OS_*`-locked), `'environment'` (detected by the
+   * runtime itself from its own boot environment, outside this namespace), or
+   * `'none'` (nothing is in use).
+   */
+  source: 'settings' | 'environment' | 'none';
 }
 
 /**

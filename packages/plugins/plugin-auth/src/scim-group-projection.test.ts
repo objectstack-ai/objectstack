@@ -26,6 +26,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
+import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
@@ -482,5 +483,55 @@ describe('SCIM group push → mapped permission set', () => {
     expect(error.code).toBe('VALIDATION_FAILED');
     expect(error.fields.map((f) => [f.field, f.code])).toEqual([['connectionId', 'rule_violation']]);
     expect(await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
+  });
+});
+
+// [ADR-0090 D10, D12] The projection writes its grants as the system, so the
+// agent ceiling refusal on the grant table stands down for it; what keeps an
+// agent ceiling set off a person here is the organization boundary's by-name
+// denylist, asked at the mapping's save and again before each projected grant.
+describe('an identity-provider group mapping never grants an agent ceiling set', () => {
+  it.each([...MCP_AGENT_PERMISSION_SETS])('the mapping save refuses %s and stores nothing', async (ceiling) => {
+    const h = await boot();
+    const refused = await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-agents', permissionSet: ceiling });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    const error = (refused.body as { error: { code: string; fields: Array<{ field: string; code: string }> } }).error;
+    expect(error.code).toBe('VALIDATION_FAILED');
+    expect(error.fields.map((f) => [f.field, f.code])).toEqual([['permissionSet', 'rule_violation']]);
+    expect(await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)).toEqual([]);
+  });
+
+  it('positive control: the mapping save admits an ordinary set', async () => {
+    const h = await boot();
+    mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES }));
+    expect(((await h.engine.find('sys_idp_group_mapping', {}, SYSTEM)) as Array<Record<string, unknown>>).map((r) => r.permission_set))
+      .toEqual([SALES]);
+  });
+
+  it.each([...MCP_AGENT_PERMISSION_SETS])('a stored mapping naming %s grants nothing at the per-grant admission', async (ceiling) => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES }));
+    // A row that reached the table without the save's judgment.
+    await h.engine.update('sys_idp_group_mapping', { id: mappingId, permission_set: ceiling }, SYSTEM);
+    const hana = await provision(h, 'hana');
+    const warn = vi.fn();
+    const projection = createScimGroupProjection({ getEngine: () => h.engine as never, boundary: async () => h.judge, warn });
+
+    await projection.reconcileUser(projectedState(hana.userId, mappingId), {} as never);
+
+    expect(await grantsOf(h, hana.userId)).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0][0])).toMatch(/grants nothing/);
+  });
+
+  it('positive control: the per-grant admission grants an ordinary set', async () => {
+    const h = await boot();
+    const mappingId = mappingIdOf(await saveMapping(h, { connectionId: CONNECTION, groupExternalId: 'okta-grp-sales', permissionSet: SALES }));
+    const ivan = await provision(h, 'ivan');
+    const projection = createScimGroupProjection({ getEngine: () => h.engine as never, boundary: async () => h.judge, warn: vi.fn() });
+
+    await projection.reconcileUser(projectedState(ivan.userId, mappingId), {} as never);
+
+    expect(await grantsOf(h, ivan.userId)).toEqual([projected(SALES)]);
   });
 });
