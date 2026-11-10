@@ -9,14 +9,19 @@
 
 feat(plugin-security, runtime, metadata-protocol, core)!: the permission-set grant, clone and activation doors take a package, and a grant is unique per package (#32164)
 
-Clause-②: no — a widening at the doors, plus declared narrowings: a named package that does not hold the set is refused at any holder count (F3), the clone and activation doors' query sets are closed, and a clone target name two packages hold is taken.
+Clause-②: no (narrowing)
+- Widening, at the grant, clone and activation doors: a permission set two packages hold, addressed with no package: FROM read as absent (the grant's `400 reference_not_found`, the clone and activation doors' `404`) TO `409 RESOURCE_CONFLICT` naming the holders; addressed with a package that holds it (`permission_set_package` on the grant, `?package=` on clone and activation): FROM the package dropped TO exactly that package's set.
+- Narrowing (F3), a named package that does not hold the set, at any holder count: FROM the grant re-stamped to the holder (one holder) or stored with no package (two holders), a system column-only bind landing as written, and `?package=` dropped at the clone and activation doors (one holder: the holder's set) TO `409 RESOURCE_CONFLICT`, reason `not-held-by-qualifier`, naming the holders, with nothing stored or switched.
+- Narrowing, the clone and activation doors' query sets are closed: FROM any query parameter dropped without a word TO `400 VALIDATION_ERROR` before any lookup for anything but `package`, and for `package` on an activation type other than `permission`, repeated or blank.
+- Narrowing, a clone target name two packages hold: FROM free (the reader answers nothing for a refused name, so the copy was saved) TO taken, `409`, as a name one package holds already was.
+
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any authorable schema is added, removed, renamed or re-shaped. `sys_user_permission_set` is a platform object and its `indexes[]` is not authored metadata; the index change is a schema face that the drift plan and a runtime guard apply, and no stored row is rewritten. What moves is the answer a request gets at three doors, so there is nothing for `objectstack migrate meta` to rewrite. -->
 
 **BREAKING** for a writer that sends `permission_set_package` naming a package that does not hold the permission set, and for a request to either permission-set door that carries a query parameter. No first-party writer sends either: the boot backfill and `os migrate stored-references bind` write only a holder, and the Console sends no query to these doors.
 
-ADR-0150 D3/D5/D8, child of #31527. A permission set is identified by `(package, name)` (D4). Until #31698 PR-2 a real registry cannot hold two packages' sets of one name, so every two-holder answer below is reachable only after that; every one-holder answer is unchanged, except the three narrowings declared above.
+ADR-0150 D3/D5/D8, child of #31527. A permission set is identified by `(package, name)` (D4). Until #31698 PR-2 a real registry cannot hold two packages' sets of one name, so every two-holder answer below is reachable only after that; every one-holder answer is unchanged, except the narrowings declared above.
 
 **The grant: `sys_user_permission_set` through the engine and `/data`.**
 
