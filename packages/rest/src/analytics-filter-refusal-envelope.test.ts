@@ -51,6 +51,9 @@
 // `dist/`). The dynamic calls stay where they are — this only decides where the
 // first load is paid.
 import '@objectstack/spec/api';
+// …and `@objectstack/objectql`, which the meta routes `rest-server.ts` registers
+// load dynamically, for the same reason (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
