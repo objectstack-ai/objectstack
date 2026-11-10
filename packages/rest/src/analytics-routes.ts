@@ -81,6 +81,7 @@ import { datasetQueryBodyRefusal } from './analytics-dataset-body-door.js';
 import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
+import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -203,7 +204,20 @@ export function registerAnalyticsEndpoints(this: AnalyticsRouteHost, basePath: s
                 // one-element array it unwraps here is unwrapped for every
                 // query below. Whether a caller may READ drafts is still judged
                 // per query, as that caller, inside {@link answerDatasetQuery}.
-                if (refuseRepeatedQueryParams(req, res, ['preview', 'package'])) return;
+                if (refuseRepeatedQueryParams(req, res, ['preview', 'package', 'callerPackage'])) return;
+                // [ADR-0150 D3, #32310] …and the batch URL's `?callerPackage=`,
+                // the caller arm, is read once for every query too. What the
+                // arm itself gets wrong (a blank or non-string value, `all`,
+                // the arm beside `?package=`) depends on no query, so it
+                // refuses the whole batch before any query runs, in the single
+                // door's words. What depends on the query — the name's
+                // resolution from that package, its `409` and `404` — is
+                // judged per query inside {@link answerDatasetQuery}, so one
+                // query's refusal is one entry's.
+                const callerArmRefusal = metaItemCallerPackageRefusalMessage(req.query ?? {}, 'dataset');
+                if (callerArmRefusal !== undefined) {
+                    return sendError(res, 400, 'VALIDATION_ERROR', callerArmRefusal);
+                }
 
                 // The caller's own objects, never the parse output: the single
                 // door judges the body it was sent.
@@ -519,8 +533,23 @@ async function answerDatasetQuery(
         // its status and body are answered unchanged ({@link writtenAnswer}).
         // The batch door asks the same gate over its own URL before any query
         // runs, so for a batch this finds nothing repeated.
-        const repeated = writtenAnswer((recorder) => refuseRepeatedQueryParams(req, recorder, ['preview', 'package']));
+        // [#32310] …and `?callerPackage=`, the caller arm below.
+        const repeated = writtenAnswer((recorder) =>
+            refuseRepeatedQueryParams(req, recorder, ['preview', 'package', 'callerPackage']));
         if (repeated) return repeated;
+        // [ADR-0150 D3, #32310] The caller arm refuses what it cannot read,
+        // in the `/meta` item read's words (rule 4 of its query decision): a
+        // blank or non-string value, `all` (which names no package, so it
+        // would read as the bare read), and the arm beside `?package=` — two
+        // addresses on one read, neither picked. This door took no closed
+        // query set, so before the arm `?callerPackage=` was dropped and the
+        // bare read answered; it is now read, or refused, never dropped. The
+        // batch door asks the same question over its own URL before any query
+        // runs, so for a batch this finds nothing.
+        const callerArmRefusal = metaItemCallerPackageRefusalMessage(req.query ?? {}, 'dataset');
+        if (callerArmRefusal !== undefined) {
+            return { status: 400, body: { error: { code: 'VALIDATION_ERROR', message: callerArmRefusal } } };
+        }
         // [#20338] …for a caller who may read drafts: both halves
         // serve unpublished work (a draft definition, a pending
         // seed's rows). Anyone else runs over the published
@@ -566,7 +595,20 @@ async function answerDatasetQuery(
                     { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true },
                 );
             }
-            const packageId = metaItemPackageBinding(req.query?.package);
+            // [ADR-0150 D3, #32310] `?callerPackage=P` is the caller arm: the
+            // dashboard, report or chart of package P that names this
+            // dataset. It resolves FROM P by D3 — P's own dataset, else the
+            // unique holder in P's declared closure plus `sys`, else
+            // `409 RESOURCE_CONFLICT` naming the candidates
+            // (`ambiguous-in-closure`, `outside-closure`) — through the
+            // protocol's one resolution, the `/meta` item read's
+            // ({@link metaCallerPackageQuery}). The read below then reads the
+            // resolved holder at its exact qualifier, `?package=`, so what
+            // follows (the by-name read, the parse, the query's admission of
+            // the caller) judges the resolved item exactly as that address's.
+            // A protocol that cannot resolve by caller fails closed, `503`.
+            const callerQuery = metaCallerPackageQuery(p, { type: 'dataset', name: body.datasetName }, req.query);
+            const packageId = metaItemPackageBinding((callerQuery ?? req.query)?.package);
             const datasetRequest: GetMetaItemRequest = {
                 type: 'dataset',
                 name: body.datasetName,

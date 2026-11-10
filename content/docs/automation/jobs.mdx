@@ -240,11 +240,14 @@ everything at once.
 
 A job whose work is "copy the records an external system holds into a local
 object" needs no code. Declare the sync on its target — a
-[`mapping`](/docs/references/data/mapping) with a `connectorSource` naming the
-`rest` or `openapi` connector it reads from, in `mode: 'upsert'` with an
-`upsertKey`, into an object declared `managedBy: 'synced'` — and give the job a
-`pull` naming that mapping. The mapping says where the rows come from, how fields map, and how a
-pulled row matches a stored one; the job says when.
+[`mapping`](/docs/references/data/mapping) in `mode: 'upsert'` with an
+`upsertKey`, into an object declared `managedBy: 'synced'`, with one source — and
+give the job a `pull` naming that mapping. The source is a `connectorSource`
+naming the `rest` or `openapi` connector it reads from, or a `datasourceSource`
+naming a federated object (a remote table, a warehouse table included) and the
+`watermark` field its rows are read in windows on. The mapping says where the rows
+come from, how fields map, and how a pulled row matches a stored one; the job says
+when.
 
 {/* os:check */}
 ```typescript
@@ -263,17 +266,31 @@ export const OrdersPullJob = defineJob({
   cannot call a pull; a pull on a schedule is this declaration.
 - **Checked when you build.** `defineStack` — and so `os validate` — refuses a
   `pull` that names a mapping the stack does not declare, or one with no source
-  (`connectorSource`, or `datasourceSource`, which the pull engine does not run
-  yet). The binder checks the same reference against the artifact
+  (`connectorSource` or `datasourceSource`). The binder checks the same reference
+  against the artifact
   before it schedules the job, on every door, and `os package install` refuses a
   package whose enabled job's `pull` fails that check, with `422 VALIDATION_ERROR`
   naming the job and the reason. A package an earlier version installed still
   loads after a restart; such a job of it is not scheduled, and a warning names it.
-- **Each run is one pull.** It calls the connector's read action once, reads one
-  response, and writes the records through the import runner with the mapping's
-  `mode` and `upsertKey` — see
-  [Data sync is defined on the target](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/docs/SYNC_ARCHITECTURE.md#data-sync-is-defined-on-the-target)
-  for the watermark and the one-response limit.
+- **Each run is one pull, read the way its source is read.** Either way the
+  records are written through the import runner with the mapping's `mode` and
+  `upsertKey`.
+  - A **`connectorSource`** run calls the connector's read action once and reads
+    one response — see
+    [Data sync is defined on the target](https://github.com/objectstack-ai/objectstack/blob/main/packages/spec/docs/SYNC_ARCHITECTURE.md#data-sync-is-defined-on-the-target)
+    for the watermark and the one-response limit.
+  - A **`datasourceSource`** run reads the federated object in windows cut on
+    `watermark.field`. A built-in driver's windows are read whole, paged by the key
+    the object's `external.columnMap` maps onto `id`. A plugin driver's windows go
+    through the engine's row cap and are halved while they come back over it. Under
+    a walled tenancy posture the run reads only the job's organization's rows of a
+    source that declares its own `organization_id`, reads a shared source whole,
+    and refuses a source that states no organization scope.
+  - **Until the read position is stored, every `datasourceSource` run reads from
+    `watermark.start`.** The upsert keeps the copy right, but every run rewrites
+    every row of the target: record automations run, audit rows are written and
+    `updated_at` moves on each one. `full` and the delete keys change nothing yet,
+    and `os validate` says so.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
   the job's package reaches no one mapping of that name, the connector is degraded, the input breaks the read action's declared
   `inputSchema`, the upstream answered `ok: false` — rejects, so the

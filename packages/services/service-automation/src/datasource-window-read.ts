@@ -318,7 +318,12 @@ class WindowRun {
         const h1 = await this.highWater();
         const last: SyncWindow = { lo };
         const pages = await this.readPaged(last);
-        await this.commitWindow(last, pages > 1 ? h1 : undefined);
+        // [S1] On a window read in several pages, an absent high-water value
+        // (the source held no non-NULL watermark under the scope before the
+        // first page) reads as the window's own `lo`: rows that arrived during
+        // the read are read again by the next run, never passed by a later row's
+        // higher value.
+        await this.commitWindow(last, pages > 1 ? (h1 ?? last.lo) : undefined);
         return this.report;
     }
 
@@ -419,7 +424,10 @@ class WindowRun {
         const shown: number[] = [];
         for (const value of refusal.returnedValuesOf(this.source.field)) {
             const reading = canonOf(this.source.kind, value);
-            if (!reading.ok && reading.inexact) this.notExactWatermark(value);
+            // [N3] A value present but unreadable is the data's fault, named as
+            // it is under the cap; only a row with NO watermark (NULL) is one no
+            // bound admits, which blames the driver.
+            if (!reading.ok && (reading.inexact || (value !== null && value !== undefined))) this.notExactWatermark(value);
             const inside = reading.ok && reading.canon >= window.lo && (window.hi === undefined || reading.canon < window.hi);
             if (!inside) this.boundsNotPushed(window, refusal);
             shown.push((reading as { canon: number }).canon);
@@ -475,11 +483,18 @@ class WindowRun {
         });
     }
 
-    /** Invariant 9: commit floor(min(a, b)) at a window's end — nothing when the run has written no row. */
+    /**
+     * Invariant 9: commit floor(min(a, b)) at a window's end — nothing when the
+     * run has written no row. [S1] Never below `from`: every row the run read
+     * held a value at or above it, and under invariant 2 its update does too, so
+     * a high-water value read below `from` (the source's maximum sat under the
+     * starting position) caps nothing the next run would miss.
+     */
     private async commitWindow(window: SyncWindow, highWater: number | undefined): Promise<void> {
         this.report.windows++;
         if (this.maxWritten === undefined) return;
-        const position = highWater === undefined ? this.maxWritten : Math.min(this.maxWritten, highWater);
+        const capped = highWater === undefined ? this.maxWritten : Math.min(this.maxWritten, highWater);
+        const position = Math.max(capped, this.report.from);
         await this.deps.commit(position, window);
         this.report.committed = position;
     }

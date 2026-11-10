@@ -1064,7 +1064,7 @@ export interface RunListResult {
  * connector-sync card).
  */
 export interface ConnectorSourcePullRequest {
-    /** Name of the `mapping` whose `connectorSource` is pulled. */
+    /** Name of the `mapping` whose source (`connectorSource` or `datasourceSource`) is pulled. */
     mapping: string;
     /** The execution context the target read and the writes run under. */
     context?: ExecutionContext;
@@ -1120,11 +1120,32 @@ export interface ConnectorSourcePullSummary {
 
 /**
  * What one {@link IAutomationService.pullConnectorSource} call did. A refused
- * pull never answers this — it rejects before anything is written.
+ * pull never answers this: a connector pull rejects before anything is
+ * written; a datasource pull refused part-way through its read rejects too,
+ * keeping the windows it read to their end and the position it committed.
+ *
+ * [ADR-0153 D1] A mapping pulls from one of two sources, `connectorSource` or
+ * `datasourceSource`, and the answer says which: `source` is the discriminator.
+ * The connector arm leaves it optional, so an implementation written before
+ * the datasource source answers the connector arm unchanged; read an absent
+ * `source` as `'connector'`. Narrow on `source === 'datasource'` before reading
+ * either arm's own fields.
  */
-export interface ConnectorSourcePullResult {
+export type ConnectorSourcePullResult = ConnectorSourcePullConnectorResult | ConnectorSourcePullDatasourceResult;
+
+/** The fields both arms of {@link ConnectorSourcePullResult} carry. */
+export interface ConnectorSourcePullResultBase {
     mapping: string;
     targetObject: string;
+    /** Records the source answered: the one action response's, or every window's. */
+    pulled: number;
+    summary: ConnectorSourcePullSummary;
+}
+
+/** A pull of a `connectorSource`: one declared `rest` / `openapi` connector action. */
+export interface ConnectorSourcePullConnectorResult extends ConnectorSourcePullResultBase {
+    /** Absent on an implementation written before the datasource source; reads as `'connector'`. */
+    source?: 'connector';
     connector: string;
     action: string;
     /**
@@ -1133,9 +1154,31 @@ export interface ConnectorSourcePullResult {
      * highest value already stored in `target`), `undefined` on a first pull.
      */
     watermark?: { field: string; target: string; param: string; from: unknown };
-    /** Records the one action response carried. */
-    pulled: number;
-    summary: ConnectorSourcePullSummary;
+}
+
+/**
+ * [ADR-0153 D1, D2] A pull of a `datasourceSource`: the federated object it
+ * names, read in windows cut on `watermark.field`.
+ */
+export interface ConnectorSourcePullDatasourceResult extends ConnectorSourcePullResultBase {
+    source: 'datasource';
+    /** The federated object the rows were read from (`datasourceSource.object`). */
+    object: string;
+    /** The datasource that object lives on. */
+    datasource: string;
+    /**
+     * Which read path the datasource's driver took (ADR-0153 D1): `builtin` —
+     * windows read whole, paged by the source key; `floored` — a plugin
+     * driver read through the engine's floor, windows halved over its row cap.
+     */
+    readPath: 'builtin' | 'floored';
+    /**
+     * The window field, the position the read started from, and the position
+     * this run committed at a window's end (absent when the run wrote no row),
+     * each in the field's storage form: an ISO date-time, an ISO date or an
+     * integer.
+     */
+    watermark: { field: string; from: string | number; committed?: string | number };
 }
 
 /**
@@ -1557,8 +1600,11 @@ export interface IAutomationService {
     getConnectorDescriptors?(): ConnectorDescriptor[];
 
     /**
-     * Pull one `mapping`'s `connectorSource` and write the records through the
-     * import runner — the connector sync executor, on the automation service.
+     * Pull one `mapping`'s source and write the records through the import
+     * runner — the sync executor, on the automation service. The source is the
+     * mapping's `connectorSource` (one connector action) or, [ADR-0153 D1], its
+     * `datasourceSource` (a federated object read in windows); the result's
+     * `source` says which.
      *
      * The door a job's `pull` run form binds through (`JobSchema.pull`, ruling
      * Q1-B on the connector-sync card): the job binder resolves the
@@ -1567,12 +1613,13 @@ export interface IAutomationService {
      * only as an instance method of the automation PLUGIN, which no other
      * package holds.
      *
-     * Rejects — before anything is written — when the binding cannot be
-     * honoured (no such mapping, no `connectorSource`, a connector that is not
-     * a declared `rest` / `openapi` instance, an upstream `ok: false`, …), with
-     * an error carrying an ADR-0112 `code` + `status` and a `reason`
-     * discriminator. A pull whose rows the import runner refused RESOLVES, and
-     * says so in `summary.errors`.
+     * Rejects when the binding cannot be honoured (no such mapping, no source,
+     * a connector that is not a declared `rest` / `openapi` instance, an
+     * upstream `ok: false`, a datasource source that is not a federated object,
+     * …), with an error carrying an ADR-0112 `code` + `status` and a `reason`
+     * discriminator: a connector pull before anything is written, a datasource
+     * pull keeping the windows it read to their end. A pull whose rows the
+     * import runner refused RESOLVES, and says so in `summary.errors`.
      *
      * Optional for the reason {@link getConnectorDescriptors} is: a connector
      * registry is a capability of the flow-engine implementation, not of every

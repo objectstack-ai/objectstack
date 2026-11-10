@@ -277,16 +277,35 @@ qualifier `/meta/:type/:name?package=` takes. A package that does not hold the
 name is refused `409` naming the holders when the environment or another
 package holds it, and answers `404` when nothing does.
 
+A dashboard, report or list chart that belongs to a package sends that package
+instead, with `?callerPackage=<package id>` (also on `GET /meta/dataset/:name`).
+`?package=` names the package that holds the dataset; `?callerPackage=` names
+the package that reads it, and the name resolves from there: the reader's own
+dataset first, then the one holder among the packages its manifest declares in
+`dependencies` (transitively, plus the platform's `sys` packages). Two holders
+there answer `409 RESOURCE_CONFLICT` naming both. A holder the reader does not
+depend on answers `409` naming it: declare the dependency. Both parameters on
+one request are refused `400`, and so is `?callerPackage=` on a qualified
+`/meta/dataset/:namespace/:name` path or on any `/meta` type other than
+`dataset`. A package id that is not installed answers what `?package=` naming it
+answers. `?callerPackage=all` and a blank value name no package and are
+refused `400`; none of these falls back to the bare read. The client SDK takes it as `callerPackage`
+on `client.analytics.queryDataset(payload, { callerPackage })`,
+`client.analytics.queryDatasetBatch(queries, { callerPackage })` and
+`client.meta.getItem(type, name, { callerPackage })`.
+
 To run several queries in one request, as a dashboard render does, send them
 to `POST {basePath}/analytics/dataset/query/batch` as `{ queries: [...] }`,
 each entry a body the single route takes (at most 50). Each query is judged
 exactly as the single route judges it, as the same caller, and the answer is
 `{ success: true, data: { results } }` with one entry per query in the order
 sent: `{ data }` for an answered query, `{ status, error }` for a refused one.
-One refused query never fails the others. `?package=` and `?preview=draft` on
-the batch URL apply to every query. A malformed batch (not that object, an
-empty list, more than 50 queries, or an entry that is not an object) is refused
-whole with `400 VALIDATION_FAILED`, and nothing runs. From the SDK, call
+One refused query never fails the others. `?package=`, `?callerPackage=` and
+`?preview=draft` on the batch URL apply to every query: a name that cannot be
+resolved from the caller package is that query's own `409` or `404` entry, and
+a malformed `?callerPackage=` is refused whole with `400`. A malformed batch
+(not that object, an empty list, more than 50 queries, or an entry that is not
+an object) is refused whole with `400 VALIDATION_FAILED`, and nothing runs. From the SDK, call
 `client.analytics.queryDatasetBatch(queries)`.
 
 The same governed path backs the Studio dataset preview, dashboard widgets, and

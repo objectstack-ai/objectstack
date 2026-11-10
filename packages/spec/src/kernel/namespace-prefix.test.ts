@@ -5,6 +5,7 @@ import {
   validateObjectNamespacePrefix,
   deriveNamespaceFromPackageId,
   findNamespaceObjectNameClashes,
+  namespacedHoldersMeet,
 } from './namespace-prefix';
 
 describe('validateObjectNamespacePrefix', () => {
@@ -116,5 +117,17 @@ describe('findNamespaceObjectNameClashes (ADR-0150 D6, Q3 — child K)', () => {
       namespaces: [{ namespace: 'crm_lead' }],
       objects: [{ name: 'crm_lead', namespace: 'crm' }],
     })).toEqual([]);
+  });
+});
+
+describe('namespacedHoldersMeet — two package holders of one name, by namespace (ADR-0150 D2/D9)', () => {
+  it('two different declared namespaces do not meet; one namespace, or a missing one, meets', () => {
+    expect(namespacedHoldersMeet('alpha', 'beta')).toBe(false);
+    expect(namespacedHoldersMeet('alpha', 'alpha')).toBe(true);
+    expect(namespacedHoldersMeet('sys', 'sys')).toBe(true);
+    expect(namespacedHoldersMeet(undefined, 'beta')).toBe(true);
+    expect(namespacedHoldersMeet('alpha', undefined)).toBe(true);
+    expect(namespacedHoldersMeet('', 'beta')).toBe(true);
+    expect(namespacedHoldersMeet(undefined, undefined)).toBe(true);
   });
 });
