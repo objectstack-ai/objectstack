@@ -87,6 +87,8 @@ export * from './app-lifecycle-service.js';
 export * from './seed-loader-service.js';
 export * from './seed-settlement.js';
 export * from './crypto-provider.js';
+// ADR-0154 D11 — the audit ledger's signing and export seams.
+export * from './audit-checkpoint.js';
 export * from './cluster-service.js';
 // This server's cloud binding (cloud ADR-0008), registered as `cloud-binding`
 // by cloud-connection and read by the hosted push relay sender (#29920).

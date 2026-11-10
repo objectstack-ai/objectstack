@@ -575,6 +575,8 @@
     "OpenApiSpecSchema": "api/OpenApiSpec",
     "OperatorMapping": "api/OperatorMapping",
     "OperatorMappingSchema": "api/OperatorMapping",
+    "OrganizationEditionChoice": "api/OrganizationEditionChoice",
+    "OrganizationEditionChoiceSchema": "api/OrganizationEditionChoice",
     "PackageApiErrorCode": "api/PackageApiErrorCode",
     "PackageExportBundle": "api/PackageExportBundle",
     "PackageExportBundleSchema": "api/PackageExportBundle",
