@@ -276,7 +276,14 @@ describe('red line 2 — every refusal names every candidate', () => {
 
 describe('ADR-0150 D3 exceptions', () => {
   it('a platform-requested name resolves environment-wide whatever the caller, and keeps one holder', () => {
-    expect(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE).toEqual({ permission: ['guest_portal'] });
+    expect(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE).toEqual({
+      permission: ['guest_portal'],
+      // [#31699] The auth mails the platform sends with no package.
+      email_template: [
+        'auth.password_reset', 'auth.verify_email', 'auth.magic_link', 'auth.invitation',
+        'auth.account_invitation', 'auth.two_factor_otp', 'auth.email_change_notice', 'auth.existing_account_sign_up',
+      ],
+    });
     install(A);
     install(P); // declares nothing: A is outside its closure
     ship('permission', 'guest_portal', A);
@@ -307,7 +314,8 @@ describe('ADR-0150 D3 exceptions', () => {
     expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'baseline' });
     ship('email_template', 'auth.password_reset', A);
     expect(resolve('email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { packageId: A } });
-    expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'closure', holder: { packageId: A } });
+    // A name the platform requests (#31699) resolves environment-wide for a package caller too.
+    expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { packageId: A } });
   });
 
   it('a bundled type answers the asked member of the resolved package, or not-found', () => {

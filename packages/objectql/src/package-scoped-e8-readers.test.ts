@@ -261,6 +261,46 @@ describe('narrowing (3) — D3 step 3: one holder outside the package caller\'s 
   }
 });
 
+describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by-name read resolves member by member', () => {
+  /** One member of `packageId`'s bundle `name` (its composite slot), or the environment's own when `packageId` is undefined. */
+  const tpl = (name: string, locale: string, packageId?: string) => {
+    const tag = packageId ? packageId.split('.').pop()! : 'env';
+    const item = { name, label: `${tag} ${locale}`, locale, subject: `${tag} ${locale}`, bodyHtml: `<p>${tag}</p>` };
+    if (packageId) registry.registerItem('email_template', item, 'name' as never, packageId);
+    else registry.registerItem('email_template', { ...item, _provenance: 'org' }, 'name' as never);
+  };
+
+  it('a caller with no package is refused a name two packages ship, naming both, at every member', async () => {
+    tpl('welcome', 'en-US', A);
+    tpl('welcome', 'en-US', B);
+    tpl('welcome', 'zh-CN', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'email_template', name: 'welcome' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'zh-CN' } as never), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => protocol.getMetaItemForExecution({ type: 'email_template', name: 'welcome' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('email_template', 'welcome'), 'ambiguous-in-environment', [A, B]);
+  });
+
+  it('the read that names a package serves that package\'s member, never the other\'s (child G1\'s exact qualifier)', async () => {
+    tpl('welcome', 'en-US', A);
+    tpl('welcome', 'en-US', B);
+    expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'welcome', packageId: A }))?.item)).toBe('alpha en-US');
+    expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'welcome', packageId: B }))?.item)).toBe('beta en-US');
+  });
+
+  it('CONTROL — one holder: each member is served to a caller with no package, as before', async () => {
+    tpl('solo', 'en-US', A);
+    tpl('solo', 'zh-CN', A);
+    expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'solo' }))?.item)).toBe('alpha en-US');
+    expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'solo', member: 'zh-CN' } as never))?.item)).toBe('alpha zh-CN');
+    expect(labelOf(await facade.get('email_template', 'solo'))).toBe('alpha en-US');
+  });
+
+  it('CONTROL — the environment\'s own template is served to a caller with no package', async () => {
+    tpl('local', 'en-US');
+    expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'local' }))?.item)).toBe('env en-US');
+  });
+});
+
 describe('the types E8 does not wire keep the legacy read', () => {
   it('a view (bucket 1) and a flow (child E1) are read by getItem, untouched', async () => {
     ship('flow', 'onboard', A);
