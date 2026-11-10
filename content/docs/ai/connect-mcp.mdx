@@ -435,8 +435,9 @@ drive this MCP server. Same word, different layer.
   (one whose param binds a field the caller cannot read, judged on the object
   the param names, so an object-less action too) is not listed, and a
   listed action's params carry no label, help text or options of such a
-  field. Nor can the caller run it: `run_action`, `resume_run` and
-  `POST /api/v1/actions/...` answer it as an action that does not exist.
+  field. Nor can the caller run it: `run_action` and `POST /api/v1/actions/...`
+  answer it as an action that does not exist, and `resume_run` refuses a run
+  it would admit as it refuses a run no flow action could have started.
   Sparse results or denied
   writes usually mean governance is *working*, not that the connection is
   broken.
