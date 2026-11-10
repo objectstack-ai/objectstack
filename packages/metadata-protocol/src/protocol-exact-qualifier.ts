@@ -280,8 +280,10 @@ export async function admitExactQualifier(
  * package's (two packages of one App share the App's pair, ADR-0146 D3, and
  * the row declares no `overrides` naming one of them). It is refused on each
  * such holder's address, naming every one ({@link pairMemberOwners}, epic
- * ruling on #31699 F2). The App's own address keeps #28390 ruling A. A row that
- * declares the base it customizes is kept on that base's address only.
+ * ruling on #31699 F2). A row with one owner is kept on that owner's address
+ * only, and a row that declares the base it customizes on that base's address
+ * only. The App's own address keeps #28390 ruling A for a row that declares
+ * nothing or declares the App.
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -302,15 +304,18 @@ export function exactQualifierItem(
     const installed = installedManifestsOfEngine(host.engine);
     const bases = [address.packageId, ...address.registryHolders];
     if (bases.some((base) => isPairOf(served, base, installed))) {
-        if (isAppPairOf(served, address.packageId, installed)) return item;
+        const declared = declaredOverrideBase(item);
+        // The App's own pair on the App's address, unless the row declares another base (#28390 ruling A).
+        if (isAppPairOf(served, address.packageId, installed) && (declared === undefined || declared === address.packageId)) return item;
         const owners = pairMemberOwners(served, registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed, item);
         if (owners.length > 1) {
             throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
                 owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
         }
-        const declared = declaredOverrideBase(item);
-        if (declared === undefined || bases.includes(declared)) return item;
-        // Bound to another holder: not this address's item, so the admitted holder's is served below.
+        // One owner: kept only when it is the address's package or a base it admitted. No owner: kept
+        // unless the row declares a base the address does not name.
+        if (owners.length === 1 ? bases.includes(owners[0]) : (declared === undefined || bases.includes(declared))) return item;
+        // Another holder's row: not this address's item, so the admitted holder's is served below.
     } else if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) {
         // A provenance sentinel or a package this registry does not hold is not another package's item.
         return item;

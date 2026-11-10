@@ -553,6 +553,50 @@ describe('[#32076] a pair row two holders could own is refused on both exact rea
     expect(labelOf(await read(APP, 'fr-FR'))).toBe('pair fr-FR');
   });
 
+  /** A pair row the boot hydrated into the registry's plain slot, stamped with the pair (`page` reads by package). */
+  const hydratedPairPage = (over: Record<string, unknown> = {}) => registry.registerItem('page', {
+    name: 'home', label: 'pair page', _packageId: PAIR, ...over,
+  }, 'name' as never);
+  const pageAt = (packageId: string) => protocol.getMetaItem({ type: 'page', name: 'home', packageId });
+
+  it('a row that declares a member is not the App\'s: the App\'s address serves the App\'s own item, the member\'s address the row (review M1r)', async () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    // The App's own item, as the registry's package-scoped read answers it before the pair's row is hydrated.
+    const appOwn = registry.getPackageScopedItem('page', 'home', APP);
+    hydratedPairPage({ overrides: { package: X } });
+    // `SchemaRegistry`'s package-scoped read then answers the pair's plain-slot row for the App too, whatever
+    // it declares (`registry.ts`, outside this change; main answers the same). This view answers the App's own
+    // item there, so the pin reads the exact qualifier's judgment alone.
+    const view = new Proxy(registry, {
+      get(target, prop) {
+        if (prop === 'getPackageScopedItem') {
+          return (type: string, name: string, packageId: string, member?: string) =>
+            (type === 'page' && name === 'home' && packageId === APP ? appOwn : target.getPackageScopedItem(type, name, packageId, member));
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const viewed = new ObjectStackProtocolImplementation({ ...engine, registry: view } as never);
+    expect(labelOf(await viewed.getMetaItem({ type: 'page', name: 'home', packageId: APP }))).toBe('suite page');
+    // CONTROL: the member the row declares serves it.
+    expect(labelOf(await viewed.getMetaItem({ type: 'page', name: 'home', packageId: X }))).toBe('pair page');
+  });
+
+  it('one owner that the address does not name: the row is not served there (review S2)', async () => {
+    ship('page', 'home', Y);
+    // X is admitted only by its own pending draft of the name; Y is the one holder.
+    rows.push({
+      type: 'page', name: 'home', state: 'draft', package_id: X,
+      metadata: JSON.stringify({ name: 'home', label: 'suitex draft' }),
+    });
+    hydratedPairPage();
+    expect((await pageAt(X))?.item).toBeUndefined();
+    // CONTROL: the one owner's address serves the row.
+    expect(labelOf(await pageAt(Y))).toBe('pair page');
+  });
+
   it('a row that declares the base it customizes is served on that base only', async () => {
     tpl('en-US', X);
     tpl('en-US', Y);
