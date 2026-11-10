@@ -13,6 +13,9 @@
 // `client.hono.test.ts`.
 
 import { describe, it, expect, vi } from 'vitest';
+// The server's source reaches `import('@objectstack/objectql')` inside a
+// function; pay that load during collection, not inside a case's clock.
+import '@objectstack/objectql';
 import { RestServer } from './rest-server';
 
 function createMockServer() {
