@@ -3,7 +3,7 @@
 /**
  * #12663 — the cross-producer `sys_secret` REFERENCE UNION.
  *
- * `sys_secret` is written by **three** privileged producers, and each keeps its
+ * `sys_secret` is written by **four** privileged producers, and each keeps its
  * handle in a holder column of its own (`sys_secret.object.ts` says so in the
  * `id` field's own description):
  *
@@ -14,9 +14,15 @@
  *     `secret:<id>` on an arbitrary business row, on every `secret` field of
  *     every REGISTERED object, tenant-authored ones included;
  *  3. **datasource** — the credential binder stores `sys_secret:<id>` at a
- *     datasource artefact's `external.credentialsRef`.
+ *     datasource artefact's `external.credentialsRef`;
+ *  4. **audit-seal** — the audit ledger's sealer (ADR-0154) stores a bare
+ *     handle id in `sys_audit_checkpoint.seed_handle` (a checkpoint's seed)
+ *     and `sys_audit_signing_key.private_handle` (a signing key's private
+ *     half). Those ids sit inside signed checkpoint bodies, so a row this
+ *     union missed would be one `os secret rewrap` left behind — and after a
+ *     master-key change every checkpoint holding it would be unverifiable.
  *
- * This module builds the union of those three reference sets. It is the
+ * This module builds the union of those four reference sets. It is the
  * precondition #8103's deletion half is blocked on: the only sound deletion
  * predicate is "attributable AND unreferenced by the COMPLETE union".
  *
@@ -79,11 +85,11 @@
  * returns the whole holder set; a page size introduced here would truncate the
  * union silently on exactly the large tables where an orphan sweep matters.
  *
- * The three producer surfaces are consumed **read-only, through their own
+ * The four producer surfaces are consumed **read-only, through their own
  * published predicates** — `isSecretHandle` (service-settings),
  * `collectSecretFields`/`parseSecretRef` (objectql), `parseCredentialsRef`
- * (service-datasource). No producer needed a change to build this, and none of
- * the three ref spellings is restated here: a restated prefix is a second
+ * (service-datasource), `AUDIT_SEAL_SECRET_HOLDERS`/`isAuditSealSecretCoordinate`
+ * (plugin-audit). None of the ref spellings is restated here: a restated prefix is a second
  * de-facto contract that drifts silently, and the failure it produces is a
  * handle missing from the union.
  *
@@ -96,6 +102,12 @@
 import { collectSecretFields, parseSecretRef } from '@objectstack/objectql';
 import { parseCredentialsRef } from '@objectstack/service-datasource';
 import { isSecretHandle } from '@objectstack/service-settings';
+import {
+  AUDIT_SEAL_SECRET_HOLDERS,
+  checkpointSeedContext,
+  isAuditSealSecretCoordinate,
+  signingKeyContext,
+} from '@objectstack/plugin-audit';
 import type { ServiceObject } from '@objectstack/spec/data';
 
 /**
@@ -107,7 +119,7 @@ import type { ServiceObject } from '@objectstack/spec/data';
  * collector. That is the only mechanical defence there is against the silent
  * incompleteness this module exists to prevent.
  */
-export const SECRET_REFERENCE_FAMILIES = ['settings', 'object-field', 'datasource'] as const;
+export const SECRET_REFERENCE_FAMILIES = ['settings', 'object-field', 'datasource', 'audit-seal'] as const;
 
 /** One producer/holder family. See {@link SECRET_REFERENCE_FAMILIES}. */
 export type SecretReferenceFamily = (typeof SECRET_REFERENCE_FAMILIES)[number];
@@ -680,6 +692,121 @@ export function readEngineDatasourceDefs(
   }
 }
 
+/**
+ * Family 4 — the audit ledger sealer's handles (ADR-0154 D2, D6): a
+ * checkpoint's seed in `sys_audit_checkpoint.seed_handle`, a signing key's
+ * private half in `sys_audit_signing_key.private_handle`
+ * (`AUDIT_SEAL_SECRET_HOLDERS`, the producer's own list).
+ *
+ * A holder object is read only where it is REGISTERED: on a runtime without
+ * `@objectstack/plugin-audit`'s sealer it has no table to read. Its absence is
+ * judged by evidence, never assumed:
+ *
+ *  - no `sys_secret` row carries an `audit_seal` coordinate
+ *    (`isAuditSealSecretCoordinate`, the producer's own predicate) ⇒ there is
+ *    nothing for the family to hold, and it is enumerated, EMPTY;
+ *  - such a row exists ⇒ its holder exists somewhere this runtime cannot
+ *    read, and the family is a GAP — the union is incomplete, so nothing
+ *    reads that row as unreferenced.
+ *
+ * Gapping on absence alone would leave every deployment that never sealed
+ * anything with a union that is never complete.
+ */
+export async function collectAuditSealSecretReferences(
+  engine: SecretReferenceEngineLike,
+): Promise<FamilyResult> {
+  const family: SecretReferenceFamily = 'audit-seal';
+  const references: SecretReference[] = [];
+
+  let configs: Record<string, ServiceObject>;
+  try {
+    configs = engine.getConfigs() ?? {};
+  } catch (err) {
+    return { family, status: 'gap', reason: `enumerating registered objects threw — ${describeCause(err)}`, references };
+  }
+
+  const unregistered: string[] = [];
+  for (const { object, field } of AUDIT_SEAL_SECRET_HOLDERS) {
+    if (!Object.prototype.hasOwnProperty.call(configs, object)) {
+      unregistered.push(object);
+      continue;
+    }
+    const driver = engine.getDriverForObject(object);
+    if (!driver) {
+      return { family, status: 'gap', reason: `no driver resolves for \`${object}\`, so its \`${field}\` holders could not be read`, references };
+    }
+    const fields = object === 'sys_audit_checkpoint'
+      ? ['id', field, 'sealed_object', 'tenant_id', 'sequence']
+      : ['id', field, 'fingerprint'];
+    let result: unknown;
+    try {
+      result = await driver.find(object, { fields });
+    } catch (err) {
+      return { family, status: 'gap', reason: `reading \`${object}\` threw — ${describeCause(err)}`, references };
+    }
+    for (const row of rowsOf(result)) {
+      const handleId = row[field];
+      if (typeof handleId !== 'string' || handleId === '') continue;
+      references.push({
+        handleId,
+        family,
+        holder: `${object}.${field}#${String(row.id)}`,
+        column: {
+          object,
+          field,
+          record: row.id == null ? null : String(row.id),
+          mintedPair: auditSealMintedPair(object, row),
+        },
+      });
+    }
+  }
+
+  if (unregistered.length === 0) return { family, status: 'enumerated', references };
+
+  const secretDriver = engine.getDriverForObject('sys_secret');
+  if (!secretDriver) {
+    return {
+      family,
+      status: 'gap',
+      reason: `${unregistered.join(', ')} not registered, and no driver resolves for \`sys_secret\`, so whether any audit-seal handle exists could not be read`,
+      references,
+    };
+  }
+  let secrets: unknown;
+  try {
+    secrets = await secretDriver.find('sys_secret', { fields: ['id', 'namespace', 'key'] });
+  } catch (err) {
+    return { family, status: 'gap', reason: `reading \`sys_secret\` threw — ${describeCause(err)}`, references };
+  }
+  const evidence = rowsOf(secrets).filter((row) => isAuditSealSecretCoordinate(row.namespace, row.key)).length;
+  if (evidence === 0) return { family, status: 'enumerated', references };
+  return {
+    family,
+    status: 'gap',
+    reason:
+      `${evidence} sys_secret row(s) carry an audit-seal coordinate, but ${unregistered.join(', ')} `
+      + 'is not registered on this runtime, so the holders naming them could not be read (register '
+      + '@objectstack/plugin-audit\'s objects on the runtime this command boots)',
+    references,
+  };
+}
+
+/** The `(namespace, key)` the sealer records on the `sys_secret` row it mints for one holder row. */
+function auditSealMintedPair(object: string, row: Record<string, unknown>): { namespace: string; key: string } | null {
+  try {
+    const ctx = object === 'sys_audit_checkpoint'
+      ? checkpointSeedContext(
+        String(row.sealed_object),
+        row.tenant_id == null ? null : String(row.tenant_id),
+        typeof row.sequence === 'string' ? Number(row.sequence) : (row.sequence as number),
+      )
+      : signingKeyContext(String(row.fingerprint));
+    return { namespace: ctx.namespace, key: ctx.key };
+  } catch {
+    return null; // a holder row too malformed to name its pair: placement is not judged
+  }
+}
+
 /** Input to {@link collectSecretReferenceUnion}. */
 export interface SecretReferenceUnionInput {
   /** A booted runtime's ObjectQL engine. */
@@ -705,7 +832,7 @@ export interface SecretReferenceUnionInput {
 /**
  * Collect the complete union from a booted runtime.
  *
- * Runs all three families. Each is a separate exported collector so a consumer
+ * Runs all four families. Each is a separate exported collector so a consumer
  * can enumerate one family alone — and so that ablating any single family's
  * enumeration is a real, isolated experiment rather than a rewrite.
  */
@@ -716,6 +843,7 @@ export async function collectSecretReferenceUnion(
 
   const settings = await collectSettingsSecretReferences(engine);
   const objectField = await collectObjectFieldSecretReferences(engine);
+  const auditSeal = await collectAuditSealSecretReferences(engine);
 
   const stored = await readStoredDatasourceArtefacts(engine);
   const held = readEngineDatasourceDefs(engine);
@@ -745,5 +873,6 @@ export async function collectSecretReferenceUnion(
       datasourceGaps.length === 0
         ? datasource
         : { family: 'datasource', status: 'gap', reason: datasourceGaps.join('; '), references: datasource.references },
+    'audit-seal': auditSeal,
   });
 }

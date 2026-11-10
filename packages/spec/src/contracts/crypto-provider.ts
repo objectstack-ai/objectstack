@@ -10,7 +10,7 @@
  * leaves the format up to the implementation. Where the caller *records*
  * the handle differs per producer — see "Producers" below.
  *
- * Producers — three independent call sites construct a
+ * Producers — four independent call sites construct a
  * {@link CryptoContext}, and only the first of them means "settings". Each
  * names itself with its own member of {@link CRYPTO_CONTEXT_SCOPES}
  * (`ctx.scope`, ADR-0128 D1):
@@ -26,8 +26,15 @@
  *     `'datasource_credential'`) — `ctx.namespace` is caller-supplied
  *     (default `'datasource'`), `ctx.key` the datasource name; `handle.id`
  *     is recorded as the artefact's `sys_secret:` credentialsRef.
+ *  4. **Audit seal** (the audit ledger's sealer, scope `'audit_seal'`,
+ *     ADR-0154) — a checkpoint's seed: `ctx.namespace` is the sealed
+ *     object's name, `ctx.key` the JCS array `[organization id or null,
+ *     sequence]`, `handle.id` recorded in `sys_audit_checkpoint.seed_handle`;
+ *     the signing key's private half: `ctx.namespace` is
+ *     `sys_audit_signing_key`, `ctx.key` the key's fingerprint, `handle.id`
+ *     recorded in `sys_audit_signing_key.private_handle`.
  *
- * All three persist a `sys_secret` row keyed by `handle.id`, and the three
+ * All four persist a `sys_secret` row keyed by `handle.id`, and the four
  * `(namespace, key)` vocabularies are uncoordinated: `sys_secret` declares
  * that pair **non-unique** precisely because it does not attribute a row to
  * a producer. The scope is what does — see {@link CryptoContext} for how an
@@ -104,6 +111,12 @@ export interface CryptoHandle {
  *    object name + field name.
  *  - `'datasource_credential'` — the datasource secret binder:
  *    caller-supplied namespace (default `'datasource'`) + datasource name.
+ *  - `'audit_seal'` — the audit ledger's sealer (ADR-0154 D2, D6): a
+ *    checkpoint's seed under the sealed object's name + the JCS array
+ *    `[organization id or null, sequence]`, and the signing key's private
+ *    half under `sys_audit_signing_key` + the key's fingerprint. Both are
+ *    referenced from inside signed bodies, so this scope alone requires a
+ *    stable handle id across {@link ICryptoProvider.rotateKey}.
  *
  * Closed on purpose. A new producer of `CryptoContext` adds its own member
  * here in the same change that adds the producer — ⛔ it never borrows an
@@ -115,6 +128,7 @@ export const CRYPTO_CONTEXT_SCOPES = [
   'settings',
   'object_secret_field',
   'datasource_credential',
+  'audit_seal',
 ] as const;
 
 /** A producer vocabulary — derived from {@link CRYPTO_CONTEXT_SCOPES}. */
@@ -216,6 +230,11 @@ export interface ICryptoProvider {
    * Implementations SHOULD bump `version` and update `kmsKeyId` while
    * leaving `id` stable, so no producer's stored reference to the handle
    * has to be rewritten.
+   *
+   * Under scope `'audit_seal'` the returned handle's `id` MUST equal the
+   * input's (ADR-0154 D2). That producer records the id inside a signed
+   * checkpoint body, which nothing may rewrite afterwards: a provider that
+   * re-ids such a handle makes every checkpoint holding it unverifiable.
    */
   rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle>;
 

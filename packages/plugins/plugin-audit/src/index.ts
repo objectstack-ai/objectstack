@@ -198,3 +198,9 @@ export type {
   CommentSharingLike,
   CommentThreadTarget,
 } from './comment-access-hooks.js';
+// [ADR-0154] The audit ledger's tamper evidence — its pure core: the RFC 8785
+// canonical form, salted column commitments, per-checkpoint seed salts, the
+// RFC 6962 Merkle tree and the checkpoint / amendment signed bodies. The
+// `sys_secret` reference union reads `AUDIT_SEAL_SECRET_HOLDERS` and
+// `isAuditSealSecretCoordinate` from here.
+export * from './audit-seal/index.js';
