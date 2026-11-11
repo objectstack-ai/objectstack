@@ -9962,8 +9962,13 @@ export class ObjectStackProtocolImplementation implements
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
      * lock guards and refreshes the runtime registry), so this needs NO
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
-     * the in-memory registry and 503s when that service is absent). Per-item
-     * failures are collected and do NOT abort the rest.
+     * the in-memory registry and 503s when that service is absent).
+     *
+     * All-or-nothing (ADR-0067 D2): a refusal of any draft refuses the whole
+     * batch, and nothing it promoted stays live. [#32396] That holds on a
+     * runtime that cannot roll a transaction back too — there the whole batch
+     * is judged before any draft is promoted, and a failure only the writes
+     * meet undoes the promotions already made — see the body's Phase 0.
      *
      * [#9406] The wire face of this return is DECLARED:
      * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the
