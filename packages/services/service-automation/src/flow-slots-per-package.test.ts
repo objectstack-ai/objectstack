@@ -307,22 +307,36 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         expect(engine.getFlowSlots('f')).toEqual([]);
     });
 
-    it('a trigger is not handed a slot of a shared name (it binds by name alone), with one warning', () => {
+    it('[PR-2] a trigger is handed each slot of a shared name under its key; the incumbent is re-armed under its qualified key', () => {
         const started: string[] = [];
+        const stopped: string[] = [];
         const trigger: FlowTrigger = {
             type: 'record_change',
             start: (binding: { flowName: string }) => { started.push(binding.flowName); },
-            stop: () => undefined,
+            stop: (key: string) => { stopped.push(key); },
         } as unknown as FlowTrigger;
         engine.registerTrigger(trigger);
         ship(P1, triggered('t', 'p1'));
         expect(started).toEqual(['t']);
         ship(P2, triggered('t', 'p2'));
-        expect(started).toEqual(['t']);
+        expect(stopped).toEqual(['t']);
+        expect(started).toEqual(['t', `${P1}/t`, `${P2}/t`]);
+        expect(engine.getActiveTriggerBindings().map((b) => b.flowName)).toEqual([`${P1}/t`, `${P2}/t`]);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
+    });
+
+    it('[M1, PR-2] the one slot left when the other holder\'s body was refused is not armed, behind one warning', () => {
+        const started: string[] = [];
+        engine.registerTrigger({ type: 'record_change', start: (b: { flowName: string }) => { started.push(b.flowName); }, stop: () => undefined } as unknown as FlowTrigger);
+        // P1's body of `f` is refused first; P2 then ships `f`: one engine slot, two registry holders.
+        registry.registerItem('flow', { ...leaf('f', 'p1'), _packageId: P1 }, 'name' as never, P1);
+        loaderSets.f = [P1];
+        engine.recordFlowRefusal('f', new Error('refused: p1 body'));
+        ship(P2, triggered('f', 'p2'));
+        expect(engine.getFlowSlots('f')).toHaveLength(1);
+        expect(started).toEqual([]);
         expect(engine.getActiveTriggerBindings()).toEqual([]);
-        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));
-        expect(warned).toHaveLength(2);
-        expect(warned[0][0]).toContain(`another package holds a flow named 't'`);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /whose body was refused/.test(message))).toHaveLength(1);
     });
 
     it('[M1] two registry holders, one slot (the other body refused): no P1 caller, bare door or trigger reaches P2\'s flow', async () => {
@@ -841,19 +855,22 @@ describe('#31696 a run of a flow whose name two packages hold reads its own flow
     });
 });
 
-describe('#31696 the trigger decline is said again for a name shared again', () => {
-    it('a pair that drops to one holder and shares again warns again', () => {
+describe('#31696 [PR-2] a name shared again is re-armed per slot again', () => {
+    it('a pair that drops to one holder and shares again arms each slot under its key each time, and warns nothing', () => {
+        const started: string[] = [];
+        const stopped: string[] = [];
         engine.registerTrigger({
             type: 'record_change',
-            start: () => undefined,
-            stop: () => undefined,
+            start: (binding: { flowName: string }) => { started.push(binding.flowName); },
+            stop: (key: string) => { stopped.push(key); },
         } as unknown as FlowTrigger);
         ship(P1, triggered('t', 'p1'));
         ship(P2, triggered('t', 'p2'));
         registry.unregisterItemsByPackage(P2);
         engine.withdrawFlowSlot(P2, 't');
         ship(P2, triggered('t', 'p2'));
-        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));
-        expect(warned).toHaveLength(4);
+        expect(started).toEqual(['t', `${P1}/t`, `${P2}/t`, 't', `${P1}/t`, `${P2}/t`]);
+        expect(stopped).toEqual(['t', `${P2}/t`, `${P1}/t`, 't']);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
     });
 });
