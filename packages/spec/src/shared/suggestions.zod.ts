@@ -284,6 +284,19 @@ export interface StrictUnknownKeyErrorOptions {
    * {@link strictUnknownKeyError}.
    */
   history: string;
+  /**
+   * Whether the refusal points at the protocol upgrade guide
+   * ({@link RETIRED_KEY_UPGRADE_GUIDE_SENTENCE}). Default `true`: on an
+   * authorable metadata surface a key whose retirement kit has aged out
+   * arrives as a plain unknown key, and the guide is the one place its
+   * prescription is still written (ADR-0087, 2026-10-26 amendment).
+   *
+   * Pass `false` only for a surface that has never carried a retirement kit
+   * because it is not protocol metadata at all — an MCP tool's arguments, for
+   * one. There no unknown key can be a retired key, so the sentence would send
+   * the caller to a page that has nothing to do with its mistake.
+   */
+  retiredKeyUpgradeGuide?: boolean;
 }
 
 /**
@@ -352,7 +365,9 @@ export interface StrictUnknownKeyErrorOptions {
  * arrive outside the shape-backed audit.
  */
 export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.core.$ZodErrorMap {
-  const { surface, knownKeys, guidance = {}, guidanceSets = [], history } = options;
+  const {
+    surface, knownKeys, guidance = {}, guidanceSets = [], history, retiredKeyUpgradeGuide = true,
+  } = options;
   const aliases: Record<string, string> = {};
   for (const [key, canonical] of Object.entries(options.aliases ?? {})) {
     // Two keys in ONE table that share a probe collapse here, later silently
@@ -436,7 +451,10 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     // still written down. It is a pointer, not a prescription, so it is one
     // static sentence on every refusal rather than a per-key bullet, and it
     // sits with the fixes rather than behind the history sentence the #5955
-    // ruling moved last.
+    // ruling moved last. A surface that declares it has no retirement history
+    // (`retiredKeyUpgradeGuide: false`) has nothing to point at, so it ends at
+    // its fix channels.
+    if (!retiredKeyUpgradeGuide) return `${message} ${history}`;
     return `${message} ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${history}`;
   };
 }

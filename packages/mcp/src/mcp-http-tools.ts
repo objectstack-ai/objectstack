@@ -1711,6 +1711,11 @@ function strictToolInput<T extends z.ZodRawShape>(
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
         history: '',
+        // Tool arguments are not protocol metadata and never carried a
+        // retirement kit, so no unknown key here is a retired key: the
+        // upgrade-guide pointer would send an agent to a page unrelated to
+        // its mistake.
+        retiredKeyUpgradeGuide: false,
       })),
     })
     .strict();
@@ -1724,6 +1729,19 @@ const OBJECT_NAME_ALIASES = { object: 'objectName', table: 'objectName' } as con
 
 /** The spellings every record-scoped tool shares. */
 const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
+
+/**
+ * What every `recordId` argument holds, said where an agent reads it: the
+ * record-scoped tools take the id under the name `recordId`, while the answers
+ * it comes from (`create_record`'s `{ object, id, record }`, a `query_records`
+ * row) carry it as `id` — the data protocol's own spelling
+ * (`CreateDataResponseSchema`). The two names stay as they are: an `id` alias
+ * and a `recordId` → `id` rename were both refused on this surface, so the
+ * hand-off is stated rather than accepted under a second spelling.
+ */
+const RECORD_ID_DESCRIPTION =
+  'The record id: the `id` that create_record answers and that each query_records row carries, '
+  + 'sent under the name recordId.';
 
 /**
  * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
@@ -2451,7 +2469,7 @@ export function registerObjectTools(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -2515,7 +2533,7 @@ export function registerObjectTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             data: z.record(z.string(), z.unknown()).describe('Field values to change'),
           },
         ),
@@ -2542,7 +2560,7 @@ export function registerObjectTools(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             // The confirmation member, keyed off the contract's constant as
             // `run_action` declares it. OPTIONAL in the schema on purpose: a
             // required member would refuse an unconfirmed call as a bare input
@@ -2858,7 +2876,7 @@ export function registerActionTools(
         recordId: z
           .string()
           .optional()
-          .describe('The id of the record to act on (for record-scoped actions).'),
+          .describe(`For a record-scoped action, the record to act on. ${RECORD_ID_DESCRIPTION}`),
         params: z
           .record(z.string(), z.unknown())
           .optional()
@@ -3113,7 +3131,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             field: z.string().optional().describe('A file or image field of the record'),
             fileId: z
               .string()
@@ -3183,7 +3201,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             field: z.string().optional().describe('A file or image field of the record the upload fills'),
             attachments: z
               .literal(true)
