@@ -116,12 +116,13 @@ function asError(thrown: unknown): Error {
  * registered (a sibling can complete its pair), then ask every registered row
  * against the registry the unit leaves. The registry is put back before this
  * returns. On a registry that cannot be asked (a partial double) nothing is
- * refused and the rows' own order is answered.
+ * refused, and nothing is answered to register again: there is no registry
+ * the batch's own registrations could have left short.
  */
 export function judgeBatchObjectRegistrations(host: JudgeHost, rows: readonly BatchObjectRow[]): BatchRegistrationVerdict {
     const judged = rows.map((_, i) => i).filter((i) => isBatchObjectType(rows[i].type));
     const registry = judgingRegistryOf(host);
-    if (judged.length === 0 || registry === undefined) return { refused: new Map(), order: judged };
+    if (judged.length === 0 || registry === undefined) return { refused: new Map(), order: [] };
 
     type Layer = ReturnType<JudgeHost['classifyObjectContribution']>;
     const layers = new Map<number, Layer>();
@@ -163,7 +164,36 @@ export function judgeBatchObjectRegistrations(host: JudgeHost, rows: readonly Ba
         }
     };
 
+    /** The object each row registers as: its own name, or the object an extension extends. */
+    const objectNameOf = (i: number): string | undefined => {
+        const row = rows[i];
+        if (row.type !== OBJECT_EXTENSION_TYPE) return row.name;
+        try {
+            return registrableObjectExtension(row.body).extend;
+        } catch {
+            return undefined;
+        }
+    };
     const refused = new Map<number, Error>();
+    /**
+     * Charge a refusal to the row whose declaration it refuses. A currency door
+     * asked of one end of a pair names the object declaring the refused field
+     * (`objectName`: the child for a following amount, the parent for a
+     * roll-up), which can be ANOTHER row of the unit — asked of an innocent
+     * parent, the follow door refuses the child that follows a field the parent
+     * holds as text. That row is the one refused; the asked row is refused
+     * only when the declaration is its own, or an object outside the unit (a
+     * live object the row would break).
+     */
+    const charge = (i: number, refusal: Error): void => {
+        const declaring = (refusal as { objectName?: unknown }).objectName;
+        let at = i;
+        if (typeof declaring === 'string' && declaring !== objectNameOf(i)) {
+            const other = judged.find((j) => j !== i && objectNameOf(j) === declaring);
+            if (other !== undefined) at = other;
+        }
+        if (!refused.has(at)) refused.set(at, refusal);
+    };
     const order: number[] = [];
     const judgementEnds = new Error('[batch-object-registration] the unit is judged; the registry is put back');
     try {
@@ -188,9 +218,9 @@ export function judgeBatchObjectRegistrations(host: JudgeHost, rows: readonly Ba
             }
             for (const i of order) {
                 const refusal = againstRegistry(i);
-                if (refusal) refused.set(i, refusal);
+                if (refusal) charge(i, refusal);
             }
-            for (const [i, refusal] of lastRefusal) refused.set(i, refusal);
+            for (const [i, refusal] of lastRefusal) charge(i, refusal);
             throw judgementEnds;
         });
     } catch (thrown) {
