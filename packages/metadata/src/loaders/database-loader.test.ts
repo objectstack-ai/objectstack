@@ -1934,7 +1934,10 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     (manager as any).loaders.clear();
     for (const loader of [...fileSystem, ...loaders]) manager.registerLoader(loader);
     await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return manager;
   };
+  /** What the manager's registry holds for `type`. */
+  const registered = (manager: MetadataManager, type: string) => [...((manager as any).registry.get(type)?.values() ?? [])];
 
   beforeEach(() => {
     driver = createMockDriver();
@@ -1972,5 +1975,34 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     } finally {
       rmSync(rootDir, { recursive: true, force: true });
     }
+  });
+
+  // [R7-A; epic ruling 6809488921] The one write the skip still lets reach the source loader.
+  const seedAgent = (body: Record<string, unknown>) =>
+    driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'database',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', ...body }),
+    });
+  const agentRow = async () => (await driver.findOne('sys_metadata', { where: { type: 'agent' } } as never)) as Record<string, any>;
+
+  it('[R7-A] an agent legacy row (empty column, stamped body): the column is bound, body, version and history unchanged', async () => {
+    await seedAgent({ _packageId: ALPHA });
+    const before = await agentRow();
+    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual({ ...before, package_id: ALPHA });
+    expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
+    expect(driver.create).toHaveBeenCalledTimes(1);
+    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: ALPHA, _provenance: 'package' }]);
+  });
+
+  it('[R7-A, R7-B] a package-less row on a host with a packageId stays package-less, no update; the loader\'s cache keeps it unstamped', async () => {
+    await seedAgent({});
+    const before = await agentRow();
+    const loader = new DatabaseLoader({ driver });
+    await bootPass([loader], { packageId: ALPHA });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(1);
+    expect(await loader.loadMany('agent')).toEqual([{ name: 'helper', label: 'Helper' }]);
   });
 });

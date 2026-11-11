@@ -345,6 +345,8 @@ export class DatabaseLoader implements MetadataLoader {
   private readonly listCache?: LRUCache<string, string[]>;
   /** (type, name) → MetadataStats — primes `stat()` */
   private readonly statCache?: LRUCache<string, MetadataStats | null>;
+  /** [#31699 R7-A] Each body a plural read handed out from a legacy row, with that row's id and package ({@link bindReadRowPackage}). */
+  private readonly legacyReadRows = new WeakMap<object, { id: string; packageId: string }>();
 
   constructor(options: DatabaseLoaderOptions) {
     if (!options.driver && !options.engine) {
@@ -1136,14 +1138,17 @@ export class DatabaseLoader implements MetadataLoader {
         const data = this.rowToData(row);
         if (data === null) continue;
         const name = row.name;
+        const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
         result.push({
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
           ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
             ? {
-                packageId: storedRowPackageId(row),
+                packageId,
                 version: Number(row.version) || 0,
                 ...(isBundledStoreType(type) ? { member: storedBundleMemberOf(type, data, row.bundle_member) ?? null } : {}),
+                // [#31699 R7-A] A legacy row: its package named by its stored body alone.
+                ...(packageId !== undefined && packageId !== row.package_id ? { legacyRowId: String(row.id) } : {}),
               }
             : {}),
         });
@@ -1162,7 +1167,40 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     _options?: MetadataLoadOptions
   ): Promise<T[]> {
-    return (await this.unscopedTypeRows(type)).map(entry => entry.data) as T[];
+    return (await this.unscopedTypeRows(type)).map(entry => this.handOut(entry)) as T[];
+  }
+
+  /**
+   * [#31699 R7-B] A copy of a cached body, so a caller that stamps what it is
+   * handed (the boot priming pass's `applyProtection`) never edits the
+   * plural-read cache. A legacy row's copy is recorded for
+   * {@link bindReadRowPackage}.
+   */
+  private handOut(entry: StoredTypeRow): Record<string, unknown> {
+    const copy = { ...entry.data };
+    if (entry.legacyRowId !== undefined && entry.packageId !== undefined) this.legacyReadRows.set(copy, { id: entry.legacyRowId, packageId: entry.packageId });
+    return copy;
+  }
+
+  /**
+   * [#31699 R7-A; epic ruling 6809488921] Bind the empty `package_id` column of
+   * the legacy row a plural read handed `item` out from to the package that
+   * row's own stored body names: the column only — no body, no version, no
+   * history row, no insert (#32347's column-only update). ⛔ Never from
+   * `item`'s stamp as it stands now, never a row the read did not hand out,
+   * and never into a slot another row of the name holds. `MetadataManager.register`
+   * calls it in place of the write-through it skips (`skipSourceLoader`).
+   */
+  async bindReadRowPackage(type: string, name: string, item: object): Promise<void> {
+    const read = this.legacyReadRows.get(item);
+    if (!read) return;
+    const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    const row = rows.find((candidate) => String(candidate.id) === read.id);
+    if (!row || row.package_id === read.packageId || storedRowPackageId(row) !== read.packageId) return;
+    const memberOf = (of: Record<string, unknown>) => storedBundleMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
+    if (rows.some((other) => other !== row && other.package_id === read.packageId && memberOf(other) === memberOf(row))) return;
+    await this._update(this.tableName, read.id, { package_id: read.packageId });
+    this.invalidate(type, name);
   }
 
   /**
@@ -1212,7 +1250,8 @@ export class DatabaseLoader implements MetadataLoader {
     const keyed: MetadataKeyedItem<T>[] = [];
     for (const entry of entries) {
       if (entry.name === null) continue;
-      keyed.push(withPackage ? keyedRow<T>(entry.name, entry) : { name: entry.name, data: entry.data as T });
+      const data = this.handOut(entry);
+      keyed.push(withPackage ? keyedRow<T>(entry.name, { ...entry, data }) : { name: entry.name, data: data as T });
     }
     return keyed;
   }
@@ -1859,6 +1898,8 @@ interface StoredTypeRow {
   version?: number;
   /** [#31699 R3-B] For a bundled by-package type, the member the row holds (`null`: the canonical one). */
   member?: string | null;
+  /** [#31699 R7-A] For a by-package type's row whose `package_id` is empty and whose body names `packageId`: its id. */
+  legacyRowId?: string;
 }
 
 /** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */

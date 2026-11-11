@@ -1673,7 +1673,8 @@ export class MetadataPlugin implements Plugin {
                             // edits to these files reach watchers through the
                             // FileSystemRepository attached by onEnable.
                             // [#31699 R5-A] Never written back into the loader it was read from
-                            // (a stored row stays as stored); every other loader still receives it,
+                            // (a stored row stays as stored, but for a legacy row's empty package
+                            // column, bound from its own stored body: R7-A); every other loader still receives it,
                             // so a file-system item still seeds the database loader.
                             await this.manager.register(entry.type, meta.name, item, { notify: false, skipSourceLoader: true });
                         }

@@ -120,7 +120,9 @@ export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
  * With it, an item {@link MetadataManager.loadMany} read from a loader is not
  * persisted back into that same loader; every other loader's write is
  * unchanged. The boot priming pass sets it, so a boot never writes back a row
- * it read from the store it read it from. Class-level, as
+ * it read from the store it read it from. [R7-A] That loader still binds the
+ * empty `package_id` column of the legacy row the item was read from, the
+ * column only (`MetadataLoader.bindReadRowPackage`). Class-level, as
  * {@link MetadataUnregisterOptions} is.
  */
 export interface MetadataRegisterOptions extends MetadataWriteOptions {
@@ -959,8 +961,12 @@ export class MetadataManager implements IMetadataService {
       // and because `save?` stays optional on the interface for the protocols
       // the gate does not cover. Mirrors the same guard in `unregister()`.
       if (typeof loader.save !== 'function') continue;
-      // [#31699 R5-A] Never back into the loader this item was read from.
-      if (options?.skipSourceLoader && data !== null && typeof data === 'object' && this.loadedFrom.get(data) === loader) continue;
+      // [#31699 R5-A] Never back into the loader this item was read from; [R7-A] only the
+      // column-only bind of the legacy row it was read from reaches that loader.
+      if (options?.skipSourceLoader && data !== null && typeof data === 'object' && this.loadedFrom.get(data) === loader) {
+        await loader.bindReadRowPackage?.(type, name, data);
+        continue;
+      }
       await loader.save(type, name, data);
     }
 
