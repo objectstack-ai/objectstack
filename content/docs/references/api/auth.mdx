@@ -92,7 +92,7 @@ const result = AuthProvider.parse(data);
 | **tenantId** | `string \| null` | ✅ | The caller's active organization id, or null when the session has none. |
 | **positions** | `string[]` | ✅ | The security positions the caller holds (ADR-0068 D3): built-in identity names plus assigned positions, scope-resolved. |
 | **permissionSets** | `string[]` | ✅ | The names of the permission sets resolved for the caller. |
-| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server. |
+| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server, except that `allowTransfer` follows edit here: it reads true only where the entry grants edit. |
 | **fields** | `Record<string, { readable: boolean; editable: boolean }>` | ✅ | The effective field permissions, keyed `object.field`. |
 | **systemPermissions** | `string[]` | optional | The effective system capabilities (ADR-0066). Absent only on the degraded body, where it means unknown; an empty array means none. |
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | The effective app tab visibilities, keyed by app name. Absent only on the degraded body. |
@@ -155,7 +155,7 @@ This schema accepts one of the following structures:
 | **tenantId** | `string \| null` | ✅ | The caller's active organization id, or null when the session has none. |
 | **positions** | `string[]` | ✅ | The security positions the caller holds (ADR-0068 D3): built-in identity names plus assigned positions, scope-resolved. |
 | **permissionSets** | `string[]` | ✅ | The names of the permission sets resolved for the caller. |
-| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server. |
+| **objects** | `Record<string, { allowCreate?: boolean; allowRead?: boolean; allowEdit?: boolean; allowDelete?: boolean; … }>` | ✅ | The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server, except that `allowTransfer` follows edit here: it reads true only where the entry grants edit. |
 | **fields** | `Record<string, { readable: boolean; editable: boolean }>` | ✅ | The effective field permissions, keyed `object.field`. |
 | **systemPermissions** | `string[]` | optional | The effective system capabilities (ADR-0066). Absent only on the degraded body, where it means unknown; an empty array means none. |
 | **tabPermissions** | `Record<string, Enum<'visible' \| 'hidden' \| 'default_on' \| 'default_off'>>` | optional | The effective app tab visibilities, keyed by app name. Absent only on the degraded body. |

@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
-import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, engineExternalWriteForbidden, registryObjectPackageDisabled, servedObjectPermissions } from '@objectstack/core';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
@@ -233,5 +233,32 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         expect(body.fields).toEqual({});
         expect(body.systemPermissions).toEqual([]);
         expect(body.tabPermissions).toEqual({});
+    });
+});
+
+/**
+ * [Ruling of record 6755714726 on #32004] The served slot is the one map with
+ * one derivation, `servedObjectPermissions`: `allowTransfer` follows edit. The
+ * map `buildEffectiveObjectPermissions` builds — the one `current_user.can()`
+ * reads — keeps the transfer grant.
+ */
+describe('/auth/me/permissions serves a transfer only with edit', () => {
+    it('a transfer grant without edit is served allowTransfer false; the base map keeps it; nothing else moves', async () => {
+        const resolved = [{ name: 'transferrer', objects: { deal: { allowRead: true, allowTransfer: true } }, fields: {} }];
+        const body: any = await (await mount(resolved).request(`http://localhost${ME_PERMISSIONS}`)).json();
+        const base: any = buildEffectiveObjectPermissions(resolved, {
+            allSchemas: () => ql.registry.getAllObjects(),
+            schemaOf: (name) => ql.getSchema(name),
+        });
+        expect(base.deal.allowTransfer).toBe(true);
+        expect(body.objects.deal.allowTransfer).toBe(false);
+        expect(JSON.stringify(body.objects)).toBe(JSON.stringify(servedObjectPermissions(base)));
+        expect(body.objects.deal).toEqual({ ...base.deal, allowTransfer: false });
+    });
+
+    it('CONTROL: edit and the transfer grant are served allowTransfer true', async () => {
+        const resolved = [{ name: 'editor', objects: { deal: { allowRead: true, allowEdit: true, allowTransfer: true } }, fields: {} }];
+        const body: any = await (await mount(resolved).request(`http://localhost${ME_PERMISSIONS}`)).json();
+        expect(body.objects.deal.allowTransfer).toBe(true);
     });
 });

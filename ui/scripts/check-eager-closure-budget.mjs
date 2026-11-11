@@ -2287,6 +2287,21 @@ export const PER_CHUNK_GZIP_CEILINGS = Object.freeze({
   // (objectstack#30588). ⛔ Not moved: MAX_EAGER_CLOSURE_GZIP_BYTES, BASELINE,
   // REGRESSION_THIS_GATE_MUST_CATCH_BYTES and the other per-chunk rows. No
   // exemption was added and no import was made lazy.
+  //
+  // READ, ⛔ not moved, by objectstack#32225 (2026-11-10): `main` sat 119
+  // bytes under this line, so every PR adding a few English keys was ejected
+  // from the queue. The packs' `console.developer.*` and `connectAgent.*`
+  // groups left the eleven packs for the lazy `developer` namespace
+  // (`packages/i18n/src/namespaces/developer/`). On two console builds
+  // (`CI=true pnpm exec vite build` in `apps/console`, reading
+  // `apps/console/dist/eager-closure.json`) at `dee2e920` (`main`) and at that
+  // card's branch this chunk read 61,881 -> 57,330 gzipped bytes, headroom
+  // 119 -> 4,670. The eager closure read 2,267,784 -> 2,264,606 (-3,178), with
+  // no chunk added: besides this one, `i18n-runtime` +1,084 (the pack-namespace
+  // loader both namespaces share, `namespaces/packNamespace.ts`, and the
+  // `developer` loader — eager because app-shell registers the two
+  // `console/connect/` widgets whose frame imports them) and `src` +267 (that
+  // frame), none other moving by more than 40 bytes.
   'i18n-locale-en': 62_000,
   // Raised by the maintainer ruling of 2026-09-08, ⛔ not by a measurement here:
   // `main` had been red on this line since `f76f43628`. The bytes that put it

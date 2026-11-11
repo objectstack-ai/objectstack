@@ -19,6 +19,10 @@
  * After a hide, the home page draws nothing and System Overview keeps one
  * small line, with a way to show the notice again in this browser.
  *
+ * On Home it sits in the page's 1120 px content column, like every other card
+ * above the apps, and while it draws its email line it claims the `mail` item
+ * (`../home/homeItemClaims`), so the first-run checklist does not repeat it.
+ *
  * @module
  */
 
@@ -27,6 +31,7 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Check, Copy, HardDrive, Info } from 'lucide-react';
+import { useHomeItemClaim } from '../home/homeItemClaims.js';
 import {
   deploymentVariablesText,
   fetchDeploymentNotice,
@@ -106,9 +111,18 @@ export function DeploymentNotice({ placement }: DeploymentNoticeProps) {
     return () => clearTimeout(id);
   }, [copied]);
 
+  const drawn = Boolean(
+    isResolved && isAdmin && userId && state && state.production && state.findings.length > 0,
+  );
+  const isHidden = drawn && hidden === state?.fingerprint;
+  // On Home, the email line is said here; the checklist stands aside for it.
+  useHomeItemClaim(
+    'mail',
+    placement === 'home' && drawn && !isHidden && !!state?.findings.some((f) => f.id === 'email_not_configured'),
+  );
+
   if (!isResolved || !isAdmin || !userId || !state || !state.production || state.findings.length === 0) return null;
 
-  const isHidden = hidden === state.fingerprint;
   if (isHidden) {
     if (placement === 'home') return null;
     return (
@@ -169,7 +183,7 @@ export function DeploymentNotice({ placement }: DeploymentNoticeProps) {
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 pt-4">
-      <div className={placement === 'home' ? 'max-w-7xl mx-auto' : undefined}>
+      <div className={placement === 'home' ? 'max-w-[1120px] mx-auto' : undefined}>
         <section
           className={`rounded-xl border px-4 py-3 ${tone}`}
           aria-labelledby="deployment-notice-title"

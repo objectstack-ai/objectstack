@@ -2216,3 +2216,81 @@ describe('[#20515] buildContextForUser and resolveDelegatorContext resolve in an
     });
   });
 });
+
+// ── [Ruling of record 6755714726 on #32004] A transfer is explained as edit
+// AND the transfer grant. Its door is the by-id update of `owner_id`: the
+// update grant (edit, which implies read) and then the ownership gate's
+// transfer grant. The evaluator's `transfer` cell — that gate's grant alone —
+// is unchanged; the composition is the explanation's.
+
+describe('explainAccess — a transfer is reported only where the record could be edited and its owner changed', () => {
+  const grantSet = (name: string, entry: Record<string, unknown>) =>
+    PermissionSetSchema.parse({ name, objects: { leave_request: entry } });
+  const SHAPES = {
+    'the transfer grant alone': { sets: [grantSet('transfer_only', { allowTransfer: true })], transfers: false },
+    'edit alone': { sets: [grantSet('edit_only', { allowRead: true, allowEdit: true })], transfers: false },
+    'edit and the transfer grant': {
+      sets: [grantSet('edit_transfer', { allowRead: true, allowEdit: true, allowTransfer: true })],
+      transfers: true,
+    },
+    'read and the transfer grant': { sets: [grantSet('read_transfer', { allowRead: true, allowTransfer: true })], transfers: false },
+  } as const;
+  const REC_CTX = { userId: 'u1', tenantId: 'org1', positions: ['sales_rep', 'everyone'], permissions: [] };
+  /** The record write gate admits the row: the record verdict is the object grant's to decide. */
+  const recordDeps = (sets: any[]): ExplainEngineDeps => ({
+    ...makeDeps({ sets }),
+    computeLayeredRlsFilter: async () => ({ layer0: null, layer1: null }),
+    fetchRecord: async () => ({ id: 'r1', organization_id: 'org1', owner_id: 'u1' }),
+    sharingReadFilter: async () => null,
+    listRecordShares: async () => [],
+    canEditRecord: async () => true,
+  });
+  const crudOf = (d: { layers: Array<{ layer: string }> }) => d.layers.find((l) => l.layer === 'object_crud') as any;
+
+  for (const [label, shape] of Object.entries(SHAPES)) {
+    it(`${label}: the object level ${shape.transfers ? 'grants' : 'denies'} a transfer`, async () => {
+      const d = await explainAccess(makeDeps({ sets: [...shape.sets] }), { object: 'leave_request', operation: 'transfer', context: CTX });
+      expect(d.allowed).toBe(shape.transfers);
+      expect(crudOf(d).verdict).toBe(shape.transfers ? 'grants' : 'denies');
+      expect(ExplainDecisionSchema.safeParse(d).success).toBe(true);
+    });
+
+    it(`${label}: the record level ${shape.transfers ? 'admits' : 'refuses'} a transfer of a record the write gate admits`, async () => {
+      const d = await explainAccess(recordDeps([...shape.sets]), {
+        object: 'leave_request', operation: 'transfer', context: REC_CTX, recordId: 'r1',
+      });
+      expect(d.record?.visible).toBe(shape.transfers);
+      if (!shape.transfers) expect(d.record?.decidedBy).toBe('object_crud');
+      expect(ExplainDecisionSchema.safeParse(d).success).toBe(true);
+    });
+  }
+
+  it('the transfer grant without edit names edit as the missing half', async () => {
+    const d = await explainAccess(makeDeps({ sets: [...SHAPES['read and the transfer grant'].sets] }), {
+      object: 'leave_request', operation: 'transfer', context: CTX,
+    });
+    expect(crudOf(d).detail).toContain("No resolved permission set grants edit on 'leave_request'");
+    expect(crudOf(d).contributors).toEqual([]);
+  });
+
+  it('edit from one set and the transfer grant from another compose, and both sets are attributed', async () => {
+    const sets = [grantSet('editor', { allowRead: true, allowEdit: true }), grantSet('transferrer', { allowTransfer: true })];
+    const d = await explainAccess(makeDeps({ sets }), { object: 'leave_request', operation: 'transfer', context: CTX });
+    expect(d.allowed).toBe(true);
+    expect(crudOf(d).contributors.map((c: { name: string }) => c.name)).toEqual(['editor', 'transferrer']);
+    expect(crudOf(d).detail).toBe("transfer on 'leave_request' is granted: edit by [editor] and the transfer grant by [transferrer].");
+  });
+
+  it('CONTROL: modifyAllRecords grants edit and the transfer grant, so it transfers', async () => {
+    const d = await explainAccess(makeDeps({ sets: [ADMIN] }), { object: 'leave_request', operation: 'transfer', context: CTX });
+    expect(crudOf(d).verdict).toBe('grants');
+  });
+
+  it('CONTROL: the evaluator\'s transfer cell, which the ownership gate reads, is the transfer grant alone', () => {
+    const evaluator = new PermissionEvaluator();
+    for (const shape of Object.values(SHAPES)) {
+      const holdsGrant = (shape.sets[0].objects as any).leave_request.allowTransfer === true;
+      expect(evaluator.checkObjectPermission('transfer', 'leave_request', [...shape.sets])).toBe(holdsGrant);
+    }
+  });
+});

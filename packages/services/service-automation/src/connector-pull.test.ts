@@ -15,6 +15,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildFieldMetaMap, runImport } from '@objectstack/core';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { SchemaRegistry } from '@objectstack/objectql';
+import { mappingNameResolver } from './connector-package-scope.js';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import {
     pullConnectorSource,
@@ -495,10 +496,9 @@ describe('a failed pull logs one warn line naming the mapping and the reason', (
 });
 
 /**
- * [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`, and the
- * pull names no package (its request carries `callerPackageId`, which the pull
- * does not read yet): the mapping is read by the protocol's by-name read as a
- * caller with no package. Driven here over the
+ * [#32071, ADR-0150 D3] `mapping` is addressed by `(package, name)`. A pull
+ * whose request names no package (no `callerPackageId`) reads the mapping by
+ * the protocol's by-name read as a caller with no package. Driven here over the
  * REAL read — `ObjectStackProtocolImplementation` over a real `SchemaRegistry`
  * — for the mapping, the harness for everything else.
  */
@@ -572,5 +572,218 @@ describe('[#32071] connector pull — a mapping name two packages hold is refuse
         const result = await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
         expect(result.targetObject).toBe('contact');
         expect(h.handler).toHaveBeenCalledTimes(1);
+    });
+});
+
+/**
+ * [#32071 Part B, ADR-0150 D3] A pull naming the package that declares its job
+ * (`callerPackageId`) reads the mapping from that package through the injected
+ * registry resolver (`mappingNameResolver`): its own mapping, else the one
+ * holder in its declared closure plus `sys`, else a refusal. A pull naming no
+ * package keeps the protocol's read (Part A). Each holder's mapping pulls a
+ * path of its own, so which mapping a pull read is the path the action got.
+ */
+describe('[#32071] connector pull — a package caller reads the mapping from its own package', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const CALLER = 'com.acme.caller';
+
+    function overRegistry(setup: (r: SchemaRegistry) => void): Harness & { registry: SchemaRegistry } {
+        const h = harness();
+        const registry = new SchemaRegistry({ multiTenant: false });
+        setup(registry);
+        h.deps.mappingByPackage = mappingNameResolver({ getService: <T>() => ({ registry }) as T });
+        const engine = {
+            registry,
+            find: vi.fn().mockResolvedValue([]),
+            findOne: vi.fn().mockResolvedValue(null),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        };
+        const real = new ObjectStackProtocolImplementation(engine as never);
+        const fake = h.deps.protocol;
+        h.deps.protocol = {
+            ...fake,
+            getMetaItem: (request) => (request.type === 'mapping' ? real.getMetaItem(request) : fake.getMetaItem(request)),
+        };
+        return { ...h, registry };
+    }
+    const install = (r: SchemaRegistry, id: string, deps: string[] = []) => r.installPackage(
+        {
+            id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+            ...(deps.length > 0 ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+        } as never,
+        'code',
+    );
+    const mappingOf = (tag: string) => baseMapping({
+        label: tag,
+        connectorSource: { connector: 'crm_api', action: 'request', input: { method: 'GET', path: `/${tag}` } },
+    });
+    const ship = (r: SchemaRegistry, packageId: string) =>
+        r.registerItem('mapping', mappingOf(packageId.split('.').pop()!) as never, 'name' as never, packageId);
+    const pathPulled = (h: Harness) => JSON.stringify(h.handler.mock.calls[0] ?? []).match(/"path":"\/(\w+)"/)?.[1];
+
+    it('two holders, the caller one of them: the caller\'s own mapping is pulled (no-package: 409)', async () => {
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, BETA); ship(r, ALPHA); ship(r, BETA); });
+        const noPackage = await refusal(h);
+        expect(noPackage.reason).toBe('mapping_name_refused');
+        h.handler.mockClear();
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: BETA });
+        expect(pathPulled(h)).toBe('beta');
+        h.handler.mockClear();
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: ALPHA });
+        expect(pathPulled(h)).toBe('alpha');
+    });
+
+    it('CONTROL: a runtime row over the package\'s mapping is its overlay (ADR-0005), served to both callers alike', async () => {
+        // A package-less row of a name a package ships is no second holder:
+        // the registry files it as that package's overlay, so the package
+        // caller's own item IS the row, as the no-package read's is.
+        const h = overRegistry((r) => {
+            install(r, ALPHA);
+            ship(r, ALPHA);
+            r.registerItem('mapping', { ...mappingOf('env'), _provenance: 'org' } as never, 'name' as never);
+        });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(pathPulled(h)).toBe('env');
+        h.handler.mockClear();
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: ALPHA });
+        expect(pathPulled(h)).toBe('env');
+    });
+
+    it('D3 (c): the only holder is outside the caller\'s closure — refused naming it, before any call or write', async () => {
+        const h = overRegistry((r) => { install(r, BETA); install(r, CALLER); ship(r, BETA); });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(pathPulled(h), 'no-package: the one holder is pulled').toBe('beta');
+        h.handler.mockClear();
+        const writesBefore = h.writes.length;
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER }).then(
+            () => undefined,
+            (e: unknown) => e as ConnectorPullError,
+        );
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        const refused = err as ConnectorPullError;
+        expect(refused.reason).toBe('mapping_name_refused');
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(refused.message).toContain(BETA);
+        expect(h.handler).not.toHaveBeenCalled();
+        expect(h.writes).toHaveLength(writesBefore);
+    });
+
+    it('D3 (a): a package caller whose name only the environment holds is refused naming the environment (no binder reaches it)', async () => {
+        const h = overRegistry((r) => {
+            install(r, CALLER);
+            r.registerItem('mapping', { ...mappingOf('env'), _provenance: 'org' } as never, 'name' as never);
+        });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+        expect(pathPulled(h), 'no-package: the environment\'s own').toBe('env');
+        h.handler.mockClear();
+        const err = await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER }).then(
+            () => undefined,
+            (e: unknown) => e as ConnectorPullError,
+        );
+        expect(err).toBeInstanceOf(ConnectorPullError);
+        expect((err as ConnectorPullError).reason).toBe('mapping_name_refused');
+        expect((err as ConnectorPullError).status).toBe(409);
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    it('the one holder in the caller\'s declared closure is pulled', async () => {
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, BETA); install(r, CALLER, [ALPHA]); ship(r, ALPHA); ship(r, BETA); });
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER });
+        expect(pathPulled(h)).toBe('alpha');
+    });
+
+    const pullError = (h: Harness, callerPackageId?: string) =>
+        pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId }).then(
+            () => undefined,
+            (e: unknown) => e as ConnectorPullError,
+        );
+    const answerOf = (err: ConnectorPullError | undefined) =>
+        err === undefined ? 'pulled' : `${err.status} ${err.reason}`;
+
+    it('a disabled package\'s own mapping answers mapping_not_found for its caller, as the no-package read does', async () => {
+        const h = overRegistry((r) => { install(r, CALLER); ship(r, CALLER); r.disablePackage(CALLER); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    it('a disabled package\'s own mapping beside an enabled holder: its caller reads its own, withheld — 404 (no package: 409)', async () => {
+        // The one refusal that becomes a miss (declared in the changeset):
+        // the caller's own item is step 1, then withheld as disabled.
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER); ship(r, ALPHA); ship(r, CALLER); r.disablePackage(CALLER); });
+        expect(answerOf(await pullError(h)), 'no-package (Part A)').toBe('409 mapping_name_refused');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    it('a disabled closure holder\'s mapping answers mapping_not_found, as the no-package read does', async () => {
+        const h = overRegistry((r) => { install(r, ALPHA); install(r, CALLER, [ALPHA]); ship(r, ALPHA); r.disablePackage(ALPHA); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+        expect(h.handler).not.toHaveBeenCalled();
+        // Re-enabled, the same caller pulls it: the withholding is the disable, nothing else.
+        h.registry.enablePackage(ALPHA);
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER });
+        expect(pathPulled(h)).toBe('alpha');
+    });
+
+    it('a disabled sole holder outside the closure answers mapping_not_found, not a refusal naming it', async () => {
+        const h = overRegistry((r) => { install(r, BETA); install(r, CALLER); ship(r, BETA); r.disablePackage(BETA); });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('404 mapping_not_found');
+        expect(answerOf(await pullError(h, CALLER))).toBe('404 mapping_not_found');
+    });
+
+    it('CONTROL (#32183\'s class): a disabled holder beside an enabled one in the closure still counts — refused, as today', async () => {
+        const h = overRegistry((r) => {
+            install(r, ALPHA); install(r, BETA); install(r, CALLER, [ALPHA, BETA]);
+            ship(r, ALPHA); ship(r, BETA); r.disablePackage(ALPHA);
+        });
+        expect(answerOf(await pullError(h)), 'no-package (main)').toBe('409 mapping_name_refused');
+        const err = await pullError(h, CALLER);
+        expect(answerOf(err)).toBe('409 mapping_name_refused');
+        expect(err?.message).toContain(ALPHA);
+        expect(err?.message).toContain(BETA);
+        expect(h.handler).not.toHaveBeenCalled();
+    });
+
+    describe('a multi-package artifact\'s residual owner (ADR-0130 D4: no package row)', () => {
+        // The residual rule files a stack's unclaimed top-level items under the
+        // top-level id, which is no package (`recordResidualOwner`); a body is
+        // a package. The binder sends no package for a residual job.
+        const TOP = 'com.acme.top';
+
+        it('a residual job (no package) pulls the mapping a body declares, as on main', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, BETA); });
+            await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+            expect(pathPulled(h)).toBe('beta');
+        });
+
+        it('a residual job (no package) pulls a mapping filed under the residual owner, as on main', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, TOP); });
+            await pullConnectorSource(h.deps, { mapping: 'crm_contacts' });
+            expect(pathPulled(h)).toBe('top');
+        });
+
+        it('MIRROR: a body\'s job pulling a mapping filed under the residual owner is refused outside-closure (no package: pulled)', async () => {
+            const h = overRegistry((r) => { install(r, BETA); ship(r, TOP); });
+            const err = await pullError(h, BETA);
+            expect(answerOf(err)).toBe('409 mapping_name_refused');
+            expect(err?.message).toContain(TOP);
+            expect(h.handler).not.toHaveBeenCalled();
+        });
+    });
+
+    it('CONTROL: an absent, null or empty caller package reads by no package; no registry to ask reads by no package', async () => {
+        for (const callerPackageId of [undefined, null, '']) {
+            const h = overRegistry((r) => { install(r, ALPHA); ship(r, ALPHA); });
+            await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId });
+            expect(pathPulled(h), String(callerPackageId)).toBe('alpha');
+        }
+        const h = overRegistry((r) => { install(r, BETA); install(r, CALLER); ship(r, BETA); });
+        h.deps.mappingByPackage = () => undefined;
+        await pullConnectorSource(h.deps, { mapping: 'crm_contacts', callerPackageId: CALLER });
+        expect(pathPulled(h), 'no registry: the protocol read, as before').toBe('beta');
     });
 });

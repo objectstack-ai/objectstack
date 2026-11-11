@@ -766,12 +766,18 @@ const EMAIL_ROWS = formRows(EMAIL_SECTIONS);
 /**
  * ⭐ THE FIRST SHAPE PREDICATE — read off the LIVE SCHEMA, never off a name.
  *
- * `LifecycleSchema` declares exactly six top-level keys; the form composite that
- * manufactures this panel is the one whose DIRECT children are exactly those six.
- * So the population follows a rename of the form field, grows when ADR-0057 grows,
- * and can be wrong in a way a `startsWith('lifecycle')` walk never could.
+ * `LifecycleSchema` declares seven top-level keys, and the object form offers six
+ * of them: `seal` (ADR-0154 D10) is an `omit` row of spec's metadata-form ↔ Zod
+ * reconciliation ledger, opted into by code-declared compliance ledgers only. The
+ * form composite that manufactures this panel is the one whose DIRECT children are
+ * exactly the offered six. So the population follows a rename of the form field,
+ * grows when ADR-0057 grows, and can be wrong in a way a `startsWith('lifecycle')`
+ * walk never could; a form that starts offering `seal` matches nothing here until
+ * this list drops it.
  */
-const LIFECYCLE_SHAPE_KEYS = Object.keys(((LifecycleSchema as any).shape ?? {}) as Rec).sort();
+const LIFECYCLE_FORM_OMITTED_KEYS: readonly string[] = ['seal'];
+const LIFECYCLE_SCHEMA_KEYS = Object.keys(((LifecycleSchema as any).shape ?? {}) as Rec).sort();
+const LIFECYCLE_SHAPE_KEYS = LIFECYCLE_SCHEMA_KEYS.filter((k) => !LIFECYCLE_FORM_OMITTED_KEYS.includes(k));
 
 const sameSet = (a: readonly string[], b: readonly string[]): boolean =>
   a.length === b.length && a.every((x, i) => x === b[i]);
@@ -987,6 +993,7 @@ describe('#19403 round 10 — the ledger itself (controls before verdicts)', () 
 
 describe('#19403 round 10 — the populations, DERIVED from a schema shape and a widget', () => {
   it('⭐ the lifecycle root is found by SHAPE — the live LifecycleSchema keys, not a name', () => {
+    expect(LIFECYCLE_SCHEMA_KEYS).toEqual(['archive', 'class', 'reclaim', 'retention', 'seal', 'storage', 'ttl']);
     expect(LIFECYCLE_SHAPE_KEYS).toEqual(['archive', 'class', 'reclaim', 'retention', 'storage', 'ttl']);
     expect(LIFECYCLE_ROOTS.length, 'the form composite matching LifecycleSchema shape is no longer unique').toBe(1);
     expect(LIFECYCLE_ROOT_PATH).toBe('lifecycle');

@@ -314,12 +314,13 @@ token through the `CAPABILITY_PROVIDERS` registry in
 The tokens in `PLATFORM_CAPABILITY_TOKENS` not in that map do not resolve
 through it:
 
-- **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
-  entry; dedicated blocks in `serve.ts` `run()` open their tier instead
+- **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth`: dedicated blocks
+  in `serve.ts` `run()` open their tier instead
   (`ai`/`ai-studio` through the intent-driven AI block).
-- **Enterprise / cloud** — `hierarchy-security` has no open-edition provider and
-  ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
-  `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
+- **Enterprise / cloud** — `hierarchy-security` ships in
+  `@objectstack/security-enterprise`, loaded through `plugins[]`; `ai-seat`,
+  `governance`, `audit-compliance` and `access-policy-console` are resolved
+  only by cloud's objectos-runtime.
 
 The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is

@@ -36,6 +36,11 @@ import { I18nProvider } from '@object-ui/i18n';
 import { builtInLocales, registerBuiltInLocales } from '@object-ui/i18n/locales';
 import { AuthProvider, createAuthClient } from '@object-ui/auth';
 import { RegisterPage } from '../RegisterPage';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 // The zh catalogue is otherwise fetched by a lazy `import()` on first render;
 // making it resident here keeps that load out of the `findBy*` windows below.
