@@ -57,10 +57,12 @@
  *    \`sortable: false\``), so a declaration naming it is the same
  *    first-fetch refusal as check 2, and is graded the same: `error`.
  *
- * 4. GRID AGGREGATIONS (`grid-aggregation-field-type-refused`, #32144): not a
- *    sort, but the one other field-typed question an `object-grid` block's
- *    stored props raise against the same object — `properties.aggregations`
- *    `sum` / `avg` over a field the aggregate × field-type table refuses.
+ * 4. GRID AGGREGATIONS (`grid-aggregation-field-type-refused`, #32144,
+ *    #32449): not a sort, but the one other field-typed question an
+ *    `object-grid` block's stored props raise against the same object —
+ *    `properties.aggregations` whose function the aggregate door refuses over
+ *    the field's declaration (`sum` / `avg` / `min` / `max` / `count_distinct`,
+ *    every row of the aggregate × field-type table).
  *    Asked here because this is the member that already binds a page's
  *    `object-grid` to its object and reaches the page publish door; graded
  *    `error` because the engine's `aggregate` door refuses the pair. See
@@ -265,12 +267,12 @@ import {
   type FieldSortability,
 } from '@objectstack/spec/api';
 import {
-  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
-  FieldType,
-  isAggregateCompatibleWithFieldType,
-  virtualFieldAggregateRemedy,
-} from '@objectstack/spec/data';
-
+  aggregateAcceptsDeclaration,
+  declaredAs,
+  isJudgeableAggregateType,
+  isTableAggregate,
+  refusedAggregateRemedy,
+} from './aggregate-pair-verdict.js';
 import {
   indexServedObjectGraph,
   isUnjudgeable,
@@ -300,9 +302,10 @@ export const SORT_FIELD_UNSORTABLE = 'sort-field-unsortable';
 /** [#10474] The provenance verdict — a WARNING, unlike the two above. */
 export const SORT_FIELD_UNPROVISIONED = 'sort-field-unprovisioned';
 /**
- * [#32144] An `object-grid` group-header aggregation that sums or averages a
- * field the aggregate × field-type table refuses for that function — an
- * `error`, the page-sort grade, because the engine's `aggregate` door refuses
+ * [#32144, #32449] An `object-grid` group-header aggregation whose function
+ * the aggregate door refuses over the field's declaration (every row of the
+ * aggregate × field-type table, plus `count_distinct` over a multi-value
+ * field) — an `error`, the page-sort grade, because the engine's `aggregate` door refuses
  * the same pair (`400 INVALID_FIELD`) on the grouped grid's header query.
  */
 export const GRID_AGGREGATION_FIELD_TYPE_REFUSED = 'grid-aggregation-field-type-refused';
@@ -1006,56 +1009,48 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
   // ── [#30023] Stored page sorts: existence (#30093), provenance, sortability ──
   findings.push(...validatePageSorts(stack, fieldsByObject, sortability, unprovisionedAnchors));
 
-  // ── [#32144] `object-grid` group-header aggregations: sum / avg over a refused type ──
+  // ── [#32144, #32449] `object-grid` group-header aggregations the aggregate door refuses ──
   findings.push(...validateGridAggregations(stack));
 
   return findings;
 }
 
 /**
- * [#32144] The aggregate functions this walk judges: the two that do
- * ARITHMETIC on the value. `count` reads no value; `count_distinct`, `min` and
- * `max` are rows of the same table this walk reads, but out of the card's
- * ruled scope (sum / avg over a non-numeric field), so they are not asked here.
- */
-const GRID_ARITHMETIC_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg']);
-
-/**
- * The declared `FieldType` vocabulary. A type outside it (a driver-internal
- * alias such as `integer`) is not judged: the engine's `aggregate` door skips
- * it too (its own `DECLARED_FIELD_TYPES`), and the table has no row to name.
- */
-const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
-
-/** The aggregates the table accepts over `fieldType`, in the table's own order — the remedy's list. */
-function aggregatesAcceptingType(fieldType: string): string[] {
-  return Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY).filter((fn) => isAggregateCompatibleWithFieldType(fn, fieldType));
-}
-
-/**
- * [#32144] Every stored `object-grid` block's `properties.aggregations`
+ * [#32144, #32449] Every stored `object-grid` block's `properties.aggregations`
  * (`[{ field, type }]`, the per-group numbers a grouped grid draws in its group
- * headers) whose `type` is `sum` or `avg` over a field the aggregate ×
- * field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`,
- * `@objectstack/spec/data`) refuses for that function — a `text`, `date`,
- * `datetime`, `select`, `lookup`, `formula`, … field, and `sum` over a
- * `percent` (a rate does not add).
+ * headers) whose (`type`, field) pair the engine's `aggregate` door refuses:
+ * `sum` / `avg` over a non-numeric field (a `text`, `date`, `datetime`,
+ * `select`, `lookup`, `formula`, … field, and `sum` over a `percent` — a rate
+ * does not add), `min` / `max` over a string-class or JSON-stored field, and
+ * `count_distinct` over a JSON-stored one (a structured-JSON or multi-option
+ * type, or a multi-capable type flagged `multiple: true`).
  *
- * The VERDICT is the table's, asked through `isAggregateCompatibleWithFieldType`
- * — the predicate the engine's `aggregate` door (`aggregate-field-type-door.ts`,
- * `@objectstack/objectql`) refuses the grouped grid's header query by, with
- * `400 INVALID_FIELD`, and the dataset-measure lint refuses a measure by.
- * ⛔ No second list of "numeric" types here: so `boolean` / `toggle`, which
- * the table accepts for both functions (booleans aggregate as numbers on every
- * backend, ruled), pass, exactly as they pass the door.
+ * The VERDICT is the door's, asked through `aggregateAcceptsDeclaration`
+ * (`aggregate-pair-verdict.ts`): the aggregate × field-type table
+ * (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) through
+ * `isAggregateCompatibleWithFieldType` on every row, plus `isMultiValueField`
+ * for `count_distinct` — the two predicates the engine's `aggregate` door
+ * (`aggregate-field-type-door.ts`, `@objectstack/objectql`) refuses the grouped
+ * grid's header query by, with `400 INVALID_FIELD`, and the dataset-measure
+ * lint refuses a measure by. ⛔ No second list of types here: so `boolean` /
+ * `toggle`, which the table accepts for `sum` / `avg` / `min` / `max`
+ * (booleans aggregate as numbers on every backend, ruled), pass, and so does
+ * `min` / `max` over a date, exactly as they pass the door. `count` accepts
+ * every type and is never refused.
+ *
+ * Every `type` the schema admits reaches the door: the grid hands each entry
+ * to the header query as the column summary member it reads back through
+ * (`serverSummaryOf` in `@object-ui/plugin-grid`: `count_distinct` as
+ * `count_unique`, the rest by name), and `compileListViewGroupQuery` lowers
+ * that member to the same function (`COLUMN_SUMMARY_AGGREGATION`).
  *
  * The grade is the page-sort grade, `error`: like a page sort the door refuses
  * (`page-field-unknown`, `sort-field-unsortable`), a grid that owns its fetch
  * has its grouped header query refused at runtime, on the first grouped load
  * and every load after it. A grid handed its rows (`data.provider: 'value'`)
- * groups them in the browser instead and draws a number the pair cannot mean
+ * groups them in the browser instead and draws a figure the pair cannot mean
  * (`0` for a text sum); the declaration is the same one, refused here on the
- * same table, because which of the two a block meets is not the
+ * same verdict, because which of the two a block meets is not the
  * declaration's to choose. Zod cannot see either — `GridAggregationSchema.field`
  * is a bare string, and the field's type lives on the object. This member reaches the page publish door
  * (`runtimeTypes` carries `page`), so the refusal lands at save.
@@ -1067,8 +1062,9 @@ function aggregatesAcceptingType(fieldType: string): string[] {
  * `objectExtensions` entry adds, and a registry-injected column such as
  * `created_at`, are judged by their own declaration. Skipped, never reported:
  * an object this stack does not define or that declares no field map, a field
- * that does not resolve (existence is not this verdict), a dotted path, and a
- * leaf whose declaration carries no type (`id`) or a type outside `FieldType`.
+ * that does not resolve (existence is not this verdict), a dotted path, a
+ * `type` outside the table's vocabulary (the schema's refusal), and a leaf
+ * whose declaration carries no type (`id`) or a type outside `FieldType`.
  */
 function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
@@ -1092,28 +1088,25 @@ function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
         if (!isRec(entry)) return;
         const fn = entry.type;
         const field = strName(entry.field);
-        if (typeof fn !== 'string' || !GRID_ARITHMETIC_AGGREGATES.has(fn) || !field || field.includes('.')) return;
+        if (!isTableAggregate(fn) || !field || field.includes('.')) return;
 
         graph ??= indexServedObjectGraph(stack, { tied: 'drop' });
         const verdict = resolveFieldPath(graph, objectName, field);
         if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return;
         const fieldType = verdict.meta?.type;
-        if (typeof fieldType !== 'string' || !DECLARED_FIELD_TYPES.has(fieldType)) return;
-        if (isAggregateCompatibleWithFieldType(fn, fieldType)) return;
+        if (!isJudgeableAggregateType(fieldType)) return;
+        const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+        if (aggregateAcceptsDeclaration(fn, shape)) return;
 
-        const accepted = aggregatesAcceptingType(fieldType);
         findings.push({
           severity: 'error',
           rule: GRID_AGGREGATION_FIELD_TYPE_REFUSED,
           where: `page "${pageName}" · object-grid`,
           path: `${path}.properties.aggregations[${ai}]`,
           message:
-            `"${fn}" over "${field}" (\`${fieldType}\` on "${objectName}") is refused by the aggregate × ` +
-            'field-type table: 400 INVALID_FIELD on the server, a meaningless number in the browser',
-          hint:
-            virtualFieldAggregateRemedy(fn, fieldType) ??
-            `Point "${fn}" at a numeric field, or aggregate "${field}" with one its \`${fieldType}\` type accepts: ` +
-            `${accepted.join(', ')}.`,
+            `"${fn}" over "${field}" (${declaredAs(shape)} on "${objectName}") is refused by the aggregate ` +
+            'door: 400 INVALID_FIELD on the server, a figure the pair cannot mean in the browser',
+          hint: refusedAggregateRemedy(fn, field, shape),
         });
       });
     }

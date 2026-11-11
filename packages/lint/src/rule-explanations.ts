@@ -2797,25 +2797,38 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/**
+ * [#32449] The table's rows in words — shared by the two authoring surfaces
+ * whose declarations reach the engine's `aggregate` door (an `object-grid`'s
+ * `aggregations`, a list view's column summaries); held to
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` by both rules' tests.
+ */
+const AGGREGATE_PAIR_ROWS =
+  'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
+  'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
+  'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
+  '`avg` the same plus percent; `min` and `max` the numeric types, date, datetime, time, boolean and ' +
+  'toggle (an extreme of a date is the earliest or latest value, drawn as the field draws it) — never ' +
+  'text, option values or references, whose order is collation-dependent. `count_distinct` accepts ' +
+  'every type except the JSON-stored ones (json, composite, repeater, record, location, address, ' +
+  'vector, multiselect, checkboxes, tags) and a field declared `multiple: true`, whose values no two ' +
+  'backends compare alike; `count` accepts every type.';
+
 const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
   rule: 'grid-aggregation-field-type-refused',
-  covers: 'why a grouped grid cannot sum or average that field',
+  covers: 'why a grouped grid cannot aggregate that field that way',
   paragraphs: [
     'An `object-grid` block\'s `aggregations` (`[{ field, type }]`) are the per-group numbers a grouped ' +
       'grid draws in its group headers, answered by ONE aggregate query on the server. The engine\'s ' +
       '`aggregate` door asks the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, ' +
       '`@objectstack/spec/data`) about every pair and refuses one it refuses with `400 INVALID_FIELD`, so ' +
-      'a `sum` or `avg` over a refused type breaks the grid\'s grouped load, and every load after it. A ' +
-      'grid handed its rows (`data.provider: \'value\'`) groups them in the browser instead and draws a ' +
-      'number the pair cannot mean, `0` for a text sum; the declaration is refused either way.',
-    'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
-      'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
-      'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
-      '`avg` the same plus percent. A `date` or `datetime` field takes `min` / `max` (the earliest or ' +
-      'latest value, drawn as the field draws it) or a count; a text field takes a count.',
-    'The fix is a numeric field, or an aggregate the field\'s type accepts. A `formula` field stores no ' +
-      'value, whatever its `returnType`, so a total over it has to be STORED as a number field (kept by a ' +
-      'hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      'such an aggregation breaks the grid\'s grouped load, and every load after it. A grid handed its ' +
+      'rows (`data.provider: \'value\'`) groups them in the browser instead and draws a figure the pair ' +
+      'cannot mean, `0` for a text sum; the declaration is refused either way.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts, or a function the field accepts. A `formula` ' +
+      'field stores no value, whatever its `returnType`, so a total over it has to be STORED as a number ' +
+      'field (kept by a hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
       '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
       'dotted path, a field two packages define at the same priority, and a field with no declared ' +
       'type (or one outside `FieldType`) are not judged here.',
@@ -4018,6 +4031,28 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
+  ],
+};
+
+const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-summary-field-type-refused',
+  covers: 'which functions a column summary can apply to its field',
+  paragraphs: [
+    'A list column\'s `summary` is answered on the server, by two aggregate queries: the group header ' +
+      'query of a grouped view (one number per group) and the footer\'s whole-set query of a paged grid. ' +
+      'Both lower the summary through `COLUMN_SUMMARY_AGGREGATION`: `count_unique` to `count_distinct`, ' +
+      '`sum`, `avg`, `min` and `max` by name. The field is `summary.field` on the object form, else the ' +
+      'column\'s own `field`. The engine\'s `aggregate` door asks the aggregate × field-type table ' +
+      '(`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) about every pair and refuses one ' +
+      'it refuses with `400 INVALID_FIELD`, so the grouped view renders no group and the footer falls ' +
+      'back to the page\'s figure.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
+      'field), or a summary the field accepts. A `formula` field stores no value, whatever its ' +
+      '`returnType`, so a total over it has to be STORED as a number field (kept by a hook). Not judged: ' +
+      '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
+      'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +
+      'outside `FieldType`, which the door does not judge either.',
   ],
 };
 
@@ -6085,6 +6120,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
   [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
+  [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION.rule]: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION,
   [LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION.rule]: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION,
