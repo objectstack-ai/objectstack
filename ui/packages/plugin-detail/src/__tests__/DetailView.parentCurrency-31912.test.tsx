@@ -56,6 +56,6 @@ describe('detail view: an amount that follows its parent (ADR-0144 D2 as amended
     );
     await waitFor(() => expect(findOne).toHaveBeenCalled());
     expect(findOne.mock.calls.at(-1)?.[2]?.$expand).toContain('invoice');
-    await waitFor(() => expect((container.textContent ?? '').replace(/ /g, ' ')).toContain('€1,234.50'));
+    await waitFor(() => expect((container.textContent ?? '').replace(/\u00a0/g, ' ')).toContain('€1,234.50'));
   });
 });

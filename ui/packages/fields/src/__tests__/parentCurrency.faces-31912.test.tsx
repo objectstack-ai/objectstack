@@ -28,7 +28,7 @@ import { GridField } from '../widgets/GridField';
 afterEach(cleanup);
 
 const TENANT = { locale: 'en-US', currency: 'USD' };
-const text = (s: string | null | undefined) => (s ?? '').replace(/ /g, ' ');
+const text = (s: string | null | undefined) => (s ?? '').replace(/\u00a0/g, ' ');
 const LINE_FIELDS = {
   invoice: { type: 'master_detail', reference: 'inv' },
   currency_code: { type: 'text', valueDomain: 'iso_4217_currency' },

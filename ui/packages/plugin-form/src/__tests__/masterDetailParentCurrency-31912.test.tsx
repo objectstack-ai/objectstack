@@ -77,8 +77,8 @@ describe('master-detail form: lines that follow the header (ADR-0144 D2 as amend
     );
     const section = () => container.querySelector('section');
     await waitFor(() => expect(section()?.querySelectorAll('input[value="first"], td').length).toBeGreaterThan(0));
-    await waitFor(() => expect((section()?.textContent ?? '').replace(/ /g, ' ')).toContain('€'));
-    const t = (section()?.textContent ?? '').replace(/ /g, ' ');
+    await waitFor(() => expect((section()?.textContent ?? '').replace(/\u00a0/g, ' ')).toContain('€'));
+    const t = (section()?.textContent ?? '').replace(/\u00a0/g, ' ');
     expect(t).not.toContain('$');
   });
 });

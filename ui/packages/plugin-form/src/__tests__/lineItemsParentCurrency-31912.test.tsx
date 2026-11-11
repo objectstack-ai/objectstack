@@ -76,8 +76,8 @@ describe('record:line_items on the header\'s page', () => {
 
   it('draws both lines\' amount in the header\'s currency; the sibling column is unchanged', async () => {
     const { container } = mount({ id: 'p1', currency_code: 'EUR' });
-    await waitFor(() => expect((container.textContent ?? '').replace(/ /g, ' ')).toContain('€1,234.50'));
-    const t = (container.textContent ?? '').replace(/ /g, ' ');
+    await waitFor(() => expect((container.textContent ?? '').replace(/\u00a0/g, ' ')).toContain('€1,234.50'));
+    const t = (container.textContent ?? '').replace(/\u00a0/g, ' ');
     expect(t).toContain('€100.00');
     // The sibling column reads no row code in this grid, as before: the tenant's.
     expect(t).toContain('$7.00');

@@ -80,7 +80,7 @@ async function rowsOf(columns: string[]) {
     </LocalizationProvider>,
   );
   await waitFor(() => expect(screen.getByText('L1')).toBeInTheDocument(), { timeout: 8000 });
-  const rows = [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/ /g, ' '));
+  const rows = [...document.querySelectorAll('tbody tr')].map((tr) => (tr.textContent ?? '').replace(/\u00a0/g, ' '));
   return { rows, calls };
 }
 

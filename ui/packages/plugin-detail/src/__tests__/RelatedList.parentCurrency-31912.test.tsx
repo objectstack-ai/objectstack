@@ -37,7 +37,7 @@ const ROWS = [
   { id: 'l1', name: 'L1', invoice: 'i1', amount: 1234.5, fee: 10, currency_code: 'JPY' },
   { id: 'l2', name: 'L2', invoice: 'i1', amount: 100, fee: 10, currency_code: 'JPY' },
 ];
-const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/ /g, ' ');
+const text = (el: Element | null | undefined) => (el?.textContent ?? '').replace(/\u00a0/g, ' ');
 
 function renderOnParent(parent: Record<string, unknown>, columns: Array<{ field: string; label: string }>) {
   return render(
