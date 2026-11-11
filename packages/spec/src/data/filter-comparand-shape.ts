@@ -476,6 +476,7 @@ import {
 } from './filter-comparand-refusal-text';
 import { SCALAR_COMPARAND_OPERATORS } from './filter-comparand-operators';
 import { isReadableIds } from './readable-ids';
+import { REFUSAL_HEAD_MAX, headFieldName } from '../shared/refusal-head';
 
 /**
  * [ADR-0139 D1] What a caller of {@link assertListComparandShapes} declares
@@ -607,14 +608,44 @@ function describeOperand(value: unknown): string {
  * caller with no operation to name passes none, and the message reads from its
  * first load-bearing word.
  */
-function invalidFilterComparandError(context: string | undefined, message: string): Error {
+function invalidFilterComparandError(context: string | undefined, message: string, head: string): Error {
   const err = new Error(`${context ? `${context}: ` : ''}${message}`) as Error & {
     code?: string;
     status?: number;
+    refusalHead?: string;
   };
   err.code = 'INVALID_FILTER';
   err.status = 400;
+  const refusalHead = comparandRefusalHead(context, head);
+  if (refusalHead !== undefined) err.refusalHead = refusalHead;
   return err;
+}
+
+/**
+ * [#32279] The one-line head a data door answers in place of the refusal's
+ * message, which stays the whole prescription for every other reader
+ * (`../shared/refusal-head.ts`). Each arm below writes its own head by hand:
+ * the refused operator and field, and the fix, ⛔ never a cut of the message
+ * (the fix sits in its second or third sentence).
+ *
+ * The caller's `context` (`find('deal')`) leads the head when the two fit in
+ * the bound together, and is left out when they do not: the head names the
+ * field and the fix, which is what a reader acts on, and the message keeps
+ * the context either way.
+ */
+function comparandRefusalHead(context: string | undefined, head: string): string | undefined {
+  // ⛔ Never thrown from here: this runs while a refusal is being built, and a
+  // throw would replace the 400 with a fault. A head past the bound (which the
+  // field elision keeps from happening, pinned per arm at a 200-character
+  // field) is dropped, and the door answers the whole message as before.
+  if (head.trim() === '' || head.includes('\n') || head.length > REFUSAL_HEAD_MAX) return undefined;
+  const led = context ? `${context}: ${head}` : head;
+  return led.length <= REFUSAL_HEAD_MAX ? led : head;
+}
+
+/** `Operator "$op" on field "f"`, the subject every comparand head opens with. */
+function headPosition(op: string, field: string): string {
+  return `Operator "${op}" on field "${headFieldName(field)}"`;
 }
 
 /**
@@ -642,6 +673,8 @@ function nonListComparandError(
     (alternative ? `, or use ${alternative} to compare against it` : '') +
     `. Authoring spellings: ${spellings.join(', ')}. The filter was NOT applied, and an ` +
     `unapplied filter would have returned the UNFILTERED result set.`,
+    `${headPosition(op, field)} requires an array of values: wrap a single value in a list` +
+    (alternative ? `, or use ${alternative}.` : '.'),
   );
 }
 
@@ -667,6 +700,7 @@ function malformedRangeComparandError(
     `A range needs exactly two bounds, in order; the authoring spelling that lowers to ` +
     `"$between" is "between". The filter was NOT applied, and an unapplied filter would have ` +
     `returned the UNFILTERED result set.`,
+    `${headPosition('$between', field)} requires a [min, max] array of exactly two bounds.`,
   );
 }
 
@@ -699,6 +733,8 @@ function nullListMemberError(
     `{"${field}": {"$null": true}}]} is "one of […] OR has no value"; {"$null": false} ` +
     `is "has a value". Authoring spellings: ${spellings.join(', ')}. The filter was NOT ` +
     `applied, and an unapplied filter would have returned the UNFILTERED result set.`,
+    `${headPosition(op, field)} does not accept null in its list: state absence with ` +
+    `{"$null": true} in an $or.`,
   );
 }
 
@@ -729,6 +765,8 @@ function nullRangeBoundError(
     `{"${field}": {"$null": true}}]}. The authoring spelling that lowers to "$between" is ` +
     `"between". The filter was NOT applied, and an unapplied filter would have returned ` +
     `the UNFILTERED result set.`,
+    `${headPosition('$between', field)} requires two non-null bounds: use "$gte" or "$lte" ` +
+    `for a half-open range.`,
   );
 }
 
@@ -768,6 +806,8 @@ function blankRangeBoundError(
     `one-sided range use {"$gte": min} / {"$lte": max}. Authoring spellings: ` +
     `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
     `returned the UNFILTERED result set.`,
+    `${headPosition('$between', field)} requires two non-blank bounds: write both, or use ` +
+    `"$gte" or "$lte" for one side.`,
   );
 }
 
@@ -809,6 +849,8 @@ function fieldReferenceRangeBoundError(
     `bounds: {"$gte": {"$field": "a"}, "$lte": {"$field": "b"}}. Authoring spellings: ` +
     `${spellings.join(', ')}. The filter was NOT applied, and an unapplied filter would have ` +
     `returned the UNFILTERED result set.`,
+    `${headPosition('$between', field)} does not accept a {"$field"} endpoint: write a literal, ` +
+    `or use "$gte" and "$lte".`,
   );
 }
 
@@ -839,6 +881,8 @@ function nullOrderingComparandError(
     `with the null predicate: {"$eq": null} is "has no value", {"$ne": null} is "has a value". ` +
     `Authoring spellings: ${spellings.join(', ')}. The filter was NOT applied, and an ` +
     `unapplied filter would have returned the UNFILTERED result set.`,
+    `${headPosition(op, field)} does not accept null: test for a value with {"$eq": null} or ` +
+    `{"$ne": null}.`,
   );
 }
 
@@ -874,6 +918,8 @@ function arrayEqualityComparandError(
   return invalidFilterComparandError(
     context,
     arrayEqualityComparandMessage(value, op ? { op, field, path } : { field, path }),
+    `${op ? headPosition(op, field) : `The comparand of field "${headFieldName(field)}"`} takes ` +
+    `one value, not an array: use "$in" for one of several values.`,
   );
 }
 
@@ -895,7 +941,12 @@ function arrayInequalityComparandError(
   value: unknown,
   path: string,
 ): Error {
-  return invalidFilterComparandError(context, arrayInequalityComparandMessage(value, { field, path }));
+  return invalidFilterComparandError(
+    context,
+    arrayInequalityComparandMessage(value, { field, path }),
+    `${headPosition('$ne', field)} takes one value, not an array: use "$nin" for none of ` +
+    `several values.`,
+  );
 }
 
 /**
@@ -917,7 +968,12 @@ function arrayScalarComparandError(
   value: unknown,
   path: string,
 ): Error {
-  return invalidFilterComparandError(context, arrayScalarComparandMessage(op, value, { field, path }));
+  return invalidFilterComparandError(
+    context,
+    arrayScalarComparandMessage(op, value, { field, path }),
+    `${headPosition(op, field)} takes one value, not an array: write one value, or use "$in" ` +
+    `or "$between".`,
+  );
 }
 
 /**

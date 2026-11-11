@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHmac, randomBytes } from 'node:crypto';
+import { SysSecret } from '@objectstack/platform-objects/system';
 import type { CryptoContext } from '@objectstack/spec/contracts';
 import { canonicalJson } from './jcs.js';
 
@@ -98,12 +99,53 @@ export function columnSaltsOf(seed: Uint8Array, sealedObject: string): (rowId: s
  */
 export function checkpointSeedContext(sealedObject: string, tenantId: string | null, sequence: number): CryptoContext {
   if (!Number.isSafeInteger(sequence) || sequence < 0) throw new Error('a checkpoint sequence is a non-negative integer');
-  return { scope: AUDIT_SEAL_SCOPE, namespace: sealedObject, key: canonicalJson([tenantId, sequence]) };
+  return withinSecretBounds({ scope: AUDIT_SEAL_SCOPE, namespace: sealedObject, key: canonicalJson([tenantId, sequence]) });
 }
 
 /** The context the signing key's private half is sealed under (D6): its own fingerprint as the key. */
 export function signingKeyContext(fingerprint: string): CryptoContext {
-  return { scope: AUDIT_SEAL_SCOPE, namespace: AUDIT_SIGNING_KEY_OBJECT, key: fingerprint };
+  return withinSecretBounds({ scope: AUDIT_SEAL_SCOPE, namespace: AUDIT_SIGNING_KEY_OBJECT, key: fingerprint });
+}
+
+/** A coordinate longer than its `sys_secret` column holds (#31908 n3). */
+export class SecretCoordinateBoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SecretCoordinateBoundError';
+  }
+}
+
+/**
+ * The bound of a `sys_secret` coordinate column, read off the holder's own
+ * declaration so the two cannot drift: `namespace` and `key` both declare
+ * `maxLength: 128` today.
+ */
+function secretColumnBound(column: 'namespace' | 'key'): number {
+  const bound = (SysSecret.fields[column] as { maxLength?: unknown }).maxLength;
+  if (typeof bound !== 'number' || !Number.isSafeInteger(bound) || bound <= 0) {
+    throw new SecretCoordinateBoundError(`sys_secret.${column} declares no maxLength to bound a coordinate by`);
+  }
+  return bound;
+}
+
+/**
+ * A context whose `namespace` and `key` fit the `sys_secret` columns that hold
+ * them (#31908 n3, seat ruling Q6 (a)): refused here, before any secret is
+ * encrypted or written, so a store that would truncate or refuse the row never
+ * sees it. A seed key is `[organization id, sequence]`, so this binds an
+ * organization id's length; a namespace is a sealed object's name.
+ */
+function withinSecretBounds(context: CryptoContext): CryptoContext {
+  for (const column of ['namespace', 'key'] as const) {
+    const value = context[column] ?? '';
+    const bound = secretColumnBound(column);
+    if (value.length > bound) {
+      throw new SecretCoordinateBoundError(
+        `an audit_seal ${column} of ${value.length} characters is longer than sys_secret.${column} holds (${bound})`,
+      );
+    }
+  }
+  return context;
 }
 
 /**

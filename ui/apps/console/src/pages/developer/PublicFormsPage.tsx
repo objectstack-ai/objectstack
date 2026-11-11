@@ -76,7 +76,7 @@
 
 import { useEffect, useState } from 'react';
 import { useHref } from 'react-router-dom';
-import { useAdapter } from '@object-ui/app-shell';
+import { useAdapter, DeveloperNamespaceGate } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Card,
@@ -207,7 +207,19 @@ function FormsPicker<V extends string>({
   );
 }
 
+/**
+ * Its strings are the lazy `developer` i18n namespace's, so the page body
+ * renders under `DeveloperNamespaceGate` (objectstack#32225).
+ */
 export function PublicFormsPage() {
+  return (
+    <DeveloperNamespaceGate>
+      <PublicFormsPageBody />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function PublicFormsPageBody() {
   // objectui#13460 — the page's copy reads `console.developer.publicForms.*`
   // (and `common.*` for Refresh / Actions / Cancel / Save); each inline
   // `defaultValue` is the `en` pack's value, held byte-identical to it by

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
+import type { FieldType } from '@objectstack/spec/data';
 import { canonicalJsonBytes } from './jcs.js';
 
 /**
@@ -39,8 +40,102 @@ export interface SealedColumnSet {
   readonly committed: readonly string[];
 }
 
-/** The declared shape the canonical form reads: each field's `type`. */
-export type SealedFieldTypes = Readonly<Record<string, { readonly type?: string }>>;
+/**
+ * The declared shape the canonical form reads of one field: its `type`, and
+ * whether it is a multi-value column (`multiple: true` stores a list).
+ */
+export interface SealedFieldType {
+  readonly type?: string;
+  readonly multiple?: boolean;
+}
+
+/** The declared shape the canonical form reads: each field's `type` and `multiple`. */
+export type SealedFieldTypes = Readonly<Record<string, SealedFieldType>>;
+
+/**
+ * The normalisation rules of `canon` version 1 (ADR-0154 D1, open question 1
+ * ruled A widened). Each rule has ONE spelling, and takes every spelling a
+ * driver hands back for it to that one:
+ *
+ *  - `text` — a string, as it is. Nothing else: a number under a text column
+ *    is a store disagreeing with the declaration, not a spelling.
+ *  - `number` — a finite JS number. A decimal text (an exact-decimal column
+ *    reads back as one on PostgreSQL) and a bigint are read as the number they
+ *    spell, only when that number carries them exactly: an integer must be a
+ *    safe integer, and a decimal text must survive the trip to a double
+ *    (`12.50` is `12.5`; `0.1000000000000000055` is refused, since `0.1`
+ *    would seal a value the store does not hold).
+ *  - `boolean` — `true`/`false`, a driver's `1`/`0` and `'1'`/`'0'` included.
+ *  - `date` — `YYYY-MM-DD`: that text, or a `Date` at UTC midnight. A `Date`
+ *    at any other instant is refused rather than cut to a day, since which
+ *    day it names depends on the zone the driver read it in.
+ *  - `datetime` — {@link canonicalDatetime}.
+ *  - `json` — the parsed JSON value: a string is parsed (a JSON column reads
+ *    back as text on SQLite and parsed on PostgreSQL), anything else is taken
+ *    as the value it is.
+ */
+export type AuditSealCanonRule = 'text' | 'number' | 'boolean' | 'date' | 'datetime' | 'json';
+
+/**
+ * The rule of every declared field type, exhaustive over `FieldType`: a type
+ * added to the spec fails this file's type check until it is given a rule or
+ * `null`. `null` is "no rule", and an object that declares a column of such a
+ * type is not sealed (reported once, at `error`, by the sealer):
+ *
+ *  - `password`, `secret` — what the store holds is not the value; a secret is
+ *    a ciphertext re-wrapped on key rotation, which would read as a change;
+ *  - `formula`, `summary` — computed from other rows or columns, not stored
+ *    with the row;
+ *  - `image`, `file`, `avatar`, `video`, `audio` — a reference whose stored
+ *    shape is the file service's (an id, a URL, or an object), with no one
+ *    spelling.
+ *
+ * A field declared `multiple: true` stores a list, so a `text` rule reads as
+ * `json` there.
+ */
+export const AUDIT_SEAL_TYPE_RULES = {
+  text: 'text', textarea: 'text', email: 'text', url: 'text', phone: 'text',
+  password: null, secret: null,
+  markdown: 'text', html: 'text', richtext: 'text',
+  number: 'number', currency: 'number', percent: 'number',
+  date: 'date', datetime: 'datetime', time: 'text',
+  boolean: 'boolean', toggle: 'boolean',
+  select: 'text', multiselect: 'json', radio: 'text', checkboxes: 'json',
+  lookup: 'text', master_detail: 'text', tree: 'text', user: 'text',
+  image: null, file: null, avatar: null, video: null, audio: null,
+  formula: null, summary: null, autonumber: 'text',
+  composite: 'json', repeater: 'json', record: 'json', location: 'json', address: 'json',
+  code: 'text', json: 'json', color: 'text',
+  rating: 'number', slider: 'number', signature: 'text', qrcode: 'text', progress: 'number',
+  tags: 'json', vector: 'json',
+} as const satisfies Record<FieldType, AuditSealCanonRule | null>;
+
+/** The rule a declared field reads by, or `null` when its type has none. */
+export function canonRuleOf(field: SealedFieldType | undefined): AuditSealCanonRule | null {
+  const type = field?.type;
+  if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(AUDIT_SEAL_TYPE_RULES, type)) return null;
+  const rule: AuditSealCanonRule | null = AUDIT_SEAL_TYPE_RULES[type as FieldType];
+  return rule === 'text' && field?.multiple === true ? 'json' : rule;
+}
+
+/** A column the canonical form has no rule for: its name and declared type. */
+export interface UnsealableColumn {
+  readonly column: string;
+  readonly type: string | null;
+}
+
+/**
+ * The columns of a column set whose declared type has no rule. Any one of them,
+ * clear or committed, means the object is not sealed: a commitment is taken over
+ * the canonical value too, so a committed column needs one spelling as much as a
+ * clear one.
+ */
+export function unsealableColumns(columns: SealedColumnSet, types: SealedFieldTypes): UnsealableColumn[] {
+  return [...columns.clear, ...columns.committed]
+    .filter((column) => canonRuleOf(types[column]) === null)
+    .map((column) => ({ column, type: typeof types[column]?.type === 'string' ? (types[column].type as string) : null }))
+    .sort((a, b) => (a.column < b.column ? -1 : a.column > b.column ? 1 : 0));
+}
 
 /**
  * The column set for an object: every declared field, with `valueFields`
@@ -86,31 +181,119 @@ export function canonicalDatetime(value: unknown, at = 'value'): string {
   return date.toISOString();
 }
 
+/** A decimal number's digits and exponent with no leading or trailing zeros: equal for equal values. */
+function decimalKey(text: string): string {
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  if (!match) return text;
+  const [, sign, whole = '', fraction = '', exponent = '0'] = match;
+  let digits = whole + fraction;
+  let power = Number(exponent) - fraction.length;
+  const leading = digits.length - digits.replace(/^0+/, '').length;
+  digits = digits.slice(leading);
+  const trailing = digits.length - digits.replace(/0+$/, '').length;
+  digits = digits.slice(0, digits.length - trailing);
+  power += trailing;
+  if (digits === '') return '0';
+  return `${sign === '-' ? '-' : ''}${digits}e${power}`;
+}
+
+/** `[+-]digits[.digits][e[+-]digits]` — a decimal number written as text. */
+const DECIMAL_TEXT = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
+
+function canonicalNumber(value: unknown, at: string): number {
+  let n: number;
+  if (typeof value === 'number') {
+    n = value;
+  } else if (typeof value === 'bigint') {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER) || value < BigInt(Number.MIN_SAFE_INTEGER)) {
+      throw new CanonicalFormError(`${at}: a bigint outside the safe integer range has no number spelling`);
+    }
+    n = Number(value);
+  } else if (typeof value === 'string' && DECIMAL_TEXT.test(value.trim())) {
+    const text = value.trim();
+    n = Number(text);
+    if (Number.isFinite(n) && decimalKey(text) !== decimalKey(String(n))) {
+      throw new CanonicalFormError(`${at}: a decimal text that a double cannot carry exactly`);
+    }
+  } else {
+    throw new CanonicalFormError(`${at}: a ${value === null ? 'null' : typeof value} that is not a number`);
+  }
+  if (!Number.isFinite(n)) throw new CanonicalFormError(`${at}: a non-finite number`);
+  if (Number.isInteger(n) && !Number.isSafeInteger(n)) throw new CanonicalFormError(`${at}: an integer outside the safe range`);
+  return n === 0 ? 0 : n; // -0 is 0
+}
+
+/** `YYYY-MM-DD`. */
+const DATE_TEXT = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+function canonicalDate(value: unknown, at: string): string {
+  if (typeof value === 'string') {
+    const match = DATE_TEXT.exec(value.trim());
+    if (match) {
+      const [, y, m, d] = match;
+      const date = new Date(Date.UTC(Number(y), Number(m) - 1, Number(d)));
+      if (date.toISOString().slice(0, 10) === value.trim()) return value.trim();
+    }
+    throw new CanonicalFormError(`${at}: a string that is not a YYYY-MM-DD date`);
+  }
+  if (value instanceof Date) {
+    const time = value.getTime();
+    if (Number.isNaN(time)) throw new CanonicalFormError(`${at}: an invalid Date`);
+    if (time % 86_400_000 !== 0) {
+      throw new CanonicalFormError(`${at}: a Date that is not at UTC midnight names no one day`);
+    }
+    return value.toISOString().slice(0, 10);
+  }
+  throw new CanonicalFormError(`${at}: a ${value === null ? 'null' : typeof value} that is not a date`);
+}
+
+function canonicalBoolean(value: unknown, at: string): boolean {
+  if (value === true || value === 1 || value === '1') return true;
+  if (value === false || value === 0 || value === '0') return false;
+  throw new CanonicalFormError(`${at}: a ${typeof value} that is not a boolean`);
+}
+
+function canonicalJsonValue(value: unknown, at: string): unknown {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new CanonicalFormError(`${at}: a string that does not parse as JSON`);
+  }
+}
+
 /**
- * One column's value in canonical form, by the column's declared type.
+ * One column's value in canonical form, by the rule of the column's declared
+ * type ({@link AUDIT_SEAL_TYPE_RULES}).
  *
  *  - absent (`undefined`) and `null` are both `null` — and are committed too,
  *    so a value appearing where there was none is a change;
- *  - `datetime` → {@link canonicalDatetime};
- *  - `date` → `YYYY-MM-DD`;
- *  - `boolean` → `true`/`false` (a driver's `0`/`1` included);
- *  - anything else as the JSON value it is. A `Date` under any other type is a
- *    datetime; a value JCS cannot write is refused.
+ *  - a type with no rule is refused, whatever the value.
+ *
+ * A refusal names `at` and the value's type, never the value: a value column
+ * holds audit payloads, and an error message is logged.
  */
-export function canonicalValue(value: unknown, type: string | undefined, at = 'value'): unknown {
+export function canonicalValue(value: unknown, field: SealedFieldType | undefined, at = 'value'): unknown {
+  const rule = canonRuleOf(field);
+  if (rule === null) {
+    throw new CanonicalFormError(`${at}: the column's type '${field?.type ?? 'none'}' has no canonical rule`);
+  }
   if (value === undefined || value === null) return null;
-  // `date` first: a driver hands a date column back as a `Date` too.
-  if (type === 'date') {
-    if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) return value.trim();
-    return canonicalDatetime(value, at).slice(0, 10);
+  switch (rule) {
+    case 'text':
+      if (typeof value !== 'string') throw new CanonicalFormError(`${at}: a ${typeof value} that is not text`);
+      return value;
+    case 'number':
+      return canonicalNumber(value, at);
+    case 'boolean':
+      return canonicalBoolean(value, at);
+    case 'date':
+      return canonicalDate(value, at);
+    case 'datetime':
+      return canonicalDatetime(value, at);
+    case 'json':
+      return canonicalJsonValue(value, at);
   }
-  if (type === 'datetime' || value instanceof Date) return canonicalDatetime(value, at);
-  if (type === 'boolean') {
-    if (value === true || value === 1 || value === '1') return true;
-    if (value === false || value === 0 || value === '0') return false;
-    throw new CanonicalFormError(`${at}: a ${typeof value} that is not a boolean`);
-  }
-  return value;
 }
 
 function sha256(...parts: Array<Buffer | Uint8Array>): Buffer {
@@ -122,9 +305,13 @@ function sha256(...parts: Array<Buffer | Uint8Array>): Buffer {
 /**
  * The commitment of value `v` (already canonical) under `salt`:
  * `SHA-256(salt ‖ JCS(v))`, lowercase hex (D1).
+ *
+ * A JCS refusal names `at` and the member's POSITION, not its name: a committed
+ * JSON value's member names are the payload's own keys, and stay off the log
+ * with the rest of it.
  */
-export function commitValue(salt: Uint8Array, value: unknown): string {
-  return sha256(salt, canonicalJsonBytes(value)).toString('hex');
+export function commitValue(salt: Uint8Array, value: unknown, at = '$'): string {
+  return sha256(salt, canonicalJsonBytes(value, { at, opaqueNames: true })).toString('hex');
 }
 
 /** The salt of one value column of one row; see `seed.ts`. */
@@ -147,10 +334,10 @@ export function leafInput(
 ): Record<string, unknown> {
   const id = rowIdOf(row);
   const leaf: Record<string, unknown> = {};
-  for (const column of columns.clear) leaf[column] = canonicalValue(row[column], types[column]?.type, `${id}.${column}`);
+  for (const column of columns.clear) leaf[column] = canonicalValue(row[column], types[column], `${id}.${column}`);
   for (const column of columns.committed) {
-    leaf[column] = overrides?.[column]
-      ?? commitValue(saltOf(id, column), canonicalValue(row[column], types[column]?.type, `${id}.${column}`));
+    const at = `${id}.${column}`;
+    leaf[column] = overrides?.[column] ?? commitValue(saltOf(id, column), canonicalValue(row[column], types[column], at), at);
   }
   return leaf;
 }

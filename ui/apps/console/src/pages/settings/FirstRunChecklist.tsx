@@ -30,14 +30,25 @@
  *      localization keys, edited in place with the Settings page's own fields,
  *      pre-filled from the browser and written only on the row's Confirm.
  *   5. Email delivery: mail can deliver; links to Setup → Mail Delivery.
- *      Only for a session that may write mail.
+ *      Only for a session that may write mail, and left out while the
+ *      deployment notice on the same page states that no email service is
+ *      set up (it claims the `mail` item, app-shell's `useHomeItemClaim`):
+ *      what that notice says is ruled (objectstack#30120), so the row yields.
  *   6. Invite colleagues: a second member or a pending invitation; links to
  *      Setup → Users, where Invite User is.
- *   7. Connect an AI assistant: done once this administrator has authorized an
- *      AI assistant or holds an API key that still works, read from those
- *      records by `useConnectedAccess` (the read Connect an AI Assistant's
- *      Connected line uses), never from a click; links to that page. Only
- *      where the served Account app carries the page (MCP turned on).
+ *   7. Connect an external AI assistant: done once this administrator has
+ *      authorized an AI assistant or holds an API key that still works, read
+ *      from those records by `useConnectedAccess` (the read Connect an AI
+ *      Assistant's Connected line uses), never from a click; links to that
+ *      page. Only where the served Account app carries the page (MCP turned
+ *      on). Its words say it is for assistants outside the product, over MCP,
+ *      and not the built-in AI (Setup → AI & Embedder). While this row is
+ *      drawn and not done it claims the `connect_assistant` item, and Home's
+ *      Connect an AI Assistant card stands aside.
+ *
+ * Language and country are named in the page's language (`Intl.DisplayNames`),
+ * not by the setting's option label: the language options are autonyms, so a
+ * zh-CN page read 「当前为English、美国 (US)」.
  *
  * A row whose state cannot be read is left out rather than shown as not done.
  * Once every row shown is done the checklist draws nothing; it comes back on
@@ -68,7 +79,14 @@ import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { CheckCircle2, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
-import { connectAssistantPath, resolveSetupAppPath, useConnectedAccess, useMetadata } from '@object-ui/app-shell';
+import {
+  connectAssistantPath,
+  resolveSetupAppPath,
+  useConnectedAccess,
+  useHomeItemClaim,
+  useHomeItemClaimed,
+  useMetadata,
+} from '@object-ui/app-shell';
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { usePermissions } from '@object-ui/permissions';
@@ -79,7 +97,9 @@ import { resolveLabel, type ResolvedSettingValue } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
 import { whenBootPainted } from '../../loadLocales';
 import {
+  COUNTRY_KEY,
   CURRENCY_KEY,
+  LOCALE_KEY,
   LOCALIZATION_NAMESPACE,
   TIMEZONE_KEY,
   deviceStorage,
@@ -108,14 +128,29 @@ function currencyName(language: string, code: string): string | undefined {
   }
 }
 
+/** A language or region's name in `language`, or `undefined` where `Intl.DisplayNames` cannot answer. */
+function displayName(language: string, type: 'language' | 'region', code: string): string | undefined {
+  try {
+    const name = new Intl.DisplayNames([language], { type }).of(code);
+    return name && name !== code ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * A field's value as the row names it: the currency by its name and code, any
- * other key by its option's translated label, else the value itself.
+ * A field's value as the row names it: the currency by its name and code, the
+ * language and the country by their names in the page's language, any other
+ * key by its option's translated label, else the value itself.
  */
 function describeValue(field: ChecklistField, value: string, labels: SettingsLabelHelpers, language: string): string {
   if (field.key === CURRENCY_KEY) {
     const name = currencyName(language, value);
     return name ? `${name} (${value})` : value;
+  }
+  if (field.key === LOCALE_KEY || field.key === COUNTRY_KEY) {
+    const name = displayName(language, field.key === LOCALE_KEY ? 'language' : 'region', value);
+    if (name) return name;
   }
   const option = (field.spec.options ?? []).find((o) => String(o.value) === value);
   return option ? labels.optionLabel(field.key, value, resolveLabel(option.label)) : value;
@@ -412,6 +447,15 @@ export function FirstRunChecklist() {
   // connected one only once the checklist is going to draw.
   const assistantPath = connectAssistantPath(apps);
   const assistant = useConnectedAccess({ enabled: Boolean(settings && !dismissed && assistantPath) });
+  // One Home card per item (app-shell's `homeItemClaims`): the deployment
+  // notice's email line outranks the mail row; this checklist's assistant row,
+  // while it is open, outranks Home's Connect an AI Assistant card.
+  const mailSaidByNotice = useHomeItemClaimed('mail');
+  const drawsAssistantRow = Boolean(
+    settings && !dismissed && orgId && userId && recordKey && assistantPath &&
+      assistant.state === 'ready' && !assistant.connected,
+  );
+  useHomeItemClaim('connect_assistant', drawsAssistantRow);
   const setSettings = (update: (prev: ChecklistSettingsState) => ChecklistSettingsState) =>
     setLoaded((prev) => (prev ? { identity: prev.identity, settings: update(prev.settings) } : prev));
 
@@ -508,7 +552,7 @@ export function FirstRunChecklist() {
     });
   }
 
-  if (settings.mail) {
+  if (settings.mail && !mailSaidByNotice) {
     const done = settings.mail.done;
     rows.push({
       id: 'mail',
@@ -592,7 +636,7 @@ export function FirstRunChecklist() {
   };
 
   return (
-    <div className="px-4 pt-7 sm:px-6 lg:px-8">
+    <div className="px-4 pt-4 sm:px-6 lg:px-8">
       <section
         className="mx-auto max-w-[1120px] rounded-xl border border-border bg-card px-5 pt-4 pb-1"
         data-testid="first-run-checklist"

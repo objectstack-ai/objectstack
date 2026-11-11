@@ -56,6 +56,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_audit_checkpoint.label": "f83be04792f63f23",
   "objects.sys_audit_checkpoint.pluralLabel": "9f6cf60d97382872",
   "objects.sys_audit_log.fields.action.label": "a36bba313a7aa9ab",
+  "objects.sys_audit_log.fields.action.options.audit_signing_key_change": "3d3ea51b5e14e16f",
   "objects.sys_audit_log.fields.action.options.credential_use": "68af3e0d078292d7",
   "objects.sys_audit_log.fields.action.options.export": "cdfbf4ace38f5a21",
   "objects.sys_audit_log.fields.action.options.import": "05c80d3a61ec3290",

@@ -269,6 +269,14 @@ const ADMITTED = [
   // pinned in plugin-auth's `sso-oidc-refusal-cause.test.ts`.
   'POST /api/v1/auth/admin/sso/get-groups-claim',
   'POST /api/v1/auth/admin/sso/set-groups-claim',
+  // #32085 — the SSO Providers edit door and the delete preview: ObjectStack
+  // raw mounts whose FIRST statement is the ADR-0068 gate. Both read the
+  // stored provider before anything else, and the probe names one this boot
+  // does not hold, so the admin reaches the handler and gets 404 and nothing
+  // moves; the edit and the delete's effects are pinned in plugin-auth's
+  // `sso-provider-lifecycle.test.ts`.
+  'POST /api/v1/auth/admin/sso/update-provider',
+  'GET /api/v1/auth/admin/sso/delete-impact',
   // #32086 — the SSO Providers form's attribute mapping (show, and set): the
   // same raw mounts and gate as the groups claim above, the same unknown probe
   // provider (404, nothing moves); the stored effect (the members a sign-in
@@ -786,6 +794,10 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       'POST /api/v1/auth/admin/sso/set-groups-claim': {
         body: { providerId: 'standing-probe-groups-claim', groupsClaim: 'groups' },
       },
+      // #32085. `providerId` is required by both: the edit's body and the
+      // read's one query parameter. With none, each answers 400 past the gate.
+      'POST /api/v1/auth/admin/sso/update-provider': { body: { providerId: 'standing-probe-edit', clientSecret: 'probe-secret' } },
+      'GET /api/v1/auth/admin/sso/delete-impact': { query: '?providerId=standing-probe-edit' },
       // #32086. `providerId` is required by both; the set takes at least one
       // member as text (none, or a non-text one, answers `400 INVALID_REQUEST`
       // past the gate).

@@ -22,6 +22,7 @@ import {
 } from './widgetDispatch';
 import { LEGACY_RETIRED_WIDGET_SCHEMA, isLegacyRetiredWidget, isRetiredEnvelopeNode } from './legacyRetiredWidget';
 import { DatasetWidget } from './DatasetWidget';
+import { DatasetQueryCoalescerContext, useDatasetQueryCoalescer } from './datasetQueryBatch';
 import type { DashboardChartRenderSchema } from './chartRenderHandoff';
 import { useDashboardAutoRefresh } from './useDashboardAutoRefresh';
 
@@ -147,6 +148,9 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
   // ADR-0150 D5 — the package this dashboard is served from, which each
   // dataset widget's query names.
   const dashboardPackageId = servedPackageId(schema);
+  // objectstack#32165 — this render's dataset queries go out as one batch
+  // request per package (see `DashboardRenderer`).
+  const datasetQueries = useDatasetQueryCoalescer(dataSource);
   const [editMode, setEditMode] = React.useState(false);
   const hasDndProvider = useHasDndProvider();
   // Active UI language, for resolving inline per-locale widget titles below.
@@ -510,6 +514,7 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
   }, [resolveSeriesLabel]);
 
   return (
+    <DatasetQueryCoalescerContext.Provider value={datasetQueries}>
     <div ref={containerRef} className={cn("w-full", className)} data-testid="grid-layout">
       {hasDndProvider && <DndEditModeBridge editMode={editMode} />}
       <div className="mb-4 flex items-center justify-between">
@@ -732,5 +737,6 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
         </ResponsiveGridLayout>
       )}
     </div>
+    </DatasetQueryCoalescerContext.Provider>
   );
 };
