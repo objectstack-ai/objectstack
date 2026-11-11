@@ -973,6 +973,32 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION: RuleExplanation = {
+  rule: 'security-update-policy-no-check',
+  covers: 'why a caller-keyed update policy should declare a check',
+  paragraphs: [
+    'A row-level policy with no `check` also admits new rows the ownership floor admits; declare `check` to ' +
+      'bound what an update may write. The write check is decided per operation across the applicable policies ' +
+      '(ADR-0058 D4). When none of them declares `check`, each applicable policy\'s `using` stands in as its ' +
+      'check and they are OR-combined, and the platform\'s ownership floor (`owner_only_writes`, ' +
+      '`created_by == current_user.id`) joins that OR wherever the write\'s pre-image gate kept it. So an ' +
+      '`update` or `all` policy whose `using` is `owner_id == current_user.id` admits a written row whose ' +
+      '`owner_id` is the caller, and also one whose `created_by` is the caller. The same holds for any other ' +
+      'caller column the policy keys, an assignee for example. Changing `owner_id` itself needs the transfer ' +
+      'grant (`allowTransfer` or `modifyAllRecords`) whatever the check says.',
+    'Declaring `check` changes the composition for every caller the policy applies to: when any applicable ' +
+      'policy declares `check`, only the declared checks decide, OR-combined. The USING-only siblings and the ' +
+      'ownership floor take no part in the check, so a creator who is not the owner loses update unless a ' +
+      '`check` admits them. Decide which callers an update should admit, and write exactly that as the `check`.',
+    'The finding is `info` tier: the composition is the published one and no door refuses a policy without ' +
+      '`check`. `--strict` promotes warnings and never an `info` finding, so neither `os lint --strict` nor ' +
+      '`os validate --strict` fails on it. A policy keyed on `created_by` alone is not reported, ' +
+      'because on the new row its `using` admits exactly whom the floor admits. Each policy is judged as ' +
+      'declared: whether a sibling policy declares `check` for a given caller depends on the sets and ' +
+      'positions that caller holds, which the authored metadata does not settle.',
+  ],
+};
+
 const SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION: RuleExplanation = {
   rule: 'security-rollup-source-unreadable',
   covers: 'why a roll-up shows child data its reader cannot read',
@@ -5949,6 +5975,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
+  [SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION.rule]: SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
