@@ -3,9 +3,9 @@
 /**
  * [ADR-0150 D5, child G1] `os validate`'s and `os build`'s half of the rule
  * that no package namespace spells a literal segment of the address grammar
- * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`): the router
- * reads the literal before any namespace, so such a package's qualified
- * addresses would never reach it.
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`):
+ * the router reads the literal before any namespace, so such a package's
+ * qualified addresses would never reach it.
  *
  * ## One judge, not a second rule
  *
