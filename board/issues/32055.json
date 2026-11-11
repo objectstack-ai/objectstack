@@ -13,7 +13,6 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:dispatched",
     "priority:p3",
     "security"
   ],
@@ -23,7 +22,7 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T04:16:13Z",
-  "updated_at": "2026-11-11T11:50:22Z",
+  "updated_at": "2026-11-11T15:02:26Z",
   "closed_at": "2026-11-11T11:50:22Z",
   "closed_by": {
     "login": "objectstack-fleet[bot]",
@@ -31,7 +30,7 @@
     "type": "Bot"
   },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32055",
   "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of #31923 (PR #32032, merged as `99992ddf`). The narrowing contract review on PR #32032 (record 6757903087) graded F2 and F3 as nits for a follow-up card. The seat's delta record 6758062273 assigned them here.\nBusiness reason: cloud's in-product AI action tool is replacing its mirror with `dispatchAction` (notice on mailbox #31366). The export should answer what the REST door and MCP `run_action` answer on every host shape cloud runs, and an agent should get the AI door's own guidance.\nReader: the `domain:server` seat that owns `packages/runtime/src/action-dispatch.ts`.\nDedupe: no open or closed card names `dispatchAction`'s kernel scope or its AI-posture prescription text.\nclass: c · type: Tech debt\n\n## 维护者速读\n\n- 问题：新导出的 `dispatchAction` 自己建一个 dispatcher，多 kernel 的宿主上它是否和 REST 门给同一个答案，只在单 kernel 上证明过；`ai` 姿态下被拒的 api/客户端动作现在带的是 REST 门的「直接调用 TARGET」提示，AI 门原来不说这些。\n- 要做：让 `dispatchAction` 走和 REST 门同一个请求作用域解析（或在文档和类型上写死该传哪个 kernel），并给 `ai` 姿态一句面向 AI 的拒绝文案；两件各钉一条。\n- 需要你做的：无，车道派发。\n\n## What to build\n\n1. **F2, kernel scope.** `dispatchAction` builds `new HttpDispatcher(kernel)` with no `kernel` or `dataDriver` on the context, and never runs `resolveRequestScope`. On a multi-kernel host, whether it reaches the environment's own kernel depends on the `kernel-resolver` service honouring a context that carries only `environmentId`. Either resolve the scope the way the REST door does, or state in the type docs and `content/docs/ui/actions.mdx` which kernel a host passes. Pin it on a two-kernel host: the same request answers the same through the REST door and through `dispatchAction`.\n2. **F3, AI-posture prescription.** Under `posture: 'ai'`, a refused off-origin api action says \"Call `TARGET` directly\", and a refused client-side action names its `target`. Base `run_action` named neither. The refusal and the status are right; the sentence is written for a REST caller. Give the `ai` posture the AI door's wording, without the target. Pin the body text under both postures.\n\n`Clause-②: no` is expected: no accept set moves, only a refusal's message and the host-scope resolution. If the kernel resolution changes an answer on any host, measure it and restate. `Metadata-protocol: none`, a runtime `patch` changeset.\n\nCloud consumer: the AI action tool in objectstack-ai/cloud (`packages/service-ai/src/tools/action-tools.ts`). Tell mailbox #31366 when this lands."

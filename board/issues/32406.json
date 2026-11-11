@@ -2,8 +2,8 @@
   "number": 32406,
   "kind": "issue",
   "title": "service-job: DbJobAdapter records a manual trigger() as trigger 'schedule' on sys_job_run, and replay() leaves a second 'schedule' row beside its 'replay' row",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T08:26:53Z",
-  "updated_at": "2026-11-11T14:06:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T14:45:22Z",
+  "closed_at": "2026-11-11T14:44:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32406",
   "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① a defect read in code by the #32062 slice-4 dev (report 6790923718, out-of-scope finding, class b). The reach is named but not measured end to end.\n\n**Where (`origin/main`):** `packages/services/service-job/src/db-job-adapter.ts`.\n- `schedule()` wraps the handler as `this.wrap(name, handler, 'schedule', options)` (L299), and the wrapper opens its `sys_job_run` row with that `defaultTrigger` (L604).\n- `trigger()` (L335) runs the same wrapper through the inner adapter, so a manual run's row reads `trigger: 'schedule'`.\n- `replay()` writes its synthetic `'replay'` row, and the wrapper writes its own `'schedule'` row beside it.\n- `db-job-adapter.test.ts:302` pins `trigger: 'schedule'` after `adapter.trigger('on')`.\n\n**Why it is wrong:**\n- `content/docs/automation/jobs.mdx` documents `trigger (schedule | manual | replay)`.\n- The `SysJobRun` docblock says the field tells \"whether the run was a manual trigger or a scheduled tick\".\n- Since #32062 slice 4 (PR #32405), a manual pull's `sys_sync_run.trigger` reads `manual`, while the `sys_job_run` row it names reads `schedule`.\n\n**Do:**\n1. Measure it on a real `DbJobAdapter`:\n   - `trigger()` → the row's trigger;\n   - `replay()` → how many rows, and each one's trigger.\n2. Make the wrapper take the trigger of the call that runs it: a scheduled tick writes `schedule`, `trigger()` writes `manual`, and `replay()` writes ONE `replay` row.\n3. Correct the stale pin at L302. Pin all three triggers, and ablate once.\n\n**Clause-②:** the claimer declares it. The recorded value changes for manual and replay runs, so read whether anything consumes `sys_job_run.trigger` before declaring.\n**Business reason:** an operator reading run history cannot tell a manual run from a scheduled one, and a replay shows up as two runs.\n\nDedupe (`sys_job_run trigger manual`, `DbJobAdapter defaultTrigger`, `replay row trigger`): none found."

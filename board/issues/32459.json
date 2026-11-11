@@ -1,0 +1,32 @@
+{
+  "number": 32459,
+  "kind": "issue",
+  "title": "metadata: the artifact door's MemoryLoader keeps one item per (package, name), so a package body's second locale of an email template replaces the first",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T16:25:18Z",
+  "updated_at": "2026-11-11T17:01:00Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32459",
+  "body": "epic:#31527#1 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. Found by the #31699 dev in round 6 of PR #32214 (report 6801182598, out-of-scope finding 2, class a). It also happens on `main`, where the slot is keyed by name.\n\n**Where:** `MemoryLoader.save`, the artifact door's in-memory loader in `packages/metadata`. Its slot holds one item per `(package, name)`.\n\n**What happens:** a package body that ships two locales of one email template keeps only the last. Probe M1 at `f9f589da` answered `[[alpha, fr-FR]]` after saving `en-US` then `fr-FR`. `register` never persists there, so #32214 opens no new path to it.\n\n**Do:**\n1. Measure, after #32214 lands, whether an artifact carrying a two-locale email template serves both locales through the artifact door.\n2. If one locale is lost, key the memory slot of a bundled type by `(package, name, member)`, as #32214 does for `DatabaseLoader`.\n3. Pins:\n   - both locales are served;\n   - CONTROL: an unbundled type keeps one item per slot.\n\n   Ablate once.\n\n**Serial:** after #32214.\n**Clause-②:** to be declared by the claimer.\n**Business reason:** a package that ships a template in two languages silently serves one.\n\nDedupe (`MemoryLoader locale overwrite`, `memory slot member-blind`): none found."
+}

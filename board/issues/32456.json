@@ -1,0 +1,32 @@
+{
+  "number": 32456,
+  "kind": "issue",
+  "title": "mcp: verify_build and create_metadata do not surface a publish-time refusal (an unsupported autonumber format) before publish",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:cloud",
+    "pm:queue",
+    "priority:p2",
+    "repo:cloud"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T16:11:19Z",
+  "updated_at": "2026-11-11T17:00:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32456",
+  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\nCarries the \"Secondary\" item of #32396; #32396 keeps its main defect, fixed by PR #32454 (`Fixes #32396`). The seat splits this item off so it is not lost when that PR closes the card.\n\nFiling gate: ① product defect, reported on a public entry (MCP, ObjectOS Cloud os-test, 2026-11-11, #32396's reporter).\nreach: public entry, measured by #32396's reporter over MCP. ⚠ First step: re-measure in-repo on `main`.\n\n## What happened (from #32396, verbatim)\n\n> The bad autonumber format was staged through MCP `create_metadata(type: object)` → `status: drafted` with no warning, and MCP `verify_build` then answered `errors: 0` (\"structurally clean\"). The `lint-autonumber-formats` rule is only enforced at publish. That is the save-vs-publish verdict parity #26707 / #26856 closed, but `verify_build` (and the create_metadata result) still do not surface it.\n\n## Expected\n\nA rule that refuses at publish is reported by `verify_build`, and on the `create_metadata` result as a warning, before publish. That is the same verdict parity #26707 / #26856 established for the save door.\n\n## Business reason\n\nWho: AI builders and admins authoring over MCP. Without it, they are told the build is clean and only learn of the refusal at publish, after other work depends on it.\n\n## Reader\n\nTriage first touch. The fix likely lands in the MCP `verify_build` / `create_metadata` paths (`packages/mcp`, metadata-protocol's verdict).\n\n## Duplicate check\n\n`gh api search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed, 2026-11-11: `verify_build autonumber refusal publish` 2 hits, #32396 (the parent) and #6015 (a seat post). No card for this."
+}

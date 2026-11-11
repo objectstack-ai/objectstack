@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-lizheng"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T20:20:19Z",
-  "updated_at": "2026-11-11T13:44:51Z",
+  "updated_at": "2026-11-11T14:42:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32342",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nOrigin: nit 4 of the contract review on PR #32338 (card #32278).\n\n`labelList` in `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` keeps the per-language quote marks and list separators for the `field_edit_denied` placeholder. Those rules live outside `BUILTIN_OPERATION_MESSAGES`, so adding a fifth catalog locale means editing plugin-security too, and nothing fails when that edit is missed.\n\nPremise re-check: `git grep -n \"labelList\" -- packages/plugins/plugin-security/src` lists the helper and its per-locale table.\n\nWanted: the catalog owns the list formatting, either as catalog entries or through `Intl.ListFormat` keyed by the resolved locale. Add a test that fails when a catalog locale has no list rule.\n\nClause-②: no"

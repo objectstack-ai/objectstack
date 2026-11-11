@@ -1,0 +1,32 @@
+{
+  "number": 32458,
+  "kind": "issue",
+  "title": "metadata: the boot priming pass hands a column-bound slotted row to register unstamped, so with two holders of a name the DatabaseLoader save inserts a package-less row (unbundled slotted types)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T16:24:49Z",
+  "updated_at": "2026-11-11T17:00:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32458",
+  "body": "epic:#31527#1 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. This was found by the #31699 dev in round 6 of PR #32214 (report 6801182598, out-of-scope finding 1, class a). It already exists on `main`. #32214 fixes it for `email_template` only (column-bound bodies are handed on stamped; a save that only adds its own row's stamp writes nothing).\n\n**Where:** `MetadataPlugin._loadFromFileSystem` → `MetadataManager.loadMany` → `register` → `DatabaseLoader.save` (`packages/metadata`). This path applies to the unbundled slotted types (`agent`, `skill`, `action`, `api`, `permission`) when a host wires a `DatabaseLoader`.\n\n**What happens:** a row bound to its package by `package_id` alone reaches `register` unstamped. When two packages hold the name, the save fills the package-less slot and inserts a NEW package-less row. Under #32214's refusal (4), that row then makes both holders' exact addresses answer 409. The case was measured for `email_template` at `f9f589da` (probe P2, `stamp=false`). It is NOT MEASURED for the unbundled types. First-party reach is 0, since no in-tree composition wires the loader.\n\n**Do:**\n1. Measure on `main` after #32214 lands. For each unbundled slotted type, prime a `DatabaseLoader` holding two packages' column-bound rows of one name.\n2. Apply #32214's shape for every slotted type:\n   - `loadMany` reads through the keyed entries and stamps the body with the row's package;\n   - a save whose body differs from its row only by its own row's package stamp writes nothing.\n3. Pins:\n   - priming leaves every row unchanged;\n   - no package-less row is inserted.\n\n   Ablate once.\n\n**Serial:** after #32214.\n**Clause-②:** the claimer declares it.\n**Business reason:** a boot can silently create a package-less row that later turns both packages' reads into 409s.\n\nDedupe (`priming pass package-less row insert`, `DatabaseLoader column-bound package unstamped register`): none found."
+}

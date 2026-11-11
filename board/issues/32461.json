@@ -1,0 +1,31 @@
+{
+  "number": 32461,
+  "kind": "issue",
+  "title": "test(plugin-security): pin that a self-explanation's refused read is a fact of the object, never of one record",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T17:06:07Z",
+  "updated_at": "2026-11-11T17:56:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32461",
+  "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n**Filing gate ②: a contract-review finding.** The contract review of #32453 (records 6800400746 and 6802141171) graded this should-fix as a follow-up and asked for a tracked home before landing.\n\n#32453 makes a record-grained `security.explain` give one answer for every record id when the asking principal explains its own access and its read of the object is refused (ruling of record 6787890900 on #32004). That one-answer property rests on an assumption the code makes and no test pins: a read refusal the explanation classifies is decided at object level, never per record.\n\nThe review found no platform path that breaks the assumption, and the two pinned refusal shapes are object-level. If a per-record refusal were ever introduced, the property could silently stop holding.\n\n## Asked\n\nOne of:\n- a pin that fails if a self-explanation's refused read becomes record-dependent; or\n- classify the refusal at object level in the explain engine, so the property no longer rests on the assumption.\n\nKeep public text at rule level. The reviewer's mechanism note is held by the security seat.\n\n## Not asked\n\nAny change to the explain answer, to third-party explanations, or to the readers' answers."
+}

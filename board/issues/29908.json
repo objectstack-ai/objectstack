@@ -1,7 +1,7 @@
 {
   "number": 29908,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 6 — 🟢 huangyiirene",
+  "title": "[PM seat] domain:server · seat 6 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -20,12 +20,12 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T10:35:44Z",
-  "updated_at": "2026-11-11T05:48:58Z",
+  "updated_at": "2026-11-11T17:39:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 9,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29908",
-  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed at seating 2026-11-10T11:27Z; the seating comment is the record.</sub>\n\n## Current PM — 🟢 huangyiirene\n\n- **Holder:** `huangyiirene` · `session_01J8VVAnTcb4cZVkPdhkPicW` (a cloud session summoned by `/pm-dispatch server`). Previous PM: `os-project-manager` · `session_01FEkQ5p3T5YWhLjurajudnQ`, clock-out brief on this post.\n- **Mailbox:** PR #32180 (subscribed). **Patrol:** `trig_01LBoTMbFAySRHSsEUujDULg` · `26 * * * *` (self-bound).\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#6` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Concurrency:** batch 5 (the maintainer's 「并发5」), `mode:subagent` dev agents.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 6**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 5 is #28677 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-11T17:38Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant. Signed off by `huangyiirene` · `session_01J8VVAnTcb4cZVkPdhkPicW` (seated 2026-11-10T11:27Z), on the maintainer's 「当前任务处理完，合并后下班」. `check-handover.mjs` exited 0 before this body was written.\n\n## Handover ledger\n\n- **In flight:** none. No dev agent is running.\n- **Stay-behind:** none.\n- **Merged this shift:** #32237 (Fixes #32143), #32324 (Fixes #32167), #32253 (Fixes #32026), #32248 (Fixes #32123), #32356 (Part of #32164, P1), #32378 (Fixes #32055), #32413 (Fixes #32079), #32452 (Fixes #32393), #32454 (Fixes #32396).\n- **Released:**\n  - #32164 → `pm:queue`, p1. P1b PR #32357 is ACCEPTed on `1b83b672` but was kicked from the queue by a new `@objectstack/mcp` signature and NOT re-queued. Re-diagnose it first; the audit is on the PR. P2 #32306 waits on the live guard suites going green on `main`. Release 6802214706.\n  - #31696 → `pm:queue`, p1. Skills PR #32416 waits on a `GOVERNED_APPROVERS` approval. The closing part is not started. Release 6801591890.\n  - #32183 → `pm:queue`. It waits on #32214 (seat 7).\n  - #32155 → `needs-user-decision`. PR #32325 is held on a maintainer question. Release 6801614212.\n- **Decision box:** #32163 (seat recommends A), #32155.\n- **Security ledger:** #32055 item (publicly disclosed in 6788728988; labeled `security`; `security#1` notified through mailbox #31360; maintainer pushed). #32325's question is held in the maintainer's session and is not restated publicly.\n- **Filed this shift:** #32252, #32399, #32455, #32456, #32460.\n- **Maintainer, not cards:** the ADR-0067 D2 caveat (\"atomicity is a SQL-driver guarantee\") does not hold on remote Turso (from #32396). This is a Tier H ADR edit.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#6` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch server` and read this post first.\n- **Patrol:** none (deleted). **Mailbox:** none (#32180 closed).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
 }

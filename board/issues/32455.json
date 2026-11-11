@@ -1,0 +1,31 @@
+{
+  "number": 32455,
+  "kind": "issue",
+  "title": "runtime: a refused package publish still runs the publish-drafts visibility flip, so an app already active for the package is unhidden",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T16:10:51Z",
+  "updated_at": "2026-11-11T17:00:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32455",
+  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\nFiling gate: ① product defect with a named producer (class b, an out-of-scope finding of PR #32454 for #32396; the seat files it).\nreach: named producer, read from code and not yet measured through the door. The `POST /packages/:id/publish-drafts` handler (`packages/runtime/src/domains/packages.ts`, the ADR-0045 visibility-flip block) runs whatever `publishPackageDrafts` returns. ⚠ First step: measure it once through the door. Use a package whose app is already active and whose publish is refused by a later draft, then read the app's `_unpublished`.\n\n## What happens (code reading)\n\nAfter `publishPackageDrafts` returns, the handler flips the package's visibility, setting `_unpublished: false` on apps already ACTIVE for the package. It checks no outcome before the flip. So a refused publish (the batch rolled back, `publishedCount: 0`) can still unhide an app that the operator kept hidden.\n\n## Expected\n\nADR-0067 D2: \"no partial visibility flip\". A refused or failed publish flips nothing; the flip runs only on a fully published batch.\n\n## Business reason\n\nWho: operators publishing a package whose app is staged hidden. Without it, a refused publish exposes the app in the launcher anyway, which is the exact symptom #32396 reported, by a second path.\n\n## Reader\n\nThe `domain:server` seat that claims it after triage, once PR #32454 (#32396) has landed. That PR makes the batch itself all-or-nothing on runtimes without rollback.\n\n## Duplicate check\n\n`gh api search/issues`, `repo:objectstack-ai/objectstack is:issue`, open and closed, 2026-11-11: `publish-drafts visibility flip refused` 28 hits, the first three #32396 (this defect's parent), #25467 and #29893, neither of which covers this. `unhiddenApps publish` 9 hits: #5242 (closed) concerns a flip that fails midway dropping `unhiddenApps` from the response, not a flip after a refused publish. No card for this."
+}

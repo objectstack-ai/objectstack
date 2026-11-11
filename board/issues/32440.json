@@ -11,17 +11,20 @@
     "type": "User"
   },
   "labels": [
-    "bug"
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T14:01:06Z",
-  "updated_at": "2026-11-11T14:01:06Z",
+  "updated_at": "2026-11-11T15:08:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32440",
   "body": "Filing category: ① product defect (user-visible).\nreach: public entry — the console Studio (`/_console/studio/<package>/interfaces` and the 发布 dialog), measured once in a browser (Playwright, zh-CN) on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`).\nBatch-of: 15 cards filed together from one MCP capability test session (2026-11-11; 6 in cloud, 9 in objectstack).\n\n## Business reason\n\nA maker who adds a navigation entry and reloads before choosing its target loses sight of it, while 变更 still counts a draft they cannot find; the publish dialog then reads half-translated.\n\n## Steps / what happens\n\n1. Studio › 界面 › 导航 ＋ › 对象. A draft entry 「导航项 1」 (`nav_item_1`) appears, toast 「已保存 请假管理 的草稿」, 变更 badge 1.\n2. Reload before picking 「链接到对象」. The navigation panel reads 「还没有导航项」; in 编辑 mode 「导航 0 项」. The 变更 badge still shows 1 pending draft. Adding another entry starts again from 「导航项 1」.\n3. Open 发布 with drafts of every type staged: section headings render as 「对象 2 · 视图 3 · … · mapping 1 · 流程 2 · seed 1」 and group titles 「MAPPING 1」, 「SEED 1」; the post-publish toast lists lint advisories as raw English rule text (`[security-private-no-readscope] permission set …`) in the zh-CN console.\n\n## Expected\n\n(2) A saved draft entry stays visible in the editor (marked incomplete) until it is configured or removed. (3) Type names and advisories go through the console's i18n.\n\nReader who acts: the `domain:ui` seat (Studio interfaces editor and publish dialog in `ui/apps/console`).\nDedupe: `repo:objectstack-ai/objectstack is:issue studio nav item draft disappears reload` → 7 hits (#29002, #23942, #23163; QA run records), none on this."

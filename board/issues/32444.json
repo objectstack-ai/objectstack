@@ -12,17 +12,19 @@
   },
   "labels": [
     "bug",
-    "finding"
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T14:14:57Z",
-  "updated_at": "2026-11-11T14:14:57Z",
+  "updated_at": "2026-11-11T15:08:21Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32444",
   "body": "triage#1 · baozhoutao · session_01RKKVnggJeBxtQEF8sbEJAW\n\nFiling category: ① a product defect with a named site and a UI reach (also an ADR-0030 contract violation).\n\n## 维护者速读\n\n- 现象：控制台「站内消息」列表有「新建」按钮，弹出通用新建表单。「接收用户」是纯文本框，要手填用户内部 ID；「通知事件」「投递记录」下面直接显示开发者注释（「外键 → sys_notification…」「P1 之前为空」）；「执行人」看起来像发件人，其实只是回执抑制用的字段。\n- 用这个表单建出来的消息会出现在对方铃铛里，但**永远无法标记已读**，也不产生 `sys_notification` 事件、不走任何其它渠道。\n- 建议：关闭该对象在界面上的新建/编辑（站内信只读），「发站内信」的正式入口另见决策卡。\n\n## One-sentence problem\n\nAn administrator who clicks New on the inbox list believes they are sending a message; they get a row the recipient can never clear from their unread badge, addressed by a raw id they had to type by hand.\n\n## Evidence (reach)\n\n- UI: the maintainer reached the console's create dialog for `sys_inbox_message` (\"新建站内消息\") and it renders every field of the object, including the internal FK notes (screenshot in the session, 2026-11-11).\n- `packages/services/service-messaging/src/objects/inbox-message.object.ts` declares no `managedBy` and no `userActions`, so the generic create/edit affordances are on; `user_id` is `Field.text` (not a lookup), and the `notification_id` / `delivery_id` descriptions are developer notes rendered as help text.\n- Never markable read (code path, `messaging-service.ts`): `listInbox` serves a row with no `notification_id` under its row id; `markRead` → `upsertReadReceipt` finds no receipt and `inboxMessageNames(user, id)` matches on `notification_id`, so it writes nothing and returns 0; `markAllRead` skips rows without `notification_id` by design. The row stays unread until its 90-day TTL.\n\n## Governing text\n\n- ADR-0030 (`docs/adr/0030-notification-platform-convergence.md`): \"**Single ingress.** Every notification producer … calls exactly one API: `NotificationService.emit(...)`. **No producer writes an inbox/materialization row directly.**\" The generic New form is such a producer.\n- Precedent on the sibling objects: `sys_notification_delivery`, `sys_notification_receipt` and `sys_http_delivery` already restrict the API to `get`/`list` and/or set `userActions` create/edit/delete false.\n\n## Business reason\n\nWho benefits: every administrator and every recipient. Scenario: an admin tries to \"send a message\" from the only place the console suggests. Without a fix: a stuck unread badge for the recipient, a silent no-op when the id is mistyped, and no audit event.\n\n## Suggested fix (for the seat that picks it)\n\n1. `sys_inbox_message`: `userActions: { create: false, edit: false, delete: false, import: false }` (keep list/read for the owner's own rows and admin inspection); consider `managedBy: 'engine-owned'` like `sys_notification`.\n2. Rewrite the `notification_id` / `delivery_id` / `actor_id` descriptions for an administrator (or hide them from forms), and regenerate translations.\n3. Test: the object's resolved CRUD affordances deny create; a pin that the inbox row is written only by the inbox channel.\n\nA proper \"send an in-app message\" entry point is a separate product decision (filed alongside as a `needs-user-decision` card).\n\nReader who acts: the server-lane seat that owns `service-messaging` (triage assigns lane/area).\nDedupe: `repo:objectstack-ai/objectstack is:issue sys_inbox_message create` → 64 hits, none on the generic New form; `sys_inbox_message user_id` → 26 hits (#7344 permission set, #16974 actor column, #25758 unreachable email recipient), none on this; #30208 (Setup developer wording) is related in spirit but does not cover this object."
