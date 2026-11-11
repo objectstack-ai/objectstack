@@ -290,6 +290,18 @@ export function storedBundleMemberOf(type: string, item: unknown, column?: unkno
   return declared === '' || declared === disc.canonical ? null : declared;
 }
 
+/**
+ * [#31699 R3-B] The identity an unscoped plural read keeps one entry per, for
+ * a bundled type stored per `(package, name)`: `(package, name, member)`, the
+ * package being `packageId` else the one the item carries
+ * ({@link storedItemPackageId}). `undefined` for every other type, whose
+ * unscoped reads keep their own identity.
+ */
+export function bundleEntryKey(type: string, name: string, data: unknown, packageId?: string): string | undefined {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return undefined;
+  return JSON.stringify([packageId ?? storedItemPackageId(data) ?? null, name, storedBundleMemberOf(type, data) ?? null]);
+}
+
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */
 export function storeKeysNamed(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): string[] {
   if (!store) return [];

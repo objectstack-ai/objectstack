@@ -1206,10 +1206,13 @@ export class DatabaseLoader implements MetadataLoader {
     _options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
     const entries = await this.unscopedTypeRows(type);
+    // [#31699 R3-B] A bundled type's entries carry the package each row holds,
+    // so a merge above this loader keeps two packages' same member apart.
+    const withPackage = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type);
     const keyed: MetadataKeyedItem<T>[] = [];
     for (const entry of entries) {
       if (entry.name === null) continue;
-      keyed.push({ name: entry.name, data: entry.data as T });
+      keyed.push(withPackage ? keyedRow<T>(entry.name, entry) : { name: entry.name, data: entry.data as T });
     }
     return keyed;
   }

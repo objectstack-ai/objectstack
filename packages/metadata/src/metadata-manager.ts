@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  bundleEntryKey,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
@@ -3328,6 +3329,9 @@ export class MetadataManager implements IMetadataService {
     options?: MetadataLoadOptions
   ): Promise<T[]> {
     const results: T[] = [];
+    // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
+    // per `(package, name, member)` (`bundleEntryKey`), never one per name.
+    const bundleEntries = new Set<string>();
 
     for (const loader of this.loaders.values()) {
         try {
@@ -3335,6 +3339,13 @@ export class MetadataManager implements IMetadataService {
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
+                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
+                    if (bundleKey !== undefined) {
+                        if (bundleEntries.has(bundleKey)) continue;
+                        bundleEntries.add(bundleKey);
+                        results.push(item);
+                        continue;
+                    }
                     const exists = results.some((r: any) => r && r.name === itemAny.name);
                     if (exists) continue;
                 }
@@ -3406,7 +3417,9 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    const items = new Map<string, T>();
+    // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
+    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
+    const items = new Map<string, MetadataKeyedItem<T>>();
 
     for (const loader of this.loaders.values()) {
       try {
@@ -3418,7 +3431,7 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return Array.from(items, ([name, data]) => ({ name, data }));
+    return Array.from(items.values());
   }
 
   /**
@@ -3438,15 +3451,16 @@ export class MetadataManager implements IMetadataService {
   private async admitKeyedLoaderItems<T = any>(
     loader: MetadataLoader,
     type: string,
-    items: Map<string, T>,
+    items: Map<string, MetadataKeyedItem<T>>,
     options?: MetadataLoadOptions
   ): Promise<void> {
     if (typeof loader.loadManyKeyed === 'function') {
       const keyed = await loader.loadManyKeyed<T>(type, options);
       for (const entry of keyed) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        if (items.has(entry.name)) continue;
-        items.set(entry.name, entry.data);
+        const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
+        if (items.has(key)) continue;
+        items.set(key, { name: entry.name, data: entry.data });
       }
       return;
     }
@@ -3455,7 +3469,9 @@ export class MetadataManager implements IMetadataService {
       if (typeof name !== 'string' || name === '' || items.has(name)) continue;
       const result = await loader.load(type, name, options);
       if (result?.data == null) continue;
-      items.set(name, result.data as T);
+      const key = bundleEntryKey(type, name, result.data) ?? name;
+      if (items.has(key)) continue;
+      items.set(key, { name, data: result.data as T });
     }
   }
 
