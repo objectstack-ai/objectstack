@@ -246,9 +246,14 @@ export interface ResolveAuthzInput {
    * enforced (ADR-0093 D4/D5).
    *
    * Supplied by the transport because this resolver is deliberately
-   * kernel-agnostic. OMITTING it disables the two posture-conditional API-key
-   * refusals and leaves behaviour exactly as it was — so an unwired caller is
-   * never made WORSE, only less strict.
+   * kernel-agnostic. OMITTING it disables the posture-conditional org-less
+   * API-key refusal (`organization_required`) — so an unwired caller is never
+   * made WORSE there, only less strict.
+   *
+   * [ADR-0093 D8.1, as amended] The membership rule does NOT read it: an
+   * organization claim — a session's or an API key's — needs a current
+   * membership in that organization under every posture and with no posture
+   * supplied ({@link vetOrganizationClaim}).
    */
   tenancyPosture?: TenancyPosture;
   /**
