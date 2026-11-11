@@ -1,11 +1,13 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
   IJobService,
   JobSchedule,
   JobHandler,
   JobExecution,
   JobRunOutcome,
+  JobRunTrigger,
   JobScheduleOptions,
   JobReplayOptions,
 } from '@objectstack/spec/contracts';
@@ -15,6 +17,42 @@ import { runWithPolicy } from './run-with-policy.js';
 const JOB_TABLE = 'sys_job';
 const RUN_TABLE = 'sys_job_run';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/**
+ * What a `sys_job_run` row's `trigger` column records: why the run started,
+ * as the handler's context says it, plus `replay` — which the handler's
+ * context reports as `manual`, because a replay runs through `trigger()`.
+ */
+type RunRowTrigger = JobRunTrigger | 'replay';
+
+/**
+ * The run a `replay()` call is asking for: the wrapper `inner` will invoke,
+ * and whether that invocation has already taken the `replay` tag.
+ */
+interface ReplayClaim {
+  readonly wrapper: JobHandler;
+  taken: boolean;
+}
+
+/**
+ * Carries a `replay()` call down to the wrapper it reaches through
+ * `inner.trigger()`, whose context cannot say "replay" — see
+ * {@link DbJobAdapter.replay}.
+ */
+const replayScope = new AsyncLocalStorage<ReplayClaim>();
+
+/**
+ * The `trigger` a run row records for one invocation of `wrapper` — the
+ * table in {@link DbJobAdapter}'s `wrap` says why each row reads as it does.
+ */
+function runTriggerOf(wrapper: JobHandler, ctx: Parameters<JobHandler>[0]): RunRowTrigger {
+  const claim = replayScope.getStore();
+  if (claim && claim.wrapper === wrapper && !claim.taken) {
+    claim.taken = true;
+    return 'replay';
+  }
+  return ctx.trigger ?? 'schedule';
+}
 
 export interface JobEngineLike {
   find(object: string, options?: any): Promise<any[]>;
@@ -39,7 +77,7 @@ export interface DbJobAdapterOptions {
    *
    * This is an on/off switch for run history, NOT a retention cap: setting it to
    * `false` means no rows are written at all — not the per-attempt rows above,
-   * and not {@link DbJobAdapter.replay}'s synthetic `trigger: 'replay'` row —
+   * whatever their `trigger`, {@link DbJobAdapter.replay}'s `replay` rows included —
    * so `sys_job_run` stays empty for this adapter and `listExecutionsByStatus`
    * has nothing to read. The one thing unaffected either way is the `sys_job`
    * row's own `last_status` / `run_count` / `failure_count` counters.
@@ -190,10 +228,11 @@ function uid(prefix: string): string {
  * Persisted side effects:
  *   - `schedule(name, …)` upserts a `sys_job` row (active=true)
  *   - `cancel(name)` marks the row inactive
- *   - every execution writes a `sys_job_run` row per attempt — unless
+ *   - every execution writes a `sys_job_run` row per attempt, its `trigger`
+ *     the call that ran it: `schedule` for a scheduled fire, `manual` for
+ *     `trigger()`, `replay` for {@link DbJobAdapter.replay} — unless
  *     {@link DbJobAdapterOptions.recordRuns} is `false`, the on/off switch for
- *     run history, which writes none of them, {@link DbJobAdapter.replay}'s
- *     synthetic `trigger: 'replay'` row included.
+ *     run history, which writes none of them.
  *   - every execution updates `sys_job.last_run_at / last_status / run_count /
  *     failure_count` — unconditionally: `recordRuns` gates the per-attempt rows
  *     above, never these counters.
@@ -296,7 +335,7 @@ export class DbJobAdapter implements IJobService {
    * the way to make everyone skim `warn` is to write one on a hot path.
    */
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
-    const wrapped = this.wrap(name, handler, 'schedule', options);
+    const wrapped = this.wrap(name, handler, options);
     // The wrapper OWNS `retryPolicy`/`timeoutMs` from here down — see withoutPolicy.
     const downstream = withoutPolicy(options);
 
@@ -393,11 +432,25 @@ export class DbJobAdapter implements IJobService {
   /**
    * Replay a job's most recent execution, tagging its run `trigger: 'replay'`.
    *
-   * The synthetic `sys_job_run` row this writes is governed by
-   * {@link DbJobAdapterOptions.recordRuns} exactly as every other run row is:
-   * with the flag `false` the handler still runs and no row is written — not
-   * this synthetic one, and not the per-attempt row the execution itself
-   * would produce. `sys_job_run` is run history, not an audit trail; an
+   * The replay is ONE run, so it lands as one `sys_job_run` row per attempt,
+   * like any other run: the wrapper's own row, which it opens with
+   * `trigger: 'replay'` and settles to the run's real status from inside the
+   * retry/timeout policy. The handler's context still says `manual` — the
+   * contract's value for a replay, which runs through `trigger()` — and its
+   * `runId` names that `replay` row.
+   *
+   * How the wrapper knows: the call reaches it through `inner.trigger()`,
+   * whose context cannot say "replay", so this method opens a
+   * {@link replayScope} naming the exact wrapper `inner` holds for the job.
+   * That wrapper's first invocation inside the scope takes the tag, once, and
+   * reads it before its first attempt; any other run the replayed handler
+   * starts — another job's `trigger()`, a second call of this one, a timer
+   * armed inside it — finds the tag taken or names another wrapper, and
+   * records its own trigger.
+   *
+   * The row is governed by {@link DbJobAdapterOptions.recordRuns} exactly as
+   * every other run row is: with the flag `false` the handler still runs and
+   * no row is written. `sys_job_run` is run history, not an audit trail; an
    * operator who switched history off gets nothing durable from this path.
    *
    * **Once-only delivery on the scheduled path (#14501).** A job carrying a
@@ -415,9 +468,9 @@ export class DbJobAdapter implements IJobService {
    * else. A refusal is a positive reading, never the absence of one.
    */
   async replay(name: string, data?: unknown, options?: JobReplayOptions): Promise<void> {
-    // Same execution path as trigger but tag the run as 'replay'.
-    const handlers = (this.inner as any).jobs?.get?.(name);
-    if (!handlers) throw new Error(`Job "${name}" not found`);
+    // Same execution path as trigger, with the run tagged 'replay'.
+    const record: { handler: JobHandler } | undefined = (this.inner as any).jobs?.get?.(name);
+    if (!record) throw new Error(`Job "${name}" not found`);
 
     const guard = this.replayGuards.get(name);
     if (guard) {
@@ -434,40 +487,12 @@ export class DbJobAdapter implements IJobService {
       }
       if (decision && decision.allow === false) throw replayConflict(name, decision);
     }
-    // Reuse trigger; the wrap function uses a closure flag — simpler:
-    // expose by calling inner.trigger with a marker via data is intrusive,
-    // so we record a synthetic run row before/after to ensure 'replay' tag.
-    //
-    // Gated exactly as `wrap`'s per-attempt row is: `recordRuns` is the on/off
-    // switch for run history and this row is run history, so an operator who
-    // turned it off gets no replay rows either. Ungated, this was the one write
-    // that ignored the flag — the artifact of the gate landing on one of two
-    // `startRun` call sites, never a designed carve-out for replay.
-    const runId = this.recordRuns ? await this.startRun(name, 'replay') : undefined;
-    try {
-      await this.inner.trigger(name, data);
-      // The wrap already recorded a run; settle our synthetic row the same way
-      // it settled that one. `IJobService.trigger` resolves `void` by contract,
-      // so the outcome cannot come back through it — it is read off the
-      // execution the inner adapter just recorded (#5548). Without this, a
-      // replayed degraded run would land TWO rows disagreeing with each other,
-      // one `degraded` and one `success`, which is the very defect this card
-      // fixes wearing a `trigger: 'replay'` tag.
-      // #7734 widened this from `degraded` to every terminal status for the
-      // same reason #5548 introduced it: a replayed run that timed out (or
-      // threw — `executeJob` swallows the error, so the catch below never sees
-      // it) used to land a `success` row next to the wrapper's honest one.
-      const [last] = await this.inner.getExecutions(name, 1);
-      const status = last?.status;
-      if (status === 'degraded' || status === 'timeout' || status === 'failed') {
-        if (runId) await this.finishRun(runId, status, last.error);
-      } else {
-        if (runId) await this.finishRun(runId, 'success');
-      }
-    } catch (err) {
-      if (runId) await this.finishRun(runId, 'failed', err instanceof Error ? err.message : String(err));
-      throw err;
-    }
+    // No row of its own: a second, synthetic row beside the wrapper's is what
+    // made one replay read as two runs, the wrapper's tagged `schedule`. The
+    // wrapper's row IS the replay's, written and settled by the same code as
+    // every other run's, so its status needs no reading back either.
+    const claim: ReplayClaim = { wrapper: record.handler, taken: false };
+    await replayScope.run(claim, () => this.inner.trigger(name, data));
   }
 
   async listExecutionsByStatus(
@@ -577,14 +602,34 @@ export class DbJobAdapter implements IJobService {
    * before #6617, byte for byte) takes the `success` branch exactly as before.
    * Retry is untouched — it keys on a *rejected* promise only, so a `degraded`
    * run never re-runs (`spec/contracts/job-service.ts`, the JobHandler TSDoc).
+   *
+   * **Which `trigger` the row records is decided per call, never at wrap
+   * time.** One wrapper serves every way the job runs: `schedule()` hands the
+   * same closure to the scheduler that fires it and to `inner`, which runs it
+   * for `trigger()` and `replay()` — and on the no-cron fallback `inner` is
+   * the scheduler too. So the value is read off the invocation, once, before
+   * the first attempt (every attempt of one run carries it):
+   *
+   * | The call | `sys_job_run.trigger` |
+   * |:---|:---|
+   * | the {@link replayScope} `replay()` opened for this very wrapper, first invocation | `replay` |
+   * | the context says `manual` (`trigger()`, through either timer adapter) | `manual` |
+   * | the context says `schedule` (a timer's fire) | `schedule` |
+   * | the context says nothing | `schedule` |
+   *
+   * The last row is not a guess: the only caller that may leave the trigger
+   * unstated (it is optional in the `JobHandler` contract) is the `cron`
+   * adapter, which can be any `IJobService` — and this class never calls that
+   * adapter's `trigger()`, so a call arriving through it is its scheduled fire.
+   * `inner`, which serves every manual call, always states it.
    */
   private wrap(
     name: string,
     handler: JobHandler,
-    defaultTrigger: 'schedule' | 'manual' | 'replay',
     options?: JobScheduleOptions,
   ): JobHandler {
-    return async (ctx) => {
+    const wrapped: JobHandler = async (ctx) => {
+      const trigger = runTriggerOf(wrapped, ctx);
       // Per-FIRE state: one of these closures exists per invocation, so two
       // overlapping fires of the same job never share a run row.
       let current: { id?: string; settled: boolean } | undefined;
@@ -603,7 +648,7 @@ export class DbJobAdapter implements IJobService {
       // `current` is set by `onAttemptStart`, which runs before each attempt.
       return await runWithPolicy<void | JobRunOutcome>(name, () => handler(current?.id ? { ...ctx, runId: current.id } : ctx), options, {
         onAttemptStart: async (attempt) => {
-          current = { id: this.recordRuns ? await this.startRun(name, defaultTrigger, attempt) : undefined, settled: false };
+          current = { id: this.recordRuns ? await this.startRun(name, trigger, attempt) : undefined, settled: false };
         },
         onAttemptSettled: async (_attempt, result) => {
           if (result.ok) {
@@ -626,12 +671,13 @@ export class DbJobAdapter implements IJobService {
         },
       });
     };
+    return wrapped;
   }
 
   private async startRun(
     jobName: string,
-    trigger: 'schedule' | 'manual' | 'replay',
-    attempt = 1,
+    trigger: RunRowTrigger,
+    attempt: number,
   ): Promise<string | undefined> {
     const id = uid('run');
     const now = new Date().toISOString();

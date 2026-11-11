@@ -194,24 +194,24 @@ describe('DbJobAdapter — the three-outcome handler table (#5548)', () => {
     expect(runRows()[0].status).toBe('degraded');
   });
 
-  it('replay of a degraded job writes BOTH rows as degraded — no success row alongside', async () => {
+  it('replay of a degraded job writes its one row as degraded — no success row alongside', async () => {
     await adapter.schedule('wake', CRON, async (): Promise<JobRunOutcome> => ({
       outcome: 'degraded',
       reason: 'STORE_UNAVAILABLE',
     }));
     await adapter.replay('wake');
 
-    // One synthetic `replay` row + one wrapped row, and they must agree.
-    expect(runRows().map((r) => r.trigger).sort()).toEqual(['replay', 'schedule']);
-    expect(runRows().map((r) => r.status)).toEqual(['degraded', 'degraded']);
-    expect(runRows().map((r) => r.error)).toEqual(['STORE_UNAVAILABLE', 'STORE_UNAVAILABLE']);
+    // One run, one row, tagged `replay`.
+    expect(runRows().map((r) => r.trigger)).toEqual(['replay']);
+    expect(runRows().map((r) => r.status)).toEqual(['degraded']);
+    expect(runRows().map((r) => r.error)).toEqual(['STORE_UNAVAILABLE']);
   });
 
   it('replay of an ordinary job still writes success rows (the replay path stays additive too)', async () => {
     await adapter.schedule('plain', CRON, async () => {});
     await adapter.replay('plain');
 
-    expect(runRows().map((r) => r.status)).toEqual(['success', 'success']);
+    expect(runRows().map((r) => r.status)).toEqual(['success']);
   });
 });
 
