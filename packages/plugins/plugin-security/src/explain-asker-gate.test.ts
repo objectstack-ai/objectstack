@@ -22,11 +22,12 @@
 // read door returns it every row (the system asker's cells below).
 //
 // Ruling C (#22851) settles how a REFUSED read (a declared 4xx, such as no
-// read grant on the object) is classified, on that same read: for an asker
-// explaining another user it is "cannot read", the nonexistent id's answer;
-// for a principal explaining itself it is not, because that principal's own
-// by-id write doors do not treat it as absence, so its explanation shows what
-// those doors do (the edit-only principal's cells).
+// read grant on the object) is classified for an asker explaining another
+// user, on that same read: it is "cannot read", the nonexistent id's answer.
+// A principal explaining itself whose read is refused gets the nonexistent
+// id's answer too, with the read's refusal as the decider (ruling of record
+// 6787890900; the edit-only principal's cells, and
+// `explain-self-refused-read-one-answer.test.ts`).
 //
 // ## The rig
 //
@@ -415,7 +416,7 @@ const doorAs = (ctx: Record<string, unknown>, verb: ExplainOperation, id: string
     : landed(engine.update(BOARD, verb === 'transfer' ? { owner_id: 'usr_ag_successor' } : { name: 'edited' },
         { where: { id }, context: { ...ctx } } as never));
 
-describe('[#22851] ruling C: a refused read is "cannot read" only for an asker explaining another user', () => {
+describe('[#22851] ruling C: a refused read is "cannot read" for an asker explaining another user', () => {
   it('armed: the refused askers\' and the edit-only principal\'s own reads are REFUSED, for a stored row and a nonexistent id alike', async () => {
     for (const [who, asker] of [
       ['the refused administrator', REFUSED_ADMIN],
@@ -451,24 +452,12 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
   // by-id UPDATE of the owner, which asks the same edit grant. So the write
   // verbs get their own control below, and this one keeps the read verbs.
   for (const verb of VERBS.filter((v) => !WRITE_VERBS.includes(v))) {
-    it(`control, ${verb}: a principal explaining itself keeps the write path's notion, so a refused read is not the missing record`, async () => {
-      const id = WRITE_VERBS.includes(verb) ? editOnlyRowOf(verb) : HIDDEN;
-      const self = await explainAs(EDIT_ONLY, verb, id);
+    it(`${verb}: a principal explaining itself whose read is refused gets the nonexistent id's explanation, decided by the read's refusal`, async () => {
+      const self = await explainAs(EDIT_ONLY, verb, HIDDEN);
       const nonexistent = await explainAs(EDIT_ONLY, verb, NONEXISTENT);
-      // Today's answer: the stored row's own story, the one a system asker is told about this principal.
-      const bySystem = await explainAs(SYSTEM, verb, id, EDIT_ONLY_USER);
-      expect(self.record, verb).toEqual(bySystem.record);
-      expect(self.layers.map((l) => l.record), verb).toEqual(bySystem.layers.map((l) => l.record));
-      expect(withoutRecordId(self), verb).not.toEqual(withoutRecordId(nonexistent));
-      expect(layerRecord(self, 'owd_baseline')?.outcome, verb).toBe('admitted');
-      expect(layerRecord(nonexistent, 'owd_baseline')?.outcome, verb).toBe('not_evaluated');
-      if (WRITE_VERBS.includes(verb)) {
-        // ...which is what that principal's own door does with the row.
-        expect(self.record, verb).toMatchObject({ visible: true });
-        expect(await doorAs(EDIT_ONLY, verb, id), `${verb} door`).toEqual({ kind: 'admitted' });
-      } else {
-        expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
-      }
+      expect(self.record, verb).toEqual({ recordId: HIDDEN, visible: false, decidedBy: 'object_crud' });
+      expect(withoutRecordId(self), verb).toEqual(withoutRecordId(nonexistent));
+      expect(layerRecord(self, 'owd_baseline')?.outcome, verb).toBe('not_evaluated');
     });
   }
 
@@ -480,6 +469,7 @@ describe('[#22851] ruling C: a refused read is "cannot read" only for an asker e
       expect(self.layers.find((l) => l.layer === 'object_crud')?.verdict, verb).toBe('denies');
       expect(self.record, verb).toEqual({ recordId: id, visible: false, decidedBy: 'object_crud' });
       expect(nonexistent.record, verb).toEqual({ recordId: NONEXISTENT, visible: false, decidedBy: 'object_crud' });
+      expect(withoutRecordId(self), verb).toEqual(withoutRecordId(nonexistent));
       const row = await doorAs(EDIT_ONLY, verb, id);
       expect(row, `${verb} door`).toMatchObject({ kind: 'refused', code: 'PERMISSION_DENIED', status: 403 });
       expect(await doorAs(EDIT_ONLY, verb, NONEXISTENT), `${verb} door, nonexistent`).toEqual(row);
