@@ -2771,6 +2771,28 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'grid-aggregation-field-type-refused',
+  covers: 'why a grouped grid cannot sum or average that field',
+  paragraphs: [
+    'An `object-grid` block\'s `aggregations` (`[{ field, type }]`) are the per-group numbers a grouped ' +
+      'grid draws in its group headers, answered by ONE aggregate query on the server. The engine\'s ' +
+      '`aggregate` door asks the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, ' +
+      '`@objectstack/spec/data`) about every pair and refuses one it refuses with `400 INVALID_FIELD`, so ' +
+      'a `sum` or `avg` over a refused type breaks the grid\'s grouped load, and every load after it.',
+    'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
+      'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
+      'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
+      '`avg` the same plus percent. A `date` or `datetime` field takes `min` / `max` (the earliest or ' +
+      'latest value, drawn as the field draws it) or a count; a text field takes a count.',
+    'The fix is a numeric field, or an aggregate the field\'s type accepts. A `formula` field stores no ' +
+      'value, whatever its `returnType`, so a total over it has to be STORED as a number field (kept by a ' +
+      'hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
+      'dotted path and a field with no declared type are not judged here.',
+  ],
+};
+
 const SEARCHABLE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'searchable-field-unknown',
   covers: 'what a stale searchableFields entry does',
@@ -5989,6 +6011,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SORT_FIELD_UNKNOWN_EXPLANATION.rule]: SORT_FIELD_UNKNOWN_EXPLANATION,
   [SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: SORT_FIELD_UNSORTABLE_EXPLANATION,
   [SORT_FIELD_UNPROVISIONED_EXPLANATION.rule]: SORT_FIELD_UNPROVISIONED_EXPLANATION,
+  [GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION.rule]: GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION,
   [SEARCHABLE_FIELD_UNKNOWN_EXPLANATION.rule]: SEARCHABLE_FIELD_UNKNOWN_EXPLANATION,
   [SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION.rule]: SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION,
   [SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION,
