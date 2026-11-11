@@ -69,7 +69,7 @@ import {
   droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
-  writeFailureLogMeta,
+  writeFailureLogLevel, writeFailureLogMeta,
 } from './engine-top-level.js';
 import type {
   AutonumberReaders, IssuedAutonumber, OperationContext, PermissionResolution, StoredExpressionServing,
@@ -1697,8 +1697,11 @@ export class InsertFacet {
         // slot, and an Error's fields are non-enumerable).
         // [#24768] A NOT NULL refusal's `ValidationError` carries the driver's
         // error the same way, for the same reason.
+        // [#32154] …and the engine's own refusal of the caller's input logs at
+        // `debug`: it carries nothing the database said (see
+        // `writeFailureLogLevel`).
         const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
-        this.logger.warn(
+        this.logger[writeFailureLogLevel(e)](
           'Insert operation failed',
           writeFailureLogMeta(redactBoundStatement(logged), { object }),
         );
