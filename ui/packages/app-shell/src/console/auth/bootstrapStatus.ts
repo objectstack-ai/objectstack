@@ -36,6 +36,18 @@ const AUTH_BASE = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 export type BootstrapStatus = 'unknown' | 'fresh' | 'bootstrapped';
 
 /**
+ * What one `hasOwner` probe found: `status` for the decisions above (a failed
+ * probe falls open to `fresh`), and `noOwner` — the server ANSWERED
+ * `hasOwner: false`. `noOwner` never falls open: a failed or unreadable probe
+ * leaves it `false`, so a page that tells the visitor "nobody has an account
+ * here yet" says it only on the server's own word.
+ */
+export interface BootstrapProbe {
+  status: BootstrapStatus;
+  noOwner: boolean;
+}
+
+/**
  * Probe `hasOwner` once. `enabled` is load-bearing twice over for the
  * console's `/setup` policy: an already-authenticated visitor never pays for a
  * request whose answer that policy would ignore, AND it is what confines a
@@ -43,8 +55,8 @@ export type BootstrapStatus = 'unknown' | 'fresh' | 'bootstrapped';
  * durable. The answer is kept once received — losing `enabled` (as `signUp()`
  * does) cancels the in-flight probe, it does not reset the state.
  */
-export function useBootstrapStatus(enabled: boolean): BootstrapStatus {
-  const [status, setStatus] = useState<BootstrapStatus>('unknown');
+export function useBootstrapProbe(enabled: boolean): BootstrapProbe {
+  const [probe, setProbe] = useState<BootstrapProbe>({ status: 'unknown', noOwner: false });
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -52,15 +64,25 @@ export function useBootstrapStatus(enabled: boolean): BootstrapStatus {
       try {
         const res = await fetch(`${AUTH_BASE}/bootstrap-status`, { credentials: 'include' });
         const data: { hasOwner?: boolean } = res.ok ? await res.json().catch(() => ({})) : {};
-        if (!cancelled) setStatus(data.hasOwner === true ? 'bootstrapped' : 'fresh');
+        if (!cancelled) {
+          setProbe({
+            status: data.hasOwner === true ? 'bootstrapped' : 'fresh',
+            noOwner: data.hasOwner === false,
+          });
+        }
       } catch {
-        // Fall open — see BootstrapStatus.
-        if (!cancelled) setStatus('fresh');
+        // Fall open — see BootstrapStatus. `noOwner` stays false.
+        if (!cancelled) setProbe({ status: 'fresh', noOwner: false });
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [enabled]);
-  return status;
+  return probe;
+}
+
+/** The probe's `status` alone — what the `/setup` policy and `decideSignUpOffer` read. */
+export function useBootstrapStatus(enabled: boolean): BootstrapStatus {
+  return useBootstrapProbe(enabled).status;
 }

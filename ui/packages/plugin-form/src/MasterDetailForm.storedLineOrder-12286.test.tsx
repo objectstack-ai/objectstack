@@ -87,12 +87,12 @@ function serverOrder(rows: Row[], orderby: unknown): Row[] {
 type ReadParams = { $filter?: { invoice?: unknown }; $orderby?: unknown } | undefined;
 
 /** Mount an edit form over `table`, the server's lines in the server's own order. */
-function renderForm(table: Row[]) {
+function renderForm(table: Row[], lineSchema: { name: string; fields: Record<string, unknown> } = LINE_SCHEMA) {
   const batch = vi.fn(async (ops: Op[]) => ({
     results: ops.map((op) => (op.action === 'delete' ? true : { id: op.id ?? 'new', ...op.data })),
   }));
   const ds = {
-    getObjectSchema: vi.fn(async (o: string) => (o === 'inv_line' ? LINE_SCHEMA : INV_SCHEMA)),
+    getObjectSchema: vi.fn(async (o: string) => (o === 'inv_line' ? lineSchema : INV_SCHEMA)),
     findOne: vi.fn().mockResolvedValue({ id: 'inv1', ref: 'INV-1' }),
     find: vi.fn(async (o: string, params: ReadParams) =>
       o === 'inv_line'
@@ -229,5 +229,53 @@ describe('a master-detail edit opens its lines in stored order and writes only w
     expect(await saveChildOps(batch)).toEqual([
       { object: 'inv_line', action: 'update', id: 'l2', data: { quantity: 5 } },
     ]);
+  });
+});
+
+describe('the line read orders by the line-position field the spec names, and by nothing when the child has none', () => {
+  /** The invoice line with its position field renamed, or dropped for number fields the spec does not name. */
+  const lineSchemaWith = (sortFields: Record<string, unknown>) => ({
+    name: 'inv_line',
+    fields: {
+      invoice: LINE_SCHEMA.fields.invoice,
+      ...sortFields,
+      description: LINE_SCHEMA.fields.description,
+      quantity: LINE_SCHEMA.fields.quantity,
+    },
+  });
+
+  it('a child whose sort-named field is `line_no` opens its lines ordered by it', async () => {
+    const lines: Row[] = [
+      { id: 'l2', invoice: 'inv1', description: 'Widget A units', quantity: 4, line_no: 1 },
+      { id: 'l1', invoice: 'inv1', description: 'Consulting hours', quantity: 10, line_no: 0 },
+    ];
+    const { container, ds } = renderForm(lines, lineSchemaWith({ line_no: { type: 'number', label: 'Line No' } }));
+    await ready(container, ds, 2);
+    expect(drawn()).toEqual(['Consulting hours', 'Widget A units']);
+    expect(lineReads(ds).at(-1)?.$orderby).toEqual([
+      { field: 'line_no', order: 'asc' },
+      { field: 'id', order: 'asc' },
+    ]);
+  });
+
+  it('a child with no sort-named field reads its lines unordered, in the server order, guessing no field', async () => {
+    const lines: Row[] = [
+      { id: 'l2', invoice: 'inv1', description: 'Widget A units', quantity: 4, order: 1, seq: 1 },
+      { id: 'l1', invoice: 'inv1', description: 'Consulting hours', quantity: 10, order: 0, seq: 0 },
+    ];
+    const { container, ds } = renderForm(
+      lines,
+      lineSchemaWith({ order: { type: 'number', label: 'Order' }, seq: { type: 'number', label: 'Seq' } }),
+    );
+    await waitFor(() => {
+      const ref = container.querySelector('input[name="ref"]') as HTMLInputElement | null;
+      expect(ref?.value).toBe('INV-1');
+    });
+    await waitFor(() => expect(descriptions()).toHaveLength(3));
+    await act(async () => {});
+    expect(drawn()).toEqual(['Widget A units', 'Consulting hours']);
+    const reads = lineReads(ds);
+    expect(reads.length).toBeGreaterThanOrEqual(1);
+    expect(reads.map((r) => r && '$orderby' in r)).toEqual(reads.map(() => false));
   });
 });
