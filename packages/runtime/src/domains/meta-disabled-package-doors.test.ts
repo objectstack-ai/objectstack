@@ -359,16 +359,30 @@ describe('[ruling record 6787890900] the dispatcher: an object the caller may no
         legacy: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/${name}`, {}, {}, SESSION()),
     };
 
+    /**
+     * One door's stack: the legacy one-segment exit is reached only on a host
+     * whose protocol declares no type set; the layered read serves the
+     * readable object's code layer, so the control has layers to serve.
+     */
+    const stackFor = (door: string, security?: Record<string, unknown>) => {
+        const stack = boot({ ...(door === 'legacy' ? { getMetaTypes: false } : {}), ...(security ? { security } : {}) });
+        const layered = stack.getMetaItemLayered.getMockImplementation()!;
+        stack.getMetaItemLayered.mockImplementation(async (request: any) =>
+            (request?.type === 'object' && request?.name === HEALTHY
+                ? { type: 'object', name: HEALTHY, code: schema(HEALTHY), overlay: null, effective: schema(HEALTHY) }
+                : layered(request)));
+        return stack;
+    };
+
     it('precondition: without the object read, each door answers the disabled package\'s object with the protocol\'s refusal', async () => {
-        const stack = boot();
-        for (const door of ['plain', 'layers', 'layersFlag', 'state', 'published', 'legacy']) {
-            expectObjectRefusal(await DOORS[door](stack, DISABLED));
+        for (const door of Object.keys(DOORS)) {
+            expectObjectRefusal(await DOORS[door](stackFor(door), DISABLED));
         }
     });
 
     for (const [door, read] of Object.entries(DOORS)) {
         it(`${door}: byte for byte the missing name's answer, and no store is asked about the object`, async () => {
-            const stack = boot({ security: hiding() });
+            const stack = stackFor(door, hiding());
             const missing = await read(stack, 'no_such_widget');
             expect(missing.response?.status).toBe(404);
             stack.getMetaItem.mockClear();

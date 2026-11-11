@@ -436,8 +436,9 @@ describe('[ruling record 6787890900] RestServer: an object the caller may not re
         getMetadataReadableFields: async () => ['name'],
         canReadObject: async (object: string) => object !== 'demo_gadget',
     });
-    const answerOf = (r: { status: number; body: unknown; headers?: Record<string, string> }) =>
-        JSON.stringify({ status: r.status, body: r.body, headers: r.headers ?? {} });
+    /** The answer, with the requested name written out of it (a `Link` header echoes the path it was asked on). */
+    const answerOf = (r: { status: number; body: unknown; headers?: Record<string, string> }, name: string) =>
+        JSON.stringify({ status: r.status, body: r.body, headers: r.headers ?? {} }).split(name).join('NAME');
 
     for (const disabledPackage of [false, true]) {
         it(`the plain read, /layers, ?layers=true and /state answer exactly as for a missing name${disabledPackage ? ' — its package disabled' : ''}`, async () => {
@@ -456,7 +457,7 @@ describe('[ruling record 6787890900] RestServer: an object the caller may not re
                 const missing = await read('no_such_gadget');
                 expect(missing.status, door).toBe(404);
                 layered.mockClear();
-                expect(answerOf(await read('demo_gadget')), door).toBe(answerOf(missing));
+                expect(answerOf(await read('demo_gadget'), 'demo_gadget'), door).toBe(answerOf(missing, 'no_such_gadget'));
                 // Decided before the store: the layered read is never asked about it.
                 expect(layered.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
             }
