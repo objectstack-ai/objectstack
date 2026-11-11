@@ -37,7 +37,6 @@ import {
   formatConversionNotice,
   printAuthoringRuleErrors,
   authoringFindingDetailLines,
-  type AuthoringRuleFinding,
   printDocIssueErrors,
   JSON_FULL_LIST_REMEDY,
   createTimer,
@@ -1331,7 +1330,9 @@ export default class Validate extends Command {
       // the payload's `warnings`, but `strictFailing` below does not count it.
       // Every other member of this list (conversion notices, doc, unknown-key,
       // capability and structural advisories) is a warning and is counted.
-      const registryFindingAt = new Map<number, AuthoringRuleFinding>();
+      // Keyed to the registry's own finding type (it carries `severity`), not
+      // the formatter's severity-free `AuthoringRuleFinding`.
+      const registryFindingAt = new Map<number, (typeof ruleAdvisories)[number]>();
       let infoFindings = 0;
       for (const f of ruleAdvisories) {
         registryFindingAt.set(warnings.length, f);
