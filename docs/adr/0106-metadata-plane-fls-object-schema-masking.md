@@ -240,9 +240,11 @@ gets the full schema; a non-admin hitting any route gets the projection.
 5. *(Amendment 2026-11-11.)* The outlets the audit and later work brought under
    the same projection, each of which also applies the object-level rule of
    the amendment below: the published, layered and diff reads of an object,
-   the object state-machine read, the MCP `list_objects`, `describe_object`
-   and `validate_expression` tools on both transports, and the stdio MCP
-   bridge's object view.
+   the MCP `list_objects`, `describe_object` and `validate_expression` tools
+   on both transports, and the stdio MCP bridge's object view. The object
+   state-machine read applies the object-level rule only, not the field
+   projection; that it does not apply the field projection is a known
+   residual.
 
 ### D6 — Failure posture: three tiers, never silent, never empty-200
 
@@ -293,8 +295,9 @@ complementary by design.
   not read, and answers a read of such an object exactly as that outlet
   answers a name that names no object.
 - Whether the caller may read the object is decided once, in the same posture
-  resolution that decides the field projection, so no two outlets can
-  disagree.
+  resolution that decides the field projection, and every schema-serving
+  outlet answers that verdict before it reads any store, so no two outlets
+  disagree about whether an object exists for the caller.
 - The D4 exemptions and the D8 switch are unchanged and are decided first;
   with the D8 switch set, the object rule is off as well.
 - A readable object's reference field may still name an object the caller may
@@ -313,8 +316,9 @@ complementary by design.
   action read and the run doors — keep judging it on that object's field
   projection; this amendment does not change their verdicts.
 - Known residuals, not narrowed by this amendment: outlets that carry only
-  object names and labels (the API description document, label bundles), and
-  navigation entries that name an object.
+  object names and labels (the API description document, label bundles),
+  navigation entries that name an object, and the object state-machine read's
+  field level — it applies the object-level rule, not the field projection.
 
 ---
 

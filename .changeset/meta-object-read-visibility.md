@@ -32,6 +32,6 @@ What does not change:
 
 What is enforced when a read cannot be evaluated: a fault in the field question answers `503 FIELD_VISIBILITY_UNRESOLVED`, as before, and is asked first; an object admission that throws answers the same `503`, never an empty list; a fault the security service's object admission folds into "not admitted" is answered as the object not existing, which fails closed.
 
-Known residuals, not narrowed by this change: outlets that carry only object names and labels (the API description document, label bundles), and navigation entries that name an object.
+Known residuals, not narrowed by this change: outlets that carry only object names and labels (the API description document, label bundles), navigation entries that name an object, and the object state-machine read's field level — that read applies the object-level rule, not the field projection.
 
 To restore an object for a caller, grant them read access to it (`allowRead` in one of their permission sets); the data plane's read access and the metadata plane's visibility are the same grant.
