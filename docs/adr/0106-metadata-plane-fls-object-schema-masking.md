@@ -237,6 +237,12 @@ gets the full schema; a non-admin hitting any route gets the projection.
    `$metadata`/describe-style surfaces, client SDK describe calls); anything
    found either routes through the same projection or is filed per Prime
    Directive #10.
+5. *(Amendment 2026-11-11.)* The outlets the audit and later work brought under
+   the same projection, each of which also applies the object-level rule of
+   the amendment below: the published, layered and diff reads of an object,
+   the object state-machine read, the MCP `list_objects`, `describe_object`
+   and `validate_expression` tools on both transports, and the stdio MCP
+   bridge's object view.
 
 ### D6 — Failure posture: three tiers, never silent, never empty-200
 
@@ -289,11 +295,26 @@ complementary by design.
 - Whether the caller may read the object is decided once, in the same posture
   resolution that decides the field projection, so no two outlets can
   disagree.
-- The D4 exemptions and the D8 switch are unchanged and are decided first.
+- The D4 exemptions and the D8 switch are unchanged and are decided first;
+  with the D8 switch set, the object rule is off as well.
 - A readable object's reference field may still name an object the caller may
   not read.
-- An object read that cannot be evaluated is the D6 tier-3 fault: never an
-  empty list, and never an answer that the object does not exist.
+- What is enforced when a read cannot be evaluated: a fault in the field
+  question answers the D6 tier-3 fault (5xx), and is asked first; an object
+  admission that throws answers that fault too, never an empty list; a fault
+  the security service's object admission folds into "not admitted" is
+  answered as the object not existing, which fails closed.
+- A security service that answers field visibility but offers no object-level
+  read admission narrows no object; the runtime says so once, at warn.
+- A caller with no principal, or with no resolved permission set, is served no
+  object. The D7 fallback set decides fields only, never which objects exist
+  for the caller.
+- The doors that judge an action against its object — the action list, the
+  action read and the run doors — keep judging it on that object's field
+  projection; this amendment does not change their verdicts.
+- Known residuals, not narrowed by this amendment: outlets that carry only
+  object names and labels (the API description document, label bundles), and
+  navigation entries that name an object.
 
 ---
 

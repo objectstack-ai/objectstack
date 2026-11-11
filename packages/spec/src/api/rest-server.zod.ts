@@ -53,8 +53,11 @@ import { retiredKey } from '../shared/retired-key';
  * `normalizeConfig` folds the environment into the effective value of
  * `metadata.maskObjectFields` — `OS_ALLOW_UNMASKED_OBJECT_METADATA` turns the
  * ADR-0106 D8 mask OFF for a deployment that cannot otherwise reach the key.
- * That env var is the only thing outside an embedder's argument that changes
- * any value here. See `maskObjectFields` below.
+ * The mask governs object visibility as well as fields (ADR-0106, amended
+ * 2026-11-11): with it off, every caller is served every object, including
+ * objects they may not read. That env var is the only thing outside an
+ * embedder's argument that changes any value here. See `maskObjectFields`
+ * below.
  *
  * This is the recorded posture, not a gap awaiting a fix: the keys keep their
  * runtime reads and their embedder consumer, and the reachability answer
@@ -467,8 +470,10 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
    * name, label, type, picklist options, formula, `visibleWhen` predicate,
    * `defaultValue`, nor the `requiredPermissions` capability guarding it.
    *
-   * `false` serves the full schema to every authenticated caller, as releases
-   * before ADR-0106 did — but ⛔ only an EMBEDDER can write that `false`. This
+   * `false` serves the full schema of every object to every authenticated
+   * caller — including objects the caller may not read, which the mask
+   * otherwise leaves out (ADR-0106, amended 2026-11-11) — as releases before
+   * ADR-0106 did — but ⛔ only an EMBEDDER can write that `false`. This
    * KEY is not reachable from a CLI-started deployment at all (see WHO CAN
    * WRITE THIS CONFIG in the file header), so under `os serve` and the dev
    * plugin it is always `true`. The change is **disclosure only**: the data

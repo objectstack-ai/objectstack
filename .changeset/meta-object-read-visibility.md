@@ -14,18 +14,24 @@ Metadata-protocol: none
 
 **BREAKING** — the metadata plane now applies object-level read access as well as field-level read access (ADR-0106, amended by ruling record 6787890900).
 
-After the upgrade, every outlet that serves object schemas — `GET /meta/object` and `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the runtime `/metadata` catch-all, MCP `list_objects`, `describe_object` and `validate_expression`, and the stdio MCP bridge — treats an object the caller may not read (the security service's `canReadObject` does not admit them) as an object that does not exist:
+After the upgrade, every outlet that serves object schemas — `GET /meta/object` and `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the object state-machine read `GET /meta/object/:name/state/:field`, the runtime `/metadata` catch-all, MCP `list_objects`, `describe_object` and `validate_expression`, and the stdio MCP bridge — treats an object the caller may not read (the security service's `canReadObject` does not admit them) as an object that does not exist:
 
 - an object list leaves it out;
-- a read of it answers exactly as that outlet answers a name that names no object, before any validator is judged, so no `304` is answered for it.
+- a read of it answers exactly as that outlet answers a name that names no object, before the store or any validator is consulted, so no `304` and no store answer about that object is returned for it.
+
+A caller with no principal, or with no resolved permission set, is served no object. The D7 fallback permission set decides which fields are served, never which objects exist for the caller.
 
 What does not change:
 
-- callers exempt under ADR-0106 D4 (system context, `manage_metadata`, `studio.access`, `setup.access`) are served every object whole, and a deployment that sets `OS_ALLOW_UNMASKED_OBJECT_METADATA` (D8) is served as before;
+- callers exempt under ADR-0106 D4 (system context, `manage_metadata`, `studio.access`, `setup.access`) are served every object whole;
+- the D8 switch (`OS_ALLOW_UNMASKED_OBJECT_METADATA`, or `metadata.maskObjectFields: false`) now also governs object visibility: with it set, every caller is served every object, as before;
+- a security service that answers field visibility but offers no object-level read admission narrows no object; the runtime says so once, at warn;
 - a readable object's reference field still names its target object;
 - the action doors (`GET /meta/action`, MCP `list_actions`, and the run doors) judge an action on its object's field projection as before, whether or not the object itself is served to the caller;
 - a deployment with no security service is served as before.
 
-If the object read cannot be evaluated, the outlet answers `503 FIELD_VISIBILITY_UNRESOLVED`, as it already does when field visibility cannot be evaluated.
+What is enforced when a read cannot be evaluated: a fault in the field question answers `503 FIELD_VISIBILITY_UNRESOLVED`, as before, and is asked first; an object admission that throws answers the same `503`, never an empty list; a fault the security service's object admission folds into "not admitted" is answered as the object not existing, which fails closed.
+
+Known residuals, not narrowed by this change: outlets that carry only object names and labels (the API description document, label bundles), and navigation entries that name an object.
 
 To restore an object for a caller, grant them read access to it (`allowRead` in one of their permission sets); the data plane's read access and the metadata plane's visibility are the same grant.
