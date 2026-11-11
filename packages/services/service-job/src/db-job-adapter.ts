@@ -469,8 +469,7 @@ export class DbJobAdapter implements IJobService {
    */
   async replay(name: string, data?: unknown, options?: JobReplayOptions): Promise<void> {
     // Same execution path as trigger, with the run tagged 'replay'.
-    const record: { handler: JobHandler } | undefined = (this.inner as any).jobs?.get?.(name);
-    if (!record) throw new Error(`Job "${name}" not found`);
+    if (!this.innerRegistration(name)) throw new Error(`Job "${name}" not found`);
 
     const guard = this.replayGuards.get(name);
     if (guard) {
@@ -491,8 +490,19 @@ export class DbJobAdapter implements IJobService {
     // made one replay read as two runs, the wrapper's tagged `schedule`. The
     // wrapper's row IS the replay's, written and settled by the same code as
     // every other run's, so its status needs no reading back either.
-    const claim: ReplayClaim = { wrapper: record.handler, taken: false };
+    //
+    // The wrapper is read HERE, not before the guard's await: a re-schedule in
+    // between replaces it, and `inner.trigger()` reads the registration in this
+    // same tick, so the claim names the wrapper that call will run.
+    const registration = this.innerRegistration(name);
+    if (!registration) throw new Error(`Job "${name}" not found`);
+    const claim: ReplayClaim = { wrapper: registration.handler, taken: false };
     await replayScope.run(claim, () => this.inner.trigger(name, data));
+  }
+
+  /** `inner`'s registration of `name` — the wrapper `trigger()` and `replay()` run. */
+  private innerRegistration(name: string): { handler: JobHandler } | undefined {
+    return (this.inner as any).jobs?.get?.(name);
   }
 
   async listExecutionsByStatus(

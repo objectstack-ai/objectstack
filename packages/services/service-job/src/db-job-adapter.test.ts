@@ -635,4 +635,19 @@ describe('DbJobAdapter — a run row records the trigger of the call that ran it
       ['other', 'manual'],
     ]);
   });
+
+  it('a job re-scheduled while its replay guard is consulted still replays as `replay`', async () => {
+    // The re-schedule replaces the wrapper `inner` holds; the tag must name
+    // the wrapper the replay actually runs, not the one it found first.
+    const { adapter, runs } = build();
+    const schedule = { type: 'cron', expression: '0 0 1 1 *' } as const;
+    await adapter.schedule('job', schedule, async () => {});
+    adapter.setReplayGuard('job', async () => {
+      await adapter.schedule('job', schedule, async () => {});
+      return { allow: true };
+    });
+
+    await adapter.replay('job');
+    expect(runs().map((r) => r.trigger)).toEqual(['replay']);
+  });
 });
