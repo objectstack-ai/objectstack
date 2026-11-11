@@ -328,7 +328,7 @@ export default class AuditVerify extends Command {
     if (report.faults.length > 0) {
       console.log('');
       console.log(chalk.red('  Chain faults:'));
-      for (const f of report.faults) console.log(`    ${chalk.red(f.code)}  ${f.object} ${f.chain}: ${f.message}`);
+      for (const f of report.faults) console.log(`    ${chalk.red(f.kind)}  ${f.object} ${f.chain}: ${f.message}`);
     }
     console.log('');
     const t = report.totals;

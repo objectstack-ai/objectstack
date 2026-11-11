@@ -60,7 +60,7 @@ export const AUDIT_ROW_VERDICTS = ['unmodified', 'modified', 'missing', 'late', 
 export type AuditRowVerdict = (typeof AUDIT_ROW_VERDICTS)[number];
 
 /** What failed in a chain: each one fails the run. */
-export type AuditChainFaultCode =
+export type AuditChainFaultKind =
   /** A checkpoint or amendment row that is not a valid signed body. */
   | 'malformed'
   /** Signed under a key the trust anchor does not vouch for. */
@@ -86,7 +86,7 @@ export interface AuditChainFault {
   readonly object: string;
   /** The chain: `org:<id>`, or `deployment`. */
   readonly chain: string;
-  readonly code: AuditChainFaultCode;
+  readonly kind: AuditChainFaultKind;
   /** The checkpoint's sequence, when the fault is one checkpoint's. */
   readonly sequence?: number;
   /** The amendment row's id, when the fault is one amendment's. */
@@ -469,21 +469,21 @@ class ObjectCheck {
       try {
         body = checkpointBodyFromRow(row);
       } catch (err) {
-        this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), code: 'malformed', message: `checkpoint ${String(row.id)}: ${messageOf(err)}` });
+        this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), kind: 'malformed', message: `checkpoint ${String(row.id)}: ${messageOf(err)}` });
         continue;
       }
       const chain = chainKeyOf(body.tenant_id);
       if (this.check.inScope(chain)) this.check.chain(this.name, chain).checkpoints += 1;
       if (row.chain_key !== chain) {
         this.check.fault({
-          object: this.name, chain, code: 'chain_key', sequence: body.sequence,
+          object: this.name, chain, kind: 'chain_key', sequence: body.sequence,
           message: `checkpoint ${body.sequence}: stored under chain '${String(row.chain_key)}', but its signed organization is chain '${chain}'`,
         });
       }
       const signed = await this.check.signature(body.signing_key_id, signedBodyBytes(body), row.signature);
       if (signed !== 'ok') {
         this.check.fault({
-          object: this.name, chain, code: signed, sequence: body.sequence,
+          object: this.name, chain, kind: signed, sequence: body.sequence,
           message: signed === 'untrusted_key'
             ? `checkpoint ${body.sequence}: signed under key ${body.signing_key_id}, which no trusted key matches — it holds nothing`
             : `checkpoint ${body.sequence}: its signature does not verify under key ${body.signing_key_id} — it holds nothing`,
@@ -503,7 +503,7 @@ class ObjectCheck {
       if (twin) {
         twin.holds = false;
         head.holds = false;
-        this.check.fault({ object: this.name, chain, code: 'duplicate', sequence: body.sequence, message: `checkpoint ${body.sequence}: two checkpoints take this sequence — neither holds anything` });
+        this.check.fault({ object: this.name, chain, kind: 'duplicate', sequence: body.sequence, message: `checkpoint ${body.sequence}: two checkpoints take this sequence — neither holds anything` });
       } else {
         taken.set(this.key(chain, body.sequence), head);
       }
@@ -533,7 +533,7 @@ class ObjectCheck {
       try {
         body = amendmentBodyFromRow(row);
       } catch (err) {
-        this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), code: 'malformed', amendment: String(row.id), message: `amendment ${String(row.id)}: ${messageOf(err)}` });
+        this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), kind: 'malformed', amendment: String(row.id), message: `amendment ${String(row.id)}: ${messageOf(err)}` });
         continue;
       }
       const chain = chainKeyOf(body.tenant_id);
@@ -541,7 +541,7 @@ class ObjectCheck {
       if (signed !== 'ok') {
         // An amendment nothing vouches for is ignored: the row it would explain reads as what it is.
         this.check.fault({
-          object: this.name, chain, code: signed, amendment: String(row.id),
+          object: this.name, chain, kind: signed, amendment: String(row.id),
           message: `${body.kind} amendment ${String(row.id)}: ${signed === 'untrusted_key' ? `signed under key ${body.signing_key_id}, which no trusted key matches` : 'its signature does not verify'} — it is ignored`,
         });
         continue;
@@ -576,7 +576,7 @@ class ObjectCheck {
       }
       if (reason !== null) {
         this.check.fault({
-          object: this.name, chain, code: 'expiry',
+          object: this.name, chain, kind: 'expiry',
           message: `expiry of sequences ${expiry.first_sequence}–${expiry.last_sequence} is not honoured: ${reason} — the range reads missing`,
         });
         continue;
@@ -609,7 +609,7 @@ class ObjectCheck {
         let end = s;
         while (end + 1 <= last && !seqs.has(end + 1) && !this.expiryCovering(chain, end + 1)) end += 1;
         this.check.fault({
-          object: this.name, chain, code: 'gap', sequence: s,
+          object: this.name, chain, kind: 'gap', sequence: s,
           message: `${s === end ? `sequence ${s}` : `sequences ${s}–${end}`}: no checkpoint holds it and no honoured expiry covers it — its rows are missing`,
         });
         s = end;
@@ -621,7 +621,7 @@ class ObjectCheck {
         if (expected === undefined) continue; // the gap is reported above
         if (head.previousDigest !== expected) {
           this.check.fault({
-            object: this.name, chain, code: 'link', sequence: head.sequence,
+            object: this.name, chain, kind: 'link', sequence: head.sequence,
             message: `checkpoint ${head.sequence}: its previous_digest is not the digest of ${bridge ? `the expiry ending at ${bridge.last_sequence}` : `checkpoint ${head.sequence - 1}`}`,
           });
         }
@@ -773,13 +773,13 @@ class ObjectCheck {
     try {
       hashes = checkpointLeafHashesFromRow(row, body);
     } catch (err) {
-      this.check.fault({ ...at, code: 'leaf_hashes', sequence: body.sequence, message: `checkpoint ${body.sequence}: ${messageOf(err)} — it holds nothing` });
+      this.check.fault({ ...at, kind: 'leaf_hashes', sequence: body.sequence, message: `checkpoint ${body.sequence}: ${messageOf(err)} — it holds nothing` });
       for (const id of body.row_ids) this.listedByFaulted.add(id);
       return;
     }
     const seed = await this.openSeed(body);
     if (typeof seed === 'string') {
-      this.check.fault({ ...at, code: 'seed', sequence: body.sequence, message: `checkpoint ${body.sequence}: its seed ${seed} — it holds nothing` });
+      this.check.fault({ ...at, kind: 'seed', sequence: body.sequence, message: `checkpoint ${body.sequence}: its seed ${seed} — it holds nothing` });
       for (const id of body.row_ids) this.listedByFaulted.add(id);
       return;
     }

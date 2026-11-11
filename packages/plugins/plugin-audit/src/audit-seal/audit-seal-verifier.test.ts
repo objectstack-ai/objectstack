@@ -83,7 +83,7 @@ async function sealedLedger(options: { objects?: unknown[] } = {}) {
 /** Each row that is not unmodified, as `id: verdict` (`late!` for an unsealed late row). */
 const verdicts = (report: AuditVerifyReport) =>
   Object.fromEntries(report.rows.map((r) => [r.row, r.verdict === 'late' && !r.sealed ? 'late!' : r.verdict]));
-const faultCodes = (report: AuditVerifyReport) => report.faults.map((f) => `${f.chain}#${f.sequence ?? '-'}:${f.code}`).sort();
+const faultKinds = (report: AuditVerifyReport) => report.faults.map((f) => `${f.chain}#${f.sequence ?? '-'}:${f.kind}`).sort();
 
 /** A signing key nobody vouches for: its row is planted, its private half is the forger's own. */
 function plantKey(s: Awaited<ReturnType<typeof sealedLedger>>) {
@@ -201,7 +201,7 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     const forged = { ...checkpointBodyFromRow(cp), signing_key_id: planted.fingerprint } as CheckpointSignedBody;
     Object.assign(cp, { signing_key_id: planted.fingerprint, signature: planted.sign(signedBodyBytes(forged)) });
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_b#0:untrusted_key']);
+    expect(faultKinds(report)).toEqual(['org:org_b#0:untrusted_key']);
     expect(report.keys.untrusted).toEqual([planted.fingerprint]);
     expect(report.keys.trusted).toEqual([s.keyId]);
     expect(verdicts(report)).toEqual({ r5: 'late!' });
@@ -212,7 +212,7 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     const s = await sealedLedger();
     s.checkpoint('org:org_a', 0).sealed_at = at(12, 0);
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_a#0:signature', 'org:org_a#1:link']);
+    expect(faultKinds(report)).toEqual(['org:org_a#0:signature', 'org:org_a#1:link']);
     expect(verdicts(report)).toEqual({ r1: 'late!', r2: 'late!' });
   });
 
@@ -220,7 +220,7 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     const s = await sealedLedger();
     s.checkpoints().push({ ...s.checkpoint('org:org_b', 0), id: 'twin' });
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_b#0:duplicate']);
+    expect(faultKinds(report)).toEqual(['org:org_b#0:duplicate']);
     expect(verdicts(report)).toEqual({ r5: 'late!' });
   });
 
@@ -228,14 +228,14 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     const s = await sealedLedger();
     s.checkpoint('org:org_b', 0).row_ids = '["r5","r5"]';
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_b#-:malformed']);
+    expect(faultKinds(report)).toEqual(['org:org_b#-:malformed']);
     expect(report.ok).toBe(false);
   });
 
   it('refuses a stored chain key that disagrees with the signed organization', async () => {
     const s = await sealedLedger();
     s.checkpoint('org:org_b', 0).chain_key = 'org:org_z';
-    expect(faultCodes(await s.verifyNow())).toEqual(['org:org_b#0:chain_key']);
+    expect(faultKinds(await s.verifyNow())).toEqual(['org:org_b#0:chain_key']);
   });
 });
 
@@ -246,7 +246,7 @@ describe('a checkpoint holds its rows only through its signed root and its seed'
     const hashes = JSON.parse(String(cp.leaf_hashes)) as string[];
     cp.leaf_hashes = canonicalJson([hashes[1], hashes[0]]);
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_a#0:leaf_hashes']);
+    expect(faultKinds(report)).toEqual(['org:org_a#0:leaf_hashes']);
     expect(report.faults[0].message).toMatch(/do not rebuild the signed root/);
     expect(verdicts(report)).toEqual({ r1: 'late!', r2: 'late!' });
   });
@@ -256,7 +256,7 @@ describe('a checkpoint holds its rows only through its signed root and its seed'
     const cp = s.checkpoint('org:org_a', 0);
     cp.leaf_hashes = canonicalJson((JSON.parse(String(cp.leaf_hashes)) as string[]).slice(0, 1));
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_a#0:leaf_hashes']);
+    expect(faultKinds(report)).toEqual(['org:org_a#0:leaf_hashes']);
     expect(report.faults[0].message).toMatch(/1 hash\(es\) for 2 row id\(s\) and a leaf count of 2/);
   });
 
@@ -266,7 +266,7 @@ describe('a checkpoint holds its rows only through its signed root and its seed'
     const secrets = s.hot.table('sys_secret');
     secrets.splice(secrets.findIndex((r) => r.id === handle), 1);
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_b#0:seed']);
+    expect(faultKinds(report)).toEqual(['org:org_b#0:seed']);
     expect(verdicts(report)).toEqual({ r5: 'late!' });
   });
 });
@@ -280,7 +280,7 @@ describe('links: the whole chain, whatever the window range (D4)', () => {
     const cps = s.checkpoints();
     cps.splice(cps.indexOf(s.checkpoint('org:org_a', 1)), 1);
     const report = await s.verifyNow();
-    expect(faultCodes(report)).toEqual(['org:org_a#1:gap']);
+    expect(faultKinds(report)).toEqual(['org:org_a#1:gap']);
     expect(verdicts(report)).toEqual({ r4: 'late!' });
   });
 
@@ -289,7 +289,7 @@ describe('links: the whole chain, whatever the window range (D4)', () => {
     s.checkpoint('org:org_a', 0).sealed_at = at(12, 0);
     s.ledger.find((r) => r.id === 'r5')!.payload = 'x';
     const report = await s.verifyNow({ from: new Date(at(10, 30)), to: new Date(at(11, 0)) });
-    expect(faultCodes(report)).toEqual(['org:org_a#0:signature', 'org:org_a#1:link']);
+    expect(faultKinds(report)).toEqual(['org:org_a#0:signature', 'org:org_a#1:link']);
     expect(report.rows).toEqual([]);
     expect(report.totals.unmodified).toBe(1); // r4: window 10:00 is the one [10:30, 11:00) overlaps
   });
@@ -350,7 +350,7 @@ describe('redaction amendments (D7)', () => {
     s.ledger.find((r) => r.id === 'r1')!.payload = '[masked]';
     const report = await s.verifyNow();
     expect(verdicts(report)).toEqual({ r1: 'modified' });
-    expect(report.faults.map((f) => [f.code, f.amendment])).toEqual([['untrusted_key', 'forged']]);
+    expect(report.faults.map((f) => [f.kind, f.amendment])).toEqual([['untrusted_key', 'forged']]);
   });
 
   it('ignores an amendment for a row or a column the named checkpoint does not seal as a commitment', async () => {
@@ -416,21 +416,21 @@ describe('expiry amendments (D8)', () => {
     const s = await sealedLedger();
     s.clock.now = DAY0 + 30 * 24 * H;
     await expire(s, { keep: '90d' });
-    expect(faultCodes(await s.verifyNow())).toEqual(['org:org_a#-:expiry', 'org:org_a#0:gap']);
+    expect(faultKinds(await s.verifyNow())).toEqual(['org:org_a#-:expiry', 'org:org_a#0:gap']);
   });
 
   it('refuses an expiry that does not start at the chain front', async () => {
     const s = await sealedLedger();
     s.clock.now = DAY0 + 30 * 24 * H;
     await expire(s, { first: 1, last: 1 });
-    expect(faultCodes(await s.verifyNow())).toEqual(['org:org_a#-:expiry', 'org:org_a#0:gap']);
+    expect(faultKinds(await s.verifyNow())).toEqual(['org:org_a#-:expiry', 'org:org_a#0:gap']);
   });
 
   it('refuses an expiry whose carried digest is not what the first remaining checkpoint links to', async () => {
     const s = await sealedLedger();
     s.clock.now = DAY0 + 30 * 24 * H;
     await expire(s, { digest: 'f'.repeat(64) });
-    expect(faultCodes(await s.verifyNow())).toEqual(['org:org_a#1:link']);
+    expect(faultKinds(await s.verifyNow())).toEqual(['org:org_a#1:link']);
   });
 
   it('never reads a row written back into an expired window as expired: no checkpoint holds it', async () => {

@@ -76,7 +76,7 @@ export type {
 export { AUDIT_ROW_VERDICTS, verifyAuditLedger } from './verifier.js';
 export type {
   AuditChainFault,
-  AuditChainFaultCode,
+  AuditChainFaultKind,
   AuditChainReport,
   AuditDanglingRedaction,
   AuditRowFinding,

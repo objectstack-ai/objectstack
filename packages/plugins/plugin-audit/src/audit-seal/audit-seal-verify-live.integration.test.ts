@@ -139,7 +139,7 @@ describe('os audit verify, the live check, on a live engine (ADR-0154 D9)', () =
     await hot().update('sys_audit_checkpoint', String(deployment.id), { signing_key_id: fingerprint, signature: sign(null, signedBodyBytes(body), privateKey).toString('base64') });
     const report = await verify();
     expect(report.keys.untrusted).toEqual([fingerprint]);
-    expect(report.faults.map((f) => [f.chain, f.code])).toEqual([['deployment', 'untrusted_key']]);
+    expect(report.faults.map((f) => [f.chain, f.kind])).toEqual([['deployment', 'untrusted_key']]);
     expect(verdicts(report)).toMatchObject({ p3: 'late!' });
     expect(report.ok).toBe(false);
   });
