@@ -506,15 +506,16 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     expect(rows.map((r) => r.title)).toEqual(['Channel row']);
 
     // CONTROL: the channel-written row is served and flips to read.
-    const listed = await (await as(USER, '/api/v1/notifications')).json();
+    type InboxList = { data: { unreadCount: number; notifications: Array<{ id: string }> } };
+    const listed = await (await as(USER, '/api/v1/notifications')).json() as InboxList;
     expect(listed.data.unreadCount).toBe(1);
     const readOne = await as(USER, '/api/v1/notifications/read', {
       method: 'POST',
       body: JSON.stringify({ ids: [listed.data.notifications[0].id] }),
     });
     expect(readOne.status).toBe(200);
-    expect((await readOne.json()).data).toMatchObject({ success: true, readCount: 1 });
-    const after = await (await as(USER, '/api/v1/notifications')).json();
+    expect((await readOne.json() as { data: unknown }).data).toMatchObject({ success: true, readCount: 1 });
+    const after = await (await as(USER, '/api/v1/notifications')).json() as InboxList;
     expect(after.data.unreadCount).toBe(0);
 
     await expectResolverAuthzReadsSucceed();
