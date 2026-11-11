@@ -302,7 +302,19 @@ export function bindAppArtifactHandlers(
     }
     let hookGroups: HookBindingGroup[] = [];
     try {
-        hookGroups = hookBindingGroups(bundle, owner);
+        const read = hookBindingGroups(bundle, owner);
+        hookGroups = read.groups;
+        // [#32349] A hook name a package body and the top level both carry:
+        // nothing tells whose each copy is, so neither binds (ADR-0150 D3).
+        for (const refused of read.refused) {
+            logger.error(`${tag} ${describeHookNameRefusal(refused)}`, undefined, {
+                appId,
+                hook: refused.name,
+                code: 'RESOURCE_CONFLICT',
+                reason: 'ambiguous-in-environment',
+                packages: refused.packageIds,
+            });
+        }
     } catch (err: any) {
         logger.error(`${tag} Failed to read the declared hooks and functions`, err as Error, { appId });
     }
@@ -610,7 +622,11 @@ interface HookBindingGroup {
  * namespace or none may) — and then each body binds its OWN hooks of the name
  * under its own package (`split` once). Each owner's hooks keep the order the
  * reconciled list carries them in, and the owners bind in the order their
- * first hook appears there.
+ * first hook appears there. A name that would go to a body other than the
+ * artifact's own, and that the top level carries beside the bodies (an input
+ * with no manifest declares it too, counted as #32355 counts a job's), is
+ * `refused`: nothing tells the residual's copy from the body's, so no hook of
+ * the name binds, and the caller logs the refusal naming both holders.
  *
  * **Functions, by name.** One body declares the name in its `functions` (read
  * by name, with or without a callable: a built artifact's body carries the ref
@@ -628,11 +644,11 @@ interface HookBindingGroup {
  * reaches its own body's functions, and a function another body declares is
  * not its own (`bindHooksToEngine` refuses it at registration).
  */
-function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
+function hookBindingGroups(bundle: unknown, owner: string): { groups: HookBindingGroup[]; refused: HookNameRefusal[] } {
     const reconciledHooks = collectBundleHooks(bundle);
     const reconciledFunctions = collectBundleFunctionEntries(bundle);
     const bodies = artifactBodies(bundle);
-    if (!bodies) return [{ owner, hooks: reconciledHooks, functions: reconciledFunctions }];
+    if (!bodies) return { groups: [{ owner, hooks: reconciledHooks, functions: reconciledFunctions }], refused: [] };
 
     const byOwner = new Map<string, { hooks: any[]; functions: HookBindingGroup['functions'] }>();
     const groupOf = (to: string) => {
@@ -667,10 +683,30 @@ function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
         }));
         return packages.every((incoming) => namespaceNameConflicts(incoming, packages).length === 0);
     };
+    // The body hook names the top level carries beside the bodies (the residual
+    // twin): the reconciled list holds more hooks of the name than the bodies
+    // declare, since the flattened top level copies each body hook once. By
+    // count, never by comparing a copy with its body (`jobDeclaringPackages`).
+    const reconciledCount = new Map<string, number>();
+    for (const hook of reconciledHooks) {
+        const name = hookNameOf(hook);
+        if (name !== undefined) reconciledCount.set(name, (reconciledCount.get(name) ?? 0) + 1);
+    }
+    const residualCarries = (name: string, holders: readonly Holder[]) =>
+        (reconciledCount.get(name) ?? 0) > holders.reduce((sum, holder) => sum + holder.hooks.length, 0);
+    const refused = new Map<string, HookNameRefusal>();
     const split = new Set<string>();
     for (const hook of reconciledHooks) {
         const name = hookNameOf(hook);
         const holders = name === undefined ? [] : holdersByName.get(name) ?? [];
+        // A name a body other than the artifact's own would take, which the
+        // residual carries too: nothing picks the body for the residual's copy,
+        // so neither binds. Under the artifact's owner nothing is picked.
+        const toBodies = holders.length === 1 ? ownerOf(holders[0].body) !== owner : holders.length > 1 && heldApart(name!, holders);
+        if (toBodies && residualCarries(name!, holders)) {
+            if (!refused.has(name!)) refused.set(name!, { name: name!, packageIds: holders.map((holder) => holder.body.packageId) });
+            continue;
+        }
         if (holders.length === 1) groupOf(ownerOf(holders[0].body)).hooks.push(hook);
         else if (holders.length > 1 && heldApart(name!, holders)) {
             if (split.has(name!)) continue;
@@ -726,9 +762,25 @@ function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
         for (const to of owners) groupOf(to).functions[name] = entry;
     }
 
-    return [...byOwner]
+    const groups = [...byOwner]
         .filter(([, group]) => group.hooks.length > 0 || Object.keys(group.functions).length > 0)
         .map(([groupOwner, group]) => ({ owner: groupOwner, hooks: group.hooks, functions: group.functions }));
+    return { groups, refused: [...refused.values()] };
+}
+
+/** A hook name {@link hookBindingGroups} binds under no owner: the declaring bodies and the top level both carry it. */
+interface HookNameRefusal {
+    readonly name: string;
+    /** The package bodies that declare the name; the top level is the other holder. */
+    readonly packageIds: readonly string[];
+}
+
+/** The sentence a {@link HookNameRefusal} is logged with: both holders and the fix. */
+function describeHookNameRefusal({ name, packageIds }: HookNameRefusal): string {
+    const bodies = packageIds.map((id) => `package "${id}"`).join(', ');
+    return `Hook "${name}" NOT bound: it is declared by ${bodies} and by this artifact's top level outside every `
+        + 'package body (an input with no manifest), and nothing tells which copy is whose (ADR-0150 D3), so no hook '
+        + 'of the name binds. Rename the top-level hook, or the package body\'s, so each name has one declaring holder.';
 }
 
 /** A hook's name, the key {@link hookBindingGroups} reads it by; `undefined` for one with none. */

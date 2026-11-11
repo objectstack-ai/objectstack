@@ -457,6 +457,29 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(ql.registry.sealBareNameHolders(), 'the cold boot finds no function held twice').toEqual([]);
     });
 
+    it('NARROWING — a hook name body B declares and an input with no manifest declares too binds neither, never the residual\'s as B\'s; when the body is the artifact\'s own, both bind as before', async () => {
+        const residual = defineStack({
+            functions: { qa_res_fn: stamp('res') },
+            hooks: [{ name: 'qa_twin', object: 'beta_doc', events: ['beforeInsert'], handler: 'qa_res_fn' }, hookOn('alpha', 'qa_twin_own', 'qa_res_fn')],
+        } as never);
+        const artifact = compose(
+            packageStack('beta', { functions: { beta_fn: stamp('beta') }, hooks: [hookOn('beta', 'qa_twin', 'beta_fn')] }),
+            residual,
+            packageStack('alpha', { hooks: [hookOn('alpha', 'qa_twin_own', 'qa_res_fn')] }),
+        );
+        expect(artifact.manifest.id, 'precondition: the artifact is alpha\'s, so alpha is the residual\'s own package').toBe(ALPHA);
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(artifact, logger);
+
+        bind(ql, artifact, logger);
+
+        expect(errors.map((e) => [e.meta?.hook, e.meta?.code, e.meta?.packages])).toEqual([['qa_twin', 'RESOURCE_CONFLICT', [BETA]]]);
+        expect(await insertInto(ql, 'beta'), 'neither copy of the name binds').toBeUndefined();
+        expect(ql.functionHoldersOf('qa_res_fn').packageItem(BETA), 'the residual\'s function is not attributed to beta').toBeUndefined();
+        // The residual's twin of the artifact's own body's hook: one package, both bind under it.
+        expect(await insertInto(ql, 'alpha')).toBe('res;res;');
+    });
+
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {
         // `os build` lowers an inline hook handler it cannot extract to a ref the
         // runtime module serves; the artifact loader merges the module's callables
