@@ -801,15 +801,25 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
      * The caller, as the host authenticated it. The same envelope a REST
      * request carries: an anonymous caller (no `userId`, not `isSystem`) is
      * refused `401`, as at the REST door.
+     *
+     * It is used as given. `dispatch()` resolves a REST caller's envelope
+     * against the kernel the request was placed on; this door does not, so
+     * the envelope must be the caller as the named environment resolves it
+     * (its roles and permissions there). See {@link dispatchAction} for the
+     * gates that stay the host's.
      */
     executionContext: ExecutionContext;
     /**
-     * The environment the call runs in; omitted, the single-environment
-     * default. On a multi-kernel host the call is placed the way the REST
-     * door places `POST /environments/:environmentId/actions/...`: the host's
-     * `kernel-resolver` is asked that scoped path, and the call runs on the
-     * kernel it answers (on the host kernel when it places none). A resolver
-     * that throws refuses the call with the status it carries.
+     * The environment the call runs in. It reaches the host's
+     * `kernel-resolver` as the scoped-URL hint (`urlEnvironmentId`), the way
+     * `POST /environments/:environmentId/actions/...` reaches it, and the
+     * resolver writes the environment: the call runs on the kernel it answers,
+     * on the host kernel when it places none, and a resolver that throws
+     * refuses the call with the status it carries. Omitted, the resolver gets
+     * no environment hint and places the call from what else it reads (the
+     * `credentialHeaders`; a host door has no hostname), or not at all. Where
+     * no environment was written — no resolver, or none placed — the call runs
+     * in the kernel's default environment, as the REST door's does.
      */
     environmentId?: string;
     /** The object whose action is called; omitted, an object-less action. */
@@ -1007,9 +1017,17 @@ const hostDispatchers = new WeakMap<object, HttpDispatcher>();
  *
  * `kernel` is the kernel the host's HTTP door is served from — on a
  * multi-kernel host, the one that registers the `kernel-resolver` service.
- * The call is placed in `request.environmentId`'s kernel by the dispatcher's
- * own scope step, asked the path `POST /environments/:id/actions/...` would
- * ask, so both doors run the call on the same kernel.
+ * The call is placed by the dispatcher's own placement step, asked what the
+ * scoped REST request asks, so both doors run the call on the same kernel.
+ *
+ * What `dispatch()` runs after placement and this door does NOT, so it stays
+ * the host's job before it calls:
+ *  - resolving the caller's envelope against the placed kernel
+ *    (`executionContext` is used as given);
+ *  - the ADR-0069 authentication-policy gate (an expired password or a
+ *    required MFA step blocks a REST session; nothing here reads a session);
+ *  - the environment-membership gate, which refuses a signed-in non-member of
+ *    the environment `403 PROJECT_MEMBERSHIP_REQUIRED` at the REST door.
  *
  * @example
  * const answer = await dispatchAction(kernel, {

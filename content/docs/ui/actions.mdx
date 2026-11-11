@@ -720,15 +720,33 @@ posture cannot quietly drop the AI rules.
 `credentialHeaders` are the caller's own credential headers, read the way the
 REST door reads its request's: a same-origin `type: 'api'` action forwards
 with them, and its target authorizes the caller itself. Omit them and such an
-action forwards with none. `environmentId` names the environment the action
-runs in; without it the kernel's default environment is used.
+action forwards with none.
 
 Pass the kernel your HTTP door is served from. On a multi-kernel host that is
-the kernel that registers the `kernel-resolver` service: the call is placed by
-the same step that places `POST /api/v1/environments/:id/actions/...`, so it
-runs on the environment's own kernel, and on the host kernel only where the
-resolver places it there. A resolver that fails refuses the call with its own
-status; the call never runs on the host kernel in its place.
+the kernel that registers the `kernel-resolver` service. `environmentId` reaches
+that resolver the way the environment of
+`POST /api/v1/environments/:id/actions/...` does, and the resolver places the
+call: it runs on the environment's own kernel, and on the host kernel only where
+the resolver places it there. A resolver that fails refuses the call with its
+own status; the call never runs on the host kernel in its place. Without
+`environmentId` the resolver gets no environment to read and places the call
+from what else it reads (your `credentialHeaders`; a host door has no
+hostname), or not at all. Wherever no environment gets placed (no resolver, or
+one that places none), the call runs in the kernel's default environment, as
+the REST door's does.
+
+Placement is all `dispatchAction` shares with the REST door's request
+handling. Three steps that door runs after placement are **not** run here, so
+they stay your door's job:
+
+- **The caller's identity in that environment.** The REST door resolves its
+  caller against the kernel the request was placed on. `executionContext` is
+  used as you pass it, so pass the caller as the named environment knows
+  them (roles and permissions there).
+- **The authentication-policy gate** (ADR-0069): a session with an expired
+  password or a pending MFA step is blocked at the REST door.
+- **Environment membership**: the REST door refuses a signed-in user who is
+  not a member of the environment, **403** `PROJECT_MEMBERSHIP_REQUIRED`.
 
 `namespace` addresses an installed package's action the way the
 `/api/v1/actions/:namespace/:object/:action` path does (`_env` names the
