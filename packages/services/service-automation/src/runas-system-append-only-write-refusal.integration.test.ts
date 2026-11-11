@@ -16,6 +16,10 @@
  *    `sys_activity` fails the run with `PERMISSION_DENIED` carried to its
  *    caller, user-triggered and user-less alike, and the row does not move —
  *    whichever organization the row names;
+ *  - the same run's delete of a record a ledger row references is refused
+ *    whole with `PERMISSION_DENIED` (the engine's clean-up of that reference
+ *    is a change to the ledger row), and nothing changes; a platform delete of
+ *    the same record lands and clears the reference;
  *  - CONTROL, the platform's own writers, whose system context carries no run
  *    (the retention sweeper, a migration), update and delete both ledgers as
  *    before;
@@ -150,6 +154,36 @@ describe("a runAs:'system' flow does not change or delete an append-only object'
         }
       });
     }
+  }
+
+  // [Seat decision on the contract review] Deleting a record that a ledger row
+  // references makes the engine clear that reference on the ledger row, under
+  // the deleting context: a change to an append-only object, so the delete is
+  // refused whole.
+  for (const [object, field, row] of [
+    ['sys_activity', 'actor_id', (id: string, user: string) => ({ ...LEDGERS.sys_activity.row(id, orgA), actor_id: user })],
+    ['sys_audit_log', 'user_id', (id: string, user: string) => ({ ...LEDGERS.sys_audit_log.row(id, orgA), user_id: user })],
+  ] as const) {
+    it(`a ${object} row references a user: a runAs:'system' flow's delete of that user is refused with PERMISSION_DENIED and nothing changes; a platform delete of the same user lands`, async () => {
+      const user = `usr_departed_${++seq}`;
+      const ledgerId = `${object}_ref_${seq}`;
+      await ql.insert('sys_user', { id: user, name: user, email: `${user}@example.test` }, { context: SYS });
+      await ql.insert(object, row(ledgerId, user), { context: { isSystem: true, tenantId: orgA } });
+      const ledgerBefore = await stored(object, ledgerId);
+      const userBefore = await stored('sys_user', user);
+
+      const res: any = await run(remove('sys_user', user));
+      expect(res.success, `the run succeeded: ${JSON.stringify(res)}`).toBe(false);
+      expect(res.innerRefusal?.code).toBe('PERMISSION_DENIED');
+      expect(res.innerRefusal?.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system is refused/);
+      expect(res.innerRefusal?.message).toMatch(/deleting this record would change a record in an append-only ledger that references it/);
+      expect(await stored('sys_user', user)).toEqual(userBefore);
+      expect(await stored(object, ledgerId)).toEqual(ledgerBefore);
+
+      await ql.delete('sys_user', { where: { id: user }, context: SYS } as never);
+      expect(await stored('sys_user', user)).toBe(null);
+      expect(await stored(object, ledgerId)).toMatchObject({ id: ledgerId, [field]: null });
+    });
   }
 
   it("CONTROL: a platform writer's system context, which carries no run, updates and deletes both ledgers as before", async () => {

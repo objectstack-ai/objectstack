@@ -142,7 +142,13 @@ async function boot(): Promise<ObjectQL> {
       inline('qa_note', ['title', 'organization_id', 'owner_id']),
       // Two append-only stand-ins, named for the audit ledger and the activity feed.
       { ...inline('sys_audit_log', ['action', 'object_name']), managedBy: 'append-only', systemFields: { tenant: false } },
-      { ...inline('sys_activity', ['type', 'summary']), managedBy: 'append-only', systemFields: { tenant: false } },
+      {
+        ...inline('sys_activity', ['type', 'summary']),
+        managedBy: 'append-only',
+        systemFields: { tenant: false },
+        // The reference a delete of the user it names has to clear.
+        fields: { ...inline('sys_activity', ['type', 'summary']).fields, actor_id: { name: 'actor_id', type: 'lookup', reference: 'sys_user' } },
+      },
       SysPermissionSet,
       SysPosition,
       SysPositionPermissionSet,
@@ -545,5 +551,60 @@ describe('[ruling record 6787890900] app-automation elevation does not change or
         expect(await stored(engine, 'qa_note', 'note_1'), label).toBe(null);
       }
     });
+  });
+});
+
+describe("[seat decision on the contract review] an elevated automation's delete of a record a ledger row references is refused whole", () => {
+  const CLEANUP = /deleting this record would change a record in an append-only ledger that references it \('sys_activity'\.actor_id\)/;
+
+  it('names the delete, the referencing ledger and the rule, not the ledger write the author never wrote', () => {
+    const context = {
+      ...FLOW_SYSTEM,
+      __referentialFieldClear: true,
+      __referentialFieldClearCause: { object: 'sys_user', id: 'usr_departed', referencingObject: 'sys_activity', referencingId: 'act_1', field: 'actor_id' },
+    };
+    let err: any = null;
+    try {
+      assertAppAutomationAppendOnlyWriteAllowed({ object: 'sys_activity', operation: 'update', context }, () => ({ managedBy: 'append-only' }));
+    } catch (e) {
+      err = e;
+    }
+    expect(err?.code).toBe('PERMISSION_DENIED');
+    expect(err?.statusCode ?? err?.status).toBe(403);
+    expect(err.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system is refused/);
+    expect(err.message).toMatch(CLEANUP);
+    expect(err.message).toMatch(/an insert is not judged by it/);
+    expect(err.message).toMatch(/Keep the record/);
+    expect(err.message).not.toMatch(/usr_departed|act_1/);
+    expect(err.details).toMatchObject({ operation: 'delete', object: 'sys_user', referencingObject: 'sys_activity', field: 'actor_id' });
+  });
+
+  for (const [label, context] of [['flow', FLOW_SYSTEM], ['hook', HOOK_SYSTEM], ['action', ACTION_SYSTEM]] as const) {
+    it(`a ${label} elevation's delete is refused with 403, and neither the record nor the ledger row moves`, async () => {
+      const engine = await boot();
+      await engine.insert('sys_user', { id: 'usr_departed', name: 'usr_departed' }, opts(SEEDER));
+      await engine.insert('sys_activity', { id: 'act_1', type: 'created', summary: 'Note created', actor_id: 'usr_departed' }, opts(SEEDER));
+      const ledgerBefore = await stored(engine, 'sys_activity', 'act_1');
+
+      const err = await refusal(() => engine.delete('sys_user', { where: { id: 'usr_departed' }, context: { ...context } } as never));
+      expect(err, 'the delete landed').not.toBe(null);
+      expect(err.code).toBe('PERMISSION_DENIED');
+      expect(err.statusCode ?? err.status).toBe(403);
+      expect(err.message).toMatch(CLEANUP);
+
+      expect(await stored(engine, 'sys_user', 'usr_departed')).toMatchObject({ id: 'usr_departed' });
+      expect(await stored(engine, 'sys_activity', 'act_1')).toEqual(ledgerBefore);
+    });
+  }
+
+  it("CONTROL: a platform writer's delete of the same record lands and clears the ledger row's reference", async () => {
+    const engine = await boot();
+    await engine.insert('sys_user', { id: 'usr_departed', name: 'usr_departed' }, opts(SEEDER));
+    await engine.insert('sys_activity', { id: 'act_1', type: 'created', summary: 'Note created', actor_id: 'usr_departed' }, opts(SEEDER));
+
+    await engine.delete('sys_user', { where: { id: 'usr_departed' }, context: { ...SEEDER } } as never);
+
+    expect(await stored(engine, 'sys_user', 'usr_departed')).toBe(null);
+    expect(await stored(engine, 'sys_activity', 'act_1')).toMatchObject({ id: 'act_1', actor_id: null });
   });
 });
