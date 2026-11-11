@@ -217,6 +217,7 @@
     "JobReplayOptions (interface)",
     "JobRetryPolicy (interface)",
     "JobRunOutcome (interface)",
+    "JobRunTrigger (type)",
     "JobSchedule (interface)",
     "JobScheduleOptions (interface)",
     "KNOWLEDGE_SERVICE (const)",

@@ -84,6 +84,7 @@ import {
     type SyncRunCounts,
     type SyncRunDescription,
     type SyncRunLedger,
+    type SyncRunOrigin,
     type SyncRunPosition,
     type SyncRunScope,
 } from './sync-run-ledger.js';
@@ -188,6 +189,13 @@ export interface ConnectorPullOptions {
      * `null` or `''`: read by no package.
      */
     callerPackageId?: string | null;
+    /**
+     * [ADR-0153 D7] The job run that drove the pull
+     * (`ConnectorSourcePullRequest.jobRunId` / `trigger`), kept on the run
+     * record. Absent for a pull no job drove.
+     */
+    jobRunId?: string;
+    trigger?: SyncRunOrigin['trigger'];
     /** Automation context handed to the connector action, as a flow node would hand it. */
     automation?: AutomationContext;
 }
@@ -402,9 +410,17 @@ function servedHolderPackage(answer: Record<string, unknown> | undefined): strin
     return id;
 }
 
+/** The job run that drove the pull, as the request carries it: only what it says. */
+function originOf(opts: ConnectorPullOptions): SyncRunOrigin {
+    return {
+        ...(opts.jobRunId ? { jobRunId: opts.jobRunId } : {}),
+        ...(opts.trigger ? { trigger: opts.trigger } : {}),
+    };
+}
+
 /**
- * Open the pull's run (ADR-0153 D7). A ledger that cannot write the row
- * refuses the pull here, before anything is read.
+ * Open the pull's run (ADR-0153 D7), with the job run that drove it. A ledger
+ * that cannot write the row refuses the pull here, before anything is read.
  */
 async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions): Promise<SyncRunHandle> {
     const requested: SyncRunScope = { mapping: opts.mapping, organizationId: organizationOf(opts.context) };
@@ -427,7 +443,7 @@ async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions):
     let id: string;
     let scope: SyncRunScope;
     try {
-        const opened = await ledger.open(requested, new Date());
+        const opened = await ledger.open(requested, new Date(), originOf(opts));
         id = opened.id;
         // The run is scoped by the organization its row holds, not the one asked for.
         scope = { mapping: opts.mapping, ...(opened.organizationId ? { organizationId: opened.organizationId } : {}) };
