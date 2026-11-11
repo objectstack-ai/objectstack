@@ -88,6 +88,7 @@ import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   bundleEntryKey,
+  isBundledStoreType,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
@@ -3335,7 +3336,19 @@ export class MetadataManager implements IMetadataService {
 
     for (const loader of this.loaders.values()) {
         try {
-            const items = await loader.loadMany<T>(type, options);
+            // [#31699 R4-B; epic ruling 6799056319] A bundled type stored per
+            // `(package, name)` reads the loader's keyed entries where it has
+            // them: a row bound to its package by the `package_id` column alone
+            // (as the metadata protocol writes it) carries no stamp in its body,
+            // so only the entry's `packageId` keeps two packages' same member
+            // apart. Such a body is handed on stamped with that package
+            // (`_packageId`, the column's package and only the column's, as the
+            // protocol's own read binds a row), so a caller that registers it
+            // back — the boot priming pass — fills that package's slot and its
+            // member's row, never a package-less one.
+            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
+                ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
+                : await loader.loadMany<T>(type, options);
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
@@ -4024,3 +4037,13 @@ export class MetadataManager implements IMetadataService {
   }
 }
 
+/**
+ * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
+ * body names none itself; the body unchanged otherwise.
+ */
+function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
+  const data = entry.data as unknown;
+  if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
+  return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+}

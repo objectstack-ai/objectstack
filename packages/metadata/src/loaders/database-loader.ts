@@ -1567,7 +1567,12 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     name: string,
     data: unknown,
-  ): Promise<{ existing: Record<string, unknown> | null; packageId?: string; rows: Array<Record<string, unknown>> }> {
+  ): Promise<{
+    existing: Record<string, unknown> | null;
+    packageId?: string;
+    rows: Array<Record<string, unknown>>;
+    member?: string | null;
+  }> {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const bySlot = new Map<string, Record<string, unknown>>();
     for (const row of rows) {
@@ -1575,6 +1580,19 @@ export class DatabaseLoader implements MetadataLoader {
       if (!bySlot.has(key)) bySlot.set(key, row);
     }
     const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
+    // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
+    // a row per member: the write goes to the row of the member the body
+    // declares (the canonical one spelled `null`, `storedBundleMemberOf`), and
+    // a member with no row in the slot is inserted — ⛔ never written over
+    // another member's row. The slot itself is chosen from every row of the
+    // name, as for every by-package type.
+    if (isBundledStoreType(type)) {
+      const member = storedBundleMemberOf(type, data) ?? null;
+      const rowOf = (slot: string) => rows.find((row) => storeRowKey(name, storedRowPackageId(row)) === slot
+        && (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member);
+      const existing = rowOf(key) ?? replaces.map(rowOf).find(Boolean) ?? null;
+      return { existing, packageId: slotPackageOf(key), rows, member };
+    }
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
     return { existing, packageId: slotPackageOf(key), rows };
   }
@@ -1654,7 +1672,7 @@ export class DatabaseLoader implements MetadataLoader {
         // Skip the write when the stored CONTENT is identical (prevents phantom
         // version bumps). [#21828] Content, not stamps: see `storedBodyUnchanged`.
         const previousChecksum = existing.checksum as string | undefined;
-        if (storedBodyUnchanged(existing, type, newChecksum)) {
+        if (storedBodyUnchanged(existing, type, newChecksum) || (slot?.member !== undefined && onlyBoundStampAdded(existing, type, data, slot.packageId))) {
           // No DB write, but make sure the cached payload reflects the latest
           // call (prior cached `null` would otherwise mask a freshly-saved
           // record). [#32246] An unchanged row written before this loader
@@ -1721,6 +1739,9 @@ export class DatabaseLoader implements MetadataLoader {
           version,
           source: 'database',
           ...binding,
+          // [#31699 R4-A] A bundled type's new row names its member, as the
+          // store's unique key `(type, name, package_id, bundle_member)` reads it.
+          ...(slot?.member !== undefined ? { bundle_member: slot.member } : {}),
           created_at: now,
           updated_at: now,
         });
@@ -1916,6 +1937,21 @@ function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: s
     return false;
   }
   return hashSpec(storedBody, type) === hash;
+}
+
+/**
+ * [#31699 R4-B] Whether `data` is `row`'s stored body plus nothing but a
+ * `_packageId` stamp naming the package `row` is already bound to: the stamp
+ * `MetadataManager.loadMany` puts on a body its row binds by the `package_id`
+ * column alone. Such a save writes nothing new, so it is no change.
+ */
+function onlyBoundStampAdded(row: Record<string, unknown>, type: string, data: unknown, packageId: string | undefined): boolean {
+  if (packageId === undefined || storedRowPackageId(row) !== packageId) return false;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false;
+  if ((data as Record<string, unknown>)._packageId !== packageId) return false;
+  const unstamped: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+  delete unstamped._packageId;
+  return storedBodyUnchanged(row, type, contentHash(JSON.stringify(unstamped), type));
 }
 
 /**

@@ -1707,9 +1707,8 @@ describe('#13997 — stat() emits canonical ISO text whatever the dialect materi
  * (in the set, collapsed one row per name): one alpha bundle answered only
  * `fr-FR`; two packages' bundles answered 1 row of 4.
  *
- * Out of scope: a save through the loader is locale-blind and overwrites
- * another member's row in its slot, as on `main` (card #32422), so the
- * bundles below are seeded as the store writes them.
+ * The bundles below are seeded as the store writes them; the save's own
+ * member-awareness is pinned in the R4-A describe after this one.
  */
 describe('[#31699 R3-B] a bundled type keeps every member of every slot', () => {
   const ALPHA = 'com.alpha.app';
@@ -1798,5 +1797,100 @@ describe('[#31699 R3-B] a bundled type keeps every member of every slot', () => 
     await memory.save('email_template', 'welcome', { ...body('en-US', BETA), _packageId: BETA });
     expect(subjects(await memory.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${BETA} en-US`]);
     expect((await memory.loadManyKeyed('email_template')).map((entry) => entry.name)).toEqual(['welcome', 'welcome']);
+  });
+});
+
+/**
+ * [#31699 R4-A / R4-B, #32422; epic ruling 6799056319] The save of a bundled
+ * type stored per `(package, name)` writes the row of the member the body
+ * declares, and inserts a member that has no row: never another member's row.
+ *
+ * BEFORE (measured at f9f589da, same fixtures): the boot priming pass
+ * (`MetadataManager.loadMany` then `register` each, as
+ * `MetadataPlugin._loadFromFileSystem` does) on a slot holding `en-US` and
+ * `fr-FR` replaced the `en-US` row's body with `fr-FR`'s (version 3, a history
+ * row); with two packages' rows bound by `package_id` alone, `loadMany`
+ * answered alpha's two and the pass inserted a package-less row; a direct save
+ * of `fr-FR` into a slot holding `en-US` overwrote the `en-US` row.
+ */
+describe('[#31699 R4-A] the save of a bundled type writes its own member\'s row', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+
+  const body = (locale: string, packageId: string, stamped: boolean) => ({
+    name: 'welcome', locale, subject: `${packageId} ${locale}`, bodyHtml: '<p/>',
+    ...(stamped ? { _packageId: packageId } : {}),
+  });
+  // Bound by the `package_id` column; the body stamped or not (the protocol writes none).
+  const seed = (packageId: string, locale: string, version: number, stamped: boolean) =>
+    driver.create('sys_metadata', {
+      id: `${packageId}_${locale}`, type: 'email_template', name: 'welcome', state: 'active', version,
+      checksum: `${packageId}_${locale}`, package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify(body(locale, packageId, stamped)),
+    });
+  const stored = async (type = 'email_template') =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).subject ?? JSON.parse(row.metadata).label])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  const manager = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  /** `MetadataPlugin._loadFromFileSystem`'s priming pass, over the manager's loaders. */
+  const prime = async (m: MetadataManager) => {
+    for (const item of (await m.loadMany('email_template')) as Array<{ name?: string }>) {
+      if (item?.name) await m.register('email_template', item.name, item, { notify: false });
+    }
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const stamped of [true, false]) {
+    it(`the priming pass leaves a two-member slot's rows unchanged (bodies ${stamped ? 'stamped' : 'bound by the column only'}; BEFORE: en-US overwritten by fr-FR)`, async () => {
+      await seed(ALPHA, 'en-US', 1, stamped);
+      await seed(ALPHA, 'fr-FR', 2, stamped);
+      const before = await stored();
+      await prime(manager());
+      expect(await stored()).toEqual(before);
+      expect(driver.update).not.toHaveBeenCalled();
+      expect(driver.create).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it('R4-B: rows bound by the column only — `loadMany` keeps two packages\' same member apart, and the priming pass writes nothing (BEFORE: alpha\'s two only, and a package-less row inserted)', async () => {
+    await seed(ALPHA, 'en-US', 1, false);
+    await seed(ALPHA, 'fr-FR', 2, false);
+    await seed(BETA, 'en-US', 3, false);
+    await seed(BETA, 'fr-FR', 4, false);
+    const m = manager();
+    const items = (await m.loadMany('email_template')) as Array<{ subject: string; _packageId?: string }>;
+    expect(items.map((item) => [item._packageId, item.subject]).sort()).toEqual([
+      [ALPHA, `${ALPHA} en-US`], [ALPHA, `${ALPHA} fr-FR`], [BETA, `${BETA} en-US`], [BETA, `${BETA} fr-FR`],
+    ]);
+    const before = await stored();
+    await prime(m);
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(4);
+  });
+
+  it('a direct save of fr-FR into a slot holding en-US inserts the fr-FR row; the en-US row is untouched; a second fr-FR save updates its own row (BEFORE: the en-US row overwritten)', async () => {
+    await seed(ALPHA, 'en-US', 1, true);
+    const loader = new DatabaseLoader({ driver });
+    await loader.save('email_template', 'welcome', body('fr-FR', ALPHA, true));
+    expect(await stored()).toEqual([[ALPHA, null, `${ALPHA} en-US`], [ALPHA, 'fr-FR', `${ALPHA} fr-FR`]]);
+    await loader.save('email_template', 'welcome', { ...body('fr-FR', ALPHA, true), subject: 'fr again' });
+    expect(await stored()).toEqual([[ALPHA, null, `${ALPHA} en-US`], [ALPHA, 'fr-FR', 'fr again']]);
+  });
+
+  it('CONTROL: an unbundled slotted type (agent) still saves to its one row per slot', async () => {
+    const loader = new DatabaseLoader({ driver });
+    await loader.save('agent', 'helper', { name: 'helper', label: 'v1', _packageId: ALPHA });
+    await loader.save('agent', 'helper', { name: 'helper', label: 'v2', _packageId: ALPHA });
+    expect(await stored('agent')).toEqual([[ALPHA, null, 'v2']]);
   });
 });
