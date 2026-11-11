@@ -271,6 +271,25 @@
         ],
         "must_not_contain": []
       }
+    },
+    {
+      "id": 16,
+      "prompt": "Our `consent_change` audit log must show it if anyone edits, inserts or deletes rows directly in the database, but whatever proof is stored must not carry the consent text itself. How do I declare that?",
+      "expected_output": "Keep `lifecycle.class: 'audit'` with its bounding `retention` (or a `ttl` on `created_at`) and add `seal: { valueFields: ['consent_text'] }`: the audit plugin signs each `created_at` hour into one checkpoint per organization, chained to the one before, where `valueFields` columns enter as salted commitments and every other column in clear. The object declares its own `id` and `tenant_id` fields; without them it parses but is not sealed, and the sealer reports it at `error` each hour. Refused at parse: `seal` on a class other than `audit`, `valueFields` naming `id`, `created_at` or an undeclared field, and beside `seal` a `retention` or `ttl` `onlyWhen`, a `ttl` on another field, or rotation `storage`. Until expiry ships, the sweeper still deletes sealed rows, which then read as missing. Field history is not tamper evidence.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "seal",
+          "valueFields",
+          "tenant_id",
+          "salted commitments",
+          "read as missing"
+        ],
+        "must_not_contain": [
+          "trackHistory",
+          "class: 'telemetry'"
+        ]
+      }
     }
   ]
 }
