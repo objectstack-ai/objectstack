@@ -123,10 +123,13 @@ function makeEngine(mode: TransactionMode) {
             if (tables[table]) return tables[table].find((h) => matchesWhere(h, opts.where)) ?? null;
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts: { where?: Record<string, unknown> } = {}) {
+        async find(table: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
             const where = opts.where ?? {};
-            if (tables[table]) return tables[table].filter((h) => matchesWhere(h, where));
-            return Array.from(rows.values()).filter((r) => matchesWhere(r, where));
+            const hits: Array<Record<string, unknown>> = tables[table]
+                ? tables[table].filter((h) => matchesWhere(h, where))
+                : Array.from(rows.values()).filter((r) => matchesWhere(r, where));
+            // The caller's bound, after the filter, by presence.
+            return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
         },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
@@ -360,6 +363,7 @@ describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll b
         expect(h.mutationEvents).not.toHaveBeenCalled();
         const audit = h.tables.sys_metadata_audit;
         expect(audit.filter((r) => r.operation === 'publish' && r.outcome === 'allowed')).toEqual([]);
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
         expect(audit.filter((r) => r.code === 'batch_aborted').map((r) => `${r.type}/${r.name}`)).toEqual([`object/${OBJ}`]);
         expect(h.tables.sys_metadata_commit).toEqual([]);
         // The refusal was found before anything was written: not one history event.
@@ -457,6 +461,7 @@ describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll b
         expect(namesOf(h.active())).toEqual(['dataset/nyd2_leave_request_ds']);
         expect(error).toHaveBeenCalledTimes(1);
         expect(String(error.mock.calls[0]![0])).toContain('dataset/nyd2_leave_request_ds');
+        // adr0112-ok: D6b — persisted audit column, its own vocabulary
         const aborted = h.tables.sys_metadata_audit.find((r) => r.code === 'batch_aborted')!;
         expect(String(aborted.note)).not.toContain('nothing landed');
     });
