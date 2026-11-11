@@ -30,6 +30,8 @@ import {
 } from '@objectstack/metadata-core/testing';
 import { OBJECT_SCHEMA_MASK_DISABLE_ENV, isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 const account = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
 
@@ -75,21 +77,22 @@ async function runExit(
     else delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
     try {
         const dispatcher = make({ ...services, ...(security ? { security } : {}) });
-        const res = await dispatcher.handleMetadata(path('account'), ctxFor(testCase), 'GET');
-        const status = res.response.status;
+        const answered = (await dispatcher.handleMetadata(path('account'), ctxFor(testCase), 'GET')).response;
+        if (!answered) throw new Error(`${path('account')} was not handled`);
+        const status = answered.status;
         if (status >= 400) {
             // [ruling record 6787890900] `absent` only when byte-identical to
             // this door's answer for a name it holds nothing for — asked with
             // no security service, so the reference is never a fault the
             // case's own service raises.
-            const unknown = await make(services).handleMetadata(path(UNKNOWN), ctxFor(testCase), 'GET');
-            if (shape === 'item' && unknown.response.status === status
-                && JSON.stringify(unknown.response.body) === JSON.stringify(res.response.body)) {
+            const unknown = (await make(services).handleMetadata(path(UNKNOWN), ctxFor(testCase), 'GET')).response;
+            if (shape === 'item' && unknown?.status === status
+                && JSON.stringify(unknown.body) === JSON.stringify(answered.body)) {
                 return { kind: 'absent' };
             }
             return { kind: 'fault', status };
         }
-        const document = pick(res.response.body.data);
+        const document = pick(answered.body.data);
         if (shape === 'list' && document === undefined) return { kind: 'absent' };
         return { kind: 'document', document };
     } finally {

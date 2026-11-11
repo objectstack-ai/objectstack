@@ -39,6 +39,8 @@ import {
 } from '@objectstack/metadata-core/testing';
 import { isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
+// Paid at collection, not inside a case's clock: the routes' reach loads it lazily.
+import '@objectstack/objectql';
 
 const ACCOUNT = FLS_CONTRACT_OBJECT as unknown as Record<string, unknown>;
 
@@ -481,7 +483,10 @@ describe('[ruling record 6787890900] an object the caller may not read shares no
         expect(reader.status).toBe(200);
         const unknown = await read(READER, UNKNOWN);
         expect(unknown.status).toBe(404);
-        for (const headers of [{}, { 'if-none-match': reader.etag! }, { 'if-modified-since': 'Thu, 01 Jan 2099 00:00:00 GMT' }]) {
+        const validators: Array<Record<string, string>> = [
+            {}, { 'if-none-match': reader.etag! }, { 'if-modified-since': 'Thu, 01 Jan 2099 00:00:00 GMT' },
+        ];
+        for (const headers of validators) {
             const nonReader = await read(NON_READER, 'account', headers);
             expect(nonReader.status, JSON.stringify(headers)).toBe(404);
             expect(JSON.stringify(nonReader.body)).toBe(JSON.stringify(unknown.body));
