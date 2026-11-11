@@ -266,6 +266,7 @@ import {
 } from '@objectstack/spec/api';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  FieldType,
   isAggregateCompatibleWithFieldType,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
@@ -1019,6 +1020,13 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
  */
 const GRID_ARITHMETIC_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg']);
 
+/**
+ * The declared `FieldType` vocabulary. A type outside it (a driver-internal
+ * alias such as `integer`) is not judged: the engine's `aggregate` door skips
+ * it too (its own `DECLARED_FIELD_TYPES`), and the table has no row to name.
+ */
+const DECLARED_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
+
 /** The aggregates the table accepts over `fieldType`, in the table's own order — the remedy's list. */
 function aggregatesAcceptingType(fieldType: string): string[] {
   return Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY).filter((fn) => isAggregateCompatibleWithFieldType(fn, fieldType));
@@ -1042,10 +1050,14 @@ function aggregatesAcceptingType(fieldType: string): string[] {
  * backend, ruled), pass, exactly as they pass the door.
  *
  * The grade is the page-sort grade, `error`: like a page sort the door refuses
- * (`page-field-unknown`, `sort-field-unsortable`), the declaration is refused
- * at runtime, on the grid's first grouped load and every load after it, and
- * Zod cannot see it — `GridAggregationSchema.field` is a bare string, and the
- * field's type lives on the object. This member reaches the page publish door
+ * (`page-field-unknown`, `sort-field-unsortable`), a grid that owns its fetch
+ * has its grouped header query refused at runtime, on the first grouped load
+ * and every load after it. A grid handed its rows (`data.provider: 'value'`)
+ * groups them in the browser instead and draws a number the pair cannot mean
+ * (`0` for a text sum); the declaration is the same one, refused here on the
+ * same table, because which of the two a block meets is not the
+ * declaration's to choose. Zod cannot see either — `GridAggregationSchema.field`
+ * is a bare string, and the field's type lives on the object. This member reaches the page publish door
  * (`runtimeTypes` carries `page`), so the refusal lands at save.
  *
  * Bound the way the page-sort walk binds the block ({@link PAGE_BLOCK_SORT_OBJECT_PROP}):
@@ -1056,7 +1068,7 @@ function aggregatesAcceptingType(fieldType: string): string[] {
  * `created_at`, are judged by their own declaration. Skipped, never reported:
  * an object this stack does not define or that declares no field map, a field
  * that does not resolve (existence is not this verdict), a dotted path, and a
- * leaf whose declaration carries no type (`id`).
+ * leaf whose declaration carries no type (`id`) or a type outside `FieldType`.
  */
 function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
@@ -1086,7 +1098,7 @@ function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
         const verdict = resolveFieldPath(graph, objectName, field);
         if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return;
         const fieldType = verdict.meta?.type;
-        if (typeof fieldType !== 'string' || !fieldType) return;
+        if (typeof fieldType !== 'string' || !DECLARED_FIELD_TYPES.has(fieldType)) return;
         if (isAggregateCompatibleWithFieldType(fn, fieldType)) return;
 
         const accepted = aggregatesAcceptingType(fieldType);
@@ -1096,8 +1108,8 @@ function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
           where: `page "${pageName}" · object-grid`,
           path: `${path}.properties.aggregations[${ai}]`,
           message:
-            `aggregation "${fn}" over "${field}" (\`${fieldType}\` on "${objectName}") is refused by the ` +
-            'aggregate × field-type table: the group header query answers 400 INVALID_FIELD',
+            `"${fn}" over "${field}" (\`${fieldType}\` on "${objectName}") is refused by the aggregate × ` +
+            'field-type table: 400 INVALID_FIELD on the server, a meaningless number in the browser',
           hint:
             virtualFieldAggregateRemedy(fn, fieldType) ??
             `Point "${fn}" at a numeric field, or aggregate "${field}" with one its \`${fieldType}\` type accepts: ` +

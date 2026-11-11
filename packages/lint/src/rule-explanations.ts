@@ -2779,7 +2779,9 @@ const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'grid draws in its group headers, answered by ONE aggregate query on the server. The engine\'s ' +
       '`aggregate` door asks the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, ' +
       '`@objectstack/spec/data`) about every pair and refuses one it refuses with `400 INVALID_FIELD`, so ' +
-      'a `sum` or `avg` over a refused type breaks the grid\'s grouped load, and every load after it.',
+      'a `sum` or `avg` over a refused type breaks the grid\'s grouped load, and every load after it. A ' +
+      'grid handed its rows (`data.provider: \'value\'`) groups them in the browser instead and draws a ' +
+      'number the pair cannot mean, `0` for a text sum; the declaration is refused either way.',
     'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
       'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
       'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
@@ -2789,7 +2791,8 @@ const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'value, whatever its `returnType`, so a total over it has to be STORED as a number field (kept by a ' +
       'hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
       '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
-      'dotted path and a field with no declared type are not judged here.',
+      'dotted path, a field two packages define at the same priority, and a field with no declared ' +
+      'type (or one outside `FieldType`) are not judged here.',
   ],
 };
 

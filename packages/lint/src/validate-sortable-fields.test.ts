@@ -1089,6 +1089,8 @@ const gridTaskFields = {
   cost: { type: 'currency', label: 'Cost' },
   rate: { type: 'percent', label: 'Rate' },
   score: { type: 'formula', label: 'Score', expression: 'hours * 2', returnType: 'number' },
+  labels: { type: 'tags', label: 'Labels' },
+  legacy_count: { type: 'integer', label: 'Legacy count' },
 };
 const gridStack = (aggregations: unknown, extra: Record<string, unknown> = {}) => ({
   objects: [{ name: 'grid_task', fields: gridTaskFields }, { name: 'crm_opportunity', fields: opportunityFields }],
@@ -1106,10 +1108,11 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     ['text', 'sum', 'title'],
     ['text', 'avg', 'notes'],
     ['date', 'sum', 'due_on'],
-    ['date', 'avg', 'closed_at'],
+    ['datetime', 'avg', 'closed_at'],
     ['date (a registry-injected column)', 'sum', 'created_at'],
     ['option', 'sum', 'stage'],
     ['reference', 'avg', 'account'],
+    ['multi-option (JSON-stored)', 'sum', 'labels'],
   ])('refuses `%s` family: %s over "%s", at `error`, at the entry\'s path', (_family, type, field) => {
     const findings = gridFindings([{ field: 'hours', type: 'sum' }, { field, type }]);
     expect(findings).toHaveLength(1);
@@ -1119,8 +1122,8 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
       where: 'page "board" · object-grid',
       path: 'pages[0].regions[0].components[0].properties.aggregations[1]',
     });
-    expect(findings[0].message).toContain(`aggregation "${type}" over "${field}"`);
-    expect(findings[0].message).toContain('400 INVALID_FIELD');
+    expect(findings[0].message).toContain(`"${type}" over "${field}"`);
+    expect(findings[0].message).toContain('400 INVALID_FIELD on the server');
   });
 
   it('names the aggregates the field\'s type accepts, read off the table', () => {
@@ -1163,6 +1166,19 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     expect(gridFindings([{ field: 'nope', type: 'sum' }, { field: 'account.amount', type: 'avg' }])).toEqual([]);
     expect(gridFindings([{ field: 'title', type: 'sum' }], { objectName: 'elsewhere_object' })).toEqual([]);
     expect(gridFindings([{ field: 'title', type: 'sum' }], { objectName: undefined })).toEqual([]);
+  });
+
+  it('skips a field with no declared type (`id`) and a type outside `FieldType`, as the door does', () => {
+    expect(gridFindings([{ field: 'id', type: 'sum' }, { field: 'legacy_count', type: 'avg' }])).toEqual([]);
+  });
+
+  it('judges a field an `objectExtensions` entry adds, and leaves a field two packages tie on unjudged', () => {
+    const ext = (label: string) => ({ manifest: { objectExtensions: [{ extend: 'grid_task', priority: 200, fields: { remark: { type: 'text', label } } }] } });
+    const once = { ...gridStack([{ field: 'remark', type: 'sum' }]), packages: [ext('A')] };
+    expect(validateSortableFields(once).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED).map((f) => f.path))
+      .toEqual(['pages[0].regions[0].components[0].properties.aggregations[0]']);
+    const tied = { ...gridStack([{ field: 'remark', type: 'sum' }]), packages: [ext('A'), ext('B')] };
+    expect(validateSortableFields(tied).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED)).toEqual([]);
   });
 
   it('binds the block by its `dataSource.object` first, then `properties.objectName`', () => {
