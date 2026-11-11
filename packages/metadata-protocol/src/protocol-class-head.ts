@@ -519,7 +519,10 @@ export class ProtocolClassHeadFacet {
             // write-through; see the docblock.
             await host.ensureObjectStorage(type, evt.name);
         } else {
-            await host.restoreArtifactRegistryView(type, evt.name, null, evt.member);
+            // [#32366] No package to name: the removed row's binding went with
+            // it, and the signal carries an address, never a binding (see
+            // above). A refusal of the bare baseline read is logged by the heal.
+            await host.restoreArtifactRegistryView(type, evt.name, null, null, evt.member);
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see

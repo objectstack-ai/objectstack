@@ -50,12 +50,28 @@ import {
 } from './protocol-package-bindings.js';
 import type { HydrationOptions, ShippingPackages, UnboundOwnerRefusalState } from './protocol-package-bindings.js';
 import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
+import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import type { ViewContainerWrite } from './protocol-package-bindings.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 // [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
 import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
+
+/**
+ * [#32366, ADR-0150 D5] The one line {@link ProtocolRegistryHydrationFacet.restoreArtifactRegistryView}
+ * logs when its walk stops on a throw: which item, why, and what the registry
+ * may keep serving. A package-scoped refusal (a read naming no package, of a
+ * name two packages hold) is named as one, with the holders its message lists.
+ */
+function registryHealStoppedMessage(type: string, name: string, packageId: string | null, error: unknown): string {
+    const reason = error instanceof Error ? error.message : String(error);
+    const why = packageScopedRefusalOf(error) !== undefined
+        ? `the metadata service refused the baseline read, which named ${packageId === null ? 'no package' : `package '${packageId}'`}: ${reason}`
+        : reason;
+    return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
+        + 'The stored rows are already correct; the registry entry is left as it was and may serve the removed row until the next reload.';
+}
 
 export class ProtocolRegistryHydrationFacet {
     /**
@@ -948,7 +964,9 @@ export class ProtocolRegistryHydrationFacet {
         // 3. Heal what the rows registered before and do not now.
         for (const name of previous) {
             if (registered.has(name)) continue;
-            await this.restoreArtifactRegistryView(type, name, organizationId);
+            // [#32366] No package: an expanded view's name is a global literal
+            // (ADR-0150 bucket 1), which the metadata service reads by name.
+            await this.restoreArtifactRegistryView(type, name, organizationId, null);
         }
     }
 
@@ -1266,13 +1284,42 @@ export class ProtocolRegistryHydrationFacet {
      * each registration is healed once. A walk that stops on a degraded
      * baseline read leaves that name registered until a restart.
      *
+     * ## [#32366, ADR-0150 D3/D5] The baseline is read for the removed row's package
+     *
+     * Tier 2's MetadataService read names the package of the row the caller
+     * removed (`packageId`), the way the other code-layer reads name the
+     * package they serve (`readCodeLayerForCarryForward`, the by-name reads).
+     * A type the service stores per `(package, name)` refuses a read naming no
+     * package of a name two packages hold (before #32244 that read picked the
+     * package written last), so read bare, a reset of package P's row on such
+     * a name restored nothing, and said nothing. Read for P, it restores P's
+     * baseline, never another package's.
+     *
+     * REQUIRED, never optional, for the reason `organizationId` is: an omitted
+     * package would read bare. A caller with no package to name passes `null`
+     * and says why at its call site: the removed row was package-less (the
+     * environment's own item, which D3 reads bare), the name is a global
+     * literal (a `view`, ADR-0150 bucket 1), or the caller never learns the
+     * binding (a peer converging on the cluster signal, whose payload carries
+     * an address and no binding).
+     *
      * Best-effort: a failure must never block the delete that already
-     * succeeded; the next full reload fixes the registry anyway.
+     * succeeded; the next full reload fixes the registry anyway. Never silent:
+     * what stops the walk is logged once, at `warn`, with what the registry
+     * may keep serving until then ({@link registryHealStoppedMessage}). A
+     * package-scoped refusal of the baseline read is named as one, with the
+     * holders it lists.
      */
     static async restoreArtifactRegistryView(host: Pick<ProtocolHost, 'anotherPackageShips' | 'applyRegistryWriteThrough' | 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'isArtifactBacked' | 'isUnservedSealedOverlay' | 'readItemFromMetadataService' | 'reconcileViewExpansions' | 'registryTakesStoredRows' | 'resyncStoredObjectExtensions' | 'rethrowUnlessMetadataStoreUnprovisioned'>, type: string,
             name: string,
             /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
             organizationId: string | null,
+            /**
+             * [#32366] The package the removed row was bound to, which tier 2's
+             * baseline read names; `null` for a package-less row, or where the
+             * caller has no binding to name (see the header).
+             */
+            packageId: string | null,
             /**
              * [#22877] The bundle member whose row was removed, as the door's
              * selector named it; omitted, the canonical member. For a type whose
@@ -1418,7 +1465,8 @@ export class ProtocolRegistryHydrationFacet {
             }
             if (healed) return;
 
-            const baseline = await host.readItemFromMetadataService(type, name);
+            // [#32366] Read for the removed row's package — see the header.
+            const baseline = await host.readItemFromMetadataService(type, name, packageId ?? undefined);
             // [#22877] A baseline of ANOTHER member is no baseline of this one:
             // the service keys a type's items by name alone, so it can hold a
             // bundle's other member under the name.
@@ -1543,8 +1591,10 @@ export class ProtocolRegistryHydrationFacet {
                     );
                 }
             }
-        } catch {
-            // Best-effort registry refresh; next read fixes it anyway
+        } catch (error) {
+            // [#32366] Best-effort, never silent: the delete has committed and
+            // is not failed here, and what stopped the walk is said once.
+            console.warn(registryHealStoppedMessage(type, name, packageId, error));
         }
     }
 

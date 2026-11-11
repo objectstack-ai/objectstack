@@ -8365,6 +8365,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /** [#32366] The package the removed row was bound to; `null` for none. */
+        packageId: string | null,
         /**
          * [#22877] The bundle member whose row was removed, as the door's
          * selector named it; omitted, the canonical member. For a type whose
@@ -8376,7 +8378,7 @@ export class ObjectStackProtocolImplementation implements
         member?: string,
     ): Promise<void> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, member);
+        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, packageId, member);
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */

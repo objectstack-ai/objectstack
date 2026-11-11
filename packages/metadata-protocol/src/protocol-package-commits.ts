@@ -1345,7 +1345,8 @@ export class ProtocolPackageCommitsFacet {
                     // #6602 gate this parameter carries asks "is this row
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
-                    await host.restoreArtifactRegistryView(it.type, it.name, null, member);
+                    // [#32366] For the package whose commit is reverted.
+                    await host.restoreArtifactRegistryView(it.type, it.name, null, commitPackageId, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
