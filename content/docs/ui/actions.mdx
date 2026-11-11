@@ -742,7 +742,7 @@ they stay your door's job:
 - **The caller's identity in that environment.** The REST door resolves its
   caller against the kernel the request was placed on. `executionContext` is
   used as you pass it, so pass the caller as the named environment knows
-  them (roles and permissions there).
+  them (their permission sets and positions there).
 - **The authentication-policy gate** (ADR-0069): a session with an expired
   password or a pending MFA step is blocked at the REST door.
 - **Environment membership**: the REST door refuses a signed-in user who is

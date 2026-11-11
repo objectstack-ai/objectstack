@@ -805,7 +805,7 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
      * It is used as given. `dispatch()` resolves a REST caller's envelope
      * against the kernel the request was placed on; this door does not, so
      * the envelope must be the caller as the named environment resolves it
-     * (its roles and permissions there). See {@link dispatchAction} for the
+     * (its permission sets and positions there). See {@link dispatchAction} for the
      * gates that stay the host's.
      */
     executionContext: ExecutionContext;
