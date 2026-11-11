@@ -58,6 +58,7 @@ import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
 import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
 import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-question.js';
+import { judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -1422,7 +1423,7 @@ export class ProtocolHistoryAndPublishFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#publishPackageDrafts`; the method's docblock there is its contract. */
-    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
+    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applyRegistryWriteThrough' | 'applySeedBodies' | 'classifyObjectContribution' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
         packageId: string;
         actor?: string;
         /**
@@ -1971,6 +1972,10 @@ export class ProtocolHistoryAndPublishFacet {
             advisories: RuntimeAuthoringIssue[];
         };
         const promoted: PromotedDraft[] = [];
+        // [#32369] The promoted objects as the registry registers them, and the
+        // order the unit admits them in (assigned inside the transaction).
+        let promotedObjects: BatchObjectRow[] = [];
+        let admittedOrder: readonly number[] = [];
         // (assigned inside the transaction closure — keep the wide type)
         let commit = null as { commitId: string } | null;
         // ADR-0119 D1 — `transaction` is contract-declared, so this reaches it
@@ -2049,7 +2054,7 @@ export class ProtocolHistoryAndPublishFacet {
                 : `publish app package '${request.packageId}'`,
         });
         /** Tag the causal item on the error that aborts the batch (the `catch` below reads it). */
-        const tagCausal = (e: unknown, d: (typeof ordered)[number]): Error => {
+        const tagCausal = (e: unknown, d: Pick<(typeof ordered)[number], 'type' | 'name' | 'member'>): Error => {
             const err = e instanceof Error ? e : new Error(String(e));
             (err as { __batchItem?: unknown }).__batchItem = d;
             return err;
@@ -2097,6 +2102,23 @@ export class ProtocolHistoryAndPublishFacet {
                         throw tagCausal(e, d);
                     }
                 }
+                // [#32369, ADR-0144 D2 and D6] The promoted objects as ONE unit,
+                // now that every draft is promoted: each promotion asked the
+                // registry about its body alone (`'package-publish'` is
+                // `'body-only'`, so a later draft can complete a pair, #29673),
+                // and nothing asked the pair once the package was whole. A row
+                // the registry refuses — at registration (D6's roll-up door) or
+                // against the unit (the follow door) — refuses the batch with
+                // that row as its cause, before the commit is recorded: the
+                // transaction rolls the promotions back, or the `catch` below
+                // undoes them, and the refusal is answered in `failed[]`.
+                promotedObjects = promoted.map((p) => ({
+                    type: p.singularType, name: p.d.name, body: p.body, packageId: p.packageId,
+                }));
+                const unitVerdict = judgeBatchObjectRegistrations(this, promotedObjects);
+                const [firstRefused] = unitVerdict.refused;
+                if (firstRefused) throw tagCausal(firstRefused[1], promoted[firstRefused[0]]!.d);
+                admittedOrder = unitVerdict.order;
                 // ADR-0067 — record this turn as ONE commit, INSIDE the same
                 // transaction as the promotions it describes: the commit row and
                 // the published state land or roll back together, so a recorded
@@ -2375,6 +2397,12 @@ export class ProtocolHistoryAndPublishFacet {
             });
         }
 
+        // [#32369] The promoted objects registered in the order the unit admits
+        // them, before the per-item side effects below register each again in
+        // publish order: a draft whose pair a later draft completes is then
+        // registered after its sibling, not refused (and only logged) at its
+        // own write-through ahead of it.
+        await registerAdmittedBatchRows(this, promotedObjects, admittedOrder);
         for (const p of promoted) {
             // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
             // discipline every advisory-carrying door follows: an advisory-free
