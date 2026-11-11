@@ -45,7 +45,8 @@
  *   value is wrong, so a second boot writes nothing.
  */
 
-import { keysetWalk } from '@objectstack/types';
+import { isMissingTableError, keysetWalk } from '@objectstack/types';
+import { authSystemWriteContext } from './auth-actor-attribution.js';
 
 /** The engine surface the mark needs — satisfied by `IDataEngine`. */
 export interface ScimIdentitySourceEngine {
@@ -96,7 +97,9 @@ export async function markDirectoryProvisionedUsers(
     const id = String(user.id);
     if (user.source === DIRECTORY_MANAGED_SOURCE) continue;
     if (holdsLocalPassword.has(id)) continue;
-    await engine.update('sys_user', { id, source: DIRECTORY_MANAGED_SOURCE }, { context: SYSTEM_CTX });
+    // Attributed like every other identity write plugin-auth makes: on the
+    // SCIM path to the connection performing the request, at boot to nobody.
+    await engine.update('sys_user', { id, source: DIRECTORY_MANAGED_SOURCE }, { context: await authSystemWriteContext() });
     written += 1;
   }
   return written;
@@ -121,14 +124,22 @@ export async function backfillScimProvisionedIdentitySource(
   const seen = new Set<string>();
   let marked = 0;
   const walk = keysetWalk<{ id?: unknown; user_id?: unknown }>(
-    async (q) =>
-      (await engine.find('sys_scim_subject', {
-        ...(q.where === undefined ? {} : { where: q.where }),
-        orderBy: q.orderBy,
-        limit: q.limit,
-        fields: ['id', 'user_id'],
-        context: SYSTEM_CTX,
-      })) as Array<{ id?: unknown; user_id?: unknown }>,
+    async (q) => {
+      try {
+        return (await engine.find('sys_scim_subject', {
+          ...(q.where === undefined ? {} : { where: q.where }),
+          orderBy: q.orderBy,
+          limit: q.limit,
+          fields: ['id', 'user_id'],
+          context: SYSTEM_CTX,
+        })) as Array<{ id?: unknown; user_id?: unknown }>;
+      } catch (e) {
+        // No subject table means no directory ever provisioned a user here:
+        // the one read failure that is an answer. Any other failure propagates.
+        if (isMissingTableError(e, 'sys_scim_subject')) return [];
+        throw e;
+      }
+    },
     { pageSize },
   );
   for await (const page of walk.pages()) {

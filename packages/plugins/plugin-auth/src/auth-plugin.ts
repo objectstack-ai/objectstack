@@ -1994,7 +1994,10 @@ export class AuthPlugin implements Plugin {
     // after the first marks zero. `scim-identity-source.ts` holds the rule.
     ctx.hook('kernel:ready', async () => {
       try {
+        // A composition with no engine has no identity tables to mark — the
+        // same posture as the `sys_account` stamp registration above.
         const engine = ctx.getService<IObjectQLEngine>('objectql');
+        if (!engine || typeof engine.find !== 'function') return;
         const { directoryProvisioned, marked } = await backfillScimProvisionedIdentitySource(engine as never);
         ctx.logger.info(
           `[auth] SCIM identity-source backfill: marked ${marked} of ${directoryProvisioned} `
