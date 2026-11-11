@@ -28,15 +28,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "通知事件",
-        help: "外键 → sys_notification(本行物化的 L2 事件)"
+        help: "本消息所投递的通知。将消息标记为已读时,已读状态记录在该通知上。"
       },
       delivery_id: {
         label: "投递记录",
-        help: "外键 → sys_notification_delivery(发件箱行);P1 之前为空"
+        help: "本消息的投递记录。站内消息不填写此项。"
       },
       actor_id: {
-        label: "执行人",
-        help: "触发该事件的用户(提及人、分配人)——与 sys_notification.actor_id 同语义。客户端据此可用纯本地比较抑制自己触发的回执。摘要行按构造为 null:合并后的一组没有单一执行人。"
+        label: "触发人",
+        help: "其操作触发了本通知的人,例如提及或分配接收人的人。消息合并了多条通知时为空。"
       },
       topic: {
         label: "主题"

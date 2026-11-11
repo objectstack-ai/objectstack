@@ -28,15 +28,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (the L2 event this row materializes)"
+        help: "The notification this message delivers. Marking the message read records it against this notification."
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "The delivery record of this message. Not filled in for in-app messages."
       },
       actor_id: {
-        label: "Actor",
-        help: "User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client suppress its own receipts with a purely local comparison. Null on a digest row by construction: a collapsed group has no single actor."
+        label: "Triggered By",
+        help: "The person whose action raised this notification, for example who mentioned or assigned the recipient. Empty when the message groups several notifications."
       },
       topic: {
         label: "Topic"

@@ -28,15 +28,15 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Benachrichtigungsereignis",
-        help: "Fremdschlüssel → sys_notification (das L2-Ereignis, das diese Zeile materialisiert)"
+        help: "Die Benachrichtigung, die diese Nachricht zustellt. Wird die Nachricht als gelesen markiert, wird dies für diese Benachrichtigung erfasst."
       },
       delivery_id: {
         label: "Zustellung",
-        help: "Fremdschlüssel → sys_notification_delivery (Postausgangszeile); null bis P1"
+        help: "Der Zustelldatensatz dieser Nachricht. Bei In-App-Nachrichten nicht ausgefüllt."
       },
       actor_id: {
-        label: "Akteur",
-        help: "Benutzer, der das Ereignis ausgelöst hat (Erwähnende, Zuweisende) — gleiche Semantik wie sys_notification.actor_id. Ermöglicht einem Client, eigene Bestätigungen per rein lokalem Vergleich auszublenden. Bei einer Sammelzeile konstruktionsbedingt null: Eine zusammengefasste Gruppe hat keinen einzelnen Akteur."
+        label: "Ausgelöst von",
+        help: "Die Person, deren Aktion diese Benachrichtigung ausgelöst hat, zum Beispiel wer den Empfänger erwähnt oder zugewiesen hat. Leer, wenn die Nachricht mehrere Benachrichtigungen zusammenfasst."
       },
       topic: {
         label: "Thema"

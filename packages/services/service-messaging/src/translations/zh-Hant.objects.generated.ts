@@ -28,15 +28,15 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "通知事件",
-        help: "外鍵 → sys_notification（本列所具體化的 L2 事件）"
+        help: "本訊息所投遞的通知。將訊息標記為已讀時,已讀狀態記錄在該通知上。"
       },
       delivery_id: {
         label: "傳送紀錄",
-        help: "外鍵 → sys_notification_delivery（寄件匣列）；P1 之前為 null"
+        help: "本訊息的投遞記錄。站內訊息不填寫此項。"
       },
       actor_id: {
-        label: "執行者",
-        help: "觸發此事件的使用者（提及者、指派者）——與 sys_notification.actor_id 語意相同。用戶端可據此以純本機比較隱藏自己觸發的回執。摘要列依構造為 null：合併後的群組沒有單一執行者。"
+        label: "觸發人",
+        help: "其操作觸發了本通知的人,例如提及或指派收件人的人。訊息合併了多則通知時為空。"
       },
       topic: {
         label: "主題"
