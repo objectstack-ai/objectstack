@@ -120,6 +120,9 @@ describe('one dashboard render sends its dataset queries as one batch (objectsta
     render(<DashboardRenderer schema={served} dataSource={source} />);
     await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
     expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
   });
 
   it('the grid layout surface sends the dashboard package with its batch as the reader\'s package too', async () => {
@@ -128,6 +131,9 @@ describe('one dashboard render sends its dataset queries as one batch (objectsta
     render(<DashboardGridLayout schema={served} dataSource={source} />);
     await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
     expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
   });
 
   it('control: a package-less dashboard sends its batch with no options at all', async () => {
@@ -135,6 +141,8 @@ describe('one dashboard render sends its dataset queries as one batch (objectsta
     render(<DashboardRenderer schema={DASHBOARD} dataSource={source} />);
     await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
     expect(batchDoor.mock.calls[0][1]).toBeUndefined();
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
   });
 
   it('the grid layout surface batches the same way', async () => {
