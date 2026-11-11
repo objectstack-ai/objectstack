@@ -73,7 +73,7 @@ import {
     type MappingArtifactLike,
 } from '@objectstack/core';
 import { needsExternalDriverFloor, resolveExternalRowCap } from '@objectstack/objectql';
-import { EXTERNAL_SCOPE_REMEDY, externalOrganizationScopeOf } from '@objectstack/plugin-security';
+import { EXTERNAL_SCOPE_REMEDY, externalOrganizationScopeOf } from '@objectstack/core';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveQueryReadLimits, resolveTenancyPosture } from '@objectstack/types';
 import type { ConnectorPullDeps, ConnectorPullOptions } from './connector-pull.js';

@@ -517,9 +517,12 @@ describe('#12892 step 2 — the artifact boot has ONE registrar for its security
             .toEqual(['_packageId', '_packageVersion', '_provenance', 'active', 'condition']);
         expect(diffPaths(door.get('position:sales_rep'), bundle.get('position:sales_rep')).sort())
             .toEqual(['_packageId', '_packageVersion', '_provenance', 'delegatable']);
+        // [#32162] The door-less registrar stamps a permission set's
+        // `_packageId` (its store is per `(package, name)`), so that key no
+        // longer differs; its version and provenance still do.
         expect(diffPaths(door.get('permission:support_agent'), bundle.get('permission:support_agent')).sort())
             .toEqual([
-                '_packageId', '_packageVersion', '_provenance', 'isDefault',
+                '_packageVersion', '_provenance', 'isDefault',
                 'objects.crm_lead.allowTransfer', 'objects.crm_lead.modifyAllRecords', 'objects.crm_lead.viewAllRecords',
                 'objects.crm_ticket.allowTransfer', 'objects.crm_ticket.modifyAllRecords', 'objects.crm_ticket.viewAllRecords',
             ]);
