@@ -540,6 +540,7 @@
     "checkPageMainRegionWidth (function)",
     "checkPagePrintComposition (function)",
     "checkPageRecordBindingPlacement (function)",
+    "checkPageRecordPlacesComponent (function)",
     "checkPageRegionPlacement (function)",
     "checkPageRequiresKind (function)",
     "checkPageSourceCompleteness (function)",
