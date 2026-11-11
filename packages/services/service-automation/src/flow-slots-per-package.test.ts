@@ -325,6 +325,20 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
     });
 
+    it('[M1, PR-2] the one slot left when the other holder\'s body was refused is not armed, behind one warning', () => {
+        const started: string[] = [];
+        engine.registerTrigger({ type: 'record_change', start: (b: { flowName: string }) => { started.push(b.flowName); }, stop: () => undefined } as unknown as FlowTrigger);
+        // P1's body of `f` is refused first; P2 then ships `f`: one engine slot, two registry holders.
+        registry.registerItem('flow', { ...leaf('f', 'p1'), _packageId: P1 }, 'name' as never, P1);
+        loaderSets.f = [P1];
+        engine.recordFlowRefusal('f', new Error('refused: p1 body'));
+        ship(P2, triggered('f', 'p2'));
+        expect(engine.getFlowSlots('f')).toHaveLength(1);
+        expect(started).toEqual([]);
+        expect(engine.getActiveTriggerBindings()).toEqual([]);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /whose body was refused/.test(message))).toHaveLength(1);
+    });
+
     it('[M1] two registry holders, one slot (the other body refused): no P1 caller, bare door or trigger reaches P2\'s flow', async () => {
         const started: string[] = [];
         engine.registerTrigger({ type: 'record_change', start: (b: { flowName: string }) => { started.push(b.flowName); }, stop: () => undefined } as unknown as FlowTrigger);
