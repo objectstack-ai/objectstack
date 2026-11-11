@@ -530,7 +530,10 @@ describe('a language is its pack plus its namespace partial packs', () => {
     Object.fromEntries(LOCALES.map((lang) => [`${NS}${lang}.ts`, packSource(lang, trees[lang])]));
 
   it('names one partial pack per language per namespace', () => {
-    expect(namespacePackPaths('zh-Hans')).toEqual(['packages/i18n/src/namespaces/marketplace/zh-Hans.ts']);
+    expect(namespacePackPaths('zh-Hans')).toEqual([
+      'packages/i18n/src/namespaces/marketplace/zh-Hans.ts',
+      'packages/i18n/src/namespaces/developer/zh-Hans.ts',
+    ]);
   });
 
   it('a group MOVED from the pack to its namespace is no drift and no key-set change', () => {
