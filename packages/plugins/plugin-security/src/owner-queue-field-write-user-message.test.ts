@@ -330,15 +330,25 @@ describe('the queue 403 on the wire: a sentence per verb, nothing else moves', (
     for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
       it(`${p.name} — ${locale}`, async () => {
         const refuse = await boot({ sets: [memberSet], row: p.row });
-        const answer = mapDataError(await refuse(p.opCtx(locale)), 'case');
+        const refusal = await refuse(p.opCtx(locale));
+        // The thrown refusal: code, status, message and details as before.
+        expect({
+          code: refusal.code,
+          status: refusal.status,
+          message: refusal.message,
+          details: refusal.details,
+        }).toEqual({
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          message: p.message,
+          details: { operation: p.operation, object: 'case', positions: [], permissionSets: [] },
+        });
+        // The wire body: every member but `userMessage` as before.
+        const answer = mapDataError(refusal, 'case');
         const { userMessage, ...rest } = answer.body;
         expect({ status: answer.status, body: rest }).toEqual({
           status: 403,
-          body: {
-            code: 'PERMISSION_DENIED',
-            error: p.message,
-            details: { operation: p.operation, object: 'case', positions: [], permissionSets: ['member_default'] },
-          },
+          body: { code: 'PERMISSION_DENIED', error: p.message, object: 'case' },
         });
         expect(userMessage).toBe(BUILTIN_OPERATION_MESSAGES[locale][p.key]);
       });
