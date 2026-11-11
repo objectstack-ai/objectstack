@@ -42,7 +42,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -159,13 +159,23 @@ async function openRecordPage(config: I18nConfig = EN) {
     <I18nProvider config={config} persistLanguage={false}>
       <MemoryRouter initialEntries={[`/apps/demo/${OBJECT}/record/${REC}`]}>
         <MetadataCtx.Provider value={metadata}>
-          <RecordDetailView
-            dataSource={ds as never}
-            objects={[def] as never}
-            onEdit={() => {}}
-            objectNameOverride={OBJECT}
-            recordIdOverride={REC}
-          />
+          {/* The record page, and the two places its not-found state leads: the object's list and Home. */}
+          <Routes>
+            <Route path={`/apps/demo/${OBJECT}`} element={<h1>Invoice list</h1>} />
+            <Route path="/home" element={<h1>Home page</h1>} />
+            <Route
+              path="*"
+              element={
+                <RecordDetailView
+                  dataSource={ds as never}
+                  objects={[def] as never}
+                  onEdit={() => {}}
+                  objectNameOverride={OBJECT}
+                  recordIdOverride={REC}
+                />
+              }
+            />
+          </Routes>
         </MetadataCtx.Provider>
       </MemoryRouter>
     </I18nProvider>,
@@ -299,5 +309,35 @@ describe('controls: not-found and a found record render as before (objectui#1190
     await waitFor(() => expect(screen.queryByTestId('record-access-denied')).toBeNull());
     expect(screen.queryByTestId('record-load-failed')).toBeNull();
     absent(NOT_FOUND_EN);
+  });
+});
+
+describe('the not-found state offers a way out: the object list, then Home (objectstack#32157)', () => {
+  it('Back to the list opens the object list', async () => {
+    answer = 'notFound';
+    await openRecordPage(EN);
+
+    const state = await screen.findByTestId('record-not-found', undefined, { timeout: 5000 });
+    expect(state).toHaveTextContent(NOT_FOUND_EN);
+    fireEvent.click(screen.getByRole('link', { name: /^Back to Invoice/ }));
+    expect(await screen.findByRole('heading', { name: 'Invoice list' })).toBeInTheDocument();
+  });
+
+  it('Back to home opens Home', async () => {
+    answer = 'notFound';
+    await openRecordPage(EN);
+
+    await screen.findByTestId('record-not-found', undefined, { timeout: 5000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to home' }));
+    expect(await screen.findByRole('heading', { name: 'Home page' })).toBeInTheDocument();
+  });
+
+  it('zh: both ways out read in the reader language', async () => {
+    answer = 'notFound';
+    await openRecordPage(ZH);
+
+    await screen.findByText(NOT_FOUND_ZH, undefined, { timeout: 5000 });
+    expect(screen.getByRole('link', { name: /^返回发票/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '返回首页' })).toBeInTheDocument();
   });
 });
