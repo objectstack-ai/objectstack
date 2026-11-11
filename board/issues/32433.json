@@ -1,0 +1,31 @@
+{
+  "number": 32433,
+  "kind": "pull_request",
+  "title": "test(auth): AuthProvider 401 re-check case waits on the re-check read with an explicit chain budget",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T13:45:41Z",
+  "updated_at": "2026-11-11T14:08:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32433",
+  "body": "Fixes #32426\nRefs #32420\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:AuthProvider 的「401 后重查会话」测试用例,改为先等重查请求真正发出,再等身份被清掉,等待预算由默认 1000 ms 改为显式的 10 s。\n- 为什么改:调度全量跑里该用例在 Test UI 分片负载下耗时 1022 ms 才失败,原因是等待预算过紧,不是产品时序缺陷。\n- 风险与回滚:仅改测试,断言一字未动;回滚即还原该文件。\n- 先看:`ui/packages/auth/src/__tests__/AuthProvider.test.tsx` 中 `CHAIN_MS` 常量与「the server answers \"no session\"」用例。\n- 两分钟验证:在 `ui/` 下跑 `pnpm exec vitest run packages/auth/src/__tests__/AuthProvider.test.tsx`,预期 20 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n`ui/packages/auth/src/__tests__/AuthProvider.test.tsx`, test-only (`skip-changeset`):\n\n- The \"the server answers no session\" case now first waits on the event it asserts on (the re-check `get-session` read reaching the fetch seam), then waits for identity to clear. Both assertions are unchanged; the trailing read-count `expect` is kept.\n- The `waitFor` calls in the 401 describe (`signedIn`, the three re-check cases) carry an explicit `CHAIN_MS = 10_000` budget with the reasoning in a comment. A passing run returns as soon as the DOM says so; the budget bounds only a failure's wait.\n- No skip, retry wrapper or quarantine; no assertion weakened.\n\n## Tests\n\nPremise check (not a product race): in `AuthProvider.tsx` the 401 subscription is registered by an effect keyed on `holdsSession`, and `loadSession` clears `sessionLoadInFlight` in the same continuation that sets the user, so by the time `signedIn()` sees \"Alice\" the subscription is live and the in-flight flag is down. The chain 401 -> `sessionEndEvents` -> `client.getSession()` -> `setUser(null)` has no timer or debounce; the red was only the 1000 ms default budget.\n\n- `pnpm exec vitest run packages/auth/src/__tests__/AuthProvider.test.tsx` (from `ui/`, under `os-verify-lock.sh`): 20/20 passed.\n- Repeat x50 under shard-like concurrency: 10 batches of 5 simultaneous `vitest run --maxWorkers=2` processes of this file under the lock: pass=50 fail=0 (`Tests 20 passed (20)` per run).\n- `pnpm --filter @object-ui/auth type-check`: exit 0.\n- Ablation: not run (test-only change; no product behaviour changed).\n\n## Acceptance notes\n\nLanding is the expected file; the producer (`AuthProvider.tsx`) needed no change.\n\n## Verification\n\nLocal gates: CI-owned families (Test UI shards, lint) are read from the PR check-runs; the `--commands` derivation for this diff lists only checker-health self-tests, none a PR verdict.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_012MmDsRT6hvZsQH9dTzn4CA\n"
+}

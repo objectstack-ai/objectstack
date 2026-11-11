@@ -1,0 +1,28 @@
+{
+  "number": 32443,
+  "kind": "issue",
+  "title": "[Decision] How should an app total a computed value (e.g. leave days = end − start + 1), when a formula field cannot be summed?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T14:01:59Z",
+  "updated_at": "2026-11-11T14:01:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32443",
+  "body": "Filing category: ② a decision only the maintainer can make.\nBatch-of: 15 cards filed together from one MCP capability test session (2026-11-11; 6 in cloud, 9 in objectstack).\n\n## 维护者速读\n\n- 现象：请假应用里「天数」是公式字段（`daysBetween(start,end)+1`）。「各类型请假总天数」这个最基本的统计做不出来：dataset 对公式字段 `sum` 被拒（`measure-aggregate-field-type-refused`），修复提示说「存成数字字段、由 hook 维护」，而托管 AI 建模这一档不允许带代码的 hook，agent 只能退回到「申请数」。\n- 要你裁：平台给「可汇总的计算值」哪条正路。\n- 推荐：B：支持「存储型公式」（写入时计算并落列），sum/avg 直接可用；A（改提示文案指向 record-change flow）作为不改契约的过渡说明可同时做。\n\n## One-sentence problem\n\nA customer cannot get \"total leave days by type\" out of a leave app, because the day count is computed and the platform refuses to total computed values without telling them a way they are allowed to use.\n\n## Evidence (reach)\n\nHosted tenant (`pnpm dev:stack`, Team plan; cloud `ff373e02`, framework `d7c3d44e`): dataset `leave_stats` with measure `{ name: 'total_days', aggregate: 'sum', field: 'days' }` (`days` = formula) → `verify_build` error `measure-aggregate-field-type-refused` \"… the number would depend on the SQL dialect. v18 refuses it\", fix \"store the value as a number field (kept by a hook) and aggregate that\" (`packages/spec/src/data/aggregate-field-type-compatibility.ts`, `packages/lint/src/rule-explanations.ts`). The same connection's restriction profile: \"in-process code (hooks/jobs with a handler …): NOT allowed\".\n\n## Governing text\n\n- `aggregate-field-type-compatibility.ts` — formula refused for sum/avg/min/max because it stores no column.\n- `docs/NORTH-STAR.md` — \"business reports\" is on the road.\n\n## Options\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | Keep the refusal; change the fix text to a path every tier allows: a `record-change` flow (`update_record` + `assignment`) that writes the value into a `number` field | Works, but each maker builds and maintains a flow per computed total | lint/spec wording · 1 PR · precedent: #24426 (same hint, reworded before) |\n| B | Stored formula: a formula field that declares it is persisted (computed on write, kept in a column, recomputed when its inputs change); sum/avg allowed on it | \"总天数\" just works; no flow to maintain | spec + objectql + drivers · 2–3 PRs · no precedent measured |\n| C | Allow aggregates over formulas the engine can translate to SQL | Works for simple expressions, refuses others | objectql/analytics · 2+ PRs · no precedent |\n\nBusiness reading: A = \"do it yourself with automation\"; B = \"mark it as stored and report on it\", how spreadsheets and most low-code tools behave; C = sometimes works, depending on the expression.\n\n## Recommendation\n\nB. Two years out a business-app platform lets you report on any number the user sees; persisted computed columns are the mainstream model (Postgres generated columns, Airtable formula + rollup, Dataverse calculated/rollup columns). A is a wording fix worth doing now regardless, because the current hint names a mechanism the hosted builder cannot use. C makes the answer depend on the expression, which is exactly the dialect drift the refusal exists to prevent. Confidence gap: recompute cost on bulk imports — unmeasured.\nSelf-check: only ① picks B; ②③④ do not flip it (② has pull; ④ argues for A first, which only affects timing).\n\n## After the ruling\n\nB: spec adds the persisted flag to `formula` (closed, refused where the expression cannot be computed on write), objectql computes on insert/update, the aggregate table admits it; lint names it as the fix. A: one wording PR in `rule-explanations.ts` / `aggregate-field-type-compatibility.ts`.\n\nos-decision-facets\n① 项目长远合理性: B 用一个声明键收敛「计算值可汇总」，消除每个应用手写 flow 的特例；A 把负担留给每个 maker。\n② 实际业务拉动: 请假/工时/订单金额这类「计算后再汇总」是报表最常见的需求，本次实测即撞上。\n③ 防 AI 犯错: B 是闭合声明、写入时算、拒收不可算的表达式；A 让 AI 手写 flow，最容易漏掉「输入变化时重算」。\n④ 创业阶段不扩散: B 新增一个 spec 键（永久义务）；A 零契约。\nPrior rulings read: \"formula aggregate sum stored\" → 80 hits (#30824 skills wording, #24426 hint wording, #29167 analytics bucket); no ruling on persisted formulas; thread: none\n\nReader who acts: the data/spec seat (and lint for A), after the ruling.\nDedupe: `repo:objectstack-ai/objectstack is:issue formula aggregate sum stored` → 80 hits, none proposes a stored formula; cloud `formula sum dataset hook` → 4 hits, none."
+}

@@ -2,7 +2,7 @@
   "number": 32402,
   "kind": "pull_request",
   "title": "feat(plugin-auth): export runOAuthConsentRequestRead and oauthConsentRequestDepsFor so a host that forwards the auth routes answers the consent page",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T07:36:20Z",
-  "updated_at": "2026-11-11T07:59:56Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-11T08:24:48Z",
+  "closed_at": "2026-11-11T08:24:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-11T08:24:45Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32402",

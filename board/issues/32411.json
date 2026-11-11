@@ -1,0 +1,31 @@
+{
+  "number": 32411,
+  "kind": "issue",
+  "title": "runtime: two jobs of one name in one artifact share one job-service key, so the later one silently replaces the earlier and the replaced job never runs (no log line)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T09:50:01Z",
+  "updated_at": "2026-11-11T13:01:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32411",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① This defect was measured by the #32355 dev (PR #32410, out-of-scope finding, class a; report 6792591092).\n\n**Where:** in `packages/runtime/src/app-artifact-handlers.ts`, `jobKeyFor` returns the app's existing key for a second job of the same name. `CronJobAdapter.schedule` and `IntervalJobAdapter.store` (`packages/services/service-job`) cancel the existing job and replace it.\n\n**What happens:**\n1. `os build` accepts a `preserve` composition whose manifest-less input carries a job with the same name as the job of the body that carries the artifact's id (measured: exit 0).\n2. At boot both jobs are scheduled under one `(app, name)` key, and the later one silently wins.\n3. On a real `CronJobAdapter`, only one of the two pulls ever runs, and nothing is logged. The residual-owner control pin in `app-artifact-handlers.job-pull.test.ts` (PR #32410) asserts the one surviving pull.\n\n#32410 refuses the case where the residual's owner is NOT the declaring body. The case where it IS the declaring body still collapses silently.\n\n**Do:**\n1. Measure on `main` once #32410 lands: two jobs of one name in one artifact, both owner arrangements, on a real `CronJobAdapter` and on `IntervalJobAdapter`.\n2. Choose one of two fixes:\n   - refuse at bind with a coded refusal naming both jobs; or\n   - build-side, refuse the composition (`os build` / `composeStacks`). This is spec lane; report it if that is where it belongs.\n   Never keep one job silently.\n3. Pins:\n   - two same-name jobs are refused, naming both;\n   - control: one job binds as today.\n   Ablate once.\n\n**Clause-②:** `no (narrowing)` if a composition that booted is now refused. First-party census expected to be 0.\n**Business reason:** a scheduled pull or job silently never runs, and the operator gets no signal.\n\nDedupe (`job service key collision`, `residual job same name dropped`, `jobKeyFor duplicate job name`, `scheduleAppArtifactJobs one key two jobs`): none found."
+}

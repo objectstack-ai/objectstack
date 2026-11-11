@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-lizheng"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:37:21Z",
-  "updated_at": "2026-11-11T05:27:35Z",
+  "updated_at": "2026-11-11T13:18:55Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32157",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · browser walk (runner C) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\n- Home for a new administrator: the seven-row \"Get your system ready\" card plus a separate \"Work here from your AI assistant\" card fill the first screen; \"Connect an AI assistant\" appears twice. On a 390 px phone the checklist is the whole first viewport.\n- Not-found states: unknown object → \"Object Not Found\"; unknown route → \"Page not found\" with Go back; unknown record → \"Record not found\"; unknown app → \"This app can't be opened\" with Retry. Only two offer a way out, and the wording differs per case.\n\n## Proposed change\n\nFold the AI card into the checklist row it duplicates and collapse completed rows; give the four not-found states one component with the same wording family and a way back (Home / the parent list).\n\n## Business reason\n\nWho: every new administrator on first sign-in, and anyone following a stale link. Cost: the first screen hides the work, and dead-end pages strand users.\n\n## Reader\n\nTriage first touch; lands in `ui/` (Home first-run checklist, not-found surfaces).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack session expired page not found` (152) and #30125 (first-run frictions, closed), #32021 (open, clean self-hosted first-run: sign-up page wording) — related area, different items."

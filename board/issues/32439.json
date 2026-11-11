@@ -1,0 +1,28 @@
+{
+  "number": 32439,
+  "kind": "issue",
+  "title": "cli: os dev reports a config-load refusal (for example a licence or KMS refusal) as \"Compile failed — fix errors above\"",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "bug"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T14:00:58Z",
+  "updated_at": "2026-11-11T14:00:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32439",
+  "body": "Filing category: ① product defect (operator-visible message).\nreach: public entry `os dev` (via `pnpm dev` in cloud `apps/objectos-ee`), measured once (cloud `ff373e02`, framework `d7c3d44e`).\nBatch-of: 15 cards filed together from one MCP capability test session (2026-11-11; 6 in cloud, 9 in objectstack).\n\n## Business reason\n\nAn operator whose deployment refuses to start for a configuration reason reads \"Compile failed\" and goes looking for a code error.\n\n## Steps\n\n`OS_CRYPTO_PROVIDER=aws-kms` set, no usable licence (the licence was in a variable the runtime does not read), `pnpm dev -- --fresh -p 38611` in `apps/objectos-ee`.\n\n## What happens\n\n```\n◆ Compile\n  → Loading configuration...\n  ObjectOS Community mode — NO valid Enterprise license …\n  ✖ [kms] OS_CRYPTO_PROVIDER=aws-kms asks for customer-managed keys, which require an Enterprise licence that enables `customerManagedKeys`. Refusing to boot …\n  ✗ Compile failed — fix errors above before starting dev server\n```\n\nThe refusal is thrown while loading `objectstack.config.ts`; `packages/cli/src/commands/dev.ts` labels any failure in that phase as a compile failure.\n\n## Expected\n\nA refusal raised while loading the config is reported as a refused boot / configuration error with its own text, not as a compile failure.\n\nReader who acts: the seat that owns `packages/cli` (`dev` command).\nDedupe: `repo:objectstack-ai/objectstack is:issue Compile failed config load` → 1068 hits (broad term); top 3 (#31264, #31112, #31968) unrelated; none on this label."
+}

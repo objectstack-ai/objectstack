@@ -1,0 +1,32 @@
+{
+  "number": 32407,
+  "kind": "issue",
+  "title": "metadata-protocol: a package-less row of a two-holder name is still served at both exact addresses for package-scoped types outside PACKAGE_SCOPED_READ_TYPES (action first) (ADR-0150 D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T09:21:23Z",
+  "updated_at": "2026-11-11T10:00:10Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32407",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. Filed at the landing of #32214 (#31699 PR 1/3), following:\n- the epic red-line read 6792024828, item S1 (should-fix, \"card it at landing\");\n- the dev's out-of-scope item (1) carried in hand-offs 6785463570 and 6790921204.\n\n**The rule.**\n- D4: a package-less row is the customization of ONE holder. With two holders it cannot say which, so each exact address refuses it.\n- #32214 carries that refusal (`exactQualifierItem`, `packageLessRowOwners`) for every type in `PACKAGE_SCOPED_READ_TYPES`.\n- Epic ruling 6761802819 requires the refusal to be in place before a type narrows.\n\n**The gap.**\n- `action` is already narrowed on `main` (#31697) and is not in `PACKAGE_SCOPED_READ_TYPES`.\n- So, by reading, a package-less row of a two-holder `action` is still served at both exact addresses, `?package=X` and `?package=Y`. This is the defect class red line 1 forbids.\n- The same holds for any other package-scoped type outside the read set.\n\n**Do.**\n1. **Measure on `main`.** Read a package-less `action` row under two holders at both exact addresses and in both holders' lists. List every package-scoped type outside `PACKAGE_SCOPED_READ_TYPES` that is already narrowed, or will be by #31699 PRs 2 and 3, #31700 and #31985.\n2. **Bring each such type under the same refusal.** That means `409 RESOURCE_CONFLICT`, `ambiguous-in-closure`, naming every holder, with the row withheld from a holder's list, exactly as #32214 does for the read set.\n3. **Close the layered door in the same PR** (epic read 6792024828 S2). `getMetaItemLayered` admits the qualifier but asks neither `exactQualifierItem` nor `packageLessRowOwners`. Pin `?layers=true&package=X` on a package-less row of a two-holder name. Ledger item 6777952260 is the same door.\n4. **Pins.** Two holders: both exact reads refuse and both lists withhold. One holder: the row is served. After a bind, only the bound holder is served. Ablate once.\n\n**Serial.**\n- After #32214 lands.\n- Before #31699 PR 2 (webhook) and PR 3 (connector) narrow their types. Each of those PRs brings its own type under the refusal, or rides this card's.\n\n**Clause-②:** `no (narrowing)`. Reads that served now refuse. First-party census expected 0, and the dogfood battery is owed.\n\n**Grade recommended by the epic read:** p1 (a precondition of every remaining B narrowing). Triage confirms.\n\nDedupe (`package-less row two holders action exact address`, `PACKAGE_SCOPED_READ_TYPES action`, `getMetaItemLayered exactQualifierItem`): ledger item 6777952260 only, which this card absorbs."
+}

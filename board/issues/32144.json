@@ -13,18 +13,20 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:07:22Z",
-  "updated_at": "2026-11-10T10:10:00Z",
+  "updated_at": "2026-11-11T13:01:35Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32144",
   "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiling gate: **① measured defect**, found by the #32119 card thread (os-dev-report 6764534316, `out_of_scope_findings` classes b and c) while fixing the renderer half in PR #32137. Spec work, so routed here instead of widening that PR.\n\n## 维护者速读\n\n- 问题：协议里「按组汇总」读回函数声明返回数字，但对日期字段取最小/最大时，服务端回的是原始日期文本；而对文本、日期字段做求和、求平均，写元数据时也不会被拒。\n- 影响：渲染端只能自己猜（#32119 之前就把日期画成了 `NaN`）；每个读这个函数的消费者都会踩同一个坑。\n- 要做：把读回的类型说实话（数字或存储值），并决定求和、求平均是否要求数值字段、在解析时就拒。\n- 需要你做的：第二项（解析时拒绝）若改变已发布的接受集，按收窄走契约复核；由车道判断。\n\n## Measured (`origin/main` `45f0f81f`)\n\n1. `packages/spec/src/ui/view-grouping-query.ts:592-596`: `deriveColumnSummary(row, summary, field): number | null | undefined`. Live, `POST /api/v1/data/showcase_task/query` with a grouped header query answers `max_created_at` as ISO text and `min_due_date` as `YYYY-MM-DD` (card thread's browser leg): a `min` / `max` column carries the aggregated field's stored value, not a number. `ui/packages/plugin-grid` now reads it as `unknown` with a comment saying so (PR #32137, `useGroupedData.ts` `readServerAggregations`).\n2. `packages/spec/src/ui/component.zod.ts:5293`: `object-grid.aggregations: z.array(GridAggregationSchema)`, whose `field` is a bare string, so `{ field: 'created_at', type: 'sum' }` (or over a text field) passes authoring. The #32119 card's Expected asks for that to be \"refused at parse or left out\"; PR #32137 does \"left out\" for date-family fields in the grid only. A text field's `sum` still reads `0` in the grid.\n\n## Expected\n\n1. `deriveColumnSummary`'s declared return type matches what each member answers (a number for `count` / `sum` / `avg` / percent members; the stored value for `min` / `max`), or the function normalises it. Lane's call; consumers then drop their local `unknown` reading.\n2. Decide whether `sum` / `avg` over a non-numeric field is refused when the object is known (a narrowing of the accepted set: owes its contract review) or stays a renderer concern. If refused, a pin per refused field family.\n\n`Metadata-protocol:` measured by the lane (a change to an accepted set of authored metadata). `Clause-②:` item 1 widens a declared return type; item 2, if built, narrows.\n\n## Who acts next\n\n`domain:spec`. No UI work waits on it: PR #32137 already reads the value safely.\n\nDedupe: `is:issue deriveColumnSummary return type` → #32119 (the renderer half), #15330, #14556 (closed, other topics); `is:issue GridAggregationSchema field type` → #32119 only; `is:issue aggregation sum non-numeric field` → 19 hits, none open but #32119."

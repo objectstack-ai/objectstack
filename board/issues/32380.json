@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
+    "needs-user-decision",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T01:10:19Z",
-  "updated_at": "2026-11-11T01:58:09Z",
+  "updated_at": "2026-11-11T13:15:26Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32380",
   "body": "## Edition / version\nObjectOS Enterprise, framework pin `e24136c2` (`@better-auth/scim` 1.7.12). Local SCIM run for objectstack-ai/cloud#3667.\n\n## Measured\n1. A user whose display name is \"Renamed InOkta\" gets `PATCH /Users/{id}` with Entra's path-addressed shape: `[{\"op\":\"Replace\",\"path\":\"name.givenName\",\"value\":\"Entra\"},{\"op\":\"Replace\",\"path\":\"name.familyName\",\"value\":\"Style\"}]`. The answer is 200, but:\n   - `name.givenName` / `familyName` change;\n   - `displayName`, `name.formatted` and **`sys_user.name` (what the console shows) keep \"Renamed InOkta\"**.\n2. Okta's path-less replace (`{\"op\":\"replace\",\"value\":{\"name.givenName\":…,\"name.familyName\":…}}`) behaves the same.\n3. Only a PATCH of `displayName`, or a full PUT, moves `sys_user.name`.\n\nThe cause is vendor behaviour: `setNamePart` stores the part and never recomposes `formatted` / `displayName`. The code has a `composeName` helper, which only the `remove` path uses.\n\n## Impact\nLow while the IdP also sends `displayName`, as Entra's default mapping does when that attribute changes. A tenant whose mapping sends only given/family name keeps showing the old name in ObjectOS indefinitely.\n\n## Expected\nWhen `displayName` / `formatted` were derived from the parts (the same test `setFormattedName` already makes), recompose them after a part changes. Either upstream it to `@better-auth/scim`, or apply it in the host's `identity.reconcileUser` before the user row is written."

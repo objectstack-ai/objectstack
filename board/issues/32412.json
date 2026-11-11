@@ -1,0 +1,32 @@
+{
+  "number": 32412,
+  "kind": "issue",
+  "title": "core + runtime: a residual-twin job refusal (ambiguous-in-environment) can carry one candidate; no PackageScopedHolder kind names a top-level job outside every package (ADR-0150 D3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T10:13:56Z",
+  "updated_at": "2026-11-11T13:01:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32412",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. This card carries S1 and N1 of the epic red-line read 6793085339 on PR #32410 (#32355).\n\n**Where.** After #32410, a residual top-level job that shares its name with one body's job is refused `409 RESOURCE_CONFLICT` `ambiguous-in-environment`. The refusal reuses #32294's `PackageScopedRefusal` shape: `candidates` of `kind: 'package'`.\n\n**What is wrong:**\n- **S1.** When no body carries the artifact's id, `candidates` holds only the declaring body. The residual is named in the message alone, so a consumer reading `candidates` sees an \"ambiguous\" refusal with one package. No `PackageScopedHolder` kind spells \"top level, no package\".\n- **N1.** When the residual's owner is another body, that owner appears in `candidates` as a plain `package` holder, although its body declares no such job.\n\nReach today is limited to the job run's failure record. No door answers this refusal to a client.\n\n**Do:**\n1. Decide how a top-level job outside every package is named as a holder. This is either a new holder kind in `@objectstack/core`'s `PackageScopedHolder` (ADR vocabulary, so the ADR-0150 amendment card records it) or an existing kind if one fits. Read the doors' `details.candidates` consumers before choosing.\n2. Make the residual-twin refusal list both holders in `candidates`, each with the right kind.\n3. Pin it with the two arrangements, with and without a body carrying the artifact's id, and ablate once.\n\n**Serial:** after #32410.\n**Clause-②:** the claimer declares it. A new holder kind is a public-surface widening of `@objectstack/core`.\n**Business reason:** a machine reader of the refusal cannot tell what the two holders are, so a UI or agent offering \"choose a package\" offers one option.\n\nDedupe (`PackageScopedHolder top-level kind`, `ambiguous-in-environment one candidate`, `residual job candidates`): none found."
+}

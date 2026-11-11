@@ -1,0 +1,32 @@
+{
+  "number": 32408,
+  "kind": "issue",
+  "title": "metadata: overlaySlotBinding's other readers (bundleMembersHeldBy, getEnvironmentScopedItem) bind a pair row without reading overrides.package (ADR-0150 D4)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T09:21:50Z",
+  "updated_at": "2026-11-11T10:00:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32408",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. Filed at the landing of #32214 (#31699 PR 1/3), following:\n- the epic red-line read 6792024828, item S1;\n- the dev's out-of-scope item (2) carried in hand-offs 6785463570 and 6790921204.\n\n**Where.** `overlaySlotBinding` (metadata). #32214 makes its exact-read path honour a pair row's `overrides.package`. Its other readers, `bundleMembersHeldBy` and `getEnvironmentScopedItem`, still bind a pair row without reading `overrides.package`, by the dev's reading at `7136e339`. The reach has NOT been measured.\n\n**Rulings.**\n- 6761802819 F2: when two pairs could own a row, refuse both. With exactly one pair, serve it to that pair. The base's own address keeps #28390 ruling A.\n- #32214 implements that ruling on the exact read.\n\n**Do.**\n1. **Measure on `main`** after #32214 lands. With two pairs X and Y of base A, and a pair row bound by `overrides.package` to X:\n   - what does `bundleMembersHeldBy` answer for X and for Y?\n   - what does `getEnvironmentScopedItem` answer?\n\n   Repeat with an unbound pair row.\n2. **If either reader binds the row to the wrong pair, or to both,** make it read the binding the way the exact read now does.\n3. **Pins:**\n   - bound to X → only X;\n   - unbound with two pairs → neither;\n   - unbound with one pair → that pair.\n\n   Ablate once.\n\n**Serial.** After #32214 lands.\n\n**Clause-②:** the claimer declares it after measuring. A reader that served a wrong pair and now does not is a narrowing.\n\nDedupe (`overlaySlotBinding bundleMembersHeldBy`, `getEnvironmentScopedItem overrides.package`): none found."
+}

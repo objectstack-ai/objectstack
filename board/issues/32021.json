@@ -13,18 +13,20 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-lizheng"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T00:46:36Z",
-  "updated_at": "2026-11-11T05:26:45Z",
+  "updated_at": "2026-11-11T13:17:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 10,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32021",
   "body": "## Edition / version\nObjectOS Enterprise (licensed, self-managed), from an image built at cloud `main` `e220532` with framework pin `e24136c2`. Everything below is console (open framework) behaviour. It was seen in a browser walk-through of a clean install, from the first visit to an AI chat, for objectstack-ai/cloud#3582.\n\n## Findings, in the order a new customer meets them\n\n1. **The first visit to a brand-new install says \"Welcome back — Sign in to continue your work\".** No user exists yet, and the first sign-up becomes the owner, but the page says neither. \"Sign up\" is a small link under the form. Expected: when the deployment has no users, lead with \"Create the owner account\" (or the sign-up form itself).\n2. **Sign-up validation is the browser's native tooltip.** Name 张伟, password `123`, confirm `456` → Chrome's own bubble \"Please lengthen this text to 8 characters or more…\". It is unstyled, in the browser's language, and shows one error at a time; the mismatch only shows after the length is fixed. The sign-in page's error is a proper inline alert, so the two forms are inconsistent.\n3. **The home page after the first sign-up stacks three notices.** \"Get your system ready\" (7 items), \"Finish setting up this deployment\" and \"Work here from your AI assistant\". Mail-not-configured and connect-an-AI-assistant each appear twice. The middle card is wider than the other two, and \"Your apps\" is pushed below the fold. The checklist itself is good; the duplication around it is the problem.\n4. **The checklist has no step for the in-product AI provider.** \"Connect an AI assistant\" means external assistants (Claude, Doubao) over MCP. A licensed customer's first wish is the built-in AI (Setup → AI & Embedder: provider and key), which is not on the list, and the wording makes \"Connect\" look like that step.\n5. **The sign-in error promises a reset that cannot arrive.** After a wrong password: \"Forgot your password? Reset it to sign in right away.\" On a self-hosted box with no mail transport (the default), the reset mail is recorded as sent and never delivered. When no mail transport is configured, the hint should point to the administrator instead.\n6. **zh-CN wording:** the checklist says 「默认语言和国家/地区：当前为English、美国 (US)」 (mixed language), the Users list header has the badge 「经身份服务写入」, which an admin cannot interpret, and Setup → AI & Embedder keeps \"Embedder / Trace / Prompt / PII\" untranslated. The provider default there is objectstack#31960.\n\nWhat works well and should stay: the sign-in error (inline, does not reveal which field was wrong, explains the lockout); the login footer switching from \"Sign up\" to \"Have an invitation?\" once the box has an owner; automatic zh-CN based on the browser; and the invitation toast that says mail is not configured and points to Copy Invite Link."

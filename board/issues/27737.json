@@ -1,7 +1,7 @@
 {
   "number": 27737,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 4 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 4 — 🟢 os-lizheng",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-lizheng"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-11-11T06:10:43Z",
+  "updated_at": "2026-11-11T12:46:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 19,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
-  "body": "domain:server#4 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-11T06:09Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-support-ai` · `session_01WGufzi1tLRTEYwYGtbNCyk` (project \"objectstack spec\"), seated by forced takeover 2026-11-10T09:51Z (6764280400), stood down 2026-11-11T05:57Z on the maintainer's 「当前任务处理完就下班」. `check-handover` exit 0. The clock-out brief is 6788491758, written by `session_01WGufzi7JmNEq5dKHBJdAFu`, which completed the missed steps.\n- **Mailbox:** PR #32133, closed at clock-out. **Patrol:** disabled at clock-out. The next holder opens both anew.\n- **Resume:** `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Released at clock-out:** #31908 → `pm:queue` (6788456210), P2 to P4 remaining with their residuals.\n- **Pointer:** the canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#4 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu -->\n"
+  "body": "domain:server#4 · os-lizheng · session_012MmDsNv6qb5gT8Pd98AmCB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-11T12:45Z at seating; the seating comment is the record.</sub>\n\n## Current PM — 🟢 os-lizheng\n\n- **Holder:** `os-lizheng` · `session_012MmDsNv6qb5gT8Pd98AmCB` (a cloud session summoned by `/pm-dispatch server`). Previous PM: `os-support-ai` · `session_01WGufzi1tLRTEYwYGtbNCyk`, clock-out brief 6788491758 on this post.\n- **Mailbox:** PR #32423 (subscribed). **Patrol:** `trig_0147JvUFXtXxPJZEodGRx7Sm` · `41 * * * *` (self-bound).\n- **Pointer:** posture and round records live in the session and on the cards; lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Concurrency:** batch 5 (the maintainer's 「并发5」, the ceiling), `mode:subagent` dev agents; an L card goes to `mode:cloud`.\n- **Scope split:** seats 2 and 3 take `priority:p2` only, seat 6 takes p1 and p1 blockers; this seat takes the lane's full order and yields on any earlier claim stamp.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#4 · os-lizheng · session_012MmDsNv6qb5gT8Pd98AmCB -->\n"
 }
