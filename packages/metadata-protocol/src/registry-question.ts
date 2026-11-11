@@ -19,8 +19,9 @@
  * keeps the body-only question; their registration refusals are still only
  * logged at the write-through (#32369). A NEW producer of a published
  * `saveMetaItem`, or of `promoteDraftForPublish`, states its choice here and
- * in {@link REGISTRY_QUESTION_PRODUCERS}; `registry-question.test.ts` fails
- * until it does.
+ * in {@link REGISTRY_QUESTION_PRODUCERS};
+ * `packages/runtime/src/metadata-registry-question-producers.test.ts` (the
+ * runtime's `repo` tier, which hashes every package source) fails until it does.
  */
 
 import type { MetadataWriteFace } from './protocol-write-face.js';

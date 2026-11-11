@@ -10,6 +10,12 @@
  * red until `REGISTRY_QUESTION_PRODUCERS` records it with its question, so a
  * new single-object door cannot inherit the body-only question (whose refusal
  * is only logged) by default.
+ *
+ * It lives in this package's `repo` tier (`vitest.repo-tests.json`) because
+ * it reads every package's sources: `@objectstack/runtime#test:repo` already
+ * hashes every `.ts` file under `packages/` (scripts/cross-package-test-inputs.mjs),
+ * so the scan reads `.ts` sources only, the declared radius. The runtime holds one of
+ * the two save producers it names (`src/domains/meta.ts`).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -21,7 +27,7 @@ import {
     PROMOTION_REGISTRY_QUESTION,
     REGISTRY_QUESTION_PRODUCERS,
     saveRegistryQuestion,
-} from './registry-question.js';
+} from '../../metadata-protocol/src/registry-question.js';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build', '.next']);
@@ -30,7 +36,7 @@ function sourcesUnder(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (entry.isDirectory()) {
             if (!SKIP_DIRS.has(entry.name)) sourcesUnder(join(dir, entry.name), out);
-        } else if (/\.(ts|tsx|mts)$/.test(entry.name) && !/\.(test|spec)\.|\.d\.ts$/.test(entry.name)) {
+        } else if (/\.ts$/.test(entry.name) && !/\.(test|spec)\.|\.d\.ts$/.test(entry.name)) {
             const rel = relative(ROOT, join(dir, entry.name)).split('\\').join('/');
             if (rel.includes('/src/')) out.push(rel);
         }
