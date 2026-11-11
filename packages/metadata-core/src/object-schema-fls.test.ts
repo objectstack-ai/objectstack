@@ -473,7 +473,7 @@ describe('[ruling record 6787890900] an object the caller may not read does not 
         expect(asked).toEqual(['account']);
         // The field half rides along for the action doors, and only for them.
         expect(objectSchemaFieldPosture(posture)).toMatchObject({ kind: 'project' });
-        expect([...(objectSchemaFieldPosture(posture) as { readable: Set<string> }).readable]).toEqual(['id', 'salary_grade']);
+        expect([...(objectSchemaFieldPosture(posture) as { readable: ReadonlySet<string> }).readable]).toEqual(['id', 'salary_grade']);
     });
 
     it('admits only `true` — any other answer is hidden', async () => {
