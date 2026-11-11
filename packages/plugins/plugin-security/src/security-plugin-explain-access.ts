@@ -190,7 +190,7 @@ export async function explainAccessForCaller(
   // through the other-user arm: an empty id names nobody, so it is refused
   // there like an unknown one, never folded into explaining the caller.
   const explainsAnotherUser = request.userId !== undefined && request.userId !== callerContext?.userId;
-  if (explainsAnotherUser) {
+  if (request.userId !== undefined && explainsAnotherUser) {
     if (!(await mayDescribeAnotherUser.call(this, request.userId, callerContext))) {
       throw new PermissionDeniedError(
         `[Security] Access denied: explaining another user's access requires the 'manage_users' ` +
