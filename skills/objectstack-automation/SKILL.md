@@ -73,7 +73,7 @@ Flows are built from **built-in node types** (plugins register more):
 | `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke the `config.flowName` flow (named as `subflow`'s) per item of `config.collection` (shaped as `loop`'s); each may pause (batch approvals); a refused name fails it at the first item |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
-| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller; an older clash, each armed) |
+| `subflow` | Invoke the flow bare `config.flowName` names: a package's flow gets its own, else the one holder in its `dependencies` closure plus `sys`; a package-less flow, the environment's, else the one package holder. Else `os validate` passes and the node fails at run time (`subflow 'X' failed: …` naming every candidate; no `code`): `outside-closure` — held only by an undeclared package (declare it) or the environment; `ambiguous-in-closure` / `ambiguous-in-environment` — two packages hold it (package / package-less caller; each armed) |
 | `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms a `parallel` / `try_catch` container lowers into; author the container |
 
 #### Data Operations
@@ -389,7 +389,6 @@ node `config`**:
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
 - **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
-- **A flow name two packages hold:** the path above answers `401 INVALID_SIGNATURE`, whatever the signature. Each is reached only at `/api/v1/automation/hooks/:namespace/:flowName/:hookId`, by its package's `manifest.namespace`.
 
 ### Trigger Types (start-node `config.triggerType`)
 
