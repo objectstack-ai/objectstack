@@ -845,7 +845,18 @@ export const CEILINGS = new Map([
   // 3207 -> 3199 (#30824): RE-LOCK at the landed count. The formula row now also says
   // a formula is no dataset or cube dimension (group key), paid by the Formula example's
   // remaining `// see the Calculated table` pointer; 12794 bytes -> 3199 tokens, zero headroom.
-  ['skills/objectstack-data/rules/field-types.md', 3199],
+  // 3199 -> 3250 (#31957, 2026-11-11): § Currency teaches a line amount following its
+  // `master_detail` parent's code (`currencyField: '<master_detail>.<parent code>'`), one
+  // invoice / line-item example with the roll-up declaration, and the parent-code lock.
+  // +263 tokens (12795 -> 13847 bytes). PAID DOWN FIRST by two same-file restatement cuts,
+  // 848 bytes (232 + 616), 212 tokens: the dataset-measure `currency` sentence, cut to a
+  // pointer (home: objectstack-ui rules/dashboards.md, the money-measure paragraph; the
+  // refusal code stays in the pointer), and the autonumber "Incorrect vs Correct" pair
+  // with its TOC line (home: § Autonumber rules 1 and 2). `wc -c` = 12999 bytes -> ceil(12999 / 4) = 3250 tokens, zero headroom, ceiling
+  // +51, pinned AT the measurement. Standing ruling (2026-10-27, tap A, verbatim and
+  // untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling record
+  // 6513306068; seat widening record 6784270263.
+  ['skills/objectstack-data/rules/field-types.md', 3250],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
