@@ -38,8 +38,10 @@
  *   or changed.
  * - UNCHANGED: a delegated context in `org_a`; the same caller in `org_d`
  *   without the delegation link; a delegated context with no active
- *   organization (it keeps ADR-0123 D2's refusal); a system context; and the
- *   `single` posture, which has no wall.
+ *   organization (it keeps ADR-0123 D2's refusal); and a system context.
+ * - [ADR-0093 D8.1, as amended] The `single` posture answers the same rule: a
+ *   delegated operation needs the delegator's current membership in the
+ *   organization under every posture.
  *
  * ## The raw-SQL read scope answers the same rule [#25106 · ADR-0021 D-C]
  *
@@ -409,11 +411,15 @@ describe('[#25063] what the rule leaves alone', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated insert in `org_d` is stored as before', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): a delegated insert and read in `org_d` are refused, and nothing is stored', async () => {
     const b = await boot('single');
-    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(ORG_D) } as never));
+    expectMembershipRefusal(await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(ORG_D) } as never)));
+    expectMembershipRefusal(await attempt(() => b.engine.find('qa_account', { context: operator(ORG_D) } as never)));
+    expect(await b.stored('qa_account')).toEqual(SEEDED('qa_account'));
+    // CONTROL — in an organization the delegator belongs to, the same insert is stored there.
+    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r2', name: 'two' }, { context: operator(ORG_A) } as never));
     expect(outcome.ok, outcome.message).toBe(true);
-    expect((await b.stored('qa_account')).find((r) => r.id === 'r1')).toEqual({ id: 'r1', name: 'one', organization_id: ORG_D });
+    expect((await b.stored('qa_account')).find((r) => r.id === 'r2')).toEqual({ id: 'r2', name: 'two', organization_id: ORG_A });
   });
 });
 
@@ -504,11 +510,13 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated context in `org_d` keeps its scope', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): a delegated context in `org_d` answers RLS_DENY_FILTER itself', async () => {
     const b = await shared('single', true);
-    expect(await scopeRows(b, 'qa_account', operator(ORG_D))).toEqual(['qa_account_in_a', 'qa_account_in_c', 'qa_account_in_d']);
-    expect(await scopeRows(b, 'qa_vault', operator(ORG_D))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
-    expect(await scopeRows(b, 'qa_catalog', operator(ORG_D))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
+    for (const object of PROVIDER_OBJECTS) {
+      expect(await b.plugin.getReadFilter(object, operator(ORG_D)), object).toBe(RLS_DENY_FILTER);
+      // CONTROL — in an organization the delegator belongs to, a scope.
+      expect(await b.plugin.getReadFilter(object, operator(ORG_A)), object).not.toBe(RLS_DENY_FILTER);
+    }
   });
 });
 
@@ -670,10 +678,21 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated context in `org_d` is admitted by every probe and its narrowing is reported', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): no probe admits a delegated context in `org_d`, and no narrowing is reported for it', async () => {
     const b = await shared('single');
-    for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D)), object);
-    expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).narrowed).toBe(true);
+    for (const object of PROVIDER_OBJECTS) {
+      const answers = await probeAnswers(b, object, operator(ORG_D));
+      expect(answers.canReadObject, object).toBe(false);
+      expect(answers.canWriteInsert, object).toBe(false);
+      expect(answers.canWriteUpdate, object).toBe(false);
+      expect(answers.canExport, object).toBe(false);
+      for (const projection of FIELD_PROJECTIONS) expect(answers.fields[projection], `${object}: ${projection}`).toEqual([]);
+      expect(answers.explained.allowed, object).toBe(false);
+      // CONTROL — in an organization the delegator belongs to, every probe admits.
+      expectAdmitted(await probeAnswers(b, object, operator(ORG_A)), object);
+    }
+    expect(await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).toEqual({ narrowed: false });
+    expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_A))).narrowed).toBe(true);
   });
 });
 

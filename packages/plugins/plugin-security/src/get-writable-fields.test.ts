@@ -81,6 +81,12 @@ async function boot(sets: PermissionSet[], opts: { noBaseline?: boolean } = {}) 
           // [#21771] An addressed by-id update asks the read door for its row;
           // the double holds the one row the update names.
           : query?.where?.id === PAYLOAD_VALUE.id ? { id: PAYLOAD_VALUE.id, title: 'x' } : null)),
+      // The delegator is a current member of the organization the delegated
+      // request runs in (ADR-0093 D8.1, as amended: under every posture).
+      find: vi.fn(async (object: string, query: any) =>
+        (object === 'sys_member' && (query?.where?.user_id === undefined || query.where.user_id === LIVE_DELEGATOR)
+          ? [{ user_id: LIVE_DELEGATOR, organization_id: 'org-1', role: 'member' }]
+          : [])),
     },
     metadata: {
       get: async (_type: string, name: string) => SCHEMAS[name],
