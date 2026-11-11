@@ -400,9 +400,9 @@ describe('[#31696] a name a second package also ships: each package\'s flow is a
                 expect(bare.error).toContain(`package "${OTHER}"`);
                 await expect(automation.getFlow(FLOW)).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
 
-                // Neither slot is handed to the trigger, which binds by name alone.
+                // [#31696 PR-2] Each slot is handed to its trigger under its own key; the bare name is bound to none.
                 const bound = automation.getActiveTriggerBindings().map((b) => b.flowName);
-                expect(bound.filter((key) => key === FLOW || key.endsWith(`/${FLOW}`))).toEqual([]);
+                expect(bound.filter((key) => key === FLOW || key.endsWith(`/${FLOW}`)).sort()).toEqual([`${BASE}/${FLOW}`, `${OTHER}/${FLOW}`].sort());
             });
         }
     }

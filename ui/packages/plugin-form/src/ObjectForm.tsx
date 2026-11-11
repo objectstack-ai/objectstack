@@ -18,7 +18,7 @@ import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@objec
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
-import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
@@ -1005,7 +1005,10 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // Important: Pass the original field metadata so widgets can access properties like precision, currency, etc.
           // A home field (ADR-0144 D5) also carries the amount, rate and document
           // date that produced it, so an authored section draws it with its hint.
-          field: withHomeAmountSource(field, objectSchema.fields, name),
+          // An amount that follows its parent's currency (ADR-0144 D2 as
+          // amended) also carries the parent object, so its widget can read
+          // the parent's code for the id the form holds.
+          field: withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
           // A per-field widget override. `form.tsx` resolves `widget || type`, so this makes the
           // auto-generated (no-form-view) form honor the override just like the
           // authored-section path already does (sectionFields.ts).

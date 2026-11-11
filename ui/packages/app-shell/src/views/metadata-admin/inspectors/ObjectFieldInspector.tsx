@@ -119,8 +119,7 @@ import {
 } from '../previews/field-types.js';
 import { FieldTypePicker } from './FieldTypePicker.js';
 import {
-  CurrencyConfigField,
-  currencyCodeFieldCandidates,
+  ObjectCurrencyConfigField,
   homeAmountCandidates,
   nextCurrencyCodeFieldName,
   newCurrencyCodeFieldDef,
@@ -1711,9 +1710,10 @@ export function ObjectFieldInspector({
           )}
           {(type === 'currency' || (type === 'formula' && def.returnType === 'currency')) && (
             <DisplayPatchLock>
-              <CurrencyConfigField
+              <ObjectCurrencyConfigField
                 config={def.currencyConfig as CurrencyConfigDraft | undefined}
-                candidates={currencyCodeFieldCandidates(view.entries, name)}
+                entries={view.entries}
+                self={name}
                 homeCandidates={type === 'currency' ? homeAmountCandidates(view.entries, name) : undefined}
                 onCommit={(next) => patchDef({ currencyConfig: next })}
                 onCreateCodeField={createCurrencyCodeField}
