@@ -35,8 +35,8 @@
  *   (`tenancy: { enabled: false }` / `systemFields: { tenant: false }`, read
  *   whole) — else `source_organization_scope_unstated`; and a pull of a
  *   walled source runs in an organization — else `job_organization_missing`.
- *   The scope is read by plugin-security's `externalOrganizationScopeOf`, the
- *   one reading the wall and the boot refusal use.
+ *   The scope is read by `externalOrganizationScopeOf` in `@objectstack/core`'s
+ *   security module, the one reading the wall and the boot refusal use.
  *
  * ## Where a run starts, and what it commits (ADR-0153 D2, D7)
  *
