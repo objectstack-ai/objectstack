@@ -1186,6 +1186,11 @@ export class ProtocolSaveFacet {
         // entry this overlay will shadow supplies the missing identity fields
         // (#2555 — a console personalization PUT sends only the raw config).
         // See {@link normalizeViewMetadata}.
+        // [#32162] The package a `permission` save lands in, read below for
+        // the name-collision refusal and again for the held-grants read of
+        // {@link unknownGrantObjectSaveRefusal} (ADR-0150 D3: the set this
+        // save edits is that package's, never another holder's of the name).
+        let permissionLandsIn: string | null = null;
         {
             // [#21412, #21470] FIRST, before the stamp below can keep an
             // authored `name`: a body of ANY type whose own `name` disagrees
@@ -1279,6 +1284,7 @@ export class ProtocolSaveFacet {
                     }
                     landsIn = address.into;
                 }
+                permissionLandsIn = landsIn;
                 const nameCollision = await host.permissionSetNameCollisionRefusal(
                     singularType, request.name, landsIn, 'save',
                 );
@@ -1618,7 +1624,7 @@ export class ProtocolSaveFacet {
         if (writeSource !== 'migrate-stored') {
             const grantRefusal = await host.unknownGrantObjectSaveRefusal(
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
-                undefined, request.inheritedGrantObjects,
+                undefined, request.inheritedGrantObjects, permissionLandsIn,
             );
             if (grantRefusal) throw grantRefusal;
         }

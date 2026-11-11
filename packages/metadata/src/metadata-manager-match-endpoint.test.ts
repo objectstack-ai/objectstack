@@ -810,6 +810,39 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     });
   });
 
+  // #32162 Do 3, named: permission sets ride the rule above unchanged. A set
+  // carries grants, so the pin reads the surviving package's grants back.
+  it('permission (#32162): uninstalling P1 leaves P2\'s same-named set, with its own grants, in the store AND in the loader rows', async () => {
+    expect(PACKAGE_SLOTTED_STORE_TYPES.has('permission'), 'permission is a slotted type').toBe(true);
+    const ctx = await boot('permission');
+    const grantsOf = (item: any) => Object.keys(item?.objects ?? {});
+    // Give each package's slot its own grant, the way two packages' sets differ.
+    await ctx.manager.register('permission', ctx.name, { ...doorItem('permission', A), objects: { alpha_thing: { allowRead: true } } }, { notify: false });
+    await ctx.manager.register('permission', ctx.name, { ...doorItem('permission', B), objects: { beta_thing: { allowRead: true } } }, { notify: false });
+    await ctx.manager.unregisterPackage(A);
+    expect(await ctx.manager.get('permission', ctx.name, A)).toBeUndefined();
+    expect(grantsOf(await ctx.manager.get('permission', ctx.name, B))).toEqual(['beta_thing']);
+    expect(grantsOf(await ctx.manager.get('permission', ctx.name)), 'one holder left: the bare read serves P2').toEqual(['beta_thing']);
+    expect(ctx.rowBodies(), 'the row holding P2\'s set is kept').toEqual(['beta permission']);
+  });
+
+  // #32162 S1: the security-catalog echo drops a stale slot with
+  // `{ packageId, notify: false }` while the name's stored row is live. The
+  // real manager removes that slot only, keeps the row it does not hold, and
+  // announces nothing to watchers — so nothing reaches the cluster channel,
+  // whose peers would drop every slot of the name. The realtime `deleted`
+  // still names the removed package (it is not governed by `notify`).
+  it('permission (#32162): a silent removal naming a package takes that slot only, keeps the other\'s row, and announces nothing to watchers', async () => {
+    const ctx = await boot('permission');
+    await ctx.manager.unregister('permission', ctx.name, { packageId: A, notify: false });
+    expect(await ctx.manager.get('permission', ctx.name, A)).toBeUndefined();
+    expect(((await ctx.manager.get('permission', ctx.name, B)) as any)?.label).toBe('beta permission');
+    expect(ctx.rowBodies()).toEqual(['beta permission']);
+    expect(ctx.watched, 'no watcher event, so no cluster broadcast').toEqual([]);
+    expect(ctx.published.map((event) => [(event.payload as any).type, (event.payload as any).packageId]))
+      .toEqual([['metadata.permission.deleted', A]]);
+  });
+
   /**
    * [#32246] The residue #32198 pinned, flipped. The artifact door's
    * `MemoryLoader` is a `memory:` loader, which no removal used to delete

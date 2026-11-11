@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069), the picklist's bare read (#32070), `mapping` (#32071) and `dataset` (#32072). */
-const WIRED_SINCE = ['api', 'picklist', 'mapping', 'dataset'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072) and `permission` (#32162). */
+const WIRED_SINCE = ['api', 'picklist', 'mapping', 'dataset', 'permission'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
