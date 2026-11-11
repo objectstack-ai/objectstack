@@ -71,7 +71,9 @@ describe('a package carrying a full record page that places no component (#32434
     const { registry, register } = await boot();
     const err = await register({ packages: [{ manifest: body() }] });
     expect(err, 'the artifact was refused').toBeDefined();
-    expect(err!.message).toContain('pages.0.regions');
+    // The refusal names the page by its path, so the fix is findable.
+    expect(err!.message).toContain('`packages[0]`');
+    expect(err!.message).toContain('manifest.pages.0.regions');
     expect(err!.message).toContain('This record page places no component in its `regions`, so every record of its object would open on a blank detail panel');
     expect(registry.getPackage(PKG)).toBeUndefined();
   });

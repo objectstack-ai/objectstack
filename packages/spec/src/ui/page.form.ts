@@ -89,10 +89,11 @@ export const pageForm = defineForm({
       fields: [
         // Not required: slotted pages compose via `slots`, list pages ignore
         // regions entirely, and a full home/app/utility page may author none.
-        // A full RECORD page must place a component here, and the parse says so
-        // (`checkPageRecordPlacesComponent`) — a form-level `required` could not:
-        // it would also bind every page this form edits that legitimately has
-        // none.
+        // A full RECORD page must place a component here (unless it binds no
+        // `object` and draws an `interfaceConfig.source` list), and the parse
+        // says so (`checkPageRecordPlacesComponent`) — a form-level `required`
+        // could not: it would also bind every page this form edits that
+        // legitimately has none.
         {
           field: 'regions',
           type: 'repeater',

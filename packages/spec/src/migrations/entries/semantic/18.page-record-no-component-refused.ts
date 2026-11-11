@@ -21,8 +21,8 @@ export const entry: SemanticMigration = {
   surface:
     'pages[] — a record page (type record, the default type) of kind full (the default kind) that places no '
     + 'component: no regions, or only regions whose components list is empty — unless it binds no object and '
-    + 'carries an interfaceConfig.source; in a stack, on a page a package registers, or in a page saved through '
-    + 'the metadata API',
+    + 'carries an interfaceConfig.source; in a stack, in a package\'s pages (refused when a pre-built release '
+    + 'artifact registers whole, not when a body is registered flat), or in a page saved through the metadata API',
   replacement:
     'Delete the page, so the record view of its object opens the default record page again; or make it '
     + "`kind: 'slotted'` to keep that default page and replace only the slots it names; or place the "
@@ -46,7 +46,9 @@ export const entry: SemanticMigration = {
     + 'objectstack validate and objectstack build, STACK_SCHEMA_INVALID 422), the manifest service when it is '
     + 'handed a whole release artifact (its package bodies are parsed there) and the metadata save door (422 '
     + 'INVALID_METADATA); a package body registered on its own, the way a hosted kernel registers an installed '
-    + 'package, meets no page parse and installs as before. Home, app '
+    + 'package, meets no page parse and installs as before. '
+    + 'A pre-built release artifact carrying such a page fails registration whole, naming the page by its path '
+    + '(packages[N], manifest.pages.M.regions): fix the page and rebuild the artifact. Home, app '
     + 'and utility pages draw their label as the page heading when no page:header '
     + 'owns it, and list pages draw through interfaceConfig, so they keep accepting no regions; slotted, html and '
     + 'react pages draw their slots or source and are not judged, and neither is a record page that binds no '
@@ -60,7 +62,8 @@ export const entry: SemanticMigration = {
     'Grep every page in defineStack pages sources, exported stacks and every page row in sys_metadata for a '
     + 'record page (type record or no type) of kind full (or no kind) whose regions are absent, empty, or hold no '
     + 'component, leaving out a page with no object that carries an interfaceConfig.source. Delete each one, make '
-    + 'it kind slotted, place its components, or name the type it is meant as. Then objectstack validate '
+    + 'it kind slotted, place its components, or name the type it is meant as, and rebuild every release '
+    + 'artifact built from those sources before this change. Then objectstack validate '
     + 'reports nothing at pages.N.regions, saving each kept page through the metadata API succeeds, and opening '
     + 'a record of each affected object shows its detail view — the default record page, or the components you '
     + 'placed — not a blank panel.',
