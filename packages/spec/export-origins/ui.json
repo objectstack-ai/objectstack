@@ -116,6 +116,7 @@
     "ColumnSummaryConfig": "src/ui/view.zod.ts#ColumnSummaryConfig (type)",
     "ColumnSummaryConfigSchema": "src/ui/view.zod.ts#ColumnSummaryConfigSchema (const)",
     "ColumnSummarySchema": "src/ui/view.zod.ts#ColumnSummarySchema (const)",
+    "ColumnSummaryValue": "src/ui/view-grouping-query.ts#ColumnSummaryValue (type)",
     "CompileListViewGroupQueryOptions": "src/ui/view-grouping-query.ts#CompileListViewGroupQueryOptions (interface)",
     "CompileListViewGroupRowsQueryOptions": "src/ui/view-grouping-query.ts#CompileListViewGroupRowsQueryOptions (interface)",
     "ComponentNavItem": "src/ui/app.zod.ts#ComponentNavItem (type)",
