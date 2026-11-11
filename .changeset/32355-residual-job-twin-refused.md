@@ -9,7 +9,7 @@ Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: the change is which package a job's pull runs as when an artifact's top level and one of its package bodies both carry the job name, the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
 
-**BREAKING** (first-party count 0: no example app or first-party package declares a job `pull`, and the one first-party multi-package artifact, `examples/app-multi-package`, declares no jobs and composes no manifest-less stack).
+**BREAKING** (first-party count 0: no example app or first-party package declares a job `pull`, and the one first-party multi-package artifact, `examples/app-multi-package`, declares no jobs and composes no manifest-less stack). On a JSON-loaded artifact the body's own job of that name is refused too, including where it used to pull correctly as its body: nothing in the artifact tells the body's flattened copy from the residual's job.
 
 `composeStacks(…, { manifest: 'preserve' })` with an input that has no `manifest` writes that input's jobs to the artifact's top level and to no package body (the ADR-0130 residual), beside the flattened copy of every body's jobs. When such a job shares its name with a body's job, an artifact loaded from JSON meets both by name, and the binder attributed the residual's job to the body: its pull ran as that body's package (`callerPackageId`) and read that package's mappings.
 

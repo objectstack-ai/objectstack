@@ -913,9 +913,30 @@ describe('[#32355] a job name a package body declares and the residual carries i
             ['host_sync', 'success', undefined],
             ['sync', 'failed', 'RESOURCE_CONFLICT'],
         ]);
+        // `CronJobAdapter.trigger()` hands `trigger: 'manual'` and the binder forwards it; that adapter writes
+        // no run row, so no `jobRunId` rides along.
         expect(pulls).toEqual([
-            { mapping: 'alpha_map', context: { isSystem: true }, callerPackageId: 'com.example.alpha' },
-            { mapping: 'host_map', context: { isSystem: true }, callerPackageId: 'com.example.beta' },
+            { mapping: 'alpha_map', context: { isSystem: true }, callerPackageId: 'com.example.alpha', trigger: 'manual' },
+            { mapping: 'host_map', context: { isSystem: true }, callerPackageId: 'com.example.beta', trigger: 'manual' },
         ]);
+    });
+
+    it('fail-closed: a disabled twin on either side still refuses the name — the enabled one is never pulled as the body', async () => {
+        const off = (job: Record<string, unknown>) => ({ ...job, enabled: false });
+        for (const [bodyJob, residualJob, survivor] of [
+            [off(pullJob('sync', 'alpha_map')), pullJob('sync', 'host_map'), 'host_map'],
+            [pullJob('sync', 'alpha_map'), off(pullJob('sync', 'host_map')), 'alpha_map'],
+        ] as const) {
+            const bundle = jsonLoaded([alpha([bodyJob]), host([residualJob]), beta]);
+            // Disabled or not, every job of the name is counted, and each answers the refusal.
+            const of = jobDeclaringPackages(bundle, 'com.example.beta');
+            for (const job of bundle.jobs) expect(of(job)).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment', name: 'sync' });
+            // The binder skips the disabled one; the enabled one is scheduled, and its run is refused before any pull.
+            const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+            expect(bundle.jobs.find((j: any) => j.enabled !== false).pull.mapping).toBe(survivor);
+            expect(out.pulls).toEqual(['sync']);
+            expect(answers.map((a) => [a.key, a.run, a.code, a.status])).toEqual([['sync', 'failed', 'RESOURCE_CONFLICT', 409]]);
+            expect(pulls).toEqual([]);
+        }
     });
 });
