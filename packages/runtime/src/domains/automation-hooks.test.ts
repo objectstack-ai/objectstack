@@ -835,3 +835,92 @@ describe('[ADR-0150 D5] the qualified inbound hook on a kernel with no http.serv
         }
     });
 });
+
+/**
+ * [ADR-0150 D5, #31696 PR-2] A name two packages hold, on a kernel with no
+ * http.server: the request kernel's engine routes the address
+ * (`inboundHookSlot`), as the self-hosted mount does. The member gets the
+ * slot's key for a qualified hook its namespace's slot answers; an address
+ * no slot answers, and a slot key in the name position, get the one refusal
+ * and the member never runs. The bare hook goes to the member as before (it
+ * answers the `409` itself: `inbound-hook-member.test.ts`), with no service
+ * read first (condition 2 above).
+ */
+describe('[#31696] a name two packages hold, on a kernel with no http.server', () => {
+    const ALPHA = 'com.pin.alpha';
+    const BETA = 'com.pin.beta';
+    const S_ALPHA = 'pin-hosted-alpha-2b7c';
+    const inboundHookSlot = vi.fn((flowName: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) => {
+        if (flowName.includes('/')) return { status: 'unadmitted' };
+        if (flowName !== FLOW) return undefined;
+        if (!address) return { status: 'refused', candidates: [{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }] };
+        const owner = [ALPHA, BETA].find((p) => address.namespaceOwners.includes(p));
+        return owner ? { status: 'served', key: `${owner}/${FLOW}` } : { status: 'unadmitted' };
+    });
+    function sharedHost(member: { handleInboundHook: unknown }): Record<string, any> {
+        const namespaces: Record<string, string[]> = { alpha: [ALPHA], beta: [BETA] };
+        const declared: Record<string, string> = { [ALPHA]: 'alpha', [BETA]: 'beta' };
+        // The slot door serves the key as the member serves a name.
+        const handleInboundSlotHook = vi.fn((request: Request, hook: { key: string; hookId: string }) =>
+            (member.handleInboundHook as (r: Request, h: { flowName: string; hookId: string }) => Promise<Response>)(request, { flowName: hook.key, hookId: hook.hookId }));
+        return {
+            'trigger-api': { handleInboundHook: member.handleInboundHook, handleInboundSlotHook },
+            automation: { packagedFlowOwner: vi.fn(() => undefined), inboundHookSlot },
+            objectql: {
+                registry: {
+                    getNamespaceOwners: (ns: string) => namespaces[ns] ?? [],
+                    getPackage: (id: string) => (declared[id] ? { manifest: { namespace: declared[id] } } : undefined),
+                },
+            },
+        };
+    }
+    async function snapshot(res: Response) {
+        return { status: res.status, headers: [...res.headers.entries()], body: new Uint8Array(await res.arrayBuffer()) };
+    }
+
+    it('the qualified hook reaches its namespace\'s slot: the member gets the slot\'s key', async () => {
+        const member = verifierMember({ [`${ALPHA}/${FLOW}`]: { hookId: HOOK, secret: S_ALPHA } });
+        const { dispatcher } = makeDispatcher(sharedHost(member));
+        const path = `/automation/hooks/alpha/${FLOW}/${HOOK}`;
+        const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path, { signature: sign(BODY, S_ALPHA) })));
+        expect((result.result as Response).status).toBe(202);
+        expect(member.calls.map((c) => c.hook)).toEqual([{ flowName: `${ALPHA}/${FLOW}`, hookId: HOOK }]);
+    });
+
+    it('red line: a trigger with no slot door (older than the engine) is refused for a routed slot, never served by name', async () => {
+        const member = verifierMember({ [FLOW]: { hookId: HOOK, secret: S_ALPHA } });
+        const services = sharedHost(member);
+        services['trigger-api'] = { handleInboundHook: member.handleInboundHook };
+        const { dispatcher } = makeDispatcher(services);
+        const path = `/automation/hooks/alpha/${FLOW}/${HOOK}`;
+        const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path, { signature: sign(BODY, S_ALPHA) })));
+        expect(await snapshot(result.result as Response)).toEqual(await snapshot(inboundHookRefusalResponse()));
+        expect(member.handleInboundHook).not.toHaveBeenCalled();
+    });
+
+    it('the bare hook goes to the member as before, the name as the path carried it, and no service is read first: the member answers the 409', async () => {
+        inboundHookSlot.mockClear();
+        const member = verifierMember();
+        const services = sharedHost(member);
+        const { dispatcher } = makeDispatcher(services);
+        await dispatcher.dispatch('POST', ROUTE, {}, {}, ctx(post(ROUTE)));
+        expect(member.calls.map((c) => c.hook)).toEqual([{ flowName: FLOW, hookId: HOOK }]);
+        expect(inboundHookSlot).not.toHaveBeenCalled();
+        expect((services.automation as any).packagedFlowOwner).not.toHaveBeenCalled();
+    });
+
+    it('red line: a qualified address no slot answers, a slot key in its name position included, gets the one refusal; the member never runs', async () => {
+        const reference = await snapshot(inboundHookRefusalResponse());
+        for (const path of [
+            `/automation/hooks/gamma/${FLOW}/${HOOK}`,
+            `/automation/hooks/alpha/${encodeURIComponent(`${ALPHA}/${FLOW}`)}/${HOOK}`,
+        ]) {
+            const member = verifierMember({ [`${ALPHA}/${FLOW}`]: { hookId: HOOK, secret: S_ALPHA } });
+            const { dispatcher } = makeDispatcher(sharedHost(member));
+            const result = await dispatcher.dispatch('POST', path, {}, {}, ctx(post(path, { signature: sign(BODY, S_ALPHA) })));
+            expect(result.response, path).toBeUndefined();
+            expect(await snapshot(result.result as Response), path).toEqual(reference);
+            expect(member.handleInboundHook, path).not.toHaveBeenCalled();
+        }
+    });
+});

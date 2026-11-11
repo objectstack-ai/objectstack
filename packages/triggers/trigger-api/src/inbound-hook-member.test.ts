@@ -68,6 +68,12 @@ interface BootOptions {
      */
     flowOwner?: (name: string) => string | undefined;
     namespaces?: Record<string, string[]>;
+    /**
+     * [#31696] The engine's `inboundHookSlot` (absent: an engine that holds
+     * one flow per name), and the namespace each installed package declares.
+     */
+    hookSlot?: (flowName: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) => unknown;
+    packages?: Record<string, string>;
 }
 
 interface Published {
@@ -92,6 +98,9 @@ class FixturePlugin implements Plugin {
     readonly aliasApp = new Hono();
     /** Every `packagedFlowOwner` read the mount made. */
     readonly flowOwnerReads = vi.fn((name: string) => this.options.flowOwner?.(name));
+    /** Every `inboundHookSlot` read the mount made. */
+    readonly hookSlotReads = vi.fn((name: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) =>
+        this.options.hookSlot?.(name, address));
 
     constructor(private readonly options: BootOptions) {}
 
@@ -100,11 +109,18 @@ class FixturePlugin implements Plugin {
             ctx.registerService('automation', {
                 registerTrigger: (t: FlowTrigger) => { this.triggers.push(t); },
                 ...(this.options.flowOwner ? { packagedFlowOwner: this.flowOwnerReads } : {}),
+                ...(this.options.hookSlot ? { inboundHookSlot: this.hookSlotReads } : {}),
             });
         }
         if (this.options.namespaces) {
             const namespaces = this.options.namespaces;
-            ctx.registerService('objectql', { registry: { getNamespaceOwners: (ns: string) => namespaces[ns] ?? [] } });
+            const packages = this.options.packages;
+            ctx.registerService('objectql', {
+                registry: {
+                    getNamespaceOwners: (ns: string) => namespaces[ns] ?? [],
+                    ...(packages ? { getPackage: (id: string) => (packages[id] ? { manifest: { namespace: packages[id] } } : undefined) } : {}),
+                },
+            });
         }
         const queueMode = this.options.queue ?? 'ok';
         if (queueMode !== 'absent') {
@@ -715,5 +731,135 @@ describe('[ADR-0150 D5] the qualified hook on http.server', () => {
             expect(res.status, label).toBe(status);
             expect(fixture.published.length, label).toBe(status === 202 ? 1 : 0);
         }
+    });
+});
+
+/**
+ * [ADR-0150 D5, #31696 PR-2] A name two packages hold, on the self-hosted
+ * mount: the engine routes the address (`inboundHookSlot`), the qualified
+ * hook reaches its slot's own hook (armed under the slot key `PACKAGE/NAME`,
+ * read with that slot's secret), the bare hook answers `409
+ * RESOURCE_CONFLICT` naming both qualified addresses, and an address no slot
+ * answers gets the one refusal. A name the engine does not route is judged as
+ * before. Both refusals wait for the whole body.
+ */
+describe('[#31696] a name two packages hold, on http.server', () => {
+    const ALPHA = 'com.pin.alpha';
+    const BETA = 'com.pin.beta';
+    const S_ALPHA = 'pin-slot-alpha-41d2';
+    const S_BETA = 'pin-slot-beta-7e90';
+    const sigWith = (secret: string, body: string) => ({ 'x-objectstack-signature': sigV1(secret, body, NOW) });
+    const qualified = (qualifier: string, flowName: string, body: string, headers: Record<string, string> = {}) =>
+        new Request(`${ORIGIN}/api/v1/automation/hooks/${qualifier}/${encodeURIComponent(flowName)}/${HOOK_ID}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body,
+        });
+    /** The engine's answer for a name ALPHA and BETA both hold. */
+    const hookSlot = (flowName: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) => {
+        if (flowName.includes('/')) return { status: 'unadmitted' };
+        if (flowName !== FLOW) return undefined;
+        if (!address) return { status: 'refused', candidates: [{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }] };
+        const owner = [ALPHA, BETA].find((p) => address.namespaceOwners.includes(p));
+        return owner ? { status: 'served', key: `${owner}/${FLOW}` } : { status: 'unadmitted' };
+    };
+    async function bootShared() {
+        const booted = await boot({
+            server: 'canonical',
+            flowOwner: () => undefined,
+            hookSlot,
+            namespaces: { alpha: [ALPHA], beta: [BETA] },
+            packages: { [ALPHA]: 'alpha', [BETA]: 'beta' },
+        });
+        booted.trigger!.start({ flowName: `${ALPHA}/${FLOW}`, config: { hookId: HOOK_ID, secret: S_ALPHA } }, async () => {});
+        booted.trigger!.start({ flowName: `${BETA}/${FLOW}`, config: { hookId: HOOK_ID, secret: S_BETA } }, async () => {});
+        return booted;
+    }
+
+    it('the qualified hook reaches its namespace\'s slot, verified with that slot\'s secret only', async () => {
+        const { fixture } = await bootShared();
+        expect((await fixture.canonicalApp.fetch(qualified('alpha', FLOW, BODY, sigWith(S_ALPHA, BODY)))).status).toBe(202);
+        expect((await fixture.canonicalApp.fetch(qualified('beta', FLOW, BODY, sigWith(S_BETA, BODY)))).status).toBe(202);
+        expect(fixture.published.map((p) => p.queue)).toEqual([`flow-api:${ALPHA}/${FLOW}`, `flow-api:${BETA}/${FLOW}`]);
+        // The other slot's secret does not verify.
+        expect((await fixture.canonicalApp.fetch(qualified('alpha', FLOW, BODY, sigWith(S_BETA, BODY)))).status).toBe(401);
+        expect(fixture.published).toHaveLength(2);
+    });
+
+    it('red line: the bare hook answers 409 RESOURCE_CONFLICT naming both qualified addresses, never a pick, and enqueues nothing', async () => {
+        const { fixture, plugin } = await bootShared();
+        for (const secret of [S_ALPHA, S_BETA]) {
+            const res = await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, sigWith(secret, BODY)));
+            expect(res.status).toBe(409);
+            const body = await res.json() as { success: boolean; error: { code: string; message: string; details: { candidates: unknown; addresses: string[] } } };
+            expect(body.success).toBe(false);
+            expect(body.error.code).toBe('RESOURCE_CONFLICT');
+            const addresses = [`/api/v1/automation/hooks/alpha/${FLOW}/${HOOK_ID}`, `/api/v1/automation/hooks/beta/${FLOW}/${HOOK_ID}`];
+            expect(body.error.details.addresses).toEqual(addresses);
+            expect(body.error.details.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }]);
+            for (const address of addresses) expect(body.error.message).toContain(address);
+        }
+        expect(fixture.published).toEqual([]);
+        expect(plugin.lines('warn', `bare hook of flow '${FLOW}'`)).toHaveLength(2);
+    });
+
+    it('red line: an address no slot answers, and a slot key in the name position, get the one refusal and enqueue nothing', async () => {
+        const { fixture, plugin } = await bootShared();
+        const viaMember = await snapshot(inboundHookRefusalResponse());
+        for (const request of [
+            qualified('gamma', FLOW, BODY, sigWith(S_ALPHA, BODY)),
+            qualified('_env', FLOW, BODY, sigWith(S_ALPHA, BODY)),
+            hookRequest(`${ALPHA}/${FLOW}`, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)),
+            qualified('alpha', `${ALPHA}/${FLOW}`, BODY, sigWith(S_ALPHA, BODY)),
+        ]) {
+            expect(await snapshot(await fixture.canonicalApp.fetch(request)), request.url).toEqual(viaMember);
+        }
+        expect(fixture.published).toEqual([]);
+        expect(plugin.logs.filter((l) => l.message.includes('refused an inbound post (')).map((l) => (l.fields as { cause: string }).cause))
+            .toEqual(['unadmitted-address', 'unadmitted-address', 'unknown-flow', 'unadmitted-address']);
+    });
+
+    it('the member (the hosted face) answers the bare hook\'s 409 with the self-hosted mount\'s bytes, refuses a key the path carried, and its slot door serves a routed key', async () => {
+        const { fixture, member, slot } = await bootShared();
+        const viaMount = await snapshot(await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY))));
+        const viaMember = await snapshot(await member(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)), { flowName: FLOW, hookId: HOOK_ID }));
+        expect(viaMember.status).toBe(409);
+        expect(viaMember).toEqual(viaMount);
+        // A slot key handed to the member is the path's name: no flow's (the one refusal).
+        const keyed = await member(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)), { flowName: `${ALPHA}/${FLOW}`, hookId: HOOK_ID });
+        expect(await snapshot(keyed)).toEqual(await snapshot(inboundHookRefusalResponse()));
+        expect(fixture.published).toEqual([]);
+        // The slot door serves the key the hosted face's engine routed a qualified address to.
+        const slotDoor = (slot() as unknown as { handleInboundSlotHook(r: Request, h: { key: string; hookId: string }): Promise<Response> });
+        const served = await slotDoor.handleInboundSlotHook(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)), { key: `${ALPHA}/${FLOW}`, hookId: HOOK_ID });
+        expect(served.status).toBe(202);
+        expect(fixture.published.map((p) => p.queue)).toEqual([`flow-api:${ALPHA}/${FLOW}`]);
+    });
+
+    it('CONTROL: a name the engine does not route is served and judged as before', async () => {
+        const { fixture } = await bootShared();
+        expect((await fixture.canonicalApp.fetch(hookRequest('never_armed', HOOK_ID, BODY, sig(BODY)))).status).toBe(401);
+        expect(fixture.hookSlotReads).toHaveBeenCalledWith('never_armed', undefined);
+    });
+
+    it('⭐ the bare hook\'s 409 waits for the whole body, as every answer does', async () => {
+        const { fixture } = await bootShared();
+        let ctl!: ReadableStreamDefaultController<Uint8Array>;
+        const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
+        ctl.enqueue(new TextEncoder().encode(BODY.slice(0, 10)));
+        const request = new Request(`${ORIGIN}/api/v1/automation/hooks/${FLOW}/${HOOK_ID}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: stream,
+            duplex: 'half',
+        } as RequestInit);
+        let settled = false;
+        const answer = Promise.resolve(fixture.canonicalApp.fetch(request));
+        answer.then(() => { settled = true; }, () => { settled = true; });
+        for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+        expect(settled).toBe(false);
+        ctl.enqueue(new TextEncoder().encode(BODY.slice(10)));
+        ctl.close();
+        expect((await answer).status).toBe(409);
     });
 });

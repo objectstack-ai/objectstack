@@ -448,6 +448,8 @@ export {
   inboundHookRefusalResponse,
   admitInboundHookAddress,
   type InboundHookAddress,
+  inboundHookSharedNameRefusal,
+  type InboundHookNameHolder,
 } from './inbound-hook-answer.js';
 
 // Managing API keys is a signed-in-session act on every data door: the one

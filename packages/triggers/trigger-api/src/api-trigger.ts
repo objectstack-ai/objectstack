@@ -535,6 +535,27 @@ export class ApiTrigger implements FlowTrigger {
     }
 
     /**
+     * [#31696] A bare hook naming a slot key (`PACKAGE/NAME`): no flow is
+     * named so, and a slot is reached only by its qualified address. The one
+     * refusal, its cause the unknown flow's.
+     */
+    refuseUnknownFlow(flowName: string): { status: number; body: Record<string, unknown> } {
+        return this.refuseUnverified('unknown-flow', flowName);
+    }
+
+    /**
+     * [ADR-0150 D5, #31696] Log the bare hook's refusal of a name two
+     * packages hold: the server's record of the `409` the mount answers.
+     */
+    noteSharedNameRefusal(flowName: string, candidates: readonly unknown[]): void {
+        this.logger.warn(
+            `[trigger-api] refused an inbound post to the bare hook of flow '${flowName}': more than one package holds ` +
+                'a flow of that name, so the sender was answered 409 naming each qualified address, and nothing was enqueued.',
+            { flowName, candidates },
+        );
+    }
+
+    /**
      * Refuse a post that did not verify: log its real cause, then answer
      * {@link unverifiedPostAnswer}, the same for every cause. The line names
      * the cause and the flow name the post carried, as structured fields, and

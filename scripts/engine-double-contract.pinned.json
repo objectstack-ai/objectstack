@@ -4717,6 +4717,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts",
       "verb": "findOne",
       "pinned": 1
