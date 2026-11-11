@@ -1674,33 +1674,56 @@ export function checkPageRecordBindingPlacement(
 }
 
 /**
- * The refusal {@link checkPageRecordPlacesComponent} raises at `regions`: the
- * consequence and the two fixes, in one sentence.
+ * The refusal {@link checkPageRecordPlacesComponent} raises at `regions`, in
+ * one sentence: the consequence, the fixes, and the type a page that is not
+ * meant as a record page names. The parsed page carries `type: 'record'`
+ * whether the author wrote it or left it to the default, so the sentence says
+ * the default instead of guessing which. Bound to an object, the page is that
+ * object's record view; bound to none, it is a blank page wherever it opens.
  */
+const RECORD_PAGE_FIXES_UNLESS_ANOTHER_TYPE =
+  "and if it is not meant as a record page, name its type (`type` defaults to `record`): `type: 'home'`, `'app'` or "
+  + "`'utility'`, which draw the label as the page heading, or `type: 'list'` with an `interfaceConfig.source`.";
 const RECORD_PAGE_PLACES_NO_COMPONENT =
   "This record page places no component in its `regions`, so every record of its object would open on a blank "
   + "detail panel: add a region with components (`regions: [{ name: 'main', components: [{ type: 'record:details' }] }]`), "
-  + "or delete the page so the object's default record page draws.";
+  + "make it `kind: 'slotted'` to draw the object's default record page with only the slots you name replaced, "
+  + "or delete the page so the object's default record page draws — "
+  + RECORD_PAGE_FIXES_UNLESS_ANOTHER_TYPE;
+const UNBOUND_RECORD_PAGE_PLACES_NO_COMPONENT =
+  "This record page places no component in its `regions` and binds no `object`, so it opens on a blank page: "
+  + "bind its `object` and add a region with components (`regions: [{ name: 'main', components: [{ type: 'record:details' }] }]`) — "
+  + RECORD_PAGE_FIXES_UNLESS_ANOTHER_TYPE;
 
 /**
  * The record page body check attached to {@link PageSchema}: a `kind: 'full'`
  * record page (`type: 'record'`, the default type) that places no component —
  * no `regions`, or only regions whose `components` are empty — is refused at
- * `regions` ({@link RECORD_PAGE_PLACES_NO_COMPONENT}).
+ * `regions` ({@link RECORD_PAGE_PLACES_NO_COMPONENT}, or
+ * {@link UNBOUND_RECORD_PAGE_PLACES_NO_COMPONENT} when it binds no `object`).
  *
  * The console draws a `full` page as authored, and on a record page the
  * authored components are ALL it draws: the page's `label` is the
  * `page:header` block's to draw and its `description` is not drawn, no layout
- * template draws anything of its own, and `slots` and `interfaceConfig` are
- * not read on a `full` page. So the record view of every record of the page's
- * object opened on a blank detail panel — the breadcrumb and nothing else —
- * while every door reported the page valid; deleting the page brought the
- * default record page back. Judged on the record type alone: a home, app or
- * utility page draws its `label` as the page heading (and its
- * `description`) when no `page:header` block owns it, and a `list` page draws
- * through `interfaceConfig`, so each keeps accepting no regions. A `slotted`
- * record page draws the synthesized default with its overrides, and an
- * `html` / `react` page draws its `source`; neither is judged here.
+ * template draws anything of its own, and `slots` are not read on a `full`
+ * page. So the record view of every record of the page's object opened on a
+ * blank detail panel — the breadcrumb and nothing else — while every door
+ * reported the page valid; deleting the page brought the default record page
+ * back. The record view reads no `interfaceConfig` either, so a page bound to
+ * an object is judged whatever `interfaceConfig` it carries.
+ *
+ * One record page is not judged: one that binds no `object` and carries an
+ * `interfaceConfig.source`. No object's record view selects a page without an
+ * `object`, and the page route draws any page carrying `interfaceConfig.source`
+ * as an interface list, whatever its type — the shape a page authored without
+ * a `type` takes when it is meant as a list.
+ *
+ * Judged on the record type alone: a home, app or utility page draws its
+ * `label` as the page heading (and its `description`) when no `page:header`
+ * block owns it, and a `list` page draws through `interfaceConfig`, so each
+ * keeps accepting no regions. A `slotted` record page draws the synthesized
+ * default with its overrides, and an `html` / `react` page draws its
+ * `source`; neither is judged here.
  *
  * `type` and `kind` absent are the spec defaults (`record`, `full`) and
  * `regions` absent is the default `[]`, so a `.shape` mirror without the
@@ -1709,7 +1732,7 @@ const RECORD_PAGE_PLACES_NO_COMPONENT =
  * in `object-refinement-check-exports.test.ts`.
  */
 export function checkPageRecordPlacesComponent(
-  page: { type?: unknown; kind?: unknown; regions?: unknown },
+  page: { type?: unknown; kind?: unknown; regions?: unknown; object?: unknown; interfaceConfig?: unknown },
   ctx: z.RefinementCtx,
 ): void {
   const type = page.type === undefined ? PAGE_TYPE_DEFAULT : page.type;
@@ -1722,7 +1745,17 @@ export function checkPageRecordPlacesComponent(
     return Array.isArray(components) && components.length > 0;
   });
   if (placesComponent) return;
-  ctx.addIssue({ code: 'custom', path: ['regions'], message: RECORD_PAGE_PLACES_NO_COMPONENT });
+  const bound = typeof page.object === 'string' && page.object.length > 0;
+  const source = page.interfaceConfig && typeof page.interfaceConfig === 'object'
+    ? (page.interfaceConfig as { source?: unknown }).source
+    : undefined;
+  // Drawn as an interface list on the page route, and no record view selects it.
+  if (!bound && typeof source === 'string' && source.trim().length > 0) return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['regions'],
+    message: bound ? RECORD_PAGE_PLACES_NO_COMPONENT : UNBOUND_RECORD_PAGE_PLACES_NO_COMPONENT,
+  });
 }
 
 /**
@@ -1997,11 +2030,13 @@ export const PageSchema = lazySchema(() => strictObject({
   // A `kind: 'full'` RECORD page is the exception: it draws only the
   // components in its regions, so one that places none is refused
   // (`checkPageRecordPlacesComponent`) — it used to open every record of its
-  // object on a blank detail panel. It never fell back to the synthesized
+  // object on a blank detail panel. One binding no `object` that carries an
+  // `interfaceConfig.source` is not judged: the page route draws it as an
+  // interface list. It never fell back to the synthesized
   // default layout, whatever this field once claimed. Requiring the key forced
   // `regions: []` boilerplate on every list page, so it stays optional.
   regions: z.array(PageRegionSchema).optional().default([])
-    .describe("Layout regions (header, main, sidebar, footer) with their components. Optional on most pages — list pages use interfaceConfig, slotted pages use slots, html and react pages use source — but a kind: 'full' record page draws nothing else, so it must place at least one component here: one that places none is refused, since every record of its object would open on a blank detail panel."),
+    .describe("Layout regions (header, main, sidebar, footer) with their components. Optional on most pages — list pages use interfaceConfig, slotted pages use slots, html and react pages use source — but a kind: 'full' record page draws nothing else, so it must place at least one component here: one that places none is refused, since every record of its object would open on a blank detail panel. A record page binding no object that carries an interfaceConfig.source is drawn as an interface list instead, and is not judged."),
   
   /**
    * Activation — whether this page is the DEFAULT RECORD PAGE of its `object`:

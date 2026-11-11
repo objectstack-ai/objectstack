@@ -1231,13 +1231,35 @@ describe('PageSchema — a full record page that places no component is refused 
     ['`kind: \'full\'` spelled out', { ...LEAVE, type: 'record', kind: 'full' }],
     ['regions whose `components` are all empty', { ...LEAVE, regions: [{ name: 'header', components: [] }, { name: 'main', components: [] }] }],
     ['`slots` on a full page — not read there', { ...LEAVE, slots: { details: [{ type: 'record:details' }] } }],
-    ['an `interfaceConfig` on a record page — not read there', { ...LEAVE, interfaceConfig: { source: 'leave_request' } }],
+    ['an `interfaceConfig` on a record page bound to an object — the record view does not read it', { ...LEAVE, interfaceConfig: { source: 'leave_request' } }],
   ] as const)('%s — refused at `regions`, one custom issue, naming the blank panel and the fixes', (_label, value) => {
     const issues = regionIssues(value);
     expect(issues).toHaveLength(1);
     expect(issues[0].code).toBe('custom');
     expect(issues[0].message.startsWith(VERDICT)).toBe(true);
     expect(issues[0].message).toContain('delete the page');
+    expect(issues[0].message).toContain("kind: 'slotted'");
+    // `type` reads `record` after the parse whether written or defaulted, so
+    // the sentence names the default and the types a page is meant as instead.
+    expect(issues[0].message).toContain('`type` defaults to `record`');
+  });
+
+  it.each([
+    ['no `object`, no `type`, no regions — the shape a page meant as a home page takes', { name: 'pp_home', label: 'Home' }],
+    ['no `object`, `type: \'record\'`, regions with no component', { name: 'pp_page', label: 'P', type: 'record', regions: [{ name: 'main', components: [] }] }],
+    ['no `object` and an `interfaceConfig` with a blank `source`', { name: 'pp_page', label: 'P', interfaceConfig: { source: '  ' } }],
+  ] as const)('%s — refused at `regions`, saying it opens blank and naming the types it may be meant as', (_label, value) => {
+    const issues = regionIssues(value);
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].message.startsWith('This record page places no component in its `regions` and binds no `object`, so it opens on a blank page')).toBe(true);
+    expect(issues[0].message).toContain('`type` defaults to `record`');
+    expect(issues[0].message).toContain("`type: 'home'`, `'app'` or `'utility'`");
+  });
+
+  it('CONTROL — a page binding no `object` that carries an `interfaceConfig.source` is not judged: the page route draws it as an interface list, whatever its type', () => {
+    expect(regionIssues({ name: 'open_cases', label: 'Open cases', interfaceConfig: { source: 'case' } })).toEqual([]);
+    expect(regionIssues({ name: 'open_cases', label: 'Open cases', type: 'record', interfaceConfig: { source: 'case' } })).toEqual([]);
   });
 
   it('`definePage` throws on it — the authoring door a source stack uses', () => {

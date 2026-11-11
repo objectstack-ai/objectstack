@@ -350,6 +350,8 @@ const pageRecordPlacesComponentFixtures: Fixture[] = [
   { label: 'an `html` record page with no regions — it draws its `source`', value: { ...PAGE_BASE, type: 'record', kind: 'html', source: 'Card' }, refusesAt: [] },
   { label: 'a `home` page with no regions — it draws its label as the heading', value: { ...PAGE_BASE }, refusesAt: [] },
   { label: 'an `app` page whose regions hold no component', value: { ...PAGE_BASE, type: 'app', regions: [region('main')] }, refusesAt: [] },
+  { label: 'a record page bound to an object, carrying an `interfaceConfig.source` — the record view does not read it', value: { ...PAGE_BASE, type: 'record', object: 'account', interfaceConfig: { source: 'account' } }, refusesAt: ['regions'] },
+  { label: 'a page with no `type` and no `object` carrying an `interfaceConfig.source` — the page route draws it as an interface list', value: { name: 'open_cases', label: 'Open cases', interfaceConfig: { source: 'case' } }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
