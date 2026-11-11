@@ -331,6 +331,17 @@ describe('[ADR-0153 D2] floored: windows bounded on both sides, through the floo
         expect(rec.written).toEqual([]);
     });
 
+    it('[N3] an unreadable watermark in an over-cap answer is the data\'s fault (watermark_not_exact), not the driver\'s', async () => {
+        const junk = seqRows([1, 2, 3, 4, 5]).map((r) => ({ ...r, seq: 'not-a-number' }));
+        const { engine } = flooredEngine({ rows: junk, rowCap: 4 });
+        const err = await refusalOf(readSourceInWindows(FLOORED_SOURCE, {
+            find: (q) => engine.find('wh_order', q), ...recorder(),
+        }, { path: 'floored', from: 0 }));
+        expect(err.code).toBe('VALIDATION_ERROR');
+        expect(err.status).toBe(400);
+        expect(err.reason).toBe('watermark_not_exact');
+    });
+
     it('a run that writes no row commits nothing: the position stays where it was', async () => {
         const { engine } = flooredEngine({ rows: seqRows([3, 4]) });
         const rec = recorder(() => true);
@@ -545,6 +556,49 @@ describe('[ADR-0153 D2] builtin: aligned windows read whole, paged by key', () =
         }, { path: 'builtin', from: 0 }));
         expect(keyErr.reason).toBe('source_key_not_exact');
         expect(keyErr.status).toBe(400);
+    });
+
+    it('[S1] a multi-page window whose high-water read found nothing commits its own lo, never the largest value written', async () => {
+        // The source is empty when the high-water values are read; more than a page lands before the window's first page.
+        const { driver, find: base } = await builtinEngine([]);
+        let calls = 0;
+        const find = async (q: SyncWindowQuery) => {
+            const rows = await base(q);
+            if (++calls === 2) {
+                for (let i = 0; i < 5; i++) {
+                    await driver.knex.raw('insert into ERP_ORDERS values (?, ?, ?)', [`n${i}`, at(1000 + i), 'org_a']);
+                }
+            }
+            return rows;
+        };
+        const rec = recorder();
+        const from = canonOfStart(BUILTIN_SOURCE, '2026-01-01');
+        const report = await readSourceInWindows(BUILTIN_SOURCE, { find, ...rec }, { path: 'builtin', from, pageSize: 2 });
+        expect(report.highWater).toBeUndefined();
+        expect(rec.written).toHaveLength(5);
+        expect(report.committed).toBe(from);
+    });
+
+    it('[S1] a commit never goes below where the run started, even when the high-water value sat under it', async () => {
+        // The source's maximum (T+100) is below the start (T+500) when it is read; rows above the start land after.
+        const { driver, find: base } = await builtinEngine([{ no: 'old', at: at(100) }]);
+        let calls = 0;
+        const find = async (q: SyncWindowQuery) => {
+            const rows = await base(q);
+            if (++calls === 2) {
+                for (let i = 0; i < 5; i++) {
+                    await driver.knex.raw('insert into ERP_ORDERS values (?, ?, ?)', [`n${i}`, at(600 + i), 'org_a']);
+                }
+            }
+            return rows;
+        };
+        const rec = recorder();
+        const from = Date.UTC(2026, 0, 1) + 500;
+        const report = await readSourceInWindows(BUILTIN_SOURCE, { find, ...rec }, { path: 'builtin', from, pageSize: 2 });
+        expect(report.highWater).toBe(Date.UTC(2026, 0, 1) + 100);
+        expect(rec.written.map((r) => r.id).sort()).toEqual(['n0', 'n1', 'n2', 'n3', 'n4']);
+        expect(report.committed).toBe(from);
+        expect(rec.commits.every((c) => c.position >= from)).toBe(true);
     });
 
     it('an empty source reads one open-above window and commits nothing', async () => {

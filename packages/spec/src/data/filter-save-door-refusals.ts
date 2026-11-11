@@ -98,6 +98,7 @@ import {
   arrayScalarComparandMessage,
   shapePreview,
 } from './filter-comparand-refusal-text';
+import { headFieldName, refusalHeadOf } from '../shared/refusal-head';
 
 /** One parse result, as far as this module reads it. */
 type SlotParse = {
@@ -192,8 +193,12 @@ function malformedRangeComparandMessage(field: string, value: unknown): string {
 /** The four ordering operators — the positions of the face's `null` ordering-comparand arm. */
 const ORDERING_OPERATORS: ReadonlySet<string> = new Set(['$gt', '$gte', '$lt', '$lte']);
 
-/** Where a refusal sits below its operator (`[]`, or a member / endpoint index), and its words. */
-type SaveDoorRefusal = { readonly at: readonly number[]; readonly message: string };
+/**
+ * Where a refusal sits below its operator (`[]`, or a member / endpoint index),
+ * its words, and [#32279] the one-line head a data door answers in their place
+ * (`../shared/refusal-head.ts`), when the refusal has one.
+ */
+type SaveDoorRefusal = { readonly at: readonly number[]; readonly message: string; readonly head?: string };
 
 /**
  * The sentence the enforced operator slot prints for `comparand` at `at` — the
@@ -260,7 +265,13 @@ function comparandShapeRefusalAtSave(
       if (bound !== -1) refusal = fromSlot([bound]);
     }
   }
-  return refusal ?? { at: [], message: face.message };
+  // [#32279] The head is the face's: the verdict is the face's, and the head
+  // names the operator, the field and the fix, never the location, so it reads
+  // the same whichever of the face's words or the operator slot's this door
+  // prints.
+  const head = refusalHeadOf(face);
+  const located = refusal ?? { at: [], message: face.message };
+  return head === undefined ? located : { ...located, head };
 }
 
 /**
@@ -419,9 +430,21 @@ export function reportQueryFaceRefusals(
   if (shapeFace) refusal = comparandShapeRefusalAtSave(slots, field, op, comparand, shapeFace);
   refusal ??= comparandTypeRefusalAtSave(field, op, comparand, fieldSpec);
   if (refusal === undefined && op !== undefined && BOOLEAN_FLAG_OPERATORS.has(op) && typeof comparand !== 'boolean') {
-    refusal = { at: [], message: nonBooleanFlagComparandMessage(op, field, comparand) };
+    refusal = {
+      at: [],
+      message: nonBooleanFlagComparandMessage(op, field, comparand),
+      head: `Operator "${op}" on field "${headFieldName(field)}" requires a boolean comparand: write true or false.`,
+    };
   }
   if (refusal === undefined) return false;
-  ctx.addIssue({ code: 'custom', path: [...slotPath, ...refusal.at], message: refusal.message });
+  // [#32279] The head rides as the issue's `params.refusalHead`, which a data
+  // door's `fields[]` mapper reads (`zodIssuesToFields`); the message stays the
+  // whole prescription for the save doors and `os compile`.
+  ctx.addIssue({
+    code: 'custom',
+    path: [...slotPath, ...refusal.at],
+    message: refusal.message,
+    ...(refusal.head === undefined ? {} : { params: { refusalHead: refusal.head } }),
+  });
   return true;
 }

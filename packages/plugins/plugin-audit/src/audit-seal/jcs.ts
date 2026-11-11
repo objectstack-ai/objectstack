@@ -42,7 +42,21 @@ function isPlainObject(value: object): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
-function write(value: unknown, at: string): string {
+/**
+ * How a refusal says where it sits. By default a member is named by its name
+ * (`$.a.b[0]`); with `opaqueNames` by its position in sorted order (`$.#0.#1[0]`),
+ * for a value whose member names are themselves payload — a committed column's
+ * JSON (round-1 n2 of #31908's P1a record): a refusal is logged, and must not
+ * carry what the commitment keeps off the checkpoint.
+ */
+export interface CanonicalJsonOptions {
+  /** Where the value sits, as the refusal's path prefix. Default `$`. */
+  readonly at?: string;
+  /** Name members by sorted position instead of by name in a refusal's path. */
+  readonly opaqueNames?: boolean;
+}
+
+function write(value: unknown, at: string, opaqueNames: boolean): string {
   if (value === null) return 'null';
   switch (typeof value) {
     case 'boolean':
@@ -54,16 +68,16 @@ function write(value: unknown, at: string): string {
       if (UNPAIRED_SURROGATE.test(value)) throw new CanonicalJsonError(`${at}: a string holds an unpaired surrogate`);
       return JSON.stringify(value);
     case 'object': {
-      if (Array.isArray(value)) return `[${value.map((item, i) => write(item, `${at}[${i}]`)).join(',')}]`;
+      if (Array.isArray(value)) return `[${value.map((item, i) => write(item, `${at}[${i}]`, opaqueNames)).join(',')}]`;
       if (!isPlainObject(value)) {
         throw new CanonicalJsonError(`${at}: a ${value.constructor?.name ?? 'non-plain'} object is not JSON; canonicalize it first`);
       }
       const names = Object.keys(value).sort();
       const members: string[] = [];
-      for (const name of names) {
+      names.forEach((name, index) => {
         if (UNPAIRED_SURROGATE.test(name)) throw new CanonicalJsonError(`${at}: a member name holds an unpaired surrogate`);
-        members.push(`${JSON.stringify(name)}:${write(value[name], `${at}.${name}`)}`);
-      }
+        members.push(`${JSON.stringify(name)}:${write(value[name], opaqueNames ? `${at}.#${index}` : `${at}.${name}`, opaqueNames)}`);
+      });
       return `{${members.join(',')}}`;
     }
     default:
@@ -72,11 +86,11 @@ function write(value: unknown, at: string): string {
 }
 
 /** The RFC 8785 serialization of `value`. Throws {@link CanonicalJsonError} on anything that is not JSON. */
-export function canonicalJson(value: unknown): string {
-  return write(value, '$');
+export function canonicalJson(value: unknown, options: CanonicalJsonOptions = {}): string {
+  return write(value, options.at ?? '$', options.opaqueNames === true);
 }
 
 /** The UTF-8 bytes of {@link canonicalJson} — what is hashed and signed. */
-export function canonicalJsonBytes(value: unknown): Buffer {
-  return Buffer.from(canonicalJson(value), 'utf8');
+export function canonicalJsonBytes(value: unknown, options: CanonicalJsonOptions = {}): Buffer {
+  return Buffer.from(canonicalJson(value, options), 'utf8');
 }

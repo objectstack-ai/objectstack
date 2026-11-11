@@ -45,6 +45,7 @@
  */
 
 import type { FieldErrorCode } from './errors.zod';
+import { refusalHeadOf } from '../shared/refusal-head';
 import {
     CONTAINER_ISSUE_CODES,
     NESTED_EXPANSION_DEPTH_LIMIT,
@@ -173,7 +174,7 @@ function collectIssueFields(
     seen: Set<string>,
     input: unknown,
     inputProvided: boolean,
-    out: Array<{ field: string; code: FieldErrorCode; message: string }>,
+    out: Array<{ field: string; code: FieldErrorCode; message: string; hint?: string }>,
 ): void {
     const ownPathIsArray = Array.isArray(issue?.path);
     const path = ownPathIsArray ? [...parentPath, ...issue.path] : parentPath;
@@ -190,12 +191,19 @@ function collectIssueFields(
     const expandable = (branches.length > 0 || contained.length > 0)
         && depth < NESTED_EXPANSION_DEPTH_LIMIT;
 
-    const entry = {
+    const message = String(issue?.message ?? 'Invalid value');
+    // [#32279] A refusal that carries a one-line head (a retired query key or
+    // aggregation, a refused comparand: `../shared/refusal-head.ts`) answers
+    // the head as `message` and its whole prescription beside it as `hint`.
+    // Every other issue maps exactly as before, with no `hint`.
+    const head = refusalHeadOf(issue);
+    const entry: { field: string; code: FieldErrorCode; message: string; hint?: string } = {
         field,
         // A non-array path keeps the pre-#5014 reading (`valueAtPath` bails and
         // the mapper stays conservative) instead of being coerced into one.
         code: zodIssueToFieldCode(issue, ownPathIsArray ? path : issue?.path, input, inputProvided),
-        message: String(issue?.message ?? 'Invalid value'),
+        message: head ?? message,
+        ...(head === undefined ? {} : { hint: message }),
     };
 
     if (!expandable) {
@@ -251,10 +259,10 @@ function collectIssueFields(
 export function zodIssuesToFields(
     issues: unknown,
     ...input: [] | [unknown]
-): Array<{ field: string; code: FieldErrorCode; message: string }> {
+): Array<{ field: string; code: FieldErrorCode; message: string; hint?: string }> {
     if (!Array.isArray(issues)) return [];
     const inputProvided = input.length > 0;
-    const out: Array<{ field: string; code: FieldErrorCode; message: string }> = [];
+    const out: Array<{ field: string; code: FieldErrorCode; message: string; hint?: string }> = [];
     for (const issue of issues) {
         // A fresh `seen` per top-level issue: de-duplication is about one
         // union's branches agreeing, never about two independent issues.

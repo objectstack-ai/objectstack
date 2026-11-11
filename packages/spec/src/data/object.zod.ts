@@ -1050,6 +1050,24 @@ export const LifecycleSchema = lazySchema(() => strictObject({
     to: z.string().describe('Target datasource name for cold storage. When it is not registered, the Archiver skips (audit rows are then retained, never dropped unarchived).'),
     keep: lifecycleDuration('archive.keep').optional().describe('How long archived rows are kept in cold storage (undefined = forever).'),
   }).optional().describe('Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off.'),
+  // [ADR-0154 D10] Tamper evidence. Read by `@objectstack/plugin-audit`'s
+  // sealer, which signs each window of rows into a per-organization checkpoint.
+  seal: strictObject({
+    surface: "this object's `lifecycle.seal` block",
+    history: 'Closed from its first release (ADR-0154): no key here was ever dropped silently.',
+  }, {
+    valueFields: z.array(z.string()).describe(
+      'Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never ' +
+      'carries their values; every other declared column enters in clear. Each must name a declared field ' +
+      'other than `id` and `created_at`, which order the leaves.',
+    ),
+  }).optional().describe(
+    'Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside ' +
+    "the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` " +
+    "`onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments " +
+    'ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A ' +
+    'deployment with no crypto provider seals nothing and reports that at error.',
+  ),
   reclaim: z.boolean().optional().describe('Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes.'),
 }).superRefine((lc, ctx) => {
   // ADR-0057 §3.5: a non-`record` lifecycle class with no bounding policy is a
@@ -1134,6 +1152,28 @@ export const LifecycleSchema = lazySchema(() => strictObject({
       code: z.ZodIssueCode.custom,
       message: 'lifecycle.ttl.onlyWhen cannot be combined with archive — archive takes over the whole reap (the ttl sweep never runs), and while the Archiver does move rows by the declared ttl cutoff it selects them by that cutoff alone and would archive rows the filter protects',
     });
+  }
+  // [ADR-0154 D10] What `seal` refuses beside it. A sealed chain expires only by
+  // whole windows from its front (D8), so each policy below would delete part of
+  // a sealed window and make an honest expiry read as `missing`.
+  if (lc.seal) {
+    const refuse = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: `${message} (ADR-0154 D10)` });
+    if (lc.class !== 'audit') {
+      refuse(['seal'], `lifecycle.seal is for the compliance ledger: only class 'audit' may declare it, not '${lc.class}'`);
+    }
+    if (lc.retention?.onlyWhen) {
+      refuse(['retention', 'onlyWhen'], 'lifecycle.retention.onlyWhen cannot be combined with seal — it deletes part of a sealed window');
+    }
+    if (lc.ttl?.onlyWhen) {
+      refuse(['ttl', 'onlyWhen'], 'lifecycle.ttl.onlyWhen cannot be combined with seal — it deletes part of a sealed window');
+    }
+    if (lc.ttl && lc.ttl.field !== 'created_at') {
+      refuse(['ttl', 'field'], `lifecycle.ttl on '${lc.ttl.field}' cannot be combined with seal — its cutoff is not a created_at window; measure the ttl from created_at`);
+    }
+    if (lc.storage?.strategy === 'rotation') {
+      refuse(['storage'], 'rotation storage cannot be combined with seal — the Rotator drops whole shards, not whole sealed windows');
+    }
   }
 }));
 
@@ -2949,6 +2989,41 @@ function refuseAttachedBlockConflicts(attachedOnRead: unknown, fields: unknown, 
 }
 
 /**
+ * [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a field this object
+ * declares: a sealed checkpoint commits that column's value instead of carrying
+ * it, and a name that matches no column would commit nothing while the author
+ * believes the column is kept out of the checkpoint. `id` and `created_at`
+ * order each leaf, so neither can be committed. One located issue per refused
+ * name, at `['lifecycle', 'seal', 'valueFields', <index>]`.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseAttachedBlockConflicts}, for the reason given there: only the
+ * object holds both the lifecycle block and the field map. Names are judged
+ * against the AUTHORED field map.
+ */
+function refuseUndeclaredSealValueFields(lifecycle: unknown, fields: unknown, ctx: z.RefinementCtx): void {
+  if (lifecycle === null || typeof lifecycle !== 'object') return;
+  const seal = (lifecycle as { seal?: { valueFields?: unknown } }).seal;
+  if (!seal || !Array.isArray(seal.valueFields)) return;
+  const declared = fields !== null && typeof fields === 'object' ? fields : {};
+  seal.valueFields.forEach((name, index) => {
+    if (name === 'id' || name === 'created_at') {
+      ctx.addIssue({ code: 'custom', path: ['lifecycle', 'seal', 'valueFields', index], message: `lifecycle.seal.valueFields cannot name '${name}': it orders each sealed leaf, so it enters in clear (ADR-0154 D10).` });
+      return;
+    }
+    if (typeof name !== 'string' || Object.prototype.hasOwnProperty.call(declared, name)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['lifecycle', 'seal', 'valueFields', index],
+      message:
+        `\`lifecycle.seal.valueFields\` names \`${name}\`, which is not a declared field of this object. `
+        + 'A value field enters each sealed row as a salted commitment instead of in clear, so it must name a '
+        + 'column the object stores; declare the field, or remove the name (ADR-0154 D10).',
+    });
+  });
+}
+
+/**
  * [#27069] A field group that carries `relatedList` stands for a body table,
  * not a section of fields, so no field may join it. One located issue per
  * field whose `group` names such a group, at `['fields', <name>, 'group']`.
@@ -4436,6 +4511,9 @@ const ObjectSchemaBase = strictObject(
   // [ADR-0153 D4] `userActions` opens no write verb on a `synced` object. See
   // the helper's docblock.
   refuseWriteLockedUserActions(object.name, object.managedBy, object.userActions, ctx);
+  // [ADR-0154 D10] Each `lifecycle.seal.valueFields` name is a declared field.
+  // See the helper's docblock.
+  refuseUndeclaredSealValueFields(object.lifecycle, object.fields, ctx);
 }).overwrite((object) => {
   // [#23065] A `tree` that names no `reference` references this object, and the
   // parse writes that down after the refinements above judged what the author

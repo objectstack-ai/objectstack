@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 294 |
-| Object name statically decidable | 204 |
-| Object name chosen at run time | 90 |
-| Against a tenancy-enabled object | 197 |
+| Write call sites | 300 |
+| Object name statically decidable | 207 |
+| Object name chosen at run time | 93 |
+| Against a tenancy-enabled object | 200 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 226 |
-| Provably carrying none | 11 |
+| Threading a tenant context | 230 |
+| Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
-| Options argument unreadable | 57 |
-| …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 162 |
+| Options argument unreadable | 58 |
+| …and decidably tenancy-enabled | 31 |
+| Threading a decidably elevated context | 166 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 121 |
+| Threading a context of undecidable elevation | 122 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-10 at `c6e96d157`.
+Measured on 2026-11-10 at `2919a8dc2`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1112 |
-| engine-shaped types recognised | 128 |
+| tracked non-test sources scanned | 1129 |
+| engine-shaped types recognised | 131 |
 | declared objects in the registry | 136 |
-| same-named calls subtracted as non-engine | 261 |
+| same-named calls subtracted as non-engine | 287 |
 
 ## Every site
 
@@ -119,6 +119,10 @@ Measured on 2026-11-10 at `c6e96d157`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-audit/src/audit-signing-key-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/credential-use-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
@@ -191,6 +195,8 @@ Measured on 2026-11-10 at `c6e96d157`.
 | `packages/plugins/plugin-auth/src/service-account-owner-leaves.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |

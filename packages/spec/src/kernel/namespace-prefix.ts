@@ -193,3 +193,33 @@ export function findNamespaceObjectNameClashes(
 
   return clashes;
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Two package holders of one name, judged by their namespaces (ADR-0150 D2/D9)
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Do two PACKAGE holders of one name meet, judged by the namespaces they
+ * declare, so that one may be refused because the other holds the name?
+ * They meet unless both declare a namespace and the two differ: two
+ * namespaces give the two items two addresses (`/actions/NS/global/NAME`,
+ * `NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves a
+ * bare name by `(package, name)` or refuses it naming both. A package with no
+ * namespace has no address of its own, so it meets every holder; two packages
+ * of ONE namespace meet, the shareable platform namespaces and the co-owners
+ * of ADR-0150 D2 included.
+ *
+ * The ONE copy of the namespace half of the rule, read by both doors that
+ * judge a pair of holders: the install gate (`bareNameHoldersMeet` in
+ * `@objectstack/objectql`, for a type whose one-holder rule has narrowed to
+ * the namespace) and `composeStacks` (two input stacks' object-less action of
+ * one name, under `manifest: 'preserve'`). It lives here because `composeStacks`
+ * cannot import the engine. It judges namespaces only: which types narrowed,
+ * and that two bodies of one package are one holder, stay with each door.
+ */
+export function namespacedHoldersMeet(
+  incomingNamespace: string | undefined,
+  holderNamespace: string | undefined,
+): boolean {
+  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+}

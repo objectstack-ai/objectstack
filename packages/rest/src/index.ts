@@ -192,8 +192,10 @@ export {
     translateMetaEnvelope,
     translateMetaList,
     wantsMetaItemLayers,
+    metaCallerPackageQuery,
 } from './meta-item-read-gate.js';
 export type {
+    MetaCallerPackageProtocol,
     MetaActionProjection,
     MetaActionProjectionSources,
     MetaBookTreeAnswer,

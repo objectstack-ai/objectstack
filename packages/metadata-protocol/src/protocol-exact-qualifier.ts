@@ -32,12 +32,21 @@
  *    member, an item authored into X.
  */
 
-import { appOf, isPairOf, pairOf, pairsOf, type InstalledManifestLookup } from '@objectstack/metadata-core';
+import {
+    appOf,
+    isPairOf,
+    packageResolutionClosure,
+    pairOf,
+    pairsOf,
+    type InstalledManifestLookup,
+    type PackageClosureRegistry,
+} from '@objectstack/metadata-core';
 import {
     isNamespaceScopedBareNameType,
     isPackageScopedType,
     PackageScopedNameRefusedError,
     packageScopedRefusalMessage,
+    resolvePackageScopedHolders,
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
@@ -54,7 +63,12 @@ import type { ProtocolHost } from './protocol-host.js';
  * name)` for the type (`SchemaRegistry`'s answer for every type).
  */
 interface ExactQualifierRegistry {
-    packageScopedHoldersOf(type: string, name: string): string[];
+    /**
+     * [#32310] `callerPackageId` counts the caller's own holding for the caller
+     * arm's step 1 ({@link resolveCallerPackageAddress}), as objectql's
+     * resolver reads it; the exact qualifier passes none.
+     */
+    packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[];
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
@@ -334,6 +348,91 @@ export function exactQualifierItem(
     }
     const [holder] = address.registryHolders;
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+}
+
+/**
+ * Where a caller-arm read is read: the holder the caller resolves to, read at
+ * its exact address (`?package=<holder>`), or the environment's own item for
+ * a name the platform requests by spelling (ADR-0150 D3's exception), which
+ * every caller reads environment-wide.
+ */
+export type CallerPackageAddress =
+    | { readonly kind: 'package'; readonly packageId: string }
+    | { readonly kind: 'environment' };
+
+/** The registry reads the caller arm asks: the exact qualifier's, and the closure walk's. */
+type CallerPackageRegistry = ExactQualifierRegistry & PackageClosureRegistry;
+
+/**
+ * [ADR-0150 D3, #32310] Resolve a by-name read made FROM package
+ * `callerPackageId` (`?callerPackage=`): a dashboard, report or chart of
+ * package P naming a dataset. Unlike `?package=`, the exact qualifier (D5),
+ * this is the caller's resolution, by the ONE rule (`resolvePackageScopedHolders`,
+ * `@objectstack/core`) over the holders the bare read resolves over
+ * (`packageScopedHoldersOf`, as objectql's `resolvePackageScopedName` reads
+ * them), with P's closure from the one walk (`packageResolutionClosure`):
+ *
+ *  1. P's own item;
+ *  2. else the unique holder in P's declared dependency closure plus `sys`;
+ *  3. else a refusal naming the candidates: `ambiguous-in-closure` for two
+ *     holders in the closure, `outside-closure` for holders P cannot reach
+ *     (`409 RESOURCE_CONFLICT`, thrown). ⛔ Never an environment-wide guess.
+ *
+ * The answer is an ADDRESS, not an item: the door reads the resolved holder
+ * at its exact qualifier (`?package=<holder>`), so the holder's bound overlay,
+ * drafts, lock, version and every read gate after it — admission included —
+ * answer exactly as they answer that address. A name nothing holds is read at
+ * P's own address, which answers its own miss (or a stored row bound to P).
+ *
+ * A caller package that is not installed is read at its own address too, so
+ * it answers exactly what `?package=` naming it answers (`409` naming the
+ * holders, or the read's miss) — ⛔ never the bare read.
+ *
+ * @throws {PackageScopedNameRefusedError} when the rule refuses.
+ * @throws an error with `code: 'SERVICE_UNAVAILABLE'` (`503`) when the type
+ *   is not one ADR-0150 addresses by package (core's `isPackageScopedType`),
+ *   or the registry lacks the exact qualifier's reads: the arm fails closed.
+ */
+export function resolveCallerPackageAddress(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; callerPackageId: string; member?: string },
+): CallerPackageAddress {
+    request = canonicalizeMetaRequestType(request);
+    const { type, name, callerPackageId, member } = request;
+    // [#32277] Whether a type is addressed by package is core's static
+    // `PACKAGE_SCOPED_TYPES` (`isPackageScopedType`), the one rule the exact
+    // qualifier reads, never a list the registry supplies; and a registry
+    // without the exact qualifier's reads cannot judge the name. Either way
+    // the arm fails closed, never a first match.
+    const registry = isPackageScopedType(type)
+        ? exactQualifierRegistry(host) as CallerPackageRegistry | undefined
+        : undefined;
+    if (!registry) {
+        throw Object.assign(
+            new Error(`The ${type} "${name}" could not be resolved from package "${callerPackageId}": this deployment's `
+                + `metadata registry does not resolve ${type} names by package. This is a server-side fault.`),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+    const installed = typeof registry.getPackage === 'function' && registry.getPackage(callerPackageId) !== undefined;
+    if (!installed && registry.residualOwnerDependenciesOf?.(callerPackageId) === undefined) {
+        return { kind: 'package', packageId: callerPackageId };
+    }
+    const resolution = resolvePackageScopedHolders(
+        { type: type as PackageScopedResolvableType, name, callerPackageId },
+        {
+            // The caller's own holding counts for its step 1 even as a bundle addition.
+            packageHolders: registry.packageScopedHoldersOf(type, name, callerPackageId) ?? [],
+            packageItem: (packageId) => registry.getPackageScopedItem(type, name, packageId, member),
+            environmentItem: () => registry.getEnvironmentScopedItem(type, name, member),
+        },
+        (caller) => packageResolutionClosure(registry, caller),
+    );
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+    if (resolution.status === 'not-found') return { kind: 'package', packageId: callerPackageId };
+    return resolution.holder.kind === 'package'
+        ? { kind: 'package', packageId: resolution.holder.packageId }
+        : { kind: 'environment' };
 }
 
 
