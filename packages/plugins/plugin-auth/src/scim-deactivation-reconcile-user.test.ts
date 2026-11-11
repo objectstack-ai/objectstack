@@ -63,7 +63,11 @@
  *      create (and from a tombstone re-link), so `admin/set-user-manager`
  *      refuses it as directory-owned; a local password still flips it to
  *      `env_native` and a later sync leaves that; the boot backfill marks a
- *      user provisioned before the mark existed, once.
+ *      user provisioned before the mark existed, once. The mark fails closed
+ *      on a create (the request fails and nothing persists) and never undoes
+ *      a deprovision (a deactivation still bans when the mark is refused);
+ *      `admin/set-user-password` on a cloud-managed environment refuses the
+ *      SCIM user.
  *      And, under (d): a deactivation makes an administrator's EXPIRING ban
  *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
  *      principal.
@@ -82,6 +86,9 @@ import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './id
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
 import { runSetUserManager } from './admin-set-user-manager.js';
+import { runAdminSetUserPassword } from './admin-user-endpoints.js';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
+import { resetCloudManagedForTesting } from '@objectstack/core';
 import { backfillScimProvisionedIdentitySource, type ScimIdentitySourceEngine } from './scim-identity-source.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
@@ -994,5 +1001,134 @@ describe('[ADR-0135 D4] the boot backfill marks directory-provisioned users once
     const pass = countingUserWrites(h);
     expect(await backfillScimProvisionedIdentitySource(pass.engine, 2)).toEqual({ directoryProvisioned: 3, marked: 3 });
     for (const u of users) expect(await sourceOf(h, u.userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(h) a subject row whose user row is gone is not counted as directory-provisioned', async () => {
+    const h = await boot();
+    const vic = await provision(h, 'vic');
+    await unmark(h, vic.userId);
+    await h.engine.insert(
+      'sys_scim_subject',
+      { id: 'zz_orphan_subject', user_id: 'usr_gone_32113', revision: 1, created_at: new Date(), updated_at: new Date() },
+      SYSTEM,
+    );
+    const pass = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(pass.engine)).toEqual({ directoryProvisioned: 1, marked: 1 });
+    expect(await sourceOf(h, vic.userId)).toBe('idp_provisioned');
+  }, 60_000);
+});
+
+/**
+ * The manager's data engine with the directory-managed mark write refused —
+ * a `sys_user` update carrying `source` throws, every other call reaches the
+ * real engine (and so the vendor's ambient transaction) unchanged.
+ */
+function refuseMarkWrites(h: Harness): () => number {
+  let refused = 0;
+  const real = h.engine;
+  const refusing = new Proxy(real, {
+    get(target, prop, receiver) {
+      if (prop === 'update') {
+        return (object: string, data: Record<string, unknown>, options?: unknown) => {
+          if (object === 'sys_user' && data && 'source' in data) {
+            refused += 1;
+            throw new Error('mark write refused (test)');
+          }
+          return target.update(object, data as never, options as never);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+  return () => refused;
+}
+
+describe('[ADR-0135 D4] the SCIM create fails closed on the directory-managed mark', () => {
+  it('(h) a mark that cannot be written fails POST /Users, and neither the user nor its SCIM source persists', async () => {
+    const h = await boot();
+    const refused = refuseMarkWrites(h);
+    const res = await h.send(
+      scimRequest(h, 'POST', '/Users', {
+        schemas: [USER_SCHEMA],
+        userName: 'sol@example.com',
+        name: { givenName: 'sol', familyName: 'Example' },
+        displayName: 'sol Example',
+        emails: [{ value: 'sol@example.com', primary: true, type: 'work' }],
+        active: true,
+      }),
+    );
+    expect(refused()).toBeGreaterThan(0);
+    expect(res.status, await res.clone().text()).toBe(500);
+    const body = (await res.json()) as { schemas?: string[]; status?: string };
+    expect(body.schemas).toContain(SCIM_ERROR_SCHEMA);
+    expect(body.status).toBe('500');
+    expect(await userRow(h, 'sol@example.com')).toBeNull();
+    expect(await h.engine.find('sys_scim_user', { where: { user_name: 'sol@example.com' } }, SYSTEM)).toHaveLength(0);
+    expect(await h.engine.find('sys_scim_subject', {}, SYSTEM)).toHaveLength(0);
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] a SCIM deprovision lands even when the directory-managed mark cannot be written', () => {
+  it('(h) PATCH active:false with the mark refused still bans the account with the SCIM reason', async () => {
+    const h = await boot();
+    const tia = await provision(h, 'tia');
+    await unmark(h, tia.userId);
+    const refused = refuseMarkWrites(h);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, tia.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused()).toBe(1);
+      const row = await userRow(h, tia.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      // The mark stayed unwritten, and said so once.
+      expect(await sourceOf(h, tia.userId)).toBe('env_native');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('identity-source mark was NOT written'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4/D5.2] admin/set-user-password refuses a SCIM-provisioned user on a cloud-managed environment', () => {
+  it('(h) the refusal is 409 RESOURCE_CONFLICT and no local credential is written', async () => {
+    const h = await boot();
+    const uma = await provision(h, 'uma');
+    const prev = process.env.OS_CLOUD_MANAGED;
+    process.env.OS_CLOUD_MANAGED = '1';
+    resetCloudManagedForTesting();
+    try {
+      const res = await runAdminSetUserPassword(
+        {
+          getAuthApi: () => h.manager.getApi() as never,
+          getAuthContext: () => h.manager.getAuthContext(),
+          getDataEngine: () => h.engine as never,
+          assertPasswordComplexity: async () => {},
+          noteMustChangePasswordIssued: () => {},
+        },
+        new Request(`${AUTH}/admin/set-user-password`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId: uma.userId, newPassword: PASSWORD }),
+        }),
+        { id: 'usr_admin_32113' },
+      );
+      expect(res.status).toBe(CLOUD_MANAGED_REFUSAL_STATUS);
+      expect(res.body.error?.code).toBe(CLOUD_MANAGED_REFUSAL_CODE);
+      const credentials = await h.engine.find(
+        'sys_account',
+        { where: { user_id: uma.userId, provider_id: 'credential' } },
+        SYSTEM,
+      );
+      expect(credentials).toHaveLength(0);
+      expect(await sourceOf(h, uma.userId)).toBe('idp_provisioned');
+    } finally {
+      if (prev === undefined) delete process.env.OS_CLOUD_MANAGED;
+      else process.env.OS_CLOUD_MANAGED = prev;
+      resetCloudManagedForTesting();
+    }
   }, 60_000);
 });
