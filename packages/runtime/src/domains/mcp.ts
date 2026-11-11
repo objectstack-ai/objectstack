@@ -697,8 +697,11 @@ export function buildMcpBridge(
      * either. An unrestricted caller is handed the definition it was handed
      * before (the projection returns it by reference). A posture that cannot
      * be evaluated, or a projection that leaves no field, is refused with the
-     * door's code ({@link fieldVisibilityRefusal}). The masker is resolved
-     * once per bridge, i.e. once per MCP request, and asked per object.
+     * door's code ({@link fieldVisibilityRefusal}). [ruling record
+     * 6787890900] An object the caller may not read is `undefined`: it does
+     * not exist for them in `describe_object` or `list_objects`, exactly as a
+     * name the listing omits. The masker is resolved once per bridge, i.e.
+     * once per MCP request, and asked per object.
      *
      * Only the definitions these tools SERVE go through it. The reads that
      * judge a call (the action collection, the exposure gates) keep the
@@ -708,6 +711,9 @@ export function buildMcpBridge(
     const servedToCaller = async (def: any): Promise<any> => {
         const name = String(def?.name ?? '');
         const masked = await maskObjectSchema(await (masker ??= resolveObjectMasker(deps, context, 'object')), name, def);
+        // [ruling record 6787890900] An object the caller may not read does not
+        // exist for them: `undefined`, the answer for a name the listing omits.
+        if (!masked.ok && masked.hidden) return undefined;
         if (!masked.ok) throw fieldVisibilityRefusal(name);
         return masked.document;
     };
@@ -764,6 +770,8 @@ export function buildMcpBridge(
         // object list does.
         for (const listed of objs) {
             const o = await servedToCaller(listed);
+            // [ruling record 6787890900] An object the caller may not read is left out.
+            if (o === undefined) continue;
             out.push({
                 name: o.name,
                 label: o.label ?? o.name,
