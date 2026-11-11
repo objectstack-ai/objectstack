@@ -37,6 +37,7 @@ import {
 } from './thrown-http-error.js';
 import { isScriptFaultMessage, sandboxBusinessMessage } from './sandbox-business-message.js';
 import { unevaluableHookConditionRefusal } from './hook-condition-refusal.js';
+import { refusalHeadOf } from '@objectstack/spec/api';
 
 // [#27672] Declared in `sandbox-business-message.ts` so the resolver can read
 // it too; exported from here as before, so the package's public names are
@@ -598,9 +599,48 @@ function withDeclaredUserMessage(
     error: any,
     mapped: { status: number; body: Record<string, unknown> },
 ): { status: number; body: Record<string, unknown> } {
+    const headed = withRefusalHeadAnswer(error, mapped);
     const userMessage = boundedDeclaredUserMessage(error);
-    if (userMessage === undefined) return mapped;
-    return { status: mapped.status, body: { ...mapped.body, userMessage } };
+    if (userMessage === undefined) return headed;
+    return { status: headed.status, body: { ...headed.body, userMessage } };
+}
+
+/**
+ * [#32279] A 4xx refusal that carries a one-line head (`@objectstack/spec`'s
+ * `refusalHeadOf`: the filter-comparand face's `INVALID_FILTER` refusals)
+ * answers the head as `error`, and the text it would have answered there, the
+ * whole prescription under the same #5423 bound, as `details.hint`.
+ *
+ * Composed into {@link withDeclaredUserMessage} because every exit that
+ * renders a thrown error's own sentence already passes through it: the
+ * declared-status passthrough in `@objectstack/rest`'s `resolveErrorResponse`
+ * and every arm of {@link mapDataError}. So a refusal reads the same on every
+ * route that catches it, which is the #9232 / #12975 rule.
+ *
+ * What it never touches: the status and the `code` (a head is a shorter
+ * sentence, not a different verdict); a 5xx (its sentence is withheld or
+ * declared by other rules, and no head is written for one); a body whose
+ * `error` is not a string; and every error that carries no head, whose body is
+ * returned as it was. `details` is merged, so a member another arm set
+ * (`details.candidates`) is kept.
+ */
+function withRefusalHeadAnswer(
+    error: any,
+    mapped: { status: number; body: Record<string, unknown> },
+): { status: number; body: Record<string, unknown> } {
+    if (mapped.status < 400 || mapped.status >= 500) return mapped;
+    const answered = mapped.body.error;
+    if (typeof answered !== 'string') return mapped;
+    const head = refusalHeadOf(error);
+    if (head === undefined || head === answered) return mapped;
+    const details = mapped.body.details;
+    const kept = details !== null && typeof details === 'object' && !Array.isArray(details)
+        ? details as Record<string, unknown>
+        : {};
+    return {
+        status: mapped.status,
+        body: { ...mapped.body, error: head, details: { ...kept, hint: answered } },
+    };
 }
 
 /**

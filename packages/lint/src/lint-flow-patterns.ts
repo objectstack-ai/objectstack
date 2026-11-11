@@ -158,6 +158,7 @@ import {
   APPROVAL_REVISE_NODE_TYPE,
   collectFlowGraphs,
   FLOW_NODE_TEXT_SLOTS,
+  FlowNodeAction,
   flowNodeTextSlotSources,
   flowNodeValueTemplateRefusals,
   textSlotTemplateRefusal,
@@ -243,6 +244,16 @@ export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
  * See {@link scanUnreachableNodes}.
  */
 export const FLOW_NODE_UNREACHABLE = 'flow-node-unreachable';
+/**
+ * A flow whose top-level `nodes` hold no `start` node: it can never run, and
+ * the automation engine refuses to register it. See {@link scanStartNodeMissing}.
+ *
+ * Named descriptor-first like the rest of the flow family
+ * (`flow-<descriptor>-<verdict>`, the note on {@link FLOW_MULTI_WRITE_UNFILTERED}):
+ * the descriptor is the start node, the verdict is that it is missing, as in
+ * `flow-api-trigger-secret-missing`.
+ */
+export const FLOW_START_NODE_MISSING = 'flow-start-node-missing';
 /**
  * #15429 — a `decision` `config.mode` the spec refuses: a value outside
  * `'exclusive' | 'inclusive'`, or a legal `mode` beside a non-empty
@@ -1889,8 +1900,8 @@ function scanTryCatchWithoutCatch(
  * Scope, declared rather than discovered:
  *
  *  - The top-level graph only (see the call site).
- *  - A flow with no `start` node is not judged: nothing is reached from
- *    nothing, and the engine refuses to run it (`FLOW_NO_START_NODE`).
+ *  - A flow with no `start` node is not judged here: nothing is reached from
+ *    nothing, and {@link FLOW_START_NODE_MISSING} names that defect.
  *  - Every edge counts, whatever its `type` or `condition`: a `fault` edge or a
  *    conditional edge is a path the engine can take.
  *  - A flow with an edge whose endpoint names no top-level node is not judged:
@@ -1946,6 +1957,62 @@ function scanUnreachableNodes(
       severity: 'error',
     });
   }
+}
+
+/**
+ * The node type a run begins at, read from the spec's node type enum rather
+ * than restated: the engine's registration check (`validateStartNode` in
+ * `service-automation`'s `flow-registration-checks.ts`) and every run look up
+ * the first node of this type.
+ */
+const START_NODE_TYPE = FlowNodeAction.enum.start;
+
+/**
+ * {@link FLOW_START_NODE_MISSING}: a flow whose top-level `nodes` hold no
+ * `start` node, one `error` finding per flow.
+ *
+ * The engine begins every run at the flow's first `start` node and follows
+ * edges from there; nothing else schedules a top-level node. Without one,
+ * every trigger and every explicit run is refused (`FLOW_NO_START_NODE`), and
+ * since #32273 the engine refuses to register the flow at all
+ * (`validateStartNode`). So the flow is dead on every run, which is this
+ * module's bar for `error`.
+ *
+ * Why lint and not the flow parse: the reason {@link scanUnreachableNodes}
+ * gives. The save door parses `FlowSchema` on every save, a draft included, and
+ * a designer draft may hold no start node mid-edit. As a finding here it fails
+ * `os lint` / `os build`, and on the runtime authoring gate
+ * (`runtimeTypes: ['flow']`) a live save and a publish, while a draft is kept
+ * with it in `_diagnostics`.
+ *
+ * Scope, matching the engine's check exactly:
+ *
+ *  - Zero `start` nodes only. More than one is not this rule: the engine
+ *    registers that flow and runs from the first, and
+ *    {@link FLOW_NODE_UNREACHABLE} names each extra start node.
+ *  - The top-level graph only: a region body is entered at its single entry
+ *    node, not at a `start` node.
+ *  - A flow whose `nodes` is not a list is not judged: the flow parse refuses
+ *    it first.
+ */
+function scanStartNodeMissing(flowName: string, rawNodes: unknown, nodes: AnyRec[], findings: FlowLintFinding[]): void {
+  if (!Array.isArray(rawNodes)) return;
+  if (nodes.some((n) => n.type === START_NODE_TYPE)) return;
+  const types = [...new Set(nodes.map((n) => String(n.type)))];
+  const found = nodes.length === 0
+    ? 'the list is empty'
+    : `found ${nodes.length} node(s), of type ${types.map((t) => `\`${t}\``).join(', ')}`;
+  findings.push({
+    where: `flow '${flowName}' · nodes`,
+    message:
+      `the flow's top-level \`nodes\` hold no \`${START_NODE_TYPE}\` node (${found}), so it can never run: a run ` +
+      `begins at the start node and follows edges from there, and the automation engine refuses to register the flow.`,
+    hint:
+      `Add a node with \`type: '${START_NODE_TYPE}'\` to the top-level \`nodes\` and an edge from it to the first step; ` +
+      `a record-change or schedule flow declares its trigger in that node's \`config\`.`,
+    rule: FLOW_START_NODE_MISSING,
+    severity: 'error',
+  });
 }
 
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
@@ -2053,10 +2120,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       }
     }
 
-    // (a5) A top-level node no edge path from the start node reaches never runs.
-    //      Flow-level for the reason the trigger rules are: a run enters the
-    //      top-level graph at its start node, and a region body is already
-    //      single-entry (ADR-0031), so nothing one level down can be unreached.
+    // (a5) A flow with no start node never runs, and neither does a top-level
+    //      node no edge path from the start node reaches. Both flow-level for
+    //      the reason the trigger rules are: a run enters the top-level graph at
+    //      its start node, and a region body is already single-entry
+    //      (ADR-0031), so nothing one level down can be unreached.
+    scanStartNodeMissing(flowName, flow.nodes, nodes, findings);
     scanUnreachableNodes(flowName, nodes, edges, findings);
 
     // (b)–(e) #5383 — every graph in the flow, not just the top-level one: its

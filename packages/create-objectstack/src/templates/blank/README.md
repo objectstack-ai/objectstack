@@ -53,12 +53,12 @@ opens the list of sample notes.
 
 **An object appears in Console navigation only when an app lists it.**
 `src/apps/main.app.ts` lists the sample object, and `src/views/note.view.ts`
-draws its list. To show another object, add an entry for it to the app's
-`navigation` (or add an app of its own under `src/apps/`) and give it a view,
-exporting each new file from its directory's `index.ts`.
-`objectstack generate app NAME --object OBJECT` and
-`objectstack generate view OBJECT` write the file and its export line
-together; the Console renders it after the next `pnpm dev` rebuild. The
+draws its list. A package whose manifest type is `app` holds at most one app,
+so `main.app.ts` is the one: to show another object, add a navigation entry for
+it to that app's `navigation` (a `group` entry with children nests them) rather
+than a second app, and give it a list view. `objectstack generate view OBJECT`
+writes the view and its export line together; the Console renders both after
+the next `pnpm dev` rebuild. The
 `objectstack-ui` skill covers the shape; describing the app you want to your
 coding agent is the intended path.
 

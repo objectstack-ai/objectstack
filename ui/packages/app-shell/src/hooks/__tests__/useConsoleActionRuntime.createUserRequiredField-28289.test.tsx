@@ -48,6 +48,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
     actionDescription: (_o: any, _a: any, fallback: any) => fallback,
     actionSubmitText: (_o: any, _a: any, fallback: any) => fallback,
     actionCancelText: (_o: any, _a: any, fallback: any) => fallback,
+    actionResultDialog: (_o: any, _a: any, spec: any) => spec,
   }),
 }));
 vi.mock('../useActionModal', () => ({
@@ -374,5 +375,375 @@ describe('objectstack#32185 — Setup maps and unmaps an IdP group through the p
     expect(result?.success).toBe(false);
     expect(String((result?.error as unknown) ?? '')).toContain("No IdP group mapping 'm_gone' exists");
     expect(onRefresh).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * objectstack#32297 — Setup → SSO Providers → Register SSO Provider registers
+ * a Microsoft Entra ID provider with its userinfo endpoint named, through the
+ * same seam. After #32296 the register bridge (`POST /api/v1/auth/admin/sso/register`,
+ * plugin-auth `register-sso-provider.ts`) reads `userInfoEndpoint`,
+ * `discoveryEndpoint` and `skipUserInfo` from the flat form body, and an
+ * endpoint the registration names is trusted for it. The declared params are
+ * restated from `sys_sso_provider.register_sso_provider`
+ * (`@objectstack/platform-objects`, whose `platform-objects.test.ts` pin holds
+ * them by name, type and order; help texts trimmed to what is asserted). The
+ * door is the mocked authenticated fetch, so what is pinned is the request the
+ * console sends: every value under the name the bridge reads.
+ */
+const ENTRA_ISSUER = 'https://login.microsoftonline.com/7d1c0f2e-0000-4a5b-8c6d-tenant000001/v2.0';
+const ENTRA_USERINFO = 'https://graph.microsoft.com/oidc/userinfo';
+const REGISTER_SSO = {
+  name: 'register_sso_provider',
+  label: 'Register SSO Provider',
+  type: 'api',
+  method: 'POST',
+  target: '/api/v1/auth/admin/sso/register',
+  refreshAfter: true,
+};
+const REGISTER_SSO_PARAMS = [
+  { name: 'providerId', label: 'Provider ID', type: 'text', required: true },
+  { name: 'issuer', label: 'Issuer URL', type: 'text', required: true },
+  { name: 'domain', label: 'Email Domain', type: 'text', required: true },
+  { name: 'clientId', label: 'Client ID', type: 'text', required: true },
+  { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true },
+  { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'url', required: false },
+  {
+    name: 'userInfoEndpoint',
+    label: 'Userinfo URL',
+    type: 'url',
+    required: false,
+    helpText: 'Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider.',
+  },
+  { name: 'skipUserInfo', label: 'Read Claims From the ID Token Only', type: 'boolean', required: false },
+  { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile' },
+  {
+    name: 'mapEmail',
+    label: 'Map: Email claim',
+    type: 'text',
+    required: false,
+    placeholder: 'email',
+    helpText: 'Optional. Claim mapped to email. Defaults to "email". Microsoft Entra ID (issuer on login.microsoftonline.com): users without a mailbox carry no "email" claim, so map "preferred_username" (or "upn") and turn on Read Claims From the ID Token Only.',
+  },
+  { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name' },
+  { name: 'mapGroups', label: 'Map: Groups claim', type: 'text', required: false, placeholder: 'groups' },
+];
+
+function SsoHarness({ onReady }: { onReady: (rt: ReturnType<typeof useConsoleActionRuntime>) => void }) {
+  const runtime = useConsoleActionRuntime({
+    dataSource: {},
+    objects: [{ name: 'sys_sso_provider', actions: [REGISTER_SSO] }] as any[],
+    objectName: 'sys_sso_provider',
+  });
+  const ready = React.useRef(false);
+  if (!ready.current) {
+    ready.current = true;
+    onReady(runtime);
+  }
+  return <>{runtime.dialogs}</>;
+}
+
+/** Open Register SSO Provider under Chinese chrome. */
+async function openRegisterSso() {
+  let runtime!: ReturnType<typeof useConsoleActionRuntime>;
+  render(
+    <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }}>
+      <SsoHarness onReady={(rt) => { runtime = rt; }} />
+    </I18nProvider>,
+  );
+  const runner = new ActionRunner({});
+  runner.setParamCollectionHandler(runtime.paramCollectionHandler);
+  runner.setToastHandler(vi.fn());
+  runner.registerHandler('api', runtime.apiHandler);
+  const settled: { result?: ActionResult } = {};
+  await act(async () => {
+    void runner.execute({ ...REGISTER_SSO, params: REGISTER_SSO_PARAMS } as any).then((r) => { settled.result = r; });
+  });
+  await screen.findByLabelText(/^Provider ID/);
+  return settled;
+}
+
+/** Type the five required values of an Entra ID registration. */
+function typeEntraRequired() {
+  const put = (label: RegExp, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
+  put(/^Provider ID/, 'acme-entra');
+  put(/^Issuer URL/, ENTRA_ISSUER);
+  put(/^Email Domain/, 'acme.com');
+  put(/^Client ID/, 'client-id');
+  put(/^Client Secret/, 'client-secret');
+}
+
+function sentRegisterParams(): Record<string, unknown> {
+  const [url, init] = authFetchSpy.mock.calls[0] as [string, { body: string }];
+  expect(String(url).endsWith('/api/v1/actions/sys_sso_provider/register_sso_provider')).toBe(true);
+  return (JSON.parse(init.body) as { params: Record<string, unknown> }).params;
+}
+
+describe('objectstack#32297 — Register SSO Provider registers an Entra ID provider with its userinfo endpoint named', () => {
+  it('the dialog offers the userinfo URL and the opt-out, and suggests the Entra email claim in words without setting it', async () => {
+    await openRegisterSso();
+
+    expect(screen.getByLabelText(/^Userinfo URL/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Discovery URL/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText(/map "preferred_username" \(or "upn"\)/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Map: Email claim/)).toHaveValue('');
+  });
+
+  it('an Entra-shaped registration sends the userinfo endpoint, the opt-out and the claim under the bridge\'s names', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-entra' } });
+    const settled = await openRegisterSso();
+
+    typeEntraRequired();
+    fireEvent.change(screen.getByLabelText(/^Userinfo URL/), { target: { value: ENTRA_USERINFO } });
+    fireEvent.change(screen.getByLabelText(/^Map: Email claim/), { target: { value: 'preferred_username' } });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    expect(sentRegisterParams()).toMatchObject({
+      providerId: 'acme-entra',
+      issuer: ENTRA_ISSUER,
+      domain: 'acme.com',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      userInfoEndpoint: ENTRA_USERINFO,
+      skipUserInfo: true,
+      mapEmail: 'preferred_username',
+    });
+    await waitFor(() => expect(settled.result?.success).toBe(true));
+  });
+
+  it('control: left alone, the opt-out is not sent as on and no email claim is sent for the admin', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-entra' } });
+    await openRegisterSso();
+
+    typeEntraRequired();
+    fireEvent.click(screen.getByRole('button', { name: '确认' }));
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    const params = sentRegisterParams();
+    expect(params.skipUserInfo === true || params.skipUserInfo === 'true').toBe(false);
+    expect(params.mapEmail ?? '').toBe('');
+  });
+});
+
+/**
+ * objectstack#32185 item 1 — Setup → SSO Providers → "Edit SAML Settings" and
+ * "Edit OIDC Settings" draw through this same seam, the generic declared-action
+ * form. The declared params are restated from `sys_sso_provider.edit_saml_provider`
+ * / `edit_oidc_provider` (`@objectstack/platform-objects`, whose own pins hold
+ * the declarations); help texts trimmed. The door is the mocked authenticated
+ * fetch answering what plugin-auth's edit bridge answers
+ * (`register-sso-provider.ts` `runUpdateSsoProviderFromForm`), so what is
+ * pinned is the request the console sends and what it shows: the certificate
+ * input is multi-line and a pasted PEM reaches the body byte-for-byte; the
+ * client secret is a password input, never prefilled, and a blank one posts
+ * nothing (the bridge reads blank as "keep"); `providerId` and `issuer` default
+ * from the row; the result dialog names what changed.
+ */
+const UPDATE_PROVIDER = '/api/v1/auth/admin/sso/update-provider';
+const EDIT_SAML = {
+  name: 'edit_saml_provider',
+  label: 'Edit SAML Settings',
+  type: 'api',
+  method: 'POST',
+  target: UPDATE_PROVIDER,
+  refreshAfter: true,
+  resultDialog: { title: 'SAML settings saved', acknowledge: 'Done', fields: [{ path: 'message', label: 'Changed', format: 'text' }] },
+};
+const EDIT_SAML_PARAMS = [
+  { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+  { name: 'issuer', field: 'issuer', label: 'IdP Entity ID', defaultFromRow: true, required: false },
+  { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: false },
+  { name: 'cert', label: 'New IdP Signing Certificate', type: 'textarea', required: false },
+  { name: 'keepCurrentCert', label: 'Keep trusting the current certificate', type: 'boolean', required: false },
+];
+const EDIT_OIDC = {
+  name: 'edit_oidc_provider',
+  label: 'Edit OIDC Settings',
+  type: 'api',
+  method: 'POST',
+  target: UPDATE_PROVIDER,
+  refreshAfter: true,
+  resultDialog: { title: 'OIDC settings saved', acknowledge: 'Done', fields: [{ path: 'message', label: 'Changed', format: 'text' }] },
+};
+const EDIT_OIDC_PARAMS = [
+  { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+  { name: 'clientId', label: 'Client ID', type: 'text', required: false },
+  { name: 'clientSecret', label: 'New Client Secret', type: 'password', required: false },
+  { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile' },
+];
+/** The two row fields the params are backed by, as `sys_sso_provider` declares them. */
+const SSO_OBJECT = {
+  name: 'sys_sso_provider',
+  fields: {
+    provider_id: { name: 'provider_id', type: 'text', label: 'Provider ID' },
+    issuer: { name: 'issuer', type: 'text', label: 'Issuer' },
+  },
+  actions: [EDIT_SAML, EDIT_OIDC],
+};
+const SAML_ROW = { id: 'p1', provider_id: 'acme-saml', issuer: 'https://idp.acme.test/entity', domain: 'acme.test' };
+const OIDC_ROW = { id: 'p2', provider_id: 'acme-oidc', issuer: 'https://login.acme.test', domain: 'acme.test' };
+
+/** A pasted PEM: armour, 64-column body lines, a trailing newline. */
+const PEM = [
+  '-----BEGIN CERTIFICATE-----',
+  'MIIBszCCAVmgAwIBAgIUQm9ndXNDZXJ0aWZpY2F0ZUZvclRlc3RzMAoGCCqGSM49',
+  'BAMCMBkxFzAVBgNVBAMMDmlkcC5hY21lLnRlc3QwHhcNMjYxMTEwMDAwMDAwWhcN',
+  'Mjcx',
+  '-----END CERTIFICATE-----',
+  '',
+].join('\n');
+
+function SsoEditHarness({ onReady }: { onReady: (rt: ReturnType<typeof useConsoleActionRuntime>) => void }) {
+  const runtime = useConsoleActionRuntime({
+    dataSource: {},
+    objects: [SSO_OBJECT] as any[],
+    objectName: 'sys_sso_provider',
+  });
+  const ready = React.useRef(false);
+  if (!ready.current) {
+    ready.current = true;
+    onReady(runtime);
+  }
+  return <>{runtime.dialogs}</>;
+}
+
+/** Open `action` on `row` as a list-item click dispatches it: the declared params as `actionParams`, the row under `params._rowRecord`. */
+async function openEdit(action: typeof EDIT_SAML, params: unknown[], row: Record<string, unknown>) {
+  let runtime!: ReturnType<typeof useConsoleActionRuntime>;
+  render(
+    <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+      <SsoEditHarness onReady={(rt) => { runtime = rt; }} />
+    </I18nProvider>,
+  );
+  const runner = new ActionRunner({});
+  runner.setParamCollectionHandler(runtime.paramCollectionHandler);
+  runner.setToastHandler(vi.fn());
+  runner.registerHandler('api', runtime.apiHandler);
+  runner.setResultDialogHandler(runtime.resultDialogHandler);
+  const settled: { result?: ActionResult } = {};
+  await act(async () => {
+    void runner.execute({ ...action, actionParams: params, params: { _rowRecord: row } } as any).then((r) => { settled.result = r; });
+  });
+  await screen.findByRole('dialog');
+  return settled;
+}
+
+function sentEditParams(actionName: string): Record<string, unknown> {
+  const [url, init] = authFetchSpy.mock.calls[0] as [string, { body: string }];
+  expect(String(url).endsWith(`/api/v1/actions/sys_sso_provider/${actionName}`)).toBe(true);
+  return (JSON.parse(init.body) as { params: Record<string, unknown> }).params;
+}
+
+function pressConfirm() {
+  fireEvent.click(screen.getByRole('button', { name: /^(Confirm|Submit|OK)$/ }));
+}
+
+describe('objectstack#32185 — Edit SAML Settings through the generic action form', () => {
+  it('draws the certificate as a multi-line input and defaults providerId and issuer from the row', async () => {
+    await openEdit(EDIT_SAML, EDIT_SAML_PARAMS, SAML_ROW);
+
+    const cert = await screen.findByLabelText(/^New IdP Signing Certificate/);
+    expect(cert.tagName).toBe('TEXTAREA');
+    expect(cert).toHaveValue('');
+    expect(screen.getByLabelText(/^IdP Entity ID/)).toHaveValue(SAML_ROW.issuer);
+    expect(screen.getByLabelText(/^IdP SSO URL/)).toHaveValue('');
+  });
+
+  it('a pasted PEM posts byte-for-byte, line breaks included', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-saml', protocol: 'saml', updated: ['cert'], message: 'SSO provider "acme-saml" updated: cert.' } });
+    await openEdit(EDIT_SAML, EDIT_SAML_PARAMS, SAML_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^New IdP Signing Certificate/), { target: { value: PEM } });
+    pressConfirm();
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    const params = sentEditParams('edit_saml_provider');
+    expect(params.cert).toBe(PEM);
+    expect(params.providerId).toBe('acme-saml');
+    expect(params.issuer).toBe(SAML_ROW.issuer);
+    expect(params.entryPoint ?? '').toBe('');
+    expect(params.keepCurrentCert === true || params.keepCurrentCert === 'true').toBe(false);
+  });
+
+  it('the result dialog names what changed', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-saml', protocol: 'saml', updated: ['cert'], message: 'SSO provider "acme-saml" updated: cert.' } });
+    await openEdit(EDIT_SAML, EDIT_SAML_PARAMS, SAML_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^New IdP Signing Certificate/), { target: { value: PEM } });
+    pressConfirm();
+
+    expect(await screen.findByText('SAML settings saved')).toBeInTheDocument();
+    expect(screen.getByText('SSO provider "acme-saml" updated: cert.')).toBeInTheDocument();
+  });
+
+  it('the identity-change refusal while users are linked keeps the dialog open with the bridge\'s sentence', async () => {
+    const sentence = 'SSO provider "acme-saml" was not updated: Cannot change the issuer while users are linked. issuer identifies the IdP account each linked user signs in with, so it changes only while no user is linked to the provider.';
+    answer(409, { success: false, error: { code: 'RESOURCE_CONFLICT', message: sentence, httpStatus: 409 } });
+    const settled = await openEdit(EDIT_SAML, EDIT_SAML_PARAMS, SAML_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^IdP Entity ID/), { target: { value: 'https://idp.other.test/entity' } });
+    pressConfirm();
+
+    const box = await screen.findByTestId('action-param-refusal');
+    expect(box).toHaveTextContent('SSO provider "acme-saml" was not updated');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(settled.result).toBeUndefined();
+  });
+});
+
+describe('objectstack#32185 — Edit OIDC Settings through the generic action form', () => {
+  it('draws the client secret as an empty password input and defaults providerId from the row', async () => {
+    await openEdit(EDIT_OIDC as any, EDIT_OIDC_PARAMS, OIDC_ROW);
+
+    const secret = await screen.findByLabelText(/^New Client Secret/);
+    expect(secret).toHaveAttribute('type', 'password');
+    expect(secret).toHaveValue('');
+    expect(screen.getByLabelText(/^Client ID/)).toHaveValue('');
+    expect(screen.getByLabelText(/^Scopes/)).toHaveValue('');
+  });
+
+  it('a blank secret, client id and scopes post nothing for them', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-oidc', protocol: 'oidc', updated: ['clientId'], message: 'SSO provider "acme-oidc" updated: clientId.' } });
+    await openEdit(EDIT_OIDC as any, EDIT_OIDC_PARAMS, OIDC_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^Client ID/), { target: { value: 'new-client' } });
+    pressConfirm();
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    const params = sentEditParams('edit_oidc_provider');
+    expect(params.providerId).toBe('acme-oidc');
+    expect(params.clientId).toBe('new-client');
+    expect(params.clientSecret ?? '').toBe('');
+    expect(params.scopes ?? '').toBe('');
+  });
+
+  it('a typed secret posts once and is not shown again in the result dialog', async () => {
+    answer(200, { success: true, data: { providerId: 'acme-oidc', protocol: 'oidc', updated: ['clientSecret'], message: 'SSO provider "acme-oidc" updated: clientSecret.' } });
+    await openEdit(EDIT_OIDC as any, EDIT_OIDC_PARAMS, OIDC_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^New Client Secret/), { target: { value: 's3cret-value' } });
+    pressConfirm();
+
+    await waitFor(() => expect(authFetchSpy).toHaveBeenCalledTimes(1));
+    expect(sentEditParams('edit_oidc_provider').clientSecret).toBe('s3cret-value');
+    expect(await screen.findByText('OIDC settings saved')).toBeInTheDocument();
+    expect(screen.getByText('SSO provider "acme-oidc" updated: clientSecret.')).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('s3cret-value');
+  });
+
+  it('the wrong-protocol refusal reaches the admin with the bridge\'s sentence naming the right action', async () => {
+    const sentence = 'SSO provider "acme-oidc" is an OIDC provider, so cert does not apply to it (that is "Edit SAML Settings"). Use "Edit OIDC Settings".';
+    answer(400, { success: false, error: { code: 'INVALID_REQUEST', message: sentence, httpStatus: 400, field: 'cert' } });
+    await openEdit(EDIT_SAML, EDIT_SAML_PARAMS, OIDC_ROW);
+
+    fireEvent.change(await screen.findByLabelText(/^New IdP Signing Certificate/), { target: { value: PEM } });
+    pressConfirm();
+
+    const box = await screen.findByTestId('action-param-refusal');
+    expect(box).toHaveTextContent('is an OIDC provider, so cert does not apply to it');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 });

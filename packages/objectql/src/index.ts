@@ -418,6 +418,9 @@ export {
   EXTERNAL_ROW_CAP,
   EXTERNAL_WRITE_REFUSED_STATUSES,
   EXTERNAL_READ_REFUSED_STATUSES,
+  // [ADR-0153 D2] The cap a floored read applies — the sync-in pull names it as
+  // a window's `limit`, so the data door's page size never cuts a window.
+  resolveExternalRowCap,
 } from './external-driver-errors.js';
 export type { ExternalWriteOperation } from './external-driver-errors.js';
 export { needsExternalDriverFloor, unwrapExternalDriverFloor } from './external-driver-floor.js';

@@ -345,7 +345,8 @@ describe('which requests the SAML landing wraps', () => {
     const post = new Request(ACS, { method: 'POST', body: '' });
     expect(ssoCallbackOf('/sso/saml2/sp/acs/acme-entra', post)).toEqual({ protocol: 'saml', providerId: 'acme-entra', request: post });
     expect(ssoCallbackOf('/sso/saml2/sp/acs/acme-entra', new Request(ACS))).toBeUndefined();
-    expect(ssoCallbackOf('/sso/callback/acme-okta', new Request(ACS))).toEqual({ protocol: 'oidc', providerId: 'acme-okta' });
+    const get = new Request(ACS);
+    expect(ssoCallbackOf('/sso/callback/acme-okta', get)).toEqual({ protocol: 'oidc', providerId: 'acme-okta', request: get });
   });
 });
 

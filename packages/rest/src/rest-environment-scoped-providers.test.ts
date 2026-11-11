@@ -967,6 +967,29 @@ describe('[#30218] single kernel: the data engine is the plugin\'s own kernel\'s
             expect(calls).toEqual([{ env: 'host', op: 'registry.isPackageDisabled' }]);
         }, 60_000);
     }
+
+    // [#32076] The owner step stands on the plain read of the member the
+    // layers were read at: a read naming a package is judged at member grain
+    // (ADR-0150 D5), so a dependent's added locale asked with no member would
+    // be judged as the base's canonical member and refused.
+    it('[#32076] the owner step reads the member the layers were read at, and names none when none was named', async () => {
+        const req = scopedRequest('host');
+        const asked: Array<Record<string, unknown>> = [];
+        const protocol = {
+            getMetaItem: async (request: Record<string, unknown>) => {
+                asked.push(request);
+                return { item: undefined, packageId: 'pkg_host' };
+            },
+        };
+        const sources = h.server.metaItemReadGateSources(req.params.environmentId, req, protocol as any);
+        await sources.isItemOfDisabledPackage({ type: 'email_template', name: 'task_done_email', packageId: 'com.acme.addon', member: 'fr-FR' });
+        await sources.isItemOfDisabledPackage({ type: 'email_template', name: 'task_done_email', packageId: 'com.acme.addon' });
+        expect(asked.map(({ type, name, packageId, member }) => ({ type, name, packageId, member }))).toEqual([
+            { type: 'email_template', name: 'task_done_email', packageId: 'com.acme.addon', member: 'fr-FR' },
+            { type: 'email_template', name: 'task_done_email', packageId: 'com.acme.addon', member: undefined },
+        ]);
+        expect('member' in asked[1]!).toBe(false);
+    }, 60_000);
 });
 
 /**

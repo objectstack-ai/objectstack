@@ -35,7 +35,7 @@ kernel.shutdown()
 ## Plugin Interface
 
 ```typescript
-import type { Plugin, PluginContext } from '@objectstack/core';
+import type { PluginContext, PluginType } from '@objectstack/core';
 
 export interface Plugin {
   /** Unique name (reverse domain recommended) */
