@@ -855,13 +855,13 @@ describe('[#32355] a job name a package body declares and the residual carries i
         const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
         // Both are scheduled, under one key: the later (the residual's, `host_map`) replaces the body's copy.
         expect(out.pulls).toEqual(['sync', 'sync']);
+        // Before any call or write: no pull was asked for, as any package or as none —
+        // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
+        expect(pulls).toEqual([]);
         expect(answers.map((a) => [a.key, a.run])).toEqual([['sync', 'failed']]);
         expect({ code: answers[0].code, status: answers[0].status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(answers[0].message).toContain('package "com.example.alpha"');
         expect(answers[0].message).toContain('package "com.example.beta"');
-        // Before any call or write: no pull was asked for, as any package or as none —
-        // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
-        expect(pulls).toEqual([]);
         // Every job of the name, by name: the refusal, with both packages its candidates.
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
