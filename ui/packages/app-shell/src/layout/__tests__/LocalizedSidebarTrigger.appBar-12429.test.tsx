@@ -192,3 +192,36 @@ describe('phone: the same trigger opens the drawer, and the drawer carries none 
     expect(document.querySelector('[data-mobile="true"] [data-sidebar="footer"]')).toBeNull();
   });
 });
+
+/**
+ * The sidebar is one navigation landmark, labelled by the shell, so assistive
+ * tech can jump to it; and the trigger that opens it keeps its name and its
+ * state at every width. One landmark per open view: the desktop sidebar, or
+ * the phone drawer once it opens, never one nested in another.
+ */
+describe('the sidebar is the shell\'s navigation landmark, and its trigger is named', () => {
+  it('desktop: exactly one landmark, "App navigation", holding the entries', () => {
+    renderShell(1280);
+    const navs = screen.getAllByRole('navigation');
+    expect(navs).toHaveLength(1);
+    expect(navs[0]).toHaveAccessibleName('App navigation');
+    expect(within(navs[0]).getByRole('link', { name: 'Leads' })).toBeInTheDocument();
+    expect(document.querySelectorAll('nav nav')).toHaveLength(0);
+  });
+
+  it('phone: the named trigger opens the drawer, and the drawer holds the one landmark', async () => {
+    renderShell(375);
+    const toggle = screen.getByRole('button', { name: 'Toggle sidebar', expanded: false });
+    // The drawer is not drawn while closed, so neither is its landmark.
+    expect(screen.queryAllByRole('navigation')).toHaveLength(0);
+
+    fireEvent.click(toggle);
+    const nav = await screen.findByRole('navigation', { name: 'App navigation' });
+    expect(screen.getAllByRole('navigation')).toHaveLength(1);
+    expect(within(nav).getByRole('link', { name: 'Leads' })).toBeInTheDocument();
+    expect(document.querySelectorAll('nav nav')).toHaveLength(0);
+    // The open drawer is modal, so the app bar is hidden from the role tree;
+    // the trigger keeps its name and reports the drawer open.
+    expect(screen.getByRole('button', { name: 'Toggle sidebar', expanded: true, hidden: true })).toBe(toggle);
+  });
+});
