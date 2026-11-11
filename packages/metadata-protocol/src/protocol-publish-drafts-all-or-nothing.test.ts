@@ -192,6 +192,8 @@ function makeEngine(mode: TransactionMode) {
             registerItem: () => {},
             registerObject: () => {},
             listItems: () => [],
+            // The app list read folds nav contributions in; this registry has none.
+            applyNavContributions: (app: unknown) => app,
             // The package the drafts are bound to is INSTALLED, and its
             // manifest declares no namespace and no dependencies.
             getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
@@ -211,6 +213,9 @@ const OBJ = 'nyd2_leave_request';
 const leaveRequest = (autonumberFormat: string) => ({
     name: OBJ,
     label: 'Leave Request',
+    // The authored OWD the publish gate asks of every custom object
+    // (`security-owd-unset`), so the autonumber format is the only refusal.
+    sharingModel: 'private',
     fields: {
         leave_no: { type: 'autonumber', label: 'Leave No', autonumberFormat },
         reason: { type: 'text', label: 'Reason' },
@@ -278,7 +283,186 @@ async function stageCardDrafts(protocol: ObjectStackProtocolImplementation, auto
 const allNames = cardDrafts(CLEAN_FORMAT).map(([type, name]) => `${type}/${name}`).sort();
 const namesOf = (list: Array<{ type: string; name: string }>) => list.map((r) => `${r.type}/${r.name}`).sort();
 
-describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll back', () => {
+/** A protocol over a fresh engine, with the card's drafts staged and the side-effect seams observed. */
+async function stage(mode: TransactionMode, autonumberFormat: string) {
+    const h = makeEngine(mode);
+    const protocol = new ObjectStackProtocolImplementation(h.engine);
+    await stageCardDrafts(protocol, autonumberFormat);
+    const writeThrough = vi.spyOn(protocol as any, 'applyRegistryWriteThrough');
+    const mutationEvents = vi.spyOn(protocol as any, 'emitMetadataMutation');
+    const sideEffects = vi.spyOn(protocol as any, 'runPublishSideEffects');
+    const draftHashes = new Map(h.drafts().map((r) => [`${r.type}/${r.name}`, r.checksum]));
+    const historyBefore = h.tables.sys_metadata_history.length;
+    return { ...h, protocol, writeThrough, mutationEvents, sideEffects, draftHashes, historyBefore };
+}
+
+const servedApps = async (protocol: ObjectStackProtocolImplementation): Promise<string[]> => {
+    const res: any = await (protocol as any).getMetaItems({ type: 'app', packageId: PKG });
+    const items: any[] = Array.isArray(res) ? res : (res?.items ?? []);
+    return items.map((a) => a?.name).filter((n): n is string => typeof n === 'string');
+};
+
+const draftHashesOf = (drafts: Row[]) => new Map(drafts.map((r) => [`${r.type}/${r.name}`, r.checksum]));
+
+describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll back (#32396)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    let info: ReturnType<typeof vi.spyOn>;
+    let error: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        info = vi.spyOn(console, 'info').mockImplementation(() => {});
+        error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        info.mockRestore();
+        error.mockRestore();
+        vi.restoreAllMocks();
+    });
+
+    it('stages all eleven drafts and nothing is active before the publish', async () => {
+        const { active, drafts } = await stage('degrading', REFUSED_FORMAT);
+        expect(namesOf(drafts())).toEqual(allNames);
+        expect(active()).toEqual([]);
+    });
+
+    it('a refusal at item 9 of 11 leaves every draft pending, byte for byte, and nothing active', async () => {
+        const { protocol, active, drafts, draftHashes } = await stage('degrading', REFUSED_FORMAT);
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, published: [], failedCount: 11 });
+        const causal = res.failed.find((f) => f.name === OBJ)!;
+        expect(causal).toMatchObject({ type: 'object', code: 'INVALID_METADATA' });
+        // The card's refusal and no other: the autonumber format, on `leave_no`.
+        const issues = (causal as { issues?: Array<{ path: string; severity?: string }> }).issues ?? [];
+        expect(issues.filter((i) => i.severity === 'error').map((i) => i.path)).toEqual([
+            expect.stringContaining('leave_no'),
+        ]);
+        expect(res.failed.filter((f) => f.name !== OBJ).map((f) => f.code)).toEqual(Array(10).fill('BATCH_ABORTED'));
+        expect(
+            namesOf(active()),
+            'a refused batch promoted drafts before the refused item — the half-landing the card measured',
+        ).toEqual([]);
+        expect(namesOf(drafts())).toEqual(allNames);
+        expect(draftHashesOf(drafts())).toEqual(draftHashes);
+    });
+
+    it('…and serves nothing as published: no app on the read the visibility flip uses, no registry write-through, no event, no allowed audit row, no commit', async () => {
+        const h = await stage('degrading', REFUSED_FORMAT);
+
+        await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(await servedApps(h.protocol)).toEqual([]);
+        expect(h.sideEffects).not.toHaveBeenCalled();
+        expect(h.writeThrough).not.toHaveBeenCalled();
+        expect(h.mutationEvents).not.toHaveBeenCalled();
+        const audit = h.tables.sys_metadata_audit;
+        expect(audit.filter((r) => r.operation === 'publish' && r.outcome === 'allowed')).toEqual([]);
+        expect(audit.filter((r) => r.code === 'batch_aborted').map((r) => `${r.type}/${r.name}`)).toEqual([`object/${OBJ}`]);
+        expect(h.tables.sys_metadata_commit).toEqual([]);
+        // The refusal was found before anything was written: not one history event.
+        expect(h.tables.sys_metadata_history.length).toBe(h.historyBefore);
+    });
+
+    it('judges the whole batch before promoting any of it, and promotes nothing once a draft is refused', async () => {
+        const h = await stage('degrading', REFUSED_FORMAT);
+        const promote = vi.spyOn(h.protocol as any, 'promoteDraftForPublish');
+
+        await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        const calls = promote.mock.calls.map(([req]: any[]) => ({ name: req.name, judgeOnly: req.judgeOnly === true }));
+        expect(calls.every((c) => c.judgeOnly)).toBe(true);
+        expect(calls.map((c) => c.name)).toEqual(cardDrafts(CLEAN_FORMAT).slice(0, 9).map(([, name]) => name));
+    });
+
+    it('a clean batch still publishes all eleven', async () => {
+        const h = await stage('degrading', CLEAN_FORMAT);
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.failed).toEqual([]);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 11 });
+        expect(namesOf(h.active())).toEqual(allNames);
+        expect(h.drafts()).toEqual([]);
+        expect(await servedApps(h.protocol)).toEqual(['leave_management']);
+        expect(h.tables.sys_metadata_audit.filter((r) => r.operation === 'publish' && r.outcome === 'allowed')).toHaveLength(11);
+        expect(h.tables.sys_metadata_commit).toHaveLength(1);
+    });
+
+    it('a failure the judging pass cannot see undoes every promotion already made: created rows removed, an edited row restored, drafts put back', async () => {
+        // The app is live at v1 before the batch, so the batch EDITS it.
+        const h = makeEngine('degrading');
+        const protocol = new ObjectStackProtocolImplementation(h.engine);
+        await (protocol as any).saveMetaItem({
+            type: 'app', name: 'leave_management', item: { name: 'leave_management', label: '请假 v1' }, packageId: PKG, mode: 'draft',
+        });
+        expect((await protocol.publishPackageDrafts({ packageId: PKG })).outcome).toBe('published');
+        await stageCardDrafts(protocol, CLEAN_FORMAT);
+        const hashesBefore = draftHashesOf(h.drafts());
+        // A store-level refusal at item 9's WRITE (a draft saved under the
+        // publish, say): Phase 0 judged every draft clean, so only the undo
+        // can keep items 1-8 from staying live.
+        const promote = vi.spyOn(protocol as any, 'promoteDraftForPublish');
+        const real = promote.getMockImplementation() ?? ObjectStackProtocolImplementation.prototype['promoteDraftForPublish' as never];
+        promote.mockImplementation(async function (this: unknown, req: any) {
+            if (!req.judgeOnly && req.name === OBJ) {
+                throw Object.assign(new Error('object/nyd2_leave_request draft changed after this publish judged it'), {
+                    code: 'METADATA_CONFLICT', status: 409,
+                });
+            }
+            return (real as any).call(protocol, req);
+        });
+
+        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, published: [] });
+        expect(res.failed.find((f) => f.name === OBJ)).toMatchObject({ code: 'METADATA_CONFLICT' });
+        expect(res.failed.filter((f) => f.name !== OBJ).map((f) => f.code)).toEqual(Array(10).fill('BATCH_ABORTED'));
+        // Only the app was live before the publish, and it is live as v1 again.
+        expect(namesOf(h.active())).toEqual(['app/leave_management']);
+        expect(JSON.parse(h.active()[0]!.metadata)).toMatchObject({ label: '请假 v1' });
+        expect(await servedApps(protocol)).toEqual(['leave_management']);
+        expect(namesOf(h.drafts())).toEqual(allNames);
+        expect(draftHashesOf(h.drafts())).toEqual(hashesBefore);
+        expect(h.tables.sys_metadata_audit.filter((r) => r.outcome === 'allowed' && r.source === 'protocol.publishPackageDrafts'))
+            .toHaveLength(1); // the v1 publish, not this batch
+        expect(error).not.toHaveBeenCalled();
+    });
+
+    it('an undo that fails is reported, never hidden: the live item is not marked BATCH_ABORTED, and the error log names it', async () => {
+        const h = await stage('degrading', CLEAN_FORMAT);
+        const promote = vi.spyOn(h.protocol as any, 'promoteDraftForPublish');
+        const real = ObjectStackProtocolImplementation.prototype['promoteDraftForPublish' as never];
+        promote.mockImplementation(async (req: any) => {
+            if (!req.judgeOnly && req.name === OBJ) {
+                throw Object.assign(new Error('conflict'), { code: 'METADATA_CONFLICT', status: 409 });
+            }
+            return (real as any).call(h.protocol, req);
+        });
+        const repo = (h.protocol as any).getOverlayRepo();
+        const realDelete = repo.delete.bind(repo);
+        vi.spyOn(repo, 'delete').mockImplementation(async (ref: any, opts: any) => {
+            // The undo's removal of the active row — not the promotion's own drain.
+            if (ref.name === 'nyd2_leave_request_ds' && opts?.state === 'active') throw new Error('connection reset');
+            return realDelete(ref, opts);
+        });
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res.outcome).toBe('refused');
+        const live = res.failed.find((f) => f.name === 'nyd2_leave_request_ds')!;
+        expect(live.code).toBeUndefined();
+        expect(namesOf(h.active())).toEqual(['dataset/nyd2_leave_request_ds']);
+        expect(error).toHaveBeenCalledTimes(1);
+        expect(String(error.mock.calls[0]![0])).toContain('dataset/nyd2_leave_request_ds');
+        const aborted = h.tables.sys_metadata_audit.find((r) => r.code === 'batch_aborted')!;
+        expect(String(aborted.note)).not.toContain('nothing landed');
+    });
+});
+
+describe('publishPackageDrafts on a runtime that rolls back is unchanged (#32396)', () => {
     let warn: ReturnType<typeof vi.spyOn>;
     let info: ReturnType<typeof vi.spyOn>;
     beforeEach(() => {
@@ -289,30 +473,29 @@ describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll b
     afterEach(() => {
         warn.mockRestore();
         info.mockRestore();
+        vi.restoreAllMocks();
     });
 
-    it('stages all eleven drafts and nothing is active before the publish', async () => {
-        const { engine, active, drafts } = makeEngine('degrading');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        await stageCardDrafts(protocol, REFUSED_FORMAT);
-        expect(namesOf(drafts())).toEqual(allNames);
-        expect(active()).toEqual([]);
+    it('the refusal at item 9 is undone by the transaction, and no judging pass runs', async () => {
+        const h = await stage('rollingBack', REFUSED_FORMAT);
+        const promote = vi.spyOn(h.protocol as any, 'promoteDraftForPublish');
+
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        expect(res.failed.find((f) => f.name === OBJ)).toMatchObject({ code: 'INVALID_METADATA' });
+        expect(h.active()).toEqual([]);
+        expect(namesOf(h.drafts())).toEqual(allNames);
+        expect(promote.mock.calls.some(([req]: any[]) => req.judgeOnly === true)).toBe(false);
     });
 
-    it('a refusal at item 9 of 11 leaves every draft pending and nothing active (store)', async () => {
-        const { engine, active, drafts } = makeEngine('degrading');
-        const protocol = new ObjectStackProtocolImplementation(engine);
-        await stageCardDrafts(protocol, REFUSED_FORMAT);
+    it('a clean batch publishes all eleven', async () => {
+        const h = await stage('rollingBack', CLEAN_FORMAT);
 
-        const res = await protocol.publishPackageDrafts({ packageId: PKG });
+        const res = await h.protocol.publishPackageDrafts({ packageId: PKG });
 
-        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, published: [] });
-        const causal = res.failed.find((f) => f.name === OBJ)!;
-        expect(causal).toMatchObject({ type: 'object', code: 'INVALID_METADATA' });
-        expect(
-            namesOf(active()),
-            'a refused batch promoted drafts before the refused item — the half-landing the card measured',
-        ).toEqual([]);
-        expect(namesOf(drafts())).toEqual(allNames);
+        expect(res).toMatchObject({ success: true, outcome: 'published', publishedCount: 11 });
+        expect(namesOf(h.active())).toEqual(allNames);
+        expect(h.drafts()).toEqual([]);
     });
 });
