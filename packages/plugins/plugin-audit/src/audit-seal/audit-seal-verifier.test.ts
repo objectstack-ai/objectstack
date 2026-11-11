@@ -216,6 +216,22 @@ describe('trust: only keys the anchor vouches for (D6)', () => {
     expect(verdicts(report)).toEqual({ r1: 'late!', r2: 'late!' });
   });
 
+  it('refuses two checkpoints at one sequence of one chain: neither holds anything', async () => {
+    const s = await sealedLedger();
+    s.checkpoints().push({ ...s.checkpoint('org:org_b', 0), id: 'twin' });
+    const report = await s.verifyNow();
+    expect(faultCodes(report)).toEqual(['org:org_b#0:duplicate']);
+    expect(verdicts(report)).toEqual({ r5: 'late!' });
+  });
+
+  it('reports a checkpoint row that is not a signed body as malformed: the run fails', async () => {
+    const s = await sealedLedger();
+    s.checkpoint('org:org_b', 0).row_ids = '["r5","r5"]';
+    const report = await s.verifyNow();
+    expect(faultCodes(report)).toEqual(['org:org_b#-:malformed']);
+    expect(report.ok).toBe(false);
+  });
+
   it('refuses a stored chain key that disagrees with the signed organization', async () => {
     const s = await sealedLedger();
     s.checkpoint('org:org_b', 0).chain_key = 'org:org_z';
