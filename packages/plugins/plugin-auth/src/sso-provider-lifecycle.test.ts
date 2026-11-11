@@ -915,3 +915,45 @@ describe('a registered provider is edited in place, without unlinking anyone', (
     expect(del.preflight.fields.map((f: any) => f.path)).toEqual(['summary', 'linkedUsers', 'usersWithoutOtherSignIn']);
   });
 });
+
+describe('providers stored colliding before the rule stay, and are judged only when a request writes a domain', () => {
+  it('no stored row is re-checked or touched; an edit without a domain passes; any domain write, even the unchanged value, is judged', async () => {
+    const s = await stage();
+    // Stored beneath the check, as a deployment that registered them before the rule holds them.
+    await storeProvider(s, { providerId: 'p-parent', domain: 'acme.example' });
+    await storeProvider(s, { providerId: 'q-list', domain: 'eng.acme.example, foo.example' });
+    await storeProvider(s, { providerId: 'u-uni', domain: 'bücher.example' });
+    await storeProvider(s, { providerId: 'u-puny', domain: 'xn--bcher-kva.example' });
+    const domains = async () =>
+      Object.fromEntries((await rows(s, 'sys_sso_provider')).map((r) => [String(r.provider_id), r.domain]));
+    const stored = await domains();
+    const answer = async (path: string, body: unknown) => {
+      const res = await postJson(s, path, body);
+      return { status: res.status, body: (await res.json()) as any };
+    };
+
+    // An edit that writes no domain is not judged.
+    for (const providerId of ['q-list', 'u-uni']) {
+      const edit = await answer('/sso/update-provider', { providerId, oidcConfig: { scopes: ['openid', 'email'] } });
+      expect(edit.status, `${providerId}: ${JSON.stringify(edit.body)}`).toBe(200);
+    }
+
+    // A request that writes a domain is judged, even when it re-saves the stored value unchanged.
+    for (const [providerId, domain, heldBy] of [
+      ['q-list', 'eng.acme.example, foo.example', 'p-parent'],
+      ['p-parent', 'acme.example', 'q-list'],
+      ['u-puny', 'xn--bcher-kva.example', 'u-uni'],
+      ['u-uni', 'bücher.example', 'u-puny'],
+    ] as const) {
+      const resave = await answer('/sso/update-provider', { providerId, domain });
+      expect(resave.status, `${providerId}: ${JSON.stringify(resave.body)}`).toBe(409);
+      expect(resave.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy });
+    }
+    expect(await domains()).toEqual(stored);
+
+    // The way out: edit the colliding entry off; the other provider then re-saves cleanly.
+    expect((await answer('/sso/update-provider', { providerId: 'q-list', domain: 'foo.example' })).status).toBe(200);
+    expect((await answer('/sso/update-provider', { providerId: 'p-parent', domain: 'acme.example' })).status).toBe(200);
+    expect(await domains()).toEqual({ ...stored, 'q-list': 'foo.example' });
+  }, 60_000);
+});
