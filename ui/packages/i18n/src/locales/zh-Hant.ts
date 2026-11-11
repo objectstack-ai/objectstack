@@ -972,9 +972,9 @@ const zhHant = {
       body: '不可變審計日誌。行由平台在事件發生時寫入,不能在介面上建立、編輯或刪除。可使用匯出功能下載以供合規審查。',
     },
     betterAuth: {
-      short: '經身份服務寫入',
-      title: '經內建身份服務寫入',
-      body: '此物件的架構屬於平台內建的身份服務 {{provider}}。請用本頁上的操作，或通過登入、邀請和安全流程來建立和修改這些記錄；它們都經由該服務寫入。直接編輯資料表會繞過密碼雜湊、會話校驗、兩步驗證檢查和審計鉤子。',
+      short: '由賬號系統維護',
+      title: '由內建賬號系統維護',
+      body: '此物件的架構屬於平台內建的賬號系統 {{provider}}。請用本頁上的操作，或通過登入、邀請和安全流程來建立和修改這些記錄；它們都經由賬號系統寫入。直接編輯資料表會繞過密碼雜湊、會話校驗、兩步驗證檢查和審計鉤子。',
     },
   },
   kanban: {
@@ -2080,8 +2080,8 @@ const zhHant = {
         action: '邀請',
       },
       connectAssistant: {
-        title: '連線 AI 助手',
-        todo: '在 Claude、豆包等助手裡以你自己的身份使用本系統。',
+        title: '連線外部 AI 助手',
+        todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在 Setup → AI 與向量化 中設定。',
         done: '你已連線了 AI 助手或 API 金鑰。',
         action: '連線',
       },
@@ -2763,6 +2763,7 @@ const zhHant = {
       },
       errors: {
         invalidCredentials: '郵箱或密碼錯誤。多次失敗後，登入將暫停一段時間。忘記密碼？重置密碼後即可立即登入。',
+        invalidCredentialsNoMail: '郵箱或密碼錯誤。多次失敗後，登入將暫停一段時間。忘記密碼？請聯絡管理員為你重置。',
         emailNotVerified: '請先驗證您的郵箱後再登入。',
         oauthCallbackFailed: '單點登入未能完成——登入連結已過期或已被使用，請重新發起登入。',
         ssoAccountNotInvited: "你的賬號尚未在本系統中開通。請聯絡管理員邀請你。",
@@ -2821,6 +2822,12 @@ const zhHant = {
       invitationGoneDescription: '邀請可能已過期、已被使用或已被撤回。請聯絡邀請你的人重新發送邀請。',
       invitationGoneSignIn: '前往登入',
       invitationLinkHint: '收到了邀請？請開啟邀請郵件中的連結接受邀請。',
+      firstOwner: {
+        title: '設定此部署',
+        description: '這裡還沒有任何賬號。你建立的第一個賬號將成為此部署的所有者。',
+        createButton: '建立所有者賬號',
+        signInDivider: '或登入已有賬號',
+      },
       showPasswordText: '顯示密碼',
       hidePasswordText: '隱藏密碼',
       footer: {
@@ -2844,6 +2851,13 @@ const zhHant = {
       confirmPasswordPlaceholder: '確認您的密碼',
       passwordMismatchError: '兩次輸入的密碼不一致',
       passwordTooShortError: '密碼至少需要8個字元',
+      nameRequiredError: '請輸入姓名',
+      emailRequiredError: '請輸入郵箱地址',
+      emailInvalidError: '請輸入有效的郵箱地址，例如 name@example.com',
+      firstOwner: {
+        title: '建立所有者賬號',
+        description: '這裡還沒有任何賬號。你現在建立的賬號將成為此部署的所有者，之後可以邀請同事加入。',
+      },
       submitButton: '建立賬戶',
       submittingButton: '建立中…',
       hasAccountText: '已有賬戶？',

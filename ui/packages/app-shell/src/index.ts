@@ -292,10 +292,16 @@ export {
 export {
   decideSignUpOffer,
   needsBootstrapProbe,
+  needsOwnerProbe,
   isInvitationRedirect,
   type SignUpOffer,
 } from './console/auth/signUpOffer.js';
-export { useBootstrapStatus, type BootstrapStatus } from './console/auth/bootstrapStatus.js';
+export {
+  useBootstrapProbe,
+  useBootstrapStatus,
+  type BootstrapProbe,
+  type BootstrapStatus,
+} from './console/auth/bootstrapStatus.js';
 // The register-first prompt both login pages show a signed-out visitor who
 // arrived from an invitation link (#25886), and the signed-out invitation
 // preview both login and both register pages greet that visitor with (#26473),
@@ -327,6 +333,10 @@ export {
   type ConnectedEntry,
 } from './console/connect/connectedAccess.js';
 export { connectAssistantPath } from './console/connect/connectAssistantPath.js';
+// Which Home card draws an item that more than one could (email not set up,
+// connect an AI assistant), so the console's first-run checklist and this
+// package's Home cards say each one once (#32021).
+export { useHomeItemClaim, useHomeItemClaimed, type HomeItem } from './console/home/homeItemClaims.js';
 // The frame the lazy `developer` i18n namespace's readers render under
 // (#32225): the console's Developer pages wrap their bodies in it.
 export { DeveloperNamespaceGate } from './console/connect/DeveloperNamespaceGate.js';

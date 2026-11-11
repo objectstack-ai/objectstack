@@ -2324,8 +2324,8 @@ const de = {
         action: "Einladen",
       },
       connectAssistant: {
-        title: 'KI-Assistenten verbinden',
-        todo: 'Arbeiten Sie in diesem System aus Claude, Doubao und ähnlichen Assistenten, als Sie selbst.',
+        title: 'Externen KI-Assistenten verbinden',
+        todo: 'Arbeiten Sie in diesem System als Sie selbst aus Claude, Doubao und ähnlichen Assistenten, über MCP. Die eingebaute KI wird separat eingerichtet, unter Setup → KI und Embedder.',
         done: 'Ein KI-Assistent oder API-Schlüssel von Ihnen ist verbunden.',
         action: 'Verbinden',
       },
@@ -2706,6 +2706,7 @@ const de = {
         twoFactorExpired: "Diese Anmeldung ist abgelaufen. Melden Sie sich erneut mit Ihrem Passwort an.",
         twoFactorLocked: "Zu viele fehlgeschlagene Versuche. Ihr Konto ist vorübergehend gesperrt. Versuchen Sie es später erneut.",
         invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
+        invalidCredentialsNoMail: 'Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Bitten Sie Ihre Administration, es zurückzusetzen.',
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2753,6 +2754,12 @@ const de = {
       invitationGoneDescription: "Die Einladung ist möglicherweise abgelaufen, wurde bereits verwendet oder zurückgezogen. Bitten Sie die Person, die Sie eingeladen hat, eine neue Einladung zu senden.",
       invitationGoneSignIn: "Zur Anmeldung",
       invitationLinkHint: "Sie haben eine Einladung? Öffnen Sie den Link in der Einladungs-E-Mail, um sie anzunehmen.",
+      firstOwner: {
+        title: 'Diese Bereitstellung einrichten',
+        description: 'Hier gibt es noch kein Konto. Das erste Konto, das Sie anlegen, ist Eigentümer dieser Bereitstellung.',
+        createButton: 'Eigentümerkonto anlegen',
+        signInDivider: 'oder mit einem bestehenden Konto anmelden',
+      },
       showPasswordText: "Passwort anzeigen",
       hidePasswordText: "Passwort verbergen",
       footer: {
@@ -2776,6 +2783,13 @@ const de = {
       confirmPasswordPlaceholder: "Passwort bestätigen",
       passwordMismatchError: "Passwörter stimmen nicht überein",
       passwordTooShortError: "Das Passwort muss mindestens 8 Zeichen lang sein",
+      nameRequiredError: 'Geben Sie Ihren Namen ein',
+      emailRequiredError: 'Geben Sie Ihre E-Mail-Adresse ein',
+      emailInvalidError: 'Geben Sie eine E-Mail-Adresse wie name@example.com ein',
+      firstOwner: {
+        title: 'Eigentümerkonto anlegen',
+        description: 'Hier gibt es noch kein Konto. Das Konto, das Sie jetzt anlegen, ist Eigentümer dieser Bereitstellung; Kolleginnen und Kollegen laden Sie danach ein.',
+      },
       submitButton: "Konto erstellen",
       submittingButton: "Konto wird erstellt…",
       hasAccountText: "Bereits ein Konto?",
