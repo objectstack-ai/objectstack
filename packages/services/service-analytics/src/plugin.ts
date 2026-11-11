@@ -18,7 +18,7 @@ import {
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
-import { composeNarrowedReadAdmission, readAdmissionUnresolvedError } from './read-admission.js';
+import { readAdmissionUnresolvedError, type ObjectReadAdmissionProvider } from './read-admission.js';
 // [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
 // this package's config hook declares — see the bridge below.
 import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
@@ -271,6 +271,28 @@ export interface AnalyticsServicePluginOptions {
    * choice", which the service resolves to development-only.
    */
   debugSql?: boolean;
+}
+
+/**
+ * Compose a host's NARROWING over the provider the plugin wired
+ * ({@link AnalyticsServicePluginOptions.narrowObjectReadAdmission}).
+ *
+ * The composition can only refuse more, never admit more: the narrowing is
+ * asked only once `base` has admitted — by the same truthiness test the gate
+ * (`assertObjectsReadable`) applies to any provider — and it admits only on
+ * exactly `true`, so a malformed answer refuses, as the `explain` bridge's
+ * `allowed === true` does. A throw from either side is left to propagate, so
+ * the gate answers it as it answers any throwing provider: fail-closed,
+ * `SERVICE_UNAVAILABLE` / 503.
+ */
+function composeNarrowedReadAdmission(
+  base: ObjectReadAdmissionProvider,
+  narrowing: ObjectReadAdmissionProvider,
+): ObjectReadAdmissionProvider {
+  return async (objectName, context) => {
+    if (!(await base(objectName, context))) return false;
+    return (await narrowing(objectName, context)) === true;
+  };
 }
 
 /**

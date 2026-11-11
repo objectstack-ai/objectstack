@@ -1,5 +1,5 @@
 ---
-'@objectstack/service-analytics': patch
+'@objectstack/service-analytics': minor
 ---
 
 feat(service-analytics): `AnalyticsServicePluginOptions.narrowObjectReadAdmission` — a public way for a host to narrow the analytics gate's object-level read admission
