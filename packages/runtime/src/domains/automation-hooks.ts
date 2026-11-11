@@ -91,7 +91,6 @@ import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import {
     admitInboundHookAddress,
     inboundHookRefusalResponse,
-    type InboundHookNameHolder,
     type InboundHookRouteMatch,
 } from '@objectstack/core';
 import { automationAddressRegistryOf } from './automation-address.js';
@@ -119,7 +118,7 @@ function decodeHookSegment(segment: string): string {
 type InboundHookSlotAnswer =
     | { readonly status: 'served'; readonly key: string }
     | { readonly status: 'unadmitted' }
-    | { readonly status: 'refused'; readonly candidates: readonly InboundHookNameHolder[] };
+    | { readonly status: 'refused'; readonly candidates: readonly unknown[] };
 
 /**
  * [#31696] The `trigger-api` service's slot door, beside the contract's
@@ -243,9 +242,9 @@ export async function handleInboundHookRequest(
     // the member's slot door (`handleInboundSlotHook`), handed the key. An
     // address no slot answers, a slot key in its name position included, is
     // the same one refusal, once the body is read. The bare route is
-    // untouched: the member refuses a slot key there, and answers the bare
-    // hook of a name two packages hold with its `409`. Any other name is
-    // judged as before.
+    // untouched: the member refuses a slot key there, and the bare hook of a
+    // name two packages hold with the same one refusal, its cause logged
+    // (`shared-name`). Any other name is judged as before.
     const flowName = decodeHookSegment(hook.flowName);
     const hookId = decodeHookSegment(hook.hookId);
     if (hook.qualifier !== undefined) {

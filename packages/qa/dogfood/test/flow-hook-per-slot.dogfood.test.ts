@@ -13,8 +13,10 @@
  *
  *  - The qualified hook of each namespace runs that package's flow, verified
  *    with that package's secret only.
- *  - The bare hook answers `409 RESOURCE_CONFLICT` naming both qualified
- *    addresses; nothing is enqueued and nothing runs.
+ *  - The bare hook names neither flow: the door's one refusal (401), the
+ *    same bytes as any unverified post's, naming no holder; the cause
+ *    (`shared-name`) and both holders go to the server log only. Nothing is
+ *    enqueued and nothing runs.
  *  - A slot key in the name position reaches no hook.
  *  - CONTROL: a name one package holds is served by its bare hook as before.
  *
@@ -35,7 +37,8 @@ const S1 = 'pin-slot-hook-alpha-5d2e';
 const S2 = 'pin-slot-hook-beta-a817';
 const S_ALONE = 'pin-slot-hook-alone-0b63';
 
-const quiet: any = { info() {}, warn() {}, error() {}, debug() {} };
+const warned: Array<{ message: string; fields?: any }> = [];
+const quiet: any = { info() {}, warn(message: string, fields?: unknown) { warned.push({ message, fields }); }, error() {}, debug() {} };
 quiet.child = () => quiet;
 
 const sign = (secret: string, body: string) => {
@@ -106,6 +109,7 @@ async function post(path: string, params: Record<string, string>, secret: string
 
 beforeEach(async () => {
     routes = new Map();
+    warned.length = 0;
     enqueued = [];
     ran = [];
     const registry = new SchemaRegistry();
@@ -193,18 +197,22 @@ describe('#31696 PR-2 the inbound hook of a flow name two packages hold, end to 
         expect(ran).toEqual(['p1', 'p2']);
     });
 
-    it('red line: the bare hook answers 409 RESOURCE_CONFLICT naming both qualified addresses; nothing is enqueued or run', async () => {
+    it('red line: the bare hook answers the one refusal, naming no holder; the cause is logged; nothing is enqueued or run', async () => {
+        // The one refusal, as an unknown flow's post gets it.
+        const reference = await post(HOOKS_PATH, { flowName: 'zz_never_armed', hookId: 'h1' }, S1);
+        expect(reference.status).toBe(401);
         for (const secret of [S1, S2]) {
             const answer = await post(HOOKS_PATH, { flowName: SHARED, hookId: 'h1' }, secret);
-            expect(answer.status).toBe(409);
-            expect(answer.body.error.code).toBe('RESOURCE_CONFLICT');
-            expect(answer.body.error.details.addresses).toEqual([
-                `/api/v1/automation/hooks/alpha/${SHARED}/h1`,
-                `/api/v1/automation/hooks/beta/${SHARED}/h1`,
-            ]);
+            expect(answer).toEqual(reference);
+            for (const leak of [P1, P2, 'alpha', 'beta']) expect(JSON.stringify(answer.body)).not.toContain(leak);
         }
         expect(enqueued).toEqual([]);
         expect(ran).toEqual([]);
+        const causes = warned.filter((w) => w.message.includes('refused an inbound post (shared-name)'));
+        expect(causes).toHaveLength(2);
+        expect(causes[0].fields).toMatchObject({ cause: 'shared-name', flowName: SHARED });
+        expect(JSON.stringify(causes[0].fields.holders)).toContain(P1);
+        expect(JSON.stringify(causes[0].fields.holders)).toContain(P2);
     });
 
     it('red line: a slot key in the name position reaches no hook, on either address', async () => {

@@ -33,21 +33,9 @@
  * admitted address reaches exactly the hook the bare route reaches, and never
  * another. {@link admitInboundHookAddress} is the predicate; each face reads
  * the owner and the namespace's packages from its own kernel and asks it.
- *
- * ## A name two packages hold (#31696)
- *
- * Each package's flow of the name is its own slot, and its hook is reached
- * only by its qualified address: the engine answers which slot an address
- * reaches (`AutomationEngine.inboundHookSlot`). The bare hook of such a name
- * names neither flow, so it answers {@link inboundHookSharedNameRefusal}, `409
- * RESOURCE_CONFLICT` naming each holder's qualified address — ADR-0150 D5's
- * answer for a bare address two holders share, never a pick. That answer is
- * not the one refusal above: it is given before any signature is read, and
- * says which packages hold the name.
  */
 
 import { ENVIRONMENT_ADDRESS_SEGMENT } from '@objectstack/spec/kernel';
-import { INBOUND_HOOK_QUALIFIER_EXCLUSIONS } from './auth-gate.js';
 
 /** The inbound hook door's refusal status: every post it does not serve. */
 export const INBOUND_HOOK_REFUSAL_STATUS = 401;
@@ -102,55 +90,4 @@ export interface InboundHookAddress {
 export function admitInboundHookAddress(address: InboundHookAddress): boolean {
   if (address.qualifier === ENVIRONMENT_ADDRESS_SEGMENT) return address.flowOwner === undefined;
   return address.flowOwner !== undefined && address.namespaceOwners.includes(address.flowOwner);
-}
-
-/**
- * [#31696] One holder of a flow name the bare hook refuses: a package, with
- * the namespace its manifest declares when it declares one, or the
- * environment.
- */
-export type InboundHookNameHolder =
-  | { readonly kind: 'package'; readonly packageId: string; readonly namespace?: string }
-  | { readonly kind: 'environment' }
-  | { readonly kind: 'platform' };
-
-/** [#31696] The mount the qualified addresses in {@link inboundHookSharedNameRefusal} are spelled under. */
-const INBOUND_HOOK_ADDRESS_ROOT = '/api/v1/automation/hooks';
-
-/**
- * [ADR-0150 D5, #31696] The bare hook's answer for a flow name two packages
- * hold: `409 RESOURCE_CONFLICT`, its message and `details.addresses` naming
- * each holder's qualified address, and `details.candidates` every holder —
- * the envelope the `/automation` doors answer a refused bare name with. A
- * holder with no qualified hook (no namespace declared, or one the address
- * cannot carry, such as `runs`) is a candidate with no address. Both faces
- * render it the same way the one refusal is rendered.
- */
-export function inboundHookSharedNameRefusal(input: {
-  readonly flowName: string;
-  readonly hookId: string;
-  readonly holders: readonly InboundHookNameHolder[];
-}): { status: number; body: Record<string, unknown> } {
-  const { flowName, hookId, holders } = input;
-  const qualifierOf = (holder: InboundHookNameHolder): string | undefined => {
-    if (holder.kind === 'environment') return ENVIRONMENT_ADDRESS_SEGMENT;
-    if (holder.kind !== 'package' || !holder.namespace) return undefined;
-    return INBOUND_HOOK_QUALIFIER_EXCLUSIONS.includes(holder.namespace) ? undefined : holder.namespace;
-  };
-  const addresses = holders.flatMap((holder) => {
-    const qualifier = qualifierOf(holder);
-    return qualifier === undefined
-      ? []
-      : [`${INBOUND_HOOK_ADDRESS_ROOT}/${encodeURIComponent(qualifier)}/${encodeURIComponent(flowName)}/${encodeURIComponent(hookId)}`];
-  });
-  const named = holders.map((holder) => (holder.kind === 'package' ? `'${holder.packageId}'` : `the ${holder.kind}`));
-  const list = named.length < 2 ? named.join('') : `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}`;
-  const message = `Flow '${flowName}' is held by ${list}, so the bare hook address `
-    + 'names neither flow and nothing was enqueued. Post to the qualified address of the flow you mean'
-    + (addresses.length > 0 ? `: ${addresses.join(', ')}.` : '.');
-  const candidates = holders.map((holder) => (holder.kind === 'package' ? { kind: 'package', packageId: holder.packageId } : { kind: holder.kind }));
-  return {
-    status: 409,
-    body: { success: false, error: { code: 'RESOURCE_CONFLICT', message, httpStatus: 409, details: { candidates, addresses } } },
-  };
 }

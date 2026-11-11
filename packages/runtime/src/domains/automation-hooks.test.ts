@@ -843,8 +843,9 @@ describe('[ADR-0150 D5] the qualified inbound hook on a kernel with no http.serv
  * slot's key for a qualified hook its namespace's slot answers; an address
  * no slot answers, and a slot key in the name position, get the one refusal
  * and the member never runs. The bare hook goes to the member as before (it
- * answers the `409` itself: `inbound-hook-member.test.ts`), with no service
- * read first (condition 2 above).
+ * answers the one refusal itself, the `shared-name` cause logged:
+ * `inbound-hook-member.test.ts`), with no service read first (condition 2
+ * above).
  */
 describe('[#31696] a name two packages hold, on a kernel with no http.server', () => {
     const ALPHA = 'com.pin.alpha';
@@ -898,7 +899,7 @@ describe('[#31696] a name two packages hold, on a kernel with no http.server', (
         expect(member.handleInboundHook).not.toHaveBeenCalled();
     });
 
-    it('the bare hook goes to the member as before, the name as the path carried it, and no service is read first: the member answers the 409', async () => {
+    it('the bare hook goes to the member as before, the name as the path carried it, and no service is read first: the member answers it', async () => {
         inboundHookSlot.mockClear();
         const member = verifierMember();
         const services = sharedHost(member);

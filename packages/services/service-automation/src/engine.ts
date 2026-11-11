@@ -5619,7 +5619,8 @@ export class AutomationEngine implements IAutomationService {
      *    holder, or the name is spelled as a slot key (a slot is reached by
      *    its qualified address, never by its key) — the door's one refusal.
      *  - `refused`: the bare hook of a name two packages hold: every holder,
-     *    nothing picked (D5's `409`).
+     *    nothing picked. The door logs the holders and answers its one
+     *    refusal: D5's `409` does not apply to this anonymous door.
      */
     inboundHookSlot(
         flowName: string,

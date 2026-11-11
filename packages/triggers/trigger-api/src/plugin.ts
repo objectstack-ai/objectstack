@@ -1,13 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import {
-    admitInboundHookAddress,
-    inboundHookJsonResponse,
-    inboundHookSharedNameRefusal,
-    INBOUND_HOOK_QUALIFIER_EXCLUSIONS,
-    type InboundHookNameHolder,
-} from '@objectstack/core';
+import { admitInboundHookAddress, inboundHookJsonResponse, INBOUND_HOOK_QUALIFIER_EXCLUSIONS } from '@objectstack/core';
 import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import { ApiTrigger } from './api-trigger.js';
 import type { FlowTrigger, QueueServiceSurface } from './api-trigger.js';
@@ -50,17 +44,11 @@ interface InboundHookSlotDoor {
 type InboundHookSlotAnswer =
     | { readonly status: 'served'; readonly key: string }
     | { readonly status: 'unadmitted' }
-    | { readonly status: 'refused'; readonly candidates: readonly InboundHookNameHolder[] };
+    | { readonly status: 'refused'; readonly candidates: readonly unknown[] };
 
-/**
- * [ADR-0150 D5] The slice of the ObjectQL service the hook reads: the
- * namespace table, and [#31696] the namespace an installed package declares.
- */
+/** [ADR-0150 D5] The slice of the ObjectQL service the qualified hook reads: the namespace table. */
 interface NamespaceRegistrySurface {
-    registry?: {
-        getNamespaceOwners?(namespace: string): string[];
-        getPackage?(id: string): { manifest?: { namespace?: unknown } } | undefined;
-    };
+    registry?: { getNamespaceOwners?(namespace: string): string[] };
 }
 
 /** The slice of the Hono host server this plugin needs. */
@@ -165,38 +153,26 @@ async function serveInboundHook<R>(
 /**
  * [ADR-0150 D5, #31696] Answer a post whose address the engine routed to a
  * slot ({@link AutomationTriggerRegistry.inboundHookSlot}): the slot's own
- * hook, served by {@link serveInboundHook} under its key; the door's one
- * refusal for an address no slot answers; or the bare hook's `409` naming
- * each holder's qualified address. Both refusals are answered only once the
- * body has been read in full, as every post's is.
+ * hook, served by {@link serveInboundHook} under its key; otherwise the door's
+ * one refusal, once the body has been read in full as every post's is. The
+ * bare hook of a name two packages hold gets that same refusal, its cause
+ * (`shared-name`) and the holders in the server log only: D5's `409` naming
+ * the holders does not apply to this anonymous door.
  */
 async function answerInboundHookSlot<R>(
     trigger: ApiTrigger,
     c: InboundHookDoorContext<R>,
     slot: InboundHookSlotAnswer,
     hook: { readonly flowName: string; readonly hookId: string; readonly qualifier?: string },
-    namespaceOf: (packageId: string) => string | undefined,
 ): Promise<R> {
     if (slot.status === 'served') return serveInboundHook(trigger, c, { flowName: slot.key, hookId: hook.hookId });
     await c.req.text();
-    if (slot.status === 'unadmitted') {
-        const refusal = hook.qualifier === undefined
+    const refusal = slot.status === 'refused'
+        ? trigger.refuseSharedName(hook.flowName, slot.candidates)
+        : hook.qualifier === undefined
             ? trigger.refuseUnknownFlow(hook.flowName)
             : trigger.refuseUnadmittedAddress(hook.flowName, hook.qualifier);
-        return c.json(refusal.body, refusal.status);
-    }
-    const refusal = inboundHookSharedNameRefusal({
-        flowName: hook.flowName,
-        hookId: hook.hookId,
-        holders: slot.candidates.map((holder) =>
-            holder.kind === 'package' ? { ...holder, ...optionalNamespace(namespaceOf(holder.packageId)) } : holder),
-    });
-    trigger.noteSharedNameRefusal(hook.flowName, slot.candidates);
     return c.json(refusal.body, refusal.status);
-}
-
-function optionalNamespace(namespace: string | undefined): { namespace?: string } {
-    return namespace ? { namespace } : {};
 }
 
 /**
@@ -263,11 +239,6 @@ export class ApiTriggerPlugin implements Plugin {
             // and the member's caller answers its typed absence (the
             // contract's rule), just as no route is mounted here then.
             const registry = () => this.resolveService<NamespaceRegistrySurface>(ctx, 'objectql')?.registry;
-            const namespaceOf = (packageId: string): string | undefined => {
-                const reg = registry();
-                const namespace = typeof reg?.getPackage === 'function' ? reg.getPackage(packageId)?.manifest?.namespace : undefined;
-                return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
-            };
             // [ADR-0150 D5, #31696] A name two packages hold, or a slot-key
             // spelling, is routed by the engine; any other name is served as
             // it always was.
@@ -276,13 +247,13 @@ export class ApiTriggerPlugin implements Plugin {
 
             const service: ITriggerApiService & InboundHookSlotDoor = {
                 // [#31696] The name as the path carried it, routed as the bare
-                // mount routes it: a slot key names no flow (the one refusal),
-                // and a name two packages hold is the `409`.
+                // mount routes it: a slot key names no flow, and a name two
+                // packages hold names neither (the one refusal, either way).
                 handleInboundHook: (request, hook) => {
                     const door = requestDoorContext(request);
                     const slot = slotOf(hook.flowName) ?? (hook.flowName.includes('/') ? { status: 'unadmitted' as const } : undefined);
                     return slot !== undefined && slot.status !== 'served'
-                        ? answerInboundHookSlot(trigger, door, slot, hook, namespaceOf)
+                        ? answerInboundHookSlot(trigger, door, slot, hook)
                         : serveInboundHook(trigger, door, hook);
                 },
                 // [#31696] The slot door: the hook armed under the slot key the
@@ -315,7 +286,7 @@ export class ApiTriggerPlugin implements Plugin {
                 const flowName: string = c.req.param('flowName');
                 const hookId: string = c.req.param('hookId');
                 const slot = slotOf(flowName);
-                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId }, namespaceOf);
+                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId });
                 return serveInboundHook(trigger, c, { flowName, hookId });
             });
             // [ADR-0150 D5, child G1] The qualified hook. A qualifier the
@@ -339,7 +310,7 @@ export class ApiTriggerPlugin implements Plugin {
                 const reg = registry();
                 const namespaceOwners = typeof reg?.getNamespaceOwners === 'function' ? reg.getNamespaceOwners(qualifier) ?? [] : [];
                 const slot = slotOf(flowName, { qualifier, namespaceOwners });
-                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId, qualifier }, namespaceOf);
+                if (slot) return answerInboundHookSlot(trigger, c, slot, { flowName, hookId, qualifier });
                 // An engine that cannot say who ships the flow admits no address.
                 const admitted = typeof automation.packagedFlowOwner === 'function' && admitInboundHookAddress({
                     qualifier,

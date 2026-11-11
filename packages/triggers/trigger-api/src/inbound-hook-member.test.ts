@@ -70,10 +70,9 @@ interface BootOptions {
     namespaces?: Record<string, string[]>;
     /**
      * [#31696] The engine's `inboundHookSlot` (absent: an engine that holds
-     * one flow per name), and the namespace each installed package declares.
+     * one flow per name).
      */
     hookSlot?: (flowName: string, address?: { qualifier: string; namespaceOwners: readonly string[] }) => unknown;
-    packages?: Record<string, string>;
 }
 
 interface Published {
@@ -114,13 +113,7 @@ class FixturePlugin implements Plugin {
         }
         if (this.options.namespaces) {
             const namespaces = this.options.namespaces;
-            const packages = this.options.packages;
-            ctx.registerService('objectql', {
-                registry: {
-                    getNamespaceOwners: (ns: string) => namespaces[ns] ?? [],
-                    ...(packages ? { getPackage: (id: string) => (packages[id] ? { manifest: { namespace: packages[id] } } : undefined) } : {}),
-                },
-            });
+            ctx.registerService('objectql', { registry: { getNamespaceOwners: (ns: string) => namespaces[ns] ?? [] } });
         }
         const queueMode = this.options.queue ?? 'ok';
         if (queueMode !== 'absent') {
@@ -738,10 +731,11 @@ describe('[ADR-0150 D5] the qualified hook on http.server', () => {
  * [ADR-0150 D5, #31696 PR-2] A name two packages hold, on the self-hosted
  * mount: the engine routes the address (`inboundHookSlot`), the qualified
  * hook reaches its slot's own hook (armed under the slot key `PACKAGE/NAME`,
- * read with that slot's secret), the bare hook answers `409
- * RESOURCE_CONFLICT` naming both qualified addresses, and an address no slot
- * answers gets the one refusal. A name the engine does not route is judged as
- * before. Both refusals wait for the whole body.
+ * read with that slot's secret), and every other address — the bare hook,
+ * which names neither flow, an address no slot answers, a slot key — gets the
+ * door's one refusal, its cause in the server log only (D5's `409` does not
+ * apply to this anonymous door). A name the engine does not route is judged
+ * as before. Every refusal waits for the whole body.
  */
 describe('[#31696] a name two packages hold, on http.server', () => {
     const ALPHA = 'com.pin.alpha';
@@ -769,7 +763,6 @@ describe('[#31696] a name two packages hold, on http.server', () => {
             flowOwner: () => undefined,
             hookSlot,
             namespaces: { alpha: [ALPHA], beta: [BETA] },
-            packages: { [ALPHA]: 'alpha', [BETA]: 'beta' },
         });
         booted.trigger!.start({ flowName: `${ALPHA}/${FLOW}`, config: { hookId: HOOK_ID, secret: S_ALPHA } }, async () => {});
         booted.trigger!.start({ flowName: `${BETA}/${FLOW}`, config: { hookId: HOOK_ID, secret: S_BETA } }, async () => {});
@@ -786,21 +779,20 @@ describe('[#31696] a name two packages hold, on http.server', () => {
         expect(fixture.published).toHaveLength(2);
     });
 
-    it('red line: the bare hook answers 409 RESOURCE_CONFLICT naming both qualified addresses, never a pick, and enqueues nothing', async () => {
+    it('red line: the bare hook answers the one refusal, byte for byte, says nothing of the holders, enqueues nothing, and logs its cause with both holders', async () => {
         const { fixture, plugin } = await bootShared();
+        const refusal = await snapshot(inboundHookRefusalResponse());
         for (const secret of [S_ALPHA, S_BETA]) {
-            const res = await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, sigWith(secret, BODY)));
-            expect(res.status).toBe(409);
-            const body = await res.json() as { success: boolean; error: { code: string; message: string; details: { candidates: unknown; addresses: string[] } } };
-            expect(body.success).toBe(false);
-            expect(body.error.code).toBe('RESOURCE_CONFLICT');
-            const addresses = [`/api/v1/automation/hooks/alpha/${FLOW}/${HOOK_ID}`, `/api/v1/automation/hooks/beta/${FLOW}/${HOOK_ID}`];
-            expect(body.error.details.addresses).toEqual(addresses);
-            expect(body.error.details.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }]);
-            for (const address of addresses) expect(body.error.message).toContain(address);
+            const answer = await snapshot(await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, sigWith(secret, BODY))));
+            expect(answer).toEqual(refusal);
+            for (const leak of [ALPHA, BETA, 'alpha', 'beta', '409', 'RESOURCE_CONFLICT']) expect(JSON.stringify(answer)).not.toContain(leak);
         }
         expect(fixture.published).toEqual([]);
-        expect(plugin.lines('warn', `bare hook of flow '${FLOW}'`)).toHaveLength(2);
+        const logged = plugin.logs.filter((l) => l.message.includes('refused an inbound post (shared-name)'));
+        expect(logged.map((l) => l.fields)).toEqual([
+            { cause: 'shared-name', flowName: FLOW, holders: [{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }] },
+            { cause: 'shared-name', flowName: FLOW, holders: [{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }] },
+        ]);
     });
 
     it('red line: an address no slot answers, and a slot key in the name position, get the one refusal and enqueue nothing', async () => {
@@ -819,12 +811,13 @@ describe('[#31696] a name two packages hold, on http.server', () => {
             .toEqual(['unadmitted-address', 'unadmitted-address', 'unknown-flow', 'unadmitted-address']);
     });
 
-    it('the member (the hosted face) answers the bare hook\'s 409 with the self-hosted mount\'s bytes, refuses a key the path carried, and its slot door serves a routed key', async () => {
-        const { fixture, member, slot } = await bootShared();
+    it('the member (the hosted face) answers the bare hook with the self-hosted mount\'s one refusal, refuses a key the path carried, and its slot door serves a routed key', async () => {
+        const { fixture, member, slot, plugin } = await bootShared();
         const viaMount = await snapshot(await fixture.canonicalApp.fetch(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY))));
         const viaMember = await snapshot(await member(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)), { flowName: FLOW, hookId: HOOK_ID }));
-        expect(viaMember.status).toBe(409);
+        expect(viaMember).toEqual(await snapshot(inboundHookRefusalResponse()));
         expect(viaMember).toEqual(viaMount);
+        expect(plugin.logs.filter((l) => l.message.includes('refused an inbound post (shared-name)'))).toHaveLength(2);
         // A slot key handed to the member is the path's name: no flow's (the one refusal).
         const keyed = await member(hookRequest(FLOW, HOOK_ID, BODY, sigWith(S_ALPHA, BODY)), { flowName: `${ALPHA}/${FLOW}`, hookId: HOOK_ID });
         expect(await snapshot(keyed)).toEqual(await snapshot(inboundHookRefusalResponse()));
@@ -842,7 +835,7 @@ describe('[#31696] a name two packages hold, on http.server', () => {
         expect(fixture.hookSlotReads).toHaveBeenCalledWith('never_armed', undefined);
     });
 
-    it('⭐ the bare hook\'s 409 waits for the whole body, as every answer does', async () => {
+    it('⭐ the bare hook\'s refusal waits for the whole body, as every answer does', async () => {
         const { fixture } = await bootShared();
         let ctl!: ReadableStreamDefaultController<Uint8Array>;
         const stream = new ReadableStream<Uint8Array>({ start(c) { ctl = c; } });
@@ -860,6 +853,6 @@ describe('[#31696] a name two packages hold, on http.server', () => {
         expect(settled).toBe(false);
         ctl.enqueue(new TextEncoder().encode(BODY.slice(10)));
         ctl.close();
-        expect((await answer).status).toBe(409);
+        expect((await answer).status).toBe(401);
     });
 });
