@@ -611,7 +611,7 @@ describe('an email domain another provider serves is refused on register and on 
     // 'xacme.example' ends with 'acme.example' but is not a subdomain of it.
     const res = await registerSaml(s, 'list-ok', 'xacme.example, foo.example');
     expect(res.status, await res.clone().text()).toBe(200);
-    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual(['list-ok', PROVIDER]);
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, 'list-ok']);
   }, 30_000);
 
   it('an internationalised domain is one domain in Unicode and in punycode, either way round', async () => {
@@ -872,10 +872,13 @@ describe('a registered provider is edited in place, without unlinking anyone', (
     const auth: any = await s.manager.getAuthInstance();
     const ctx = await auth.$context;
     await ctx.adapter.update({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }], update: { skipUserInfo: true } });
+    // What is stored, read beneath the adapter (its read halves do not run here).
     const stored = async () => {
       const [row] = await rows(s, 'sys_sso_provider', { provider_id: OIDC });
-      return { row, oidc: JSON.parse(String(row.oidc_config)) as Record<string, unknown> };
+      const configs = await createEngineSsoProviderConfigReader(() => s.engine as never)(OIDC);
+      return { row, oidc: JSON.parse(String(configs?.oidcConfig)) as Record<string, unknown> };
     };
+    expect((await stored()).oidc.userInfoEndpoint).toBe(USERINFO);
     // The vendor is handed the config with the endpoint parked, so its callback reads the ID token.
     const handed = await ctx.adapter.findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }] });
     expect(JSON.parse(handed.oidcConfig).userInfoEndpoint).toBeUndefined();
