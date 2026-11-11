@@ -243,6 +243,33 @@ describe('a principal whose own read of the object is refused gets one explanati
   }
 });
 
+describe('a parent edit judged by the caller\'s own update explanation is refused when its read of the object is refused', () => {
+  // The comment gate (plugin-audit) and the attachment gate (service-storage)
+  // admit a parent edit only when the caller's own record-grained `update`
+  // explanation of the parent is `allowed` with `record.visible`. This pins
+  // that predicate's input for a principal that holds edit and is refused
+  // the read (ADR-0066 ⑤), for every kind of principal.
+  const admitsParentEdit = (d: ExplainDecision) => d.allowed === true && d.record?.visible === true;
+  const gated = REFUSED_READ_SHAPES.find((s) => s.readRefusedBy === 'required_permissions')!;
+
+  for (const kind of KINDS) {
+    it(`${kind ?? 'plain'} context: the update explanation is allowed for the object and not visible for the stored row or a missing id`, async () => {
+      const caller = contextOf(gated.userId, gated.set, kind);
+      for (const id of [STORED, MISSING]) {
+        const update = await explainSelf(caller, gated.object, 'update', id);
+        expect(update.allowed, id).toBe(true);
+        expect(update.record, id).toEqual({ recordId: id, visible: false, decidedBy: 'required_permissions' });
+        expect(admitsParentEdit(update), id).toBe(false);
+      }
+    });
+  }
+
+  it('control: a principal who reads the object is admitted a parent edit on the stored row', async () => {
+    const update = await explainSelf(contextOf(READER_USER, READER_SET.name, 'agent'), BOARD, 'update', STORED);
+    expect(admitsParentEdit(update)).toBe(true);
+  });
+});
+
 describe('controls', () => {
   for (const kind of KINDS) {
     it(`a principal who reads the object keeps its record story (${kind ?? 'plain'} context): the stored row is explained, a missing id is not`, async () => {
