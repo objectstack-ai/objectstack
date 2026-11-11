@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T01:06:48Z",
-  "updated_at": "2026-11-11T01:55:49Z",
+  "updated_at": "2026-11-11T05:07:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32379",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\nFiling gate: ① (a follow-up owed by landed work: the contract review of PR #32377, card #32264, comment 6783849220)\n\n**What is wrong.** `skills/objectstack-api/SKILL.md` (on `origin/main`, the flow-door paragraph near L365–L370) says `error.details.innerRefusal` is \"the `{ code, message }` a node's write was refused with\" and lists `UNIQUE_VIOLATION`, `VALIDATION_FAILED`, `PERMISSION_DENIED`. Since PR #32257 (card #32073, ADR-0150 D3), a `script` node whose `config.function` is ambiguous in the calling flow's reach, or held only outside its `dependencies` closure, fails the step as a guard and the flow door answers `400 FLOW_FAILED` with `innerRefusal: { code: 'RESOURCE_CONFLICT', message }` naming each holder. That refusal is not a write refusal, and its code is not in the list. A client author who renders by the taught rule handles it, but one who branches on the listed codes misses it.\n\nAlso owed: the api skill's \"Choosing between `apis:` and a code handler\" table (near L133) sends a reader to a `script` node naming a stack function, with no pointer to the package rule that now decides which function runs. One link to the owner text (objectstack-automation, silently-wrong item 3, landing in PR #32377) closes it; ⛔ no restatement.\n\n**Reach.** PR #32257's tests pin the `RESOURCE_CONFLICT` inner refusal on a flow door; the api skill is shipped (`skills/**`).\n\n**Business reason.** Client authors and agents writing flow-door error handling read the api skill; the code list they are taught is now incomplete for a refusal the platform ships.\n\n**Reader who acts.** The `domain:skills` seat dispatches one card thread after PR #32377 merges (the link target lands there). Surface: `skills/objectstack-api/SKILL.md` and its `evals/*.json` only for a hit the edit makes false, plus one changeset (`'@objectstack/skills': patch`, `Clause-②: no`).\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue innerRefusal`: 18 hits, one open (#32264, the automation skill, which this card follows); closed #26299 taught the field originally and does not cover a non-write refusal.\n\nSuggested-grade: p3 (a sentence that under-describes a shipped refusal; no protocol change)."

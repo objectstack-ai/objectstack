@@ -1,7 +1,7 @@
 {
   "number": 20966,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 2 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
+  "title": "[PM seat] domain:server · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-30T23:12:24Z",
-  "updated_at": "2026-11-10T09:56:18Z",
+  "updated_at": "2026-11-11T05:57:53Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 96,
+  "comments": 97,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20966",
-  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post, ⛔ do not sit there.\n\n<sub>Refreshed 2026-11-10T09:53Z at seating (forced takeover).</sub>\n\n## Current PM — 🟢 os-support-ai\n\n- **Holder:** `os-support-ai` · `session_01WGufziCTpjnYbdh76SAWwb` · project \"objectstack spec\" · 由 os-support-ai 账户的项目负责. Seated by forced takeover on the maintainer's order 「接手 server 车道，前任没token了……你应该接手他们的所有工作」 (Yibo Wang, project chat, 2026-11-10T09:46Z); the seating comment carries the provenance.\n- **Previous PM:** `os-steve` · `session_01ADHkmQKZzp4DLtqiCkZZRM` (seated 6723667633). No clock-out brief; its last hand-back is on #31985 (6761159656). The prior revision of this body is the archive.\n- **Pointer:** posture and ledger live in the project; the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Handover ledger\n\n- **Taken over in flight:** #31985 (ADR-0150 child B, `tool`), draft PR #32081 at `c3d90f1c`, branch `claude/project-thread-1o6x78`. Not yet reviewed. It lands after #31696, #31697, #31699 and #31700, and leaves draft only on a fresh cloud reading (epic ruling 6760270915).\n- **Landed since the last body:** #31564 and #31566 closed; PR #32057 (#32052) merged.\n- **Scope:** `domain:server` cards, `priority:p1` and `priority:p2`, up to 5 card threads at once (the maintainer's project cap). ⛔ Not opened: #32073, #32078, #32079. Excluded: `pm:epic` subtrees and every card another seat holds.\n\n## Hot-file serial queue\n\n- `packages/objectql/src/bare-name-one-holder.ts` (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): #31696 → #31697 → #31699 (seat 1) → #31700 (seat 3) → #31985 (this seat), each merging main after the previous lands.\n- ⛔ Re-derive every other overlap from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Mailbox:** PR #32130 (the previous holder's #31577 is closed). **Patrol:** `trig_01S9JEuaf6ibJVRBB38BMuPs` · hourly (`53 * * * *`).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb -->\n"
+  "body": "domain:server#2 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 2**. Seat 1 is #6367, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #21118 and #22648 are archives of this post.\n\n<sub>Refreshed 2026-11-11T05:55Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-support-ai` · `session_01WGufziCTpjnYbdh76SAWwb` (project \"objectstack spec\"), seated by forced takeover 2026-11-10T09:54Z (6764338442), stood down 2026-11-11T03:36Z on the maintainer's 「当前任务处理完就下班」. `check-handover` exit 0. The clock-out brief is 6788284288, written by `session_01WGufzi7JmNEq5dKHBJdAFu`, which completed the missed steps.\n- **Mailbox:** PR #32130, closed at clock-out. **Patrol:** disabled at clock-out. The next holder opens both anew.\n- **Resume:** `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Released at clock-out:** #31985 → `pm:queue` (6788254205), draft PR #32081, serial after #31696, #31699, #31700.\n- **Open follow-ups from this tenure:** #32369 (p2), #32371, #32342, #32359 (p3). Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#2` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. `packages/objectql/src/bare-name-one-holder.ts` (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) still runs #31696 → #31699 → #31700 → #31985, each merging main after the previous lands. ⛔ Re-derive from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#2 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu -->\n"
 }

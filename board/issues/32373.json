@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T00:12:19Z",
-  "updated_at": "2026-11-11T00:56:59Z",
+  "updated_at": "2026-11-11T08:10:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32373",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **② 可机械化项 / 契约缺口。** 来自 cloud PR #4286 的契约复核记录 `6782628535`（nit 2）和返工开发报告 `6782884542`（cloud#4282）。\n\n## 维护者速读\n\ncloud 企业版要在 AI 的分析调用里按 actor 范围判断「能不能读这个对象」。框架的 `AnalyticsService` 没有对外的组合点，cloud 只好按名字去装饰它的私有只读字段 `readAdmissionProvider`。字段改名时会失败即关（不会放过不该读的），集成测试会在 pin 移动时变红，但这不是契约。要做：给宿主一个公开的挂钩，或者让组合方把自己的 `admitObjectRead` 交给 `AnalyticsServicePlugin`。\n\n## Where（objectstack，cloud pin `ff04ad81`）\n\n- `packages/services/service-analytics/src/analytics-service.ts`：字段声明约 L1526；由 `config.admitObjectRead` 设置约 L1620。\n- 消费方：cloud `packages/security-enterprise`（`installAnalyticsScopeGate`）。\n\n## Expected\n\n宿主能通过公开选项或钩子组合分析门的对象读准入；cloud 换用它后删除按名字的装饰。\n\nDedupe（objectstack）：`readAdmissionProvider`、`admitObjectRead composition` —— 无。"

@@ -1,0 +1,34 @@
+{
+  "number": 32393,
+  "kind": "issue",
+  "title": "cli(nightly): four generate-scaffold-gates e2e legs are red on the blank starter, because the starter now ships an app with a Notes entry (os g app, os g permission)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T05:26:35Z",
+  "updated_at": "2026-11-11T08:00:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32393",
+  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① a red test measured by the #32153 dev (PR #32389, out-of-scope findings). The four legs reproduce with `generate.ts` at the merge base `26f4e6d84a`, so they are not #32389's.\n\n**Where:** `packages/cli/test/generate-scaffold-gates.e2e.test.ts`, the nightly tier (`OS_TEST_TIERS=nightly`), run against a fresh blank starter (`npm create objectstack`).\n\n**What happens:**\n1. The leg \"`os g app` and its prerequisites exit 0\": `os g app gate_probe --object gate_target` exits 1 with \"An app package must define at most one app … ADR-0019 D3\", because the blank starter now ships `main.app.ts`.\n2. Three `os g permission` legs: after `os g permission gate_probe --object gate_target`, `os validate`, `os build` and `os lint` report `nav-object-ungranted` at `apps[0].navigation[0].objectName`. That is the starter app's Notes entry, which the generated permission set does not grant.\n\n**Do:**\n1. Measure whether each leg's expectation is stale against the current starter, or whether the CLI should behave differently.\n   - Leg 1: should `os g app` on a starter that already has an app refuse? The CLI says so by ADR-0019 D3. The leg then pins the refusal and drops the \"exit 0\" claim.\n   - Legs 2–4: should the e2e grant Notes, scope the gate, or should `os g permission` say what remains ungranted?\n2. Change the test or the CLI accordingly. A CLI behaviour change states FROM → TO.\n3. The same starter drift: `os init`'s object template (`packages/cli/src/commands/init.ts`) still writes raw `{ type }` literals and a default-only export, while `os g object` now writes the `npm create objectstack` style (#32389). Align `os init` with it, or record why not.\n\n**Clause-②:** declared by the claimer (a test-only fix is `no`, `skip-changeset`).\n**Business reason:** the nightly CLI scaffold gate is red for a reason nobody reads, so a real regression on that path would go unseen.\n\nDedupe (`generate-scaffold-gates nightly`, `os g app at most one app`, `nav-object-ungranted starter`): none found."
+}

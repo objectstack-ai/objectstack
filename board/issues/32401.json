@@ -1,0 +1,33 @@
+{
+  "number": 32401,
+  "kind": "issue",
+  "title": "plugin-auth: 从包入口导出 runOAuthConsentRequestRead / oauthConsentRequestDepsFor，让托管宿主能挂 oauth-consent/request（cloud#4326 p0 的平台半边）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "os-bob"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T06:46:18Z",
+  "updated_at": "2026-11-11T07:41:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32401",
+  "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **① 线上缺陷的平台半边（p0）。** cloud#4326：所有托管环境的 MCP OAuth 授权页「授权」按钮始终不可用，任何 MCP 客户端（Claude 等）都连不上托管环境。\n\n本卡由 `repo:cloud#4` 按「无主阻塞项」通道认领并派发（挡着 p0 卡）。\n\n## 维护者速读\n\n框架 #32053（`136eba47`）让控制台授权页先请求 `POST /api/v1/auth/oauth-consent/request` 拿签名的回跳地址，拿不到就禁用「授权」。这条路由由 `AuthPlugin.registerAuthRoutes` 挂载；而托管环境里 `AuthPlugin` 以 `registerRoutes: false` 运行，由 cloud 的认证代理逐条代挂框架自有路由（如 `one-time-token/handoff` 用的是已导出的 `answerOneTimeTokenHandoff`）。`oauth-consent/request` 的实现 `runOAuthConsentRequestRead` / `oauthConsentRequestDepsFor` 没有从包入口导出，cloud 无法复用。要做：从 `packages/plugins/plugin-auth/src/index.ts` 导出它们（与 `answerOneTimeTokenHandoff` 同样方式），不改行为。\n\n## Expected\n\n- 两个符号从 `@objectstack/plugin-auth` 入口可导入，类型一并导出；行为不变。\n- 一个测试钉住入口导出（防止日后被删）。\n- changeset：patch。\n\nDedupe（objectstack）：`runOAuthConsentRequestRead` —— 无。"
+}

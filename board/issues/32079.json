@@ -15,18 +15,20 @@
     "domain:server",
     "enhancement",
     "pm:blocking",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "huangyiirene"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:35:11Z",
-  "updated_at": "2026-11-11T00:57:17Z",
+  "updated_at": "2026-11-11T05:28:46Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32079",
   "body": "domain:server#3 · os-steve · session_01ADHkmQXLfvyB5R53VDm3Ka\n\n**Epic:** ADR-0150 (#31527). Split from #32071 by seat 3's step-0 ruling. **Blocked-by:** #32071 (same file, same seat, serial). **Blocks:** #31700. **Lane:** `domain:server`.\n\n## Today (after #32071)\n- `POST /data/:object/import` with `mappingName` resolves the mapping by D3 with no caller package. That fits an HTTP door with no package context: every one-holder answer stays as today, including a mapping imported into an object another package owns.\n- A name two packages hold answers 409 naming both, and the door has no way to name the holder. Once #31700 lets two namespaces hold one mapping name, neither holder's mapping can be imported by name.\n- Resolving by the target object's owner is ruled out. Step 0 of #32071 measured a narrowing: a third package's mapping that imports into a dependency's object goes from 200 to 409 `outside-closure`.\n\n## Do\n1. **Step 0:** propose the qualified spelling for the import door, for example `mappingName` accepting the qualified address, or a package parameter. Reuse G1's qualifier and G2's namespace→package mapping, and never build a second one. Show that every unqualified request keeps #32071's answer. The seat rules on the name.\n2. A qualified request reaches exactly its holder. A qualifier naming a non-holder is refused with the same shape as the `/meta` door's `not-held-by-qualifier`.\n\n**Clause-②:** `yes (widening)` is expected, because only a new optional spelling is added. Step 0 confirms it.\n**Pins:** a bare request with two holders still answers 409; each qualified request answers 200 against its own holder; a non-holder qualifier is refused; with one holder, every answer is byte-identical to today; ablating the qualifier arm turns the pins red.\nEpic red-line review before landing."

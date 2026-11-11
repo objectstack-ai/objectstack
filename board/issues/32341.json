@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T20:19:33Z",
-  "updated_at": "2026-11-10T20:55:19Z",
+  "updated_at": "2026-11-11T04:58:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32341",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nOrigin: nit 3 of the contract review on PR #32338 (card #32278).\n\nThe catalog sentence `errors.record_queue_change_denied` in `packages/spec/src/system/operation-message.ts` ends \"if it needs to be moved\" in all four locales. `denyQueueWrite` in `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` also throws it for a create into a queue the caller is not a member of. Nothing is being moved in that case, so the sentence reads slightly wrong.\n\nPremise re-check: `git grep -n \"record_queue_change_denied\" -- packages/` lists both the catalog entry and the two `denyQueueWrite` sites.\n\nWanted: one sentence that fits both the create and the update, or a separate create key on the insert site (the one-wire-code, several-keys rule from #7451). Status, `code`, `message` and `details` must not move.\n\nClause-②: no (copy only; the key is not removed)"

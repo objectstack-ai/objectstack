@@ -1,7 +1,7 @@
 {
   "number": 18883,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 3 — 🟢 os-support-ai · 由 os-support-ai 账户的项目负责",
+  "title": "[PM seat] domain:spec · seat 3 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-sam",
-    "os-support-ai"
+    "os-sam"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T04:07:15Z",
-  "updated_at": "2026-11-10T00:09:12Z",
+  "updated_at": "2026-11-11T05:57:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 70,
+  "comments": 71,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18883",
-  "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:spec` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here).\n- The other spec seats: seat 1 objectstack-ai/objectstack#6017, seat 2 objectstack-ai/objectstack#18549, seat 4 objectstack-ai/objectstack#18917, seat 5 objectstack-ai/objectstack#19357. ⛔ This post is none of them.\n- Posture and ledger live in the seat's project; the previous body is the archive of the `os-sales` tenure.\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzh7cM8EmUX4T2CBNHX` · seated 2026-11-10T00:04Z.\n\n- **Patrol:** `trig_011LJDUnAfBpQfwLzCp6pFgH` · `4 * * * *`.\n- **Mailbox:** PR objectstack-ai/objectstack#32006.\n- **Concurrency:** up to 5 cards in flight, `priority:p1` / `priority:p2` only. **Dispatch back end:** `mode:thread`.\n\n## Handover ledger\n\n- Inherited from the `os-sales` brief (6674546497): nothing in flight. Its cross-lane memos (#30641 / #30751, #30066 / #30760, #30237) are re-read live before this seat answers any of them.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing. ⛔ Re-derive it from the live `Claim:` comments and each open PR's file list before every dispatch.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Tier:** contract reviews run as an isolated subagent at `CONTRACT_REVIEW_TIER`. ⛔ Never in-seat.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:spec#3 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:spec` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here).\n- The other spec seats: seat 1 objectstack-ai/objectstack#6017, seat 2 objectstack-ai/objectstack#18549, seat 4 objectstack-ai/objectstack#18917, seat 5 objectstack-ai/objectstack#19357. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-11T05:54Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-support-ai` · `session_01WGufzh7cM8EmUX4T2CBNHX` (project \"objectstack spec\"), seated 2026-11-10T00:08Z (6754972458), stood down 2026-11-10T23:49Z on the maintainer's 「当前任务处理完就下班」. `check-handover` exit 0. The clock-out brief is 6788268038, written by `session_01WGufzi7JmNEq5dKHBJdAFu`, which completed the missed steps.\n- **Mailbox:** PR #32006, closed at clock-out. **Patrol:** disabled at clock-out. The next holder opens both anew.\n- **Resume:** `/pm-dispatch 接手`, then read this post and the clock-out brief below it.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Queue snapshot (p1/p2 `domain:spec`):** no eligible card (only the tracking card #29428). Open p3 follow-ups from this tenure: #32282, #32345.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:spec#3 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu -->\n"
 }

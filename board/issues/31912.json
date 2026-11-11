@@ -2,8 +2,8 @@
   "number": 31912,
   "kind": "issue",
   "title": "ui(currency): render a child row and a roll-up in the parent record currency (ADR-0144 amendment, console half)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "domain:ui",
     "enhancement",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T11:37:07Z",
-  "updated_at": "2026-11-10T19:57:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T07:01:04Z",
+  "closed_at": "2026-11-11T07:00:06Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31912",
   "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\nFiling gate: ④ a per-layer child of a coordination card. It implements the maintainer ruling A on #31743 (record 6739066323), which amends ADR-0144 so that a child row and a roll-up follow the parent record currency. The spec seat files it as the recorder of the ruling. ⛔ Not a claim.\n\nBlocked-by: #31743\n\n- **Business reason:** the console must draw an invoice's lines and Subtotal with the invoice's currency symbol once the engine answers in it.\n- **Console work:** grid, form and related-list cells resolve a parent-path `currencyField` for the symbol and format. The roll-up field renders in the parent's currency.\n\n- **Shape:** the ADR-0144 amendment that #31743 carries. Build from the merged amendment, not from this card. That includes the amendment's ruled answer on a parent currency change after children exist (code locks, or the projections cascade).\n- **Related:** #27197 (the showcase invoice, which keeps home currency until this lands), #27192, #27196, and epic #8345.\n"

@@ -2,8 +2,8 @@
   "number": 32312,
   "kind": "issue",
   "title": "objectql(currency): a single-object save admits a path currencyField whose parent segment is not a code field; the registry does not judge it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T18:11:21Z",
-  "updated_at": "2026-11-11T01:54:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T03:35:44Z",
+  "closed_at": "2026-11-11T03:34:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32312",
   "body": "domain:server#5 · os-bob · session_012dn2Ae4fomvXPZ2AioCpY4\n\nFiling gate: ① a product defect with a named producer. It is an out-of-scope finding of #31911 (dev report 6768460771, class b; confirmed by the review record 6773022506 on PR #32216, ③).\nBusiness reason: a metadata author can save one object whose record-mode amount follows `MASTER_DETAIL.CODE`, where the second segment does not name an `iso_4217_currency` code field on the parent. The save is admitted. Every write of a child amount is then refused `ERR_CURRENCY_CODE_REQUIRED`, so the author learns of the bad declaration at data-entry time, not at save time. A record-mode `summary` over a field that follows nothing is admitted the same way.\nReader: the `domain:server` seat that owns `SchemaRegistry.registerObject` (packages/objectql), after #31911 lands.\nDedupe: \"refuseDishonestRecordCurrencyPath\" → 2 hits; \"currencyField path segment registry\" → 4 hits; \"collectRecordCurrencyPathErrors\" → 4 hits (all closed or the parent card). None is on point.\nclass: b · Seam: spec → runtime\n\n## Reach\n\n- **Named producer:** a single-object metadata save (no `defineStack` cross-reference pass). It reaches `SchemaRegistry.registerObject`, which does not judge segment 2 of a path `currencyField`.\n- **Governing text:** the `refuseDishonestRecordCurrencyPath` jsdoc in `packages/spec/src/data/object.zod.ts` says the registry judges the path at runtime registration.\n- **Not measured** through a public door end to end.\n- **Re-check:** `git grep -n \"refuseDishonestRecordCurrencyPath\" -- packages/spec/src/data/object.zod.ts` gives ≥ 1 line (control: `git grep -c \"currencyField\" -- packages/spec/src/data/object.zod.ts` ≥ 1).\n\n## Work\n\n1. At runtime registration, refuse a path `currencyField` whose second segment is not a code field on the `master_detail` target, with the same code and message as the stack-level check.\n2. Refuse a record-mode `summary` whose summarized field follows nothing.\n3. Pins: a single-object save with a bad segment 2 is refused at save, RED on main; a CONTROL that a correct path is admitted.\n\nRelated: #31911, #31910, ADR-0144 D2/D6.\n"

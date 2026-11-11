@@ -1,0 +1,31 @@
+{
+  "number": 32392,
+  "kind": "issue",
+  "title": "skills: the `master_detail` parent-currency path owes two follow-ups (ui dashboards aggregate rule, data eval case)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T05:05:03Z",
+  "updated_at": "2026-11-11T05:56:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32392",
+  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\nFiling gate: ① (follow-ups owed by landed work: the contract review of PR #32384, card #31957, comment 6787524555, nit N2 and the eval reading the claim excluded)\n\n**1. `skills/objectstack-ui/rules/dashboards.md` (near L305–L308) under-describes a path amount.** It says a `currencyMode: 'record'` amount refuses sum/avg/min/max \"unless grouped by its code field\". For an amount whose `currencyField` is the two-segment parent path (`'<master_detail field>.<parent code field>'`), no grouping is admitted on `main`: PR #32216 (#31911) refuses the parent-path reading (ADR-0144 Open item 14, edge 2). A dashboard author following the sentence groups by the path and is refused. Fix: say which grouping admits which form, or that a path amount has none yet, true to `main` when picked up (edge 2 may have moved). One sentence; ⛔ no restatement of the data skill's owner text, which a link reaches.\n\n**2. `skills/objectstack-data/evals/objects-fields-relationships.json` has no case for `currencyField`.** PR #32384 teaches the parent path in `rules/field-types.md`, and its body proposes an eval case (an invoice with line items whose amounts follow the invoice's currency, and the `lookup` path refused). The claim excluded the data evals because sibling #32364 owned them. Add the case in the README's shape: every `must_contain` literal in `expected_output`, no `must_not_contain` in it.\n\n**Reach.** Both are shipped `skills/**` faces. Item 1 is a sentence that leads an author into a refusal on `main`; item 2 is the eval gap the skill's own harness measures.\n\n**Business reason.** An AI author building invoice dashboards and line-item objects reads these two pages; item 1 leads to a refused dashboard, and item 2 leaves the new rule unmeasured.\n\n**Reader who acts.** The `domain:skills` seat dispatches one card thread once PR #32384 and #32364's PR have merged (both touch the data skill). Surface: those two files, plus one changeset (`'@objectstack/skills': patch`, `Clause-②: no`).\n\n**Dedupe.** `repo:objectstack-ai/objectstack is:issue currencyField eval`: 5 hits, only #31957 relevant (this card follows it). `… dashboards record amount grouped code field`: 25 hits, all closed and about the sibling-field form.\n\nSuggested-grade: p3."
+}

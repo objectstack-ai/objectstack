@@ -2,8 +2,8 @@
   "number": 32162,
   "kind": "issue",
   "title": "metadata + objectql: permission sets are stored, read and removed by (package, name), so /meta/permission serves each holder its own body (ADR-0150 D3/D4; before #31698 PR-2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:39:35Z",
-  "updated_at": "2026-11-10T22:34:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T03:56:29Z",
+  "closed_at": "2026-11-11T03:04:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32162",
   "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled verbatim by seat 3 from the epic seat's draft (`epic:#31527#1`, /mnt/project-files/epic-31527/31698-carriers.md), with the maintainer's approval on seat 3's decision card (option 「允许，3 号席位立卡」, 2026-11-10, this account's project thread). ⛔ Not a claim.\nRuling-ref: 6764938596 (epic, on #31698: ruling A agreed, the carrier rulings); seat 3 step-0 ruling on #31698.\n\n④ coordination card: a child of the ADR-0150 epic #31527, a precondition of #31698 PR-2.\n\n**Epic:** ADR-0150 (#31527). **Blocks:** #31698 (PR-2). **Blocked-by:** #32151. That card makes the slotted store cover every narrowed type; this one adds `permission` to that set and must not fork it. **Lane:** `domain:server`. **Reader:** the server seat that claims it.\n**Found by** #31698 PR-2 step 0 (seat 3, premise forks F2, F3 and F4). Readings: `/mnt/project-files/server-orders/seat3/31698-step0.md`.\n\n### Permission sets: one store slot, one read rule, one removal rule per `(package, name)`\n\n**Today**, under a throwaway probe of the switch, with two namespaces each holding `qa_probe_set`:\n- **F2.** A bare `GET /meta/permission/NAME` answered `200` with beta's set, a silent pick. `permission` is not in `PACKAGE_SCOPED_READ_TYPES`.\n- **F3.** `GET /meta/permission/NAME?package=alpha` answered `200` stamped `_packageId: alpha`, carrying **beta's body**. `PACKAGE_SLOTTED_STORE_TYPES` is `['api']`, so `MetadataManager` keys `permission` by name, and the second registrar overwrote the first. This is the #32069 class.\n- **F4.** `unregisterPackage` deletes `(type, name)` in the store and the loader rows by name, so uninstalling one holder empties the other's item. This is the epic's precondition 1 in 6761712849.\n- The save door's held-grants read (`protocol-save-door-refusals.ts`) goes through F2's read.\n\n**Do (the #32070 / #32092 shape):**\n1. Add `permission` to `PACKAGE_SLOTTED_STORE_TYPES`, so each package's set has its own slot. The superset pin from #32151 then holds.\n2. Add `permission` to `PACKAGE_SCOPED_READ_TYPES`. A bare read with two holders answers 409 naming both. The exact qualifier serves the named package's own body or refuses.\n3. Remove by slot. `unregisterPackage` / `unregisterAt` and the loader-row delete remove only the departing package's item. Pin: removing P1 leaves P2's same-named set, in the store and in the loader rows.\n4. The save door's held-grants read resolves by D3 from the saving package.\n5. `guest_portal`, which the platform requests, keeps one holder per deployment, as today.\n\n**Clause-②:** the seat declares it, under G1's precedent for E8's types. A two-holder bare read goes from 200 to 409, and so does a qualified read of a non-holder. First-party census: 0 pairs.\n**Dedupe** (open and closed, `permission PACKAGE_SCOPED_READ_TYPES`): 1 hit, #32076, which covers the no-slice fallback, a different branch.\n**Business reason:** without this, after the narrowing, an administrator reading or editing package A's permission set can be shown package B's grants under A's address.\n**Epic red-line review before landing.**\n\nBlocked-by: #32151\n"
