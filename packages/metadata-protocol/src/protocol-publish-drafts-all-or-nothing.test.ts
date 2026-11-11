@@ -72,6 +72,17 @@ function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>
             if (!clauses.some((c) => matchesWhere(r, c))) return false;
             continue;
         }
+        if (k === '$and') {
+            const clauses = v as Array<Record<string, unknown>>;
+            if (!clauses.every((c) => matchesWhere(r, c))) return false;
+            continue;
+        }
+        // Equality and the two combinators above are all this double implements:
+        // anything else is refused rather than read as a field name or a value.
+        if (k.startsWith('$')) throw new Error(`this engine double does not implement the '${k}' combinator`);
+        if (v !== null && typeof v === 'object') {
+            throw new Error(`this engine double does not implement operator objects (field '${k}')`);
+        }
         if (v === undefined) continue;
         if (r[k] !== v) return false;
     }
