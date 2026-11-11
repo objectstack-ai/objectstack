@@ -249,6 +249,7 @@ import {
 // [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
 import { McpClientLastUseStamper, mcpClientLastUseStoreFor, issuedAtOf } from './mcp-client-last-use.js';
 import { runAfterResponse } from './run-after-response.js';
+import { markDirectoryProvisionedUsers } from './scim-identity-source.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -4520,10 +4521,18 @@ export class AuthManager {
    * never applied it on the SCIM path either — the vendor wrote the column
    * straight through the adapter.
    *
-   * Every read and write goes through `context.database` — the adapter the
+   * Every ban read and write goes through `context.database` — the adapter the
    * vendor bound to its transaction — never through an `internalAdapter`
    * resolved outside it, so the ban commits or rolls back with the SCIM
    * mutation it belongs to.
+   *
+   * [ADR-0135 D4] This callback also writes the directory-managed mark
+   * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`), first,
+   * on every call: the vendor invokes it for every SCIM create, re-link and
+   * reprovision, and it is the one host seam all of them share. `source` is not
+   * a vendor field, so the adapter would drop it; the mark is written through
+   * the data engine instead, which joins the same transaction as its ambient
+   * one. A user holding a local password keeps `env_native` (D4's rule).
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,
@@ -4544,6 +4553,18 @@ export class AuthManager {
         `[auth] SCIM identity reconciliation: better-auth user '${state.userId}' has no sys_user row`,
       );
     }
+    // [ADR-0135 D4] The directory-managed mark, on the one seam every SCIM
+    // create, re-link and reprovision passes through (`scim-identity-source.ts`
+    // says why it is this callback). The engine joins the vendor's transaction,
+    // so the mark commits with the SCIM write or not at all; a mark that cannot
+    // be written fails the SCIM request, which the IdP retries.
+    const engine = this.getDataEngine();
+    if (!engine) {
+      throw new Error(
+        `[auth] SCIM identity reconciliation: no data engine to write the identity-source mark for user '${state.userId}'`,
+      );
+    }
+    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
     const writer = {
       updateUser: (id: string, data: Record<string, unknown>) =>
         db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
