@@ -36,6 +36,13 @@ import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
 import { SysConnectorCredential } from './sys-connector-credential.object.js';
 import { SysConnectorConnection } from './sys-connector-connection.object.js';
+import { SysSyncRun } from './sys-sync-run.object.js';
+import {
+    ObjectStoreSyncRunLedger,
+    SYNC_RUN_OBJECT,
+    closeInterruptedSyncRuns,
+    type SyncRunLedgerEngine,
+} from './sync-run-ledger.js';
 import type {
     ConnectorCredentialRef,
     ConnectorCredentialSetRequest,
@@ -1600,6 +1607,15 @@ export class AutomationServicePlugin implements Plugin {
      * what their disagreement looks like in production.
      */
     private runObjectRegistered = false;
+    /**
+     * [ADR-0153 D7] Whether {@link SysSyncRun} reached the `manifest` service —
+     * with the run objects, or with the credential objects under
+     * `suspendedRunStore: 'memory'`: a pull's read position needs its table on
+     * every composition, whatever the suspended-run store is.
+     */
+    private syncRunObjectRegistered = false;
+    /** [ADR-0153 D7] Said once: a pull ran with no run ledger. */
+    private syncRunLedgerAbsenceSaid = false;
     /** The context `init()` received — what {@link pullConnectorSource} resolves its services through. */
     private ctx?: PluginContext;
     /**
@@ -1695,6 +1711,15 @@ export class AutomationServicePlugin implements Plugin {
             throw new Error('[Automation] pullConnectorSource() called before init() — the automation plugin is not initialized');
         }
         const protocol = ctx.getService<ConnectorPullProtocol>('protocol');
+        const runs = this.syncRunLedgerOf(ctx);
+        if (!runs && !this.syncRunLedgerAbsenceSaid) {
+            this.syncRunLedgerAbsenceSaid = true;
+            ctx.logger.warn(
+                `[Automation] pulls run with no run record: ${SYNC_RUN_OBJECT} ${this.syncRunObjectRegistered ? 'is registered, but no data engine serves it' : 'was never registered (no manifest service)'}. `
+                + 'A datasource pull keeps no read position, so every run reads from watermark.start and rewrites every row it reads, '
+                + 'and no run history is kept. Compose ObjectQLPlugin before AutomationServicePlugin.',
+            );
+        }
         return pullConnectorSource(
             {
                 protocol,
@@ -1704,9 +1729,49 @@ export class AutomationServicePlugin implements Plugin {
                 // [ADR-0150 D3, #32071] A pull naming the package that declares
                 // its job reads the mapping from that package.
                 mappingByPackage: mappingNameResolver(ctx),
+                ...(runs ? { runs } : {}),
             },
             opts,
         );
+    }
+
+    /**
+     * [ADR-0153 D7] The `sys_sync_run` ledger, resolved where a pull uses it:
+     * the data engine may register after this plugin inits. None when the
+     * object never reached a manifest (no table would hold the rows) or no
+     * engine serves it.
+     */
+    private syncRunLedgerOf(ctx: PluginContext): ObjectStoreSyncRunLedger | undefined {
+        if (!this.syncRunObjectRegistered) return undefined;
+        const engine = this.resolveDataEngine(ctx) as Partial<SyncRunLedgerEngine> | undefined;
+        if (!engine || typeof engine.find !== 'function' || typeof engine.insert !== 'function' || typeof engine.update !== 'function') {
+            return undefined;
+        }
+        return new ObjectStoreSyncRunLedger(engine as SyncRunLedgerEngine);
+    }
+
+    /**
+     * [ADR-0153 D7] At boot, close every pull a stopped server left `running`:
+     * `failed`, reason `interrupted`, its committed read position untouched.
+     * A store that cannot be written leaves those rows reading `running`, which
+     * is said once at `error` — the next pull still starts from the right
+     * position, because the position is read by commit time, never by status.
+     */
+    private async closeInterruptedSyncRuns(ctx: PluginContext): Promise<void> {
+        const ledger = this.syncRunLedgerOf(ctx);
+        if (!ledger) return;
+        const engine = this.resolveDataEngine(ctx) as unknown as SyncRunLedgerEngine;
+        try {
+            await closeInterruptedSyncRuns(engine, ctx.logger);
+        } catch (err) {
+            ctx.logger.error(
+                `[Automation] ${SYNC_RUN_OBJECT}: the pulls a stopped server left running could not be closed at boot — they keep `
+                + 'reading running in the run history although nothing runs them. Their committed read positions are unaffected. '
+                + "Check that schema sync ran for this datasource; the driver's own failure is in this record's meta.",
+                undefined,
+                describeThrownForLog(err),
+            );
+        }
     }
 
     /**
@@ -1732,8 +1797,9 @@ export class AutomationServicePlugin implements Plugin {
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
                 // [#27237] The connector credential store rides it too, and
-                // (ADR-0143 D3) the connector connection store.
-                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
+                // (ADR-0143 D3) the connector connection store, and (ADR-0153
+                // D7) the pull's run record, beside the flow's.
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential, SysConnectorConnection, SysSyncRun],
             });
             return true;
         } catch (err) {
@@ -1801,7 +1867,9 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
+                // [ADR-0153 D7] The pull's run record too: a read position has
+                // nowhere else to go under `suspendedRunStore: 'memory'`.
+                objects: [SysFlowCredential, SysConnectorCredential, SysConnectorConnection, SysSyncRun],
             });
             return true;
         } catch (err) {
@@ -2019,8 +2087,9 @@ export class AutomationServicePlugin implements Plugin {
         if ((this.options.suspendedRunStore ?? 'auto') !== 'memory') {
             // [#20790] The channel's table rides the same registration.
             this.runObjectRegistered = this.registerRunObject(ctx);
+            this.syncRunObjectRegistered = this.runObjectRegistered;
         } else {
-            this.registerCredentialObject(ctx);
+            this.syncRunObjectRegistered = this.registerCredentialObject(ctx);
         }
 
         // Seed the platform's built-in node executors. A bare
@@ -2111,6 +2180,7 @@ export class AutomationServicePlugin implements Plugin {
                 // smell (`optionalDependencies` should have ordered us after it).
                 if (!this.runObjectRegistered) {
                     this.runObjectRegistered = this.registerRunObject(ctx);
+                    if (this.runObjectRegistered) this.syncRunObjectRegistered = true;
                     if (this.runObjectRegistered) {
                         ctx.logger.info(
                             '[Automation] sys_automation_run registered at start() — the manifest service was not available during init()',
@@ -2227,6 +2297,10 @@ export class AutomationServicePlugin implements Plugin {
                 ctx.logger.info('[Automation] No ObjectQL engine — suspended runs kept in-memory only');
             }
         }
+
+        // [ADR-0153 D7] A pull a stopped server left `running` is closed
+        // `failed` / `interrupted`; its committed read position stands.
+        await this.closeInterruptedSyncRuns(ctx);
 
         // Run-history AGE retention is declarative since ADR-0057 (#2834):
         // sys_automation_run carries `retention: { maxAge: '30d', onlyWhen:

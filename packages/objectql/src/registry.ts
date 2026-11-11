@@ -8850,8 +8850,10 @@ export class SchemaRegistry {
    *    read withhold its item (#25308), so it neither answers nor makes the
    *    enabled holder's read refuse.
    *
-   * ⛔ An action bound to an object is not judged here: its by-name read stays
-   * {@link getItem}'s (seat ruling on #31697, Q1 A).
+   * An action bound to an object is not judged here: the protocol's by-name
+   * read counts {@link packageScopedHoldersOf}, which keys an action by package
+   * and name whatever its object, and refuses two or more enabled package
+   * holders itself (ADR-0150 D3, #32244).
    *
    * @throws {PackageScopedNameRefusedError} when the object-less holders refuse.
    */
