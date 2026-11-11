@@ -66,6 +66,9 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { CronJobAdapter } from '@objectstack/service-job';
 import { AppPlugin } from './app-plugin.js';
+// The source under test reaches `@objectstack/metadata` by dynamic import
+// (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
+import '@objectstack/metadata';
 import { loadArtifactBundle } from './load-artifact-bundle.js';
 import type { JobHandlerContext } from './job-handler-context.js';
 import {

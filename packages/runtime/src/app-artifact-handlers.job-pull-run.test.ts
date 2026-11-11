@@ -27,6 +27,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
 import { DbJobAdapter } from '@objectstack/service-job';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 // The source under test reaches `@objectstack/metadata` by dynamic import
 // (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
@@ -53,15 +54,22 @@ const answer = () => ({
     summary: { total: 0, processed: 0, created: 0, updated: 0, skipped: 0, errors: 0, ok: 0, cancelled: false },
 });
 
-/** The store `DbJobAdapter` writes `sys_job` / `sys_job_run` through: equality filters only. */
+/**
+ * The store `DbJobAdapter` writes `sys_job` / `sys_job_run` through: equality
+ * filters only (a combinator is refused, not read as a field), the caller's
+ * bound applied by presence, and `update` held to the engine's dispatch rule.
+ */
 function fakeJobStore() {
     const tables = new Map<string, Array<Record<string, unknown>>>();
     return {
         tables,
         async find(table: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
             const rows = (tables.get(table) ?? []).filter((r) =>
-                Object.entries(opts.where ?? {}).every(([k, v]) => r[k] === v));
-            return opts.limit ? rows.slice(0, opts.limit) : rows;
+                Object.entries(opts.where ?? {}).every(([k, v]) => {
+                    if (k.startsWith('$')) throw new Error(`fake job store: unsupported operator ${k}`);
+                    return r[k] === v;
+                }));
+            return typeof opts.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         async insert(table: string, data: Record<string, unknown>) {
             const t = tables.get(table) ?? [];
@@ -69,7 +77,8 @@ function fakeJobStore() {
             tables.set(table, t);
             return { id: data.id };
         },
-        async update(table: string, patch: Record<string, unknown>) {
+        async update(table: string, patch: Record<string, unknown>, options?: any) {
+            assertEngineUpdateDispatch(patch, options);
             const row = (tables.get(table) ?? []).find((r) => r.id === patch.id);
             if (row) Object.assign(row, patch);
             return row;

@@ -20,6 +20,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JobHandler } from '@objectstack/spec/contracts';
+import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { IntervalJobAdapter } from './interval-job-adapter.js';
 import { CronJobAdapter } from './cron-job-adapter.js';
 import { DbJobAdapter } from './db-job-adapter.js';
@@ -36,15 +37,22 @@ function recording() {
   return { seen, handler };
 }
 
-/** The store `DbJobAdapter` writes `sys_job` / `sys_job_run` through: equality filters only. */
+/**
+ * The store `DbJobAdapter` writes `sys_job` / `sys_job_run` through: equality
+ * filters only (a combinator is refused, not read as a field), the caller's
+ * bound applied by presence, and `update` held to the engine's dispatch rule.
+ */
 function fakeEngine() {
   const tables = new Map<string, Array<Record<string, unknown>>>();
   return {
     tables,
     async find(table: string, opts: { where?: Record<string, unknown>; limit?: number } = {}) {
       const rows = (tables.get(table) ?? []).filter((r) =>
-        Object.entries(opts.where ?? {}).every(([k, v]) => r[k] === v));
-      return opts.limit ? rows.slice(0, opts.limit) : rows;
+        Object.entries(opts.where ?? {}).every(([k, v]) => {
+          if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+          return r[k] === v;
+        }));
+      return typeof opts.limit === 'number' ? rows.slice(0, opts.limit) : rows;
     },
     async insert(table: string, data: Record<string, unknown>) {
       const t = tables.get(table) ?? [];
@@ -52,7 +60,8 @@ function fakeEngine() {
       tables.set(table, t);
       return { id: data.id };
     },
-    async update(table: string, patch: Record<string, unknown>) {
+    async update(table: string, patch: Record<string, unknown>, options?: any) {
+      assertEngineUpdateDispatch(patch, options);
       const row = (tables.get(table) ?? []).find((r) => r.id === patch.id);
       if (row) Object.assign(row, patch);
       return row;
