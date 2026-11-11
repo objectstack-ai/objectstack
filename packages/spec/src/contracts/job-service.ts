@@ -116,8 +116,37 @@ export interface JobRunOutcome {
  * {@link JobExecutionStatus} in `system/job.zod.ts` — see that type's TSDoc
  * for the full mapping and the cost of routing `reason` through an "Error"
  * column.
+ *
+ * **Which run this is** (ADR-0153 D7). The context may also say which run the
+ * handler is executing, for a handler that records its work beside the job's
+ * own history (a sync-in pull's `sys_sync_run` row):
+ *
+ * - `runId`: the job service's id for this attempt's run-history row — on
+ *   the shipped adapters, the `sys_job_run` id `DbJobAdapter` wrote for this
+ *   attempt (a retried run has one per attempt). Absent when no row was
+ *   written: an adapter that keeps no durable history, or `recordRuns: false`.
+ * - `trigger`: why the run started — `schedule` for a timer's fire,
+ *   `manual` for `trigger()` (and `replay()`, which runs through it).
+ *
+ * Both are optional, the same additivity as the return type above: a handler
+ * that reads neither is unchanged, and an implementation that sends neither
+ * still satisfies the contract — the handler then records no run id and no
+ * trigger.
  */
-export type JobHandler = (context: { jobId: string; data?: unknown }) => Promise<void | JobRunOutcome>;
+export type JobHandler = (context: {
+    jobId: string;
+    data?: unknown;
+    /** The run-history row of this attempt, where the job service wrote one. */
+    runId?: string;
+    /** Why this run started. */
+    trigger?: JobRunTrigger;
+}) => Promise<void | JobRunOutcome>;
+
+/**
+ * Why a job run started, as {@link JobHandler}'s context says it: a timer's
+ * fire (`schedule`) or a caller's `trigger()` / `replay()` (`manual`).
+ */
+export type JobRunTrigger = 'schedule' | 'manual';
 
 /**
  * Retry policy for a scheduled job (mirrors the authorable `RetryPolicySchema`,
