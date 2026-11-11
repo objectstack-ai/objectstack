@@ -68,6 +68,7 @@ import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
+import { runAdminBanUser } from './admin-ban-endpoints.js';
 import { AuthManager } from './auth-manager.js';
 import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
@@ -499,6 +500,132 @@ describe('[#14360] SCIM active:false disables the account through the platform b
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect((await setActive(h, dana.scimId, true)).status).toBe(200);
     expect(isBanned(await userRow(h, dana.email))).toBe(false);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// The refusal's cause — a deactivation and an administrator's ban, told apart
+// ---------------------------------------------------------------------------
+
+/** A sign-in's answer, read once: the status and the parsed body. */
+async function signInAnswer(
+  h: Harness,
+  email: string,
+  password = PASSWORD,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const res = await h.send(
+    new Request(`${AUTH}/sign-in/email`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: BASE },
+      body: JSON.stringify({ email, password }),
+    }),
+  );
+  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+}
+
+/**
+ * An administrator's ban, through the ban mount's own handler (the platform
+ * administrator gate in front of it is not the subject). The target must not
+ * be the last local-credential holder, or the mount refuses the ban.
+ */
+async function adminBan(h: Harness, userId: string, banReason?: string): Promise<void> {
+  const res = await runAdminBanUser(
+    { getAuthContext: () => h.manager.getAuthContext() },
+    { id: 'usr_platform_admin' } as never,
+    new Request(`${AUTH}/admin/ban-user`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId, ...(banReason !== undefined ? { banReason } : {}) }),
+    }),
+  );
+  expect(res.status, `admin ban failed: ${JSON.stringify(res.body)}`).toBe(200);
+}
+
+describe('a sign-in refused for a SCIM deactivation names that cause; an administrator\'s ban does not', () => {
+  it('SCIM active:false ⇒ 403 BANNED_USER with details.cause scim_deactivated, under any spelling of the address', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+
+    for (const spelling of [dana.email, dana.email.toUpperCase()]) {
+      const { status, body } = await signInAnswer(h, spelling);
+      expect(status, `${spelling}: ${JSON.stringify(body)}`).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      // The whole of `details`: one machine token, nothing about the directory.
+      expect(body.details).toEqual({ cause: 'scim_deactivated' });
+    }
+  }, 60_000);
+
+  it('SCIM DELETE /Users/{id} ⇒ the same cause', async () => {
+    const h = await boot();
+    const gus = await provision(h, 'gus');
+    await attachPassword(h, gus);
+    expect((await h.send(scimRequest(h, 'DELETE', `/Users/${gus.scimId}`))).status).toBe(204);
+
+    const { status, body } = await signInAnswer(h, gus.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body.details).toEqual({ cause: 'scim_deactivated' });
+  }, 60_000);
+
+  it('an administrator\'s ban ⇒ 403 BANNED_USER exactly as before: no details, the same message', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    // A second local-password holder, so the ban mount's last-credential guard lets the ban through.
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    await adminBan(h, dana.userId);
+    expect((await userRow(h, dana.email))?.ban_reason).toBe('No reason');
+
+    const withReason = await signInAnswer(h, frank.email);
+    const noReason = await signInAnswer(h, dana.email);
+    for (const { status, body } of [withReason, noReason]) {
+      expect(status, JSON.stringify(body)).toBe(403);
+      expect(body.code).toBe('BANNED_USER');
+      expect(body).not.toHaveProperty('details');
+    }
+
+    // The deactivation's refusal differs from an administrator's by `details`
+    // alone: the vendor's status, code and message are kept.
+    expect((await setActive(h, dana.scimId, true)).status).toBe(200); // the IdP cannot lift an administrator's ban
+    await h.engine.update('sys_user', { id: dana.userId, banned: false, ban_reason: null }, SYSTEM);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+    const deactivated = await signInAnswer(h, dana.email);
+    expect(deactivated.body.details).toEqual({ cause: 'scim_deactivated' });
+    const { details: _cause, ...rest } = deactivated.body;
+    expect(rest).toEqual(withReason.body);
+  }, 60_000);
+
+  it('a deactivation over an administrator\'s ban keeps the administrator\'s reason, and answers as that ban', async () => {
+    const h = await boot();
+    const frank = await provision(h, 'frank');
+    await attachPassword(h, frank);
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    await adminBan(h, frank.userId, 'Policy violation');
+    expect((await setActive(h, frank.scimId, false)).status).toBe(200);
+    expect((await userRow(h, frank.email))?.ban_reason).toBe('Policy violation');
+
+    const { status, body } = await signInAnswer(h, frank.email);
+    expect(status, JSON.stringify(body)).toBe(403);
+    expect(body.code).toBe('BANNED_USER');
+    expect(body).not.toHaveProperty('details');
+  }, 60_000);
+
+  it('a wrong password for a deactivated account is the ordinary credential refusal: the cause is told only to the password holder', async () => {
+    const h = await boot();
+    const dana = await provision(h, 'dana');
+    await attachPassword(h, dana);
+    expect((await setActive(h, dana.scimId, false)).status).toBe(200);
+
+    const { status, body } = await signInAnswer(h, dana.email, 'not-the-password-14360');
+    expect(status, JSON.stringify(body)).toBe(401);
+    expect(body.code).toBe('INVALID_EMAIL_OR_PASSWORD');
+    expect(body).not.toHaveProperty('details');
   }, 60_000);
 });
 
