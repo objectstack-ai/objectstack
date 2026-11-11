@@ -726,7 +726,38 @@ describe('import route — named mapping artifact (#2611)', () => {
       };
       return reads;
     };
-    const BARE_ONE_HOLDER_WIRE: string[] = [];
+    /**
+     * The answers the import door gave the bare requests of the byte-identity
+     * pin below before the qualified spelling existed, measured on the base
+     * tree's `import-mapping.ts`, as wire bytes: key order included, a `200`
+     * setting no status. The card asks for byte identity, so the sentences are
+     * pinned here and nowhere else.
+     */
+    const BARE_ONE_HOLDER_WIRE = [
+      {
+        body: {
+          object: 'task', dryRun: false, writeMode: 'upsert', total: 1, ok: 1, errors: 0, created: 1, updated: 0, skipped: 0,
+          results: [{ row: 1, ok: true, action: 'created', id: 'k1' }],
+        },
+      },
+      { status: 404, body: { code: 'MAPPING_NOT_FOUND', error: 'No mapping artifact named "nope" is registered' } },
+      {
+        status: 400,
+        body: { code: 'MAPPING_TARGET_MISMATCH', error: 'Mapping "user_only_mapping" targets object "user", not "task"' },
+      },
+      {
+        status: 400,
+        body: {
+          code: 'UNSUPPORTED_TRANSFORM',
+          error: 'Mapping "task_js_mapping" uses transform "javascript", which the import path does not execute (there is no '
+            + 'server-side sandbox), so the import is refused rather than run with that transform skipped',
+        },
+      },
+      {
+        status: 400,
+        body: { code: 'MAPPING_FORMAT_MISMATCH', error: 'Mapping "task_json_mapping" declares sourceFormat "json" but the payload is "csv"' },
+      },
+    ].map((answer) => JSON.stringify(answer));
 
     // The exact qualifier reads the stored rows bound to the package it names
     // (`findServedOverlayRow`) before it refuses a non-holder, as a deployed
