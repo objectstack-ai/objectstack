@@ -100,9 +100,11 @@ export interface NamespacePosition {
    * code-unit order. A literal is read as the literal before any namespace
    * (D5 step 1), whether it is letter-led (`trigger`) or `_`-led (`_status`).
    * A row serves a literal here when it spells the prefix, or when a
-   * parameter of its own reads the prefix's last segment and the row has the
-   * verb and arity of the door's qualified form (`runs` under
-   * `/automation/hooks`, see {@link NAMESPACE_POSITION_LITERALS}).
+   * parameter of its own reads a literal segment of the prefix and the row
+   * matches a path the door's qualified form matches: the same verb and
+   * arity, and at every segment a parameter on either side or the same
+   * literal on both (`runs` under `/automation/hooks`, see
+   * {@link NAMESPACE_POSITION_LITERALS}).
    */
   readonly literals: readonly string[];
 }
@@ -122,13 +124,17 @@ export interface NamespacePosition {
  *
  * `inboundHook` carries `runs`, which no row spells under `/automation/hooks`.
  * `POST /automation/:name/runs/:runId/resume`, `…/cancel` and
- * `…/restore-suspension` are, for a flow named `hooks`, the verb and arity of
- * the qualified hook (`POST /automation/hooks/:ns/:flowName/:hookId`), and
- * they stay the gated run doors of that flow. So `runs` in the hook's
- * namespace position is read as their literal, never as a namespace: the
- * anonymous allow-list row and the trigger mount read this entry
- * (`INBOUND_HOOK_QUALIFIER_EXCLUSIONS`, `@objectstack/core`), and a package
- * namespaced `runs` would have no qualified hook address.
+ * `…/restore-suspension` have, for a flow named `hooks`, the verb and arity of
+ * the qualified hook (`POST /automation/hooks/:ns/:flowName/:hookId`), whose
+ * two segments after the namespace are parameters: every path they serve is
+ * one the qualified hook's form matches too, and they stay the gated run
+ * doors of that flow. So `runs` in the hook's namespace position is read as
+ * their literal, never as a namespace: the anonymous allow-list row and the
+ * trigger mount read this entry (`INBOUND_HOOK_QUALIFIER_EXCLUSIONS`,
+ * `@objectstack/core`), and a package namespaced `runs` would have no
+ * qualified hook address. The same rows are not served at `connectors`: that
+ * door's qualified form ends in the literal `connection`, which none of them
+ * spells, so no path matches both.
  */
 export const NAMESPACE_POSITION_LITERALS: Readonly<Record<AddressDoor, NamespacePosition>> = Object.freeze({
   automation: Object.freeze({
@@ -163,9 +169,11 @@ export const NAMESPACE_REFUSED_LITERALS: readonly string[] = Object.freeze(
  * Judge a namespace against the address grammar's literals.
  *
  * Returns an actionable refusal naming the literal and the doors that serve
- * it, or `null` when the namespace spells none. Only the grammar is judged
- * here: whether the namespace is well-formed, reserved or already installed
- * is the manifest schema's and the install gate's question.
+ * it, or `null` when the namespace spells none. The sentence is about those
+ * doors alone: the package's qualified addresses on every other door are read
+ * as any namespace's are. Only the grammar is judged here: whether the
+ * namespace is well-formed, reserved or already installed is the manifest
+ * schema's and the install gate's question.
  */
 export function validateNamespaceNotAddressLiteral(namespace: string | undefined): string | null {
   if (!namespace || !NAMESPACE_REFUSED_LITERALS.includes(namespace)) return null;
@@ -173,7 +181,7 @@ export function validateNamespaceNotAddressLiteral(namespace: string | undefined
     .filter((door) => NAMESPACE_POSITION_LITERALS[door].literals.includes(namespace))
     .map((door) => `${NAMESPACE_POSITION_LITERALS[door].prefix}/${namespace}`);
   return `Namespace '${namespace}' spells a literal segment of the address grammar (${doors.join(', ')}), `
-    + 'which the router reads before any namespace, so the package\'s qualified addresses would never reach it '
+    + 'which the router reads before any namespace, so the package\'s qualified addresses there would never reach it '
     + '(ADR-0150 D5). Choose another namespace.';
 }
 

@@ -243,12 +243,13 @@ const INBOUND_HOOK_ROUTE: ParameterisedAllowRoute = {
  *
  * It IS the address grammar's entry for the hook's namespace position
  * (`NAMESPACE_POSITION_LITERALS.inboundHook.literals`, `@objectstack/spec/kernel`),
- * read here and never spelled a second time: a qualifier this row excludes is
- * one the install door refuses as a namespace (`NAMESPACE_REFUSED_LITERALS`),
- * so no new package installs under a qualifier its hook could never be reached
- * by. A package the boot already holds under `runs` keeps booting with no
- * qualified hook; its hook is reached bare. The runtime's
- * `route-ledger.conformance.test.ts` pins the entry against the route ledger.
+ * read here and never spelled a second time: every qualifier this row excludes
+ * that a namespace could spell is one the install door refuses as a namespace
+ * (`NAMESPACE_REFUSED_LITERALS`), so no new package installs under a qualifier
+ * its hook could never be reached by. A package the boot already holds under
+ * `runs` keeps booting with no qualified hook; its hook is reached bare. The
+ * runtime's `route-ledger.conformance.test.ts` pins the entry against the
+ * route ledger.
  */
 export const INBOUND_HOOK_QUALIFIER_EXCLUSIONS: readonly string[] = NAMESPACE_POSITION_LITERALS.inboundHook.literals;
 

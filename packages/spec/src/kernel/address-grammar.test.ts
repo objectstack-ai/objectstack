@@ -49,7 +49,20 @@ describe('address grammar (ADR-0150 D5)', () => {
 
   it('the inbound hook\'s namespace position carries `runs`, the run doors\' literal of a flow named `hooks`', () => {
     expect([...NAMESPACE_POSITION_LITERALS.inboundHook.literals]).toEqual(['runs']);
+    // No other door lists it, so the judge names the hook's address alone.
+    const doorsListingRuns = Object.entries(NAMESPACE_POSITION_LITERALS)
+      .filter(([, position]) => position.literals.includes('runs'))
+      .map(([door]) => door);
+    expect(doorsListingRuns).toEqual(['inboundHook']);
     expect(validateNamespaceNotAddressLiteral('runs')).toContain('(/automation/hooks/runs)');
+  });
+
+  it('the judge\'s sentence is about the doors it names, not every qualified address of the package', () => {
+    // `runs` is read as a namespace on every door but the hook's, so "its
+    // qualified addresses would never reach it" would be false of it.
+    for (const literal of NAMESPACE_REFUSED_LITERALS) {
+      expect(validateNamespaceNotAddressLiteral(literal)).toContain('so the package\'s qualified addresses there would never reach it');
+    }
   });
 
   it('refuses a namespace that spells a literal, naming the address it would shadow', () => {

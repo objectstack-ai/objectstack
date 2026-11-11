@@ -5,7 +5,7 @@
  * that no package namespace spells a literal segment of the address grammar
  * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`):
  * the router reads the literal before any namespace, so such a package's
- * qualified addresses would never reach it.
+ * qualified addresses at the literal's door would never reach it.
  *
  * ## One judge, not a second rule
  *
