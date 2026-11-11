@@ -67,6 +67,8 @@ import {
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { RestServer } from './rest-server.js';
 import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
+// Paid at collection, not inside a case's clock: the routes' reach loads it lazily.
+import '@objectstack/objectql';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
