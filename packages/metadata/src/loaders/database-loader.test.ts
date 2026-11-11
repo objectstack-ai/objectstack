@@ -6,6 +6,9 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Suppress logger output during tests. Stable object (not a fresh one per
 // `createLogger()` call) so the #5108 block can assert on what `list()` says
@@ -1905,7 +1908,8 @@ describe('[#31699 R4-A] the save of a bundled type writes its own member\'s row'
  * BEFORE (measured at cfb8f300, same fixtures): a package's `en-US` row beside
  * a package-less `en-US` row was overwritten with the package-less body
  * (version 3, one update); beside a package-less `fr-FR` row, a package-bound
- * copy of it was inserted; a non-`datasource:` loader's item seeded one row.
+ * copy of it was inserted; a file-system item seeded one row (the same with
+ * the source skip ablated, and after it).
  */
 describe('[#31699 R5-A] the priming pass never writes back a row it read from the same loader', () => {
   const ALPHA = 'com.alpha.app';
@@ -1920,12 +1924,13 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     ((await driver.find('sys_metadata', { where: { type: 'email_template' } } as never)) as Array<Record<string, any>>)
       .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).subject])
       .sort((a, b) => String(a).localeCompare(String(b)));
-  /** The real pass, over exactly `loaders` (the manager's default loaders removed). */
-  const bootPass = async (...loaders: Array<DatabaseLoader | MemoryLoader>) => {
-    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+  /** The real pass over `loaders`; the plugin's own file-system loader is kept only with a `rootDir`. */
+  const bootPass = async (loaders: DatabaseLoader[], options: { rootDir?: string; packageId?: string } = {}) => {
+    const plugin = new MetadataPlugin({ ...options, watch: false, config: { bootstrap: 'eager' } });
     const manager = (plugin as any).manager as MetadataManager;
+    const fileSystem = options.rootDir ? [...(manager as any).loaders.values()] : [];
     (manager as any).loaders.clear();
-    for (const loader of loaders) manager.registerLoader(loader);
+    for (const loader of [...fileSystem, ...loaders]) manager.registerLoader(loader);
     await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
   };
 
@@ -1937,7 +1942,7 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
     await seed('env_en', null, 'en-US', 'env older');
     const before = await stored();
-    await bootPass(new DatabaseLoader({ driver }));
+    await bootPass([new DatabaseLoader({ driver })]);
     expect(await stored()).toEqual(before);
     expect(driver.update).not.toHaveBeenCalled();
     expect(driver.create).toHaveBeenCalledTimes(2);
@@ -1947,16 +1952,23 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
     await seed('env_fr', null, 'fr-FR', 'env fr');
     const before = await stored();
-    await bootPass(new DatabaseLoader({ driver }));
+    await bootPass([new DatabaseLoader({ driver })]);
     expect(await stored()).toEqual(before);
     expect(driver.update).not.toHaveBeenCalled();
     expect(driver.create).toHaveBeenCalledTimes(2);
   });
 
-  it('CONTROL: an item read from another loader still seeds the database loader', async () => {
-    const source = new MemoryLoader();
-    await source.save('email_template', 'welcome', { name: 'welcome', locale: 'en-US', subject: 'from source', bodyHtml: '<p/>', _packageId: ALPHA });
-    await bootPass(source, new DatabaseLoader({ driver }));
-    expect(await stored()).toEqual([[ALPHA, null, 'from source']]);
+  it('CONTROL: a file-system item still seeds the database loader', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'r5a-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      writeFileSync(join(rootDir, 'email_template', 'welcome.email-template.json'), JSON.stringify({ name: 'welcome', locale: 'en-US', subject: 'from file', bodyHtml: '<p/>' }));
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      expect(await stored()).toEqual([[ALPHA, null, 'from file']]);
+      expect(vi.mocked(driver.create).mock.calls.map(([table]) => table)).toEqual(['sys_metadata', 'sys_metadata_history']);
+      expect(driver.update).not.toHaveBeenCalled();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 });
