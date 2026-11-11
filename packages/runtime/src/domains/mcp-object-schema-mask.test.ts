@@ -122,6 +122,9 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
             described: await settle(() => bridge.describeObject(OBJECT)),
             listed: await settle(() => bridge.listObjects()),
             options: await settle(() => bridge.optionFieldsOf(OBJECT)),
+            // The same caller's answers for a name nothing declares.
+            unknownDescribed: await settle(() => bridge.describeObject('no_such_object')),
+            unknownOptions: await settle(() => bridge.optionFieldsOf('no_such_object')),
         };
     }
 
@@ -135,6 +138,15 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
             const baseline = await readsUnder(undefined);
             const reads = await readsUnder(testCase);
             const expected = testCase.expect;
+            if (expected.kind === 'absent') {
+                // [ruling record 6787890900] Answered exactly as a name nothing
+                // declares, and left out of the listing.
+                expect(reads.described).toEqual(reads.unknownDescribed);
+                expect(reads.options).toEqual(reads.unknownOptions);
+                expect(reads.described.value).toBeNull();
+                expect((reads.listed.value as any[]).map((o) => o.name)).not.toContain(OBJECT);
+                return;
+            }
             if (expected.kind === 'fault') {
                 for (const read of [reads.described, reads.listed, reads.options]) {
                     expect(read.error, `${testCase.id}: refused, never served`).toBeDefined();

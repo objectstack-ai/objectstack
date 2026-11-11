@@ -16,6 +16,7 @@ import {
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
     objectFieldVisibilityFingerprint,
+    relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_DISABLE_ENV,
@@ -455,5 +456,109 @@ describe('[ADR-0106 D1] an action with no own-object definition — its objectOv
 
     it('an action binding no other object is served as declared', () => {
         expect(actionServedWithoutOwnObject({ name: 'plain', params: [{ name: 'note' }] }, undefined, new Map())).toBe(true);
+    });
+});
+
+describe('[ruling record 6787890900] an object the caller may not read does not exist for them', () => {
+    const base = { objectName: 'account', context: { userId: 'u' }, enabled: true };
+    const fields = () => ['id', 'salary_grade'];
+
+    it('is `hidden` when the object read does not admit the caller, whatever its fields would be', async () => {
+        const asked: string[] = [];
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: fields, canReadObject: (object) => { asked.push(object); return false; } },
+        });
+        expect(posture).toEqual({ kind: 'hidden' });
+        expect(asked).toEqual(['account']);
+    });
+
+    it('admits only `true` — any other answer is hidden', async () => {
+        for (const answer of [false, undefined, 'yes', 1]) {
+            const posture = await resolveObjectSchemaMaskPosture({
+                ...base, security: { getMetadataReadableFields: fields, canReadObject: () => answer as any },
+            });
+            expect(posture.kind, String(answer)).toBe('hidden');
+        }
+    });
+
+    it('CONTROL — a readable object keeps the field posture it always had', async () => {
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base, security: { getMetadataReadableFields: () => ['id'], canReadObject: () => true },
+        });
+        expect(posture.kind).toBe('project');
+        expect(posture.kind === 'project' && [...posture.readable]).toEqual(['id']);
+    });
+
+    it('stays hidden while the field universe is undetermined (D6 tier 2), never served unmasked', async () => {
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base, security: { getMetadataReadableFields: () => undefined, canReadObject: () => false },
+        });
+        expect(posture).toEqual({ kind: 'hidden' });
+    });
+
+    it('an object read that throws is the D6 fault, never `hidden`', async () => {
+        const boom = new Error('security down');
+        const error = await resolveObjectSchemaMaskPosture({
+            ...base, security: { getMetadataReadableFields: fields, canReadObject: () => { throw boom; } },
+        }).catch((e) => e);
+        expect(error).toBeInstanceOf(ObjectSchemaMaskEvaluationError);
+        expect(error.evaluationError).toBe(boom);
+    });
+
+    it('a field evaluation that throws faults first — the object read is never reached', async () => {
+        let asked = false;
+        const error = await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: () => { throw new Error('down'); }, canReadObject: () => { asked = true; return false; } },
+        }).catch((e) => e);
+        expect(error).toBeInstanceOf(ObjectSchemaMaskEvaluationError);
+        expect(asked).toBe(false);
+    });
+
+    it('D4 and D8 precede it unchanged: the object read is never asked', async () => {
+        let asked = false;
+        const security = { getMetadataReadableFields: fields, canReadObject: () => { asked = true; return false; } };
+        for (const context of [{ isSystem: true }, { userId: 'a', systemPermissions: ['manage_metadata'] }, { userId: 'b', systemPermissions: ['studio.access'] }]) {
+            const posture = await resolveObjectSchemaMaskPosture({ ...base, context, security });
+            expect(posture.kind, JSON.stringify(context)).toBe('passthrough');
+        }
+        expect((await resolveObjectSchemaMaskPosture({ ...base, enabled: false, security })).kind).toBe('passthrough');
+        expect(asked).toBe(false);
+    });
+
+    it('a service with no object read hides nothing (it has no object posture to give)', async () => {
+        const posture = await resolveObjectSchemaMaskPosture({ ...base, security: { getMetadataReadableFields: fields } });
+        expect(posture.kind).toBe('project');
+    });
+
+    it('an outlet that projects a hidden posture serves none of the schema and is told why', () => {
+        const masked = applyObjectSchemaMask(OBJECT, { kind: 'hidden' });
+        expect(masked.hidden).toBe(true);
+        expect(masked.emptied).toBe(true);
+        expect(JSON.stringify(masked.document)).not.toContain('salary_grade');
+        expect(applyObjectSchemaMask(OBJECT, project(['id'])).hidden).toBe(false);
+    });
+
+    it('an action reading a field of an object the caller may not read is withheld, and the fingerprint says so', async () => {
+        const document = {
+            ...OBJECT,
+            actions: [
+                { name: 'invite', type: 'script', params: [{ field: 'id', objectOverride: 'contact' }] },
+                { name: 'keep', type: 'script' },
+            ],
+        };
+        const relatedFor = async (canReadContact: boolean) => {
+            const posture = await resolveObjectSchemaMaskPosture({
+                ...base,
+                security: { getMetadataReadableFields: fields, canReadObject: (object) => object !== 'contact' || canReadContact },
+            });
+            return applyObjectSchemaMask(document, await relateObjectSchemaMaskPosture(posture, document));
+        };
+        const reader = await relatedFor(true);
+        const nonReader = await relatedFor(false);
+        expect((reader.document as any).actions.map((a: any) => a.name)).toEqual(['invite', 'keep']);
+        expect((nonReader.document as any).actions.map((a: any) => a.name)).toEqual(['keep']);
+        expect(nonReader.fingerprint).not.toBe(reader.fingerprint);
     });
 });

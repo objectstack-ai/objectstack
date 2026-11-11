@@ -451,7 +451,9 @@ export async function resolveObjectMasker(
  *
  * `'fault'` covers both the throw tier and the empty-projection case — see
  * `applyObjectSchemaMask`'s `emptied` for why an empty-fields 200 is not an
- * option the ADR leaves open.
+ * option the ADR leaves open. [ruling record 6787890900] `ok: false` with
+ * `hidden` is not a fault: the caller may not read the object, and the exit
+ * answers as for a name that names no object.
  *
  * [#20408] The projection is the shared `projectMetaObjectSchema`, so the
  * answer carries the `Cache-Control` an undetermined posture owes (ADR-0106 D6
@@ -463,7 +465,7 @@ export async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,
-): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false }> {
+): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false; hidden?: true }> {
     let posture: ObjectSchemaMaskPosture;
     try {
         posture = await masker(objectName);
@@ -1468,6 +1470,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             let cacheControl: string | undefined;
             if (publishedMasker) {
                 const masked = await maskObjectSchema(publishedMasker, name, served);
+                // [ruling record 6787890900] An object the caller may not read
+                // is this door's answer for a name with nothing published.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, name);
                 served = masked.document;
                 // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
@@ -2583,6 +2588,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 const masked = await maskObjectSchema(
                     await resolveObjectMasker(deps, _context, 'object'), typeOrName, gated.document,
                 );
+                // [ruling record 6787890900] An object the caller may not read
+                // is the answer below for a name that names nothing.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
                 // [#20408] ADR-0106 D6 tier 2's `private, no-store`, as every
                 // other object exit here serves it.

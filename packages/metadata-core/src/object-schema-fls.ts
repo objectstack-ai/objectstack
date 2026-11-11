@@ -50,6 +50,8 @@
  * | `getReadableFields` → `undefined` (field universe unresolvable) | `undetermined` | serve unmasked + structured warn + metric + `Cache-Control: private, no-store`, **no shared ETag** |
  * | `getReadableFields` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never the unmasked body, never an empty-fields 200 |
  * | otherwise | `project` | fields ∉ readable are deleted whole, references included |
+ * | `canReadObject` → not `true` (ruling record 6787890900) | `hidden` | left out of every list; a read answers as for a name that names no object |
+ * | `canReadObject` throws | throws {@link ObjectSchemaMaskEvaluationError} | the exit answers 5xx — never an empty list, never a false "no such object" |
  *
  * ## D4 exempts the definition, not the runtime projections (#22250)
  *
@@ -227,7 +229,15 @@ export type ObjectSchemaMaskPosture =
          * nothing.
          */
         relate?: (objectName: string) => Promise<ReadonlySet<string> | undefined>;
-    };
+    }
+    /**
+     * [ADR-0106, amended by ruling record 6787890900] The caller may not read
+     * the object at all. Every schema-serving outlet leaves it out of its lists
+     * and answers a read of it exactly as it answers a name that names no
+     * object; an action the `/meta` object door would serve inside it is
+     * withheld with it.
+     */
+    | { kind: 'hidden' };
 
 /** A posture that serves the document unchanged and needs no fingerprint. */
 export const OBJECT_SCHEMA_MASK_NOT_APPLICABLE: ObjectSchemaMaskPosture =
@@ -335,6 +345,12 @@ export interface ObjectSchemaMaskSecuritySurface {
      * set. Preferred when present; exits fall back to `getReadableFields`.
      */
     getMetadataReadableFields?(object: string, context?: unknown): Promise<string[] | undefined> | string[] | undefined;
+    /**
+     * [ADR-0106, amended by ruling record 6787890900] The object-level read
+     * admission — the data plane's own answer to "may this caller read this
+     * object at all". Only `true` admits; a throw is an evaluation failure.
+     */
+    canReadObject?(object: string, context?: unknown): Promise<boolean> | boolean;
 }
 
 /** Structured-degradation sink for ADR-0106 D6's middle tier. */
@@ -356,7 +372,13 @@ export const OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC = 'objectstack_meta_field_vi
  * when the answer is `passthrough` — the byte-identical guarantee D3 promises
  * unrestricted callers is a property of the code path, not just of the body.
  *
- * @throws {ObjectSchemaMaskEvaluationError} when the security service throws.
+ * [ruling record 6787890900] For a caller the mask applies to, it also decides
+ * whether the object exists for them at all: `hidden` when the security
+ * service's object-level read admission (`canReadObject`) does not admit
+ * them. The D4 exemptions and the D8 switch precede it unchanged.
+ *
+ * @throws {ObjectSchemaMaskEvaluationError} when the security service throws
+ *   evaluating either the caller's readable fields or their object read.
  */
 export async function resolveObjectSchemaMaskPosture(input: {
     /** Object machine name (`req.params.name`). */
@@ -389,6 +411,38 @@ export async function resolveObjectSchemaMaskPosture(input: {
             ? { kind: 'passthrough', reason: 'exempt', runtime: runtimeFieldPostureAsker(objectName, context, ask, telemetry) }
             : { kind: 'passthrough', reason: 'exempt' };
     }
+    const canRead = typeof security?.canReadObject === 'function'
+        ? security.canReadObject.bind(security)
+        : undefined;
+    const fields = await resolveFieldPosture(objectName, context, ask, canRead, telemetry);
+
+    // [ruling record 6787890900] An object the caller may not read does not
+    // exist for them on any schema-serving outlet. Decided HERE, once, so no
+    // two outlets can disagree. Asked after the field posture on purpose: a
+    // security service that cannot evaluate this caller fails there first, as
+    // the D6 tier-3 fault, rather than reaching an object verdict at all.
+    if (!canRead) return fields;
+    let admitted: unknown;
+    try {
+        admitted = await canRead(objectName, context);
+    } catch (error) {
+        // D6 — an evaluation that throws is the 5xx fault, never "unknown".
+        throw new ObjectSchemaMaskEvaluationError(objectName, error);
+    }
+    return admitted === true ? fields : { kind: 'hidden' };
+}
+
+/** The object-read admission the posture asks, bound to its service. */
+type ObjectReadAsker = (object: string, context?: unknown) => Promise<boolean> | boolean;
+
+/** The field half of {@link resolveObjectSchemaMaskPosture}, for a caller the mask applies to. */
+async function resolveFieldPosture(
+    objectName: string,
+    context: unknown,
+    ask: ((object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined) | undefined,
+    canRead: ObjectReadAsker | undefined,
+    telemetry: ObjectSchemaMaskTelemetry | undefined,
+): Promise<ObjectSchemaMaskPosture> {
     // D6 tier 1 — no FLS posture in this deployment at all. The data plane does
     // not mask either, so tightening the metadata plane alone would be theater.
     if (!ask) return { kind: 'passthrough', reason: 'no-service' };
@@ -425,6 +479,9 @@ export async function resolveObjectSchemaMaskPosture(input: {
         let answer: string[] | undefined;
         try {
             answer = await ask(related, context);
+            // [ruling record 6787890900] An object the caller may not read has
+            // no field they read: the actions whose params read it are withheld.
+            if (canRead && Array.isArray(answer) && (await canRead(related, context)) !== true) return new Set<string>();
         } catch (error) {
             telemetry?.warn?.(
                 '[ADR-0106] field visibility on a related object could not be evaluated — '
@@ -630,6 +687,14 @@ export interface ObjectSchemaMaskResult<T> {
      * option — silently wrong UI **and** cacheable poison"). Exits answer 5xx.
      */
     emptied: boolean;
+    /**
+     * [ruling record 6787890900] True when the posture is `hidden`: the caller
+     * may not read the object, so the exit answers as for a name that names no
+     * object (a list leaves it out). The document handed back is then an empty
+     * record and `emptied` is true as well, so an exit that never asks this
+     * refuses the read rather than serving any of the schema.
+     */
+    hidden: boolean;
 }
 
 /**
@@ -647,7 +712,10 @@ export interface ObjectSchemaMaskResult<T> {
  * nothing was removed — so an unrestricted caller pays one pass and no copy.
  */
 export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskPosture): ObjectSchemaMaskResult<T> {
-    const unchanged: ObjectSchemaMaskResult<T> = { document, denied: [], fingerprint: '', emptied: false };
+    if (posture.kind === 'hidden') {
+        return { document: {} as T, denied: [], fingerprint: '', emptied: true, hidden: true };
+    }
+    const unchanged: ObjectSchemaMaskResult<T> = { document, denied: [], fingerprint: '', emptied: false, hidden: false };
     if (posture.kind !== 'project') return unchanged;
     if (!document || typeof document !== 'object' || Array.isArray(document)) return unchanged;
 
@@ -693,6 +761,7 @@ export function applyObjectSchemaMask<T>(document: T, posture: ObjectSchemaMaskP
         denied,
         fingerprint: objectFieldVisibilityFingerprint([...denied, ...relatedDenied]),
         emptied: Object.keys(kept).length === 0,
+        hidden: false,
     };
 }
 

@@ -33,6 +33,12 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 
 const account = () => JSON.parse(JSON.stringify(FLS_CONTRACT_OBJECT));
 
+/** A name no double holds — what an absent object must be answered exactly as. */
+const UNKNOWN = 'no_such_object';
+/** The envelope a double holds for `name`: `account` only. */
+const envelopeOf = (type: string, name: string) => ({ type, name, item: name === 'account' ? account() : undefined, lock: 'none' });
+const listed = (data: any) => (data?.items ?? []).find((o: any) => o?.name === 'account');
+
 function make(services: Record<string, any>) {
     const kernel = {
         getServiceAsync: async (name: string) => services[name] ?? null,
@@ -59,8 +65,9 @@ const ctxFor = (testCase: ObjectSchemaMaskCase): any => ({
 async function runExit(
     testCase: ObjectSchemaMaskCase,
     services: Record<string, any>,
-    path: string,
+    path: (name: string) => string,
     pick: (data: any) => unknown,
+    shape: 'item' | 'list' = 'item',
 ): Promise<ObjectSchemaMaskOutcome> {
     const security = securityDoubleFor(testCase);
     const previous = process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
@@ -68,10 +75,21 @@ async function runExit(
     else delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
     try {
         const dispatcher = make({ ...services, ...(security ? { security } : {}) });
-        const res = await dispatcher.handleMetadata(path, ctxFor(testCase), 'GET');
+        const res = await dispatcher.handleMetadata(path('account'), ctxFor(testCase), 'GET');
         const status = res.response.status;
-        if (status >= 400) return { kind: 'fault', status };
-        return { kind: 'document', document: pick(res.response.body.data) };
+        if (status >= 400) {
+            // [ruling record 6787890900] `absent` only when byte-identical to
+            // this door's answer for a name it holds nothing for.
+            const unknown = await dispatcher.handleMetadata(path(UNKNOWN), ctxFor(testCase), 'GET');
+            if (shape === 'item' && unknown.response.status === status
+                && JSON.stringify(unknown.response.body) === JSON.stringify(res.response.body)) {
+                return { kind: 'absent' };
+            }
+            return { kind: 'fault', status };
+        }
+        const document = pick(res.response.body.data);
+        if (shape === 'list' && document === undefined) return { kind: 'absent' };
+        return { kind: 'document', document };
     } finally {
         if (previous === undefined) delete process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV];
         else process.env[OBJECT_SCHEMA_MASK_DISABLE_ENV] = previous;
@@ -86,10 +104,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
             {
                 protocol: {
                     getProjectId: () => 'env_1',
-                    getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: account(), lock: 'none' })),
+                    getMetaItem: vi.fn(async ({ type, name }: any) => envelopeOf(type, name)),
                 },
             },
-            '/object/account',
+            (name) => `/object/${name}`,
             (data) => data?.item,
         ),
     },
@@ -97,8 +115,8 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: '/metadata/object/:name — registry-backed fallback',
         run: (testCase) => runExit(
             testCase,
-            { objectql: { registry: { getObject: vi.fn(() => account()) } } },
-            '/object/account',
+            { objectql: { registry: { getObject: vi.fn((name: string) => (name === 'account' ? account() : undefined)) } } },
+            (name) => `/object/${name}`,
             (data) => data?.item,
         ),
     },
@@ -108,11 +126,11 @@ const EXITS: ObjectSchemaMaskExit[] = [
             testCase,
             {
                 protocol: {
-                    getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: account(), lock: 'none' })),
+                    getMetaItem: vi.fn(async ({ type, name }: any) => envelopeOf(type, name)),
                 },
                 objectql: { registry: { getObject: vi.fn(() => undefined) } },
             },
-            '/object/account',
+            (name) => `/object/${name}`,
             (data) => data?.item,
         ),
     },
@@ -121,8 +139,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         run: (testCase) => runExit(
             testCase,
             { protocol: { getMetaItems: vi.fn(async () => ({ type: 'object', items: [account()] })) } },
-            '/objects',
-            (data) => data?.items?.[0],
+            () => '/objects',
+            listed,
+            'list',
         ),
     },
     {
@@ -130,8 +149,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         run: (testCase) => runExit(
             testCase,
             { objectql: { registry: { getAllObjects: vi.fn(() => [account()]) } } },
-            '/objects',
-            (data) => data?.items?.[0],
+            () => '/objects',
+            listed,
+            'list',
         ),
     },
     {
@@ -147,7 +167,7 @@ const EXITS: ObjectSchemaMaskExit[] = [
                     },
                 },
             },
-            '/account',
+            (name) => `/${name}`,
             (data) => data,
         ),
     },
