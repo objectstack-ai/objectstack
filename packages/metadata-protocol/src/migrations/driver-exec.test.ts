@@ -35,7 +35,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
-import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
+import { driverCanRunSql, resolveDriverClientName, resolveDriverExec } from './driver-exec.js';
+import { catalogFamilyOf } from './read-probe.js';
 
 describe('resolveDriverExec — surface selection', () => {
     it('selects execute() on a driver that offers only execute', async () => {
@@ -114,5 +115,46 @@ describe('driverCanRunSql', () => {
 
         expect(driverCanRunSql({ execute: async () => undefined })).toBe(true);
         expect(driverCanRunSql({})).toBe(false);
+    });
+});
+
+/**
+ * [#32154] A driver configured with a knex Client CLASS, not a name, still
+ * answers the dialect it speaks.
+ *
+ * `@objectstack/driver-sqlite-wasm` hands knex its own dialect class
+ * (`Client_WasmSqlite`, `dialect: 'sqlite3'`), so `config.client` and
+ * `knex.client.config.client` both hold a function. The resolver read three
+ * places for a string and found none, the table-presence probe got no catalog
+ * arm, and its raising fallback printed `DATABASE_ERROR … no such table:
+ * _objectstack_sequences` on every boot of a project that had never numbered a
+ * record. The doubles below are shaped the way knex builds that driver: the
+ * dialect sits on the Client's prototype, the class on both configs.
+ */
+describe('resolveDriverClientName — the dialect of a driver built from a Client class', () => {
+    class ClientWasmSqliteDouble {}
+    Object.assign(ClientWasmSqliteDouble.prototype, { dialect: 'sqlite3', driverName: 'wasm-sqlite' });
+
+    const classConfiguredDriver = () => {
+        const client = new ClientWasmSqliteDouble() as any;
+        client.config = { client: ClientWasmSqliteDouble };
+        return { config: { client: ClientWasmSqliteDouble }, knex: { client } };
+    };
+
+    it("answers the Client's own dialect when no name was configured", () => {
+        expect(resolveDriverClientName(classConfiguredDriver())).toBe('sqlite3');
+        // …which is the catalog family the table-presence probe needs.
+        expect(catalogFamilyOf(resolveDriverClientName(classConfiguredDriver()))).toBe('sqlite');
+    });
+
+    it('a configured NAME still wins over the dialect', () => {
+        const driver = classConfiguredDriver() as any;
+        driver.config = { client: 'better-sqlite3' };
+        expect(resolveDriverClientName(driver)).toBe('better-sqlite3');
+    });
+
+    it('still answers undefined when neither a name nor a dialect is there', () => {
+        expect(resolveDriverClientName({ config: { client: ClientWasmSqliteDouble }, knex: { client: {} } })).toBeUndefined();
+        expect(resolveDriverClientName({})).toBeUndefined();
     });
 });
