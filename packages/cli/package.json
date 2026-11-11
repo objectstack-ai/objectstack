@@ -55,7 +55,48 @@
     "hooks": {
       "preparse": "./dist/hooks/preparse/strip-arg-separator.js"
     },
-    "topicSeparator": " "
+    "topicSeparator": " ",
+    "topics": {
+      "cloud": {
+        "description": "Sign in to ObjectOS Cloud, and show or clear the stored identity"
+      },
+      "data": {
+        "description": "Read and write records in a running environment: query, get, create, update, delete"
+      },
+      "datasource": {
+        "description": "Inspect external (federated) datasources: list their tables, draft objects from them, validate federated objects"
+      },
+      "db": {
+        "description": "Maintain the local database: reclaim SQLite free space, report detail rows whose master is missing"
+      },
+      "environments": {
+        "description": "Create, list, show and switch environments, and bind a local artifact or self-hosted runtime to one"
+      },
+      "i18n": {
+        "description": "Scaffold translation skeletons from a stack, and check translation coverage"
+      },
+      "mcp": {
+        "description": "Connect an MCP client to your environment's MCP server"
+      },
+      "meta": {
+        "description": "List, read, register and delete metadata items in a running environment"
+      },
+      "package": {
+        "description": "Publish a compiled artifact as a package, install one into a runtime, export a deployment as packages"
+      },
+      "plugin": {
+        "description": "Build, sign, publish, install and manage code plugins (.osplugin artifacts)"
+      },
+      "plugin:trust": {
+        "description": "Manage the publisher keys this environment trusts to sign plugins"
+      },
+      "secret": {
+        "description": "Maintain stored secrets: report orphaned rows, re-wrap old ciphertext"
+      },
+      "storage": {
+        "description": "Inspect stored files: report orphaned attachments"
+      }
+    }
   },
   "dependencies": {
     "@objectstack/account": "workspace:*",

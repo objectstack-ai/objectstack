@@ -66,7 +66,7 @@ import {
     assertGroupByTargetsAreStored,
 } from './aggregate-query-shape-door.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
-import { aggregatedRowColumnClasses, aggregatedRowColumnTypes, aggregatedRowColumns, applyHaving, assertAggregationFilterIsEvaluable, assertHavingIsEvaluable, assertHavingIsFilterCondition } from './having-filter.js';
+import { aggregatedRowColumnClasses, aggregatedRowColumnTypes, aggregatedRowColumns, applyHaving, assertAggregationFilterIsEvaluable, assertFilterNodeShapes, assertHavingIsEvaluable, assertHavingIsFilterCondition } from './having-filter.js';
 import { coerceBooleanFields } from './validation/record-validator.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, withDeclaredColumnsOnly } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
@@ -1000,6 +1000,15 @@ export class DeleteAndAggregateFacet {
                       `unapplied filter would have aggregated every row of each group for that aggregation.`,
                   );
               }
+              // …and the drivers' shape gate on `where`, one level down: a
+              // `$and` / `$or` operand that is not a list, and an element of
+              // one or a `$not` operand that is not a filter node (a condition
+              // array, `null`, a string), refused in `where`'s words at
+              // `aggregations[i].filter.$and[0]`. The walker read a condition
+              // array's index positions as columns (no row counted) and a
+              // `null` / string element as no constraint (every row counted).
+              // First among the doors below, which step around a non-node.
+              assertFilterNodeShapes(aggFilter, `aggregations[${i}].filter`);
               assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
               assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
               // [#15661] …and the declared-type door for the text operators: a
@@ -1137,6 +1146,12 @@ export class DeleteAndAggregateFacet {
       // A reference that passes is then RESOLVED against each aggregated row
       // (having-filter.ts `compareWithReference`) on both doors below.
       assertHavingIsFilterCondition(query.having);
+      // …and one level down, the same shape gate the per-aggregation `filter`
+      // takes above: a non-list `$and` / `$or` and a non-node element or `$not`
+      // operand are refused in `where`'s words at `having.$and[0]`. A `null` or
+      // string element kept every group's rows unconstrained; a condition
+      // array was refused as a key naming no column ('0').
+      assertFilterNodeShapes(query.having, 'having');
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
       // [#20176] The object's declaration, read once: the per-aggregation
       // `filter` reads a temporal comparand by its column's storage rule
