@@ -42,10 +42,18 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   `failure_reason: 'interrupted'` at the next boot of the automation plugin.
  *   Its committed position stands.
  *
- * Not here yet, each with the slice that writes it: the job run that drove the
- * pull and its trigger (`schedule` / `manual`), which need the job service to
- * hand its run to the handler; the marked-deleted count (ADR-0153 D3) and the
- * NULL-watermark count (invariant 11, read with D3's count).
+ * - **The job run that drove the pull.** `job_run_id` is the run-history id
+ *   the job service handed the job's handler (`JobHandler`'s `runId`: on the
+ *   shipped adapters, the `sys_job_run` row `DbJobAdapter` wrote for the
+ *   attempt), as text, never a lookup: the job ledger is deployment-level,
+ *   platform-only and swept on its own window, and a lookup would tie this
+ *   organization's history to it. `trigger` is why that run started
+ *   (`schedule` / `manual`). Both are written when the run opens, and both are
+ *   empty for a pull no job drove, or a job service that sends neither.
+ *
+ * Not here yet, with the slice that writes it: the marked-deleted count
+ * (ADR-0153 D3) and the NULL-watermark count (invariant 11, read with D3's
+ * count).
  *
  * Writers: the automation plugin's pull (`./connector-pull.ts`,
  * `./datasource-pull.ts`) and its boot close, under a system context.
@@ -166,6 +174,28 @@ export const SysSyncRun = ObjectSchema.create({
       group: 'Identity',
       // [ADR-0153 D1] The two read paths.
       description: "How a datasource source was read: 'builtin', windows read whole and paged by the key; 'floored', a plugin driver read through the platform's row cap. Empty for a connector source.",
+    }),
+
+    // [ADR-0153 D7] The job run that drove the pull: the run-history id the job
+    // service handed the job's handler (on the shipped adapters, a
+    // `sys_job_run` id). Text, not a lookup: the job ledger is deployment-level
+    // and swept on its own window, so its retention never reaches this row.
+    job_run_id: Field.text({
+      label: 'Job Run',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      group: 'Identity',
+      description: 'The background job run that started this pull, as the job run history names it. Empty when no job started the pull.',
+    }),
+
+    // [ADR-0153 D7] Why the job run that drove the pull started.
+    trigger: Field.select(['schedule', 'manual'], {
+      label: 'Trigger',
+      required: false,
+      readonly: true,
+      group: 'Identity',
+      description: "Why the job run started: 'schedule', on its schedule; 'manual', when someone ran the job now. Empty when no job started the pull.",
     }),
 
     status: Field.select(['running', 'completed', 'degraded', 'failed'], {

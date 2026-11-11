@@ -246,7 +246,7 @@ There are no short forms: `os -h` and `os -v` exit 2 with `command -h not found`
 
 ### `os validate`
 
-- `--strict` — Treat warnings as errors
+- `--strict` — Treat warnings as errors (exit 1); `info` findings stay advisory
 - `--json` — Output result as JSON
 
 ### `os serve`

@@ -119,6 +119,7 @@
     "ColumnSummaryConfig (type)",
     "ColumnSummaryConfigSchema (const)",
     "ColumnSummarySchema (const)",
+    "ColumnSummaryValue (type)",
     "CompileListViewGroupQueryOptions (interface)",
     "CompileListViewGroupRowsQueryOptions (interface)",
     "ComponentNavItem (type)",
