@@ -365,18 +365,18 @@ token implies the other:
 
 ### Inbound webhook (`api`) triggers (ADR-0041 Tier 1)
 
-`POST /api/v1/automation/hooks/:flowName/:hookId`; a name two packages ship:
-`hooks/<namespace>/…` each, bare ⇒ `409`. Configure it on the **start node
-`config`**:
+An `api` flow is bound to an inbound HTTP endpoint:
+`POST /api/v1/automation/hooks/:flowName/:hookId`. Configure it on the **start
+node `config`**:
 
 | `config` key | Purpose |
 |:-------------|:--------|
 | `hookId` | URL path token (default `'default'`). **Rotate it to revoke** a leaked endpoint |
-| `secretRef` / `secret` | Secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
+| `secretRef` / `secret` | HMAC-SHA256 secret, **one required** (else refused at registration and `os validate`). Ship `secretRef: 'NAME'`: an env var the deployment fills, not `OS_*`; unfilled ⇒ `503`. Never a literal |
 
 - **Signature:** `x-objectstack-signature: t=<unix seconds>,v1=<hex>` — HMAC-SHA256 of `<t>.<raw body>`; `t` within 300 s. Vendor-signed: `config.signature` replaces it (recipe 4).
 - **Idempotency:** `x-idempotency-key` dedupes retries — author the flow to be idempotent (delivery is at-least-once).
-- **Queue-backed:** the endpoint ACKs `202`; the flow runs on the consumer.
+- **Queue-backed:** the endpoint ACKs `202` and enqueues; the flow runs on the consumer.
 - The JSON body surfaces to the flow as the trigger record (`record.*` / bare fields) plus `params`.
 
 ### Trigger Types (start-node `config.triggerType`)
