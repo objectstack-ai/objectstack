@@ -115,6 +115,20 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
 
 /**
+ * [#31699 R5-A; epic ruling 6801410166] {@link MetadataManager.register}'s
+ * options: the spec's {@link MetadataWriteOptions}, plus `skipSourceLoader`.
+ * With it, an item {@link MetadataManager.loadMany} read from a loader is not
+ * persisted back into that same loader; every other loader's write is
+ * unchanged. The boot priming pass sets it, so a boot never writes back a row
+ * it read from the store it read it from. Class-level, as
+ * {@link MetadataUnregisterOptions} is.
+ */
+export interface MetadataRegisterOptions extends MetadataWriteOptions {
+  /** Skip the write-through to the loader `loadMany` read this very item from. */
+  skipSourceLoader?: boolean;
+}
+
+/**
  * [ADR-0150 D3/D4, #32198] {@link MetadataManager.unregister}'s options: the
  * spec's {@link MetadataWriteOptions}, plus the package whose item is removed.
  *
@@ -130,20 +144,6 @@ export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
  * {@link MetadataManager.get} already takes a package beyond the spec's
  * signature.
  */
-/**
- * [#31699 R5-A; epic ruling 6801410166] {@link MetadataManager.register}'s
- * options: the spec's {@link MetadataWriteOptions}, plus `skipSourceLoader`.
- * With it, an item {@link MetadataManager.loadMany} read from a loader is not
- * persisted back into that same loader; every other loader's write is
- * unchanged. The boot priming pass sets it, so a boot never writes back a row
- * it read from the store it read it from. Class-level, as
- * {@link MetadataUnregisterOptions} is.
- */
-export interface MetadataRegisterOptions extends MetadataWriteOptions {
-  /** Skip the write-through to the loader `loadMany` read this very item from. */
-  skipSourceLoader?: boolean;
-}
-
 export interface MetadataUnregisterOptions extends MetadataWriteOptions {
   /** The package whose item is removed; see the interface doc. */
   packageId?: string;
