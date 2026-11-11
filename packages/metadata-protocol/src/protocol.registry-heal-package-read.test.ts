@@ -17,6 +17,9 @@
  * a recording double: tier 1 finds no shadow, so the walk reaches tier 2.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// module under test reaches it dynamically.
+import '@objectstack/lint';
 import { MetadataManager } from '@objectstack/metadata';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
