@@ -71,7 +71,12 @@ const TRANSLATIONS: Record<string, Record<string, string>> = {
   'zh-CN': { [objectFieldLabelKey('case', 'salary')]: '薪资' },
 };
 
-const boot = async (opts: { sets: PermissionSet[]; row?: Record<string, unknown> | null; verdict?: 'allow' | 'deny' | 'abstain' }) => {
+const boot = async (opts: {
+  sets: PermissionSet[];
+  row?: Record<string, unknown> | null;
+  verdict?: 'allow' | 'deny' | 'abstain';
+  translations?: Record<string, Record<string, string>>;
+}) => {
   const schema: any = { name: 'case', label: 'Case', fields: FIELDS };
   let middleware: any;
   const findOne = vi.fn(async (object: string, query: any) => {
@@ -94,7 +99,7 @@ const boot = async (opts: { sets: PermissionSet[]; row?: Record<string, unknown>
         org && QUEUES[name] ? { name, label: name, source: 'authored', organizationId: org, members: [] } : null),
       isMember: vi.fn(async (userId: string, name: string) => !!QUEUES[name]?.includes(userId)),
     },
-    i18n: { t: (key: string, loc: string) => TRANSLATIONS[loc]?.[key] ?? key },
+    i18n: { t: (key: string, loc: string) => (opts.translations ?? TRANSLATIONS)[loc]?.[key] ?? key },
   };
   const ctx: any = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -269,6 +274,35 @@ describe('the field-write 403 names field labels only where the caller may learn
     expect(refusal.message).toBe(BUILTIN_OPERATION_MESSAGES['zh-CN'].permission_denied);
     expect('userMessage' in refusal).toBe(false);
   });
+});
+
+/**
+ * The field-write sentence's label list, pinned as LITERAL text per catalog
+ * locale plus two locales the catalog does not register (`zh-TW` reaches
+ * `zh-CN`, `fr` falls through to `en`). The quote marks and the separator are
+ * catalog entries (`field_label_quoted`, `field_label_list_separator`), so
+ * these strings are written out rather than re-rendered: a pin that renders
+ * through the same catalog would move with it.
+ */
+describe('the field-write label list is quoted and separated by the catalog, byte for byte per locale', () => {
+  const PINS: Array<[locale: string, text: string]> = [
+    ['en', 'You do not have permission to edit “Grade”, “Salary”. Undo those changes and try again, or contact your administrator if you need access.'],
+    ['zh-CN', '您无权编辑「Grade」、「薪资」，请撤销这些修改后重试，或联系管理员。'],
+    ['ja-JP', '「Grade」、「Salary」を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。'],
+    ['es-ES', 'No tiene permiso para editar «Grade», «Salary». Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.'],
+    ['zh-TW', '您无权编辑「Grade」、「Salary」，请撤销这些修改后重试，或联系管理员。'],
+    ['fr', 'You do not have permission to edit “Grade”, “Salary”. Undo those changes and try again, or contact your administrator if you need access.'],
+  ];
+
+  for (const [locale, text] of PINS) {
+    it(`two labels — ${locale}`, async () => {
+      const refuse = await boot({ sets: [memberSet], row: OWNED_BY_U1 });
+      const refusal = await refuse(update({ salary: 1, grade: 'A' }, locale));
+      expect(refusal.code).toBe('PERMISSION_DENIED');
+      expect(refusal.status).toBe(403);
+      expect(refusal.userMessage).toBe(text);
+    });
+  }
 });
 
 describe('the userMessage reaches the REST data door body (mapDataError, POST / PATCH /data/:object)', () => {
