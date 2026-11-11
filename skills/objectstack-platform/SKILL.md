@@ -99,15 +99,17 @@ OS_ARTIFACT_PATH=./dist/objectstack.json objectstack dev
 
 Every stack needs a `manifest`:
 
+<!-- os:check -->
 ```typescript
-manifest: {
-  id: 'com.example.crm',        // Reverse domain unique ID
-  version: '1.0.0',             // Semver
-  type: 'app',                  // app | plugin | driver | module | ...
-  name: 'Acme CRM',             // Human-readable display name
-  description: 'CRM system',    // Optional description
-  engines: { protocol: '^18' }, // Metadata-protocol major this app targets
-}
+import { defineStack } from '@objectstack/spec';
+export default defineStack({ manifest: {
+  id: 'com.example.crm', // Reverse domain unique ID
+  version: '1.0.0', // Semver
+  type: 'app', // app | plugin | driver | module | ...
+  name: 'Acme CRM', // Human-readable display name
+  description: 'CRM system', // Optional
+  engines: { protocol: '^18' },
+} });
 ```
 
 **`manifest.engines.protocol`:** the metadata-protocol major the app is authored
@@ -312,12 +314,13 @@ token through the `CAPABILITY_PROVIDERS` registry in
 The tokens in `PLATFORM_CAPABILITY_TOKENS` not in that map do not resolve
 through it:
 
-- **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
-  entry; dedicated blocks in `serve.ts` `run()` open their tier instead
+- **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth`: dedicated blocks
+  in `serve.ts` `run()` open their tier instead
   (`ai`/`ai-studio` through the intent-driven AI block).
-- **Enterprise / cloud** — `hierarchy-security` has no open-edition provider and
-  ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
-  `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
+- **Enterprise / cloud** — `hierarchy-security` ships in
+  `@objectstack/security-enterprise`, loaded through `plugins[]`; `ai-seat`,
+  `governance`, `audit-compliance` and `access-policy-console` are resolved
+  only by cloud's objectos-runtime.
 
 The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is

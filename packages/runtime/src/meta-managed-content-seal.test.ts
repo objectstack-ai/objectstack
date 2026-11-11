@@ -35,6 +35,8 @@
  * registry doubles follow `meta-field-overlay-lock.test.ts`.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
@@ -129,6 +131,10 @@ function makeEngine() {
     const runtimeItems = new Map<string, Map<string, unknown>>();
     const engine: any = {
         registry: {
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
+            readsByPackage: () => false,
             listItems: (type: string) => [
                 ...Array.from(artifacts.get(type)?.values() ?? []),
                 ...Array.from(runtimeItems.get(type)?.values() ?? []),
@@ -295,7 +301,7 @@ describe('[ADR-0131 D6] the dispatcher /meta door: the hatch opens no write onto
 
             const created = responseOf(await dispatcher.handleMetadata(
                 '/flow/crm_new_alert', ctx(), 'PUT',
-                { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [], edges: [] },
+                { name: 'crm_new_alert', label: 'New Alert', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] },
             ));
             expect(created.status, JSON.stringify(created.body)).toBe(200);
             expect(activeRow(engine, 'flow', 'crm_new_alert')).toBeDefined();

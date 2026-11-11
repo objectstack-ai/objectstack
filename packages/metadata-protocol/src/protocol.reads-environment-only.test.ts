@@ -33,6 +33,7 @@ import {
     assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const ORG = 'org_a';
 const PKG = 'app.pkg';
@@ -117,6 +118,7 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
             return cb(undefined, { owned: true });
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             getObject: () => undefined,

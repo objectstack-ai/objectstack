@@ -101,6 +101,7 @@ import {
 } from './connectClientPreference.js';
 import { isPublicHttpsAddress } from './deploymentReach.js';
 import { AuthorizedAccessList } from './AuthorizedAccessList.js';
+import { DeveloperNamespaceGate } from './DeveloperNamespaceGate.js';
 import { useConnectedAccess, type ConnectedEntry } from './connectedAccess.js';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
@@ -257,7 +258,19 @@ function mcpServersJson(type: string | null, url: string): string {
   return JSON.stringify({ mcpServers: { objectstack: server } }, null, 2);
 }
 
+/**
+ * The Connect an assistant page's widget. Its strings are the lazy `developer`
+ * namespace's, so the body renders under `DeveloperNamespaceGate`.
+ */
 export function ConnectAgent() {
+  return (
+    <DeveloperNamespaceGate>
+      <ConnectAgentBody />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function ConnectAgentBody() {
   const { t } = useObjectTranslation();
   const [loading, setLoading] = useState(true);
   const [mcpUrl, setMcpUrl] = useState<string | null>(null);

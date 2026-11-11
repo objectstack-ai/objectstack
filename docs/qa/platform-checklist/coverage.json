@@ -13,7 +13,10 @@
         "records-forms.script-action-hook-refusal-toast",
         "studio-authoring.actions-tab-presets",
         "api-backend.actions-namespace-address",
-        "ai.mcp-namespace-faces"
+        "api-backend.client-sdk-namespace-address",
+        "ai.mcp-namespace-faces",
+        "studio-authoring.action-preflight-authoring-refusals",
+        "records-forms.action-preflight-panel"
       ]
     },
     "agent": {
@@ -80,7 +83,9 @@
       "items": [
         "api-backend.rest-crud-config-contract",
         "api-backend.query-contract-matrix",
-        "records-forms.crud-roundtrip"
+        "records-forms.crud-roundtrip",
+        "api-backend.recycle-bin-delete-entry-restore",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "dashboard": {
@@ -101,7 +106,10 @@
         "dashboards.dataset-report-authoring",
         "api-backend.aggregate-contract-matrix",
         "studio-authoring.report-authoring-options",
-        "studio-authoring.no-entry-property-matrix"
+        "studio-authoring.no-entry-property-matrix",
+        "ai.mcp-dataset-tools",
+        "studio-authoring.dataset-member-vocabulary",
+        "dashboards.report-measure-drill-scope"
       ]
     },
     "datasource": {
@@ -111,7 +119,9 @@
         "integration-system.external-schema-drift-gate",
         "records-forms.field-unique-enforcement",
         "integration-system.external-schema-browser-ui",
-        "cli.dev-automigrate-policy"
+        "cli.dev-automigrate-policy",
+        "integration-system.federation-only-driver-catalog",
+        "integration-system.federation-only-managed-refusal"
       ]
     },
     "doc": {
@@ -146,7 +156,11 @@
         "studio-authoring.summary-field-authoring",
         "studio-authoring.no-entry-property-matrix",
         "studio-authoring.api-written-keys-survive-studio-save",
-        "studio-authoring.removed-key-save-door-refusal"
+        "studio-authoring.removed-key-save-door-refusal",
+        "records-forms.multi-currency-invoice",
+        "records-forms.home-amount-preview-states",
+        "studio-authoring.currency-home-amount-editor",
+        "records-forms.master-detail-child-follows-parent-currency"
       ]
     },
     "flow": {
@@ -179,7 +193,8 @@
         "platform-core.activation-ledger-package-key-upgrade",
         "platform-core.stored-reference-package-backfill-upgrade",
         "cli.address-grammar-reserved-names",
-        "api-backend.automation-namespace-address"
+        "api-backend.automation-namespace-address",
+        "api-backend.client-sdk-namespace-address"
       ]
     },
     "hook": {
@@ -188,7 +203,8 @@
         "cli.hook-body-extraction-gates",
         "access-security.record-view-read-audit",
         "records-forms.script-action-hook-refusal-toast",
-        "studio-authoring.hooks-tab-authoring"
+        "studio-authoring.hooks-tab-authoring",
+        "cli.validate-target-restriction-profile"
       ]
     },
     "job": {
@@ -207,7 +223,9 @@
         "platform-core.namespace-object-name-refusal",
         "platform-core.namespace-co-owner-name-refusal",
         "platform-core.bare-name-one-holder-refusal",
-        "cli.address-grammar-reserved-names"
+        "cli.address-grammar-reserved-names",
+        "cli.deploy-runtime-dry-run-json",
+        "cli.package-upgrade-plan-override-advice"
       ]
     },
     "mapping": {
@@ -219,7 +237,8 @@
     "metadata_endpoints": {
       "items": [
         "api-backend.rest-metadata-config-contract",
-        "platform-core.metadata-registry-serving"
+        "platform-core.metadata-registry-serving",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "object": {
@@ -247,7 +266,8 @@
         "studio-authoring.removed-key-save-door-refusal",
         "studio-authoring.uninstalled-package-refused",
         "studio-authoring.package-extension-field-c",
-        "platform-core.namespace-object-name-refusal"
+        "platform-core.namespace-object-name-refusal",
+        "studio-authoring.currency-field-repointed-refusal"
       ]
     },
     "page": {
@@ -260,7 +280,10 @@
         "studio-authoring.authored-page-slots-and-variables",
         "studio-authoring.uninstalled-package-refused",
         "api-backend.meta-qualified-item-read",
-        "platform-core.namespace-co-owner-name-refusal"
+        "api-backend.client-sdk-namespace-address",
+        "platform-core.namespace-co-owner-name-refusal",
+        "studio-authoring.page-row-table-block",
+        "studio-authoring.page-api-binding-reread-after-action"
       ]
     },
     "permission": {
@@ -285,7 +308,8 @@
         "access-security.ai-service-account-agent-ceiling",
         "identity-auth.idp-group-permission-set-mapping",
         "access-security.permission-set-address-in-execution-context",
-        "access-security.agent-ceiling-set-assignment-refusal"
+        "access-security.agent-ceiling-set-assignment-refusal",
+        "api-backend.recycle-bin-refusals-purge-empty"
       ]
     },
     "picklist": {
@@ -331,7 +355,8 @@
         "search.command-palette-navigation",
         "studio-authoring.interfaces-create-dialogs",
         "studio-authoring.report-authoring-options",
-        "studio-authoring.package-customize-restore-display"
+        "studio-authoring.package-customize-restore-display",
+        "dashboards.report-measure-drill-scope"
       ]
     },
     "rest_api": {
@@ -401,7 +426,8 @@
         "studio-authoring.package-customize-restore-display",
         "records-forms.field-history-tracking",
         "studio-authoring.no-entry-property-matrix",
-        "studio-authoring.removed-key-save-door-refusal"
+        "studio-authoring.removed-key-save-door-refusal",
+        "records-forms.list-link-filter-refused-whole"
       ]
     },
     "webhook": {
@@ -418,6 +444,302 @@
     },
     "template_manifest": {
       "waived": "WAIVED 2026-11-06 — no item in this checklist can drive it, measured rather than asserted. TemplateManifestSchema (packages/spec/src/marketplace/template-manifest.zod.ts) is `objectstack.manifest.json`, the package-listing file; its one runtime reader is `os package publish` (packages/cli/src/commands/package/publish.ts), whose every request goes to a HOSTED control plane (`/api/v1/cloud/packages`) that a local app booted for this checklist does not serve, and its other reader is create-objectstack at scaffold time. The CLI half is pinned where it can fail: packages/cli/test/package-publish-taxonomy.test.ts (the retired `category` refused before any network call, each facet judged and sent under its wire name, the solutionType cross-check against the built artifact) and packages/cli/test/package-publish-uncarried-manifest-keys.test.ts (every schema key sent, warned about, refused or scaffold-only); every shipped file is parsed by `pnpm --filter @objectstack/spec check:template-manifests`. The catalog half — storing, filtering and showing the facets — is the cloud checklist's (objectstack-ai/cloud#3661) and the console marketplace card's. WHAT RETIRES THIS WAIVER — the console marketplace card lands facet filters this checklist can drive against a catalog it can boot, in which case author the browse-and-filter item and flip this entry to items."
+    }
+  },
+  "releaseSweeps": {
+    "$comment": "Release-sweep close-out ledger (#32270). No gate reads it: scripts/check-platform-checklist.mjs and scripts/checklist-select.mjs read metadataKinds only, so this is not coverage and never waives a kind. Per release wave it answers two questions for the release-candidate run and the next sweep. `themes`: every theme of the wave's epic, its items, and for each item no run can drive yet (`blocked`) or that names a capability not landed (`planned`), why. `packages`: every workspace package changed since the subject that no bearing item's source[] cited when the close-out began, and either the items that cite it now or why it needs none (`internal-only`, `test-only`, or `covered-through` named items). A new release wave adds its own key beside v18.4.",
+    "v18.4": {
+      "epic": "#32022",
+      "subject": "83d7e4ae (18.3.0)",
+      "closedOutAt": "60b99f8f (#32270)",
+      "counts": "checklist-select since:v18.4: 54 runnable, 65 with --include-blocked (59 of them themes 1-8, 6 the close-out)",
+      "themes": [
+        {
+          "theme": 1,
+          "title": "ADR-0150 package namespaces",
+          "milestone": "M1 #32019",
+          "items": [
+            "api-backend.meta-qualified-item-read",
+            "api-backend.actions-namespace-address",
+            "api-backend.automation-namespace-address",
+            "ai.mcp-namespace-faces",
+            "platform-core.namespace-object-name-refusal",
+            "platform-core.namespace-co-owner-name-refusal",
+            "platform-core.bare-name-one-holder-refusal",
+            "cli.address-grammar-reserved-names",
+            "access-security.permission-set-package-resolution",
+            "access-security.permission-set-address-in-execution-context",
+            "access-security.sharing-queue-assignment-package-resolution",
+            "automation.flow-reference-package-resolution",
+            "integration-system.job-package-key",
+            "platform-core.activation-ledger-package-key-upgrade",
+            "platform-core.stored-reference-package-backfill-upgrade",
+            "cli.migrate-stored-references",
+            "api-backend.client-sdk-namespace-address"
+          ]
+        },
+        {
+          "theme": 2,
+          "title": "Multi-replica on the Redis cluster driver",
+          "milestone": "M2 #32020",
+          "items": [
+            "cli.serve-multi-replica-local-database-refusal",
+            "cli.start-multi-replica-auth-secret-refusal"
+          ],
+          "blocked": {
+            "attachments-storage.multi-replica-local-root-refusal": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage",
+            "platform-core.multi-replica-package-change-refusal": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage",
+            "platform-core.ready-cluster-driver-health": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage",
+            "platform-core.cluster-membership-heartbeat": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage",
+            "platform-core.settings-change-reaches-every-replica": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage",
+            "platform-core.shared-redis-cache-across-replicas": "fixture: no multi-node gate the open tree can register, so no declared multi-replica boot on Redis reaches kernel:ready (FOLLOW-UPS §17c). Mapped here by the close-out; still carries no metadata kind, since an item no run can drive stands as no kind's coverage"
+          }
+        },
+        {
+          "theme": 3,
+          "title": "AI service accounts and identity",
+          "milestone": "M1 #32019",
+          "items": [
+            "identity-auth.ai-service-account-register-and-key",
+            "identity-auth.ai-service-account-lifecycle",
+            "access-security.ai-service-account-agent-ceiling",
+            "access-security.agent-ceiling-set-assignment-refusal",
+            "access-security.credential-use-audit-row",
+            "identity-auth.scim-refused-audit-row",
+            "identity-auth.idp-group-permission-set-mapping",
+            "identity-auth.sso-provider-groups-claim"
+          ]
+        },
+        {
+          "theme": 4,
+          "title": "Recycle bin",
+          "milestone": "M2 #32020",
+          "items": [
+            "api-backend.recycle-bin-delete-entry-restore",
+            "api-backend.recycle-bin-refusals-purge-empty",
+            "records-forms.delete-toast-undo-restore",
+            "records-forms.setup-recycle-bin-page"
+          ]
+        },
+        {
+          "theme": 5,
+          "title": "Multi-currency record-mode amounts",
+          "milestone": "M2 #32020",
+          "items": [
+            "records-forms.multi-currency-invoice",
+            "records-forms.home-amount-preview-states",
+            "studio-authoring.currency-home-amount-editor",
+            "studio-authoring.currency-field-repointed-refusal"
+          ],
+          "planned": {
+            "records-forms.master-detail-child-follows-parent-currency": "the authoring door admits a PARENT_FIELD.CODE_FIELD currencyField (#31956), but the engine reads currencyField as a field of the same row, so a parent path reads no code (FOLLOW-UPS §17a). Tracked by #31911, open on 2026-11-10 with its PR #32216 open"
+          }
+        },
+        {
+          "theme": 6,
+          "title": "Action preflight and page API bindings",
+          "milestone": "M3 #32269",
+          "items": [
+            "studio-authoring.action-preflight-authoring-refusals",
+            "records-forms.action-preflight-panel",
+            "studio-authoring.page-row-table-block",
+            "studio-authoring.page-api-binding-reread-after-action"
+          ],
+          "planned": {
+            "ai.pending-action-held-approval": "the held status is declared (PendingActionStatus, AiPendingActionStatusSchema) and the approvals inbox draws it, but nothing in the open tree sets it: the AI service that would is Cloud/EE (FOLLOW-UPS §18a). No card: the producer is not in this repository"
+          }
+        },
+        {
+          "theme": 7,
+          "title": "AI data tools and MCP",
+          "milestone": "M3 #32269",
+          "items": [
+            "ai.mcp-dataset-tools",
+            "studio-authoring.dataset-member-vocabulary",
+            "ai.mcp-read-file-pdf-word-extraction",
+            "ai.mcp-tool-call-interceptor",
+            "records-forms.list-link-filter-refused-whole"
+          ],
+          "blocked": {
+            "ai.chat-answer-list-link": "environment: service-ai is Cloud/EE, so no open-tree AI service answers the console chat (FOLLOW-UPS §18c)"
+          }
+        },
+        {
+          "theme": 8,
+          "title": "Federation and CLI",
+          "milestone": "M3 #32269",
+          "items": [
+            "integration-system.federation-only-driver-catalog",
+            "integration-system.federation-only-managed-refusal",
+            "cli.deploy-runtime-dry-run-json",
+            "cli.validate-target-restriction-profile",
+            "cli.package-upgrade-plan-override-advice"
+          ],
+          "blocked": {
+            "integration-system.oracle-federated-read-write": "fixture: no credentialed Oracle Database; qa-fixture external-database provisions PostgreSQL only (FOLLOW-UPS §18c, #32233)",
+            "integration-system.oracle-raw16-uuid-reference": "fixture: no credentialed Oracle Database; qa-fixture external-database provisions PostgreSQL only (FOLLOW-UPS §18c, #32233)",
+            "integration-system.mssql-federated-read-write": "fixture: no credentialed SQL Server; qa-fixture external-database provisions PostgreSQL only (FOLLOW-UPS §18c, #32233)"
+          }
+        },
+        {
+          "theme": "M4",
+          "title": "Zero-citation packages since 18.3.0",
+          "milestone": "M4 #32270",
+          "items": [
+            "integration-system.push-device-registry-and-relay-boot",
+            "identity-auth.console-two-factor-prompt-phone-doors",
+            "identity-auth.console-sign-out-and-ended-session",
+            "dashboards.report-measure-drill-scope",
+            "i18n.sms-test-answer-language"
+          ],
+          "blocked": {
+            "i18n.seed-dataset-follows-organization-language": "fixture: no stock app declares a locale-scoped seed dataset, so no stock boot reads the language rungs (FOLLOW-UPS §19c)"
+          }
+        }
+      ],
+      "packages": {
+        "examples/app-crm": {
+          "covered-through": [
+            "platform-core.seed-mode-matrix",
+            "records-forms.field-history-tracking",
+            "studio-authoring.dataset-member-vocabulary",
+            "ai.mcp-dataset-tools"
+          ],
+          "why": "example content: names under the package namespace (#30927, the theme-1 address rules), the create-only seed default (#30152), field history on four objects (#30294), and business vocabulary on crm_opportunity_metrics (#31771), the synonyms the two dataset items drive on a scratch dataset"
+        },
+        "examples/app-multi-package": {
+          "internal-only": "two package index files gain the namespace in their metadata names (#30927); no behaviour of its own"
+        },
+        "examples/app-todo": {
+          "test-only": "nine test files (#31230, #31312, #31321: the MCP action drive and measured boot budgets), plus the namespace rename (#30927) and the seed default (#30152, platform-core.seed-mode-matrix)"
+        },
+        "packages/adapters/hono": {
+          "internal-only": "GET /auth/config hands the request to getPublicConfig (#32124), so a host's organization-create choices come back in the request's language. The open tree supplies no organizationEditions callback (AuthManagerOptions.organizationEditions, plugin-auth) and no Console reads the list, so a stock boot has nothing to show"
+        },
+        "packages/apps/connector-docusign": {
+          "internal-only": "its objectstack.manifest.json only: the marketplace taxonomy (#30980) and two key retirements (#31064, #31178). That file is the template_manifest kind this map waives"
+        },
+        "packages/apps/connector-github": {
+          "internal-only": "the listing file as for docusign, plus its two included MCP tools pinned and the listing provenance recorded (#31647). Driving the connector needs a GitHub credential no fixture holds; its own tests hold the pin"
+        },
+        "packages/apps/connector-stripe": {
+          "internal-only": "its objectstack.manifest.json only, as for docusign (#30980, #31064, #31178)"
+        },
+        "packages/drivers/driver-mongodb": {
+          "covered-through": [
+            "platform-core.activation-ledger-package-key-upgrade"
+          ],
+          "why": "the activation ledger keyed by (metadata_type, package_id, name) on MongoDB (#31727) and the old two-part unique retired on an upgraded database (#31831) are the key move that item drives, live on SQLite; the master_detail index at schema sync (#31913) is driver DDL. No QA fixture runs MongoDB, so the Mongo half is the driver tests'"
+        },
+        "packages/drivers/driver-turso": {
+          "internal-only": "the remote face only: a large $and / $or joined as balanced halves to fit a hosted depth limit (#30143) and a declared rename refused on the remote face (#31402). The schema-migration lock at boot (#31747) is one of the replica fixes FOLLOW-UPS §17 records as no new surface. No open-tree fixture reaches a remote Turso database; the local face runs driver-sql's rules"
+        },
+        "packages/plugins/organizations": {
+          "items": [
+            "i18n.seed-dataset-follows-organization-language"
+          ],
+          "why": "its one source change hands the founder to the seed replayer (#30346); #32027 and #32118 touched its tests only (#32027 is access-security.permission-set-address-in-execution-context's)"
+        },
+        "packages/qa/http-conformance": {
+          "test-only": "one conformance test (#31183)"
+        },
+        "packages/qa/scenarios": {
+          "internal-only": "the scenario harness and its CLI (cards, drivers, grading, the gallery exporter and export-gallery --check): QA tooling for agent build runs, not a platform surface. Its own tests and the gallery check gate it"
+        },
+        "packages/services/service-package": {
+          "internal-only": "the package store answers the row it wrote, so an unmanaged import records its base instance from the import's own row (#31570); no surface of its own, held by unmanaged-import-base-row.test.ts. The unmanaged install mode has no item (FOLLOW-UPS §19b)"
+        },
+        "packages/services/service-print": {
+          "covered-through": [
+            "access-security.credential-use-audit-row"
+          ],
+          "why": "the print door hands its client facts to the credential_use row (#31967), the row that item reads"
+        },
+        "packages/services/service-push": {
+          "items": [
+            "integration-system.push-device-registry-and-relay-boot"
+          ]
+        },
+        "packages/services/service-queue": {
+          "internal-only": "a running job whose lease ran out is reclaimed and a live handler's lease renewed (#30277); an idle dispatch loop wakes at the next due time (#30225). Scheduling internals with no surface of their own; jobs are driven by integration-system.job-scheduled-run"
+        },
+        "packages/services/service-sms": {
+          "items": [
+            "i18n.sms-test-answer-language"
+          ],
+          "why": "the shared Redis daily quota (#31624) is theme 2's, under platform-core.shared-redis-cache-across-replicas (blocked)"
+        },
+        "ui/examples/schema-catalog": {
+          "test-only": "one fixture test file (#31274, #31638)"
+        },
+        "ui/packages/auth": {
+          "items": [
+            "identity-auth.console-two-factor-prompt-phone-doors",
+            "identity-auth.console-sign-out-and-ended-session"
+          ],
+          "why": "covers #32195, #32287, #30490, #32048 and #32207; #30534 is under integration-system.push-device-registry-and-relay-boot (pins only). Not itemised: #32129, #31533, #30413, #30366 and #32042 (FOLLOW-UPS §19b)"
+        },
+        "ui/packages/cli": {
+          "internal-only": "the objectui CLI's known schema types gain eight renderer names (#31883, #31459, #31370, #31274, #31084, #31069). The row-table block is studio-authoring.page-row-table-block's; the other renderers live in cited packages and have no item (FOLLOW-UPS §19b)"
+        },
+        "ui/packages/mobile": {
+          "items": [
+            "integration-system.push-device-registry-and-relay-boot"
+          ],
+          "why": "nativeGetPushToken (#30534) runs only inside the mobile shell, so the item cites it with its pins"
+        },
+        "ui/packages/plugin-charts": {
+          "covered-through": [
+            "dashboards.report-measure-drill-scope",
+            "dashboards.chart-type-matrix"
+          ],
+          "why": "Open in list only when the list can show the drawer's records (#30735) and compareTo on a forward range (#30196); the language packs (#30902) and two rendering fixes (#30573) have no surface of their own"
+        },
+        "ui/packages/plugin-designer": {
+          "covered-through": [
+            "studio-authoring.object-designer-roundtrip"
+          ],
+          "why": "the fields and objects pages save an object as authored, not as served (#30877): the All metadata designer save that item drives (F2-F4); the authored-versus-served distinction is held by the package's 16 test files"
+        },
+        "ui/packages/plugin-editor": {
+          "internal-only": "vite.config.ts drops the retired @object-ui/providers alias (#30550)"
+        },
+        "ui/packages/plugin-markdown": {
+          "internal-only": "vite.config.ts drops the retired @object-ui/providers alias (#30550)"
+        },
+        "ui/packages/plugin-report": {
+          "items": [
+            "dashboards.report-measure-drill-scope"
+          ]
+        },
+        "ui/packages/plugin-view": {
+          "covered-through": [
+            "records-forms.delete-toast-undo-restore"
+          ],
+          "why": "ObjectView's restore through the bin is the list door of undo from the delete toast (#31795); the rest are test refactors (#30745, #30872, #30900) and the language packs (#30902)"
+        },
+        "ui/packages/runner": {
+          "internal-only": "vite.config.ts drops the retired @object-ui/providers alias (#30550)"
+        }
+      },
+      "legacySpelling": {
+        "$comment": "Cited only under the legacy `objectui packages/X` spelling, which a path-literal scan misses: with that spelling read as ui/packages/X the list above has 28 packages, without it 41. Not re-spelled here (that is a source[] edit across many items, not this close-out's)",
+        "packages": [
+          "ui/packages/collaboration",
+          "ui/packages/components",
+          "ui/packages/data-objectstack",
+          "ui/packages/layout",
+          "ui/packages/plugin-calendar",
+          "ui/packages/plugin-dashboard",
+          "ui/packages/plugin-detail",
+          "ui/packages/plugin-form",
+          "ui/packages/plugin-gantt",
+          "ui/packages/plugin-grid",
+          "ui/packages/plugin-kanban",
+          "ui/packages/plugin-list",
+          "ui/packages/types"
+        ]
+      }
     }
   }
 }

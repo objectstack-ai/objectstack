@@ -26,7 +26,12 @@
  *   3. The pure instruments `os g` reports with: barrel membership asked of
  *      the compiler (a substring test dropped names), the stack reach reader,
  *      and the wiring lines it prints.
- *   4. `os init` never overwrites a barrel of the author's with an empty one.
+ *   4. `os init` never overwrites a barrel of the author's with an empty one,
+ *      and appends its own export lines to one it finds.
+ *   5. (#32212) The project a template scaffolds lists its objects: the `app`
+ *      template's starter app navigates to every object, every object of the
+ *      `app` and `plugin` templates has a list view binding it, and both bind
+ *      the object through its import, so a rename moves them with it.
  *
  * The command's own behaviour — the reach report, the refusal that takes a
  * write back out — is spawned in `generate-stack-reach.test.ts`, and the whole
@@ -167,6 +172,16 @@ describe('[#20215] every generator names where its items land', () => {
 
 const WIRING_TEMPLATES = ['app', 'plugin'] as const;
 
+/**
+ * [#32212] The scaffolds each template ships beside its object, by stack key:
+ * the `app` template its starter app and the object's list view, the `plugin`
+ * template the list view alone (a package's navigation is its host's).
+ */
+const STARTER_SCAFFOLDS: Record<(typeof WIRING_TEMPLATES)[number], Record<string, number>> = {
+  app: { apps: 1, views: 1 },
+  plugin: { views: 1 },
+};
+
 describe('[#20215] the `app` and `plugin` templates wire every generator barrel', () => {
   it('the roster the templates wire IS the generator roster', () => {
     expect(SCAFFOLD_WIRED_BARRELS.map((b) => [b.type, b.dir, b.stackKey])).toEqual(
@@ -198,8 +213,12 @@ describe('[#20215] the `app` and `plugin` templates wire every generator barrel'
     // The template's own object is carried, through the reader `os g` uses.
     const reach = await measureStackReach({ stackKey: 'objects', itemName: `${NS}_item`, requires: SCAFFOLD_WIRED_REQUIRES }, root);
     expect(reach).toMatchObject({ kind: 'loaded', reached: true, missingRequires: [] });
-    // Nothing else is there yet: an empty barrel is a key counted at zero.
-    for (const b of SCAFFOLD_WIRED_BARRELS.filter((x) => x.type !== 'object')) {
+    // [#32212] The template's own app and list view are carried too…
+    for (const [stackKey, count] of Object.entries(STARTER_SCAFFOLDS[key])) {
+      expect(stack[stackKey], stackKey).toHaveLength(count);
+    }
+    // …and nothing else is there yet: an empty barrel is a key counted at zero.
+    for (const b of SCAFFOLD_WIRED_BARRELS.filter((x) => x.type !== 'object' && !(x.stackKey in STARTER_SCAFFOLDS[key]))) {
       expect(stack[b.stackKey], b.stackKey).toEqual([]);
     }
   });
@@ -213,13 +232,15 @@ describe('[#20215] the `app` and `plugin` templates wire every generator barrel'
 // ── 3. The instruments ────────────────────────────────────────────────────
 
 describe('[#20215] barrel membership is asked of the compiler, not of a substring', () => {
+  // The flows barrel: one the `app` template writes empty (its views barrel
+  // carries the starter list view since #32212).
   it('an empty barrel exports no name, whatever its text contains', () => {
-    const empty = TEMPLATES.app.srcFiles['src/views/index.ts'](PROJECT, NS);
+    const empty = TEMPLATES.app.srcFiles['src/flows/index.ts'](PROJECT, NS);
     expect([...barrelExportNames(ts, empty)]).toEqual([]);
   });
 
   it('`port` is not exported by `export {};` — the substring test said it was', async () => {
-    const empty = TEMPLATES.app.srcFiles['src/views/index.ts'](PROJECT, NS);
+    const empty = TEMPLATES.app.srcFiles['src/flows/index.ts'](PROJECT, NS);
     expect(empty.includes('port')).toBe(true); // the old test's verdict: "already there"
     expect(await barrelExportsBinding(empty, 'port')).toBe(false);
   });
@@ -288,24 +309,119 @@ describe('[#20215] the reach reader and the lines it prints', () => {
 // ── 4. `os init` keeps an author's barrel ─────────────────────────────────
 
 describe('[#20215] an empty barrel never overwrites a file that is already there', () => {
-  it('keeps an existing views barrel byte-identical, and still writes the objects barrel', () => {
+  it('keeps an existing flows barrel byte-identical, and still writes the objects barrel', () => {
     const root = fs.mkdtempSync(path.join(TMP_ROOT, 'existing-'));
-    const kept = "export { default as mine } from './mine.view';\n";
+    const kept = "export { default as mine } from './mine.flow';\n";
     const replaced = "export { default as old } from './old.object';\n";
-    fs.mkdirSync(path.join(root, 'src', 'views'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'src', 'flows'), { recursive: true });
     fs.mkdirSync(path.join(root, 'src', 'objects'), { recursive: true });
-    fs.writeFileSync(path.join(root, 'src', 'views', 'index.ts'), kept);
+    fs.writeFileSync(path.join(root, 'src', 'flows', 'index.ts'), kept);
     fs.writeFileSync(path.join(root, 'src', 'objects', 'index.ts'), replaced);
 
     const written = writeTemplateSrcFiles(TEMPLATES.app.srcFiles, root, PROJECT, NS);
 
-    expect(fs.readFileSync(path.join(root, 'src', 'views', 'index.ts'), 'utf-8')).toBe(kept);
-    expect(written).not.toContain('src/views/index.ts');
+    expect(fs.readFileSync(path.join(root, 'src', 'flows', 'index.ts'), 'utf-8')).toBe(kept);
+    expect(written).not.toContain('src/flows/index.ts');
     // Control: the objects barrel carries the template's own object, and is
     // written as it always was.
     expect(fs.readFileSync(path.join(root, 'src', 'objects', 'index.ts'), 'utf-8')).not.toBe(replaced);
     expect(written).toContain('src/objects/index.ts');
     // …and a wired directory with no barrel yet gets one.
-    expect(written).toContain('src/flows/index.ts');
+    expect(written).toContain('src/dashboards/index.ts');
+  });
+
+  // [#32212] The views barrel now carries the template's list view. An
+  // author's existing one keeps every export it had, and gains the template's
+  // line once, the way `os g view` appends to a barrel it finds.
+  it('appends the template\'s view to an existing views barrel, once, keeping the author\'s lines', () => {
+    const root = fs.mkdtempSync(path.join(TMP_ROOT, 'existing-views-'));
+    const kept = "export { default as mine } from './mine.view';"; // no trailing newline
+    const barrel = path.join(root, 'src', 'views', 'index.ts');
+    fs.mkdirSync(path.dirname(barrel), { recursive: true });
+    fs.writeFileSync(barrel, kept);
+
+    const written = writeTemplateSrcFiles(TEMPLATES.app.srcFiles, root, PROJECT, NS);
+
+    const templateLine = `export { default as myAppItem } from './${NS}_item.view';`;
+    expect(fs.readFileSync(barrel, 'utf-8')).toBe(`${kept}\n${templateLine}\n`);
+    expect(written).toContain('src/views/index.ts');
+    expect(written).toContain(`src/views/${NS}_item.view.ts`);
+
+    // A second run finds the line and writes nothing to the barrel.
+    const again = writeTemplateSrcFiles(TEMPLATES.app.srcFiles, root, PROJECT, NS);
+    expect(fs.readFileSync(barrel, 'utf-8')).toBe(`${kept}\n${templateLine}\n`);
+    expect(again).not.toContain('src/views/index.ts');
+  });
+});
+
+// ── 5. The starter app and list view (#32212) ─────────────────────────────
+
+/** Every `objectName` an app's navigation opens, group children included. */
+function navigatedObjects(app: Record<string, unknown>): string[] {
+  const walk = (items: unknown): string[] =>
+    ((items as Record<string, unknown>[] | undefined) ?? []).flatMap((item) => [
+      ...(item.type === 'object' && typeof item.objectName === 'string' ? [item.objectName] : []),
+      ...walk(item.children),
+    ]);
+  return walk(app.navigation);
+}
+
+describe('[#32212] a scaffolded project lists its objects in an app, each with a list view', () => {
+  async function loadedStack(root: string): Promise<Record<string, Record<string, unknown>[]>> {
+    const { config } = await loadConfig(path.join(root, 'objectstack.config.ts'));
+    return config as Record<string, Record<string, unknown>[]>;
+  }
+
+  it.each(WIRING_TEMPLATES)('`%s`: every object has a list view that binds it, with columns it declares', async (key) => {
+    const stack = await loadedStack(emitTemplate(key));
+    expect(stack.objects.length, 'the template scaffolds an object').toBeGreaterThan(0);
+    for (const object of stack.objects) {
+      const views = stack.views.filter((v) => v.object === object.name);
+      expect(views, `a view binds ${String(object.name)}`).toHaveLength(1);
+      const list = views[0].list as { type: string; label: string; columns: { field: string }[] };
+      expect(list.type).toBe('grid');
+      expect(list.label).toBeTruthy();
+      expect(list.columns.map((c) => c.field)).toEqual(Object.keys(object.fields as object));
+    }
+  });
+
+  it('`app`: the starter app navigates to every object the template scaffolds', async () => {
+    const stack = await loadedStack(emitTemplate('app'));
+    expect(stack.apps).toHaveLength(1);
+    expect(stack.apps[0].name).toBe(`${NS}_main_app`);
+    expect(navigatedObjects(stack.apps[0]).sort()).toEqual(stack.objects.map((o) => String(o.name)).sort());
+  });
+
+  it('`plugin`: ships no app, so a host that loads the package composes its own navigation', async () => {
+    const stack = await loadedStack(emitTemplate('plugin'));
+    expect(stack.apps).toEqual([]);
+    expect(Object.keys(TEMPLATES.plugin.srcFiles).filter((f) => f.startsWith('src/apps/') && f !== 'src/apps/index.ts'))
+      .toEqual([]);
+  });
+
+  it('`empty`: scaffolds no object, so it has nothing for an app or a view to name', () => {
+    expect(Object.keys(TEMPLATES.empty.srcFiles)).toEqual([]);
+  });
+
+  // The route the card asked to be named: the object is referenced through an
+  // import of its module, never as a typed-out name. So renaming the object in
+  // its own file — the only `name:` that carries it — moves the app entry and
+  // the view with it, and no other file spells the name to go stale.
+  it.each(WIRING_TEMPLATES)('`%s`: renaming the object in its own file moves the app entry and the view with it', async (key) => {
+    const root = emitTemplate(key);
+    const objectFile = path.join(root, 'src', 'objects', `${NS}_item.object.ts`);
+    const before = fs.readFileSync(objectFile, 'utf-8');
+    expect(before).toContain(`name: '${NS}_item',`);
+    for (const rel of Object.keys(TEMPLATES[key].srcFiles).map((f) => f.replace(/__name__/g, NS))) {
+      if (!/^src\/(apps|views)\/(?!index\.ts$)/.test(rel)) continue;
+      expect(fs.readFileSync(path.join(root, rel), 'utf-8'), `${rel} spells the object's name out`)
+        .not.toContain(`'${NS}_item'`);
+    }
+    fs.writeFileSync(objectFile, before.replace(`name: '${NS}_item',`, `name: '${NS}_renamed',`));
+
+    const stack = await loadedStack(root);
+    expect(stack.objects.map((o) => o.name)).toEqual([`${NS}_renamed`]);
+    expect(stack.views.map((v) => v.object)).toEqual([`${NS}_renamed`]);
+    if (key === 'app') expect(navigatedObjects(stack.apps[0])).toEqual([`${NS}_renamed`]);
   });
 });

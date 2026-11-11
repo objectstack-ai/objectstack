@@ -37,6 +37,15 @@ export interface MetadataKeyedItem<T = any> {
   readonly name: string;
   /** The stored body, exactly as {@link MetadataLoader.loadMany} would return it. */
   readonly data: T;
+  /**
+   * [ADR-0150 D4, #32246] On an entry of {@link MetadataLoader.loadSlots} or
+   * {@link MetadataLoader.loadManySlots}: the package this loader holds the
+   * item for; absent for an item it holds for no package. A customization of
+   * a package's item (D4) is held for that package though its body names
+   * none, which is why the package travels beside the body rather than being
+   * read off it.
+   */
+  readonly packageId?: string;
 }
 
 /**
@@ -104,6 +113,39 @@ export interface MetadataLoader {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]>;
+
+  /**
+   * [ADR-0150 D3/D4, #32246] Every item this loader holds under `name`, each
+   * with the package it holds it for ({@link MetadataKeyedItem.packageId}),
+   * for a type stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`),
+   * of which a loader may hold one item per package.
+   *
+   * Optional. `MetadataManager` asks it when its in-memory registry holds no
+   * slot of the name, and reads the answer through the store's own rule
+   * (`readStoreEntry`): a read naming a package gets that package's item,
+   * never another package's, and a read naming none is refused when two
+   * packages hold the name. A loader without it answers with its one
+   * `load(type, name)` body, read for the package that body carries.
+   *
+   * ⛔ The loader's own `load`, `loadMany` and `loadManyKeyed` keep one item
+   * per name — the one stored last — so their callers read what they read.
+   *
+   * @param type The metadata type
+   * @param name The item name
+   * @returns One entry per stored item of the name; `[]` when none
+   */
+  loadSlots?<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]>;
+
+  /**
+   * [ADR-0150 D4, #32246] {@link loadSlots} for every name of `type`: every
+   * stored item, each with its key and the package it is held for. Optional;
+   * `MetadataManager.list` and the endpoint index use it for a type stored
+   * per `(package, name)`, and fall back to {@link loadManyKeyed} without it.
+   *
+   * @param type The metadata type
+   * @returns One entry per stored item
+   */
+  loadManySlots?<T = any>(type: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
    * Check if item exists
@@ -191,9 +233,24 @@ export interface MetadataLoader {
    * gated: `MetadataManager` never writes to them at runtime, so it never has a
    * deletion of its own to take back.
    *
+   * [ADR-0150 D4, #32198] `options.packageId` is passed only when one package's
+   * item of a type stored per `(package, name)` is removed while another
+   * package may hold the same name. The loader then deletes its row of the
+   * name only when that row holds THAT package's item, and keeps a row that
+   * holds another package's item or one it cannot attribute — ⛔ never
+   * another package's stored item. A loader that ignores the option deletes by
+   * name, as every delete did before.
+   *
    * @param type The metadata type
    * @param name The item name
+   * @param options `packageId`: delete only that package's row of the name
    */
-  delete?(type: string, name: string): Promise<void>;
+  delete?(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void>;
+}
+
+/** [ADR-0150 D4, #32198] How {@link MetadataLoader.delete} scopes a removal. */
+export interface MetadataLoaderDeleteOptions {
+  /** Delete the name's row only when it holds this package's item. */
+  packageId?: string;
 }
 

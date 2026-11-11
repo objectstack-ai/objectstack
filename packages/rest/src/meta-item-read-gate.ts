@@ -209,8 +209,13 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
      * Absent, or a registry that cannot answer, is "not withheld": the answer
      * before #24210. A REJECTION is a fault and propagates, ⛔ never "not
      * withheld".
+     *
+     * [#32076] Asked at the member the layers were read at: the plain read
+     * it stands on reads that member, and a read naming a package is judged
+     * at member grain (ADR-0150 D5), so a dependent's added locale read with
+     * no member would be judged as the base's canonical one and refused.
      */
-    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
+    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string; member?: string }): Promise<boolean>;
     /**
      * [#28337, ADR-0048] The refusal of a layered read that names NO package,
      * of a name whose active rows two or more packages hold: the protocol's
@@ -2369,10 +2374,35 @@ export const META_ITEM_MEMBER_PARAM = 'member';
  * branch, `package` through `metaItemPackageBinding`, `layers` through
  * `wantsMetaItemLayers`, `locale` through `metaRequestLocale` behind
  * `createMetaItemAnswer`, and the member through {@link metaMemberSelector}.
+ *
+ * [ADR-0150 D3, #32310] …and {@link META_ITEM_CALLER_PACKAGE_PARAM}, the caller
+ * arm: read by both transports before the item read, which it rewrites to the
+ * resolved holder's `?package=` (rule 4 of {@link metaItemQueryRefusal} keeps
+ * it to the types that serve it).
  */
 export const META_ITEM_READ_PARAMS: readonly string[] = [
-    'layers', 'state', 'preview', 'package', 'locale', META_ITEM_MEMBER_PARAM,
+    'layers', 'state', 'preview', 'package', 'locale', META_ITEM_MEMBER_PARAM, 'callerPackage',
 ];
+
+/**
+ * [ADR-0150 D3, #32310] The caller arm of the by-name read: the package the
+ * READER belongs to (a dashboard, report or list view's chart in package P),
+ * from which the name resolves by D3 — P's own item, else the unique holder in
+ * P's declared closure plus `sys`, else `409 RESOURCE_CONFLICT` naming the
+ * candidates. Distinct from `?package=`, the exact qualifier (D5), which names
+ * the HOLDER. A package id, never a namespace; read only from this parameter,
+ * ⛔ never from a header or the session.
+ */
+export const META_ITEM_CALLER_PACKAGE_PARAM = 'callerPackage';
+
+/**
+ * [ADR-0150 D3, #32310] The types whose by-name read takes
+ * {@link META_ITEM_CALLER_PACKAGE_PARAM}: `dataset`, the one type whose
+ * readers know the package they belong to and may name a dependency's item.
+ * Every other type refuses the arm `400` (rule 4 of
+ * {@link metaItemQueryRefusal}), ⛔ never reads it as absent.
+ */
+export const META_ITEM_CALLER_PACKAGE_TYPES: readonly string[] = Object.freeze(['dataset']);
 
 /**
  * [#23072] The closed set of `PUT {metaPath}/:type/:name` (the save).
@@ -2458,7 +2488,7 @@ const META_ITEM_QUERY_DOORS: Readonly<Record<MetaItemQueryDoor, {
 }>> = Object.freeze({
     item: {
         accepted: META_ITEM_READ_PARAMS,
-        once: ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM],
+        once: ['layers', 'state', 'preview', 'package', META_ITEM_MEMBER_PARAM, META_ITEM_CALLER_PACKAGE_PARAM],
     },
     layers: { accepted: META_ITEM_LAYERS_PARAMS, once: ['package', META_ITEM_MEMBER_PARAM] },
     published: { accepted: META_ITEM_PUBLISHED_PARAMS, once: [] },
@@ -2484,7 +2514,8 @@ export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter' | 'names-on-package';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter' | 'names-on-package'
+        | 'caller-package';
 }
 
 /**
@@ -2510,6 +2541,14 @@ export interface MetaItemQueryRefusal {
  *     refused rather than answered with another member's layers. [#26699] The
  *     `layers` door's own set takes the member; only the deprecated spelling
  *     stays member-less.
+ *  4. **`item` only: the caller arm** ([ADR-0150 D3, #32310],
+ *     {@link META_ITEM_CALLER_PACKAGE_PARAM}) — refused when it names no
+ *     package, beside `?package=` (two addresses on one read: the exact
+ *     qualifier and the caller's resolution; neither is picked), or on a
+ *     `target.type` outside {@link META_ITEM_CALLER_PACKAGE_TYPES} (a type
+ *     that does not serve it; an unnamed type fails closed). `all` names no
+ *     package, as it does for `?package=`. Answered at the entry, with rules 1
+ *     and 2, and asked before rule 3, which the transports answer later.
  *
  * `undefined` — go on, nothing sent — otherwise. A query that is not an object
  * carries no name, so it is judged by rule 3 alone (and passes it).
@@ -2528,7 +2567,11 @@ export interface MetaItemQueryRefusal {
  * (`resolveBundleMemberSelector` in `@objectstack/metadata-protocol`), once,
  * for every transport — see {@link metaMemberSelector}.
  */
-export function metaItemQueryRefusal(door: MetaItemQueryDoor, query: unknown): MetaItemQueryRefusal | undefined {
+export function metaItemQueryRefusal(
+    door: MetaItemQueryDoor,
+    query: unknown,
+    target?: { readonly type?: unknown },
+): MetaItemQueryRefusal | undefined {
     const { accepted, once } = META_ITEM_QUERY_DOORS[door];
     if (query && typeof query === 'object') {
         const unknownMessage = unknownQueryParamRefusalMessage(query, accepted);
@@ -2538,12 +2581,109 @@ export function metaItemQueryRefusal(door: MetaItemQueryDoor, query: unknown): M
         const repeated = repeatedOnceRefusal(query as Record<string, unknown>, once);
         if (repeated) return repeated;
     }
+    // [#32310] Rule 4 is asked BEFORE rule 3, never after it: both transports
+    // let rule 3 through at the entry (they answer it later, where the read
+    // chooses the layered view) and resolve the caller arm before that, so a
+    // rule 4 refusal decided after rule 3 was never answered — the arm then
+    // resolved on a type that does not serve it, or beside `?package=`.
+    if (door === 'item' && query && typeof query === 'object') {
+        const message = metaItemCallerPackageRefusalMessage(query as Readonly<Record<string, unknown>>, target?.type);
+        if (message !== undefined) return { status: 400, code: 'VALIDATION_ERROR', message, rule: 'caller-package' };
+    }
     if (door === 'item'
         && wantsMetaItemLayers(query as Readonly<Record<string, unknown>> | undefined)
         && metaMemberSelector(query).member !== undefined) {
         return { status: 400, code: 'VALIDATION_ERROR', message: LAYERED_VIEW_MEMBER_MESSAGE, rule: 'layered-member' };
     }
     return undefined;
+}
+
+/**
+ * [ADR-0150 D3, #32310] Rule 4 of {@link metaItemQueryRefusal}: why the caller
+ * arm cannot be read on this read, or `undefined` when it is absent or
+ * readable. Each sentence names both parameters, so a caller sees which
+ * address it sent and which one it meant. The dataset query door
+ * (`POST /analytics/dataset/query`, `type` `dataset`) asks it too, so the arm
+ * refuses in one set of words on every door that takes it.
+ */
+export function metaItemCallerPackageRefusalMessage(
+    query: Readonly<Record<string, unknown>>,
+    type: unknown,
+): string | undefined {
+    if (!Object.prototype.hasOwnProperty.call(query, META_ITEM_CALLER_PACKAGE_PARAM)) return undefined;
+    const caller = query[META_ITEM_CALLER_PACKAGE_PARAM];
+    // `all` is refused with the blank value: the exact qualifier reads it as
+    // naming no package (`metaItemPackageBinding`), so an `all` that reached
+    // the resolution would fall through to the bare read, which the arm never
+    // answers.
+    if (typeof caller !== 'string' || caller.trim() === '' || caller === 'all') {
+        return `\`?${META_ITEM_CALLER_PACKAGE_PARAM}=\` must name the package id of the item that reads this one; it names `
+            + 'no package. Send the reader\'s package id, or address the holder exactly with `?package=`.';
+    }
+    if (query.package !== undefined) {
+        return `\`?${META_ITEM_CALLER_PACKAGE_PARAM}=\` (the reader's package, resolved by its dependencies) and `
+            + '`?package=` (the holder, exactly) name two addresses on one read, and neither is picked. Send one of the two '
+            + '(ADR-0150 D3, D5).';
+    }
+    const singular = typeof type === 'string' ? pluralToSingular(type) : undefined;
+    if (singular === undefined || !META_ITEM_CALLER_PACKAGE_TYPES.includes(singular)) {
+        return `\`?${META_ITEM_CALLER_PACKAGE_PARAM}=\` is served on the by-name read of ${META_ITEM_CALLER_PACKAGE_TYPES.join(', ')} `
+            + `only, not ${typeof type === 'string' && type !== '' ? `'${type}'` : 'this type'}. Read this item bare, or `
+            + 'address its holder exactly with `?package=`.';
+    }
+    return undefined;
+}
+
+/**
+ * [ADR-0150 D3, #32310] The protocol read the caller arm asks
+ * (`ObjectStackProtocolImplementation.resolveCallerPackageAddress` in
+ * `@objectstack/metadata-protocol`, spelled structurally and feature-detected:
+ * this package reaches the protocol as a service).
+ */
+export interface MetaCallerPackageProtocol {
+    resolveCallerPackageAddress?(request: { type: string; name: string; callerPackageId: string; member?: string }):
+        | { readonly kind: 'package'; readonly packageId: string }
+        | { readonly kind: 'environment' };
+}
+
+/**
+ * [ADR-0150 D3, #32310] THE caller arm of the by-name item read, for both
+ * transports: when `query` carries {@link META_ITEM_CALLER_PACKAGE_PARAM}
+ * (rule 4 of {@link metaItemQueryRefusal} has admitted it), resolve the name
+ * from that package by D3 and answer the query the item read then reads — the
+ * resolved holder as `?package=`, the exact qualifier, with the caller arm
+ * removed — so the holder's bound overlay, drafts, lock and every read gate
+ * after it answer exactly as that address answers. `undefined` when the query
+ * names no caller.
+ *
+ * @throws the protocol's `PackageScopedNameRefusedError` (`409
+ *   RESOURCE_CONFLICT`, naming the candidates) when the rule refuses.
+ * @throws `503 SERVICE_UNAVAILABLE` when the composed protocol cannot resolve
+ *   by caller: the arm fails closed, ⛔ never a bare read.
+ */
+export function metaCallerPackageQuery(
+    protocol: unknown,
+    request: { readonly type: string; readonly name: string; readonly member?: string },
+    query: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined {
+    const callerPackageId = query?.[META_ITEM_CALLER_PACKAGE_PARAM];
+    if (typeof callerPackageId !== 'string') return undefined;
+    const resolver = (protocol as MetaCallerPackageProtocol | undefined)?.resolveCallerPackageAddress;
+    if (typeof resolver !== 'function') {
+        throw Object.assign(
+            new Error(`The ${request.type} "${request.name}" could not be resolved from package "${callerPackageId}": this `
+                + "deployment's metadata protocol has no caller-package resolution. This is a server-side fault."),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+    const address = resolver.call(protocol, {
+        type: pluralToSingular(request.type),
+        name: request.name,
+        callerPackageId,
+        ...(request.member !== undefined ? { member: request.member } : {}),
+    });
+    const { [META_ITEM_CALLER_PACKAGE_PARAM]: _caller, ...rest } = query as Record<string, unknown>;
+    return address.kind === 'package' ? { ...rest, package: address.packageId } : rest;
 }
 
 /**
@@ -4815,7 +4955,9 @@ export function createMetaLayeredAnswer(
         // 1b. [#7557, #24210] A disabled package's item is that same absence,
         //     for every caller: before the gate, so no author is served it.
         if (metaType !== 'object'
-            && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
+            && await sources.isItemOfDisabledPackage?.({
+                type: metaType, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+            }) === true) {
             return { kind: 'refuse', refusal: { reason: 'absent' } };
         }
 

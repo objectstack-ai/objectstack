@@ -59,7 +59,7 @@ import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
-import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
+import { ROLLUP_AGGREGATE_OPTION, assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
 import {
     assertAggregatedColumnsAreDistinct,
     assertDateBucketTargetsAreTemporal,
@@ -924,7 +924,13 @@ export class DeleteAndAggregateFacet {
       // amount that does not group by its code field: the rows hold amounts in
       // different currencies, which add into one number under one label.
       // After the type door, so a type it refuses keeps that door's words.
-      assertRecordCurrencyAggregatesGrouped(object, this._registry.getObject(object), query.groupBy, query.aggregations);
+      // [ADR-0144 D6, amended] A roll-up's own recompute names the
+      // master_detail it totals one parent's rows through, on a module-private
+      // symbol no door can set: an amount following that parent is one currency.
+      assertRecordCurrencyAggregatesGrouped(
+        object, this._registry.getObject(object), query.groupBy, query.aggregations,
+        (options as Record<symbol, unknown> | undefined)?.[ROLLUP_AGGREGATE_OPTION],
+      );
       // [#25818] …and the two shapes that answered a plausible wrong table: a
       // `dateGranularity` over a field declared neither a date nor a datetime
       // (every row in one null bucket), and two columns of the aggregated row

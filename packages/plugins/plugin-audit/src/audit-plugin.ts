@@ -8,14 +8,28 @@ import {
   type TenancyServiceResolver,
 } from '@objectstack/core';
 import type {
+  IAuditCheckpointSigner,
+  IAuditCheckpointSink,
   IAuthService,
+  IClusterService,
+  ICryptoProvider,
   IDataEngine,
   IHttpServer,
   II18nService,
   ISecurityService,
   ISharingService,
 } from '@objectstack/spec/contracts';
-import { SysAuditLog, SysActivity, SysComment, SysCommentReaction } from './objects/index.js';
+import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
+import { AuditSealer, type AuditSealerEngine } from './audit-seal/sealer.js';
+import { LocalCheckpointSigner } from './audit-seal/signer.js';
+import {
+  SysAuditLog,
+  SysActivity,
+  SysComment,
+  SysCommentReaction,
+  SysAuditCheckpoint,
+  SysAuditSigningKey,
+} from './objects/index.js';
 import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
 // It has landed, so the contribution moved to @objectstack/service-messaging —
@@ -113,6 +127,17 @@ export interface AuditPluginOptions {
    * the English literal.
    */
   getLocale?: (tenantId?: string, userId?: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * [ADR-0154 D2, D6] The crypto provider the audit sealer seals each
+   * checkpoint's seed under, and the default checkpoint signer seals its
+   * private key under (scope `audit_seal`). The host composes it here.
+   *
+   * Absent, nothing is sealed: an object that declares `lifecycle.seal` is
+   * reported once, at `error`, naming the consequence and this option as the
+   * fix. A host that registers its own `audit.checkpointSigner` still needs
+   * it, for the seeds.
+   */
+  cryptoProvider?: ICryptoProvider;
 }
 
 /**
@@ -268,6 +293,8 @@ export class AuditPlugin implements Plugin {
    * succeeded.
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
+  /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
+  private sealer: AuditSealer | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -288,7 +315,12 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
+      // [ADR-0154] The checkpoints and the signing keys are registered ahead
+      // of the sealer and signer that write them (#31908 P1b-1), so their
+      // tables, translations and `get` / `list` doors exist when the sealer
+      // lands. `sys_audit_amendment` is registered with its first writer, the
+      // redaction amendments of P3; until then it is declared and unregistered.
+      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey],
       // The ledger row's record page: its fields, and every ledger row about
       // the same record beside it, so a `config_change` row sits next to the
       // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
@@ -685,7 +717,44 @@ export class AuditPlugin implements Plugin {
             'serve every parent field value it carries)',
         );
       }
+
+      // [ADR-0154 D3] The sealer starts last, once the tables it reads and
+      // writes are provisioned. It seals only objects that declare
+      // `lifecycle.seal`, re-read on every pass.
+      this.startSealer(engine, ctx);
     });
+  }
+
+  /**
+   * Start the audit sealer (ADR-0154 D3) over the engine's storage. The
+   * signer and the sink are resolved per pass from the `audit.checkpointSigner`
+   * and `audit.checkpointSink` slots (D11), the signer falling back to the
+   * default local key of D6; the `cluster` service, when registered, holds the
+   * `audit.sealer` lock. An engine without the storage surface the sealer
+   * reads (a test double) starts no sealer.
+   */
+  private startSealer(engine: IDataEngine, ctx: PluginContext): void {
+    const storage = engine as unknown as Partial<AuditSealerEngine>;
+    if (typeof storage.getDriverForObject !== 'function' || typeof storage.registry?.getAllObjects !== 'function') return;
+    const sealEngine = storage as AuditSealerEngine;
+    const crypto = this.options.cryptoProvider;
+    const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
+    const optional = <T>(name: string): T | undefined => {
+      try {
+        return ctx.getService<T>(name) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    this.sealer = new AuditSealer({
+      engine: sealEngine,
+      ...(crypto ? { crypto } : {}),
+      signer: () => optional<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE) ?? localSigner,
+      sink: () => optional<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
+      cluster: () => optional<IClusterService>('cluster'),
+      logger: ctx.logger,
+    });
+    this.sealer.start();
   }
 
   /**
@@ -736,7 +805,8 @@ export class AuditPlugin implements Plugin {
    * declared this. If a table is in fact missing, the audit writers report the
    * missing-table failure at `error` on the first write that needs it, and
    * `os migrate apply`, the documented path, was measured to create all four
-   * tables. `syncObjectSchema` itself stays ungated, because it is also how a
+   * tables this method provisioned then (the two ADR-0154 tables were added
+   * after that measurement and take the same path). `syncObjectSchema` itself stays ungated, because it is also how a
    * runtime publish gives a new object its table.
    *
    * ## Why this method reports where each table landed (#4887)
@@ -763,7 +833,7 @@ export class AuditPlugin implements Plugin {
    * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction];
+    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey];
     // [#22984] FIRST: a deployment that declared its DDL managed out-of-band
     // gets none from here either. See "Why the flag skips this provisioning".
     if (bootSchemaSyncSkipped(engine)) {
@@ -779,8 +849,7 @@ export class AuditPlugin implements Plugin {
       // wholesale" and "provisioning ran fine" produced identical logs. Name
       // the consequence, not just the condition.
       ctx.logger.warn(
-        'AuditPlugin: this engine exposes no syncObjectSchema() — sys_audit_log / sys_activity / sys_comment / ' +
-          'sys_comment_reaction were NOT ' +
+        `AuditPlugin: this engine exposes no syncObjectSchema() — ${objects.map((obj) => obj.name).join(' / ')} were NOT ` +
           'provisioned up-front and stay lazy-created on first WRITE. An env that READS one first (the home page ' +
           'activity feed queries sys_activity before any mutation) will log "no such table" until something writes to it.',
       );
@@ -896,6 +965,11 @@ export class AuditPlugin implements Plugin {
    * clean shutdown into a failed one.
    */
   async destroy(): Promise<void> {
+    // [ADR-0154 D3] The sealer first: a pass in flight finishes or fails
+    // before the process lets go, and never starts again.
+    const sealer = this.sealer;
+    this.sealer = null;
+    await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;
     if (writer) await writer.stop();

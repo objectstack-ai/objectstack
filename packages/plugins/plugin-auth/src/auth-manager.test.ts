@@ -19,8 +19,15 @@ vi.mock('better-auth/plugins/organization', () => ({
   organization: vi.fn((opts: any) => ({ id: 'organization', _opts: opts })),
 }));
 
+// The vendor's shape includes the password sign-in challenge after-hook: the
+// build refuses a two-factor plugin without one (fail closed), see
+// `second-factor-code-and-link-doors.ts`.
 vi.mock('better-auth/plugins/two-factor', () => ({
-  twoFactor: vi.fn((opts: any) => ({ id: 'two-factor', _opts: opts })),
+  twoFactor: vi.fn((opts: any) => ({
+    id: 'two-factor',
+    _opts: opts,
+    hooks: { after: [{ matcher: (ctx: any) => ctx?.path === '/sign-in/email', handler: async () => undefined }] },
+  })),
 }));
 
 vi.mock('better-auth/plugins/magic-link', () => ({
@@ -3222,8 +3229,9 @@ describe('AuthManager', () => {
         degradedTenancy: false,
         // [#25292] `OS_CLOUD_MANAGED` is unset here, so not managed.
         cloudManaged: false,
-        // No `developerEditionCreate` host option here, so no Developer
-        // Edition choice is advertised.
+        // No `organizationEditions` host option here, so no organization-create
+        // choice is served (no `organizationEditions` key at all) and the
+        // derived Developer Edition flag is false.
         developerEditionCreate: false,
         privacyUrl: 'https://objectstack.ai/privacy',
         termsUrl: 'https://objectstack.ai/terms',
@@ -3251,16 +3259,163 @@ describe('AuthManager', () => {
       expect((manager.getPublicConfig() as any).features.cloudManaged).toBe(false);
     });
 
-    // `features.developerEditionCreate` is the host option advertised as is:
-    // true only where the host set it, false otherwise (never absent, so the
-    // served key set stays the registry's).
-    it('serves features.developerEditionCreate from the host option', () => {
+    // `features.organizationEditions` is the host's organization-create choices,
+    // served only when the host declares some, its words exactly as given (the
+    // host resolves them in the request language; this package carries none).
+    // `features.developerEditionCreate` is derived from them.
+    describe('features.organizationEditions from the host option', () => {
       const base = { secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' };
-      const served = (options: Partial<ConstructorParameters<typeof AuthManager>[0]>) =>
-        (new AuthManager({ ...base, ...options }).getPublicConfig() as any).features.developerEditionCreate;
-      expect(served({ developerEditionCreate: true })).toBe(true);
-      expect(served({ developerEditionCreate: false })).toBe(false);
-      expect(served({})).toBe(false);
+      const features = (
+        options: Partial<ConstructorParameters<typeof AuthManager>[0]>,
+        request?: unknown,
+      ) => (new AuthManager({ ...base, ...options }).getPublicConfig(request) as any).features;
+      const developer = {
+        edition: 'developer',
+        label: 'Edition label as the host wrote it',
+        hint: 'Hint line as the host wrote it — «quoted», 5 members',
+        memberLimit: 5,
+      };
+
+      it('serves the declared choices with their labels and hints unchanged', () => {
+        const served = features({ organizationEditions: () => [developer] });
+        expect(served.organizationEditions).toEqual([developer]);
+        expect(served.developerEditionCreate).toBe(true);
+      });
+
+      it('CONTROL: no host option serves no choices and a false flag', () => {
+        const served = features({});
+        expect(served).not.toHaveProperty('organizationEditions');
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('an empty answer serves no choices either', () => {
+        const served = features({ organizationEditions: () => [] });
+        expect(served).not.toHaveProperty('organizationEditions');
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('the flag is true only when a developer choice is served', () => {
+        const other = { edition: 'trial', label: 'L', hint: 'H' };
+        const served = features({ organizationEditions: () => [other] });
+        expect(served.organizationEditions).toEqual([other]);
+        expect(served.developerEditionCreate).toBe(false);
+      });
+
+      it('hands the host the request\'s accept-language, and nothing without a request', () => {
+        const host = vi.fn(() => [developer]);
+        features({ organizationEditions: host }, new Request('http://localhost/x', { headers: { 'accept-language': 'ja-JP' } }));
+        features({ organizationEditions: host });
+        expect(host.mock.calls).toEqual([[{ acceptLanguage: 'ja-JP' }], [{ acceptLanguage: undefined }]]);
+      });
+
+      // Fail-soft by ruling: getPublicConfig() also feeds the login page and the
+      // sign-in checks, so a bad host answer serves no choices and is reported
+      // once, never thrown.
+      describe('a host answer the public contract rejects', () => {
+        const withLogger = (organizationEditions: (r: { acceptLanguage?: string }) => readonly any[]) => {
+          const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+          const manager = new AuthManager({ ...base, logger, organizationEditions } as any);
+          return { manager, logger };
+        };
+
+        it.each([
+          ['a blank translated hint', () => [{ ...developer, hint: '   ' }], '0.hint'],
+          ['an edition value used twice', () => [developer, { ...developer, label: 'Other' }], '(list)'],
+        ])('%s: the config is served without the key, the flag false, one error logged', (_name, answer, where) => {
+          const { manager, logger } = withLogger(answer);
+          const served = (manager.getPublicConfig() as any).features;
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(served.twoFactor).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          const [message, meta] = logger.error.mock.calls[0]!;
+          expect(message).toMatch(/AuthManagerOptions\.organizationEditions/);
+          expect(meta).toEqual({ option: 'AuthManagerOptions.organizationEditions', firstIssue: expect.stringMatching(new RegExp(`^${where.replace(/[.()]/g, '\\$&')}: `)) });
+
+          // The same failure again is not reported again.
+          manager.getPublicConfig();
+          expect(logger.error).toHaveBeenCalledTimes(1);
+        });
+
+        it('an option that throws: same fail-soft answer, one error naming its class, the message in the meta', () => {
+          const { manager, logger } = withLogger(() => { throw new Error('copy bundle missing'); });
+          const served = (manager.getPublicConfig() as any).features;
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          expect(logger.error.mock.calls[0]![1]).toEqual({
+            option: 'AuthManagerOptions.organizationEditions',
+            firstIssue: 'the option threw (Error)',
+            error: 'copy bundle missing',
+          });
+        });
+
+        // The host's only input is an anonymous caller's accept-language. A host
+        // that quotes it in its error must not grow the memo or the log per
+        // distinct header.
+        it('a throw quoting the caller\'s header: two different messages, one memo entry, one error line', () => {
+          const { manager, logger } = withLogger(({ acceptLanguage }) => {
+            throw new Error(`no copy for ${acceptLanguage}`);
+          });
+          const ask = (language: string) =>
+            manager.getPublicConfig(new Request('http://localhost/x', { headers: { 'accept-language': language } }));
+          ask('xx-AAAA');
+          ask('yy-BBBB');
+          expect(logger.error).toHaveBeenCalledTimes(1);
+          expect(logger.error.mock.calls[0]![1]).toMatchObject({ error: 'no copy for xx-AAAA' });
+          expect((manager as any).reportedOrganizationEditionFailures.size).toBe(1);
+        });
+
+        it('the memo and the error log stop at 32 distinct failures', () => {
+          let n = 0;
+          const { manager, logger } = withLogger(() => {
+            const error = new Error('varies');
+            error.name = `HostError${n++}`;
+            throw error;
+          });
+          for (let i = 0; i < 40; i++) manager.getPublicConfig();
+          expect(logger.error).toHaveBeenCalledTimes(32);
+          expect((manager as any).reportedOrganizationEditionFailures.size).toBe(32);
+        });
+
+        it('a host logger that throws cannot escape getPublicConfig()', () => {
+          const logger = {
+            info: vi.fn(),
+            warn: vi.fn(() => { throw new Error('logger down'); }),
+            error: vi.fn(() => { throw new Error('logger down'); }),
+          };
+          const manager = new AuthManager({
+            ...base, logger, organizationEditions: () => [{ ...developer, hint: '' }],
+          } as any);
+          let served: any;
+          expect(() => { served = (manager.getPublicConfig() as any).features; }).not.toThrow();
+          expect(served).not.toHaveProperty('organizationEditions');
+          expect(served.developerEditionCreate).toBe(false);
+          expect(logger.error).toHaveBeenCalledTimes(1);
+        });
+
+        it('an option that answers a rejecting promise: refused by name, the rejection handled', async () => {
+          const unhandled: unknown[] = [];
+          const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+          process.on('unhandledRejection', onUnhandled);
+          try {
+            const { manager, logger } = withLogger(
+              (() => Promise.reject(new Error('bundle load failed'))) as any,
+            );
+            const served = (manager.getPublicConfig() as any).features;
+            expect(served).not.toHaveProperty('organizationEditions');
+            expect(served.developerEditionCreate).toBe(false);
+            expect(logger.error.mock.calls[0]![1]).toEqual({
+              option: 'AuthManagerOptions.organizationEditions',
+              firstIssue: 'the option answered a promise; it must answer the list synchronously',
+            });
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            expect(unhandled).toEqual([]);
+          } finally {
+            process.off('unhandledRejection', onUnhandled);
+          }
+        });
+      });
     });
 
     // Enterprise SSO (@better-auth/sso) is opt-in: the plugin is only wired

@@ -134,7 +134,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -185,9 +185,9 @@
           "evidence": "the 401 response incl. headers"
         },
         {
-          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set over /api/v1/mcp (the HTTP door) is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, delete_records, list_actions, run_action, resume_run, validate_expression, read_file, create_upload_link: 15 tools. list_remote_tables and import_object are not in it: they register only for a token whose scopes name metadata:write (registerFederationTools, the same file), so a key or a session never lists them. The stdio door on the same build serves 10 of these: every tool but the action family (list_actions, run_action, resume_run) and the file pair (read_file, create_upload_link). The tool set is a function of the bridge (wireBridgeTools, packages/mcp/src/mcp-http-tools.ts), and the stdio data bridge implements no action methods and neither readRecordFile nor createUploadLink (createStdioDataBridge, packages/mcp/src/stdio-data-bridge.ts), so a stdio count of 10 is not a shortfall against this clause",
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set over /api/v1/mcp (the HTTP door) is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, delete_records, list_actions, run_action, resume_run, validate_expression, read_file, create_upload_link, list_datasets, query_dataset: 17 tools. list_remote_tables and import_object are not in it: they register only for a token whose scopes name metadata:write (registerFederationTools, the same file), so a key or a session never lists them. The stdio door on the same build serves 12 of these: every tool but the action family (list_actions, run_action, resume_run) and the file pair (read_file, create_upload_link). The tool set is a function of the bridge (wireBridgeTools, packages/mcp/src/mcp-http-tools.ts), and the stdio data bridge implements no action methods and neither readRecordFile nor createUploadLink (createStdioDataBridge, packages/mcp/src/stdio-data-bridge.ts), so a stdio count of 12 is not a shortfall against this clause. The dataset pair (list_datasets, query_dataset) is on both doors: it registers wherever the bridge carries the service-analytics dataset executor (registerDatasetTools, the same file; the stdio bridge takes it as datasetTools, packages/mcp/src/plugin.ts), and analytics is the foundational capability the showcase always loads",
           "oracle": "network",
-          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, resume_run only when the host cannot resume runs, and read_file / create_upload_link only when the bridge implements no readRecordFile / createUploadLink — all graceful degradation; record which)",
+          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, resume_run only when the host cannot resume runs, read_file / create_upload_link only when the bridge implements no readRecordFile / createUploadLink, and list_datasets / query_dataset only when the bridge carries no dataset executor (no analytics service) — all graceful degradation; record which)",
           "evidence": "the session trace + tool-name list"
         },
         {
@@ -226,7 +226,8 @@
           "ref": "#25807"
         },
         { "revision": 8, "date": "2026-10-31", "change": "acceptance[4] names its transport. Checklist-accuracy finding of QA run #27409 (18.3.0 sweep, wave 3, Tier 1 half A, at c4c515ad; sweep anchor #27377): the HTTP door listed the twelve, while the stdio door on the same build listed 9 with no action family, and the clause did not say which door 'the documented twelve' meant. It now names /api/v1/mcp and says why stdio serves 9. Re-read at base 488b3ed0: packages/mcp/src/mcp-http-tools.ts wireBridgeTools (the action pair registers only when the bridge implements listActions and runAction), packages/mcp/src/stdio-data-bridge.ts createStdioDataBridge (an McpDataBridge, no action methods). The HTTP assertion is unchanged", "ref": "#27409" },
-        { "revision": 9, "date": "2026-11-08", "change": "acceptance[4].clause and .verify name the HTTP tool set as 15: delete_records, read_file and create_upload_link joined the 12 it listed, and the stdio door serves 10 (its former 9 plus delete_records). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb): tools/list answered 15 on a keyed session. Read at base 4894cfe1", "ref": "#31499" }
+        { "revision": 9, "date": "2026-11-08", "change": "acceptance[4].clause and .verify name the HTTP tool set as 15: delete_records, read_file and create_upload_link joined the 12 it listed, and the stdio door serves 10 (its former 9 plus delete_records). Checklist-accuracy finding of QA run #31486 (owed:weekly, at 0647dabb): tools/list answered 15 on a keyed session. Read at base 4894cfe1", "ref": "#31499" },
+        { "revision": 10, "date": "2026-11-10", "change": "acceptance[4].clause and .verify name the HTTP tool set as 17 and the stdio set as 12: list_datasets and query_dataset (ADR-0149 D2) register on both doors where the bridge carries the dataset executor, and analytics is foundational, so the showcase serves them. Read from source at 9091955b (packages/mcp/src/mcp-http-tools.ts registerDatasetTools; packages/mcp/src/stdio-data-bridge.ts, the datasetTools members; packages/mcp/src/plugin.ts datasetToolsService); no live count was made. The dataset tools themselves are ai.mcp-dataset-tools. Scoped sweep #32269 (epic #32022 M3, theme 7)", "ref": "#32269" }
       ]
     },
     {
@@ -985,14 +986,14 @@
       "title": "MCP names package items by their face: prompts/list serves NS-NAME for a package skill and the bare name for an environment skill, list_actions rows carry namespace and face, run_action takes namespace, and a name two holders share is refused naming the faces",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin holding an osk_ API key, over MCP HTTP"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr_a, namespace qa_a) and qa_b (manifest id com.qa.addr_b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
+          "two scratch packages, each its own scratch app directory (never the shared examples): qa_a (manifest id com.qa.addr-a, namespace qa_a) and qa_b (manifest id com.qa.addr-b, namespace qa_b), each a defineStack({ manifest: { id, namespace, version, type: 'app' }, … }) project compiled with `objectstack build` and installed into the boot with `os package install DIR/dist/objectstack.json` (admin credentials), so the registry holds every item under its package. Neither declares a dependency on the other unless a step says so. Each holds a skill qa_triage with instructions (skill is narrowed to one holder per namespace, so two namespaces may each hold it); qa_a also holds an object-less action qa_a_ping and an object qa_a_ticket with an embedded action escalate. One skill name long enough that NS-NAME passes 64 characters",
           "an environment skill qa_env_triage (PUT /api/v1/meta/skill/qa_env_triage with tools: [] and instructions)",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ]
@@ -1058,6 +1059,413 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child G2, the MCP faces and namespace (#31955). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-10",
+          "change": "fixture-text correction, no clause change: the scratch package ids are re-spelled with a hyphen (com.qa.addr-a, com.qa.addr-b) everywhere this item names them (fixtures), because `objectstack build` refuses an underscore in a package id (packages/spec/src/kernel/manifest.zod.ts#MANIFEST_ID_PATTERN, refused with manifestIdRefusal). The namespaces qa_a and qa_b and every namespace-qualified address are unchanged. No step, clause or variant changes meaning. Found by the M4 verification run (#32316, FOLLOW-UPS §19b); card #32330",
+          "ref": "#32330"
+        }
+      ]
+    },
+    {
+      "id": "ai.pending-action-held-approval",
+      "title": "An AI pending action held for an approver shows as 'Waiting for approval' in the chat and the AI approvals inbox, and resolves when the approver decides",
+      "since": null,
+      "status": "planned",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "a member whose AI tool call is held for approval",
+        "the approver who decides it"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an AI service that produces a pending action in status held (none in the open tree, see source)"
+        ]
+      },
+      "acceptance": [
+        {
+          "clause": "a held pending action is listed as held, labelled Waiting for approval, and moves to the approver's decision",
+          "oracle": "api",
+          "verify": "read the pending action's status before and after the decision, and the inbox label beside it",
+          "evidence": "both reads and a screenshot of the inbox row"
+        }
+      ],
+      "source": [
+        "packages/spec/src/contracts/ai-service.ts#PendingActionStatus (declares held)",
+        "packages/spec/src/api/protocol.zod.ts#AiPendingActionStatusSchema",
+        "ui/packages/plugin-chatbot/src/AiPendingActionsInbox.tsx (renders aiApprovals.statusHeld, 'Waiting for approval')",
+        "packages/mcp/src/types.ts#McpToolCallRefusal (names a later hold outcome; deny is the only one today)",
+        "at the base sha no open-tree producer sets held: the AI service that would is Cloud/EE (ai.open-edition-honest-degradation)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — planned. The spec and the console declare a held pending-action status; no open-tree producer sets it at the base sha. Scoped sweep #32269 (epic #32022 M3, theme 6), read from source at 9091955b. Steps arrive with a producer, in the edit that promotes this item after a run in which it passes",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "ai.mcp-dataset-tools",
+      "title": "MCP serves the governed datasets: list_datasets lists each dataset this caller may query with its members and reports which terms match which member, and query_dataset answers rows with provenance, a row count and a truncation fact, never SQL",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin holding an osk_ API key, over MCP HTTP"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`. Analytics is a foundational capability the showcase loads (packages/core/src/capability-providers.ts), so the dataset pair registers",
+          "MCP HTTP reachable with an osk_ key minted via POST /api/v1/keys (see ai.mcp-http-surface): initialize, then tools/call",
+          "the showcase datasets showcase_invoice_metrics (object showcase_invoice; dimensions status, region, issued_on, account; measures invoice_count 'Invoices', total_home_sum, paid_count, paid_rate) and showcase_account_metrics (examples/app-showcase/src/ui/datasets/revenue-pulse.dataset.ts), and showcase_task_metrics (chart-gallery.dataset.ts). The seeded invoices hold at least two statuses"
+        ]
+      },
+      "steps": [
+        "tools/list; record whether list_datasets and query_dataset are listed, with their descriptions",
+        "call list_datasets {}; then list_datasets { terms: ['invoices', 'status', 'qa_no_word'] }",
+        "call query_dataset { datasetName: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'], dimensions: ['status'] } }",
+        "the same with selection.limit: 1",
+        "query_dataset { datasetName: 'qa_no_such_dataset', selection: { measures: ['invoice_count'] } }",
+        "query_dataset { dataset: 'showcase_invoice_metrics', selection: { measures: ['invoice_count'] } }; then { datasetName: 'showcase_invoice_metrics', measures: ['invoice_count'] }"
+      ],
+      "acceptance": [
+        {
+          "clause": "a keyed session lists both tools, each described with the selection rule the model reads",
+          "oracle": "network",
+          "verify": "tools/list names list_datasets and query_dataset; the list_datasets description says one match on a measure wins and several matches ask the user (packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions; packages/mcp/src/mcp-http-tools.ts#registerDatasetTools)",
+          "evidence": "the two tool entries"
+        },
+        {
+          "clause": "list_datasets answers each dataset with its object, dimensions and measures by name and label, and no dataset body beyond them",
+          "oracle": "network",
+          "verify": "datasets holds showcase_invoice_metrics with object showcase_invoice, dimensions status/region/issued_on/account and measures invoice_count/total_home_sum/paid_count/paid_rate, each with a label; no entry carries `filter`, `sql` or a join (packages/spec/src/ai/dataset-tools.zod.ts#DatasetToolCatalogEntrySchema)",
+          "evidence": "the showcase_invoice_metrics entry"
+        },
+        {
+          "clause": "terms are matched after normalization against name, label and synonym, and each match names its member",
+          "oracle": "network",
+          "verify": "the invoice entry's matches hold { term: 'invoices', member: 'measures.invoice_count', matchedOn: 'label' } and { term: 'status', member: 'dimensions.status', matchedOn: 'name' }; qa_no_word matches nothing anywhere (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm; packages/spec/src/ai/dataset-tools.zod.ts#DatasetTermMatchSchema)",
+          "evidence": "the matches arrays"
+        },
+        {
+          "clause": "query_dataset answers rows with provenance naming the dataset and the members used, rowCount and truncated, and no sql",
+          "oracle": "network",
+          "verify": "rows grouped by status; provenance { kind: 'dataset', dataset: { name: 'showcase_invoice_metrics', label }, measures: [{ name: 'invoice_count', label: 'Invoices' }], dimensions: [{ name: 'status' }] }; rowCount equals rows.length; truncated false; no `sql` key (packages/spec/src/ai/dataset-tools.zod.ts#DatasetProvenanceSchema)",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "the row cap is a fact: a limit below the row count answers that many rows and truncated true",
+          "oracle": "network",
+          "verify": "with selection.limit 1: rowCount 1, one row, truncated true. The cap is the caller's limit when it is under the server's maxQueryLimit (50 by default), and one row past it is fetched so truncated is known (packages/services/service-analytics/src/dataset-tools.ts#DATASET_TOOL_DEFAULT_MAX_ROWS)",
+          "evidence": "the answer"
+        },
+        {
+          "clause": "a dataset that does not exist answers NOT_FOUND in the coded envelope",
+          "oracle": "network",
+          "verify": "isError with { error: { code: 'NOT_FOUND', status: 404, message: 'Dataset \"qa_no_such_dataset\" not found.' } }",
+          "evidence": "the tool result"
+        },
+        {
+          "clause": "an aliased key and a selection member beside `selection` are refused before dispatch with the prescription",
+          "oracle": "network",
+          "verify": "the `dataset` call is refused naming `datasetName`; the top-level `measures` call is refused saying selection members go inside `selection` (packages/spec/src/ai/dataset-tools.zod.ts#QueryDatasetInputSchema)",
+          "evidence": "both refusals"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: a dataset this caller may not query answers the same NOT_FOUND as a missing one, a degraded read answers 503, and a token without data:read registers neither tool",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a `sql` key in a query_dataset answer is a FAIL",
+        "a hidden dataset answering anything but the missing dataset's NOT_FOUND is a FAIL: hidden and missing are one answer",
+        "truncated false on the limit-1 call while more groups exist is a FAIL"
+      ],
+      "traps": [
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-analytics/src/__tests__/dataset-tools.test.ts, packages/mcp/src/mcp-dataset-tools.test.ts, packages/runtime/src/mcp-dataset-tools-bridge.test.ts; no live spec opens a keyed MCP session against the datasets"
+      },
+      "source": [
+        "docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md D2 and D3",
+        "packages/spec/src/ai/dataset-tools.zod.ts#ListDatasetsInputSchema",
+        "packages/spec/src/ai/dataset-tools.zod.ts#QueryDatasetInputSchema",
+        "packages/services/service-analytics/src/dataset-tools.ts#getDatasetToolDefinitions",
+        "packages/mcp/src/mcp-http-tools.ts#registerDatasetTools",
+        "packages/runtime/src/domains/mcp.ts#resolveMcpDatasetToolsService",
+        "packages/mcp/src/plugin.ts#datasetToolsService (the stdio bridge carries the pair too)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0149 D2, the dataset pair on MCP. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "ai.mcp-read-file-pdf-word-extraction",
+      "title": "read_file answers the text of a PDF and a Word document with its facts, stops a long extraction at the CPU-time budget with a note, refuses past the concurrent-reading cap with a retryable 503, and a malformed budget variable fails the boot naming it",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin holding an osk_ API key, over MCP HTTP",
+        "an operator booting the server"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "MCP HTTP reachable with an osk_ key minted via POST /api/v1/keys (see ai.mcp-http-surface): initialize, then tools/call",
+          "three files uploaded into the Receipt file field (`receipt`) of three seeded showcase invoices, through the record form or create_upload_link: a two-page PDF with a text layer, a .docx with a few paragraphs, and a PDF of 150+ text pages for the budget leg. Record each invoice id",
+          "a second boot of the same app with OS_MCP_READ_FILE_CPU_BUDGET_MS=1, and a third attempt with OS_MCP_READ_FILE_CPU_BUDGET_MS=abc"
+        ]
+      },
+      "steps": [
+        "call read_file { objectName: 'showcase_invoice', recordId: PDF_INVOICE, field: 'receipt' }; then the same for the .docx invoice",
+        "call read_file with both field and attachmentId; then with fileId and no field",
+        "on the boot with the 1 ms budget, read the long PDF",
+        "boot with OS_MCP_READ_FILE_CPU_BUDGET_MS=abc; record the exit and the log"
+      ],
+      "acceptance": [
+        {
+          "clause": "a PDF answers its facts, then its text",
+          "oracle": "network",
+          "verify": "the first content block is JSON facts with fileId, name, mimeType 'application/pdf', size, field 'receipt', maxBytes 10485760, download, content 'text' and format 'application/pdf'; the second block holds the PDF's text (packages/mcp/src/file-content.ts#renderReadFile, #READ_FILE_MAX_BYTES)",
+          "evidence": "both content blocks"
+        },
+        {
+          "clause": "a Word document answers its paragraphs as text",
+          "oracle": "network",
+          "verify": "facts carry content 'text' and the .docx mime type as format; the text block holds the document's paragraphs (packages/mcp/src/file-content.ts#extractFileContent)",
+          "evidence": "both content blocks"
+        },
+        {
+          "clause": "the input names one file: field with attachmentId, and fileId without field, are refused",
+          "oracle": "network",
+          "verify": "'Name one file: either field (with fileId for a multi-file field) or attachmentId, not both.' and 'fileId names a file within a field: send field with it.' (packages/mcp/src/mcp-http-tools.ts#registerFileTools)",
+          "evidence": "both tool results"
+        },
+        {
+          "clause": "an extraction over the CPU-time budget answers the text read so far, truncated, with the budget note",
+          "oracle": "network",
+          "verify": "facts carry truncated true and a note opening 'Reading stopped at the CPU-time budget for one file (1 ms) after' (packages/mcp/src/file-content.ts#stoppedExtractionAnswer, #READ_FILE_CPU_BUDGET_MS_ENV)",
+          "evidence": "the facts block"
+        },
+        {
+          "clause": "a malformed budget variable fails the boot naming the variable",
+          "oracle": "log",
+          "verify": "the boot fails with 'OS_MCP_READ_FILE_CPU_BUDGET_MS must be a positive integer; got \"abc\"' (packages/mcp/src/file-content.ts#configureReadFileExtraction, called from the MCP plugin's init)",
+          "evidence": "the exit code and the log line"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: over OS_MCP_READ_FILE_MAX_CONCURRENT readings the call answers SERVICE_UNAVAILABLE 503 with details.retryAfterSeconds, a file over the 10 MiB cap answers its facts and the link only, and a scanned PDF says it has no text layer",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a long extraction that hangs the call, or answers no text and no note, is a FAIL",
+        "a malformed variable that boots with the default is a FAIL: it is refused, never read as unset"
+      ],
+      "traps": [
+        "single-datapoint"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/mcp/src/mcp-file-tools.test.ts; no live spec reads a document over MCP"
+      },
+      "source": [
+        "packages/mcp/src/file-content.ts#renderReadFile",
+        "packages/mcp/src/file-content.ts#extractFileContent",
+        "packages/mcp/src/file-content.ts#stoppedExtractionAnswer",
+        "packages/mcp/src/file-content.ts#configureReadFileExtraction",
+        "packages/mcp/src/file-content.ts#ReadFileExtractionBusyError",
+        "packages/mcp/src/mcp-http-tools.ts#registerFileTools"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — read_file text extraction for PDF and Word, its CPU-time budget and concurrency cap. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "ai.mcp-tool-call-interceptor",
+      "title": "A host-installed MCP tool-call interceptor sees every call with its door, transport, name and principal, may deny one with a coded refusal the tool never runs past, is told of a call to an unregistered name, and a verdict it cannot render refuses the call as a server fault",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "admin holding an osk_ API key, over MCP HTTP",
+        "an operator with a local shell, over MCP stdio"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of the showcase app outside examples/ whose objectstack.config.ts adds one plugin to `plugins`: { name: 'qa-mcp-interceptor', init() {}, start(ctx) { ctx.getService('mcp').setToolInterceptor(async (call, next) => { console.log('[qa-interceptor] ' + JSON.stringify({ door: call.door, transport: call.transport, toolName: call.toolName, registered: call.registered, userId: call.principal.userId })); if (call.toolName === 'delete_record') return { outcome: 'deny', code: 'PERMISSION_DENIED', message: 'QA interceptor refuses delete_record', status: 403 }; if (call.toolName === 'describe_object') return { outcome: 'hold' }; return next(); }); } }. The MCP plugin registers its runtime as the `mcp` service at init (packages/mcp/src/plugin.ts), so it is there at start",
+          "MCP HTTP reachable with an osk_ key minted via POST /api/v1/keys (see ai.mcp-http-surface): initialize, then tools/call",
+          "one seeded showcase_task id for the delete call"
+        ],
+        "knownGaps": [
+          "no stock plugin installs an interceptor: the seam is for a host (packages/mcp/src/mcp-server-runtime.ts, setToolInterceptor). The inline plugin above is read from the kernel's plugin contract and the showcase config's `plugins` list, and has not been booted. A run that cannot boot it records blocked(fixture) for acceptance[0]-[4] and still scores acceptance[5]. FOLLOW-UPS §18c"
+        ]
+      },
+      "steps": [
+        "boot the scratch copy; over MCP HTTP call list_objects; read the server log",
+        "call delete_record { objectName: 'showcase_task', recordId: TASK }; then GET /api/v1/data/showcase_task/TASK",
+        "call describe_object { objectName: 'showcase_task' }; read the server log",
+        "send tools/call for qa_no_such_tool; read the log",
+        "start the same scratch copy over stdio the way ai.mcp-stdio-fail-closed does (`os start` with OS_MCP_STDIO_ENABLED=true and OS_MCP_STDIO_API_KEY set to the osk_ key, never `os dev`, whose banner owns stdout) and call list_objects there"
+      ],
+      "acceptance": [
+        {
+          "clause": "an allowed call runs as before, and the interceptor is told its door, transport, name and principal",
+          "oracle": "log",
+          "verify": "list_objects answers its normal result; the log carries [qa-interceptor] with door 'mcp', transport 'http', toolName 'list_objects' and the key owner's userId (packages/mcp/src/types.ts#McpToolCallContext)",
+          "evidence": "the tool result and the log line"
+        },
+        {
+          "clause": "a deny refuses the call with the coded envelope, and the tool never runs",
+          "oracle": "network",
+          "verify": "delete_record answers isError with { error: { code: 'PERMISSION_DENIED', message: 'QA interceptor refuses delete_record', status: 403 } }; the GET afterwards still returns the task (packages/mcp/src/types.ts#McpToolCallRefusal)",
+          "evidence": "the tool result and the GET"
+        },
+        {
+          "clause": "a verdict that is neither a result nor a deny refuses the call as a server fault and warns",
+          "oracle": "log",
+          "verify": "describe_object answers isError with code INTERNAL_ERROR, status 500 and message 'Internal server error'; the log warns that the interceptor answered \"describe_object\" with neither a tool result nor a deny refusal (packages/mcp/src/tool-call-interceptor.ts#routeToolCallsThrough)",
+          "evidence": "the tool result and the warning"
+        },
+        {
+          "clause": "a call to a name nothing registered is observed with registered false, and the client gets the SDK's own answer",
+          "oracle": "log",
+          "verify": "the log carries toolName 'qa_no_such_tool' with registered false; the client gets 'Tool qa_no_such_tool not found'",
+          "evidence": "the log line and the answer"
+        },
+        {
+          "clause": "the stdio door passes through the same seam",
+          "oracle": "log",
+          "verify": "the stdio list_objects call logs transport 'stdio'",
+          "evidence": "the log line"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: with no interceptor every call runs untouched, a throw refuses the call with its code, and both servers route their calls through the seam",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a denied tool that still ran (the task deleted) is a FAIL",
+        "a malformed verdict served as a success is a FAIL",
+        "an unregistered name answered with anything but the SDK's own not-found is a FAIL: nothing about the hidden surface leaks"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/mcp/src/tool-call-interceptor.test.ts, packages/mcp/src/__tests__/plugin-execution-context.test.ts; no live spec installs an interceptor"
+      },
+      "source": [
+        "packages/mcp/src/tool-call-interceptor.ts#routeToolCallsThrough",
+        "packages/mcp/src/types.ts#McpToolInterceptor",
+        "packages/mcp/src/types.ts#McpToolCallRefusal",
+        "packages/mcp/src/types.ts#McpToolCallContext",
+        "packages/mcp/src/mcp-server-runtime.ts (setToolInterceptor, clearToolInterceptor, hasToolInterceptor)",
+        "#31605",
+        "#31838"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the MCP tool-call interceptor seam (#31605) and the unregistered-name observation (#31838). Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "ai.chat-answer-list-link",
+      "title": "An AI chat answer's list link opens the object list with the view and filter it names, and a link outside the closed list-link form is not turned into navigation",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form, in the AI chat"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "an AI service that serves an agent with a model, so the console AI chat answers (service-ai is a Cloud/EE package: ai.open-edition-honest-degradation)",
+          "an answer that carries a list link, e.g. one asked to link the open high-priority tasks: /list/showcase_task?view=all&uf__filter=ENVELOPE"
+        ],
+        "knownGaps": [
+          "BLOCKED(environment): the open tree registers no AI service, so the chat has no answer to carry a link (the entitled side of ai.console-ai-surface-gating is blocked the same way). The link parse and the target it builds are pinned (automated.ref)"
+        ]
+      },
+      "steps": [
+        "ask the chat for a list link to showcase_task; click the link in the answer",
+        "read the address bar and the list query"
+      ],
+      "acceptance": [
+        {
+          "clause": "the link navigates to the app list with the view and the filter it names",
+          "oracle": "network",
+          "verify": "the address bar is /_console/apps/APP/showcase_task?view=all&uf__filter=…, and the list query carries the filter (ui/packages/app-shell/src/console/ai/AiChatPage.tsx#listLinkTarget; ui/packages/plugin-chatbot/src/recordLink.ts#parseListLink)",
+          "evidence": "the URL and the list request"
+        },
+        {
+          "clause": "a link outside the closed form is not turned into list navigation",
+          "oracle": "dom",
+          "verify": "a /list/ link carrying any other parameter is drawn as plain text or an ordinary link, never routed to the list (ui/packages/plugin-chatbot/src/recordLink.ts#LIST_LINK_PATH_PATTERN)",
+          "evidence": "the rendered answer's DOM"
+        }
+      ],
+      "negative": [
+        "a link that drops the filter and opens the unfiltered list is a FAIL"
+      ],
+      "blocked": {
+        "by": "environment",
+        "ref": "service-ai is Cloud/EE: no open-tree AI service answers the chat (FOLLOW-UPS §18c, ai.console-ai-surface-gating)"
+      },
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/plugin-chatbot/src/__tests__/chatRecordLink-13037.test.tsx, ui/packages/app-shell/src/console/ai/__tests__/AiChatPage.recordLink-13037.test.tsx"
+      },
+      "source": [
+        "ui/packages/plugin-chatbot/src/recordLink.ts#parseListLink",
+        "ui/packages/plugin-chatbot/src/recordLink.ts#LIST_LINK_PATH_PATTERN",
+        "ui/packages/app-shell/src/console/ai/AiChatPage.tsx#listLinkTarget"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the AI chat answer's list link. Blocked(environment): no open-tree AI service. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
         }
       ]
     }

@@ -131,6 +131,18 @@ dashboard page sets it. Those texts are then drawn as served. Without the prop,
 the client bundle translates them. That covers an inline `dashboard` block, a
 preview or a design surface (objectui#11295).
 
+## Dataset widgets share one request per render
+
+Each dataset-bound widget asks its own query through the adapter's
+`queryDataset`. When the adapter also has `queryDatasetBatch`
+(`@object-ui/data-objectstack` does), the dashboard sends the queries one
+render asks as one `POST /api/v1/analytics/dataset/query/batch` per package
+(see [Analytics](/docs/data-modeling/analytics)) instead of one request per
+widget. A refused query is refused in its own widget only, drawn as the single
+request draws it, and a widget re-reads on its own when a write invalidates the
+object it reads. A query asked alone, and every query of an adapter without
+`queryDatasetBatch`, takes `queryDataset` unchanged.
+
 ## TypeScript Support
 
 ```ts

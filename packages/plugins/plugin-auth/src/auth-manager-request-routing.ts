@@ -89,10 +89,11 @@ export interface RequestRoutingHost {
   runSubjectErasureAtomically: AuthManager['runSubjectErasureAtomically'];
   answerOAuthTokenRevocation: AuthManager['answerOAuthTokenRevocation'];
   runSsoCallback: AuthManager['runSsoCallback'];
+  resolveAuthSecret: AuthManager['resolveAuthSecret'];
 }
 
 /** The body of `AuthManager#handleRequest`; the method's docblock there is its contract. */
-export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'>, request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
   // ADR-0069 D7 — the client address this request's sign-in audit stamps,
   // established ONCE, here, by the same trust rule the D5 allow-list judges
   // with (`resolveClientAddress`). Read before any rewrite below, and carried
@@ -240,13 +241,17 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // bearer verifier filled with the connection. An answer of 400 or above is
   // handed to the `audit` slot's `recordScimRefusal`, bounded and after the
   // response (`scim-refusal-audit.ts`); the answer itself is unchanged.
+  // [#32116] A request the vendor refused BEFORE its verifier ran (a body that
+  // fails its schema) leaves the scope empty: the observation is handed the
+  // verifier's read-only lookup, so a live SCIM bearer still names its
+  // connection — resolved after the response, once, for an admitted row.
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
         const scope: ScimRequestScope = { scim: true };
         const scimResponse = await scimRequestScope.run(scope, runHandler);
         if (scimResponse.status >= 400) {
-          const { observeScimRefusal } = await import('./scim-refusal-audit.js');
+          const { observeScimRefusal, scimRefusalConnectionResolver } = await import('./scim-refusal-audit.js');
           observeScimRefusal(
             this.config.getAuditSink?.(),
             scimResponse,
@@ -263,12 +268,15 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
               ...(clientAddress ? { clientAddress } : {}),
             },
             (line) => this.config.logger?.warn(line),
+            scope.connectionId
+              ? undefined
+              : scimRefusalConnectionResolver(this.config.dataEngine as never, () => this.resolveAuthSecret()),
           );
         }
         return scimResponse;
       }
     : ssoCallback !== undefined
-      ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler)
+      ? (): Promise<Response> => this.runSsoCallback(ssoCallback, runHandler, transport)
       : runHandler;
   // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` is answered a
   // second time, AFTER the provider: the provider authenticates the client

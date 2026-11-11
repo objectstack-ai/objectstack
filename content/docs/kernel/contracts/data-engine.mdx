@@ -347,10 +347,14 @@ The strips these two options cover are the engine's legal ones:
 | Primary-key strip of a payload `id` the update dispatch already ruled is not an identifier (#6437) | `primary_key` | `update` | none |
 | A value for a `formula` field, which the engine computes on read and no driver has a column for (#20805) | `computed` | `insert` **and** `update` | none — every context, `isSystem` included |
 | A value for a stored field (any type but `formula`) that declares `expression`, when it differs from the value the engine computes on every write and stores in its place | `stored_expression` | `insert` **and** `update` | none — every context, `isSystem` included |
+| An audit provenance value (`created_by`, `created_at`, `updated_by`, `updated_at`) the caller sent on a create, when the audit stamp stores a different value in its place (#32278) | `readonly` | `insert` | `isSystem`, `preserveAudit` |
 
 The `stored_expression` row is a replacement, not a removal: the field is written,
 with the computed value in place of the caller's. A caller that sends the computed
 value, or no value for the field, is neither reported nor refused.
+The audit provenance row is a replacement too: the stamp is written in place of the
+caller's value, and a caller that sends the stamped value, or none, is neither
+reported nor refused.
 
 Of the two AUTHOR-DECLARED strips only `readonlyWhen` is insert-exempt at this seam
 (a conditional lock has no prior record on a create); the static `readonly` strip runs

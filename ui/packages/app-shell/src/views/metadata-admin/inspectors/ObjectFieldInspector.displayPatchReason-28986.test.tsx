@@ -13,6 +13,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source loads these lazily; pay that load at collection, not inside a
+// case's clocked window.
+import '@objectstack/formula';
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
@@ -196,7 +200,12 @@ describe('CONTROL: outside display-patch mode the inspector draws no lock of its
   it('a writable field: nothing disabled, nothing wrapped', () => {
     const rail = mount('name', { patchOnly: false });
     expect(within(rail).queryByTestId('field-base-patch-only')).toBeNull();
-    expect(rail.querySelector('[data-disabled-reason]')).toBeNull();
+    expect(within(rail).queryByTestId('field-base-patch-locked')).toBeNull();
+    // The one reason drawn is the reorder pair's own: the first field's
+    // "Move up" says it is already first (objectstack#32103), not a lock.
+    const wrapped = rail.querySelectorAll('[data-disabled-reason]');
+    expect(wrapped).toHaveLength(1);
+    expect(wrapped[0]).toContainElement(within(rail).getByTestId('inspector-reorder-up-reason'));
     expect(within(rail).getByTestId('field-apiname-input')).toBeEnabled();
   });
 

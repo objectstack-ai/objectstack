@@ -60,6 +60,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Fecha de creación"
+      },
+      keyed_text: {
+        label: "Claves de texto",
+        help: "Las claves de catálogo y los parámetros con los que se representaron el título y el cuerpo en la entrega. Una lectura vuelve a representar el título y el cuerpo a partir de ellas en el idioma del lector; null cuando la notificación no llevaba claves, y entonces se sirven el título y el cuerpo almacenados tal cual."
       }
     },
     _views: {

@@ -62,10 +62,15 @@
  * Every write is the system's, attributed to the person (the mount opens the
  * attribution seam), so the CRUD audit records who registered and who minted.
  * Refusals use the ADR-0112 envelope with codes already in the catalog.
+ *
+ * A refusal a hook or engine middleware declares on either of register's
+ * writes (a licence plugin's, D7) is answered with its own status, and
+ * nothing is written: `declaredWriteRefusal`.
  */
 
 import {
   generateApiKey,
+  isAuthzStoreUnavailableError,
   isGrantActive,
   readRequestedApiKeyExpiry,
   signApiKeyExpiry,
@@ -73,7 +78,12 @@ import {
 } from '@objectstack/core';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { SystemObjectName } from '@objectstack/spec/system';
-import { validationFailureDetails } from '@objectstack/types';
+import {
+  declaredRefusalMessage,
+  demotedDeclaredCode,
+  resolveThrownHttpError,
+  validationFailureDetails,
+} from '@objectstack/types';
 import type { EndpointResult } from './admin-user-endpoints.js';
 import { authSystemWriteContext } from './auth-actor-attribution.js';
 import { isOrgAdminGrade } from './invitation-role-cap.js';
@@ -193,6 +203,56 @@ export function validationRefusal(error: unknown): EndpointResult | undefined {
   };
 }
 
+/** What a declared 5xx refusal's caller is told when its producer did not address the prose to them. */
+const WITHHELD_SERVER_MESSAGE = 'The request could not be completed.';
+
+/**
+ * [ADR-0151 D7] A refusal a write hook or engine middleware DECLARED during
+ * registration, answered with its own status and code; `undefined` for
+ * everything else, which keeps the answer it had.
+ *
+ * A licence plugin refuses an identity write on that write (D7: cloud's
+ * AI-seat cap throws `statusCode` 402 with code `ai_seat_limit_reached`, or
+ * 503 with `ai_seat_cap_unknown`). The declaration is a numeric status in
+ * 400-599 AND a non-empty string `code` on the throw; either half missing is a
+ * fault, not a refusal.
+ *
+ * Read through the one rule every door applies to a thrown error
+ * (`resolveThrownHttpError`, `@objectstack/types`), never re-derived here:
+ *
+ *  - `error.code` is the closed ADR-0112 vocabulary (D4): a registered code
+ *    verbatim, otherwise the code the status derives; the producer's own
+ *    spelling rides `error.declaredCode` (`demotedDeclaredCode`). That is the
+ *    answer `/api/v1/data` gives the same throw.
+ *  - a 4xx message is addressed to the caller and travels; a 5xx message
+ *    travels only when the producer declared it a refusal
+ *    (`declaredRefusalMessage`), and is withheld otherwise.
+ *
+ * ⛔ An unreadable authorization store is not this: it keeps the route's own
+ * 503 in the shared seam's words.
+ */
+export function declaredWriteRefusal(error: unknown, messagePrefix = ''): EndpointResult | undefined {
+  if (isAuthzStoreUnavailableError(error)) return undefined;
+  const spelled = (error as { code?: unknown } | null | undefined)?.code;
+  if (typeof spelled !== 'string' || spelled === '') return undefined;
+  const thrown = resolveThrownHttpError(error);
+  const status = thrown.declaredStatus;
+  if (status === undefined || status < 400 || status > 599) return undefined;
+  const declaredCode = demotedDeclaredCode(thrown);
+  const message = status < 500 ? thrown.message : declaredRefusalMessage(error);
+  return {
+    status,
+    body: {
+      success: false,
+      error: {
+        code: thrown.code,
+        message: message === undefined ? WITHHELD_SERVER_MESSAGE : `${messagePrefix}${message}`,
+        ...(declaredCode !== undefined ? { declaredCode } : {}),
+      },
+    },
+  };
+}
+
 /** The vendor's own verdict on the membership, forwarded with its status and code. */
 class MembershipRefused extends Error {
   constructor(readonly result: EndpointResult) {
@@ -201,16 +261,21 @@ class MembershipRefused extends Error {
   }
 }
 
+const MEMBERSHIP_REFUSAL_PREFIX = 'The AI service account could not be added to the organization, so it was not registered: ';
+
 function vendorRefusal(error: unknown): EndpointResult {
   const e = error as { statusCode?: number; status?: number | string; body?: { code?: string; message?: string }; message?: string } | null;
+  // The vendor's own refusals carry `body.code` and keep the answer below.
+  // A refusal a hook or middleware declared on the membership insert reaches
+  // here as the engine threw it, with no `body`.
+  if (e?.body?.code === undefined) {
+    const declared = declaredWriteRefusal(error, MEMBERSHIP_REFUSAL_PREFIX);
+    if (declared) return declared;
+  }
   const status = typeof e?.statusCode === 'number' ? e.statusCode : typeof e?.status === 'number' ? e.status : 500;
   const code = e?.body?.code ?? 'INTERNAL_ERROR';
   const message = e?.body?.message ?? e?.message ?? 'organization/add-member failed';
-  return fail(
-    status,
-    code,
-    `The AI service account could not be added to the organization, so it was not registered: ${message}`,
-  );
+  return fail(status, code, `${MEMBERSHIP_REFUSAL_PREFIX}${message}`);
 }
 
 // ── POST /service-account/register ─────────────────────────────────────────
@@ -309,7 +374,7 @@ export async function runRegisterServiceAccount(
     });
   } catch (error) {
     if (error instanceof MembershipRefused) return error.result;
-    const refused = validationRefusal(error);
+    const refused = validationRefusal(error) ?? declaredWriteRefusal(error);
     if (refused) return refused;
     throw error;
   }

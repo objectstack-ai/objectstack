@@ -69,6 +69,8 @@
  * dressed up as a red.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
     assertEngineDeleteDispatch,
@@ -155,6 +157,10 @@ function makeEngine() {
     const registryItems = new Map<string, Map<string, unknown>>();
     const engine: any = {
         registry: {
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
+            readsByPackage: () => false,
             listItems: (type: string) => Array.from(registryItems.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registryItems.get(type)?.get(name),
             // Nothing here is code-shipped: every specimen below is a

@@ -16,6 +16,7 @@
 // verification plane found the problem.
 
 import type { StandardErrorCode } from '@objectstack/spec/api';
+import { PackageScopedNameRefusedError, describePackageScopedHolder, type PackageScopedRefusal } from '@objectstack/core';
 
 /** One runtime-verification finding (ADR-0038 BuildIssue, layer 'runtime'). */
 export interface RuntimeBuildIssue {
@@ -28,7 +29,7 @@ export interface RuntimeBuildIssue {
     /**
      * 'seed_not_applied' | 'view_read_failed' | 'object_field_ref_unknown'
      * | 'object_field_ref_rule_failed' | 'empty_query' | 'widget_query_failed'
-     * | 'probes_unavailable'
+     * | 'probes_unavailable' | 'widget_not_probed'
      *
      * [#15494] `object_field_ref_rule_failed` is the odd one out and belongs
      * here anyway: it reports that a PROBE could not run, not that an artifact
@@ -214,13 +215,18 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
 
     // Memoized active-item reads (a dashboard and its widgets share datasets).
     const itemCache = new Map<string, unknown | undefined>();
+    // [#32072] A by-name read of a name two or more packages hold is refused
+    // (ADR-0150 D3), so there is no item to probe; the refusal is kept so the
+    // widget plane can say it did not probe rather than stay silent.
+    const refusals = new Map<string, PackageScopedRefusal>();
     const readItem = async (type: string, name: string): Promise<unknown | undefined> => {
         const key = `${type} ${name}`;
         if (itemCache.has(key)) return itemCache.get(key);
         let item: unknown | undefined;
         try {
             item = await getItem(type, name);
-        } catch {
+        } catch (e) {
+            if (e instanceof PackageScopedNameRefusedError) refusals.set(key, e.refusal);
             item = undefined;
         }
         itemCache.set(key, item);
@@ -395,7 +401,26 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             const widgetId = String(w.id ?? w.title ?? '?');
             const dsName = w.dataset as string;
             const dataset = asRec(await readItem('dataset', dsName));
-            if (!dataset) continue; // dangling dataset is an L1 (graph) finding, not a runtime one
+            if (!dataset) {
+                // [#32072] A name several packages hold: the read refused it, so
+                // nothing is probed, and the receipt says so (silence would read
+                // as "probed and passed"). The operator's remedy is one holder.
+                const refused = refusals.get(`dataset ${dsName}`);
+                if (refused) {
+                    const holders = refused.candidates.map((h) =>
+                        h.kind === 'package' ? h.packageId : describePackageScopedHolder(h));
+                    issues.push({
+                        layer: 'runtime',
+                        severity: 'warning',
+                        artifact: { type: 'dashboard', name: p.name },
+                        ref: { type: 'dataset', name: dsName, member: widgetId },
+                        code: 'widget_not_probed',
+                        message: `Dashboard "${p.name}" widget "${widgetId}" not probed: dataset "${dsName}" has ${holders.length} holders (${holders.join(', ')}), so a read of it by name is refused.`,
+                        fix: `Keep one dataset named "${dsName}": rename or remove the others, then republish.`,
+                    });
+                }
+                continue; // dangling dataset is an L1 (graph) finding, not a runtime one
+            }
             checked.widgets += 1;
 
             // The widget's own selection when present, else the dataset's

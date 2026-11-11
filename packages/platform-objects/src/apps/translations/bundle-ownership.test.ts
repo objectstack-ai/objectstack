@@ -13,6 +13,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { enObjects } from './en.objects.generated.js';
+import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { jaJPObjects } from './ja-JP.objects.generated.js';
+import { esESObjects } from './es-ES.objects.generated.js';
 
 // Objects the extract config (scripts/i18n-extract.config.ts) imports —
 // keep the two lists in sync when adding/moving platform objects.
@@ -38,7 +41,7 @@ const OWNED_OBJECTS = new Set([
   // (sys_saved_report / sys_report_schedule retired with the saved-report stack, #20102)
   'sys_job', 'sys_job_run', 'sys_job_queue', 'sys_import_job',
   // metadata (sys_view_definition retired as inert, ADR-0131 D13)
-  'sys_metadata', 'sys_metadata_history', 'sys_metadata_audit',
+  'sys_metadata', 'sys_metadata_history', 'sys_metadata_audit', 'sys_metadata_commit',
   // system
   'sys_setting', 'sys_platform_setting', 'sys_secret', 'sys_setting_audit', 'sys_platform_setting_audit', 'sys_migration', 'sys_exchange_rate',
 ]);
@@ -61,4 +64,34 @@ describe('objects translation bundle ownership (ADR-0029 D8)', () => {
       `objects the extract config should emit are missing from the bundle: ${missing.join(', ')} — was an import dropped from scripts/i18n-extract.config.ts?`,
     ).toEqual([]);
   });
+});
+
+/**
+ * `sys_metadata_commit` (ADR-0067, the package commit log) was left out of the
+ * extract config while its three `sys_metadata*` siblings were in it, so its
+ * label reached a zh-CN admin as "Metadata Commit". The extractor fills a new
+ * key with the English source; this pins the three hand-translated locales to
+ * their own words for the object's label, plural and every field label.
+ */
+describe('sys_metadata_commit reads in the translated locales', () => {
+  const locales = [
+    ['zh-CN', zhCNObjects, '元数据提交'],
+    ['ja-JP', jaJPObjects, 'メタデータコミット'],
+    ['es-ES', esESObjects, 'Confirmación de metadatos'],
+  ] as const;
+  const en = enObjects.sys_metadata_commit as any;
+
+  for (const [locale, bundle, label] of locales) {
+    it(`${locale} carries its own label, plural and field labels`, () => {
+      const entry = (bundle as Record<string, any>).sys_metadata_commit;
+      expect(entry?.label).toBe(label);
+      expect(entry?.pluralLabel).not.toBe(en.pluralLabel);
+      // `id` reads "ID" in every locale; every other field label is translated.
+      const echoed = Object.keys(en.fields)
+        .filter((f) => f !== 'id')
+        .filter((f) => entry?.fields?.[f]?.label === undefined || entry.fields[f].label === en.fields[f].label);
+      // es-ES "Actor" is the Spanish word too.
+      expect(echoed.filter((f) => !(locale === 'es-ES' && f === 'actor'))).toEqual([]);
+    });
+  }
 });

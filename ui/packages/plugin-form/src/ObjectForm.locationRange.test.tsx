@@ -76,6 +76,15 @@ const waitInput = (c: HTMLElement, name: string) =>
     return el;
   });
 
+/**
+ * The form's own error line for a field — `<FormMessage/>`, the text a submit
+ * refusal draws — or `null` while the field carries none. Distinct from the
+ * widget's own refusal line, which shows before any validation has run.
+ */
+function formError(container: HTMLElement, name: string): string | null {
+  return container.querySelector(`[data-field="${name}"] [id$="-form-item-message"]`)?.textContent ?? null;
+}
+
 /** Type a title + a coordinate string into a real create form and submit it. */
 async function submitWith(coordinateText: string) {
   const ds = makeDS();
@@ -90,8 +99,16 @@ async function submitWith(coordinateText: string) {
   fireEvent.change(await waitInput(container, 'place'), { target: { value: coordinateText } });
   fireEvent.submit(container.querySelector('form') as HTMLFormElement);
 
-  await waitFor(() => expect(ds.create).toHaveBeenCalled());
-  return { payload: ds.create.mock.calls[0][1] as Record<string, unknown>, container };
+  // Settle either way: since objectstack#32139 a refused coordinate is the
+  // field's validation error, so the submit writes nothing and `create` is
+  // never called — waiting on `create` alone would wait on the thing under test.
+  await waitFor(() => {
+    if (!ds.create.mock.calls.length && formError(container, 'place') === null) {
+      throw new Error('form has neither written nor refused yet');
+    }
+  });
+  const payload = ds.create.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
+  return { payload, written: payload !== undefined, container };
 }
 
 describe('ObjectForm never stores an out-of-range location (objectui#6714)', () => {
@@ -104,9 +121,11 @@ describe('ObjectForm never stores an out-of-range location (objectui#6714)', () 
       refused.success ? [] : refused.error.issues.map((i: any) => `${i.code}@[${i.path.join('.')}]`),
     ).toEqual(['too_big@[lat]', 'too_big@[lng]']);
 
-    const { payload } = await submitWith('999, 999');
-    expect(payload.place).toBeUndefined();
-    expect(payload).toMatchObject({ title: 'HQ' });
+    // Since objectstack#32139 the refusal also blocks the submit: nothing at
+    // all is written, and the form says why on the field.
+    const { written, container } = await submitWith('999, 999');
+    expect(written).toBe(false);
+    expect(formError(container, 'place')).toContain('Not saved:');
   });
 
   it('passes an in-range coordinate through to the data source unchanged', async () => {
@@ -114,14 +133,14 @@ describe('ObjectForm never stores an out-of-range location (objectui#6714)', () 
     // whatever the widget emits is what gets stored, byte for byte. Nothing on
     // this path would have caught the bad value — which is why the widget must.
     const { payload } = await submitWith('30.2741, 120.1551');
-    expect(payload.place).toEqual({ lat: 30.2741, lng: 120.1551 });
-    expect(LOCATION_SCHEMA.safeParse(payload.place).success).toBe(true);
+    expect(payload?.place).toEqual({ lat: 30.2741, lng: 120.1551 });
+    expect(LOCATION_SCHEMA.safeParse(payload?.place).success).toBe(true);
   });
 
   it('stores nothing the platform validator would refuse, for either input', async () => {
     for (const typed of ['999, 999', '91, 0', '0, 181', '30.2741, 120.1551']) {
       const { payload } = await submitWith(typed);
-      if (payload.place !== undefined) {
+      if (payload?.place !== undefined) {
         expect(LOCATION_SCHEMA.safeParse(payload.place).success, `stored for "${typed}"`).toBe(true);
       }
     }

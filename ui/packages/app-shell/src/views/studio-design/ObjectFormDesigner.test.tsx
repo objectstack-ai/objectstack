@@ -8,6 +8,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
+import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
 import { ObjectFormDesigner } from './ObjectFormDesigner';
 import { toFormFieldType } from './formFieldType';
@@ -318,5 +320,84 @@ describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (
     // does (objectui#13148), read through the catalog's row.
     expect(card.textContent).toContain(t('engine.fieldType.markdown', 'en-US'));
     expect(card.textContent).not.toContain('field:markdown');
+  });
+});
+
+/**
+ * objectstack#32103 — a group's boundary arrows ("Move group up" on the first
+ * group, "Move group down" on the last) were natively disabled with no reason:
+ * no tooltip on hover, Tab skipped them, nothing in the accessibility tree.
+ * Each now takes the header Publish's treatment (`DisabledControlReason`): a
+ * focusable wrapper opening a tooltip, and the wrapper and the button both
+ * described by an `sr-only` copy of the reason, the button keeping its name.
+ */
+describe('ObjectFormDesigner — a disabled group arrow says why (objectstack#32103)', () => {
+  const describedBy = (el: HTMLElement) =>
+    document.getElementById(el.getAttribute('aria-describedby') ?? '') as HTMLElement | null;
+
+  const oneGroup = {
+    fields: [{ name: 'email', type: 'text', label: 'Email', group: 'contact' }],
+    fieldGroups: [{ key: 'contact', label: 'Contact' }],
+  };
+
+  it('Tab from the group name reaches each disabled arrow; it shows the reason and keeps its name', async () => {
+    const user = userEvent.setup();
+    render(
+      <ObjectFormDesigner draft={oneGroup} systemFieldNames={new Set()} onChange={noop} onSelectField={noop} />,
+    );
+    const up = screen.getByRole('button', { name: 'Move group up' });
+    const down = screen.getByRole('button', { name: 'Move group down' });
+    expect(up).toBeDisabled();
+    expect(down).toBeDisabled();
+    expect(describedBy(up)).toHaveTextContent('Already the first group');
+    expect(describedBy(down)).toHaveTextContent('Already the last group');
+
+    screen.getByRole('textbox', { name: 'Group name' }).focus();
+    await user.tab();
+    expect(up.parentElement).toHaveFocus();
+    expect(up.parentElement).toHaveAttribute('data-disabled-reason');
+    expect(describedBy(up.parentElement as HTMLElement)).toHaveTextContent('Already the first group');
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Already the first group');
+
+    await user.tab();
+    expect(down.parentElement).toHaveFocus();
+    expect(describedBy(down.parentElement as HTMLElement)).toHaveTextContent('Already the last group');
+  });
+
+  it('hovering a disabled arrow opens the tooltip with the reason', async () => {
+    const user = userEvent.setup();
+    render(
+      <ObjectFormDesigner draft={oneGroup} systemFieldNames={new Set()} onChange={noop} onSelectField={noop} />,
+    );
+    await user.hover(screen.getByRole('button', { name: 'Move group down' }).parentElement as HTMLElement);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Already the last group');
+  });
+
+  it('CONTROL — an arrow that can move is a plain enabled button with no reason, and still moves', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <ObjectFormDesigner
+        draft={{
+          fields: [
+            { name: 'email', type: 'text', label: 'Email', group: 'contact' },
+            { name: 'notes', type: 'text', label: 'Notes', group: 'extra' },
+          ],
+          fieldGroups: [
+            { key: 'contact', label: 'Contact' },
+            { key: 'extra', label: 'Extra' },
+          ],
+        }}
+        systemFieldNames={new Set()}
+        onChange={onChange}
+        onSelectField={noop}
+      />,
+    );
+    const firstDown = screen.getAllByRole('button', { name: 'Move group down' })[0];
+    expect(firstDown).toBeEnabled();
+    expect(firstDown).not.toHaveAttribute('aria-describedby');
+    expect(firstDown.parentElement).not.toHaveAttribute('data-disabled-reason');
+    await user.click(firstDown);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

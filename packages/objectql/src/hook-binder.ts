@@ -26,6 +26,7 @@ import { normalizeFlowFunctionEntry, type FlowFunctionEntry } from '@objectstack
 import type { ObjectQL, HookHandler } from './engine.js';
 import { wrapDeclarativeHook, type HookDiagnosticsLogger } from './hook-wrappers.js';
 import type { HookMetricsRecorder } from './hook-metrics.js';
+import { handlerOwnerPackageId } from './bare-name-one-holder.js';
 
 export interface BindHooksOptions {
   /** Owning package / app id — used for `unregisterHooksByPackage`. */
@@ -197,19 +198,22 @@ export function bindHooksToEngine(
   // caller reads both off the one registry.
   //
   // BEFORE the no-hooks bail-out below, deliberately: `functions` is not a
-  // hook accessory. It also feeds `Action.target` string refs and a flow
-  // `script` node's `config.function`, so a stack that declares functions and
-  // no hooks — the shape #4396's example has — registered NOTHING and every
-  // such `script` node failed with "no function named 'x' is registered",
-  // naming the one thing the author had actually done.
+  // hook accessory. It also feeds a flow `script` node's `config.function`
+  // (an action `target` is a handler key, never a function), so a stack that
+  // declares functions and no hooks — the shape #4396's example has —
+  // registered NOTHING and every such `script` node failed with "no function
+  // named 'x' is registered", naming the one thing the author had actually
+  // done.
   if (opts.functions && typeof (engine as any).registerFunction === 'function') {
     // [#30803] One name, one package holder for a function
-    // (`bare-name-one-holder.ts`): the engine's function registry keeps one
-    // function per name and a `script` node or an action `target` resolves it
-    // with no package, so once the cold boot has sealed the registry a bind
-    // bringing a function another package holds is refused here, ahead of
-    // every registration below, naming both holders. Before the seal the
-    // claims are only recorded, for the cold boot to read.
+    // (`bare-name-one-holder.ts`, phase 1 of ADR-0150): once the cold boot
+    // has sealed the registry a bind bringing a function another package
+    // holds is refused here, ahead of every registration below, naming both
+    // holders. Before the seal the claims are only recorded, for the cold
+    // boot to read. The engine keeps every holder of a name
+    // (`functionHoldersOf`) and a flow `script` node resolves it in the
+    // calling flow's package (#32073); this refusal stays until the trailing
+    // backstop child (ADR-0150 D9) narrows it.
     const claimable = Object.entries(opts.functions)
       .filter(([, entry]) => normalizeFlowFunctionEntry(entry) !== undefined)
       .map(([name]) => name);
@@ -452,10 +456,10 @@ function resolveInProcessHandler(
     // record resolves to its handler — a hook cares only about the callable.
     const fromBundle = normalizeFlowFunctionEntry(opts.functions?.[h]);
     if (fromBundle) return fromBundle.handler as HookHandler;
-    // Then a function the SAME package registered on the engine earlier. The
-    // registry is keyed by bare name, so the owner on the entry is what keeps
-    // a hook from binding to a function another package registered under the
-    // same name — that package's code would run on this package's events.
+    // Then a function the SAME package registered on the engine earlier, read
+    // from that package's own holding: a hook never binds to a function
+    // another package registered under the same name — that package's code
+    // would run on this package's events.
     return ownPackageFunction(engine, h, opts.packageId);
   }
   return undefined;
@@ -465,6 +469,14 @@ function resolveInProcessHandler(
  * The engine-registered function `name` when — and only when — its owner is
  * `packageId`. A bind that states no owner holds only the functions handed to
  * it: an entry with no owner, or with another owner, is not this package's.
+ *
+ * [ADR-0150 D3 step 1, #32073] Read from the package's OWN holding
+ * (`ObjectQL#functionHoldersOf`), never from the bare map's one
+ * last-registered entry per name: a package's own function stays its own
+ * after another package registers the same name, where the bare map's entry
+ * would then name the other package and refuse the bind. The rule is still
+ * own package only — a holder in the hook's closure, the platform's
+ * owner-less function and every other package's are not this package's code.
  */
 function ownPackageFunction(
   engine: ObjectQL,
@@ -472,8 +484,8 @@ function ownPackageFunction(
   packageId: string | undefined,
 ): HookHandler | undefined {
   if (!packageId) return undefined;
-  if (typeof (engine as any).resolveFunctionEntry !== 'function') return undefined;
-  const entry = (engine as any).resolveFunctionEntry(name);
+  if (typeof (engine as any).functionHoldersOf !== 'function') return undefined;
+  const entry = (engine as ObjectQL).functionHoldersOf(name).packageItem(handlerOwnerPackageId(packageId));
   if (!entry || entry.packageId !== packageId) return undefined;
   return typeof entry.handler === 'function' ? (entry.handler as HookHandler) : undefined;
 }

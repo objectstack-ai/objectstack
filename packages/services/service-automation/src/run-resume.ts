@@ -15,6 +15,7 @@
  * is no longer `async`: it returns the promise the moved function makes.
  */
 
+import { withFlowRunSlot } from './flow-slots.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
@@ -1773,7 +1774,10 @@ export async function resumeInternal(
         await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
 
         const steps = run.steps;
-        const context = segmentContext;
+        // [#31696] A persisted context keeps no slot stamp: a run of a slot
+        // whose name two slots hold is stamped again, so its subflow calls
+        // resolve from its own package.
+        const context = withFlowRunSlot(segmentContext, run.flowName);
 
         try {
             // [#18714] The child this run is parked on REFUSED — on either

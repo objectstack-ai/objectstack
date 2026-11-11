@@ -598,7 +598,14 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
         </SidebarHeader>
       )}
       <SidebarContent className={`pt-2 ${ICON_RAIL_SCROLLS_VERTICALLY}`}>
-        <div className="transition-opacity duration-200 ease-in-out">
+        {/* The sidebar's one navigation landmark, so assistive tech can jump
+            to it. The `Sidebar` primitive draws a plain `div` (and a dialog on
+            a phone) and is Shadcn-synced, so the landmark rides inside its
+            content slot, where it reaches the drawer as well. */}
+        <nav
+          aria-label={t('console.nav.menuLabel', { defaultValue: 'App navigation' })}
+          className="transition-opacity duration-200 ease-in-out"
+        >
           {context === 'app' && activeApp ? (
            <>
           {/* App-level context selectors (e.g. package scope) */}
@@ -800,7 +807,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
            )}
            </>
          )}
-        </div>
+        </nav>
       </SidebarContent>
       {/* "Keep sidebar open" turns the fold off for this browser; offered
           where the fold applies, while the rail is expanded or kept open. */}

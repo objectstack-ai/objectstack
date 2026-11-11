@@ -195,7 +195,19 @@ export function InboxPopover({
   const unreadTopics = allGroups.reduce((sum, g) => sum + (g.unreadCount > 0 ? 1 : 0), 0);
 
   const totalBadge = unreadTopics + pendingApprovalsCount;
-  const ariaLabel = t('sidebar.inboxAriaLabel', { defaultValue: 'Open inbox' }) as string;
+  // The bell's accessible name carries what its badge says: the badge is
+  // content inside a named button, so a screen reader never reads it. Each
+  // non-zero addend is spelled out with the plural forms the popover's own
+  // breakdown uses, so the name explains the sum rather than restating it.
+  const ariaLabel = [
+    t('sidebar.notifications', { defaultValue: 'Notifications' }) as string,
+    ...(unreadTopics > 0
+      ? [t('notifications.badgeNotifications', { defaultValue: '{{count}} unread topics', count: unreadTopics }) as string]
+      : []),
+    ...(pendingApprovalsCount > 0
+      ? [t('notifications.badgeApprovals', { defaultValue: '{{count}} pending approvals', count: pendingApprovalsCount }) as string]
+      : []),
+  ].join(', ');
 
   // Pulse the bell once whenever the unread/approval pressure increases.
   // We track the previous total in a ref so the very first render (when
