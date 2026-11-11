@@ -126,7 +126,13 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
                     : n === 'protocol' ? protocol
                         : n === 'audit' ? audit
                             : opts.services?.[n] ?? null;
-    const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+    /** Every scope a service lookup on this kernel was asked under: the environment the call carries. */
+    const scopes: string[] = [];
+    const kernel: any = {
+        getService: resolve,
+        getServiceAsync: async (n: string, scopeId?: string) => { if (scopeId !== undefined) scopes.push(scopeId); return resolve(n); },
+        context: { getService: resolve },
+    };
     const dispatcher = new HttpDispatcher(kernel);
     const ran = () => executeAction.mock.calls.length + execute.mock.calls.length;
 
@@ -163,7 +169,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
         }
     };
 
-    return { viaRest, viaHost, viaMcp, ran, rows, kernel };
+    return { viaRest, viaHost, viaMcp, ran, rows, kernel, scopes };
 }
 
 const gated = { name: 'gated_ping', label: 'Gated', type: 'script', target: 'gated_ping', requiredPermissions: ['manage_x'], ai: EXPOSED };
@@ -325,6 +331,22 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
  * catch-all's scoped path; its caller is admitted by the environment kernel's
  * `auth` session. The host door is `dispatchAction` on the HOST kernel.
  */
+describe('dispatchAction on a host with no kernel-resolver keeps the environment the host names', () => {
+    const plain = { name: 'plain_ping', label: 'Plain', type: 'script', target: 'plain_ping', ai: EXPOSED };
+
+    it('a named environmentId is the scope of the call\'s service lookups, as before placement existed; omitted, none is', async () => {
+        const named = makeRig([plain]);
+        const answer = await named.viaHost(MEMBER_EC, 'plain_ping', { environmentId: 'env_named' });
+        expect({ status: answer.status, data: answer.body.data }).toEqual({ status: 200, data: { ran: 'script' } });
+        expect(named.scopes.length).toBeGreaterThan(0);
+        expect(new Set(named.scopes)).toEqual(new Set(['env_named']));
+
+        const omitted = makeRig([plain]);
+        expect((await omitted.viaHost(MEMBER_EC, 'plain_ping', { environmentId: undefined })).status).toBe(200);
+        expect(omitted.scopes).not.toContain('env_named');
+    });
+});
+
 describe('dispatchAction on a multi-kernel host runs on the environment\'s own kernel, as the REST door does', () => {
     const plain = { name: 'plain_ping', label: 'Plain', type: 'script', target: 'plain_ping', ai: EXPOSED };
     const auth = { api: { getSession: async () => ({ user: { id: MEMBER_EC.userId } }) } };

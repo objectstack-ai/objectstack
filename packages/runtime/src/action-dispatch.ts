@@ -817,9 +817,12 @@ export interface ActionDispatchRequest extends AIActionConfirmation {
      * on the host kernel when it places none, and a resolver that throws
      * refuses the call with the status it carries. Omitted, the resolver gets
      * no environment hint and places the call from what else it reads (the
-     * `credentialHeaders`; a host door has no hostname), or not at all. Where
-     * no environment was written — no resolver, or none placed — the call runs
-     * in the kernel's default environment, as the REST door's does.
+     * `credentialHeaders`; a host door has no hostname), or not at all; a call
+     * the resolver places in no environment runs in the kernel's default
+     * environment, as the REST door's does. On a host with no
+     * `kernel-resolver` nothing places the call: it runs in the environment
+     * named here (the scope of its service lookups), or in the default
+     * environment when none is named.
      */
     environmentId?: string;
     /** The object whose action is called; omitted, an object-less action. */
@@ -934,9 +937,9 @@ export async function dispatchActionRequest(
         if (typeof value === 'string') headers[name.toLowerCase()] = value;
     }
     const namedEnvironment = typeof request.environmentId === 'string' && request.environmentId !== '' ? request.environmentId : undefined;
-    // `environmentId` is the RESOLVER's to write, as at the REST door: the
-    // named environment reaches it as the scoped-URL hint, never pre-written
-    // onto the context.
+    // On a host with a `kernel-resolver`, `environmentId` is the RESOLVER's to
+    // write, as at the REST door: the named environment reaches it as the
+    // scoped-URL hint, never pre-written onto the context.
     const context: HttpProtocolContext = { request: { headers }, executionContext: ec };
     const objectName = typeof request.objectName === 'string' && request.objectName !== ''
         ? request.objectName
@@ -954,6 +957,12 @@ export async function dispatchActionRequest(
     } catch (err) {
         return deps.errorFromThrown(err, 500);
     }
+    // On a host with NO resolver nothing places the call, so the environment
+    // the host named is carried as it always was — never silently dropped for
+    // the default one. Written after placement, so the scope touch, which this
+    // door never made for an unvalidated id, still fires only on one a
+    // resolver wrote.
+    if (namedEnvironment && !deps.isMultiTenantHost()) context.environmentId = namedEnvironment;
     if (!context.environmentId) {
         const def = deps.getDefaultEnvironmentId();
         if (def) context.environmentId = def;

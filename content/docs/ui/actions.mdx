@@ -731,9 +731,11 @@ the resolver places it there. A resolver that fails refuses the call with its
 own status; the call never runs on the host kernel in its place. Without
 `environmentId` the resolver gets no environment to read and places the call
 from what else it reads (your `credentialHeaders`; a host door has no
-hostname), or not at all. Wherever no environment gets placed (no resolver, or
-one that places none), the call runs in the kernel's default environment, as
-the REST door's does.
+hostname), or not at all. A call the resolver places in no environment runs in
+the kernel's default environment, as the REST door's does. On a host with no
+`kernel-resolver`, nothing places the call: it runs in the environment
+`environmentId` names (or the default environment when you omit it), exactly as
+before.
 
 Placement is all `dispatchAction` shares with the REST door's request
 handling. Three steps that door runs after placement are **not** run here, so
