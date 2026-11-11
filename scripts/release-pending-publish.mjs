@@ -1473,13 +1473,68 @@ export function judgePublishInFlight({ version, runs, currentRunId }) {
   return { state: 'clear', reason: 'none-in-flight', detail: `no other run holds "${name}" in flight`, inFlight, docker };
 }
 
+/** The page size every run-list filter read asks for: one page, read whole or not at all. */
+const RUN_LIST_PAGE = 100;
+
+/**
+ * One run-list filter read whole: the page's runs, once its `total_count` is
+ * no more than it listed. A count above a page that is NOT full is GitHub's
+ * list/count lag, not a page skipped -- measured: release.yml's in_progress
+ * filter counted 2 over a page listing the calling run alone, the one run in
+ * progress (run 42938356503); lint.yml's counted 12 over an empty page and 0
+ * over the same empty page on the next read. So that page is re-read under
+ * the board-read policy, spending the run's `budget` (`boardReadBudget`):
+ * up to `attemptsPerRead` reads, `backoffMs` apart, each re-read one of the
+ * run's `retriesPerRun`. The first read the count agrees with is the one
+ * judged, and the note says what came before it.
+ *
+ * ⛔ Fail-closed, as before the re-read: a count still above the page when the
+ * ladder or the budget is spent throws, naming the reads. A count that is no
+ * number, or one above a FULL page (the rest sit on a page this read does not
+ * take), is no lag to wait out and throws at once.
+ */
+async function readWholeRunList({ http, path, what, budget }) {
+  const { policy } = budget;
+  const short = [];
+  for (let read = 1; ; read += 1) {
+    const page = expectOk(await http('GET', path), what);
+    if (!page || !Array.isArray(page.workflow_runs)) throw new Error(`${what} answered no workflow_runs list`);
+    const runs = page.workflow_runs;
+    if (typeof page.total_count !== 'number') {
+      throw new Error(`${what}: total_count ${JSON.stringify(page.total_count) ?? 'absent'} is no count, so whether the ${runs.length} listed are all of them is unread`);
+    }
+    if (page.total_count <= runs.length) {
+      return { runs, note: short.length === 0 ? '' : ` (whole on read ${read}; before it: ${short.join('; ')})` };
+    }
+    short.push(`total_count ${page.total_count} but ${runs.length} listed`);
+    const stop =
+      runs.length >= RUN_LIST_PAGE
+        ? `the page is full, so the rest sit on a page this read does not take`
+        : read >= policy.attemptsPerRead
+          ? 'every read one listing is allowed, so not one lagging count'
+          : budget.retriesSpent >= policy.retriesPerRun
+            ? `this run's budget of ${policy.retriesPerRun} retries is spent`
+            : null;
+    if (stop) {
+      throw new Error(
+        `${what}: total_count ${page.total_count} but ${runs.length} listed, so the rest are unread ` +
+          `(read ${read} time${read === 1 ? '' : 's'}: ${short.join('; ')}; ${stop})`,
+      );
+    }
+    budget.retriesSpent += 1;
+    await budget.sleep(policy.backoffMs[read - 1]);
+  }
+}
+
 /**
  * The runs `judgePublishInFlight` needs, read through `http`; throws on any
  * answer it cannot read. `tips` is the version commit followed by the
  * first-parent commits after it (`versionCommitsOf`), where the push run that
- * carried it is found.
+ * carried it is found. `budget` is the run's one `boardReadBudget`, which a
+ * status filter's count above its page spends on re-reads (`readWholeRunList`);
+ * a caller reading through `retryingReads` hands that reader's budget here.
  */
-export async function collectPublishRuns({ http, repo, workflow, tips, currentRunId = '' }) {
+export async function collectPublishRuns({ http, repo, workflow, tips, currentRunId = '', budget = boardReadBudget() }) {
   const listPath = `/repos/${repo}/actions/workflows/${encodeURIComponent(workflow)}/runs`;
   const listed = (page, what) => {
     if (!page || !Array.isArray(page.workflow_runs)) throw new Error(`${what} answered no workflow_runs list`);
@@ -1489,13 +1544,10 @@ export async function collectPublishRuns({ http, repo, workflow, tips, currentRu
   const filters = [];
   for (const status of IN_FLIGHT_RUN_FILTERS) {
     const what = `listing ${workflow}'s ${status} runs`;
-    const page = expectOk(await http('GET', `${listPath}?status=${status}&per_page=100&exclude_pull_requests=true`), what);
-    const runs = listed(page, what);
-    if (typeof page.total_count !== 'number' || page.total_count > runs.length) {
-      throw new Error(`${what}: total_count ${page.total_count} but ${runs.length} listed, so the rest are unread`);
-    }
+    const path = `${listPath}?status=${status}&per_page=${RUN_LIST_PAGE}&exclude_pull_requests=true`;
+    const { runs, note } = await readWholeRunList({ http, path, what, budget });
     for (const r of runs) ids.add(String(r.id));
-    filters.push(`${status} [${runs.map((r) => r.id).join(', ')}]`);
+    filters.push(`${status} [${runs.map((r) => r.id).join(', ')}]${note}`);
   }
   let pushRuns = [];
   for (const sha of tips) {
@@ -1528,11 +1580,13 @@ export async function collectPublishRuns({ http, repo, workflow, tips, currentRu
 /**
  * The guard's whole answer for one version, never a throw: whatever cannot be
  * read answers `in-flight` with reason `unreadable`, for the publish job and
- * the image build alike, so the caller backfills nothing off a guess. `walk`
- * yields the version commits of the head (`versionCommitsOf`); the first must
- * be the one the caller names.
+ * the image build alike, so the caller backfills nothing off a guess -- a
+ * status filter whose count stays above its page through the re-reads
+ * (`readWholeRunList`, on `budget`) included. `walk` yields the version
+ * commits of the head (`versionCommitsOf`); the first must be the one the
+ * caller names.
  */
-export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '' }) {
+export async function publishInFlight({ http, repo, workflow, version, versionCommit, walk, currentRunId = '', budget = boardReadBudget() }) {
   try {
     const first = walk.next().value;
     if (!first || first.versionCommit !== versionCommit || first.version !== version) {
@@ -1541,7 +1595,7 @@ export async function publishInFlight({ http, repo, workflow, version, versionCo
           `the caller ${versionCommit} (${version}): two readers of one history disagree`,
       );
     }
-    const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId });
+    const read = await collectPublishRuns({ http, repo, workflow, tips: first.tips, currentRunId, budget });
     const verdict = judgePublishInFlight({ version, runs: read.runs, currentRunId });
     if (read.pushRuns.length === 0) {
       const note = `; no push run of ${workflow} was found at the version commit, so the run-list filters alone speak for it`;

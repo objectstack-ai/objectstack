@@ -1523,10 +1523,12 @@ export async function supersede({ workflow, dryRun = false, env = process.env, h
  * each version commit's push run by `head_sha`, since the filter was measured
  * omitting a waiting run) and the in-flight runs through `collectPublishRuns`
  * (`in_progress` and `queued`), merged by id with the jobs each read. Throws
- * on anything unread -- a `TransientReadFailure` after the retries, or any
- * other failed read -- which the caller reports NOT MEASURED, never "clear".
+ * on anything unread -- a `TransientReadFailure` after the retries, a status
+ * filter whose count stays above its page after the re-reads `budget` allows
+ * (the run's one `boardReadBudget`, the one `http` retries on), or any other
+ * failed read -- which the caller reports NOT MEASURED, never "clear".
  */
-export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits }) {
+export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits, budget }) {
   // The walk is a generator (one `git show` per version commit): the newest
   // version commit's tips are taken off the front and the rest is handed on
   // unwalked, so the sweep's own bounds (its read-back and cap) still apply.
@@ -1537,7 +1539,7 @@ export async function readStableLane({ http, repo, workflow, currentRunId, versi
     yield* iter;
   };
   const waiting = await collectWaitingRuns({ http, repo, workflow, versionCommits: rest(), currentRunId });
-  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId });
+  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId, budget });
   const byId = new Map();
   for (const run of [...waiting.runs, ...inFlight.runs]) {
     const id = String(run.id);
@@ -1567,8 +1569,11 @@ export async function stableLane({ workflow, env = process.env, http = null, sle
   const currentRunId = env.GITHUB_RUN_ID || '';
   if (!http && !env.GITHUB_TOKEN) throw new Error('GITHUB_TOKEN is required');
   const raw = http ?? githubHttp({ apiUrl: env.GITHUB_API_URL || 'https://api.github.com', token: env.GITHUB_TOKEN, dryRun: true });
-  const reads = retryingReads(raw, boardReadBudget({ sleep }));
-  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
+  // ONE retry budget for the whole read: the transient retries and the
+  // in-flight listing's re-reads spend it alike.
+  const budget = boardReadBudget({ sleep });
+  const reads = retryingReads(raw, budget);
+  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, budget, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
   return { ...judgeStableLane({ runs: read.runs, currentRunId }), read };
 }
 
