@@ -1526,7 +1526,7 @@ export default defineConfig({
             // above gives. ⛔ A module added to `core.ts` belongs in this list.
             {
               name: 'plugin-chatbot-core',
-              test: /[\\/]packages[\\/]plugin-chatbot[\\/]src[\\/](core|useAgents|agentAliases|aiUsageEvents|publishHealth|mapMessages)\.tsx?$/,
+              test: /[\\/]packages[\\/]plugin-chatbot[\\/]src[\\/](core|useAgents|agentAliases|aiUsageEvents|publishHealth|toolResultParsers)\.tsx?$/,
               priority: 71,
               includeDependenciesRecursively: false,
             },

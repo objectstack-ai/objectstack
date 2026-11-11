@@ -16,6 +16,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
 import { ChatbotEnhanced, type ChatbotProcessVisibility } from '../ChatbotEnhanced';
+import { OBJECT_QUERY_SOURCE_TOOL_NAMES, ObjectQuerySourceSchema } from '@objectstack/spec/ai';
+import { PLATFORM_TOOLS_BY_PACKAGE } from '@objectstack/spec/system';
 import { detectAnswerSource, uiMessageToChatMessage } from '../mapMessages';
 
 afterEach(cleanup);
@@ -37,6 +39,9 @@ const SOURCE = {
   records: 7,
   line: 'Summed the amount of 7 open opportunities',
 };
+
+/** The members the contract requires beside `object`, for a block a test writes by hand. */
+const REQUIRED = { scope: 'visible_to_you', line: 'Read the matching records' };
 
 /** The service-ai wire form: the tool's JSON inside a `{ type: 'text', value }` wrapper. */
 const wrapped = (body: unknown) => ({ type: 'text', value: JSON.stringify(body) });
@@ -66,23 +71,17 @@ const withSource = () =>
 const openBlock = () => fireEvent.click(screen.getByRole('button', { name: 'How this was computed' }));
 
 describe('objectstack#31868 — detectAnswerSource lifts the source block alone', () => {
-  it('peels the text wrapper and keeps only the declared members', () => {
+  it('peels the text wrapper and keeps only the members the contract declares', () => {
     const lifted = detectAnswerSource(wrapped({ rows: [SENTINEL], source: { ...SOURCE, secret: SENTINEL } }));
-    expect(lifted).toEqual({
-      object: 'crm_opportunity',
-      label: 'Opportunities',
-      filter: SOURCE.filter,
-      scope: 'visible_to_you',
-      groupBy: ['owner', 'region'],
-      aggregations: [{ function: 'sum', field: 'amount' }, { function: 'count' }],
-      records: 7,
-    });
+    // The whole parsed block: the message cache stores this copy and lifts it
+    // again on reload, so a member the block does not draw is kept too.
+    expect(lifted).toEqual(SOURCE);
     expect(JSON.stringify(lifted)).not.toContain(SENTINEL);
   });
 
   it('a result with no source, or a source without its object, lifts nothing', () => {
     expect(detectAnswerSource(wrapped({ rows: [] }))).toBeUndefined();
-    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, object: '' } }))).toBeUndefined();
+    expect(detectAnswerSource(wrapped({ source: { ...SOURCE, object: undefined } }))).toBeUndefined();
     expect(detectAnswerSource('plain text answer')).toBeUndefined();
   });
 
@@ -137,7 +136,7 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
 
   it('a filter that does not lower to flat rows is drawn as served, and an unknown count draws no row', () => {
     const nested = { $or: [{ stage: 'open' }, { $and: [{ amount: { $gt: 1 } }] }] };
-    renderTurn([toolPart('t1', 'query_records', wrapped({ source: { object: 'crm_opportunity', filter: nested } }))]);
+    renderTurn([toolPart('t1', 'query_records', wrapped({ source: { ...REQUIRED, object: 'crm_opportunity', filter: nested } }))]);
     openBlock();
     expect(screen.queryByTestId('answer-source-filter')).toBeNull();
     expect(screen.getByTestId('answer-source-filter-served')).toHaveTextContent(JSON.stringify(nested));
@@ -146,8 +145,8 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
 
   it('an OR group draws its rows joined by OR, and no filter reads All records', () => {
     renderTurn([
-      toolPart('t1', 'query_records', wrapped({ source: { object: 'a', filter: { $or: [{ stage: 'open' }, { stage: 'won' }] } } })),
-      toolPart('t2', 'query_records', wrapped({ source: { object: 'b' } })),
+      toolPart('t1', 'query_records', wrapped({ source: { ...REQUIRED, object: 'a', filter: { $or: [{ stage: 'open' }, { stage: 'won' }] } } })),
+      toolPart('t2', 'query_records', wrapped({ source: { ...REQUIRED, object: 'b' } })),
     ]);
     openBlock();
     const [first, second] = screen.getAllByTestId('answer-source-section');
@@ -194,5 +193,37 @@ describe('objectstack#31868 — the "How this was computed" block', () => {
     fireEvent.click(await screen.findByRole('button', { name: '计算方式' }));
     expect(screen.getByTestId('answer-source-section')).toHaveTextContent('记录7');
     expect(screen.getByTestId('answer-source-scope')).toHaveTextContent('仅包含你可见的记录');
+  });
+});
+
+describe('the source block is read through the published contract (ObjectQuerySourceSchema)', () => {
+  /** A block the schema refuses; each one is otherwise SOURCE, which the schema accepts. */
+  const offContract: Array<[string, Record<string, unknown>]> = [
+    ['an orderBy direction outside asc | desc', { ...SOURCE, orderBy: [{ field: 'amount', order: 'ASC' }] }],
+    ['an aggregation function the query dialect does not name', { ...SOURCE, aggregations: [{ function: 'median', field: 'amount' }] }],
+    ['a scope other than visible_to_you', { ...SOURCE, scope: 'all_records' }],
+    ['no line', { ...SOURCE, line: undefined }],
+  ];
+
+  it('the fixture block is one the schema accepts', () => {
+    expect(ObjectQuerySourceSchema.safeParse(SOURCE).success).toBe(true);
+  });
+
+  it.each(offContract)('a block with %s lifts nothing', (_, source) => {
+    expect(ObjectQuerySourceSchema.safeParse(source).success).toBe(false);
+    expect(detectAnswerSource(wrapped({ rows: [], source }))).toBeUndefined();
+  });
+
+  it.each(offContract)('a turn whose block has %s draws the answer and no source block', (_, source) => {
+    renderTurn([toolPart('t1', 'aggregate_data', wrapped({ rows: [{ owner: 'u1', amount: 1 }], source }))]);
+    expect(screen.getByText('You have 7 open deals.')).toBeInTheDocument();
+    expect(screen.queryByTestId('answer-source')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'How this was computed' })).toBeNull();
+  });
+
+  it('every tool the contract says answers a source block is a service-ai platform tool', () => {
+    const serviceAi = PLATFORM_TOOLS_BY_PACKAGE['service-ai'];
+    expect(serviceAi).toBeDefined();
+    for (const name of OBJECT_QUERY_SOURCE_TOOL_NAMES) expect(serviceAi).toContain(name);
   });
 });
