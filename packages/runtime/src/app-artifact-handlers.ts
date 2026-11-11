@@ -14,9 +14,9 @@
  *   - action bodies through `ql.registerAction(object, name, handler, owner)`,
  *
  * both under the owner `app:<appId>` ({@link appArtifactHandlerOwner}); a
- * multi-package artifact's actions go under each declaring package's
- * `app:<package id>` instead (see "Each package's actions under its own
- * package" below).
+ * multi-package artifact's actions, hooks and functions go under each
+ * declaring package's `app:<package id>` instead (see "Each package's
+ * handlers under its own package" below).
  *
  * ## Why this is a function and not a block inside `AppPlugin.start`
  *
@@ -44,29 +44,39 @@
  * hook the new version dropped stop running. The explicit hook teardown matters
  * because `bindHooksToEngine` only unregisters when it is handed a NON-empty
  * list — a reinstall whose new version declares no hooks would otherwise keep
- * the old ones firing. For a multi-package artifact the action teardown
- * covers every owner the artifact's previous bind on that engine registered
- * under, and every owner the new bind registers under, so a package body the
- * new bundle no longer carries stops running too: when every action sat under
+ * the old ones firing. For a multi-package artifact the teardown covers every
+ * owner the artifact's previous bind on that engine registered under, and
+ * every owner the new bind registers under, so a package body the new bundle
+ * no longer carries stops running too: when every handler sat under
  * `app:<appId>`, the teardown of that one owner removed it.
  *
- * ## Each package's actions under its own package (ADR-0150 D4)
+ * Functions are torn down only for such a dropped body's owner: they are code
+ * (ADR-0088 — never a metadata row), so a JSON artifact cannot carry one, and
+ * `registerFunction` replaces by name, so an owner the new bind still names
+ * keeps what it registered, as it always did. A dropped body's functions leave
+ * the engine, so no flow `script` node and no hook resolves to them.
+ *
+ * ## Each package's handlers under its own package (ADR-0150 D4)
  *
  * A multi-package artifact (`packages[]`, `composeStacks(…, { manifest:
- * 'preserve' })`) carries each package's actions in that package's body, and
- * each body's action handlers are registered under THAT package
- * (`app:<package id>`, {@link actionBindingGroups}), as an install of each
- * package registers them, so a package-qualified call
- * (`/actions/NS/global/NAME`, `executeAction`'s `packageId`) reaches its own,
- * and two packages of two namespaces may each hold one object-less action of
- * a name. It binds what the reconciled artifact carries, nothing a
- * composition replaced; a key two bodies carry (outside that object-less
- * pair) stays one handler under the artifact's owner, and so does an action
- * the top level carries and no body declares. Hooks and functions stay under
- * the artifact's owner.
+ * 'preserve' })`) carries each package's actions, hooks and functions in that
+ * package's body, and each body's are registered under THAT package
+ * (`app:<package id>`), as an install of each package registers them. The two
+ * readers that resolve by package then read the body's own: a flow `script`
+ * node's function, resolved in the calling flow's package
+ * (`resolvePackageScopedFunction`), and a hook's `handler`, resolved among its
+ * own package's functions only (`bindHooksToEngine`).
  *
- * Functions are not torn down: they are code (ADR-0088 — never a metadata row),
- * so a JSON artifact cannot carry one, and `registerFunction` replaces by name.
+ * One rule decides each family's owner ({@link actionBindingGroups},
+ * {@link hookBindingGroups}): what the reconciled artifact carries is bound,
+ * nothing a composition replaced; a declaration one body carries goes under
+ * that body; one the top level carries and no body declares (the residual)
+ * under the artifact's owner; and a name two or more bodies carry stays under
+ * the artifact's owner, unless the bodies are held apart — where installing
+ * them one by one admits both holders of the name, each body binds its own
+ * under its own package. A package-qualified call (`/actions/NS/global/NAME`,
+ * `executeAction`'s `packageId`) reaches its own action, and two packages of
+ * two namespaces may each hold one object-less action of a name.
  *
  * ## Failure posture (unchanged from the block it replaces)
  *
@@ -200,6 +210,7 @@ import {
 } from './app-plugin.js';
 import { resolveArtifactCollections } from './artifact-collections.js';
 import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
+import { namespaceNameConflicts, type NamespacePackage } from '@objectstack/objectql';
 import { toBoundaryJobSchedule } from './job-schedule.js';
 import type { JobHandlerContext } from './job-handler-context.js';
 import { resolveMetrics } from './observability/observability-service-plugin.js';
@@ -207,9 +218,10 @@ import { resolveMetrics } from './observability/observability-service-plugin.js'
 /**
  * The engine owner key the handlers bound for the package `appId` are
  * registered under — the `package` of each `listRegisteredActions()` row and
- * the `packageId` of each hook. For an artifact it names the artifact's id;
- * for a multi-package artifact's action it names the declaring package's id
- * ({@link actionBindingGroups}). ObjectQLPlugin's runtime-authored re-sync reads the same owner as
+ * the `packageId` of each hook and function. For an artifact it names the
+ * artifact's id; for a multi-package artifact's action, hook or function it
+ * names the declaring package's id ({@link actionBindingGroups},
+ * {@link hookBindingGroups}). ObjectQLPlugin's runtime-authored re-sync reads the same owner as
  * "an installed code package's handler" (`isArtifactShippedAction`).
  */
 export function appArtifactHandlerOwner(appId: string): string {
@@ -241,15 +253,15 @@ export interface AppArtifactHandlerBindingOptions {
 /** What one {@link bindAppArtifactHandlers} call bound. */
 export interface AppArtifactHandlerBinding {
     /**
-     * The artifact's owner key: the hooks, the functions, and every action
-     * of a bundle with no `packages[]` were registered under it. A
-     * multi-package bundle's actions go under each declaring package's owner
-     * instead ({@link actionBindingGroups}).
+     * The artifact's owner key: every hook, function and action of a bundle
+     * with no `packages[]` was registered under it. A multi-package bundle's
+     * go under each declaring package's owner instead
+     * ({@link actionBindingGroups}, {@link hookBindingGroups}).
      */
     owner: string;
-    /** Hook definitions handed to `bindHooks` (0 when none were declared or binding failed). */
+    /** Hook definitions handed to `bindHooks`, over every owner (0 when none were declared or binding failed). */
     hooks: number;
-    /** Bundle functions handed to `bindHooks` alongside them. */
+    /** Bundle functions handed to `bindHooks` alongside them, over every owner. */
     functions: number;
     /** Action handlers registered — one per bound declaration. */
     actions: number;
@@ -279,41 +291,57 @@ export function bindAppArtifactHandlers(
     const owner = appArtifactHandlerOwner(appId);
     const out: AppArtifactHandlerBinding = { owner, hooks: 0, functions: 0, actions: 0, withheldHooks: [] };
 
-    // [ADR-0150 D4] Each package body's actions under its own package. Read
-    // before the teardown, which removes every owner the groups name.
+    // [ADR-0150 D4] Each package body's actions, hooks and functions under its
+    // own package. Read before the teardown, which removes every owner the
+    // groups name.
     let actionGroups: ActionBindingGroup[] = [];
     try {
         actionGroups = actionBindingGroups(bundle, owner);
     } catch (err: any) {
         logger.error(`${tag} Failed to read the declared actions`, err as Error, { appId });
     }
+    let hookGroups: HookBindingGroup[] = [];
+    try {
+        hookGroups = hookBindingGroups(bundle, owner);
+    } catch (err: any) {
+        logger.error(`${tag} Failed to read the declared hooks and functions`, err as Error, { appId });
+    }
+    const boundOwners = [...actionGroups.map((g) => g.owner), ...hookGroups.map((g) => g.owner)];
 
     // ── Tear down the owner's previous set ──────────────────────────────
     try {
-        if (typeof ql.removeActionsByPackage === 'function') {
-            // Every owner this artifact bound last time, and every owner it
-            // binds now: a package body the new bundle no longer carries stops
-            // running, as it did when every action sat under `owner`.
-            const owners = new Set([owner, ...previousActionOwners(ql, owner), ...actionGroups.map((g) => g.owner)]);
-            for (const each of owners) ql.removeActionsByPackage(each);
+        // Every owner this artifact bound last time, and every owner it binds
+        // now: a package body the new bundle no longer carries stops running,
+        // as it did when every handler sat under `owner`.
+        const previous = previousBoundOwners(ql, owner);
+        for (const each of new Set([owner, ...previous, ...boundOwners])) {
+            if (typeof ql.removeActionsByPackage === 'function') ql.removeActionsByPackage(each);
+            if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(each);
         }
-        recordActionOwners(ql, owner, actionGroups.map((g) => g.owner));
-        if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(owner);
+        // Functions only for an owner the new bind no longer names (module
+        // header, "Re-binding replaces"): every other owner's registrations are
+        // replaced by name below, as before.
+        const unregisterFunctions = (ql as { unregisterFunctionsByPackage?: (packageId: string) => number }).unregisterFunctionsByPackage;
+        if (typeof unregisterFunctions === 'function') {
+            const kept = new Set([owner, ...boundOwners]);
+            for (const each of previous) if (!kept.has(each)) unregisterFunctions.call(ql, each);
+        }
+        recordBoundOwners(ql, owner, boundOwners);
     } catch (err: any) {
         logger.error(`${tag} Failed to tear down the previous handler set`, err as Error, { appId, owner });
     }
 
     // ── Hooks (and the functions a hook may name) ───────────────────────
     // Inline function handlers are resolved directly; string-named handlers
-    // are looked up in `bundle.functions` (registered here too) or in any
-    // function previously registered on the engine — which is why a door with
-    // no runtime module withholds a hook that has no `body` (#21585).
+    // are looked up in the functions handed to the same owner's bind
+    // (registered here too) or in a function that owner previously registered
+    // on the engine — which is why a door with no runtime module withholds a
+    // hook that has no `body` (#21585).
     try {
-        let hooks = collectBundleHooks(bundle);
         if (options.withholdHooksWithoutBody) {
-            const withheld = hooksWithoutBodyOf(hooks);
+            const withheld = hookGroups.flatMap((group) => hooksWithoutBodyOf(group.hooks));
             if (withheld.length > 0) {
-                hooks = hooks.filter(hookCarriesBody);
+                hookGroups = hookGroups.map((group) => ({ ...group, hooks: group.hooks.filter(hookCarriesBody) }));
                 out.withheldHooks = withheld.map((h) => h.name);
                 logger.warn(
                     `${tag} ${withheld.length} hook(s) with no \`body\` NOT bound: ${describeHooks(withheld)}. `
@@ -326,9 +354,10 @@ export function bindAppArtifactHandlers(
         // Entries, not bare handlers: each function's declared `effect`
         // (#4396) rides along to the registry, where a `script` node reads
         // it to report what its run actually did.
-        const functions = collectBundleFunctionEntries(bundle);
-        for (const [name, fn] of Object.entries(functions)) {
-            if (fn.unrecognizedEffect === undefined) continue;
+        const warnedEffects = new Set<string>();
+        for (const [name, fn] of hookGroups.flatMap((group) => Object.entries(group.functions))) {
+            if (fn.unrecognizedEffect === undefined || warnedEffects.has(name)) continue;
+            warnedEffects.add(name);
             logger.warn(`${tag} unrecognized function effect — counted as an uncountable write`, {
                 appId,
                 name,
@@ -336,29 +365,41 @@ export function bindAppArtifactHandlers(
                 expected: "'pure' | 'writes'",
             });
         }
-        if (hooks.length > 0 || Object.keys(functions).length > 0) {
+        const bindable = hookGroups.filter((group) => group.hooks.length > 0 || Object.keys(group.functions).length > 0);
+        if (bindable.length > 0) {
             if (typeof ql.bindHooks === 'function') {
-                ql.bindHooks(hooks, {
-                    packageId: owner,
-                    functions,
-                    bodyRunner: hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n }),
-                    // [#24289] A handler that runs in-process, an inline function or
-                    // the function a string `handler` names, is handed the
-                    // `ctx.title(field?)` a `body` gets in the sandbox. The binder
-                    // applies it after resolving the name, so both take this one wrap.
-                    wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, String(hook.name)),
-                });
-                out.hooks = hooks.length;
-                out.functions = Object.keys(functions).length;
-                logger.info(`${tag} Bound declarative hooks`, {
-                    appId,
-                    hookCount: out.hooks,
-                    functionCount: out.functions,
-                });
+                const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n });
+                // One `bindHooks` per owner: the binder replaces an owner's hook
+                // set on each call, so an owner is never bound twice.
+                for (const group of bindable) {
+                    try {
+                        ql.bindHooks(group.hooks, {
+                            packageId: group.owner,
+                            functions: group.functions,
+                            bodyRunner,
+                            // [#24289] A handler that runs in-process, an inline function or
+                            // the function a string `handler` names, is handed the
+                            // `ctx.title(field?)` a `body` gets in the sandbox. The binder
+                            // applies it after resolving the name, so both take this one wrap.
+                            wrapHandler: (handler, hook) => withInProcessHookTitle(handler, ql, String(hook.name)),
+                        });
+                        out.hooks += group.hooks.length;
+                        out.functions += Object.keys(group.functions).length;
+                    } catch (err: any) {
+                        logger.error(`${tag} Failed to bind declarative hooks`, err as Error, { appId, owner: group.owner });
+                    }
+                }
+                if (out.hooks > 0 || out.functions > 0) {
+                    logger.info(`${tag} Bound declarative hooks`, {
+                        appId,
+                        hookCount: out.hooks,
+                        functionCount: out.functions,
+                    });
+                }
             } else {
                 logger.warn(`${tag} ql.bindHooks unavailable; declarative hooks ignored`, {
                     appId,
-                    hookCount: hooks.length,
+                    hookCount: bindable.reduce((sum, group) => sum + group.hooks.length, 0),
                 });
             }
         }
@@ -410,20 +451,46 @@ export function bindAppArtifactHandlers(
 }
 
 /**
- * The owners each artifact's last bind registered actions under, per engine
- * (keyed by the artifact's `owner`), so a re-bind tears down a package body
- * the new bundle dropped ({@link bindAppArtifactHandlers}).
+ * The owners each artifact's last bind registered actions, hooks and functions
+ * under, per engine (keyed by the artifact's `owner`), so a re-bind tears down
+ * a package body the new bundle dropped ({@link bindAppArtifactHandlers}).
  */
-const boundActionOwners = new WeakMap<object, Map<string, readonly string[]>>();
+const boundOwnersByEngine = new WeakMap<object, Map<string, readonly string[]>>();
 
-function previousActionOwners(ql: object, owner: string): readonly string[] {
-    return boundActionOwners.get(ql)?.get(owner) ?? [];
+function previousBoundOwners(ql: object, owner: string): readonly string[] {
+    return boundOwnersByEngine.get(ql)?.get(owner) ?? [];
 }
 
-function recordActionOwners(ql: object, owner: string, owners: readonly string[]): void {
-    let byArtifact = boundActionOwners.get(ql);
-    if (!byArtifact) boundActionOwners.set(ql, (byArtifact = new Map()));
+function recordBoundOwners(ql: object, owner: string, owners: readonly string[]): void {
+    let byArtifact = boundOwnersByEngine.get(ql);
+    if (!byArtifact) boundOwnersByEngine.set(ql, (byArtifact = new Map()));
     byArtifact.set(owner, [...new Set(owners)]);
+}
+
+/** One package body of a multi-package artifact, as every binding family reads it. */
+interface ArtifactBody {
+    readonly packageId: string;
+    readonly namespace: string | undefined;
+    readonly body: unknown;
+}
+
+/**
+ * The package bodies of an artifact carrying `packages[]`, in the boot's
+ * package order (`resolveArtifactPackageOrder`), each with its id and
+ * namespace; `undefined` for a bundle with no `packages[]`. A body with no id
+ * is no package and is left out.
+ */
+function artifactBodies(bundle: unknown): ArtifactBody[] | undefined {
+    const declared = (bundle as { packages?: unknown } | null | undefined)?.packages;
+    if (!Array.isArray(declared) || declared.length === 0) return undefined;
+    const out: ArtifactBody[] = [];
+    for (const body of resolveArtifactPackageOrder(bundle) as unknown[]) {
+        const packageId = artifactPackageId(body);
+        if (typeof packageId !== 'string' || packageId === '') continue;
+        const ns = (body as { namespace?: unknown } | null | undefined)?.namespace;
+        out.push({ packageId, namespace: typeof ns === 'string' && ns !== '' ? ns : undefined, body });
+    }
+    return out;
 }
 
 /** One owner's share of an artifact's declared actions ({@link actionBindingGroups}). */
@@ -468,8 +535,8 @@ interface ActionBindingGroup {
  */
 function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup[] {
     const reconciled = collectBundleActions(bundle);
-    const declared = (bundle as { packages?: unknown } | null | undefined)?.packages;
-    if (!Array.isArray(declared) || declared.length === 0) return [{ owner, actions: reconciled }];
+    const bodies = artifactBodies(bundle);
+    if (!bodies) return [{ owner, actions: reconciled }];
 
     type Action = ReturnType<typeof collectBundleActions>[number];
     interface Holder { readonly packageId: string; readonly namespace: string | undefined; readonly actions: Action[] }
@@ -477,11 +544,7 @@ function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup
         `${typeof action.object === 'string' && action.object.length > 0 ? action.object : GLOBAL_ACTION_OBJECT_KEY}:${action.name}`;
 
     const holdersByKey = new Map<string, Holder[]>();
-    for (const body of resolveArtifactPackageOrder(bundle) as unknown[]) {
-        const packageId = artifactPackageId(body);
-        if (typeof packageId !== 'string' || packageId === '') continue;
-        const ns = (body as { namespace?: unknown } | null | undefined)?.namespace;
-        const namespace = typeof ns === 'string' && ns !== '' ? ns : undefined;
+    for (const { packageId, namespace, body } of bodies) {
         for (const action of collectBundleActions(body)) {
             const key = keyOf(action);
             const holders = holdersByKey.get(key) ?? [];
@@ -517,6 +580,159 @@ function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup
         } else add(owner, action);
     }
     return [...byOwner].map(([groupOwner, actions]) => ({ owner: groupOwner, actions }));
+}
+
+/** One owner's share of an artifact's hooks, and the functions bound with them ({@link hookBindingGroups}). */
+interface HookBindingGroup {
+    readonly owner: string;
+    readonly hooks: any[];
+    readonly functions: ReturnType<typeof collectBundleFunctionEntries>;
+}
+
+/**
+ * [ADR-0150 D4, #32349] An artifact's declared hooks and functions, grouped by
+ * the owner each is registered under — the rule {@link actionBindingGroups}
+ * applies to actions. A bundle with no `packages[]` is one group, under the
+ * artifact's `owner`, exactly as before.
+ *
+ * A bundle carrying `packages[]` binds what the reconciled artifact carries
+ * (`collectBundleHooks(bundle)`, `collectBundleFunctionEntries(bundle)`, which
+ * read `resolveArtifactCollections`) and reads each body, in the boot's
+ * package order, for who declares what.
+ *
+ * **Hooks, by name.** One body carries the name: under that body's package
+ * (`app:<package id>`). No body carries it (a top-level residual: an input
+ * with no manifest): under the artifact's `owner`. Two or more bodies carry
+ * it: under the artifact's `owner`, unless the bodies are held apart — the
+ * install gate admits each holder beside the others, which for a hook is the
+ * namespace co-owner rule (`namespaceNameConflicts`: two packages of ONE
+ * judged namespace may not hold one hook name; two namespaces, a shareable
+ * namespace or none may) — and then each body binds its OWN hooks of the name
+ * under its own package (`split` once). The groups are created in the order
+ * their first hook appears in the reconciled list, so hooks of one priority
+ * fire in the order they did when one owner held them all.
+ *
+ * **Functions, by name.** One body declares the name in its `functions` (read
+ * by name, with or without a callable: a built artifact's body carries the ref
+ * and the runtime module the callable, merged at the top level): under that
+ * body's package. Two or more bodies declare it: under the artifact's
+ * `owner`, never held apart — a function keeps one package holder per
+ * deployment (ADR-0150 phase 1, `function` is not narrowed to the namespace,
+ * and `composeStacks` refuses the pair). No body declares it: under the owner
+ * of each group whose hooks name it as their `handler` — the ref `os build`
+ * lowered out of a body's hook that it could not extract, which only the
+ * runtime module serves — else under the artifact's `owner`. So a hook's
+ * `handler` reaches its own body's functions, and a function another body
+ * declares is not its own (`bindHooksToEngine` refuses it at registration).
+ */
+function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
+    const reconciledHooks = collectBundleHooks(bundle);
+    const reconciledFunctions = collectBundleFunctionEntries(bundle);
+    const bodies = artifactBodies(bundle);
+    if (!bodies) return [{ owner, hooks: reconciledHooks, functions: reconciledFunctions }];
+
+    const byOwner = new Map<string, { hooks: any[]; functions: HookBindingGroup['functions'] }>();
+    const groupOf = (to: string) => {
+        let group = byOwner.get(to);
+        if (!group) byOwner.set(to, (group = { hooks: [], functions: {} }));
+        return group;
+    };
+    const ownerOf = (body: ArtifactBody) => appArtifactHandlerOwner(body.packageId);
+
+    // ── Hooks ──
+    interface Holder { readonly body: ArtifactBody; readonly hooks: any[] }
+    const holdersByName = new Map<string, Holder[]>();
+    for (const body of bodies) {
+        for (const hook of collectBundleHooks(body.body)) {
+            const name = hookNameOf(hook);
+            if (name === undefined) continue;
+            const holders = holdersByName.get(name) ?? [];
+            let holder = holders.find((h) => h.body.packageId === body.packageId);
+            if (!holder) {
+                holder = { body, hooks: [] };
+                holders.push(holder);
+                holdersByName.set(name, holders);
+            }
+            holder.hooks.push(hook);
+        }
+    }
+    const heldApart = (name: string, holders: readonly Holder[]) => {
+        const packages: NamespacePackage[] = holders.map(({ body }) => ({
+            packageId: body.packageId,
+            namespace: body.namespace,
+            names: [{ type: 'hook', name }],
+        }));
+        return packages.every((incoming) => namespaceNameConflicts(incoming, packages).length === 0);
+    };
+    const split = new Set<string>();
+    for (const hook of reconciledHooks) {
+        const name = hookNameOf(hook);
+        const holders = name === undefined ? [] : holdersByName.get(name) ?? [];
+        if (holders.length === 1) groupOf(ownerOf(holders[0].body)).hooks.push(hook);
+        else if (holders.length > 1 && heldApart(name!, holders)) {
+            if (split.has(name!)) continue;
+            split.add(name!);
+            for (const holder of holders) groupOf(ownerOf(holder.body)).hooks.push(...holder.hooks);
+        } else groupOf(owner).hooks.push(hook);
+    }
+
+    // ── Functions ──
+    const declaredBy = new Map<string, ArtifactBody[]>();
+    for (const body of bodies) {
+        for (const name of declaredFunctionNames(body.body)) {
+            const declaring = declaredBy.get(name) ?? [];
+            if (!declaring.includes(body)) declaring.push(body);
+            declaredBy.set(name, declaring);
+        }
+    }
+    const namedBy = new Map<string, Set<string>>();
+    for (const [groupOwner, group] of byOwner) {
+        for (const hook of group.hooks) {
+            const handler = (hook as { handler?: unknown } | null | undefined)?.handler;
+            if (typeof handler !== 'string' || handler === '') continue;
+            const owners = namedBy.get(handler) ?? new Set<string>();
+            owners.add(groupOwner);
+            namedBy.set(handler, owners);
+        }
+    }
+    for (const [name, entry] of Object.entries(reconciledFunctions)) {
+        const declaring = declaredBy.get(name) ?? [];
+        const owners = declaring.length === 1 ? [ownerOf(declaring[0])]
+            : declaring.length > 1 ? [owner]
+            : [...(namedBy.get(name) ?? [owner])];
+        for (const to of owners) groupOf(to).functions[name] = entry;
+    }
+
+    return [...byOwner].map(([groupOwner, group]) => ({ owner: groupOwner, hooks: group.hooks, functions: group.functions }));
+}
+
+/** A hook's name, the key {@link hookBindingGroups} reads it by; `undefined` for one with none. */
+function hookNameOf(hook: unknown): string | undefined {
+    const name = (hook as { name?: unknown } | null | undefined)?.name;
+    return typeof name === 'string' && name !== '' ? name : undefined;
+}
+
+/**
+ * The function names one package body declares — its `functions` map keys and
+ * array entry `name`s, and those of a nested `manifest` — whether or not the
+ * entry carries a callable: a built artifact's body names a ref the runtime
+ * module serves.
+ */
+function declaredFunctionNames(body: unknown): string[] {
+    const names: string[] = [];
+    const read = (functions: unknown) => {
+        if (Array.isArray(functions)) {
+            for (const entry of functions) {
+                const name = (entry as { name?: unknown } | null | undefined)?.name;
+                if (typeof name === 'string' && name !== '') names.push(name);
+            }
+        } else if (functions && typeof functions === 'object') {
+            for (const name of Object.keys(functions)) if (name !== '') names.push(name);
+        }
+    };
+    read((body as { functions?: unknown } | null | undefined)?.functions);
+    read((body as { manifest?: { functions?: unknown } } | null | undefined)?.manifest?.functions);
+    return [...new Set(names)];
 }
 
 // ─── The job half (#21489) ─────────────────────────────────────────────
