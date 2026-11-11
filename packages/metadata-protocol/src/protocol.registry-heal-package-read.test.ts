@@ -122,8 +122,8 @@ function makeHarness(opts: { rows: Row[]; holders: ReadonlyArray<readonly [strin
 }
 
 /** The `[Protocol] … registry heal …` lines the walk logged. */
-const healLines = (warn: ReturnType<typeof vi.spyOn>): string[] =>
-    warn.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('registry heal'));
+const healLines = (warn: { mock: { calls: unknown[][] } }): string[] =>
+    warn.mock.calls.map((call: unknown[]) => String(call[0])).filter((line: string) => line.includes('registry heal'));
 
 afterEach(() => { vi.restoreAllMocks(); });
 
