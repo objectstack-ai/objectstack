@@ -5,6 +5,7 @@ import { DatabaseLoader } from './database-loader.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
+import { MetadataPlugin } from '../plugin.js';
 
 // Suppress logger output during tests. Stable object (not a fresh one per
 // `createLogger()` call) so the #5108 block can assert on what `list()` says
@@ -1892,5 +1893,70 @@ describe('[#31699 R4-A] the save of a bundled type writes its own member\'s row'
     await loader.save('agent', 'helper', { name: 'helper', label: 'v1', _packageId: ALPHA });
     await loader.save('agent', 'helper', { name: 'helper', label: 'v2', _packageId: ALPHA });
     expect(await stored('agent')).toEqual([[ALPHA, null, 'v2']]);
+  });
+});
+
+/**
+ * [#31699 R5-A; epic ruling 6801410166] The boot priming pass
+ * (`MetadataPlugin._loadFromFileSystem`, run for real here over a
+ * `DatabaseLoader`) never writes an item back into the loader it read it from;
+ * an item read from another loader still seeds the database loader.
+ *
+ * BEFORE (measured at cfb8f300, same fixtures): a package's `en-US` row beside
+ * a package-less `en-US` row was overwritten with the package-less body
+ * (version 3, one update); beside a package-less `fr-FR` row, a package-bound
+ * copy of it was inserted; a non-`datasource:` loader's item seeded one row.
+ */
+describe('[#31699 R5-A] the priming pass never writes back a row it read from the same loader', () => {
+  const ALPHA = 'com.alpha.app';
+  let driver: IDataDriver;
+  const seed = (id: string, packageId: string | null, locale: string, subject: string) =>
+    driver.create('sys_metadata', {
+      id, type: 'email_template', name: 'welcome', state: 'active', version: 1, checksum: id,
+      package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify({ name: 'welcome', locale, subject, bodyHtml: '<p/>' }),
+    });
+  const stored = async () =>
+    ((await driver.find('sys_metadata', { where: { type: 'email_template' } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).subject])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  /** The real pass, over exactly `loaders` (the manager's default loaders removed). */
+  const bootPass = async (...loaders: Array<DatabaseLoader | MemoryLoader>) => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const manager = (plugin as any).manager as MetadataManager;
+    (manager as any).loaders.clear();
+    for (const loader of loaders) manager.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('a package\'s en-US row beside a package-less en-US row: both unchanged, no update, no insert (BEFORE: the package\'s row overwritten)', async () => {
+    await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
+    await seed('env_en', null, 'en-US', 'env older');
+    const before = await stored();
+    await bootPass(new DatabaseLoader({ driver }));
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('the member-absent neighbour: a package\'s en-US row beside a package-less fr-FR row inserts nothing (BEFORE: a package-bound fr-FR copy inserted)', async () => {
+    await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
+    await seed('env_fr', null, 'fr-FR', 'env fr');
+    const before = await stored();
+    await bootPass(new DatabaseLoader({ driver }));
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('CONTROL: an item read from another loader still seeds the database loader', async () => {
+    const source = new MemoryLoader();
+    await source.save('email_template', 'welcome', { name: 'welcome', locale: 'en-US', subject: 'from source', bodyHtml: '<p/>', _packageId: ALPHA });
+    await bootPass(source, new DatabaseLoader({ driver }));
+    expect(await stored()).toEqual([[ALPHA, null, 'from source']]);
   });
 });

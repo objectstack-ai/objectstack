@@ -130,6 +130,20 @@ export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
  * {@link MetadataManager.get} already takes a package beyond the spec's
  * signature.
  */
+/**
+ * [#31699 R5-A; epic ruling 6801410166] {@link MetadataManager.register}'s
+ * options: the spec's {@link MetadataWriteOptions}, plus `skipSourceLoader`.
+ * With it, an item {@link MetadataManager.loadMany} read from a loader is not
+ * persisted back into that same loader; every other loader's write is
+ * unchanged. The boot priming pass sets it, so a boot never writes back a row
+ * it read from the store it read it from. Class-level, as
+ * {@link MetadataUnregisterOptions} is.
+ */
+export interface MetadataRegisterOptions extends MetadataWriteOptions {
+  /** Skip the write-through to the loader `loadMany` read this very item from. */
+  skipSourceLoader?: boolean;
+}
+
 export interface MetadataUnregisterOptions extends MetadataWriteOptions {
   /** The package whose item is removed; see the interface doc. */
   packageId?: string;
@@ -444,6 +458,8 @@ function redactServedDocument(
  */
 export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
+  /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
+  private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -898,7 +914,7 @@ export class MetadataManager implements IMetadataService {
     type: string,
     name: string,
     data: unknown,
-    options?: MetadataWriteOptions,
+    options?: MetadataRegisterOptions,
   ): Promise<void> {
     // [#7378] The ruled register contract, before anything is touched: refuse
     // a data.name that disagrees with the name argument and refuse a
@@ -943,6 +959,8 @@ export class MetadataManager implements IMetadataService {
       // and because `save?` stays optional on the interface for the protocols
       // the gate does not cover. Mirrors the same guard in `unregister()`.
       if (typeof loader.save !== 'function') continue;
+      // [#31699 R5-A] Never back into the loader this item was read from.
+      if (options?.skipSourceLoader && data !== null && typeof data === 'object' && this.loadedFrom.get(data) === loader) continue;
       await loader.save(type, name, data);
     }
 
@@ -3357,12 +3375,14 @@ export class MetadataManager implements IMetadataService {
                         if (bundleEntries.has(bundleKey)) continue;
                         bundleEntries.add(bundleKey);
                         results.push(item);
+                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
                         continue;
                     }
                     const exists = results.some((r: any) => r && r.name === itemAny.name);
                     if (exists) continue;
                 }
                 results.push(item);
+                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
             }
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
