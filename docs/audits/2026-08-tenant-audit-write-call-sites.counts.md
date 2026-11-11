@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 300 |
-| Object name statically decidable | 207 |
+| Write call sites | 306 |
+| Object name statically decidable | 213 |
 | Object name chosen at run time | 93 |
-| Against a tenancy-enabled object | 200 |
+| Against a tenancy-enabled object | 206 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 230 |
+| Threading a tenant context | 236 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 58 |
 | …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 166 |
+| Threading a decidably elevated context | 172 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 122 |
 
@@ -90,13 +90,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-10 at `2919a8dc2`.
+Measured on 2026-11-11 at `176946c25`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1129 |
-| engine-shaped types recognised | 131 |
-| declared objects in the registry | 136 |
+| tracked non-test sources scanned | 1132 |
+| engine-shaped types recognised | 132 |
+| declared objects in the registry | 137 |
 | same-named calls subtracted as non-engine | 287 |
 
 ## Every site
@@ -251,6 +251,8 @@ Measured on 2026-11-10 at `2919a8dc2`.
 | `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |
+| `packages/services/service-automation/src/sync-run-ledger.ts` | `insert` | `sys_sync_run` | enabled | elevated | 1 |
+| `packages/services/service-automation/src/sync-run-ledger.ts` | `update` | `sys_sync_run` | enabled | elevated | 5 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | elevated | 2 |
