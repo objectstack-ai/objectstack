@@ -91,6 +91,7 @@ import {
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
@@ -257,6 +258,36 @@ export function storedItemPackageId(item: unknown): string | undefined {
     if (typeof candidate === 'string' && candidate !== '' && candidate !== OVERLAY_SENTINEL) return candidate;
   }
   return undefined;
+}
+
+/**
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type — one that declares an
+ * item-key discriminator (`ITEM_KEY_DISCRIMINATORS`, `@objectstack/metadata-core`:
+ * `email_template`'s `locale`) — holds several members under one
+ * `(package, name)`, each its own stored row. A loader's unscoped read of
+ * such a type keeps one entry per `(package, name, member)`, never one per
+ * name or per slot, so no member of a bundle is dropped.
+ */
+export function isBundledStoreType(type: string): boolean {
+  return ITEM_KEY_DISCRIMINATORS[type] !== undefined;
+}
+
+/**
+ * The bundle member a stored item of `type` holds, spelled as the store's
+ * `bundle_member` column spells it (`overlayMemberValue`, metadata-protocol's
+ * `migrations/overlay-index.ts`): `null` for the canonical member, the trimmed
+ * value for any other, `undefined` for a type that declares no discriminator.
+ * A non-empty `column` (the row's `bundle_member`) is read first; else the
+ * body declares it (`itemDiscriminator`), a body that declares none being the
+ * canonical member.
+ */
+export function storedBundleMemberOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (!disc) return undefined;
+  const declared = typeof column === 'string' && column.trim() !== ''
+    ? column.trim()
+    : itemDiscriminator(type, peelStoredEnvelope(item).body) ?? '';
+  return declared === '' || declared === disc.canonical ? null : declared;
 }
 
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */

@@ -1694,3 +1694,109 @@ describe('#13997 — stat() emits canonical ISO text whatever the dialect materi
     expect(stats!.mtime).toBe(canonical);
   });
 });
+
+/**
+ * [#31699 R3-B, epic ruling 6796068023] `email_template` is stored per
+ * `(package, name)` and is the one BUNDLED type: one `(package, name)` holds a
+ * row per locale, the canonical member (`en-US`) stored as `bundle_member`
+ * NULL (`overlayMemberValue`). The loaders' unscoped reads keep one row per
+ * `(package, name, member)`, so no member of any slot is dropped.
+ *
+ * BASE (measured at 460df4af, `email_template` out of
+ * `PACKAGE_SLOTTED_STORE_TYPES`): `loadMany` answered every row. At 460df4af
+ * (in the set, collapsed one row per name): one alpha bundle answered only
+ * `fr-FR`; two packages' bundles answered 1 row of 4.
+ *
+ * Out of scope: a save through the loader is locale-blind and overwrites
+ * another member's row in its slot, as on `main` (card #32422), so the
+ * bundles below are seeded as the store writes them.
+ */
+describe('[#31699 R3-B] a bundled type keeps every member of every slot', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+  let loader: DatabaseLoader;
+
+  const body = (locale: string, packageId: string | null) =>
+    ({ name: 'welcome', locale, subject: `${packageId ?? 'env'} ${locale}`, bodyHtml: '<p/>' });
+  const seed = (id: string, packageId: string | null, locale: string, version: number) =>
+    driver.create('sys_metadata', {
+      id, type: 'email_template', name: 'welcome', state: 'active', version, checksum: id,
+      package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify(body(locale, packageId)),
+    });
+  const bundle = async (packageId: string, from: number) => {
+    await seed(`${packageId}_en`, packageId, 'en-US', from);
+    await seed(`${packageId}_fr`, packageId, 'fr-FR', from + 1);
+  };
+  const subjects = (items: Array<{ subject?: unknown }>) => items.map((item) => item.subject).sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+    loader = new DatabaseLoader({ driver });
+  });
+
+  it('one two-locale bundle: loadMany and loadManyKeyed keep both locales (460df4af: only fr-FR)', async () => {
+    await bundle(ALPHA, 1);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+    const keyed = await loader.loadManyKeyed('email_template');
+    expect(keyed.map((entry) => entry.name)).toEqual(['welcome', 'welcome']);
+    expect(subjects(keyed.map((entry) => entry.data))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+  });
+
+  it('two packages\' bundles: all four rows are kept (460df4af: 1 of 4)', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    const all = [`${ALPHA} en-US`, `${ALPHA} fr-FR`, `${BETA} en-US`, `${BETA} fr-FR`];
+    expect(subjects(await loader.loadMany('email_template'))).toEqual(all);
+    expect(subjects((await loader.loadManyKeyed('email_template')).map((entry) => entry.data))).toEqual(all);
+  });
+
+  it('CONTROL: one row per (package, name, member) — a member\'s older row is not a second member', async () => {
+    await bundle(ALPHA, 1);
+    await seed('alpha_fr_old', ALPHA, 'fr-FR', 0);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+  });
+
+  it('a rollback by name with two holders is refused 409 naming both, before any write', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    const err = await loader.registerRollback('email_template', 'welcome', body('en-US', ALPHA), 1)
+      .then(() => undefined, (e: any) => e);
+    expect([err?.code, err?.status, err?.refusal?.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA },
+      { kind: 'package', packageId: BETA },
+    ]);
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
+  it('a rollback by name of one slot restores the row of the member its body declares, never another member\'s', async () => {
+    await bundle(ALPHA, 1);
+    await loader.registerRollback('email_template', 'welcome', { ...body('fr-FR', ALPHA), subject: 'restored fr' }, 1);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, 'restored fr']);
+  });
+
+  it('a delete by name with two holders is refused 409; a delete naming a package takes that package\'s rows only', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    await expect(loader.delete('email_template', 'welcome')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await loader.loadManySlots('email_template')).toHaveLength(4);
+    await loader.delete('email_template', 'welcome', { packageId: ALPHA });
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${BETA} en-US`, `${BETA} fr-FR`]);
+  });
+
+  it('a save fills package_id', async () => {
+    await loader.save('email_template', 'welcome', { ...body('en-US', ALPHA), _packageId: ALPHA });
+    const rows = await driver.find('sys_metadata', { where: { type: 'email_template' } } as never) as Array<Record<string, unknown>>;
+    expect(rows.map((row) => row.package_id)).toEqual([ALPHA]);
+  });
+
+  it('MemoryLoader: two packages\' templates of one name are both answered by loadMany and loadManyKeyed', async () => {
+    const memory = new MemoryLoader();
+    await memory.save('email_template', 'welcome', { ...body('en-US', ALPHA), _packageId: ALPHA });
+    await memory.save('email_template', 'welcome', { ...body('en-US', BETA), _packageId: BETA });
+    expect(subjects(await memory.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${BETA} en-US`]);
+    expect((await memory.loadManyKeyed('email_template')).map((entry) => entry.name)).toEqual(['welcome', 'welcome']);
+  });
+});

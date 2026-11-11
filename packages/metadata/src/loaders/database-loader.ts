@@ -28,8 +28,10 @@ import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/co
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
   refuseSeveralSlots,
   slotPackageOf,
+  storedBundleMemberOf,
   storedItemPackageId,
   storeRemovalKeys,
   storeRowKey,
@@ -295,6 +297,12 @@ export interface DatabaseLoaderOptions {
  * saved last is its highest version: `load`, `loadMany` and `loadManyKeyed`
  * answer that one, one item per name, as they did. Every other type keeps one
  * row per `(type, name)`, as before.
+ *
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`) holds
+ * several members under one `(package, name)`, a row each: `loadMany` and
+ * `loadManyKeyed` keep one row per `(package, name, member)` — every member of
+ * every slot, as `main` answered every row — and a rollback by name of a name
+ * with one row slot restores the row of the member its body declares.
  */
 export class DatabaseLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -1132,7 +1140,11 @@ export class DatabaseLoader implements MetadataLoader {
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
           ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
-            ? { packageId: storedRowPackageId(row), version: Number(row.version) || 0 }
+            ? {
+                packageId: storedRowPackageId(row),
+                version: Number(row.version) || 0,
+                ...(isBundledStoreType(type) ? { member: storedBundleMemberOf(type, data, row.bundle_member) ?? null } : {}),
+              }
             : {}),
         });
       }
@@ -1158,16 +1170,22 @@ export class DatabaseLoader implements MetadataLoader {
    * by-package type, one row per name — the one saved last (its highest
    * version), in the order names first appear — as when the loader kept one
    * row per name. Every other type: every row.
+   *
+   * [#31699 R3-B] A bundled by-package type keeps one row per
+   * `(package, name, member)` ({@link unscopedRowKey}): one per name would
+   * drop every other member of a bundle, and every other package's bundle.
    */
   private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
     const rows = await this.readTypeRows(type);
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return rows;
-    const latest = new Map<string | null, StoredTypeRow>();
+    const bundled = isBundledStoreType(type);
+    const latest = new Map<string, StoredTypeRow>();
     const unnamed: StoredTypeRow[] = [];
     for (const row of rows) {
       if (row.name === null) { unnamed.push(row); continue; }
-      const held = latest.get(row.name);
-      if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(row.name, row);
+      const key = bundled ? unscopedRowKey(row.name, row.packageId, row.member ?? null) : row.name;
+      const held = latest.get(key);
+      if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(key, row);
     }
     return [...latest.values(), ...unnamed];
   }
@@ -1486,12 +1504,19 @@ export class DatabaseLoader implements MetadataLoader {
     // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
     const newChecksum = contentHash(metadataJson, type);
 
-    const existing = await this._findOne(this.tableName, {
-      where: this.baseFilter(type, name),
-    });
+    // [#31699 R3-B] A bundled type's one slot holds a row per member: the
+    // rollback restores the row of the member the restored body declares,
+    // never the first row the driver returns (another member's).
+    const member = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? storedBundleMemberOf(type, restoredData)
+      : undefined;
+    const existing = member === undefined
+      ? await this._findOne(this.tableName, { where: this.baseFilter(type, name) })
+      : (await this._find(this.tableName, { where: this.baseFilter(type, name) }))
+          .find((row) => (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
 
     if (!existing) {
-      throw new Error(`Metadata ${type}/${name} not found for rollback`);
+      throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
 
     const previousChecksum = existing.checksum as string | undefined;
@@ -1808,6 +1833,13 @@ interface StoredTypeRow {
   packageId?: string;
   /** For a by-package type, the row's version (the highest is the row saved last). */
   version?: number;
+  /** [#31699 R3-B] For a bundled by-package type, the member the row holds (`null`: the canonical one). */
+  member?: string | null;
+}
+
+/** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */
+function unscopedRowKey(name: string, packageId: string | undefined, member: string | null): string {
+  return JSON.stringify([packageId ?? null, name, member]);
 }
 
 /** A type-wide row keyed by its name, with its package when it holds one's item. */
