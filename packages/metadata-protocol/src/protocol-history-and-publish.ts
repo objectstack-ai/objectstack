@@ -104,8 +104,10 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * Each undo step appends its own history event, as a revert does: history is
  * append-only (D3), so the log records that the publish happened and was
  * undone rather than pretending it never ran. Phase 2 never ran for a refused
- * batch, so there is no registry write-through, event, materialization or
- * audit row to undo.
+ * batch, so there is no event, materialization or audit row to undo, and the
+ * registry still serves the pre-publish state; each undo write still takes the
+ * registry route every stored-row write takes (`revertCommit`'s two), which
+ * re-asserts that state.
  *
  * Returns the promotions it could NOT undo, each with its failure; empty means
  * the store is back to its pre-publish state. Never throws: one item's failure
@@ -115,9 +117,8 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * active row stored, its history append then failed) is not in `landed` — the
  * promotion threw — and is the store's own non-atomicity on such a runtime.
  */
-async function undoLandedPromotions(args: {
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
     repo: SysMetadataRepository;
-    isArtifactBacked: (type: string, name: string) => boolean;
     landed: ReadonlyArray<LandedPromotion>;
     /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
     plan: ReadonlyArray<CommitPlanItem>;
@@ -133,7 +134,7 @@ async function undoLandedPromotions(args: {
         // Per item, as the revert derives it: a runtime item is not refused by
         // the artifact-override gate on its way back out.
         const intent: 'override-artifact' | 'runtime-only' =
-            args.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
+            host.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
         try {
             if (!item.promotedDraft) {
                 throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
@@ -143,14 +144,26 @@ async function undoLandedPromotions(args: {
                 if (before.prevVersion === null) {
                     throw new Error(`${item.d.type}/${item.d.name} was live before the publish, at no recorded version to restore`);
                 }
-                await args.repo.restoreVersion(ref, before.prevVersion, {
+                const restored = await args.repo.restoreVersion(ref, before.prevVersion, {
                     actor, source, message, intent, packageId: item.packageId, ...memberOption(item.d.member),
+                });
+                // The registry route every stored-row write takes, as
+                // `revertCommit`'s restore writes it through. Phase 2 never ran,
+                // so the registry still serves this body: a write-through of
+                // what it already holds.
+                await host.applyRegistryWriteThrough({
+                    type: item.singularType, name: item.d.name, item: restored.item.body,
+                    packageId: item.packageId, organizationId: null,
                 });
             } else {
                 await args.repo.delete(ref, {
                     parentVersion: item.version, actor, source, message, intent,
                     state: 'active', packageId: item.packageId, ...memberOption(item.d.member),
                 });
+                // …and a removed row's heal, as `revertCommit`'s removal takes
+                // it: the registry never registered this row, so it is left
+                // serving what it served before the publish.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
             }
             // A drain that failed left the draft row in place (#4981): it is
             // still pending, and putting it back again would conflict with it.
@@ -160,6 +173,11 @@ async function undoLandedPromotions(args: {
                 await args.repo.put(ref, item.promotedDraft.body, {
                     parentVersion: null, actor, source, message, intent, state: 'draft', packageId: draftKey,
                 });
+                // No registry entry serves a draft row: the heal re-derives this
+                // item's entry from the active rows the store now serves, the
+                // state the undo above just restored — the route the stored-row
+                // census asks of every write.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
             }
         } catch (error) {
             notUndone.push({ item, error });
@@ -1406,7 +1424,7 @@ export class ProtocolHistoryAndPublishFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#publishPackageDrafts`; the method's docblock there is its contract. */
-    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'runPublishSideEffects'>, request: {
+    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applyRegistryWriteThrough' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
         packageId: string;
         actor?: string;
         /**
@@ -2115,9 +2133,8 @@ export class ProtocolHistoryAndPublishFacet {
             // reports the refusal. With a rollback the engine has already undone
             // them, and `promoted[]` describes writes that no longer exist.
             const stillLive = !canRollBack && promoted.length > 0
-                ? await undoLandedPromotions({
+                ? await undoLandedPromotions(this, {
                     repo,
-                    isArtifactBacked: (type, name) => this.isArtifactBacked(type, name),
                     landed: promoted,
                     plan: commitItems,
                     packageId: request.packageId,
