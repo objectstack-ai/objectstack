@@ -258,11 +258,12 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    does**, the platform's function (registered under no package) in every
    flow's reach; a `.custom` override reads as a package-less flow. `acme.crm`
    and `acme.sales` both shipping `normalize_phone` each run their own (the boot
-   warns `Bare-name conflict at boot`). Holding none itself, two holders in
-   reach (the platform's counts) or one only outside its `dependencies` closure
-   fail the step as a guard (no `fault` edge): `400 FLOW_FAILED`,
-   `details.innerRefusal.code: 'RESOURCE_CONFLICT'` naming each holder,
-   `$error.code` in a `try_catch`. Fix: declare the dependency, or rename.
+   warns `Bare-name conflict at boot`). If the flow's package holds none, two
+   holders in reach (the platform's counts) or one only outside its
+   `dependencies` closure fail the step as a guard (no `fault` edge;
+   `$error.code: 'RESOURCE_CONFLICT'` in a `try_catch`); a flow door answers
+   `400 FLOW_FAILED`, `error.details.innerRefusal` naming each holder. Fix:
+   declare the dependency, or rename.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
