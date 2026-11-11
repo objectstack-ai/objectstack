@@ -477,6 +477,27 @@ through the `@object-ui/i18n/namespaces/marketplace` subpath:
 
 The package entry's `en` is the resident pack alone, without the namespace.
 
+## The `developer` namespace — the developer surfaces' strings, fetched with them
+
+`console.developer.*` (the console's Developer pages: API console, flow runs,
+public forms, integrations) and `connectAgent.*` (connecting an AI assistant
+over MCP: the Integrations page's agent section, the Connect an assistant
+page's widget and the AI Assistants tab of a user record) live in
+[`src/namespaces/developer/`](./src/namespaces/developer/index.ts), reached
+through the `@object-ui/i18n/namespaces/developer` subpath. It is shaped and
+gated exactly like `marketplace` above: one lazy catalogue per platform locale
+table tag holding only these two groups, `useDeveloperNamespace()` answering
+`loading` / `ready` / `failed` with a `retry()`, app-shell's
+`DeveloperNamespaceGate` as the frame every reader renders under, and the
+all-packs door handing out each language complete.
+
+Both namespaces are built by one runtime, `createPackNamespace()` in
+[`src/namespaces/packNamespace.ts`](./src/namespaces/packNamespace.ts). A new
+pack-shaped namespace is a directory of catalogues, one call to it, a row in
+`PACK_NAMESPACE_FRAMES` (`ui/scripts/check-i18n-call-site-keys.mjs`) naming the
+directories its readers live in, and one `i18n-ns-<ns>-<tag>` chunk group per
+catalogue in `apps/console/vite.config.ts` — never a second loader.
+
 ## Links
 
 - 📦 [npm package](https://www.npmjs.com/package/@object-ui/i18n)
