@@ -1599,6 +1599,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
   "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
   "the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight": 12,
+  'the in-flight listing -> a count above a short page is re-read under the board-read budget: whole on a re-read it is judged, still short it is unreadable, and a count that is no number or sits over a full page is unreadable at once': 7,
   'annotate-shipped -> the next.2 shape: each changeset the last version commit left unconsumed gets the lead line once, frontmatter byte-unchanged': 5,
   'annotate-shipped -> a second run writes nothing': 2,
   'annotate-shipped -> a changeset whose first body line already says Shipped in is left byte-identical': 2,
@@ -1613,7 +1614,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'changelog fold -> armed only on an exit-mode cut, for the CHANGELOGs whose top was a prerelease before the version pass wrote': 3,
   'the sweep -> a transient read is retried under one budget, still failing it defers with a warning and exit 0, and a 4xx or a failed cancel stays red': 10,
 });
-const SELF_TEST_BATTERY_FLOOR = 35;
+const SELF_TEST_BATTERY_FLOOR = 36;
 
 async function selfTest() {
   let failed = 0;
@@ -2691,8 +2692,11 @@ async function selfTest() {
       'a run still running whose jobs were never read -> unreadable, never clear',
     );
 
-    const flightWith = async ({ filters = {}, totals = {}, tips = {}, direct = {}, fail = null, walk } = {}) => {
+    // `listings[status]` answers that filter read by read, its last answer
+    // repeating: each `{ total, runs }`, `total` absent meaning `runs.length`.
+    const flightWith = async ({ filters = {}, totals = {}, listings = {}, tips = {}, direct = {}, fail = null, walk, budget = boardReadBudget({ sleep: async () => {} }) } = {}) => {
       const calls = [];
+      const reads = {};
       const http = async (method, path) => {
         calls.push(`${method} ${path}`);
         if (fail && fail.test(path)) return { status: 502, body: 'bad gateway' };
@@ -2700,6 +2704,12 @@ async function selfTest() {
         let m;
         if (u.pathname.endsWith('/actions/workflows/release.yml/runs')) {
           const status = u.searchParams.get('status');
+          if (status && listings[status]) {
+            const n = (reads[status] = (reads[status] ?? 0) + 1);
+            const answer = listings[status][Math.min(n, listings[status].length) - 1];
+            const total = 'total' in answer ? answer.total : answer.runs.length;
+            return { status: 200, body: { total_count: total, workflow_runs: answer.runs } };
+          }
           if (status) {
             const runs = filters[status] ?? [];
             return { status: 200, body: { total_count: totals[status] ?? runs.length, workflow_runs: runs } };
@@ -2718,8 +2728,9 @@ async function selfTest() {
         versionCommit: 'c'.repeat(40),
         walk: walk ?? [{ versionCommit: 'c'.repeat(40), version: '17.6.0', tips: ['c'.repeat(40), 'dcc5ef4c', 't2'] }].values(),
         currentRunId: 36958423332,
+        budget,
       });
-      return { answer, calls };
+      return { answer, calls, reads };
     };
     const runAt = (id, event, status, jobs) => ({ id, event, status, head_sha: 'x', jobs });
 
@@ -2859,6 +2870,65 @@ async function selfTest() {
     check(
       lostImage.answer.docker.state === 'clear' && /no push run of release\.yml was found/.test(lostImage.answer.docker.detail),
       'no push run found and nothing in flight -> the image is clear on the filters, and the answer says so',
+    );
+
+    // Run 42938356503's stable-lane read at 01:24Z: `?status=in_progress`
+    // counted 2 over a page listing 1, while the calling run was the only
+    // release.yml run in progress. Opened in this block to reuse its stub API.
+    battery('the in-flight listing -> a count above a short page is re-read under the board-read budget: whole on a re-read it is judged, still short it is unreadable, and a count that is no number or sits over a full page is unreadable at once');
+    const self = runAt(36958423332, 'schedule', 'in_progress');
+    const timed = () => {
+      const ms = [];
+      return { ms, budget: boardReadBudget({ sleep: async (d) => { ms.push(d); } }) };
+    };
+    const lag = timed();
+    const healed = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }, { runs: [self] }] }, budget: lag.budget });
+    check(
+      healed.answer.state === 'clear' && healed.answer.docker.state === 'clear' && healed.reads.in_progress === 2 &&
+        lag.ms.join() === '500' && lag.budget.retriesSpent === 1,
+      'the 01:24Z reading: a count of 2 over the calling run alone, then a page the count agrees with -> clear, after one re-read 500 ms later spent from the run\'s budget',
+    );
+    const queuedLag = await flightWith({ listings: { queued: [{ total: 1, runs: [] }, { runs: [] }] } });
+    check(
+      queuedLag.answer.state === 'clear' && queuedLag.reads.queued === 2,
+      'the queued filter short by one, whole on the re-read -> clear',
+    );
+    const revealed = await flightWith({
+      listings: { in_progress: [{ total: 2, runs: [self] }, { runs: [self, runAt(77, 'workflow_dispatch', 'in_progress')] }] },
+      direct: { 77: runAt(77, 'workflow_dispatch', 'in_progress', [job('17.6.0', 'in_progress')]) },
+    });
+    check(
+      revealed.answer.state === 'in-flight' && revealed.answer.reason === 'publish-in-flight' && revealed.calls.some((c) => /\/runs\/77\/jobs/.test(c)),
+      'a re-read listing the run the short page left out -> that run is read and judged, so its publish is in flight',
+    );
+    const stuck = timed();
+    const persistent = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }] }, budget: stuck.budget });
+    check(
+      persistent.answer.state === 'in-flight' && persistent.answer.reason === 'unreadable' &&
+        persistent.answer.docker.state === 'in-flight' && persistent.answer.docker.reason === 'unreadable' &&
+        persistent.reads.in_progress === stuck.budget.policy.attemptsPerRead && stuck.ms.join() === '500,1000' &&
+        !persistent.calls.some((c) => /status=queued/.test(c)),
+      'a count still above the page on every read the ladder allows -> unreadable for the publish and the image alike, after 3 reads 500 / 1000 ms apart, and nothing after it is read',
+    );
+    const spentBudget = boardReadBudget({ sleep: async () => { throw new Error('a spent budget never sleeps'); } });
+    spentBudget.retriesSpent = spentBudget.policy.retriesPerRun;
+    const spent = await flightWith({ listings: { in_progress: [{ total: 2, runs: [self] }, { runs: [self] }] }, budget: spentBudget });
+    check(
+      spent.answer.reason === 'unreadable' && spent.reads.in_progress === 1,
+      'the run\'s retry budget already spent (by its transient retries) -> no re-read: unreadable on the first short page',
+    );
+    const noCount = await Promise.all(
+      [undefined, null, '2'].map((total) => flightWith({ listings: { in_progress: [{ total, runs: [self] }, { runs: [self] }] }, budget: timed().budget })),
+    );
+    check(
+      noCount.every((u) => u.answer.reason === 'unreadable' && u.reads.in_progress === 1),
+      'a total_count that is absent, null or a string is no count to wait for -> unreadable on the first read, never re-read',
+    );
+    const fullPage = Array.from({ length: 100 }, (_, i) => runAt(5000 + i, 'push', 'in_progress'));
+    const overFull = await flightWith({ listings: { in_progress: [{ total: 101, runs: fullPage }, { runs: [self] }] } });
+    check(
+      overFull.answer.reason === 'unreadable' && overFull.reads.in_progress === 1,
+      'a count above a FULL page of 100 is a second page this read does not take, not lag -> unreadable at once, never re-read',
     );
   }
 
