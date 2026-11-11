@@ -274,8 +274,7 @@ P`record.amount != null && record.amount > 10000 && record.region in ['us', 'eu'
 P`!isBlank(record.po_number)`;
 ```
 
-Never emit `conditionalRequired` (use `requiredWhen`) — it was REMOVED in
-protocol 17 and is a parse error.
+Conditional requiredness: [objectstack-data](../objectstack-data/SKILL.md#conditional-field-rules).
 
 ❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
 located message, and the flow engine throws if it ever reaches runtime:

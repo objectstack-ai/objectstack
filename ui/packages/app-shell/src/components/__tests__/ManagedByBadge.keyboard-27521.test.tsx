@@ -59,9 +59,12 @@ describe('ManagedByBadge — the identity note is true of a team made here (obje
       </I18nProvider>,
     );
     const note = await openNote();
-    expect(note).toContain('经内置身份服务写入');
+    // #32021 — 「经身份服务写入」 named a mechanism an administrator cannot
+    // place; the note says who keeps these records: the account system.
+    expect(note).toContain('由内置账号系统维护');
     expect(note).toContain('本页上的操作');
     expect(note).not.toContain('身份提供方');
+    expect(note).not.toContain('身份服务');
   });
 });
 
@@ -90,7 +93,7 @@ describe('ManagedByBadge — the tag word speaks to an administrator (objectstac
   it('Chinese: config, system-data and better-auth read what the administrator can do', () => {
     expect(tagText('config', 'zh')).toBe('在此配置');
     expect(tagText('system-data', 'zh')).toBe('平台预置 · 可编辑');
-    expect(tagText('better-auth', 'zh')).toBe('经身份服务写入');
+    expect(tagText('better-auth', 'zh')).toBe('由账号系统维护');
   });
 
   it('English: the same three tags', () => {
