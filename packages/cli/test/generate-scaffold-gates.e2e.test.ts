@@ -361,7 +361,8 @@ describe('[#32153] a fresh `os init` project: the new generator variants pass ev
     expect(view).toMatch(/listViews: \{\n {4}open_tickets: \{/);
     const action = read('src', 'actions', 'resolve.action.ts');
     expect(action).toContain("operation: 'update',");
-    expect(action).not.toContain("type: 'flow'");
+    // No flow binding at the action's top level (its comment may still name one).
+    expect(action).not.toMatch(/^ {2}(?:type: 'flow'|target: )/m);
   });
 
   it('the dashboard names the navigation entry that lists it, and the one app to add it to', () => {
