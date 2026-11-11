@@ -313,6 +313,15 @@ path pointer the command fails on `main`: it projects the dotted pointer as a co
 there. When the save drops `homeAmount`, the message says nothing re-rates them. Landed by #31949 in PR #31969
 (`33ab84f9`).
 
+*Note (2026-11-11):* the wait above is resolved by #31911 in PR #32216 (`193491823`). `os migrate
+recompute-home-amounts` now selects a path pointer's `master_detail` column instead of the dotted pointer, reads each
+page's parents as a write reads them, and converts each row from its parent's code
+(`packages/objectql/src/home-amount-recompute.ts#recomputeHomeAmounts`). A row whose parent holds no code, or names a
+parent the run cannot read, is listed as `code_blank`, and the remedy names the parent's code, not
+`os migrate record-currency-codes`. So the recompute that the `currency_field_repointed` message names runs for a path
+pointer as it does for a sibling pointer. The code backfill still refuses a path pointer, `INVALID_FIELD` / 400 before
+any row is read (`packages/objectql/src/record-currency-backfill.ts`); that is the third edge of Open item 14.
+
 ### D6 — Q4: raw aggregates over a record-mode field refuse, and consolidation reads the home field (letter A)
 
 - A raw aggregate over a record-mode amount refuses at build unless it groups by that amount's code field.
@@ -698,6 +707,30 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
     - **A child row that moves to another parent** whose code differs. The lock binds the parent's code field, not
       the child's `master_detail` value. The lean, not adopted here: such a move changes the child's currency the way
       a write of its own code field changes a sibling-code amount's currency today, and the write projects again.
+
+      *Note (2026-11-11):* adopted. The maintainer ruled A on #31911, recorded in
+      [`6768756192`](https://github.com/objectstack-ai/objectstack/issues/31911#issuecomment-6768756192), choosing
+      「A Re-project (Recommended)」: a child row moved to a parent whose code differs re-projects its home amount from
+      the new parent's code. PR #32216 (`193491823`) implements it. On an update, the `master_detail` field is the input
+      that moves a following amount's currency
+      (`packages/objectql/src/validation/record-currency-code.ts#recordCurrencyInputOf`), so a write that re-parents
+      the row is judged by the blank-code guard and projected again from the new parent's code
+      (`packages/objectql/src/home-amount-projection.ts#homeAmountsTouched`). The lean above is now the rule. The
+      other two edges below stay open.
+
+      *Note (2026-11-11):* the parent read is stricter than the reference check. Before any currency verdict, a
+      following amount's parent is read first through the writer's read door, then elevated within the organization
+      (`packages/objectql/src/engine-references-and-master-detail.ts`, `parentRows`;
+      `packages/objectql/src/validation/record-currency-code.ts#followParentCurrencyCodes`). That read also covers two
+      values the reference check exempts
+      (`packages/objectql/src/engine-referential-integrity.ts#assertReferencesResolve`): (a) on an update that
+      touches only the amount or its document date, the parent the row already holds; (b) a parent id that a service
+      verb vouches for (`isVouchedReference`). Both fail closed. A parent the writer's read door does not return is
+      answered `reference_not_found` on the `master_detail` field, and a parent that a system writer's elevated read
+      does not find is answered `ERR_CURRENCY_CODE_REQUIRED`. Neither answer states a currency. The review of record
+      accepted this as the conservative reading of D2 and D5 (nit F6 in
+      [`6775262964`](https://github.com/objectstack-ai/objectstack/issues/32216#issuecomment-6775262964) on PR
+      #32216).
     - **Grouping that makes a raw aggregate single-currency.** Does an ObjectQL aggregate, or a dataset or cube
       measure, over such a child amount that groups by the parent path (the code field reached through the
       `master_detail`) count as grouped by its code field (D6's first bullet)? That half is #31911's reading of D6.
