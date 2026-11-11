@@ -51,6 +51,8 @@ import {
 import type { HydrationOptions, ShippingPackages, UnboundOwnerRefusalState } from './protocol-package-bindings.js';
 import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
+import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
+import { installedManifestsOfEngine } from './installed-manifests.js';
 import type { ViewContainerWrite } from './protocol-package-bindings.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
@@ -60,17 +62,82 @@ import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplemen
 
 /**
  * [#32366, ADR-0150 D5] The one line {@link ProtocolRegistryHydrationFacet.restoreArtifactRegistryView}
- * logs when its walk stops on a throw: which item, why, and what the registry
- * may keep serving. A package-scoped refusal (a read naming no package, of a
- * name two packages hold) is named as one, with the holders its message lists.
+ * logs when its walk stops on a throw: which item, why, what the registry may
+ * keep serving, and the fix. At `error`: the stored rows and the registry then
+ * disagree while nothing looks broken (AGENTS.md, degradation log levels). A
+ * package-scoped refusal (a read naming no package, of a name two packages
+ * hold) is named as one, with the package the refused read named as the store
+ * read it (its `callerPackageId`: a package-less read is "no package") and the
+ * holders its message lists.
  */
-function registryHealStoppedMessage(type: string, name: string, packageId: string | null, error: unknown): string {
+function registryHealStoppedMessage(type: string, name: string, error: unknown): string {
     const reason = error instanceof Error ? error.message : String(error);
-    const why = packageScopedRefusalOf(error) !== undefined
-        ? `the metadata service refused the baseline read, which named ${packageId === null ? 'no package' : `package '${packageId}'`}: ${reason}`
+    const refusal = packageScopedRefusalOf(error);
+    const named = boundPackageOf(refusal?.callerPackageId);
+    const why = refusal !== undefined
+        ? `the metadata service refused the baseline read, which named ${named === undefined ? 'no package' : `package '${named}'`}: ${reason}`
         : reason;
     return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
-        + 'The stored rows are already correct; the registry entry is left as it was and may serve the removed row until the next reload.';
+        + 'The stored rows are already correct, but the registry entry is left as it was and may serve the removed row '
+        + 'while every read looks normal; the next reload (or restart) re-hydrates the registry from the stored rows and heals it.';
+}
+
+/** A MetadataService read's answer, as {@link ProtocolHost.readItemFromMetadataService} gives it. */
+type ServiceRead = { data: unknown; degraded: boolean; errors: string[] };
+
+/**
+ * [#32366 S1, ADR-0146, ADR-0150 D3] The baseline the delete heal's tier 2
+ * reads for a removed row bound to `packageId` (`undefined`: package-less).
+ *
+ * The row's own package first: a holder's row restores that holder's
+ * baseline, never another package's. A settled miss there means the package
+ * holds no item of the name in the service, so the row was a customization of
+ * the name, not an item of its own. The case that matters is an App's pair
+ * row, the declared override of a holder's item (ADR-0146; `action` is an
+ * open type): what serves the name once the row is gone is what a read naming
+ * no package answers (D3, never a guess), as on `main` before this read named
+ * a package:
+ *
+ * - the one holder's item, for a name one package holds;
+ * - for a name two or more packages hold, that read is refused. The BASE the
+ *   pair row overrides is then named by the pair relation, never picked: each
+ *   package candidate the refusal lists is asked whether the removal is a pair
+ *   row of theirs ({@link isPairRowRemoval}, the delete door's own predicate).
+ *   Exactly one base ⇒ its baseline. Otherwise the refusal stands, and the
+ *   walk stops with it, logged;
+ * - no holder at all (a clean miss) ⇒ the settled miss stands, and the walk
+ *   goes on to tier 3: the row was the item;
+ * - a degraded read ⇒ degraded: the walk stops without retiring.
+ *
+ * Asked of the service rather than the registry: tier 1 has already healed
+ * whenever the registry holds the base's composite artifact under a shadow, so
+ * this read is reached exactly where it does not.
+ */
+async function readHealBaseline(
+    host: Pick<ProtocolHost, 'engine' | 'readItemFromMetadataService'>,
+    type: string,
+    name: string,
+    packageId: string | undefined,
+): Promise<ServiceRead> {
+    const own = await host.readItemFromMetadataService(type, name, packageId);
+    if (packageId === undefined || (own.data !== undefined && own.data !== null) || own.degraded) return own;
+    try {
+        const bare = await host.readItemFromMetadataService(type, name);
+        return bare.data !== undefined && bare.data !== null
+            ? bare
+            : { data: undefined, degraded: bare.degraded, errors: [...own.errors, ...bare.errors] };
+    } catch (error) {
+        const refusal = packageScopedRefusalOf(error);
+        if (refusal === undefined) throw error;
+        const installed = installedManifestsOfEngine(host.engine);
+        const bases = refusal.candidates.flatMap((candidate) => (
+            candidate.kind === 'package' && isPairRowRemoval(type, candidate.packageId, packageId, installed)
+                ? [candidate.packageId]
+                : []
+        ));
+        if (bases.length !== 1) throw error;
+        return host.readItemFromMetadataService(type, name, bases[0]);
+    }
 }
 
 export class ProtocolRegistryHydrationFacet {
@@ -1295,6 +1362,12 @@ export class ProtocolRegistryHydrationFacet {
      * a name restored nothing, and said nothing. Read for P, it restores P's
      * baseline, never another package's.
      *
+     * A row bound to a package that holds no item of the name (an App's pair
+     * row, the declared override of a holder's item, ADR-0146) restores what a
+     * read naming no package answers, as before: the one holder's baseline.
+     * On a name two packages hold, the BASE the pair overrides, named by the
+     * pair relation and never guessed ({@link readHealBaseline}).
+     *
      * REQUIRED, never optional, for the reason `organizationId` is: an omitted
      * package would read bare. A caller with no package to name passes `null`
      * and says why at its call site: the removed row was package-less (the
@@ -1305,10 +1378,10 @@ export class ProtocolRegistryHydrationFacet {
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway. Never silent:
-     * what stops the walk is logged once, at `warn`, with what the registry
-     * may keep serving until then ({@link registryHealStoppedMessage}). A
-     * package-scoped refusal of the baseline read is named as one, with the
-     * holders it lists.
+     * what stops the walk is logged once, at `error` (the stored rows and the
+     * registry then disagree), with what the registry may keep serving and the
+     * fix ({@link registryHealStoppedMessage}). A package-scoped refusal of the
+     * baseline read is named as one, with the holders it lists.
      */
     static async restoreArtifactRegistryView(host: Pick<ProtocolHost, 'anotherPackageShips' | 'applyRegistryWriteThrough' | 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'isArtifactBacked' | 'isUnservedSealedOverlay' | 'readItemFromMetadataService' | 'reconcileViewExpansions' | 'registryTakesStoredRows' | 'resyncStoredObjectExtensions' | 'rethrowUnlessMetadataStoreUnprovisioned'>, type: string,
             name: string,
@@ -1465,8 +1538,9 @@ export class ProtocolRegistryHydrationFacet {
             }
             if (healed) return;
 
-            // [#32366] Read for the removed row's package — see the header.
-            const baseline = await host.readItemFromMetadataService(type, name, packageId ?? undefined);
+            // [#32366] Read for the removed row's package, or for the base a
+            // pair row overrides — see the header and {@link readHealBaseline}.
+            const baseline = await readHealBaseline(host, type, name, boundPackageOf(packageId));
             // [#22877] A baseline of ANOTHER member is no baseline of this one:
             // the service keys a type's items by name alone, so it can hold a
             // bundle's other member under the name.
@@ -1594,7 +1668,7 @@ export class ProtocolRegistryHydrationFacet {
         } catch (error) {
             // [#32366] Best-effort, never silent: the delete has committed and
             // is not failed here, and what stopped the walk is said once.
-            console.warn(registryHealStoppedMessage(type, name, packageId, error));
+            console.error(registryHealStoppedMessage(type, name, error));
         }
     }
 
