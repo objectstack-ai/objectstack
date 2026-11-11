@@ -54,7 +54,10 @@
  * (ADR-0088 — never a metadata row), so a JSON artifact cannot carry one, and
  * `registerFunction` replaces by name, so an owner the new bind still names
  * keeps what it registered, as it always did. A dropped body's functions leave
- * the engine, so no flow `script` node and no hook resolves to them.
+ * the engine, so no flow `script` node and no hook resolves to them; and a
+ * function the new bind gives to another owner leaves the owner the previous
+ * bind gave it, so one function is never held by two of the artifact's
+ * packages (`releaseMovedFunctions`).
  *
  * ## Each package's handlers under its own package (ADR-0150 D4)
  *
@@ -325,20 +328,32 @@ export function bindAppArtifactHandlers(
         // Every owner this artifact bound last time, and every owner it binds
         // now: a package body the new bundle no longer carries stops running,
         // as it did when every handler sat under `owner`.
-        const previous = previousBoundOwners(ql, owner);
-        for (const each of new Set([owner, ...previous, ...boundOwners])) {
+        const previous = previousBind(ql, owner);
+        for (const each of new Set([owner, ...previous.owners, ...boundOwners])) {
             if (typeof ql.removeActionsByPackage === 'function') ql.removeActionsByPackage(each);
             if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(each);
         }
         // Functions only for an owner the new bind no longer names (module
         // header, "Re-binding replaces"): every other owner's registrations are
-        // replaced by name below, as before.
-        const unregisterFunctions = (ql as { unregisterFunctionsByPackage?: (packageId: string) => number }).unregisterFunctionsByPackage;
-        if (typeof unregisterFunctions === 'function') {
+        // replaced by name below, as before — except a function the new bind
+        // gives to ANOTHER owner, which leaves the owner the previous bind
+        // gave it, so one function never stays held by two packages.
+        const engine = ql as FunctionHoldingEngine;
+        if (typeof engine.unregisterFunctionsByPackage === 'function') {
             const kept = new Set([owner, ...boundOwners]);
-            for (const each of previous) if (!kept.has(each)) unregisterFunctions.call(ql, each);
+            for (const each of previous.owners) if (!kept.has(each)) engine.unregisterFunctionsByPackage(each);
+            const givenTo = new Map<string, string>();
+            for (const group of hookGroups) for (const name of Object.keys(group.functions)) givenTo.set(name, group.owner);
+            for (const [each, names] of previous.functions) {
+                if (!kept.has(each)) continue;
+                const moved = names.filter((name) => givenTo.has(name) && givenTo.get(name) !== each);
+                if (moved.length > 0) releaseMovedFunctions(engine, each, moved, [...names, ...hookHandlersOf(hookGroups, each)]);
+            }
         }
-        recordBoundOwners(ql, owner, boundOwners);
+        recordBind(ql, owner, {
+            owners: boundOwners,
+            functions: new Map(hookGroups.map((group) => [group.owner, Object.keys(group.functions)])),
+        });
     } catch (err: any) {
         logger.error(`${tag} Failed to tear down the previous handler set`, err as Error, { appId, owner });
     }
@@ -462,21 +477,88 @@ export function bindAppArtifactHandlers(
     return out;
 }
 
-/**
- * The owners each artifact's last bind registered actions, hooks and functions
- * under, per engine (keyed by the artifact's `owner`), so a re-bind tears down
- * a package body the new bundle dropped ({@link bindAppArtifactHandlers}).
- */
-const boundOwnersByEngine = new WeakMap<object, Map<string, readonly string[]>>();
-
-function previousBoundOwners(ql: object, owner: string): readonly string[] {
-    return boundOwnersByEngine.get(ql)?.get(owner) ?? [];
+/** What one artifact's last bind on an engine registered ({@link boundOwnersByEngine}). */
+interface BoundRecord {
+    /** Every owner it bound actions, hooks or functions under. */
+    readonly owners: readonly string[];
+    /** The bundle functions it gave each owner, by owner. */
+    readonly functions: ReadonlyMap<string, readonly string[]>;
 }
 
-function recordBoundOwners(ql: object, owner: string, owners: readonly string[]): void {
+/**
+ * The owners each artifact's last bind registered actions, hooks and functions
+ * under, per engine (keyed by the artifact's `owner`), and the functions it
+ * gave each, so a re-bind tears down a package body the new bundle dropped
+ * and takes a function off an owner the new bind moved it from
+ * ({@link bindAppArtifactHandlers}).
+ */
+const boundOwnersByEngine = new WeakMap<object, Map<string, BoundRecord>>();
+
+const NO_BIND: BoundRecord = { owners: [], functions: new Map() };
+
+function previousBind(ql: object, owner: string): BoundRecord {
+    return boundOwnersByEngine.get(ql)?.get(owner) ?? NO_BIND;
+}
+
+function recordBind(ql: object, owner: string, record: BoundRecord): void {
     let byArtifact = boundOwnersByEngine.get(ql);
     if (!byArtifact) boundOwnersByEngine.set(ql, (byArtifact = new Map()));
-    byArtifact.set(owner, [...new Set(owners)]);
+    byArtifact.set(owner, { owners: [...new Set(record.owners)], functions: record.functions });
+}
+
+/** The engine's function-holder seam the re-bind reads and writes (`ObjectQL`'s methods of these names). */
+interface FunctionHoldingEngine {
+    unregisterFunctionsByPackage?(packageId: string): number;
+    registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
+    resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
+    functionHoldersOf?(name: string): { packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined };
+}
+
+/** The `handler` names `owner`'s hooks in `groups` carry. */
+function hookHandlersOf(groups: readonly HookBindingGroup[], owner: string): string[] {
+    const names: string[] = [];
+    for (const group of groups) {
+        if (group.owner !== owner) continue;
+        for (const hook of group.hooks) {
+            const handler = (hook as { handler?: unknown } | null | undefined)?.handler;
+            if (typeof handler === 'string' && handler !== '') names.push(handler);
+        }
+    }
+    return names;
+}
+
+/**
+ * [#32349] Take `moved` off `holder`, an owner the new bind still names that
+ * the previous bind gave those functions and the new bind gives to another
+ * owner. The engine removes functions by package only, so what `holder` keeps
+ * is read first and registered again, under `holder`, after the removal: the
+ * functions the previous bind gave it and the ones its hooks now name, from
+ * `known`. The bare slot of each kept name is put back as it was. A function
+ * code outside this binder registered under `holder` that none of those names
+ * leaves with the removal, as a dropped body's does.
+ */
+function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, moved: readonly string[], known: Iterable<string>): void {
+    if (typeof engine.registerFunction !== 'function' || typeof engine.functionHoldersOf !== 'function') return;
+    const packageId = handlerOwnerPackage(holder);
+    const leaving = new Set(moved);
+    const keep: Array<{ name: string; entry: { readonly handler: any; readonly effect?: unknown }; bare?: { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } }> = [];
+    for (const name of new Set(known)) {
+        if (leaving.has(name)) continue;
+        const entry = engine.functionHoldersOf(name).packageItem(packageId);
+        if (entry) keep.push({ name, entry, bare: engine.resolveFunctionEntry?.(name) });
+    }
+    engine.unregisterFunctionsByPackage?.(holder);
+    for (const { name, entry, bare } of keep) {
+        engine.registerFunction(name, entry.handler, { packageId: holder, ...(entry.effect ? { effect: entry.effect } : {}) });
+        if (bare && bare.packageId !== holder) {
+            engine.registerFunction(name, bare.handler, { packageId: bare.packageId, ...(bare.effect ? { effect: bare.effect } : {}) });
+        }
+    }
+}
+
+/** The package an owner {@link appArtifactHandlerOwner} minted names, as the engine's holder set keys it. */
+function handlerOwnerPackage(owner: string): string {
+    return owner.startsWith('app:') && owner.length > 'app:'.length ? owner.slice('app:'.length) : owner;
 }
 
 /** One package body of a multi-package artifact, as every binding family reads it. */
@@ -634,7 +716,8 @@ interface HookBindingGroup {
  * body's package. Two or more bodies declare it: under the artifact's
  * `owner`, never held apart — a function keeps one package holder per
  * deployment (ADR-0150 phase 1, `function` is not narrowed to the namespace,
- * and `composeStacks` refuses the pair). No body declares it: under the owner
+ * and `composeStacks` refuses the pair), with the declaring bodies' hooks
+ * that name it, as before. No body declares it: under the owner
  * of the group whose hooks name it as their `handler` — the ref `os build`
  * lowered out of a body's hook that it could not extract, which only the
  * runtime module serves — else under the artifact's `owner`. When the hooks of
@@ -743,48 +826,54 @@ function hookBindingGroups(bundle: unknown, owner: string): { groups: HookBindin
             namedBy.set(handler, owners);
         }
     }
-    // A function no body declares that the hooks of two or more owners name
-    // has no one package to go under: a function keeps one package holder
-    // (`claimBareNameFunctions` — two would warn at the cold boot and refuse
-    // the later body once sealed). Those hooks stay under the artifact's
-    // owner with it, as every hook and function was before.
-    for (const [name, owners] of namedBy) {
-        if (owners.size < 2 || declaredBy.has(name) || !(name in reconciledFunctions)) continue;
-        for (const from of owners) {
-            if (from === owner) continue;
-            const group = byOwner.get(from)!;
+    // A function that has no one package to go under stays under the
+    // artifact's owner, and the hooks that name it go with it, since a hook
+    // resolves its `handler` in its own group's package only and a function
+    // keeps one package holder (`claimBareNameFunctions`: two would warn at
+    // the cold boot and refuse the later body once sealed) — as every hook
+    // and function was before:
+    //  - one no body declares that the hooks of two or more owners name (one
+    //    callable two bodies' hooks share): every hook that names it;
+    //  - one two or more bodies declare (a hand-written artifact only:
+    //    `composeStacks` refuses the pair): the declaring bodies' hooks;
+    //  - one a single body other than the artifact's own declares, which a
+    //    hook under the artifact's owner names (a top-level hook, the
+    //    artifact's own body's, or a name bodies carry that are not held
+    //    apart — epic #31527 red-line E1): the declaring body's hooks.
+    // Any other body's hook naming a function only other bodies declare is
+    // refused at bind, as before this rule.
+    const moveToOwner = (name: string, from: Iterable<string>) => {
+        for (const each of from) {
+            const group = each === owner ? undefined : byOwner.get(each);
+            if (!group) continue;
             const moving = group.hooks.filter((hook) => handlerOf(hook) === name);
+            if (moving.length === 0) continue;
             group.hooks = group.hooks.filter((hook) => handlerOf(hook) !== name);
             groupOf(owner).hooks.push(...moving);
         }
-        namedBy.set(name, new Set([owner]));
-    }
-    // A function one body other than the artifact's own declares, which a hook
-    // under the artifact's owner names (a top-level hook, the artifact's own
-    // body's, or a name bodies carry that are not held apart): that hook
-    // resolves its `handler` in the owner's package only, and the function
-    // keeps one package holder, so the function stays under the artifact's
-    // owner with that hook, and the declaring body's own hooks that name it
-    // move there with it — as every hook and function was before (epic
-    // #31527 red-line E1). Another body's hooks naming it are refused, as for
-    // any function another body declares.
+    };
+    // Read over the bundle's own function names, never `name in` the map: a
+    // handler named `constructor` is no bundle function.
     const keptByOwner = new Set<string>();
-    for (const [name, declaring] of declaredBy) {
-        if (declaring.length !== 1 || !(name in reconciledFunctions)) continue;
-        const from = ownerOf(declaring[0]);
-        if (from === owner || !namedBy.get(name)?.has(owner)) continue;
-        const group = byOwner.get(from);
-        if (group) {
-            const moving = group.hooks.filter((hook) => handlerOf(hook) === name);
-            group.hooks = group.hooks.filter((hook) => handlerOf(hook) !== name);
-            groupOf(owner).hooks.push(...moving);
+    for (const name of Object.keys(reconciledFunctions)) {
+        const declaring = declaredBy.get(name) ?? [];
+        const naming = namedBy.get(name) ?? new Set<string>();
+        if (declaring.length === 0) {
+            if (naming.size < 2) continue;
+            moveToOwner(name, naming);
+        } else if (declaring.length > 1) {
+            moveToOwner(name, declaring.map(ownerOf));
+        } else {
+            const from = ownerOf(declaring[0]);
+            if (from === owner || !naming.has(owner)) continue;
+            moveToOwner(name, [from]);
         }
         keptByOwner.add(name);
     }
     for (const [name, entry] of Object.entries(reconciledFunctions)) {
         const declaring = declaredBy.get(name) ?? [];
-        const owners = declaring.length === 1 ? [keptByOwner.has(name) ? owner : ownerOf(declaring[0])]
-            : declaring.length > 1 ? [owner]
+        const owners = keptByOwner.has(name) ? [owner]
+            : declaring.length === 1 ? [ownerOf(declaring[0])]
             : [...(namedBy.get(name) ?? [owner])];
         for (const to of owners) groupOf(to).functions[name] = entry;
     }

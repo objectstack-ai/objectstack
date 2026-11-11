@@ -321,11 +321,17 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
     type Ns = 'alpha' | 'beta';
     /** A hook handler that appends `from` to the inserted record, so a hook bound twice, or not at all, shows. */
     const stamp = (from: string) => (ctx: any) => { ctx.input.from = `${ctx.input.from ?? ''}${from};`; };
-    const packageStack = (ns: Ns, extra: { functions?: Record<string, unknown>; hooks?: unknown[] } = {}) => defineStack({
-        manifest: { id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module' },
-        objects: [{ name: `${ns}_doc`, label: `${ns} doc`, sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } }],
-        ...extra,
-    } as never);
+    const packageStack = (ns: Ns, extra: { functions?: Record<string, unknown>; hooks?: unknown[]; dependencies?: Record<string, string> } = {}) => {
+        const { dependencies, ...collections } = extra;
+        return defineStack({
+            manifest: {
+                id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
+                ...(dependencies ? { dependencies } : {}),
+            },
+            objects: [{ name: `${ns}_doc`, label: `${ns} doc`, sharingModel: 'public_read_write', fields: { name: { type: 'text', label: 'Name' } } }],
+            ...collections,
+        } as never);
+    };
     const hookOn = (ns: Ns, name: string, handler: string) => ({ name, object: `${ns}_doc`, events: ['beforeInsert'], handler });
     const compose = (...stacks: unknown[]) => composeStacks(stacks as never, { manifest: 'preserve' }) as any;
     const bind = (ql: ObjectQL, artifact: any, logger: any = quiet) =>
@@ -539,6 +545,100 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(await insertInto(ql, 'beta'), 'beta\'s hook of the name runs beta\'s function').toBe('beta;');
         expect(await insertInto(ql, 'alpha')).toBe('alpha;');
         expect(ql.functionHoldersOf('beta_fn').packageHolders, 'under the artifact\'s id, with the hook').toEqual([ALPHA]);
+    });
+
+    it('NARROWING — a flow of the artifact\'s own package naming a function only body B declares resolves it through its declared closure, else is refused outside-closure (base: resolved under the artifact\'s id)', () => {
+        const betaStack = packageStack('beta', { functions: { beta_total: () => 'beta' } });
+        const read = (alpha: unknown) => {
+            const artifact = compose(betaStack, alpha);
+            const ql = engineFor(artifact);
+            bind(ql, artifact);
+            return resolvePackageScopedFunction(ql, { name: 'beta_total', callerPackageId: ALPHA });
+        };
+
+        const apart = read(packageStack('alpha'));
+        expect(apart.status, JSON.stringify(apart)).toBe('refused');
+        expect(apart.status === 'refused' && apart.reason).toBe('outside-closure');
+
+        const depending = read(packageStack('alpha', { dependencies: { [BETA]: '^1.0.0' } }));
+        expect(depending.status, JSON.stringify(depending)).toBe('resolved');
+        expect(depending.status === 'resolved' && depending.item.packageId).toBe(appArtifactHandlerOwner(BETA));
+    });
+
+    it('NARROWING — a top-level function only body B\'s hooks name is registered under B: B\'s hook runs it, the artifact\'s own package no longer holds it (base: held under the artifact\'s id)', async () => {
+        const residual = defineStack({ functions: { qa_res_only: stamp('res') } } as never);
+        const artifact = compose(
+            packageStack('beta', { hooks: [hookOn('beta', 'qa_beta_res', 'qa_res_only')] }),
+            residual,
+            packageStack('alpha'),
+        );
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(artifact, logger);
+
+        bind(ql, artifact, logger);
+
+        expect(errors.map((e) => [e.meta?.hook, e.meta?.code]), 'no hook refused').toEqual([]);
+        expect(await insertInto(ql, 'beta')).toBe('res;');
+        const holders = ql.functionHoldersOf('qa_res_only');
+        expect(holders.packageHolders, 'one package holder, the body whose hook names it').toEqual([BETA]);
+        expect(holders.packageItem(ALPHA), 'the artifact\'s own package does not hold it').toBeUndefined();
+        const alphaFlow = resolvePackageScopedFunction(ql, { name: 'qa_res_only', callerPackageId: ALPHA });
+        expect(alphaFlow.status === 'refused' && alphaFlow.reason, 'a flow of the artifact\'s own package reaches it only through its closure').toBe('outside-closure');
+        ql.unregisterFunctionsByPackage(appArtifactHandlerOwner(ALPHA));
+        expect(ql.functionHoldersOf('qa_res_only').packageItem(BETA), 'removing the artifact\'s own package leaves it').toBeDefined();
+    });
+
+    it('a function two bodies declare (a hand-written artifact) stays under the artifact\'s id with the declaring bodies\' hooks, as before', async () => {
+        const shared = stamp('twice');
+        const body = (ns: Ns) => ({
+            id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
+            objects: [{ name: `${ns}_doc`, fields: {} }],
+            hooks: [hookOn(ns, `qa_${ns}_twice`, 'qa_twice')],
+            functions: { qa_twice: shared },
+        });
+        const artifact = {
+            manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+            packages: [{ manifest: body('beta') }, { manifest: body('alpha') }],
+            functions: { qa_twice: shared },
+        };
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(artifact, logger);
+
+        bind(ql, artifact, logger);
+
+        expect(errors.map((e) => [e.meta?.hook, e.meta?.code]), 'no hook refused').toEqual([]);
+        expect(await insertInto(ql, 'beta')).toBe('twice;');
+        expect(await insertInto(ql, 'alpha')).toBe('twice;');
+        expect(ql.functionHoldersOf('qa_twice').packageHolders, 'one package holder').toEqual([ALPHA]);
+    });
+
+    it('a re-bind that moves a function to another owner takes it off the owner the previous bind gave it, which keeps its other functions', async () => {
+        const body = (ns: Ns, hooks: unknown[]) => ({
+            id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
+            objects: [{ name: `${ns}_doc`, fields: {} }],
+            hooks,
+        });
+        const artifactWith = (topLevelHooks: unknown[]) => ({
+            manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+            packages: [
+                { manifest: body('beta', [hookOn('beta', 'qa_beta_moving', 'qa_moving'), hookOn('beta', 'qa_beta_kept', 'qa_kept')]) },
+                { manifest: body('alpha', []) },
+            ],
+            hooks: topLevelHooks,
+            functions: { qa_moving: stamp('moving'), qa_kept: stamp('kept') },
+        });
+        const first = artifactWith([]);
+        const ql = engineFor(first);
+        bind(ql, first);
+        expect(ql.functionHoldersOf('qa_moving').packageHolders, 'precondition: only beta\'s hook names it').toEqual([BETA]);
+
+        // Now the top level names it too: one function two owners' hooks name, under the artifact's id.
+        bind(ql, artifactWith([hookOn('alpha', 'qa_res_moving', 'qa_moving')]));
+
+        expect(ql.functionHoldersOf('qa_moving').packageHolders, 'held once, by the artifact\'s id').toEqual([ALPHA]);
+        expect(ql.functionHoldersOf('qa_kept').packageHolders, 'beta keeps the function only its hook names').toEqual([BETA]);
+        expect(String(await insertInto(ql, 'beta')).split(';').filter(Boolean).sort()).toEqual(['kept', 'moving']);
+        expect(await insertInto(ql, 'alpha')).toBe('moving;');
     });
 
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {
