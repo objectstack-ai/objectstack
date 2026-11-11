@@ -79,8 +79,10 @@ async function runExit(
         const status = res.response.status;
         if (status >= 400) {
             // [ruling record 6787890900] `absent` only when byte-identical to
-            // this door's answer for a name it holds nothing for.
-            const unknown = await dispatcher.handleMetadata(path(UNKNOWN), ctxFor(testCase), 'GET');
+            // this door's answer for a name it holds nothing for — asked with
+            // no security service, so the reference is never a fault the
+            // case's own service raises.
+            const unknown = await make(services).handleMetadata(path(UNKNOWN), ctxFor(testCase), 'GET');
             if (shape === 'item' && unknown.response.status === status
                 && JSON.stringify(unknown.response.body) === JSON.stringify(res.response.body)) {
                 return { kind: 'absent' };

@@ -1,6 +1,6 @@
 # ADR-0106: Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas
 
-**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682)
+**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682) · **Amended** (2026-11-11, ruling record 6787890900 — an object the caller may not read is absent from every schema-serving outlet; see "Amendment (2026-11-11): object-level visibility")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove, fail-posture discipline), [ADR-0066](./0066-unified-authorization-model.md) (unified authz; D3 field `requiredPermissions` — mask on read, deny on write), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set as the only capability container; `readable`/`editable` FLS bits), [ADR-0046](./0046-package-docs-as-metadata.md) (§6.7 audience gate — the existing per-caller metadata read gate this ADR generalizes from)
 **Tracking**: #3661 (steps ① ② shipped client-side as objectui#2866; this ADR is step ③)
@@ -278,6 +278,22 @@ UI correctness. ①'s client-side gates are **not** superseded: the schema
 mask handles existence; the client channel still drives
 readable-but-disabled rendering and payload stripping. The two layers are
 complementary by design.
+
+### Amendment (2026-11-11): object-level visibility
+
+*Ruling record 6787890900.*
+
+- Every schema-serving outlet leaves out of its lists an object the caller may
+  not read, and answers a read of such an object exactly as that outlet
+  answers a name that names no object.
+- Whether the caller may read the object is decided once, in the same posture
+  resolution that decides the field projection, so no two outlets can
+  disagree.
+- The D4 exemptions and the D8 switch are unchanged and are decided first.
+- A readable object's reference field may still name an object the caller may
+  not read.
+- An object read that cannot be evaluated is the D6 tier-3 fault: never an
+  empty list, and never an answer that the object does not exist.
 
 ---
 

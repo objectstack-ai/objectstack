@@ -140,10 +140,12 @@ function routeFor(rest: RestServer, path: string) {
 /**
  * Turn a handler run into the contract's outcome. A refusal is `absent` when
  * it is BYTE-IDENTICAL to the same door's answer for {@link UNKNOWN} — status
- * and body — and a `fault` otherwise.
+ * and body — on the same server with no security service (so the reference is
+ * the door's own answer for a name, never a fault the case's service raises),
+ * and a `fault` otherwise.
  */
 async function outcomeOf(
-    run: (res: any, name: string) => Promise<void>,
+    run: (res: any, name: string, reference?: boolean) => Promise<void>,
     pick: (body: any) => unknown,
 ): Promise<ObjectSchemaMaskOutcome & { res?: any }> {
     const res = mockRes();
@@ -151,7 +153,7 @@ async function outcomeOf(
     const body = res.json.mock.calls.at(-1)?.[0];
     if (res.statusCode >= 400) {
         const unknown = mockRes();
-        await run(unknown, UNKNOWN);
+        await run(unknown, UNKNOWN, true);
         const unknownBody = unknown.json.mock.calls.at(-1)?.[0];
         if (unknown.statusCode === res.statusCode && JSON.stringify(unknownBody) === JSON.stringify(body)) {
             return { kind: 'absent' };
@@ -180,8 +182,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name — cached branch (default)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res, name) => routeFor(rest, SINGLE_PATH)!.handler(
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
                     { params: { type: 'object', name }, query: {}, headers: {} }, res,
                 ),
                 (body) => body?.item,
@@ -192,8 +195,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name — uncached branch',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: false });
+            const { rest: reference } = boot({ testCase, cached: false, security: {} });
             return outcomeOf(
-                (res, name) => routeFor(rest, SINGLE_PATH)!.handler(
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
                     { params: { type: 'object', name }, query: {}, headers: {} }, res,
                 ),
                 (body) => body?.item,
@@ -207,8 +211,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
             // the raw `:type` param is a gate it walks past. Driving one row of
             // the table through it keeps that from being re-learned.
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res, name) => routeFor(rest, SINGLE_PATH)!.handler(
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
                     { params: { type: 'objects', name }, query: { state: 'draft' }, headers: {} }, res,
                 ),
                 (body) => body?.item,
@@ -219,8 +224,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name?layers=true — layered diagnostic view (`effective`)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res, name) => routeFor(rest, SINGLE_PATH)!.handler(
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
                     { params: { type: 'object', name }, query: { layers: 'true' }, headers: {} }, res,
                 ),
                 (body) => body?.effective,
@@ -231,8 +237,9 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name?layers=true — layered diagnostic view (`code`)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res, name) => routeFor(rest, SINGLE_PATH)!.handler(
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
                     { params: { type: 'object', name }, query: { layers: 'true' }, headers: {} }, res,
                 ),
                 (body) => body?.code,
