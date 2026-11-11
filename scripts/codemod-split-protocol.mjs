@@ -2924,6 +2924,417 @@ async function mainMembers(T, argv) {
   return 0;
 }
 
+// ── The hand-host pass: a hand stub's host, run on the class's host (#30020) ─
+//
+// A hand-series stub (#25467) builds its host as an object literal and makes
+// one `fn.call(host, …)`; the facade gate reads that as a delegation while
+// every slot of the literal forwards. A slot that COMPUTES instead (a service
+// lookup, an operator) makes the whole stub a body, so the method stays an
+// exception row. Such a slot cannot become a `ProtocolHost` entry: an entry is
+// typed AS a class member, and a new member would change the published
+// `.d.ts`; and the factory in the class's static block may only forward.
+//
+// `--hand-host <stubs>` (design ruling A, 6687865760: the facade stays the sole
+// state owner and a facet reaches it through the per-instance host) moves the
+// stub's WHOLE body, its consts, its host literal and its `.call`, byte for
+// byte but one indentation level out, into the hand module its marker names,
+// as one exported function `<stub>OnHost` that runs on the class's host
+// (`protocol-host.ts`) as `this`, its `this` the `Pick` of the members the
+// body reads. In the receiver form `this.<member>` reads the host entry of
+// that member, so no byte of the body changes; the hand function the body
+// calls, and its own `this`, do not change either. The stub becomes
+// `return <stub>OnHost.call(protocolHost(this), <params>)`, one forwarding
+// call. The function keeps the method's parameters and return type as they
+// are spelled on the class.
+//
+// What it moves is closed: a body that is the hand series' stub (its marker
+// line, consts, ONE host literal, `return fn.call(host, …)`, `fn` imported
+// from the module the marker names), whose literal holds at least one slot
+// that is not a hand-series forwarder (`get x() { return readX(); }`,
+// `set x(value) { writeX(value); }`, `x: (...a) => this.x(...a)`), that reads
+// the class only as `this.<member>` with a `ProtocolHost` entry already on
+// file (this pass never grows the host), and nothing of `protocol.ts`'s own
+// top level. Anything else refuses (exit 2). The module gains the import
+// bindings the moved body reads, from where `protocol.ts` imports them (as the
+// members pass adds them), and `ProtocolHost`'s type; `protocol.ts` imports
+// the new function beside the hand function and drops the bindings only the
+// moved body read.
+//
+// The proof (`--hand-host --verify --base REF` re-runs it) undoes every
+// function the head carries under this pass's docblock, from the head alone:
+// its body, one level back in, onto its stub; the function, with its docblock
+// and the blank line before it, out of the module, and the module's imports
+// nothing reads any more with it; the function's binding out of `protocol.ts`'s
+// import. The result must be the base `protocol.ts` (its import bindings only
+// moved bodies read pruned from it) and every hand module byte for byte, and
+// `protocol-host.ts` unchanged. Then the pass, run again on the undone tree,
+// must write the head byte for byte: the undo and the move are each other's
+// inverse on this tree.
+
+const HAND_HOST_CARD = '#30020';
+const HAND_HOST_MARK = `[${HAND_HOST_CARD} codemod]`;
+/** The first line of a hand-series stub's body: its marker, naming the hand module. */
+const HAND_STUB_LINE = /^ {8}\/\/ \[#25467 cut [0-9a-z]+\] The body moved to `(protocol-[a-z0-9-]+\.ts)`/;
+const handHostName = (stub) => `${stub}OnHost`;
+const handHostDoc = (stub, fn) => ['/**', ...wrapComment((
+  `${HAND_HOST_MARK} The body of \`${CLASS_NAME}#${stub}\`, the host it builds for {@link ${fn}} included: ` +
+  `moved here whole by \`--hand-host\` of \`scripts/codemod-split-protocol.mjs\`. It runs on the class's host ` +
+  `(\`${HOST_MODULE_BASENAME}\`) as \`this\`, so the class keeps a one-call stub; the method's docblock there is its contract.`).split(' ')), ' */'].join('\n');
+const handHostStubLead = (file) => `        // ${HAND_HOST_MARK} The body moved to \`${file}\`; it runs on this class's host (\`${HOST_MODULE_BASENAME}\`) as \`this\`.`;
+const handHostStub = (file, stub, args) => `{\n${handHostStubLead(file)}\n        return ${handHostName(stub)}.call(protocolHost(this)${args ? `, ${args}` : ''});\n    }`;
+
+/** A slot of a hand-series host literal in one of the series' forwarder spellings. */
+function isHandForwarder(ts, sf, p) {
+  const t = p.getText(sf);
+  const cap = (n) => n[0].toUpperCase() + n.slice(1);
+  let m = /^get ([A-Za-z_$][\w$]*)\(\) \{ return (read[\w$]+)\(\); \}$/.exec(t);
+  if (m) return m[2] === `read${cap(m[1])}`;
+  m = /^set ([A-Za-z_$][\w$]*)\(value\) \{ (write[\w$]+)\(value\); \}$/.exec(t);
+  if (m) return m[2] === `write${cap(m[1])}`;
+  m = /^([A-Za-z_$][\w$]*): \(\.\.\.a\) => this\.([A-Za-z_$][\w$]*)\(\.\.\.a\)$/.exec(t);
+  return Boolean(m && m[1] === m[2]);
+}
+
+/** The analysis context of one `protocol.ts` text: its program, class, member table and module scope. */
+function handHostContext(T, text) {
+  const { ts, hs } = T;
+  globalTs = ts;
+  const { sf, checker } = program(ts, HOST_PATH, text);
+  const cls = hs.classOf(sf, CLASS_NAME);
+  if (!cls) refuse(`no class ${CLASS_NAME} in ${HOST_BASENAME}`);
+  const table = hs.memberTable(cls);
+  const staticScope = new Map();
+  for (const m of cls.members) {
+    if (!hasModifier(ts, m, ts.SyntaxKind.StaticKeyword) || !m.name || !ts.isIdentifier(m.name)) continue;
+    staticScope.set(m.name.text, hasModifier(ts, m, ts.SyntaxKind.PrivateKeyword) ? 'private'
+      : hasModifier(ts, m, ts.SyntaxKind.ProtectedKeyword) ? 'protected' : 'public');
+  }
+  return { ts, sf, checker, cls, table, staticScope, scope: moduleScope(ts, sf) };
+}
+
+/** The one instance method with a body named `name`, or a refusal. */
+function handHostMethod(ts, cls, name) {
+  const found = cls.members.filter((m) => ts.isMethodDeclaration(m) && m.body && m.name && ts.isIdentifier(m.name) && m.name.text === name
+    && !hasModifier(ts, m, ts.SyntaxKind.StaticKeyword));
+  if (found.length !== 1) refuse(`--hand-host names ${name}, which ${CLASS_NAME} declares as ${found.length === 0 ? 'no instance method with a body' : 'more than one method'}`);
+  return found[0];
+}
+
+/** `text` with every line after the first moved `by` columns left; null when a later line is not that far in, or holds only spaces. */
+function outdentBy(text, by) {
+  const pad = ' '.repeat(by);
+  const lines = text.split('\n');
+  const out = [lines[0]];
+  for (const line of lines.slice(1)) {
+    if (line === '') out.push(line);
+    else if (line.startsWith(pad) && line.trim() !== '') out.push(line.slice(by));
+    else return null;
+  }
+  return out.join('\n');
+}
+const indentBy = (text, by) => text.split('\n').map((line, i) => (i === 0 || line === '' ? line : `${' '.repeat(by)}${line}`)).join('\n');
+
+/**
+ * Decide the moves `names` asks for, on `text` (`protocol.ts`), `hostText`
+ * (`protocol-host.ts`) and `moduleTexts` (hand module basename -> text, read
+ * through `readModule` when absent). Refuses (exit 2) on every shape the
+ * section above closes out. Pure.
+ */
+function planHandHost(T, text, hostText, moduleTexts, names) {
+  const ctx = handHostContext(T, text);
+  const { ts, sf, cls, table, scope } = ctx;
+  if (!names || names.length === 0) refuse('--hand-host needs a comma-separated list of hand-series stub names');
+  if (new Set(names).size !== names.length) refuse(`--hand-host names a stub twice: ${names.join(', ')}`);
+  const entries = hostInterfaceEntries(hostText);
+  const records = [];
+  for (const name of names) {
+    const m = handHostMethod(ts, cls, name);
+    const why = (msg) => refuse(`${name}: ${msg}`);
+    const bodyStart = m.body.getStart(sf);
+    const line1Start = text.indexOf('\n', bodyStart) + 1;
+    const hit = HAND_STUB_LINE.exec(text.slice(line1Start, text.indexOf('\n', line1Start)));
+    if (!hit) why('is not a hand-series stub (its body does not open with the hand series\' marker)');
+    const file = hit[1];
+    const specifier = `./${file.replace(/\.ts$/, '.js')}`;
+    const mod = moduleTexts.get(file);
+    if (mod == null) why(`the hand module its marker names, ${file}, is not on disk`);
+    const stmts = [...m.body.statements];
+    const last = stmts.at(-1);
+    const call = last && ts.isReturnStatement(last) ? last.expression : null;
+    const callee = call && ts.isCallExpression(call) ? call.expression : null;
+    if (!callee || !ts.isPropertyAccessExpression(callee) || callee.name.text !== 'call' || !ts.isIdentifier(callee.expression)
+      || !call.arguments[0] || !ts.isIdentifier(call.arguments[0])) why('the stub does not end in `return fn.call(host, …)`');
+    const fn = callee.expression.text;
+    const hostName = call.arguments[0].text;
+    const hosts = [];
+    for (const st of stmts.slice(0, -1)) {
+      if (!ts.isVariableStatement(st) || !(st.declarationList.flags & ts.NodeFlags.Const)) why('a statement before the call is not a const');
+      for (const d of st.declarationList.declarations) {
+        if (d.initializer && ts.isObjectLiteralExpression(d.initializer)) hosts.push(d);
+      }
+    }
+    if (hosts.length !== 1 || !ts.isIdentifier(hosts[0].name) || hosts[0].name.text !== hostName) why(`the stub builds ${hosts.length} host literal(s), not the one it hands \`${fn}\``);
+    const fnBinding = scope.bindings.get(fn);
+    if (!fnBinding || fnBinding.kind !== 'import' || fnBinding.specifier !== specifier || fnBinding.form !== 'named' || fnBinding.imported !== fn) {
+      why(`${HOST_BASENAME} does not import ${fn} by name from ${specifier}`);
+    }
+    const msf = parseSourceFile(join(SRC_DIR, file), mod);
+    const fnDecl = msf.statements.find((st) => ts.isFunctionDeclaration(st) && st.name?.text === fn && hasModifier(ts, st, ts.SyntaxKind.ExportKeyword));
+    if (!fnDecl) why(`${file} exports no function ${fn}`);
+    const computing = hosts[0].initializer.properties.filter((p) => !isHandForwarder(ts, sf, p)).map((p) => (p.name ? p.name.getText(sf) : p.getText(sf)));
+    if (computing.length === 0) why('its host literal holds no computing slot: every slot is a hand-series forwarder, so the stub is a delegation already');
+    const reads = receiverReads(ts, sf, m, table, false);
+    if (reads.refusals.length > 0) why(`the receiver form cannot carry its body: ${reads.refusals.join('; ')}`);
+    if (reads.identity.length > 0) why('it hands a bare `this` on (this pass moves a body that reads the class as `this.<member>` only)');
+    const picks = [...reads.self.keys()].sort();
+    if (picks.length === 0) why('it reads no member of the class (nothing for the host to carry)');
+    const missing = picks.filter((k) => !entries.has(k));
+    if (missing.length > 0) why(`it reads ${missing.join(', ')}, which ${HOST_MODULE_BASENAME} carries no entry for (this pass never grows the host)`);
+    for (const [k, u] of reads.self) if (u.write) why(`it writes this.${k} (a host field entry is read-only here)`);
+    const names2 = readNames(ts, ctx, m);
+    const ownRefs = [...names2.moduleRefs.keys()].filter((n) => n !== CLASS_NAME);
+    if (ownRefs.length > 0) why(`it reads ${ownRefs.join(', ')}, which ${HOST_BASENAME} declares (this pass never widens its exports)`);
+    const target = handHostName(name);
+    if (scope.bindings.has(target)) why(`${target} is already a module-scope binding of ${HOST_BASENAME}`);
+    if (moduleScope(ts, msf).bindings.has(target)) why(`${target} is already a module-scope binding of ${file}`);
+    const wanted = new Map();
+    for (const [local, use] of names2.imports) {
+      const b = scope.bindings.get(local);
+      if (b.specifier === specifier) {
+        if (!moduleScope(ts, msf).bindings.has(b.imported ?? local) || (b.imported ?? local) !== local) why(`it reads ${local} from ${specifier}, which ${file} does not declare under that name`);
+        continue;
+      }
+      wanted.set(local, { specifier: b.specifier, form: b.form, imported: b.imported, value: use.value && !b.typeOnly });
+    }
+    wanted.set('ProtocolHost', { specifier: `./${HOST_MODULE_BASENAME.replace(/\.ts$/, '.js')}`, form: 'named', imported: 'ProtocolHost', value: false });
+    const body = text.slice(bodyStart, m.body.getEnd());
+    for (const n of [m.body, ...m.parameters, m.type].filter(Boolean)) {
+      const scan = (x) => {
+        if ((ts.isTemplateExpression(x) || ts.isNoSubstitutionTemplateLiteral(x) || ts.isStringLiteral(x))
+          && sf.getLineAndCharacterOfPosition(x.getStart(sf)).line !== sf.getLineAndCharacterOfPosition(x.getEnd()).line) {
+          why('it holds a template or string spanning lines, which a re-indent would edit');
+        }
+        ts.forEachChild(x, scan);
+      };
+      scan(n);
+    }
+    const moved = outdentBy(body, 4);
+    if (moved === null || indentBy(moved, 4) !== body) why('its body\'s re-indentation cannot be undone byte for byte (a line under-indented, or one holding only spaces)');
+    const paramLines = m.parameters.map((p) => p.getText(sf));
+    if (paramLines.some((x) => x.includes('\n'))) why('a parameter spans lines (the function spells one per line)');
+    const typeText = m.type ? outdentBy(m.type.getText(sf), 4) : '';
+    if (typeText === null) why('its return type\'s re-indentation cannot be undone (a line under-indented)');
+    const ret = m.type ? `: ${typeText}` : '';
+    const async = hasModifier(ts, m, ts.SyntaxKind.AsyncKeyword) ? 'async ' : '';
+    const fnText = `export ${async}function ${target}(\n    this: ${pickTypeOf('ProtocolHost', picks)},\n${paramLines.map((x) => `    ${x},\n`).join('')})${ret} ${moved}`;
+    records.push({ name, m, file, specifier, fn, target, picks, computing, wanted, fnText, stub: handHostStub(file, name, argsOf(m)), doc: handHostDoc(name, fn) });
+  }
+  return { ctx, records };
+}
+
+/** Apply a `planHandHost` plan. Returns `{ text, modules }` (`protocol.ts`, the hand modules it writes). Pure. */
+function generateHandHost(T, text, moduleTexts, planned) {
+  const { ts, sf, scope } = planned.ctx;
+  const order = (s) => scope.importOrder.get(s) ?? Number.MAX_SAFE_INTEGER;
+  const modules = new Map();
+  for (const r of planned.records) {
+    let mod = modules.get(r.file) ?? moduleTexts.get(r.file);
+    if (!mod.endsWith('\n')) refuse(`${r.file}: does not end in a line break`);
+    mod = addModuleImports(ts, r.file, mod, r.wanted, order);
+    modules.set(r.file, `${mod}\n${r.doc}\n${r.fnText}\n`);
+  }
+  let out = applyEdits(text, planned.records.map((r) => ({ start: r.m.body.getStart(sf), end: r.m.body.getEnd(), text: r.stub })));
+  const adds = new Map();
+  for (const r of planned.records) adds.set(r.target, { specifier: r.specifier, form: 'named', imported: r.target, value: true });
+  out = addModuleImports(ts, HOST_BASENAME, out, adds, order);
+  out = pruneImports(ts, out, usedImportNames(ts, out)).text;
+  return { text: out, modules };
+}
+
+/**
+ * Undo every function a tree carries under this pass's docblock, from its
+ * texts alone. Returns the undone `protocol.ts` and hand modules, what it
+ * undid (`{ name, file, fn, text }`), and every way the tree breaks the
+ * pass's form.
+ */
+function undoHandHost(T, text, moduleTexts) {
+  const { ts, hs } = T;
+  globalTs = ts;
+  const failures = [];
+  const moved = [];
+  const sf = parseSourceFile(HOST_PATH, text);
+  const cls = hs.classOf(sf, CLASS_NAME);
+  if (!cls) return { text, modules: moduleTexts, moved, failures: [`no class ${CLASS_NAME} in ${HOST_BASENAME}`] };
+  const edits = [];
+  const modules = new Map(moduleTexts);
+  const lead = new RegExp(`^\\{\\n {8}// ${HAND_HOST_MARK.replace(/[[\]]/g, '\\$&')} The body moved to \`(protocol-[a-z0-9-]+\\.ts)\``);
+  for (const m of cls.members) {
+    if (!ts.isMethodDeclaration(m) || !m.body || !m.name || !ts.isIdentifier(m.name)) continue;
+    const name = m.name.text;
+    const bodyText = text.slice(m.body.getStart(sf), m.body.getEnd());
+    const hit = lead.exec(bodyText);
+    if (!hit) continue;
+    const file = hit[1];
+    const target = handHostName(name);
+    if (bodyText !== handHostStub(file, name, argsOf(m))) { failures.push(`${name}: its stub is not the one this pass writes`); continue; }
+    const mod = modules.get(file);
+    if (mod == null) { failures.push(`${name}: its stub names ${file}, which is not on disk`); continue; }
+    const msf = parseSourceFile(join(SRC_DIR, file), mod);
+    const f = msf.statements.find((st) => ts.isFunctionDeclaration(st) && st.name?.text === target);
+    if (!f || !f.body) { failures.push(`${name}: ${file} holds no function ${target}`); continue; }
+    const last = f.body.statements.at(-1);
+    const callee = last && ts.isReturnStatement(last) && last.expression && ts.isCallExpression(last.expression) ? last.expression.expression : null;
+    const fn = callee && ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) ? callee.expression.text : null;
+    const doc = handHostDoc(name, fn ?? '?');
+    const fnStart = f.getStart(msf);
+    const docStart = fnStart - doc.length - 1;
+    if (!fn || mod.slice(docStart - 2, fnStart) !== `\n\n${doc}\n` || mod.slice(f.getEnd(), f.getEnd() + 1) !== '\n') {
+      failures.push(`${name}: ${file} holds ${target}, but not under this pass's docblock, a blank line before it and a line break after it`);
+      continue;
+    }
+    const thisType = f.parameters[0] && ts.isIdentifier(f.parameters[0].name) && f.parameters[0].name.text === 'this' ? f.parameters[0].type?.getText(msf) : null;
+    if (!thisType || !/^Pick<ProtocolHost, '[\w$]+'(?: \| '[\w$]+')*>$/.test(thisType)) failures.push(`${name}: ${target}'s \`this\` is not a \`Pick\` of ProtocolHost`);
+    const fBody = mod.slice(f.body.getStart(msf), f.body.getEnd());
+    const restored = indentBy(fBody, 4);
+    if (outdentBy(restored, 4) !== fBody) failures.push(`${name}: ${target}'s body does not re-indent byte for byte`);
+    edits.push({ start: m.body.getStart(sf), end: m.body.getEnd(), text: restored });
+    let undone = mod.slice(0, docStart - 1) + mod.slice(f.getEnd() + 1);
+    const usedAtHead = usedImportNames(ts, mod);
+    const unread = importDeclsOf(ts, file, mod).decls.flatMap((d) => [d.defaultName, d.nsName, ...d.named.map((e) => e.local)].filter(Boolean)).filter((k) => !usedAtHead.has(k));
+    if (unread.length > 0) failures.push(`${file}: imports what nothing in it reads: ${unread.join(', ')}`);
+    undone = pruneModuleImports(ts, file, undone);
+    modules.set(file, undone);
+    moved.push({ name, file, fn, target, text: fBody });
+  }
+  let out = text;
+  try {
+    out = applyEdits(text, edits);
+  } catch (e) {
+    if (!(e instanceof CodemodRefusal)) throw e;
+    failures.push(`${HOST_BASENAME}: the undo's edits overlap`);
+  }
+  if (moved.length > 0) {
+    const targets = new Set(moved.map((x) => x.target));
+    const keep = new Set([...moduleScope(ts, parseSourceFile(HOST_PATH, out)).bindings].filter(([k, b]) => b.kind === 'import' && !targets.has(k)).map(([k]) => k));
+    out = pruneImports(ts, out, keep).text;
+  }
+  return { text: out, modules, moved, failures };
+}
+
+/**
+ * The proof: undoing every function in the head lands on the base,
+ * `protocol.ts` (its import bindings only moved bodies read pruned) and each
+ * hand module byte for byte, with `protocol-host.ts` untouched; and the pass,
+ * run again on the undone tree for the stubs it undid, writes the head byte
+ * for byte. A base this pass has run on is undone the same way first, so a
+ * later run proves only its own stubs. `base` / `head`: `{ text, host,
+ * modules }`.
+ */
+function verifyHandHost(T, base, head) {
+  const { ts } = T;
+  const h = undoHandHost(T, head.text, head.modules);
+  const b = undoHandHost(T, base.text, base.modules);
+  const failures = [...h.failures, ...b.failures.map((f) => `base: ${f}`)];
+  if (head.host !== base.host) failures.push(`${HOST_MODULE_BASENAME} changed (this pass never grows the host)`);
+  const { text: prunedBase, removed: pruned } = pruneImports(ts, b.text, usedImportNames(ts, head.text));
+  const movedText = h.moved.map((x) => x.text).join('\n');
+  for (const n of pruned) if (!new RegExp(`\\b${n.replace(/\$/g, '\\$')}\\b`).test(movedText)) failures.push(`${n}: the head no longer imports it, and no moved body reads it`);
+  if (h.text !== prunedBase) failures.push(`undoing the moves does NOT rebuild the base ${HOST_BASENAME} (first difference at line ${firstDiffLine(h.text, prunedBase)})`);
+  for (const file of [...new Set([...base.modules.keys(), ...head.modules.keys()])].sort()) {
+    const bm = b.modules.get(file); const hm = h.modules.get(file);
+    if (bm == null || hm == null) { failures.push(`${file}: only in the ${bm == null ? 'head' : 'base'}`); continue; }
+    if (hm !== bm) failures.push(`undoing the moves does NOT rebuild the base ${file} (first difference at line ${firstDiffLine(hm, bm)})`);
+  }
+  const baseMoved = new Set(b.moved.map((x) => x.name));
+  const moved = h.moved.filter((x) => !baseMoved.has(x.name));
+  if (moved.length === 0) failures.push('nothing moved: the head carries no hand-host function its base did not');
+  if (failures.length === 0) {
+    try {
+      const again = generateHandHost(T, b.text, b.modules, planHandHost(T, b.text, base.host, b.modules, moved.map((x) => x.name)));
+      const replayed = new Map([...b.modules, ...again.modules]);
+      if (again.text !== head.text) failures.push(`the pass, run again on the undone tree, does not write the head ${HOST_BASENAME} (first difference at line ${firstDiffLine(again.text, head.text)})`);
+      for (const [file, t] of replayed) if (head.modules.get(file) !== t) failures.push(`the pass, run again on the undone tree, does not write the head ${file}`);
+    } catch (e) {
+      if (!(e instanceof CodemodRefusal)) throw e;
+      failures.push(`the pass refuses the undone tree: ${e.message}`);
+    }
+  }
+  return { failures, moved, pruned, linesBefore: lineCount(base.text), linesAfter: lineCount(head.text) };
+}
+
+const firstDiffLine = (a, b) => {
+  const x = a.split('\n'); const y = b.split('\n');
+  let i = 0;
+  while (i < x.length && i < y.length && x[i] === y[i]) i += 1;
+  return i + 1;
+};
+
+/** Every hand module a `protocol.ts` text's hand-series and hand-host markers name, read through `read` (null when absent). */
+function handHostModuleTexts(text, read) {
+  const files = new Set();
+  for (const m of text.matchAll(/\/\/ \[(?:#25467 cut [0-9a-z]+|#30020 codemod)\] The body moved to `(protocol-[a-z0-9-]+\.ts)`/g)) files.add(m[1]);
+  const out = new Map();
+  for (const f of [...files].sort()) {
+    const t = read(f);
+    if (t != null) out.set(f, t);
+  }
+  return out;
+}
+
+function printVerifyHandHost(v) {
+  for (const f of v.failures) console.error(`  ✗ ${f}`);
+  console.log(`hand host: ${v.moved.length} moved (${v.moved.map((x) => `${x.name} -> ${x.file}#${x.target}`).join(', ') || 'none'}); ${HOST_BASENAME} ${v.linesBefore} -> ${v.linesAfter} lines; ` +
+    `undoing the moves ${v.failures.length > 0 ? 'does NOT' : 'does'} rebuild the base ${HOST_BASENAME} and its hand modules byte-for-byte ` +
+    `once the ${v.pruned.length} import binding(s) only moved bodies read are pruned from the base (${v.pruned.join(', ') || 'none'}), ` +
+    `and the pass re-run on the undone tree ${v.failures.length > 0 ? 'is not checked or does not' : 'does'} write the head`);
+}
+
+/** `--hand-host`: plan, write or re-prove the pass. */
+async function mainHandHost(T, argv) {
+  const readDisk = (f) => { const p = join(SRC_DIR, f); return existsSync(p) ? readFileSync(p, 'utf8') : null; };
+  if (argv.includes('--verify')) {
+    const i = argv.indexOf('--base');
+    const ref = i >= 0 ? argv[i + 1] : null;
+    if (!ref) refuse('--hand-host --verify needs --base <ref>');
+    const baseText = gitShow(ref, `${SRC_REL}/${HOST_BASENAME}`);
+    const readAt = (f) => { try { return gitShow(ref, `${SRC_REL}/${f}`); } catch { return null; } };
+    const headText = readFileSync(HOST_PATH, 'utf8');
+    const files = new Set([...handHostModuleTexts(baseText, () => '').keys(), ...handHostModuleTexts(headText, () => '').keys()]);
+    const at = (read) => new Map([...files].sort().map((f) => [f, read(f)]).filter(([, t]) => t != null));
+    const v = verifyHandHost(T,
+      { text: baseText, host: gitShow(ref, `${SRC_REL}/${HOST_MODULE_BASENAME}`), modules: at(readAt) },
+      { text: headText, host: readFileSync(HOST_MODULE_PATH, 'utf8'), modules: at(readDisk) });
+    printVerifyHandHost(v);
+    return v.failures.length === 0 ? 0 : 1;
+  }
+  const j = argv.indexOf('--hand-host');
+  const value = argv[j + 1];
+  const names = value && !value.startsWith('--') ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
+  const text = readFileSync(HOST_PATH, 'utf8');
+  const host = readFileSync(HOST_MODULE_PATH, 'utf8');
+  const modules = handHostModuleTexts(text, readDisk);
+  const planned = planHandHost(T, text, host, modules, names);
+  console.log(`# codemod-split-protocol --hand-host (${HAND_HOST_CARD}): hand stubs run on the class's host`);
+  for (const r of planned.records) console.log(`- ${r.name} -> ${r.file}#${r.target}: this = Pick<ProtocolHost, ${r.picks.join(' | ')}>; computing slot(s): ${r.computing.join(', ')}`);
+  const out = generateHandHost(T, text, modules, planned);
+  const head = { text: out.text, host, modules: new Map([...modules, ...out.modules]) };
+  console.log(`output tree sha256: ${treeHash(new Map([[HOST_BASENAME, out.text], ...out.modules]))} (input sha256 ${sha256(text)})`);
+  const v = verifyHandHost(T, { text, host, modules }, head);
+  printVerifyHandHost(v);
+  if (v.failures.length > 0) {
+    console.error('✗ the generated moves fail their proof: nothing written. Report the fork; never hand-edit the moves.');
+    return 1;
+  }
+  if (!argv.includes('--write')) {
+    console.log('plan only: nothing written (pass --write to apply).');
+    return 0;
+  }
+  writeFileSync(HOST_PATH, out.text);
+  for (const [file, t] of out.modules) writeFileSync(join(SRC_DIR, file), t);
+  console.log(`✓ wrote ${HOST_BASENAME} and ${out.modules.size} hand module(s) under ${SRC_REL}`);
+  return 0;
+}
+
 // ── Entry ────────────────────────────────────────────────────────────────────
 
 const USAGE = [
@@ -2931,6 +3342,8 @@ const USAGE = [
   '       node scripts/codemod-split-protocol.mjs --verify --base REF   re-prove a split on disk against protocol.ts at REF',
   '       node scripts/codemod-split-protocol.mjs --members A,B [--write]   plan (or apply) moving named methods onto the landed facade (#30518)',
   '       node scripts/codemod-split-protocol.mjs --members --verify --base REF   re-prove those moves on disk against the tree at REF',
+  '       node scripts/codemod-split-protocol.mjs --hand-host A,B [--write]   plan (or apply) running the named hand stubs\' bodies on the class\'s host (#30020)',
+  '       node scripts/codemod-split-protocol.mjs --hand-host --verify --base REF   re-prove those moves on disk against the tree at REF',
   '       node scripts/codemod-split-protocol.mjs --self-test',
   '       node scripts/codemod-split-protocol.mjs --help',
 ].join('\n');
@@ -2952,14 +3365,16 @@ async function main(argv) {
     }
     return 0;
   }
-  const known = new Set(['--write', '--verify', '--base', '--members']);
+  const known = new Set(['--write', '--verify', '--base', '--members', '--hand-host']);
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--base') { i += 1; continue; }
-    if (argv[i] === '--members' && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) { i += 1; continue; }
+    if ((argv[i] === '--members' || argv[i] === '--hand-host') && argv[i + 1] !== undefined && !argv[i + 1].startsWith('--')) { i += 1; continue; }
     if (!known.has(argv[i])) refuse(`unknown argument ${JSON.stringify(argv[i])}\n${USAGE}`);
   }
   const T = await loadTools();
+  if (argv.includes('--members') && argv.includes('--hand-host')) refuse('--members and --hand-host are two passes: run one at a time');
   if (argv.includes('--members')) return mainMembers(T, argv);
+  if (argv.includes('--hand-host')) return mainHandHost(T, argv);
   if (argv.includes('--verify')) {
     const i = argv.indexOf('--base');
     const ref = i >= 0 ? argv[i + 1] : null;
