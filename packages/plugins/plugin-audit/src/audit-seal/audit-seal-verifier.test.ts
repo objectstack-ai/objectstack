@@ -70,12 +70,12 @@ async function sealedLedger(options: { objects?: unknown[] } = {}) {
     store.hot.table('sys_audit_amendment').push(amendmentRow(full, { id, signature }));
     return id;
   };
-  /** The commitment of `value` for column `payload` of `rowId`, under the salt of the checkpoint holding it. */
-  const commitmentOf = async (cp: Record<string, unknown>, rowId: string, value: string) => {
+  /** The commitment of `value` for `column` of `rowId`, under the salt of the checkpoint holding it. */
+  const commitmentOf = async (cp: Record<string, unknown>, rowId: string, value: string, column = 'payload') => {
     const body = checkpointBodyFromRow(cp);
     const handle = await readAuditSealSecret(store.engine, body.seed_handle);
     const seed = decodeCheckpointSeed(await crypto.decrypt(handle!, checkpointSeedContext(body.sealed_object, body.tenant_id, body.sequence)));
-    return commitValue(columnSaltsOf(seed, 'ledger_probe')(rowId, 'payload'), canonicalValue(value, { type: 'textarea' }));
+    return commitValue(columnSaltsOf(seed, 'ledger_probe')(rowId, column), canonicalValue(value, { type: 'text' }));
   };
   return { ...store, crypto, signer, sealer, clock, ledger, checkpoints, checkpoint, verifyNow, keyId, amend, commitmentOf };
 }
@@ -356,10 +356,11 @@ describe('redaction amendments (D7)', () => {
   it('ignores an amendment for a row or a column the named checkpoint does not seal as a commitment', async () => {
     const s = await sealedLedger();
     await s.amend({ ...(await redaction(s, 'r1', '[masked]')), checkpoint_sequence: 1 }); // sequence 1 lists r4, not r1
-    await s.amend({ ...(await redaction(s, 'r2', '[masked]')), column_name: 'action' });
     s.ledger.find((r) => r.id === 'r1')!.payload = '[masked]';
-    s.ledger.find((r) => r.id === 'r2')!.payload = '[masked]';
-    expect(verdicts(await s.verifyNow())).toEqual({ r1: 'modified', r2: 'modified' });
+    // `action` enters the leaf in clear: an amendment naming it explains nothing, so r2 stays unmodified, never redacted.
+    const cp = s.checkpoint('org:org_a', 0);
+    await s.amend({ ...(await redaction(s, 'r2', '[masked]')), column_name: 'action', rewritten_commitment: await s.commitmentOf(cp, 'r2', 'update', 'action') });
+    expect(verdicts(await s.verifyNow())).toEqual({ r1: 'modified' });
   });
 
   it('reads no amendment while sys_audit_amendment is not registered (P3 registers it)', async () => {
