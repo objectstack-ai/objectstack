@@ -1079,6 +1079,30 @@ describe('per-aggregation filter — a combinator operand that is not a filter n
     });
   }
 
+  // An in-process root that is a class instance passes the whole-filter object
+  // check (its tag is `[object Object]`) and is read as a node by its own keys,
+  // by the walker here and by driver-memory's `where`. Before, the gate skipped
+  // such a root and the walker counted `{ $and: [[…]] }` as no row. Now the root
+  // is walked like a literal one: the malformed operand is refused at the same
+  // position, and a valid filter counts exactly what its literal twin counts.
+  class FilterBox {
+    constructor(props: Record<string, unknown>) { Object.assign(this, props); }
+  }
+
+  it('a class-instance root carrying a condition-array element is refused like a literal one', async () => {
+    const message = await expectFilterRefusal(() => new FilterBox({ $and: [[{ stage: 'closed_won' }]] }));
+    expect(message.startsWith(`Filter node at ${AT}.$and[0] is a array ([{"stage":"closed_won"}]), not a filter condition object. `), message).toBe(true);
+  });
+
+  it('a class-instance root carrying a valid filter counts what its literal twin counts', async () => {
+    for (const native of [true, false]) {
+      const { driver } = makeCountingDriver(OPPORTUNITIES, native);
+      const engine = await makeEngine(driver);
+      expect(await engine.aggregate('crm_opportunity', withFilter(new FilterBox({ $or: [{ stage: 'closed_won' }, { amount: { $gt: 800 } }] }))))
+        .toEqual([{ opp_count: 6, picked: 3 }]);
+    }
+  });
+
   it('the index is the aggregation that carries the filter', async () => {
     const { driver, calls } = makeCountingDriver(OPPORTUNITIES, false);
     const engine = await makeEngine(driver);

@@ -1009,6 +1009,10 @@ describe('having — a combinator operand that is not a filter node is refused i
       'Filter node at having.$not is a array ([{"total":1}]), not a filter condition object.'],
     ['a string as the $not operand', () => ({ $not: 'c1' }),
       'Filter node at having.$not is a string ("c1"), not a filter condition object.'],
+    ['null as the $not operand', () => ({ $not: null }),
+      'Filter node at having.$not is a null (null), not a filter condition object.'],
+    ['a $and operand that is not a list', () => ({ $and: { customer_id: 'c1' } }),
+      'Filter combinator "$and" at having.$and requires an array of filter conditions, but received a object ({"customer_id":"c1"}).'],
     ['a $or operand that is not a list', () => ({ $or: { total: { $gt: 100 } } }),
       'Filter combinator "$or" at having.$or requires an array of filter conditions, but received a object ({"total":{"$gt":100}}).'],
   ];
@@ -1025,6 +1029,7 @@ describe('having — a combinator operand that is not a filter node is refused i
     ['$and of nodes', () => ({ $and: [{ total: { $gt: 100 } }, { order_count: { $lt: 3 } }] }), ['c1']],
     ['$or of nodes', () => ({ $or: [{ total: { $gt: 1000 } }, { order_count: 1 }] }), ['c2', 'c3']],
     ['$not of a node', () => ({ $not: { customer_id: 'c2' } }), ['c1', 'c3']],
+    ['a null-prototype $and element', () => ({ $and: [Object.assign(Object.create(null), { customer_id: 'c2' })] }), ['c2']],
     ['the empty $and (TRUE)', () => ({ $and: [] }), ['c1', 'c2', 'c3']],
   ];
 

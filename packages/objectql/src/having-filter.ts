@@ -1348,7 +1348,10 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * `aggregations[i].filter`, before any row is read. This is the shape gate every
  * driver runs on `where` (`driver-sql`'s, `driver-memory`'s and `driver-mongodb`'s
  * `assertFilterNodeList` / `assertFilterNode`), walked over the same nodes in the
- * same order and refused in the same words, with the position rooted at `root`:
+ * same order, with the position rooted at `root`. The words are `driver-memory`'s
+ * and `driver-sql`'s author-facing text, byte for byte. `driver-mongodb`'s node
+ * refusal differs in its last word ("which documents match" for "which rows
+ * match"). It refuses:
  * - a `$and` / `$or` operand that is not a list — {@link filterNodeListExpectedError};
  * - a `$and` / `$or` element, or the `$not` operand, that is not a plain object —
  *   a condition array, `null`, a string, a `Date` — {@link filterNodeExpectedError}.
@@ -1374,10 +1377,20 @@ export function assertHavingIsFilterCondition(having: unknown): void {
  * not withheld: no read scope is merged into either position (see
  * {@link nonBooleanFlagComparandError}).
  *
- * Read-only; `filter` is assumed to be a plain object or absent.
+ * The ROOT is walked as its caller judged it, never re-judged here. The
+ * per-aggregation root passes `isWhereFilterObject`, which admits a class
+ * instance (its tag is `[object Object]`), and the walker after this gate reads
+ * any object root as a node, by its own enumerable keys. So a class-instance
+ * root carrying `{ $and: [[…]] }` is walked and refused like a literal one,
+ * and one carrying a valid filter answers as before. Only the operands below the
+ * root must be plain objects. The `having` root is plain already
+ * ({@link assertHavingIsFilterCondition}).
+ *
+ * Read-only; `filter` is assumed to be an object its caller accepted as a
+ * filter, or absent.
  */
 export function assertFilterNodeShapes(filter: unknown, root: string): void {
-  if (!isPlainFilterNode(filter)) return;
+  if (filter === null || typeof filter !== 'object' || Array.isArray(filter)) return;
   for (const [key, value] of Object.entries(filter)) {
     const here = `${root}.${key}`;
     if (key === '$and' || key === '$or') {
