@@ -339,7 +339,10 @@ describe('address grammar ↔ route ledger (ADR-0150 D5, #31691)', () => {
       // The second arm, for every door: a literal served through another
       // row's parameter (`parameterServedAt`). No row spells a literal under
       // `/automation/hooks`; the run doors serve `runs` there this way.
-      for (const literal of parameterServedAt(position.prefix).literals) served.add(literal);
+      const throughAParameter = parameterServedAt(position.prefix);
+      // Anti-vacuity: the door's qualified form was found, so the arm was measured.
+      expect(throughAParameter.qualifiedRows.length, `door ${door}: no \`${position.prefix}/:ns\` row`).toBeGreaterThan(0);
+      for (const literal of throughAParameter.literals) served.add(literal);
       expect([...served].sort(), `door ${door} (${position.prefix})`).toEqual([...position.literals].sort());
     }
   });
