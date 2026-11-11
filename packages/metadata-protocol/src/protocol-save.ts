@@ -82,7 +82,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
-import { isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, type WrittenBatchRow } from './batch-object-registration.js';
+import { canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -2319,6 +2319,7 @@ export class ProtocolSaveFacet {
         // [#32369] The object rows this pass rewrote and published, judged as
         // one unit once the pass is done (see the settle below the loop).
         const rewrittenObjects: Array<WrittenBatchRow & { entry: StoredMigrationRow }> = [];
+        const judging = canJudgeBatchObjects(host);
         const rows: any[] = [];
         for (const state of ['active', 'draft'] as const) {
             // [#21908, ADR-0096 D5] The explicit system opt-in: the migration
@@ -2638,7 +2639,7 @@ export class ProtocolSaveFacet {
                 });
                 const entry: StoredMigrationRow = { ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' };
                 record(entry);
-                if (state === 'active' && organizationId === null && isBatchObjectType(singular)) {
+                if (judging && state === 'active' && organizationId === null && isBatchObjectType(singular)) {
                     const stored = await readActiveBatchRow(host, { type: singular, name: base.name, packageId });
                     const address = {
                         type: singular, name: base.name, packageId,

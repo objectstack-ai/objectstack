@@ -107,6 +107,16 @@ function judgingRegistryOf(host: Pick<ProtocolHost, 'engine'>): JudgingRegistry 
         : undefined;
 }
 
+/**
+ * Can this runtime's registry judge a batch's objects? A face reads its rows
+ * back for the judgement (and for an undo) only when it can: on a registry
+ * that cannot be asked (a partial double) the judgement refuses nothing, so
+ * those reads would only add a failure mode to the batch.
+ */
+export function canJudgeBatchObjects(host: Pick<ProtocolHost, 'engine'>): boolean {
+    return judgingRegistryOf(host) !== undefined;
+}
+
 function asError(thrown: unknown): Error {
     return thrown instanceof Error ? thrown : new Error(String(thrown));
 }

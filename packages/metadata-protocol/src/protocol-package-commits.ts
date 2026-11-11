@@ -49,6 +49,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { planNamespaceRename } from './package-namespace-rename.js';
 import {
+    canJudgeBatchObjects,
     isBatchObjectType,
     judgeBatchObjectRegistrations,
     readActiveBatchRow,
@@ -401,6 +402,7 @@ export class ProtocolPackageCommitsFacet {
         // [#32369] The object rows this copy wrote, judged as one unit once the
         // loop is done (see the settle below the loop).
         const writtenObjects: Array<WrittenBatchRow & { source: { type: string; name: string } }> = [];
+        const judging = canJudgeBatchObjects(host);
         // Resolved once for the whole copy: every flow row in this package needs
         // the same engine, and a package with fifty flows should not walk the
         // service table fifty times.
@@ -502,7 +504,7 @@ export class ProtocolPackageCommitsFacet {
                 // [#32369] The copy's own address before it writes there: what an
                 // undo puts back if the registry refuses the row (a duplicate
                 // again writes over its earlier copy).
-                const before = isBatchObjectType(singular)
+                const before = judging && isBatchObjectType(singular)
                     ? await readActiveBatchRow(host, { type: singular, name: newName, packageId: request.targetPackageId })
                     : null;
                 await host.saveMetaItem({
@@ -531,7 +533,7 @@ export class ProtocolPackageCommitsFacet {
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 copied.push({ type: row.type, name: newName });
-                if (isBatchObjectType(singular)) {
+                if (judging && isBatchObjectType(singular)) {
                     const stored = await readActiveBatchRow(host, { type: singular, name: newName, packageId: request.targetPackageId });
                     const address = { type: singular, name: newName, packageId: request.targetPackageId, prevVersion: before?.version ?? null };
                     writtenObjects.push({
@@ -798,7 +800,7 @@ export class ProtocolPackageCommitsFacet {
         // pass are registered again in package order, so a row the write-through
         // refused only because its sibling was not in yet is served.
         const objectRows: BatchObjectRow[] = [];
-        for (const item of prepared) {
+        for (const item of canJudgeBatchObjects(host) ? prepared : []) {
             const type = PLURAL_TO_SINGULAR[item.type] ?? item.type;
             if (!isBatchObjectType(type)) continue;
             const stored = await readActiveBatchRow(host, { type, name: item.name, packageId: targetPackageId });
