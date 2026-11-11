@@ -857,13 +857,11 @@ export const CEILINGS = new Map([
   // Standing ruling (2026-10-27, tap A, verbatim and untranslated):
   // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068; seat
   // widening record 6784270263.
-  // 3250 -> 3234 (#31957, same PR, contract-review should-fix S1): one sentence says the
-  // Console does not yet draw a path amount or its roll-up in the parent's currency
-  // (+105 bytes), paid by cutting the `user` row's `deleteBehavior` parenthetical to a
-  // pointer (-168 bytes; home: rules/relationships.md § Delete Behaviors, every fact).
-  // `wc -c` = 12936 bytes -> ceil(12936 / 4) = 3234 tokens: RE-LOCK down at the landed
-  // count, zero headroom.
-  ['skills/objectstack-data/rules/field-types.md', 3234],
+  // 3250 -> 3208 (#31957, same PR, contract review): the `user` row's `deleteBehavior`
+  // parenthetical is cut to a pointer (-168 bytes; home: rules/relationships.md § Delete
+  // Behaviors, every fact). `wc -c` = 12831 bytes -> ceil(12831 / 4) = 3208 tokens: RE-LOCK
+  // down at the landed count, zero headroom.
+  ['skills/objectstack-data/rules/field-types.md', 3208],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],

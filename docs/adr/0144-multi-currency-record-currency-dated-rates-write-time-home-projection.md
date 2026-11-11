@@ -738,11 +738,12 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
       Grouping by the `master_detail` field itself would widen D6 past ruling A, so that half takes a maintainer
       ruling.
 
-      *Note (2026-11-11):* the parent-path half has its reading. PR #32216 (`193491823`) refuses an ObjectQL aggregate
-      over such a child amount whatever it groups by: grouping by the parent path does not count as grouping by the
-      code field (`packages/objectql/src/record-currency-aggregate-door.ts`, module header), since the engine reads
-      the dotted key as a column of the child and measured USD 100 and EUR 100 under two parents summed to 200 in one
-      null group. The `master_detail` half still takes a maintainer ruling, so this edge stays open.
+      *Note (2026-11-11):* the parent-path half has its reading. PR #32216 (`193491823`) refuses a raw ObjectQL
+      aggregate (`sum`, `avg`, `min` or `max`; `count` and `count_distinct` pass) over such a child amount whatever it
+      groups by: grouping by the parent path does not count as grouping by the code field
+      (`packages/objectql/src/record-currency-aggregate-door.ts`, module header), since the engine reads the dotted
+      key as a column of the child and measured USD 100 and EUR 100 under two parents summed to 200 in one null
+      group. The `master_detail` half still takes a maintainer ruling, so this edge stays open.
     - **The code backfill** (item 13) for an amount whose code lives on the parent. The command writes a code into the
       amount's own object today.
 

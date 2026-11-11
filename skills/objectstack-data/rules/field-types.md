@@ -181,8 +181,7 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 may be `'<master_detail field>.<parent code field>'`: one hop (a `lookup` path
 is refused) to the parent's `iso_4217_currency` field. The line stores no code:
 a blank parent code refuses its amount (`ERR_CURRENCY_CODE_REQUIRED`), and the
-code backfill refuses a path (write the parents' codes). Until the Console reads
-the path, it draws such an amount and its roll-up without the parent's currency.
+code backfill refuses a path (write the parents' codes).
 
 ```typescript
 invoice: Field.masterDetail('invoice'),  // on invoice_line
