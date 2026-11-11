@@ -296,8 +296,12 @@ complementary by design.
   answers a name that names no object.
 - Whether the caller may read the object is decided once, in the same posture
   resolution that decides the field projection, and every schema-serving
-  outlet answers that verdict before it reads any store, so no two outlets
-  disagree about whether an object exists for the caller.
+  outlet reaches the same answer from that verdict, so no two outlets disagree
+  about whether an object exists for the caller. The metadata API's reads of
+  one object by name — `GET /meta/object/:name` (cached, uncached, layered,
+  published and diff reads), the object state-machine read, and the runtime
+  `/metadata` catch-all's read of one object — answer that verdict before
+  they read any store.
 - The D4 exemptions and the D8 switch are unchanged and are decided first;
   with the D8 switch set, the object rule is off as well.
 - A readable object's reference field may still name an object the caller may

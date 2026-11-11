@@ -17,7 +17,7 @@ Metadata-protocol: none
 After the upgrade, every outlet that serves object schemas — `GET /meta/object` and `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the object state-machine read `GET /meta/object/:name/state/:field`, the runtime `/metadata` catch-all, MCP `list_objects`, `describe_object` and `validate_expression`, and the stdio MCP bridge — treats an object the caller may not read (the security service's `canReadObject` does not admit them) as an object that does not exist:
 
 - an object list leaves it out;
-- a read of it answers exactly as that outlet answers a name that names no object, before the store or any validator is consulted, so no `304` and no store answer about that object is returned for it.
+- a read of it answers exactly as that outlet answers a name that names no object, so every outlet reaches the same answer. The metadata API's reads of one object by name — `GET /meta/object/:name` (cached, uncached, layered, published and diff reads), the state-machine read, and the runtime `/metadata` catch-all's read of one object — give that answer before the store or any validator is consulted, so no `304` and no store answer about that object is returned for it.
 
 A caller with no principal, or with no resolved permission set, is served no object. The D7 fallback permission set decides which fields are served, never which objects exist for the caller.
 
