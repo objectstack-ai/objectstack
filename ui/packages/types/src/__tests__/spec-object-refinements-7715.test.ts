@@ -387,7 +387,11 @@ const SITES = [
     // `record` by the page's `type` the same way, so attached here it would refuse every `record`,
     // a `pageType: 'app'` page's included; `PageKindNodeSchema` attaches it (objectui#12971,
     // measured in its describe block above).
-    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement'],
+    // `checkPageRecordPlacesComponent` joined after 18.3.0 (objectstack#32434): a `full` record page
+    // that places no component is refused at `regions`. It judges by the page's `type` the same way,
+    // and on this node `type` is the component discriminator `'page'`, so attached here it would
+    // never fire; whether `PageKindNodeSchema` attaches it is objectui's own call, not made here.
+    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement', 'checkPageRecordPlacesComponent'],
   },
   {
     site: 'ListViewSchema (objectql.zod.ts)',

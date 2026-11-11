@@ -1473,7 +1473,7 @@ const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with i
  *    admitted types are {@link PRINT_PAGE_TYPES});
  *  - `print` on a `full` page with no `regions` — it authors no block to
  *    print (a `full` page never falls back to the synthesized default
- *    layout: a record page draws nothing, a `home` / `app` page its heading);
+ *    layout: a record page draws nothing, a home or app page its heading);
  *  - `print.repeatHeader` / `print.repeatFooter` on a page with no region of
  *    that name — the running header and footer ARE those regions.
  *
@@ -1695,8 +1695,8 @@ const RECORD_PAGE_PLACES_NO_COMPONENT =
  * not read on a `full` page. So the record view of every record of the page's
  * object opened on a blank detail panel — the breadcrumb and nothing else —
  * while every door reported the page valid; deleting the page brought the
- * default record page back. Judged on the record type alone: a `home`, `app`
- * or `utility` page draws its `label` as the page heading (and its
+ * default record page back. Judged on the record type alone: a home, app or
+ * utility page draws its `label` as the page heading (and its
  * `description`) when no `page:header` block owns it, and a `list` page draws
  * through `interfaceConfig`, so each keeps accepting no regions. A `slotted`
  * record page draws the synthesized default with its overrides, and an
