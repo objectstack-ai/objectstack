@@ -11,6 +11,10 @@
  *   node scripts/codemod-split-protocol.mjs --write         # apply the split, then verify it
  *   node scripts/codemod-split-protocol.mjs --verify --base <ref>
  *                                                           # re-prove a split on disk against protocol.ts at <ref>
+ *   node scripts/codemod-split-protocol.mjs --hand-host A,B [--write]
+ *                                                           # run the named hand stubs' bodies on the class's host (#30020)
+ *   node scripts/codemod-split-protocol.mjs --hand-host --verify --base <ref>
+ *                                                           # re-prove those moves on disk against the tree at <ref>
  *   node scripts/codemod-split-protocol.mjs --self-test
  *   node scripts/codemod-split-protocol.mjs --help          # this usage, on any tree (split or not)
  *
@@ -3440,6 +3444,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'receiver proof': 10,
   'receiver refusals': 7,
   'identity port': 14,
+  'hand host': 9,
+  'hand host refusals': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 5;
 
@@ -4000,6 +4006,91 @@ ${pad}
           ibase.text.replace('this.engine.v, read', "this['engine'], read"));
       }
     }
+  }
+
+  // The hand-host pass (#30020): a hand stub whose host literal computes runs
+  // on the class's host, its body moved whole into its hand module.
+  open('hand host');
+  const HAND_STUB = `
+    private handStub(n: number): number {
+        // [#25467 cut 9] The body moved to \`protocol-hand.ts\` (see \`HandHost\`).
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof handBody> = {
+            get engine() { return readEngine(); },
+            // a computing slot
+            computed: () => (this.flag ? LIB_VALUE : 0),
+        };
+        return handBody.call(host, n);
+    }
+`;
+  const HAND_MODULE = `// fixture hand module
+import { LIB_OTHER } from './lib-other.js';
+
+export function handBody(this: { engine: unknown; computed: () => number }, n: number): number {
+    return n + this.computed() + LIB_OTHER;
+}
+`;
+  const hbase = {
+    text: fixtureSource(HAND_STUB).replace("import { already } from './protocol-already.js';\n",
+      "import { already } from './protocol-already.js';\nimport { handBody } from './protocol-hand.js';\nimport { LIB_VALUE } from './lib.js';\n"),
+    host: FIXTURE_HOST,
+    modules: new Map([['protocol-hand.ts', HAND_MODULE]]),
+  };
+  const hgen = (b = hbase, names = ['handStub']) => {
+    const o = generateHandHost(T, b.text, b.modules, planHandHost(T, b.text, b.host, b.modules, names));
+    return { text: o.text, host: b.host, modules: new Map([...b.modules, ...o.modules]) };
+  };
+  {
+    let hhead = null;
+    let herr = '';
+    try { hhead = hgen(); } catch (e) { herr = String(e.message ?? e); }
+    const hv = hhead ? verifyHandHost(T, hbase, hhead) : { failures: [herr], moved: [] };
+    check('a hand stub whose host computes moves, and proves by its undo and its replay',
+      hv.failures.length === 0 && hv.moved.map((x) => x.name).join() === 'handStub', hv.failures.join(' | '));
+    const hmod = hhead?.modules.get('protocol-hand.ts') ?? '';
+    check('the stub is one forwarding call on the host, and protocol.ts imports it beside the hand function',
+      Boolean(hhead) && hhead.text.includes('        return handStubOnHost.call(protocolHost(this), n);\n    }')
+        && hhead.text.includes("import { handStubOnHost } from './protocol-hand.js';") && !/\bLIB_VALUE\b|\bhandBody\b/.test(hhead.text), hhead?.text.slice(0, 600));
+    check('the function takes the Pick of what the body reads and carries the body one level out, unedited',
+      hmod.includes("export function handStubOnHost(\n    this: Pick<ProtocolHost, 'engine' | 'flag'>,\n    n: number,\n): number {\n"
+        + '    // [#25467 cut 9] The body moved to `protocol-hand.ts` (see `HandHost`).\n    const readEngine = () => this.engine;\n')
+        && hmod.includes('        computed: () => (this.flag ? LIB_VALUE : 0),\n    };\n    return handBody.call(host, n);\n}\n'), hmod);
+    check('the hand module imports what the body reads from where protocol.ts imports it, and the host type',
+      hmod.includes("import { LIB_VALUE } from './lib.js';") && hmod.includes("import type { ProtocolHost } from './protocol-host.js';"), hmod);
+    let again = null;
+    try { again = hgen(); } catch { again = null; }
+    check('two runs write byte-identical trees', Boolean(hhead && again) && again.text === hhead.text
+      && [...again.modules].every(([f, t]) => hhead.modules.get(f) === t));
+    const fails = (label, h) => {
+      const v = hhead ? verifyHandHost(T, hbase, h) : { failures: [] };
+      check(label, Boolean(hhead) && v.failures.length > 0, 'proved');
+    };
+    if (hhead) {
+      const withMod = (t) => ({ ...hhead, modules: new Map([...hhead.modules, ['protocol-hand.ts', t]]) });
+      fails('a moved body edited after the move fails', withMod(hmod.replace('(this.flag ? LIB_VALUE : 0)', '(this.flag ? LIB_VALUE : 1)')));
+      fails('a head that keeps an import only the moved body reads fails',
+        { ...hhead, text: hhead.text.replace("import { handStubOnHost } from './protocol-hand.js';", "import { handStubOnHost } from './protocol-hand.js';\nimport { LIB_VALUE } from './lib.js';") });
+      fails('a stub hand-edited after the move fails', { ...hhead, text: hhead.text.replace('handStubOnHost.call(protocolHost(this), n)', 'handStubOnHost.call(protocolHost(this), n + 0)') });
+      fails('a host that changed beside the move fails', { ...hhead, host: `${hhead.host}// drift\n` });
+    } else {
+      for (let i = 0; i < 4; i += 1) check('a tampered head fails (no head to tamper)', false, herr);
+    }
+  }
+
+  open('hand host refusals');
+  {
+    const refusesFor = (label, why, text, names = ['handStub']) => {
+      let msg = '';
+      try { hgen({ ...hbase, text }, names); } catch (e) { msg = String(e.message ?? e); }
+      check(label, (text !== hbase.text || names.join() !== 'handStub') && why.test(msg), msg || 'not refused');
+    };
+    refusesFor('a stub whose slots all forward refuses (it is a delegation already)', /no computing slot/,
+      hbase.text.replace('            // a computing slot\n            computed: () => (this.flag ? LIB_VALUE : 0),\n', ''));
+    refusesFor('a slot that reads a member the host carries no entry for refuses (the pass never grows the host)', /carries no entry for/,
+      hbase.text.replace('(this.flag ? LIB_VALUE : 0)', '(this.count ? LIB_VALUE : 0)'));
+    refusesFor('a slot that hands a bare `this` on refuses', /bare `this`/,
+      hbase.text.replace('(this.flag ? LIB_VALUE : 0)', '((this as any).flag ? LIB_VALUE : 0)'));
+    refusesFor('a method that is not a hand-series stub refuses', /not a hand-series stub/, hbase.text, ['tiny']);
   }
 
   open('determinism');
