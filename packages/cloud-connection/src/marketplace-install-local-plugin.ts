@@ -1108,7 +1108,8 @@ function describeUnrunnable(manifestId: string, what: UnrunnableCode): string {
             `${one ? 'its enabled job' : `${jobsWithBadPull.length} of its enabled jobs`} ${list} `
             + `${one ? 'has' : 'have'} a \`pull\` that does not bind, so this install door cannot run ${one ? 'it' : 'them'}: `
             + 'the job would be installed and never scheduled. Declare the mapping the `pull` names in the package, with '
-            + 'a `connectorSource`, or correct the `pull` as the refusal says — `os validate` refuses the same `pull`.',
+            + 'a source (a `connectorSource`, or a `datasourceSource` naming the federated object it copies), or correct '
+            + 'the `pull` as the refusal says — `os validate` refuses the same `pull`.',
         );
     }
     if (what.hooks.length > 0) {
