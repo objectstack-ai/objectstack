@@ -1,6 +1,6 @@
 # ADR-0093: Tenancy mode as a first-class capability, and a single owner for the user→membership lifecycle
 
-**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates.
+**Status**: Accepted (2026-07-13) — implemented: `tenancy` kernel service (`plugin-auth/src/tenancy-service.ts`), membership reconciler (`reconcile-membership.ts`), locked by `dogfood/test/membership-reconciler.dogfood.test.ts` · **Amended** (2026-11-08, [ADR-0151](./0151-ai-service-account-a-headless-agent-is-a-registered-principal-of-its-own.md) D1, proposed, adopted by its merge) — D7's machine / service-account row: the first-class marker it waited on is `sys_user.principal_kind`. The membership reconciler never binds an account of kind `agent`, whose one membership its registration creates. · **Amended** (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request; see the amendment note under D8.
 - **Date:** 2026-07-13
 - **Deciders:** ObjectStack Protocol Architects
 - **Implementation:** #2882 (Phase 0 — tactical create-user bind, merged) → this PR (Phases 1–3 — `tenancy` service, fail-fast boot guard, membership reconciler, consumer migration, backfill, docs). One revision from the original plan, ratified in D2: the endpoint-level create-user bind **delegates to the shared reconciler** (one implementation, two call sites) instead of being deleted. Runtime verification confirmed the hook fires for `admin.createUser`, but better-auth *defers* `user.create.after` post-commit (#1881), so the endpoint keeps its delegated call to report `organizationId` / `membershipCreated` deterministically in its response. Cloud-host semantics (personal-org hook precedence, multi-org non-binding, D5 blast radius) verified against `objectstack-ai/cloud` — see D2/D3/D5.
@@ -58,9 +58,10 @@ Decision:
 - **D7** — Edge-case ledger: existing memberships always win; platform-admin
   bootstrap keeps its own path; phone-only users bind like anyone else;
   multi-org backfill is explicitly refused.
-- **D8** — Non-goals: single-org membership still does **not** gate data access;
-  RLS strip semantics, the dual frontend feature flags, and better-auth's
-  ownership of member CRUD are all unchanged.
+- **D8** — Non-goals: single-org membership still does **not** gate data access
+  *(reversed 2026-11-11 — membership gates data access under every posture;
+  see the D8 amendment note)*; RLS strip semantics, the dual frontend feature
+  flags, and better-auth's ownership of member CRUD are all unchanged.
 - **D9** *(recording, not a new ruling)* — The `session.create.before` hook
   resolves a session's `activeOrganizationId` from the caller's `sys_member`
   row (owner-preferred, else oldest), only when the draft lacks one,
@@ -403,10 +404,11 @@ admin surfaces.
 
 ### D8 — Non-goals (explicit refusals)
 
-1. **Single-org membership still does not gate data access.** RLS stripping
+1. ~~**Single-org membership still does not gate data access.** RLS stripping
    semantics are untouched; RBAC permission sets remain the single-org access
    authority. Making `sys_member` authorization-relevant in single mode is a
-   different, larger decision — refused here to keep this ADR mechanical.
+   different, larger decision — refused here to keep this ADR mechanical.~~
+   *Reversed 2026-11-11 — see the amendment note at the end of this section.*
 2. **The dual frontend flags keep their meaning.** `features.organization`
    (member management available) vs `features.multiOrgEnabled` (org management
    available) is a deliberate cloud ADR-0081 D1/D2 distinction — D1 keeps
@@ -419,6 +421,42 @@ admin surfaces.
 4. **No new org-resolution cleverness in multi mode.** Domain matching,
    actor-active-org inheritance, etc. remain the province of the flows that
    have real context (JIT, invites, host hooks).
+
+> **Amendment note (2026-11-11, maintainer ruling 6796108313) — D8.1 reversed: a current membership
+> is required for data access under every tenancy posture.** The rule: under every tenancy posture,
+> a person's data access requires a current membership in the organization, judged on each request.
+> `single` is no longer the exception D8.1 made of it. RBAC permission sets remain the access
+> authority *inside* the organization; a current membership is what any of them applies under.
+>
+> - **One check, every posture.** The organization a session or an API key claims is kept only while
+>   a current membership backs it (`vetOrganizationClaim`, `core/src/security/resolve-authz-context.ts`),
+>   and that function no longer reads the posture; its third parameter is deprecated and ignored.
+>   Membership is read once per request (`resolveUserAuthzGrants` → `accessible_org_ids`, ADR-0091
+>   windows applied), so a membership that ends ends access on the next request.
+> - **The organization's own wall under `single`.** `single` keeps no wall *between* organizations
+>   (ADR-0105 D1). A person who holds no current membership in any organization meets the Layer 0
+>   verdict's deny (`computeTenantLayer0Verdict` with `outsideEveryOrganization`, and the one
+>   predicate every reader asks, `isOutsideEveryOrganization` — `core/src/security/tenant-layer0-verdict.ts`):
+>   reads of the organization's tenant rows resolve to nothing and writes are refused
+>   `403 PERMISSION_DENIED` naming the missing active organization — the answers ADR-0123 already
+>   gives, and the ones `isolated` and `group` give the same person.
+> - **What keeps its existing rule.** System contexts. The platform operator (the `PLATFORM_ADMIN`
+>   rung): platform standing is the deployment's, not a membership's (ADR-0131 D5). Objects outside
+>   tenancy — identity tables and platform-global objects — sit outside the wall under every posture,
+>   so a person's own account, session and invitation flows are unchanged. An anonymous guest
+>   carries no person (ADR-0138).
+> - **API keys.** An API key is its owner's credential (ADR-0090 D10, the 2026-09-16 note): the
+>   principal it admits is its owner, so the owner's membership rule is the key's, under every
+>   posture.
+> - **Delegation.** A delegated operation runs in the live principal's organization only while the
+>   delegator's own current membership backs it (ADR-0090 D10), under every posture.
+>
+> Consequences for this record. D6 and its `app:seeded` re-run are how a single-org deployment's
+> people get the membership that admits them; a deployment that opts out of them
+> (`OS_SKIP_MEMBERSHIP_BACKFILL=1`, or `membershipPolicy: 'invite-only'`) gives each person a
+> membership through the member admin surfaces. D7's "user leaves their only org" row stands as a
+> lifecycle fact, and leaving now also ends data access. The "Deferred" line's D8.1 entry is
+> resolved by this note.
 
 ### D9 — The session's active organization is resolved from membership, here
 
@@ -500,5 +538,5 @@ believing they are tenant-isolated. The reconciler adds one indexed read per
 user creation (negligible; creation is rare and already multi-write).
 
 **Deferred.** Service-account exemption (D7); any authorization role for
-single-org membership (D8.1); multi-org target-org policy beyond "don't guess"
-(D8.4).
+single-org membership (D8.1 — resolved 2026-11-11, see the D8 amendment note);
+multi-org target-org policy beyond "don't guess" (D8.4).
