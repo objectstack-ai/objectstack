@@ -1214,12 +1214,15 @@ export const FlowSchema = lazySchema(() => strictObject(
   // carries no flow run is unchanged.
   //
   // [Ruling record 6787890900] …nor a ledger. The same middleware, by the same
-  // predicate, refuses an update, delete, transfer, restore or purge of an
+  // predicate, refuses an update, transfer, delete, purge or restore of an
   // object declared `managedBy: 'append-only'` (the audit log, the activity
   // feed and their siblings, read off the live registry) from a `system` run's
-  // context, with `PERMISSION_DENIED`; reads are unchanged. A ledger's rows are
-  // written by the platform service that owns it, whose own system context
-  // carries no flow run.
+  // context, with `PERMISSION_DENIED`; an insert is not judged by this rule,
+  // and reads are unchanged. A delete of a record a ledger row references is
+  // refused whole, because the engine's clean-up of that reference changes the
+  // ledger row under the run's context (seat decision on the contract review).
+  // A ledger's rows are written by the platform service that owns it, whose own
+  // system context carries no flow run.
   //
   // A run under `user` that resolves NO trigger user has nothing to scope to, so
   // its data operations are REFUSED (#3760). This is NOT a schedule-only case —
@@ -1250,9 +1253,10 @@ export const FlowSchema = lazySchema(() => strictObject(
         "are refused with PERMISSION_DENIED; declare user for position holdings and permission-set grants (the " +
         'ADR-0090 D12 delegated-administration gate then judges the user the run acts for), and change invitations ' +
         'and memberships through the organization endpoints. ' +
-        "Nor does it reach a ledger: a system run's update, delete, transfer, restore or purge of an object declared " +
+        "Nor does it reach a ledger: a system run's update, transfer, delete, purge or restore of an object declared " +
         "managedBy: 'append-only' (the audit log, the activity feed and their siblings) is refused with " +
-        'PERMISSION_DENIED; keep a value the flow must change on an object of its own. ' +
+        'PERMISSION_DENIED, and so is its delete of a record such a ledger row references, because that delete ' +
+        'would change the ledger row; an insert is not judged by this rule. ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
         'record-change flow fired by a write that carried no user. Except behind an anonymous door: publish refuses ' +
