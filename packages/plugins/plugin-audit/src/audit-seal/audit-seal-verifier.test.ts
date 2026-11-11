@@ -447,5 +447,14 @@ describe('the archive is read or the check does not run', () => {
     const s = await sealedLedger();
     const engine = { ...s.engine, datasource: () => undefined };
     await expect(verifyAuditLedger({ engine, crypto: s.crypto })).rejects.toThrow(/archives to datasource 'archive', which this boot did not connect/);
+    await expect(verifyAuditLedger({ engine: s.engine, crypto: s.crypto, archive: () => undefined })).rejects.toThrow(/did not connect/);
+  });
+
+  it("reads the hot store alone when the caller established that no archive exists ('none')", async () => {
+    const s = await sealedLedger();
+    const engine = { ...s.engine, datasource: () => undefined };
+    const report = await verifyAuditLedger({ engine, crypto: s.crypto, now: () => s.clock.now, archive: () => 'none' });
+    expect(report.ok).toBe(true);
+    expect(report.totals.unmodified).toBe(5);
   });
 });

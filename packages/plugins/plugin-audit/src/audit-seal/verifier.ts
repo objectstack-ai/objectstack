@@ -163,6 +163,15 @@ export interface AuditVerifyOptions {
   /** Judge only the rows of the windows `[from, to)` overlaps. Links and signatures are checked whole. */
   from?: Date;
   to?: Date;
+  /**
+   * The archive datasource a sealed object declares (`lifecycle.archive.to`),
+   * resolved: its driver, or `'none'` when the caller established that no
+   * datasource of that name exists anywhere — nothing was ever archived, so
+   * the hot store alone is read. Default: `engine.datasource(name)`. Anything
+   * else (a datasource that exists and this boot did not reach) throws: every
+   * archived row would read `missing`.
+   */
+  archive?: (datasource: string, object: string) => SealStorageDriver | 'none' | undefined;
   now?: () => number;
 }
 
@@ -265,6 +274,24 @@ class LedgerCheck {
     return this.now;
   }
 
+  /** The archive store of `object`, `null` when there is none to read; throws when one exists out of reach. */
+  archiveOf(datasource: string, object: string): SealStorageDriver | null {
+    let resolved: SealStorageDriver | 'none' | undefined;
+    try {
+      resolved = this.options.archive ? this.options.archive(datasource, object) : this.options.engine.datasource?.(datasource);
+    } catch {
+      resolved = undefined;
+    }
+    if (resolved === 'none') return null;
+    if (!resolved) {
+      throw new Error(
+        `'${object}' archives to datasource '${datasource}', which this boot did not connect: its archived rows cannot be read, ` +
+          'so no verdict is given (each would read missing). Connect that datasource and run the check again.',
+      );
+    }
+    return resolved;
+  }
+
   inScope(chain: string): boolean {
     if (this.orgs === null) return true;
     return chain.startsWith('org:') && this.orgs.has(chain.slice(4));
@@ -348,7 +375,7 @@ class LedgerCheck {
     const driver = this.options.engine.getDriverForObject(AUDIT_CHECKPOINT_OBJECT);
     if (!driver) return false;
     try {
-      return (await driver.find(AUDIT_CHECKPOINT_OBJECT, { where: { sealed_object: object }, limit: 1 })).length > 0;
+      return (await driver.find(AUDIT_CHECKPOINT_OBJECT, { where: { sealed_object: object }, orderBy: [{ field: 'id', order: 'asc' }], limit: 1 })).length > 0;
     } catch (err) {
       if (isMissingTableError(err, AUDIT_CHECKPOINT_OBJECT)) return false;
       throw err;
@@ -405,20 +432,7 @@ class ObjectCheck {
     if (!hot) throw new Error(`no driver resolves for '${object.name}'`);
     this.hot = hot;
     const to = (object.lifecycle as { archive?: { to?: unknown } } | undefined)?.archive?.to;
-    let archive: SealStorageDriver | undefined;
-    if (typeof to === 'string' && to !== '') {
-      try {
-        archive = engine.datasource?.(to);
-      } catch {
-        archive = undefined;
-      }
-      if (!archive) {
-        throw new Error(
-          `'${object.name}' archives to datasource '${to}', which this boot did not connect: its archived rows cannot be read, ` +
-            'so no verdict is given (each would read missing). Connect that datasource and run the check again.',
-        );
-      }
-    }
+    const archive = typeof to === 'string' && to !== '' ? check.archiveOf(to, object.name) : null;
     this.archive = archive && archive !== hot ? archive : undefined;
   }
 
@@ -633,7 +647,8 @@ class ObjectCheck {
 
   private async rowById(id: string): Promise<Row | undefined> {
     for (const store of this.stores()) {
-      const [row] = await this.find(store, { where: { id }, limit: 1 });
+      // Ordered, so a driver that did not create the table (an archive) reads it deterministically.
+      const [row] = await this.find(store, { where: { id }, orderBy: [{ field: 'id', order: 'asc' }], limit: 1 });
       if (row) return row;
     }
     return undefined;

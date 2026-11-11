@@ -144,7 +144,11 @@ async function openPrivateHalf(engine: SealStorageReader, crypto: ICryptoProvide
  * trusts: never a public key because a row carries it.
  */
 export async function trustedSigningKey(engine: SealStorageReader, crypto: ICryptoProvider, keyId: string): Promise<string | null> {
-  const rows = await driverFor(engine, AUDIT_SIGNING_KEY_OBJECT).find(AUDIT_SIGNING_KEY_OBJECT, { where: { fingerprint: keyId }, limit: 1 });
+  const rows = await driverFor(engine, AUDIT_SIGNING_KEY_OBJECT).find(AUDIT_SIGNING_KEY_OBJECT, {
+    where: { fingerprint: keyId },
+    orderBy: [{ field: 'id', order: 'asc' }],
+    limit: 1,
+  });
   const key = keyRowOf(rows[0]);
   if (!key || key.fingerprint !== keyId) return null;
   try {
