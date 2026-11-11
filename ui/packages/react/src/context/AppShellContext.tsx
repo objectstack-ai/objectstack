@@ -81,11 +81,24 @@ export interface MetadataCacheState {
 
 export type MetadataTypeStatus = 'idle' | 'loading' | 'ready' | 'error';
 
+/** The qualifier of one {@link MetadataContextValue.getItem} read. */
+export interface MetadataItemReadOptions {
+  /**
+   * [ADR-0150 D5] The id of the package that holds the item, sent as
+   * `?package=`, the exact qualifier: that package's item, or the server's
+   * refusal naming the holders, never another package's item. Pass it when the
+   * reader holds the package (a nav item of a packaged app): a bare name two
+   * enabled packages hold is refused `409 RESOURCE_CONFLICT`. Leave it out for
+   * the bare read.
+   */
+  packageId?: string;
+}
+
 export interface MetadataContextValue extends MetadataCacheState {
   refresh: (type?: string) => Promise<void>;
   invalidate: (type: string, name?: string) => void;
   ensureType: (type: string) => Promise<any[]>;
-  getItem: (type: string, name: string) => Promise<any | null>;
+  getItem: (type: string, name: string, options?: MetadataItemReadOptions) => Promise<any | null>;
   getItemsByType: (type: string) => any[];
   /**
    * Per-type load status. Lazy types ('page', 'dashboard', …) return their
