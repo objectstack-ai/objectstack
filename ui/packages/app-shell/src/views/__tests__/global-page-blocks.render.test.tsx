@@ -245,7 +245,7 @@ describe('objectui#6757 — spec `PageComponentType` members that had no rendere
       renderPage('global:notifications');
 
       // 1. Real content: the bell control, with its accessible name.
-      const bell = await screen.findByRole('button', { name: 'Open inbox' });
+      const bell = await screen.findByRole('button', { name: /^Notifications(,|$)/ });
       expect(bell).toBeInTheDocument();
 
       // 2. Real content that had to travel the data path: two unread rows on
@@ -263,7 +263,7 @@ describe('objectui#6757 — spec `PageComponentType` members that had no rendere
 
     it('opens the inbox and lists the rows the feed returned', async () => {
       renderPage('global:notifications');
-      const bell = await screen.findByRole('button', { name: 'Open inbox' });
+      const bell = await screen.findByRole('button', { name: /^Notifications(,|$)/ });
       await waitFor(() => expect(bell).toHaveTextContent('2'));
 
       fireEvent.click(bell);

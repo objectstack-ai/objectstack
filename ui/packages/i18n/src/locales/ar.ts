@@ -2579,8 +2579,8 @@ const ar = {
         action: "دعوة",
       },
       connectAssistant: {
-        title: 'ربط مساعد ذكاء اصطناعي',
-        todo: 'استخدم هذا النظام من Claude وDoubao والمساعدين المشابهين باسمك أنت.',
+        title: 'ربط مساعد ذكاء اصطناعي خارجي',
+        todo: 'استخدم هذا النظام باسمك أنت من Claude وDoubao والمساعدين المشابهين عبر MCP. يُعدّ الذكاء الاصطناعي المدمج بشكل منفصل، في Setup ← الذكاء الاصطناعي والتضمين (Embedder).',
         done: 'تم ربط مساعد ذكاء اصطناعي أو مفتاح API خاص بك.',
         action: 'ربط',
       },
@@ -2980,6 +2980,7 @@ const ar = {
         twoFactorExpired: "انتهت صلاحية تسجيل الدخول هذا. سجّل الدخول بكلمة المرور مرة أخرى.",
         twoFactorLocked: "محاولات فاشلة كثيرة جدًا. حسابك مقفل مؤقتًا. حاول مرة أخرى لاحقًا.",
         invalidCredentials: "بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ أعد تعيينها لتسجيل الدخول على الفور.",
+        invalidCredentialsNoMail: 'بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ اطلب من المسؤول إعادة تعيينها.',
         emailNotVerified: "يرجى التحقق من بريدك الإلكتروني قبل تسجيل الدخول.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -3027,6 +3028,12 @@ const ar = {
       invitationGoneDescription: "ربما انتهت صلاحية الدعوة أو استُخدمت أو سُحبت. اطلب من الشخص الذي دعاك إرسال دعوة جديدة.",
       invitationGoneSignIn: "الانتقال إلى تسجيل الدخول",
       invitationLinkHint: "هل لديك دعوة؟ افتح الرابط في رسالة الدعوة لقبولها.",
+      firstOwner: {
+        title: 'إعداد هذا النشر',
+        description: 'لا يوجد أي حساب هنا بعد. أول حساب تنشئه يصبح مالك هذا النشر.',
+        createButton: 'إنشاء حساب المالك',
+        signInDivider: 'أو سجّل الدخول بحساب موجود',
+      },
       showPasswordText: "إظهار كلمة المرور",
       hidePasswordText: "إخفاء كلمة المرور",
       footer: {
@@ -3050,6 +3057,13 @@ const ar = {
       confirmPasswordPlaceholder: "أكّد كلمة المرور",
       passwordMismatchError: "كلمتا المرور غير متطابقتين",
       passwordTooShortError: "يجب أن تتكون كلمة المرور من 8 أحرف على الأقل",
+      nameRequiredError: 'أدخل اسمك',
+      emailRequiredError: 'أدخل بريدك الإلكتروني',
+      emailInvalidError: 'أدخل بريدًا إلكترونيًا مثل name@example.com',
+      firstOwner: {
+        title: 'إنشاء حساب المالك',
+        description: 'لا يوجد أي حساب هنا بعد. الحساب الذي تنشئه الآن يصبح مالك هذا النشر، ويمكنك دعوة زملائك بعد ذلك.',
+      },
       submitButton: "إنشاء حساب",
       submittingButton: "جارٍ إنشاء الحساب…",
       hasAccountText: "لديك حساب بالفعل؟",

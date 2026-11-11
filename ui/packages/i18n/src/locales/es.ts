@@ -2390,8 +2390,8 @@ const es = {
         action: "Invitar",
       },
       connectAssistant: {
-        title: 'Conectar un asistente de IA',
-        todo: 'Trabaja en este sistema desde Claude, Doubao y asistentes similares, como tú mismo.',
+        title: 'Conectar un asistente de IA externo',
+        todo: 'Trabaja en este sistema como tú mismo desde Claude, Doubao y asistentes similares, mediante MCP. La IA integrada se configura aparte, en Setup → IA y Embedder.',
         done: 'Tienes conectado un asistente de IA o una clave de API.',
         action: 'Conectar',
       },
@@ -2776,6 +2776,7 @@ const es = {
         twoFactorExpired: "Este inicio de sesión ha caducado. Vuelva a iniciar sesión con su contraseña.",
         twoFactorLocked: "Demasiados intentos fallidos. Su cuenta está bloqueada temporalmente. Inténtelo más tarde.",
         invalidCredentials: "Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Restablécela para iniciar sesión de inmediato.",
+        invalidCredentialsNoMail: 'Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Pide a tu administrador que la restablezca.',
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2823,6 +2824,12 @@ const es = {
       invitationGoneDescription: "Es posible que haya caducado, que ya se haya usado o que se haya retirado. Pide a quien te invitó que te envíe una nueva invitación.",
       invitationGoneSignIn: "Ir a iniciar sesión",
       invitationLinkHint: "¿Tienes una invitación? Abre el enlace del correo de invitación para aceptarla.",
+      firstOwner: {
+        title: 'Configura esta implantación',
+        description: 'Aún no hay ninguna cuenta aquí. La primera cuenta que crees será la propietaria de esta implantación.',
+        createButton: 'Crear la cuenta propietaria',
+        signInDivider: 'o inicia sesión con una cuenta existente',
+      },
       showPasswordText: "Mostrar contraseña",
       hidePasswordText: "Ocultar contraseña",
       footer: {
@@ -2846,6 +2853,13 @@ const es = {
       confirmPasswordPlaceholder: "Confirma tu contraseña",
       passwordMismatchError: "Las contraseñas no coinciden",
       passwordTooShortError: "La contraseña debe tener al menos 8 caracteres",
+      nameRequiredError: 'Introduce tu nombre',
+      emailRequiredError: 'Introduce tu correo electrónico',
+      emailInvalidError: 'Introduce un correo como nombre@ejemplo.com',
+      firstOwner: {
+        title: 'Crear la cuenta propietaria',
+        description: 'Aún no hay ninguna cuenta aquí. La cuenta que crees ahora será la propietaria de esta implantación; después podrás invitar a tus compañeros.',
+      },
       submitButton: "Crear cuenta",
       submittingButton: "Creando cuenta…",
       hasAccountText: "¿Ya tienes una cuenta?",

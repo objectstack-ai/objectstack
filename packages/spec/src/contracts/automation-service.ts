@@ -1073,7 +1073,8 @@ export interface ConnectorSourcePullRequest {
     /**
      * The package the caller belongs to, so `mapping` is read by
      * `(package, name)` (ADR-0150 D3). For a job's pull it is the package
-     * that declares the job. ⛔ Not inferred to answer that package's own
+     * that declares the job; a top-level job no package body of its artifact
+     * declares belongs to no package and sends none. ⛔ Not inferred to answer that package's own
      * mapping: in an artifact of several packages the job binder finds the
      * mapping in any package body, so the name may resolve through the
      * closure, or be refused as outside it.
@@ -1083,9 +1084,11 @@ export interface ConnectorSourcePullRequest {
      *   A name nothing in the environment holds is not found. A name held
      *   twice in that reach, held only by a package outside it, or held only
      *   by an environment-authored item (ADR-0150 D3 (a)) is a refusal naming
-     *   every candidate.
-     * - Absent (omitted, `null` or `''`): the read is by no package, exactly as
-     *   today — the bare name, read as a caller with no package.
+     *   every candidate. A disabled package's mapping, when it is the one the
+     *   name reaches, is not found, as every read of it answers.
+     * - Absent (omitted, `null` or `''`): the read is by no package — the
+     *   environment's own mapping, else the one package that holds the name;
+     *   a name two packages hold is a refusal naming both (ADR-0150 D3).
      *
      * The spelling and value type are the ownership-queue reads' caller
      * package (`OwnershipQueueCallerPackage`). Optional, so an implementation

@@ -84,7 +84,7 @@ function bell(inbox: Inbox) {
   );
 }
 
-const trigger = () => screen.getByRole('button', { name: 'Open inbox' });
+const trigger = () => screen.getByRole('button', { name: /^Notifications(,|$)/ });
 
 /** Click the bell open and report the selected tab and the visible panel text. */
 function open(): { selected: string; panel: string } {

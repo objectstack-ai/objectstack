@@ -2324,8 +2324,8 @@ const ko = {
         action: "초대",
       },
       connectAssistant: {
-        title: 'AI 어시스턴트 연결',
-        todo: 'Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요.',
+        title: '외부 AI 어시스턴트 연결',
+        todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 Setup → AI 및 Embedder에서 따로 설정합니다.',
         done: 'AI 어시스턴트 또는 API 키가 연결되어 있습니다.',
         action: '연결',
       },
@@ -2706,6 +2706,7 @@ const ko = {
         twoFactorExpired: "이 로그인이 만료되었습니다. 비밀번호로 다시 로그인하세요.",
         twoFactorLocked: "실패한 시도가 너무 많아 계정이 일시적으로 잠겼습니다. 나중에 다시 시도하세요.",
         invalidCredentials: "잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 재설정하면 바로 로그인할 수 있습니다.",
+        invalidCredentialsNoMail: '잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 관리자에게 재설정을 요청하세요.',
         emailNotVerified: "로그인하기 전에 이메일을 확인하세요.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2753,6 +2754,12 @@ const ko = {
       invitationGoneDescription: "초대가 만료되었거나, 이미 사용되었거나, 철회되었을 수 있습니다. 초대한 사람에게 새 초대를 요청하세요.",
       invitationGoneSignIn: "로그인으로 이동",
       invitationLinkHint: "초대를 받으셨나요? 초대 이메일의 링크를 열어 수락하세요.",
+      firstOwner: {
+        title: '이 배포 설정하기',
+        description: '아직 이곳에 계정이 없습니다. 처음 만드는 계정이 이 배포의 소유자가 됩니다.',
+        createButton: '소유자 계정 만들기',
+        signInDivider: '또는 기존 계정으로 로그인',
+      },
       showPasswordText: "비밀번호 표시",
       hidePasswordText: "비밀번호 숨기기",
       footer: {
@@ -2776,6 +2783,13 @@ const ko = {
       confirmPasswordPlaceholder: "비밀번호를 다시 입력하세요",
       passwordMismatchError: "비밀번호가 일치하지 않습니다",
       passwordTooShortError: "비밀번호는 최소 8자 이상이어야 합니다",
+      nameRequiredError: '이름을 입력하세요',
+      emailRequiredError: '이메일 주소를 입력하세요',
+      emailInvalidError: 'name@example.com 같은 이메일 주소를 입력하세요',
+      firstOwner: {
+        title: '소유자 계정 만들기',
+        description: '아직 이곳에 계정이 없습니다. 지금 만드는 계정이 이 배포의 소유자가 되며, 동료는 나중에 초대할 수 있습니다.',
+      },
       submitButton: "계정 만들기",
       submittingButton: "계정 생성 중…",
       hasAccountText: "이미 계정이 있으신가요?",

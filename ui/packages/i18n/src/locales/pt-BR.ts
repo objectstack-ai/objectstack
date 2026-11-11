@@ -2385,8 +2385,8 @@ const pt = {
         action: "Convidar",
       },
       connectAssistant: {
-        title: 'Conectar um assistente de IA',
-        todo: 'Trabalhe neste sistema pelo Claude, Doubao e assistentes semelhantes, como você mesmo.',
+        title: 'Conectar um assistente de IA externo',
+        todo: 'Trabalhe neste sistema como você mesmo pelo Claude, Doubao e assistentes semelhantes, via MCP. A IA integrada é configurada à parte, em Setup → IA e Embedder.',
         done: 'Um assistente de IA ou uma chave de API sua está conectada.',
         action: 'Conectar',
       },
@@ -2771,6 +2771,7 @@ const pt = {
         twoFactorExpired: "Este login expirou. Faça login novamente com sua senha.",
         twoFactorLocked: "Muitas tentativas malsucedidas. Sua conta está temporariamente bloqueada. Tente novamente mais tarde.",
         invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
+        invalidCredentialsNoMail: 'E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Peça ao seu administrador para redefini-la.',
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
@@ -2818,6 +2819,12 @@ const pt = {
       invitationGoneDescription: "Ele pode ter expirado, já ter sido usado ou ter sido retirado. Peça a quem convidou você para enviar um novo convite.",
       invitationGoneSignIn: "Ir para o login",
       invitationLinkHint: "Recebeu um convite? Abra o link do e-mail de convite para aceitá-lo.",
+      firstOwner: {
+        title: 'Configure esta implantação',
+        description: 'Ainda não há nenhuma conta aqui. A primeira conta que você criar será a proprietária desta implantação.',
+        createButton: 'Criar a conta proprietária',
+        signInDivider: 'ou entre com uma conta existente',
+      },
       showPasswordText: "Mostrar senha",
       hidePasswordText: "Ocultar senha",
       footer: {
@@ -2841,6 +2848,13 @@ const pt = {
       confirmPasswordPlaceholder: "Confirme sua senha",
       passwordMismatchError: "As senhas não coincidem",
       passwordTooShortError: "A senha deve ter pelo menos 8 caracteres",
+      nameRequiredError: 'Informe seu nome',
+      emailRequiredError: 'Informe seu e-mail',
+      emailInvalidError: 'Informe um e-mail como nome@exemplo.com',
+      firstOwner: {
+        title: 'Criar a conta proprietária',
+        description: 'Ainda não há nenhuma conta aqui. A conta que você criar agora será a proprietária desta implantação; depois você pode convidar colegas.',
+      },
       submitButton: "Criar conta",
       submittingButton: "Criando conta…",
       hasAccountText: "Já tem uma conta?",

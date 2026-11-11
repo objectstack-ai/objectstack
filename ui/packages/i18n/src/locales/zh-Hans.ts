@@ -972,9 +972,9 @@ const zh = {
       body: '不可变审计日志。行由平台在事件发生时写入,不能在界面上创建、编辑或删除。可使用导出功能下载以供合规审查。',
     },
     betterAuth: {
-      short: '经身份服务写入',
-      title: '经内置身份服务写入',
-      body: '此对象的架构属于平台内置的身份服务 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由该服务写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
+      short: '由账号系统维护',
+      title: '由内置账号系统维护',
+      body: '此对象的架构属于平台内置的账号系统 {{provider}}。请用本页上的操作，或通过登录、邀请和安全流程来创建和修改这些记录；它们都经由账号系统写入。直接编辑数据表会绕过密码哈希、会话校验、两步验证检查和审计钩子。',
     },
   },
   kanban: {
@@ -2080,8 +2080,8 @@ const zh = {
         action: '邀请',
       },
       connectAssistant: {
-        title: '连接 AI 助手',
-        todo: '在 Claude、豆包等助手里以你自己的身份使用本系统。',
+        title: '连接外部 AI 助手',
+        todo: '通过 MCP，在 Claude、豆包等助手里以你自己的身份使用本系统。内置 AI 需另行在 Setup → AI 与向量化 中设置。',
         done: '你已连接了 AI 助手或 API 密钥。',
         action: '连接',
       },
@@ -2763,6 +2763,7 @@ const zh = {
       },
       errors: {
         invalidCredentials: '邮箱或密码错误。多次失败后，登录将暂停一段时间。忘记密码？重置密码后即可立即登录。',
+        invalidCredentialsNoMail: '邮箱或密码错误。多次失败后，登录将暂停一段时间。忘记密码？请联系管理员为你重置。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
         ssoAccountNotInvited: "你的账号尚未在本系统中开通。请联系管理员邀请你。",
@@ -2821,6 +2822,12 @@ const zh = {
       invitationGoneDescription: '邀请可能已过期、已被使用或已被撤回。请联系邀请你的人重新发送邀请。',
       invitationGoneSignIn: '前往登录',
       invitationLinkHint: '收到了邀请？请打开邀请邮件中的链接接受邀请。',
+      firstOwner: {
+        title: '设置此部署',
+        description: '这里还没有任何账号。你创建的第一个账号将成为此部署的所有者。',
+        createButton: '创建所有者账号',
+        signInDivider: '或登录已有账号',
+      },
       showPasswordText: '显示密码',
       hidePasswordText: '隐藏密码',
       footer: {
@@ -2844,6 +2851,13 @@ const zh = {
       confirmPasswordPlaceholder: '确认您的密码',
       passwordMismatchError: '两次输入的密码不一致',
       passwordTooShortError: '密码至少需要8个字符',
+      nameRequiredError: '请输入姓名',
+      emailRequiredError: '请输入邮箱地址',
+      emailInvalidError: '请输入有效的邮箱地址，例如 name@example.com',
+      firstOwner: {
+        title: '创建所有者账号',
+        description: '这里还没有任何账号。你现在创建的账号将成为此部署的所有者，之后可以邀请同事加入。',
+      },
       submitButton: '创建账户',
       submittingButton: '创建中…',
       hasAccountText: '已有账户？',
