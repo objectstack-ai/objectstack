@@ -6,6 +6,8 @@ import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
+// Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
+import '@objectstack/metadata-fs';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
