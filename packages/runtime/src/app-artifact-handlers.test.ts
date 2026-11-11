@@ -383,7 +383,7 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(await insertInto(ql, 'beta')).toBe('beta;');
     });
 
-    it('CONTROL — each body\'s hook of one name binds its own body\'s bundle function, under its own package', async () => {
+    it('each body\'s hook of one name binds its own body\'s bundle function, both under their own packages (base: both under the artifact\'s id)', async () => {
         const artifact = compose(
             packageStack('beta', { functions: { beta_fn: stamp('beta') }, hooks: [hookOn('beta', 'qa_stamp', 'beta_fn')] }),
             packageStack('alpha', { functions: { alpha_fn: stamp('alpha') }, hooks: [hookOn('alpha', 'qa_stamp', 'alpha_fn')] }),
@@ -424,7 +424,7 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         bind(ql, compose(alphaStack));
 
         expect(await insertInto(ql, 'beta'), 'a dropped body\'s hook must stop firing').toBeUndefined();
-        expect(ql.functionHoldersOf('beta_fn').packageHolders(), 'a dropped body\'s function must leave the engine').toEqual([]);
+        expect(ql.functionHoldersOf('beta_fn').packageHolders, 'a dropped body\'s function must leave the engine').toEqual([]);
         expect(await insertInto(ql, 'alpha')).toBe('alpha;');
         expect(ql.functionHoldersOf('alpha_fn').packageItem(ALPHA)?.packageId).toBe(appArtifactHandlerOwner(ALPHA));
     });
