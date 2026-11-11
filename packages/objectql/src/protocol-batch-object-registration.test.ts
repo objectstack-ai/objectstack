@@ -278,11 +278,12 @@ describe('duplicatePackage: a copy the registry refuses is reported failed, and 
         // second, the read-back after it, meets a store fault.
         const read = h.protocol.findEnvironmentRow.bind(h.protocol);
         let reads = 0;
-        vi.spyOn(h.protocol, 'findEnvironmentRow').mockImplementation(async (table: string, query: any) => {
+        vi.spyOn(h.protocol, 'findEnvironmentRow').mockImplementation(async (...a: any[]) => {
+            const [table, query] = a;
             if (table === 'sys_metadata' && query?.where?.name === 'rbdst_invoice' && query?.where?.state === 'active' && ++reads === 2) {
                 throw new Error('store fault on the read-back');
             }
-            return read(table, query);
+            return read(...a);
         });
 
         const res = await h.protocol.duplicatePackage({ sourcePackageId: 'com.qa.rbsrc', targetPackageId: 'com.qa.rbdst' });
