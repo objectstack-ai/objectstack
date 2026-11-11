@@ -1471,8 +1471,9 @@ const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with i
  *    as a paged grid; the list's own print control is `allowPrinting`;
  *  - `print` on a `utility` page — a tool page, not a document (the
  *    admitted types are {@link PRINT_PAGE_TYPES});
- *  - `print` on a `full` page with no `regions` — it draws the synthesized
- *    default layout instead;
+ *  - `print` on a `full` page with no `regions` — it authors no block to
+ *    print (a `full` page never falls back to the synthesized default
+ *    layout: a record page draws nothing, a `home` / `app` page its heading);
  *  - `print.repeatHeader` / `print.repeatFooter` on a page with no region of
  *    that name — the running header and footer ARE those regions.
  *
@@ -1532,8 +1533,7 @@ export function checkPagePrintComposition(
       code: 'custom',
       path: ['print'],
       message: '`print` needs the document\'s blocks in `regions`: a `kind: \'full\'` page with no regions '
-        + 'draws the synthesized default layout, which no author wrote and the printable block subset '
-        + 'refuses. Author the document\'s blocks in `regions`.',
+        + 'authors no block to print. Author the document\'s blocks in `regions`.',
     });
     return;
   }
@@ -1671,6 +1671,58 @@ export function checkPageRecordBindingPlacement(
       ? "`record` binds the row of an app page — a record page's row is the record it opens, so it takes no binding. Delete `record`, or make the page `type: 'app'`."
       : `\`record\` binds the row of an \`app\` page, and this page is \`type: '${String(type)}'\`, which has no row to bind. Delete \`record\`, or make the page \`type: 'app'\`.`,
   });
+}
+
+/**
+ * The refusal {@link checkPageRecordPlacesComponent} raises at `regions`: the
+ * consequence and the two fixes, in one sentence.
+ */
+const RECORD_PAGE_PLACES_NO_COMPONENT =
+  "This record page places no component in its `regions`, so every record of its object would open on a blank "
+  + "detail panel: add a region with components (`regions: [{ name: 'main', components: [{ type: 'record:details' }] }]`), "
+  + "or delete the page so the object's default record page draws.";
+
+/**
+ * The record page body check attached to {@link PageSchema}: a `kind: 'full'`
+ * record page (`type: 'record'`, the default type) that places no component —
+ * no `regions`, or only regions whose `components` are empty — is refused at
+ * `regions` ({@link RECORD_PAGE_PLACES_NO_COMPONENT}).
+ *
+ * The console draws a `full` page as authored, and on a record page the
+ * authored components are ALL it draws: the page's `label` is the
+ * `page:header` block's to draw and its `description` is not drawn, no layout
+ * template draws anything of its own, and `slots` and `interfaceConfig` are
+ * not read on a `full` page. So the record view of every record of the page's
+ * object opened on a blank detail panel — the breadcrumb and nothing else —
+ * while every door reported the page valid; deleting the page brought the
+ * default record page back. Judged on the record type alone: a `home`, `app`
+ * or `utility` page draws its `label` as the page heading (and its
+ * `description`) when no `page:header` block owns it, and a `list` page draws
+ * through `interfaceConfig`, so each keeps accepting no regions. A `slotted`
+ * record page draws the synthesized default with its overrides, and an
+ * `html` / `react` page draws its `source`; neither is judged here.
+ *
+ * `type` and `kind` absent are the spec defaults (`record`, `full`) and
+ * `regions` absent is the default `[]`, so a `.shape` mirror without the
+ * defaults gets the same answer. Exported for the reason
+ * {@link checkPageSourceCompleteness} is, and attached by identifier — pinned
+ * in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageRecordPlacesComponent(
+  page: { type?: unknown; kind?: unknown; regions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const type = page.type === undefined ? PAGE_TYPE_DEFAULT : page.type;
+  if (type !== 'record' || (page.kind ?? 'full') !== 'full') return;
+  const regions: unknown[] = Array.isArray(page.regions) ? page.regions : [];
+  const placesComponent = regions.some((region) => {
+    const components = region && typeof region === 'object'
+      ? (region as { components?: unknown }).components
+      : undefined;
+    return Array.isArray(components) && components.length > 0;
+  });
+  if (placesComponent) return;
+  ctx.addIssue({ code: 'custom', path: ['regions'], message: RECORD_PAGE_PLACES_NO_COMPONENT });
 }
 
 /**
@@ -1937,14 +1989,19 @@ export const PageSchema = lazySchema(() => strictObject({
   /** Regions & Content */
   // Optional with an empty-array default. Not every page authors regions:
   //   • list/interface pages render via `interfaceConfig` (regions unused);
-  //   • `kind: 'slotted'` record pages render via `slots`;
-  //   • a `kind: 'full'` record/home/app page with no regions falls back to
-  //     the synthesized default layout (same surface a slotted page starts from).
-  // Requiring it forced `regions: []` boilerplate on every list page and made
-  // the Studio "New Page" form a dead-end for record/home/app pages (the form
-  // has no region editor, so the required field could never be satisfied).
+  //   • `kind: 'slotted'` record pages render via `slots` over the synthesized
+  //     default page — which is where a new record page starts in Studio;
+  //   • `kind: 'html'` / `'react'` pages render their `source`;
+  //   • a `kind: 'full'` home/app/utility page with no regions draws its
+  //     `label` as the page heading and nothing else.
+  // A `kind: 'full'` RECORD page is the exception: it draws only the
+  // components in its regions, so one that places none is refused
+  // (`checkPageRecordPlacesComponent`) — it used to open every record of its
+  // object on a blank detail panel. It never fell back to the synthesized
+  // default layout, whatever this field once claimed. Requiring the key forced
+  // `regions: []` boilerplate on every list page, so it stays optional.
   regions: z.array(PageRegionSchema).optional().default([])
-    .describe('Layout regions (header, main, sidebar, footer) with their components. Optional — list pages use interfaceConfig, slotted pages use slots, and an empty full page falls back to the synthesized default layout.'),
+    .describe("Layout regions (header, main, sidebar, footer) with their components. Optional on most pages — list pages use interfaceConfig, slotted pages use slots, html and react pages use source — but a kind: 'full' record page draws nothing else, so it must place at least one component here: one that places none is refused, since every record of its object would open on a blank detail panel."),
   
   /**
    * Activation — whether this page is the DEFAULT RECORD PAGE of its `object`:
@@ -2179,12 +2236,16 @@ export const PageSchema = lazySchema(() => strictObject({
   // A region named `main` takes only `width: 'full'` — no layout reads any
   // other width there. Attached by identifier for the same reason as the
   // checks above.
-  .superRefine(checkPageMainRegionWidth));
-// PageSchema's cross-field rules are the seven checks above: the
+  .superRefine(checkPageMainRegionWidth)
+  // A `full` record page draws only the components its regions place, so one
+  // that places none is refused rather than drawn as a blank detail panel.
+  // Attached by identifier for the same reason as the checks above.
+  .superRefine(checkPageRecordPlacesComponent));
+// PageSchema's cross-field rules are the eight checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
 // check, the print-page composition check, the `isDefault` placement check,
-// the region placement check, the `record` binding placement check and the
-// `main` region width check. (The `details` + `tabs` slot pair check left
+// the region placement check, the `record` binding placement check, the
+// `main` region width check and the record page component check. (The `details` + `tabs` slot pair check left
 // with the `tabs` slot.) A component's `properties` bag is judged by none of
 // them: it is `@objectstack/lint`'s `validateComponentProps`, at the CLI doors
 // and the runtime save door alike. It once also required

@@ -87,10 +87,12 @@ export const pageForm = defineForm({
       // the region designer is irrelevant here, so hide it for list pages.
       visibleWhen: "data.type != 'list'",
       fields: [
-        // Not required: an empty full page falls back to the synthesized default
-        // layout, slotted pages compose via `slots`, and list pages ignore regions
-        // entirely. Marking it required made the form unsatisfiable when no region
-        // editor was rendered (the metadata form can't yet edit a region tree).
+        // Not required: slotted pages compose via `slots`, list pages ignore
+        // regions entirely, and a full home/app/utility page may author none.
+        // A full RECORD page must place a component here, and the parse says so
+        // (`checkPageRecordPlacesComponent`) — a form-level `required` could not:
+        // it would also bind every page this form edits that legitimately has
+        // none.
         {
           field: 'regions',
           type: 'repeater',
