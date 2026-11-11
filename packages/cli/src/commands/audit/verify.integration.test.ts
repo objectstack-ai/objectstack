@@ -16,8 +16,8 @@
  *   2. a row edited and a row deleted through the database, below every hook,
  *      read `modified` and `missing`, their untouched sibling `unmodified`, and
  *      the run exits 1;
- *   3. a usage error, and a declared archive this boot cannot reach, exit 2
- *      with no verdict;
+ *   3. a usage error, a declared archive this boot cannot reach, and a run
+ *      with no data key to open the stored checkpoints, exit 2 with no verdict;
  *   4. a project that seals nothing exits 0 and says so.
  */
 
@@ -159,12 +159,12 @@ function seal(project: string, db: string, archive: string): { checkpoints: numb
 }
 
 /** One `os audit verify <extra…> --database-url file:<db>` run, in `project`. */
-function verify(project: string, db: string, extra: string[]): Promise<Run> {
+function verify(project: string, db: string, extra: string[], env: Record<string, string | undefined> = {}): Promise<Run> {
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn(
       process.execPath,
       [CLI, 'audit', 'verify', ...extra, '--database-url', `file:${db}`],
-      { cwd: project, env: childEnv({ OS_ARTIFACT_PATH: join(project, 'dist', 'objectstack.json') }), stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd: project, env: childEnv({ OS_ARTIFACT_PATH: join(project, 'dist', 'objectstack.json'), ...env }), stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stdout = '';
     let stderr = '';
@@ -184,7 +184,7 @@ let mainDb: string;
 let archiveDb: string;
 let sealed: { checkpoints: number; archived: number | null };
 let archivedIds: string[];
-const runs: Record<'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'unreachable' | 'nothing', Run> = {} as never;
+const runs: Record<'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'noKey' | 'unreachable' | 'nothing', Run> = {} as never;
 const dirs: string[] = [];
 
 beforeAll(async () => {
@@ -207,6 +207,11 @@ beforeAll(async () => {
   runs.cleanHuman = await verify(dir, mainDb, []);
   runs.badDate = await verify(dir, mainDb, ['--from', 'yesterday', '--json']);
   runs.reversed = await verify(dir, mainDb, ['--from', '2026-11-02', '--to', '2026-11-01', '--json']);
+
+  // No data key at all: no `OS_SECRET_KEY`, and a home with no key file.
+  const keyless = mkdtempSync(join(tmpdir(), 'os-31908-home-'));
+  dirs.push(keyless);
+  runs.noKey = await verify(dir, mainDb, ['--json'], { OS_SECRET_KEY: undefined, HOME: keyless });
 
   // A database-level actor, below every hook: one row edited, one deleted.
   const hot = new Database(mainDb);
@@ -289,6 +294,13 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     expect(run.code, run.stderr.slice(-2000)).toBe(2);
     expect(doc(run)).toMatchObject({ error: 'archive_not_connected' });
     expect(doc(run).message).toContain("Archive datasource 'archive' (os31908_ledger) is not connected on this boot");
+  });
+
+  it('3c. a run with no data key exits 2 with no verdict: the checkpoints it would judge cannot be opened', () => {
+    const run = runs.noKey;
+    expect(run.code, run.stderr.slice(-2000)).toBe(2);
+    expect(doc(run)).toMatchObject({ error: 'crypto_provider_refused' });
+    expect(doc(run).message).toMatch(/^The ledger holds checkpoints, and this run cannot open their seeds or signing keys/);
   });
 
   it('4. a project that seals nothing exits 0 and says so', () => {
