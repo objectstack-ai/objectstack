@@ -62,6 +62,7 @@ import { isSameStoredValue } from './sanitize';
 import { resolveInitialRecord } from './initialRecord';
 import { sectionEntryName } from './sectionFields';
 import { deriveDetail } from './deriveMasterDetail';
+import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 // objectui#11428 — the per-row form's offer test is the spec's rule.
 import { isInlineRowFormOffered } from '@objectstack/spec/data';
 // objectui#11396 — one `details` entry, by reference: the spec's own type for
@@ -433,6 +434,14 @@ interface DetailEntry {
    * configured entry skips the fetch). Internal state, never authored.
    */
   lookupAutofill?: LookupAutofillByField;
+  /**
+   * The child fields whose currency follows the header through this entry's
+   * relationship (ADR-0144 D2 as amended), by name, read from the schema the
+   * resolve effect loaded (`parentCurrencyFieldsOf`). The line grid draws
+   * those columns, and the totals stack an amount among them, in the header's
+   * currency. Internal state, never authored.
+   */
+  parentCurrencyFields?: ReturnType<typeof parentCurrencyFieldsOf>;
 }
 
 /** The field shape `resolveFieldCurrency` reads — the one currency resolver. */
@@ -465,11 +474,21 @@ function childFieldDef(
  * the resolver's own answer for an amount with no known currency: never a
  * guessed sign.
  */
-function totalsCurrency(entries: DetailEntry[], tenantCurrency: string | undefined): string | undefined {
+function totalsCurrency(
+  entries: DetailEntry[],
+  tenantCurrency: string | undefined,
+  header?: Readonly<Record<string, unknown>>,
+): string | undefined {
   const codes = new Set(
     entries
       .filter((e) => !!e.config.amountField)
-      .map((e) => resolveFieldCurrency(e.amountFieldDef, tenantCurrency)),
+      .map((e) =>
+        // An amount that follows the header's currency (ADR-0144 D2 as
+        // amended) is in the header's code; every other one keeps its own.
+        e.parentCurrencyFields && e.config.amountField && e.config.amountField in e.parentCurrencyFields
+          ? followedColumnCurrencies(e.parentCurrencyFields, header, tenantCurrency)?.[e.config.amountField]
+          : resolveFieldCurrency(e.amountFieldDef, tenantCurrency),
+      ),
   );
   return codes.size === 1 ? codes.values().next().value : undefined;
 }
@@ -976,7 +995,7 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
   const grandTotal = subtotal + taxAmount;
   // The amounts' own currency, else the tenant's; never a constant sign
   // (objectui#11132). See `totalsCurrency` and `formatTotalsAmount`.
-  const currency = totalsCurrency(entries, tenantCurrency);
+  const currency = totalsCurrency(entries, tenantCurrency, parentRecord);
   const money = (n: number) => formatTotalsAmount(n, currency, displayLocale);
 
   return (
@@ -1100,6 +1119,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // The child fields' declared `lookupAutofill` pairs: a lookup
               // cell's pick fills their targets in the row.
               lookupAutofill={entry.lookupAutofill}
+              // The columns whose amount follows this header's currency
+              // (ADR-0144 D2 as amended), in the header's live code.
+              columnCurrencies={followedColumnCurrencies(entry.parentCurrencyFields, parentRecord, tenantCurrency)}
               // Per-row "expand to full form" is offered when it adds something:
               // always in form mode (it IS the editor), and in grid mode only
               // when the full form has fields the grid omits. A thin grid whose
@@ -1369,6 +1391,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 amountFieldDef: childFieldDef(childSchema, amountField),
                 columnsWith,
                 lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+                parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, d.relationshipField),
               };
             }
             return {
@@ -1386,6 +1409,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               amountFieldDef: childFieldDef(childSchema, amountField),
               columnsWith,
               lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
+              parentCurrencyFields: parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, derived.relationshipField),
             };
           } catch (err) {
             // THE DERIVE FAILED, on a schema that loaded fine — almost always
