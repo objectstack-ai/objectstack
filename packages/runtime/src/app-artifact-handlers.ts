@@ -640,9 +640,14 @@ interface HookBindingGroup {
  * runtime module serves — else under the artifact's `owner`. When the hooks of
  * two or more owners name it (one callable two bodies' hooks share, lowered to
  * one ref), it has no one package to go under, so it and every hook that names
- * it stay under the artifact's `owner`, as before. So a hook's `handler`
- * reaches its own body's functions, and a function another body declares is
- * not its own (`bindHooksToEngine` refuses it at registration).
+ * it stay under the artifact's `owner`, as before. A function one body other
+ * than the artifact's own declares, which a hook under the artifact's `owner`
+ * names (a top-level hook, the artifact's own body's hook, or a hook name two
+ * bodies carry that are not held apart), likewise stays under the artifact's
+ * `owner`, with that hook and the declaring body's own hooks that name it, as
+ * before. So a hook's `handler` reaches its own group's functions, and a
+ * function another body declares is not its own (`bindHooksToEngine` refuses
+ * it at registration).
  */
 function hookBindingGroups(bundle: unknown, owner: string): { groups: HookBindingGroup[]; refused: HookNameRefusal[] } {
     const reconciledHooks = collectBundleHooks(bundle);
@@ -754,9 +759,31 @@ function hookBindingGroups(bundle: unknown, owner: string): { groups: HookBindin
         }
         namedBy.set(name, new Set([owner]));
     }
+    // A function one body other than the artifact's own declares, which a hook
+    // under the artifact's owner names (a top-level hook, the artifact's own
+    // body's, or a name bodies carry that are not held apart): that hook
+    // resolves its `handler` in the owner's package only, and the function
+    // keeps one package holder, so the function stays under the artifact's
+    // owner with that hook, and the declaring body's own hooks that name it
+    // move there with it — as every hook and function was before (epic
+    // #31527 red-line E1). Another body's hooks naming it are refused, as for
+    // any function another body declares.
+    const keptByOwner = new Set<string>();
+    for (const [name, declaring] of declaredBy) {
+        if (declaring.length !== 1 || !(name in reconciledFunctions)) continue;
+        const from = ownerOf(declaring[0]);
+        if (from === owner || !namedBy.get(name)?.has(owner)) continue;
+        const group = byOwner.get(from);
+        if (group) {
+            const moving = group.hooks.filter((hook) => handlerOf(hook) === name);
+            group.hooks = group.hooks.filter((hook) => handlerOf(hook) !== name);
+            groupOf(owner).hooks.push(...moving);
+        }
+        keptByOwner.add(name);
+    }
     for (const [name, entry] of Object.entries(reconciledFunctions)) {
         const declaring = declaredBy.get(name) ?? [];
-        const owners = declaring.length === 1 ? [ownerOf(declaring[0])]
+        const owners = declaring.length === 1 ? [keptByOwner.has(name) ? owner : ownerOf(declaring[0])]
             : declaring.length > 1 ? [owner]
             : [...(namedBy.get(name) ?? [owner])];
         for (const to of owners) groupOf(to).functions[name] = entry;

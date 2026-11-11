@@ -480,6 +480,67 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(await insertInto(ql, 'alpha')).toBe('res;res;');
     });
 
+    it('a top-level hook naming a function only body B declares binds and runs it, the function and B\'s own hook of it under the artifact\'s id, as before (E1-a)', async () => {
+        const residual = defineStack({
+            hooks: [{ name: 'qa_res_borrow', object: 'alpha_doc', events: ['beforeInsert'], handler: 'beta_fn' }],
+        } as never);
+        const artifact = compose(
+            packageStack('beta', { functions: { beta_fn: stamp('beta') }, hooks: [hookOn('beta', 'qa_beta_own', 'beta_fn')] }),
+            residual,
+            packageStack('alpha'),
+        );
+        expect(artifact.manifest.id, 'precondition: the artifact is alpha\'s, so beta is not its own body').toBe(ALPHA);
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(artifact, logger);
+
+        bind(ql, artifact, logger);
+
+        expect(errors.map((e) => [e.meta?.hook, e.meta?.code]), 'no hook refused').toEqual([]);
+        expect(await insertInto(ql, 'alpha'), 'the top-level hook runs beta\'s function').toBe('beta;');
+        expect(await insertInto(ql, 'beta'), 'beta\'s own hook of it still runs').toBe('beta;');
+        expect(ql.functionHoldersOf('beta_fn').packageHolders, 'one package holder, the artifact\'s').toEqual([ALPHA]);
+        expect(ql.registry.sealBareNameHolders(), 'the cold boot finds no function held twice').toEqual([]);
+    });
+
+    it('a hook name two bodies of one namespace carry, naming a function only body B declares, binds as before; the install gate refuses the pair first (E1-b)', async () => {
+        // Two bodies of ONE judged namespace holding one hook name are not held
+        // apart (`namespaceNameConflicts`), so that name binds under the
+        // artifact's owner. The boot never reaches the binder with such a pair:
+        // the co-owner install refuses the second body, NAMESPACE_CONFLICT.
+        const body = (ns: Ns, extra: Record<string, unknown>) => ({
+            id: `com.qa.bodies.${ns}`, namespace: 'qa_crm', name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
+            objects: [{ name: `${ns}_doc`, fields: {} }],
+            ...extra,
+        });
+        const betaFn = stamp('beta');
+        const alphaFn = stamp('alpha');
+        const artifact = {
+            manifest: { id: ALPHA, namespace: 'qa_crm', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+            packages: [
+                { manifest: body('beta', { hooks: [hookOn('beta', 'qa_same', 'beta_fn')], functions: { beta_fn: betaFn } }) },
+                { manifest: body('alpha', { hooks: [hookOn('alpha', 'qa_same', 'alpha_fn')], functions: { alpha_fn: alphaFn } }) },
+            ],
+            functions: { beta_fn: betaFn, alpha_fn: alphaFn },
+        };
+        const scope = { packageIds: [ALPHA, BETA] };
+        const gate = new ObjectQL({ logger: quiet } as any);
+        (gate.registry as any).logLevel = 'silent';
+        gate.registry.installPackage(artifact.packages[0].manifest as never, 'code' as never, undefined, scope as never);
+        let refusal: any;
+        try { gate.registry.installPackage(artifact.packages[1].manifest as never, 'code' as never, undefined, scope as never); } catch (err) { refusal = err; }
+        expect(refusal?.code, 'the co-owner install refuses the second holder of the name').toBe('NAMESPACE_CONFLICT');
+
+        const { errors, logger } = recordingErrors();
+        const ql = new ObjectQL({ logger } as any);
+        (ql.registry as any).logLevel = 'silent';
+        bind(ql, artifact, logger);
+
+        expect(errors.map((e) => [e.meta?.hook, e.meta?.code]), 'no hook refused').toEqual([]);
+        expect(await insertInto(ql, 'beta'), 'beta\'s hook of the name runs beta\'s function').toBe('beta;');
+        expect(await insertInto(ql, 'alpha')).toBe('alpha;');
+        expect(ql.functionHoldersOf('beta_fn').packageHolders, 'under the artifact\'s id, with the hook').toEqual([ALPHA]);
+    });
+
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {
         // `os build` lowers an inline hook handler it cannot extract to a ref the
         // runtime module serves; the artifact loader merges the module's callables
