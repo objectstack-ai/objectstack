@@ -525,10 +525,12 @@ describe('[#32244] the bare read of an action name two packages hold on any obje
     });
 
     describe('[review 6781770671 N6] each branch of the route\'s recovery from a refused bare read', () => {
-        const refusal = (candidates: any[]) => new PackageScopedNameRefusedError({
-            status: 'refused', reason: 'ambiguous-in-environment', type: 'action', name: 'approve', callerPackageId: null, candidates,
+        const refusal = (candidates: any[], reason = 'ambiguous-in-environment') => new PackageScopedNameRefusedError({
+            status: 'refused', reason, type: 'action', name: 'approve', callerPackageId: null, candidates,
             message: 'refused',
         } as any);
+        /** What a candidate's exact address answers when it holds no item of the name. */
+        const notHeld = () => refusal([{ kind: 'package', packageId: A }], 'not-held-by-qualifier');
         const declared = (packageId: string, objectName?: string) => ({
             item: { name: 'approve', label: packageId.split('.').pop(), type: 'script', ...(objectName ? { objectName } : {}), _packageId: packageId },
         });
@@ -573,17 +575,26 @@ describe('[#32244] the bare read of an action name two packages hold on any obje
             expect(answer.refusal).toBe(bare.refusal);
         });
 
-        it('a candidate read that refuses owns nothing: the other candidate answers', async () => {
-            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'account'), [B]: refusal([{ kind: 'package', packageId: A }]) });
+        it('a candidate its own address says it does not hold owns nothing: the other candidate answers', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'account'), [B]: notHeld() });
             expect([answer.refusal, answer.degraded]).toEqual([undefined, undefined]);
             expect(answer.action).toMatchObject({ label: 'alpha' });
         });
 
-        it('a candidate read that refuses, and no other owner: the bare read\'s refusal stands', async () => {
+        it('a candidate its own address says it does not hold, and no other owner: the bare read\'s refusal stands', async () => {
             const bare = refusal(AB);
-            const answer = await routeWith(bare, { [A]: declared(A, 'contact'), [B]: refusal([{ kind: 'package', packageId: A }]) });
+            const answer = await routeWith(bare, { [A]: declared(A, 'contact'), [B]: notHeld() });
             expect(answer.action).toBeUndefined();
             expect(answer.refusal).toBe(bare.refusal);
+        });
+
+        it('[epic red-line read 6784464520 R1] a candidate read refused for any reason other than not held: the bare read\'s refusal stands, though another candidate owns the route', async () => {
+            for (const reason of ['ambiguous-in-closure', 'ambiguous-in-environment', 'outside-closure']) {
+                const bare = refusal(AB);
+                const answer = await routeWith(bare, { [A]: declared(A, 'account'), [B]: refusal(AB, reason) });
+                expect(answer.action, reason).toBeUndefined();
+                expect(answer.refusal, reason).toBe(bare.refusal);
+            }
         });
 
         it('a candidate read that throws anything else is an outage, never a declaration', async () => {

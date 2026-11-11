@@ -5956,10 +5956,12 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
  * environment's item has no address of its own) or two candidates own the
  * route on one rung. No candidate owning the route is no declaration, as when
  * the bare read served another object's action. A candidate its own address
- * refuses owns nothing, so another candidate that owns the route answers; with
- * none, the bare read's refusal stands, since the unread candidate may own it.
- * A candidate read that throws anything else is an outage, as the bare read's
- * throw would be.
+ * says it does not hold (`not-held-by-qualifier`) owns nothing, so another
+ * candidate that owns the route answers; with none, the bare read's refusal
+ * stands, since the unread candidate may own it. Any other refusal of a
+ * candidate's own address leaves its action unknown, so the bare read's
+ * refusal stands whatever the others answer. A candidate read that throws
+ * anything else is an outage, as the bare read's throw would be.
  */
 async function routeOwnerOfRefusedRead(
     refusal: PackageScopedRefusal,
@@ -5983,12 +5985,18 @@ async function routeOwnerOfRefusedRead(
         try {
             envelope = await readAt(candidate.packageId);
         } catch (err: any) {
-            // [review 6781770671 S1] A candidate its own address refuses
-            // (`not-held-by-qualifier`: the store holds a package's item the
-            // registry does not, so `?package=` names another holder) owns
-            // nothing here. Its refusal is about a package the caller never
-            // named, never this route's answer.
-            if (refusalOf(err) !== undefined) {
+            // [review 6781770671 S1] A candidate its own address says it does
+            // not hold (`not-held-by-qualifier`: the store holds a package's
+            // item the registry does not, so `?package=` names another holder)
+            // owns nothing here. Its refusal is about a package the caller
+            // never named, never this route's answer.
+            // [epic red-line read 6784464520 R1] Any other refusal says the
+            // candidate's own address cannot be told: its action is unknown
+            // and may own this route beside another candidate's, so serving
+            // the other would pick. The bare read's refusal stands.
+            const refused = refusalOf(err);
+            if (refused !== undefined) {
+                if (refused.reason !== 'not-held-by-qualifier') return { action: undefined, obj, refusal };
                 unread = true;
                 continue;
             }
