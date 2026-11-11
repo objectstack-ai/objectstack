@@ -806,9 +806,10 @@ Exit codes:
   `unmodified`, `late` (sealed), `redacted` or `expired`. Also 0 when nothing is sealed.
 - **1**: a row is `modified`, `missing` or `late` and unsealed, or a link or signature
   fails. The report names every row that is not `unmodified` and every fault.
-- **2**: a usage error, a stack that would not boot, a crypto provider that cannot open
-  what is sealed, or an archive datasource a sealed object declares that this run did
-  not connect. No verdict is given, because every archived row would read `missing`.
+- **2**: no verdict is given. The cause is one of these: a usage error, a stack that would
+  not boot, a crypto provider that cannot open what is sealed, an archive datasource a
+  sealed object declares that this run did not connect (every archived row would read
+  `missing`), or a check that stopped partway.
 
 ### Build & Validate
 
