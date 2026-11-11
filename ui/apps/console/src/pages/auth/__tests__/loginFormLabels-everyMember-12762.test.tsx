@@ -51,6 +51,11 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 import { AuthProvider, type AuthClient, type LoginFormProps } from '@object-ui/auth';
 import { DefaultLoginPage } from '@object-ui/app-shell';
 import { LoginPage } from '../LoginPage';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 const { passed } = vi.hoisted(() => ({
   passed: { labels: undefined as Record<string, unknown> | undefined },

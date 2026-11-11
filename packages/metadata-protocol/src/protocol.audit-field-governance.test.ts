@@ -40,6 +40,8 @@
  * governance of something no author could have written in the first place.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL refuses. From `@objectstack/metadata-core`
@@ -48,6 +50,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { AUDIT_PROVENANCE_FIELDS } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from './index.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -119,6 +122,7 @@ function makeStubEngine() {
         },
         async syncObjectSchema() { /* no DDL in this stub */ },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             getItem: () => undefined,

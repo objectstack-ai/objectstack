@@ -725,12 +725,22 @@ const MODULES = {
   // 17 → 17, siblingCode 18 → 17), so each sum is unchanged. Both only ever
   // tick down. Discovered by the `*-routes.ts` convention and declared in the
   // same PR that created the module, so the gap never exists.
+  //
+  // [#32200] siblingCode 1 → 0 is NOT progress on the wire. The door's one
+  // `{ code, error }` body (its undeclared-fault 500, `ANALYTICS_QUERY_FAILED`)
+  // still ships, byte for byte (`analytics-dataset-single-door-bytes.test.ts`,
+  // the ③b cases): the per-body judgment the single door now shares with the
+  // batch door RETURNS it as `{ status, body }` data from
+  // `datasetQueryFaultAnswer`, and the door writes it through a variable, a
+  // spelling this walk does not read as a response body. The batch door maps
+  // the same answer into the house envelope. The count is lowered because the
+  // ratchet holds found === declared, not because a body was converted.
   'packages/rest/src/analytics-routes.ts': {
     dialectOnly:
       'moved out of `rest-server.ts` by #23050 slice 5 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
-    siblingCode: 1,
+    siblingCode: 0,
   },
 
   // [#23050 slice 6] `RestServer#registerSecurityExplainEndpoints`' and

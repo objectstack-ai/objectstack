@@ -28,6 +28,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PageSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -88,6 +89,7 @@ function makeStubEngine(
             return { deleted: 0 };
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             registerItem: (type: string, body: any) => { registered.push({ kind: 'item', type, body }); },

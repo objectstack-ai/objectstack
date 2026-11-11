@@ -19,6 +19,12 @@
  * not move.
  */
 
+import {
+    PackageScopedNameRefusedError,
+    packageScopedActionOwnersSentence,
+    packageScopedRefusalMessage,
+    type PackageScopedRefusal,
+} from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
@@ -39,7 +45,7 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, exactQualifierItem } from './protocol-exact-qualifier.js';
+import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -50,6 +56,136 @@ import {
 import type { ServedOverrideRow } from './served-override.js';
 import { withServedRowChangedAt } from './served-row-changed-at.js';
 import { canonicalIsoInstant } from './sys-metadata-repository.js';
+
+/**
+ * [ADR-0150 D3, #32244] The package-scoped refusal `error` carries — the
+ * `PackageScopedNameRefusedError` every package-scoped by-name reader throws,
+ * recognised by class or, across a bundle boundary that copies the class, by
+ * shape (`code: 'RESOURCE_CONFLICT'` and `refusal.status: 'refused'`) —
+ * else `undefined`. The ONE recogniser the by-name reads' catches ask, so a
+ * read that refused is never answered as a read that missed.
+ */
+export function packageScopedRefusalOf(error: unknown): PackageScopedRefusal | undefined {
+    if (error instanceof PackageScopedNameRefusedError) return error.refusal;
+    const shaped = error as { code?: unknown; refusal?: { status?: unknown } } | null | undefined;
+    return shaped?.code === 'RESOURCE_CONFLICT' && shaped.refusal?.status === 'refused'
+        ? shaped.refusal as PackageScopedRefusal
+        : undefined;
+}
+
+/** The registry reads {@link refuseActionHeldByPackages} counts an action name's holders with. */
+interface ActionHolderRegistry {
+    packageScopedHoldersOf(type: string, name: string): string[];
+    getPackageScopedItem(type: string, name: string, packageId: string): unknown;
+    isPackageDisabled?(packageId: string): boolean;
+}
+
+/** The engine registry's action-holder reads; `undefined` when it lacks them. */
+function actionHolderRegistry(host: Pick<ProtocolHost, 'engine'>): ActionHolderRegistry | undefined {
+    const registry = (host.engine as { registry?: Partial<ActionHolderRegistry> } | undefined)?.registry;
+    return typeof registry?.packageScopedHoldersOf === 'function' && typeof registry.getPackageScopedItem === 'function'
+        ? registry as ActionHolderRegistry
+        : undefined;
+}
+
+/**
+ * The object an action item is bound to; `undefined` for an object-less one.
+ * The owner-key ladder (`objectName`, then `object`, the object-less `global`
+ * and legacy `*` read as none) is objectql's `standaloneActionOwnerKey`, which
+ * this package cannot import: objectql depends on it.
+ */
+function actionObjectOf(item: unknown): string | undefined {
+    const body = item as { objectName?: unknown; object?: unknown } | null | undefined;
+    if (!body || typeof body !== 'object') return undefined;
+    for (const owner of [body.objectName, body.object]) {
+        if (typeof owner === 'string' && owner !== '') return owner === 'global' || owner === '*' ? undefined : owner;
+    }
+    return undefined;
+}
+
+/**
+ * Is `packageId` a package the registry has switched off? A disabled package
+ * holds nothing to a by-name action read (#25308), as
+ * `refuseAmbiguousObjectLessAction` counts it.
+ */
+function isDisabledHolder(registry: ActionHolderRegistry | undefined, packageId: string): boolean {
+    return typeof registry?.isPackageDisabled === 'function' && registry.isPackageDisabled(packageId) === true;
+}
+
+/**
+ * [ADR-0150 D3, #32244] A read of an action naming no package, of a name two
+ * or more enabled packages hold on ANY object key (each on its own object, one
+ * on an object and one object-less, or both on one object), is refused naming
+ * each package with the object it binds the name to (`409 RESOURCE_CONFLICT`,
+ * `ambiguous-in-environment`). It served the first registered: the read
+ * cannot see the object, so it picked one package's action over another's.
+ *
+ * Judged from the REGISTRY's holders (it keys an action by package and name,
+ * whatever its object), so the answer does not depend on which layer below
+ * holds the item. One package binding the name to two objects is one holder,
+ * and reads as before; so does a package-less item beside one package's.
+ *
+ * `objectLessRefused` is what the narrower object-less judge
+ * (`refuseAmbiguousObjectLessAction`, #31697) threw for the same read, if it
+ * refused. Its refusal names only the object-less holders, so it is merged in
+ * (review 6781770671 S5): with two object-less packages and a third bound to
+ * an object, the 409 names all three, and the third's own `/actions` route can
+ * find its holder among the candidates. A holder the narrower judge names that
+ * is not a package (the platform's item) is kept. Where the packages alone are
+ * fewer than two, the narrower refusal is thrown as it was.
+ *
+ * @throws {PackageScopedNameRefusedError} when two or more enabled packages hold the name.
+ * @throws `objectLessRefused` when it is set and the packages alone are fewer than two.
+ */
+export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, name: string, objectLessRefused?: unknown): void {
+    const registry = actionHolderRegistry(host);
+    const holders = registry
+        ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id))
+        : [];
+    if (!registry || holders.length < 2) {
+        if (objectLessRefused !== undefined) throw objectLessRefused;
+        return;
+    }
+    const narrower = objectLessRefused === undefined ? undefined : packageScopedRefusalOf(objectLessRefused);
+    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind !== 'package' || !holders.includes(candidate.packageId));
+    const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(registry.getPackageScopedItem('action', name, id))]] as const));
+    const base: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'action',
+        name,
+        callerPackageId: null,
+        candidates: [...holders.map((packageId) => ({ kind: 'package' as const, packageId })), ...extra],
+    };
+    throw new PackageScopedNameRefusedError({
+        ...base,
+        message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsByPackage)}`,
+    });
+}
+
+/**
+ * [ADR-0150 D3, #32244] The code layer's catch (the MetadataService read of a
+ * by-name read): rethrow a package-scoped refusal ({@link packageScopedRefusalOf}),
+ * and let anything else fall through as before. The store refuses a name it
+ * cannot resolve to one holder; swallowed, that refusal was read as a miss and
+ * the registry below served the first registered.
+ *
+ * For an `action` the store counts every package holding a slot, the disabled
+ * ones too, while a disabled package holds nothing to a by-name action read
+ * ({@link refuseActionHeldByPackages} has already judged the enabled ones): a
+ * refusal that names fewer than two enabled packages, and nothing else, falls
+ * through as before.
+ */
+export function rethrowPackageScopedRefusal(host: Pick<ProtocolHost, 'engine'>, type: string, error: unknown): void {
+    const refusal = packageScopedRefusalOf(error);
+    if (refusal === undefined) return;
+    if (type === 'action') {
+        const registry = actionHolderRegistry(host);
+        const live = refusal.candidates.filter((c) => c.kind !== 'package' || !isDisabledHolder(registry, c.packageId));
+        if (live.length < 2) return;
+    }
+    throw error;
+}
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
 export async function getMetaItem(host: Pick<ProtocolHost, 'readMetaItemFace'>, request: {
@@ -101,9 +237,19 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // packages hold is refused HERE, before any layer below is read, naming
     // both (a thrown `409 RESOURCE_CONFLICT`); it served the first registered.
     // Step 3 serves this answer in place of `getItem`'s, and nothing else
-    // below changes. A read that names a package (`?package=`) keeps
-    // `getItem`'s prefer-local read: that address is the exact qualifier of
-    // child G1 (ADR-0150 D5), not a caller.
+    // below changes. A read that names a package (`?package=`) is not a
+    // caller: that address is the exact qualifier of child G1 (ADR-0150 D5),
+    // judged below for every covered type.
+    // [ADR-0150 D3, epic #31527] The read that names no package of a type
+    // ADR-0150 addresses by `(package, name)` cannot be judged on an engine
+    // whose registry cannot say how it reads the type, or reads it by
+    // package with no resolver, or reads through `getItem` a type whose
+    // names are scoped to the namespace (two packages may hold one): nothing
+    // can count its holders, and `getItem` would serve the first match.
+    // Refused here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
+    // Any other type the registry reads through `getItem` keeps that read,
+    // as on `main` (seat ruling (a)): it narrows in its own reader card.
+    if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
     // [ADR-0150 D5, #31697] An object-less action two packages hold — two
     // namespaces may, once the action's one-holder rule narrowed to the
@@ -113,9 +259,24 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // item the environment's store does not hold (the platform's: host code
     // or a plugin), as the action doors refuse it; the store's own row is the
     // environment's and answers first. A disabled package holds nothing here.
-    // An action bound to an object reads as before (`getItem`).
-    if (!request.packageId && request.type === 'action' && typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
-        await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+    // [ADR-0150 D3, #32244] An action bound to an object is judged with it:
+    // a name two enabled packages hold on ANY object key — two objects, an
+    // object and none, or one object — is refused the same way, naming each
+    // package with its object ({@link refuseActionHeldByPackages}). The
+    // object-less judge's refusal is merged into that one (review 6781770671
+    // S5), so a third package bound to an object is named beside two
+    // object-less holders; alone, it is thrown as before.
+    if (!request.packageId && request.type === 'action') {
+        let objectLessRefused: unknown;
+        if (typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
+            try {
+                await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+            } catch (error) {
+                if (packageScopedRefusalOf(error) === undefined) throw error;
+                objectLessRefused = error;
+            }
+        }
+        refuseActionHeldByPackages(host, request.name, objectLessRefused);
     }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
@@ -577,8 +738,11 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             } else if (fromService.degraded) {
                 serviceDegraded = fromService;
             }
-        } catch {
-            // MetadataService not available — fall through
+        } catch (error) {
+            // [ADR-0150 D3, #32244] A package-scoped refusal is the store's
+            // answer, naming every holder ({@link rethrowPackageScopedRefusal});
+            // anything else is a MetadataService not available — fall through.
+            rethrowPackageScopedRefusal(host, request.type, error);
         }
     }
 

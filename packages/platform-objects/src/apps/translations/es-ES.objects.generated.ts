@@ -2160,7 +2160,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de descubrimiento",
-            helpText: "Opcional. URL del documento de descubrimiento OIDC. Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`."
+            helpText: "Opcional. URL del documento de descubrimiento OIDC (https). Déjelo en blanco para derivar `<issuer>/.well-known/openid-configuration`. Un endpoint indicado aquí se considera de confianza para este proveedor."
+          },
+          userInfoEndpoint: {
+            label: "URL de userinfo",
+            helpText: "Opcional. URL del endpoint userinfo de OIDC (https), que se usa en lugar del que indica el documento de descubrimiento. Un endpoint indicado aquí se considera de confianza para este proveedor: indíquelo cuando el registro se rechace porque el documento de descubrimiento nombra un host de userinfo en el que el servidor no confía."
+          },
+          skipUserInfo: {
+            label: "Leer las notificaciones solo del token de ID",
+            helpText: "Opcional. Leer las notificaciones del usuario solo del token de ID verificado y no llamar nunca al endpoint userinfo. Microsoft Entra ID: actívelo para asignar «preferred_username», que su endpoint userinfo no devuelve."
           },
           scopes: {
             label: "Ámbitos (scopes)",
@@ -2169,7 +2177,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mapeo: reclamo de correo",
-            helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email».",
+            helpText: "Opcional. Reclamo asignado al correo. Valor predeterminado: «email». Microsoft Entra ID (emisor en login.microsoftonline.com): los usuarios sin buzón no llevan el reclamo «email», así que asigne «preferred_username» (o «upn») y active «Leer las notificaciones solo del token de ID».",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Eliminar proveedor SSO",
-        description: "¿Eliminar este proveedor SSO? Los usuarios de su dominio ya no podrán iniciar sesión a través de él.",
-        successMessage: "Proveedor SSO eliminado"
+        description: "¿Eliminar este proveedor SSO? Todos los usuarios vinculados a él quedan desvinculados, incluidos los usuarios sin otro método de inicio de sesión vinculado (sin contraseña ni otro proveedor). Sus asignaciones de grupos del IdP y los conjuntos de permisos que otorgaron se eliminan con él. Esta acción no se puede deshacer.",
+        resultDialog: {
+          title: "Proveedor SSO eliminado",
+          acknowledge: "Hecho",
+          fields: {
+            message: "Eliminado"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "Qué elimina esta eliminación",
+            linkedUsers: "Usuarios desvinculados",
+            usersWithoutOtherSignIn: "Usuarios sin otro método de inicio de sesión vinculado"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Editar opciones de inicio de sesión",
         successMessage: "Opciones de inicio de sesión guardadas"
+      },
+      edit_saml_provider: {
+        label: "Editar configuración SAML",
+        params: {
+          issuer: {
+            label: "ID de entidad del IdP",
+            helpText: "El EntityID SAML del IdP. Solo se puede cambiar mientras ningún usuario esté vinculado al proveedor."
+          },
+          entryPoint: {
+            label: "URL de SSO del IdP",
+            helpText: "El endpoint de inicio de sesión único del IdP. Déjelo en blanco para conservar el valor guardado. Solo se puede cambiar mientras ningún usuario esté vinculado al proveedor."
+          },
+          cert: {
+            label: "Nuevo certificado de firma del IdP",
+            helpText: "El nuevo certificado de firma X.509 del IdP (PEM). Déjelo en blanco para conservar el certificado guardado."
+          },
+          keepCurrentCert: {
+            label: "Seguir confiando en el certificado actual",
+            helpText: "Mientras el IdP hace el cambio, aceptar aserciones firmadas con cualquiera de los dos certificados. Vuelva a editar sin esta opción para quitar el antiguo."
+          }
+        },
+        resultDialog: {
+          title: "Configuración SAML guardada",
+          acknowledge: "Hecho",
+          fields: {
+            message: "Cambiado"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Editar configuración OIDC",
+        params: {
+          clientId: {
+            label: "ID de cliente",
+            helpText: "ID de cliente OAuth emitido por el IdP. Déjelo en blanco para conservar el valor guardado. Solo se puede cambiar mientras ningún usuario esté vinculado al proveedor."
+          },
+          clientSecret: {
+            label: "Nuevo secreto de cliente",
+            helpText: "Déjelo en blanco para conservar el secreto guardado. El secreto guardado nunca se muestra."
+          },
+          scopes: {
+            label: "Ámbitos (scopes)",
+            helpText: "Ámbitos OAuth separados por espacios o comas, que sustituyen la lista guardada. Déjelo en blanco para conservarla.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "Configuración OIDC guardada",
+          acknowledge: "Hecho",
+          fields: {
+            message: "Cambiado"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Mostrar reclamo de grupos",

@@ -307,22 +307,36 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         expect(engine.getFlowSlots('f')).toEqual([]);
     });
 
-    it('a trigger is not handed a slot of a shared name (it binds by name alone), with one warning', () => {
+    it('[PR-2] a trigger is handed each slot of a shared name under its key; the incumbent is re-armed under its qualified key', () => {
         const started: string[] = [];
+        const stopped: string[] = [];
         const trigger: FlowTrigger = {
             type: 'record_change',
             start: (binding: { flowName: string }) => { started.push(binding.flowName); },
-            stop: () => undefined,
+            stop: (key: string) => { stopped.push(key); },
         } as unknown as FlowTrigger;
         engine.registerTrigger(trigger);
         ship(P1, triggered('t', 'p1'));
         expect(started).toEqual(['t']);
         ship(P2, triggered('t', 'p2'));
-        expect(started).toEqual(['t']);
+        expect(stopped).toEqual(['t']);
+        expect(started).toEqual(['t', `${P1}/t`, `${P2}/t`]);
+        expect(engine.getActiveTriggerBindings().map((b) => b.flowName)).toEqual([`${P1}/t`, `${P2}/t`]);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
+    });
+
+    it('[M1, PR-2] the one slot left when the other holder\'s body was refused is not armed, behind one warning', () => {
+        const started: string[] = [];
+        engine.registerTrigger({ type: 'record_change', start: (b: { flowName: string }) => { started.push(b.flowName); }, stop: () => undefined } as unknown as FlowTrigger);
+        // P1's body of `f` is refused first; P2 then ships `f`: one engine slot, two registry holders.
+        registry.registerItem('flow', { ...leaf('f', 'p1'), _packageId: P1 }, 'name' as never, P1);
+        loaderSets.f = [P1];
+        engine.recordFlowRefusal('f', new Error('refused: p1 body'));
+        ship(P2, triggered('f', 'p2'));
+        expect(engine.getFlowSlots('f')).toHaveLength(1);
+        expect(started).toEqual([]);
         expect(engine.getActiveTriggerBindings()).toEqual([]);
-        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));
-        expect(warned).toHaveLength(2);
-        expect(warned[0][0]).toContain(`another package holds a flow named 't'`);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /whose body was refused/.test(message))).toHaveLength(1);
     });
 
     it('[M1] two registry holders, one slot (the other body refused): no P1 caller, bare door or trigger reaches P2\'s flow', async () => {
@@ -350,7 +364,8 @@ describe('#31696 two packages\' flows of one name — both armed, each its own',
         engine.setSuspendedRunStore(legacy);
         expect((await (engine as unknown as { store: InMemorySuspendedRunStore }).store.load('legacy'))?.flowName).not.toBe('f');
         await engine.cancelRun('legacy');
-        expect((await legacy.listHistory('f', 10)).map((r) => r.flowName)).toEqual(['f']);
+        // [N8] Written back under its name and no package: the lone slot's package is not stamped on it.
+        expect((await legacy.listHistory('f', 10)).map((r) => [r.flowName, r.flowPackage])).toEqual([['f', undefined]]);
         engine.setFlowCredentialSource({ holds: () => true, held: () => [], resolve: async () => 'p1-secret' });
         await expect(engine.resolveFlowCredential('f', 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
         expect((await engine.executeSlot(P2, 'f')).success).toBe(true);
@@ -645,9 +660,46 @@ describe('#31696 R8 — a stored run names its flow\'s package and resumes on it
         expect(await view.listHistory!(`${P2}/f`, 10)).toEqual([expect.objectContaining({ runId: 'r3', flowName: `${P2}/f` })]);
         expect(await view.listHistory!('f', 10)).toEqual([]);
     });
+
+    it('[N2] a slot\'s history window is not filled by another slot\'s newer rows of the name', async () => {
+        const inner = new InMemorySuspendedRunStore();
+        const view = flowSlotRunStore(inner, {
+            stored: (key) => ({ flowName: 'f', flowPackage: key.split('/')[0] }),
+            key: (name, pkg) => `${pkg}/${name}`,
+        });
+        const at = (n: number) => `2026-01-0${n}T00:00:00.000Z`;
+        await view.recordTerminal!({ runId: 'old', flowName: `${P2}/f`, status: 'completed', startedAt: at(1) } as RunRecord);
+        for (const n of [2, 3, 4]) await view.recordTerminal!({ runId: `p1-${n}`, flowName: `${P1}/f`, status: 'completed', startedAt: at(n) } as RunRecord);
+        expect((await view.listHistory!(`${P2}/f`, 1)).map((r) => r.runId)).toEqual(['old']);
+        expect((await view.listHistory!(`${P1}/f`, 2)).map((r) => r.runId)).toEqual(['p1-4', 'p1-3']);
+    });
 });
 
 describe('#31696 R9 — the engine asks a credential source by package only for a slot of a shared name', () => {
+    it('the channel reads by package when asked by package, every row of the name when not', async () => {
+        const rows = [
+            { id: '1', flow_name: 'f', flow_package: P1, node_id: 'start', credential_key: 'secret', state: 'active' },
+            { id: '2', flow_name: 'f', flow_package: '', node_id: 'call', credential_key: 'signingSecret', state: 'active' },
+        ];
+        const channel = new FlowCredentialChannel(() => ({ find: async () => rows, resolveSecretField: async (_o: string, id: string) => `plain-${id}` }) as never);
+        await channel.loadIndex();
+        expect([channel.holds('f', 'start', 'secret'), channel.holds('f', 'start', 'secret', P1)]).toEqual([true, true]);
+        expect(channel.holds('f', 'start', 'secret', P2)).toBe(false);
+        expect(channel.held('f')).toHaveLength(2);
+        expect(await channel.resolve('f', 'start', 'secret', P2)).toBeUndefined();
+        expect(await channel.resolve('f', 'start', 'secret', P1)).toBe('plain-1');
+        // [R1] The row naming no package is any holder's: held for every slot, and its reads refused.
+        expect([channel.holds('f', 'call', 'signingSecret', P1), channel.holds('f', 'call', 'signingSecret', P2)]).toEqual([true, true]);
+        expect(() => channel.held('f', P2)).toThrow(/names no package/);
+        await expect(channel.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        // Beside P1's own row at one position, the row naming none is refused, in either store order.
+        const mine = { id: '3', flow_name: 'f', flow_package: P1, node_id: 'call', credential_key: 'signingSecret', state: 'active' };
+        for (const order of [[rows[1], mine], [mine, rows[1]]]) {
+            const both = new FlowCredentialChannel(() => ({ find: async () => order, resolveSecretField: async () => 'p1-own' }) as never);
+            await expect(both.resolve('f', 'call', 'signingSecret', P1)).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        }
+    });
+
     it('the engine asks the channel by package only for a slot of a name two packages hold', async () => {
         const asked: unknown[][] = [];
         engine.setFlowCredentialSource({
@@ -690,11 +742,14 @@ describe('#31696 R9 — the engine asks a credential source by package only for 
         // Only that by-name `holds` was asked for the shared slot.
         expect(asked.slice(2)).toEqual([['f', 'start', 'secret']]);
 
-        // The plugin's channel reads by name alone (R9 by package is PR-1b's): refused the same way, and
-        // where no package holds a credential, `holds` says so (an unsigned http node runs).
-        engine.setFlowCredentialSource(new FlowCredentialChannel(() => ({ find: async () => [] }) as never));
+        // [R9] The plugin's channel reads by package: P2's slot is asked for P2's rows, and P1's row answers it nothing.
+        const p1Row = [{ id: '1', flow_name: 'f', flow_package: P1, node_id: 'start', credential_key: 'secret', state: 'active' }];
+        const channel = new FlowCredentialChannel(() => ({ find: async () => p1Row, resolveSecretField: async () => 'p1-secret' }) as never);
+        await channel.loadIndex();
+        engine.setFlowCredentialSource(channel);
         expect(engine.holdsFlowCredential(key, 'start', 'secret')).toBe(false);
-        await expect(engine.resolveFlowCredential(key, 'start', 'secret')).rejects.toMatchObject({ code: 'SERVICE_UNAVAILABLE' });
+        expect(await engine.resolveFlowCredential(key, 'start', 'secret')).toBeUndefined();
+        expect(await engine.resolveFlowCredential(`${P1}/f`, 'start', 'secret')).toBe('p1-secret');
     });
 });
 
@@ -800,19 +855,22 @@ describe('#31696 a run of a flow whose name two packages hold reads its own flow
     });
 });
 
-describe('#31696 the trigger decline is said again for a name shared again', () => {
-    it('a pair that drops to one holder and shares again warns again', () => {
+describe('#31696 [PR-2] a name shared again is re-armed per slot again', () => {
+    it('a pair that drops to one holder and shares again arms each slot under its key each time, and warns nothing', () => {
+        const started: string[] = [];
+        const stopped: string[] = [];
         engine.registerTrigger({
             type: 'record_change',
-            start: () => undefined,
-            stop: () => undefined,
+            start: (binding: { flowName: string }) => { started.push(binding.flowName); },
+            stop: (key: string) => { stopped.push(key); },
         } as unknown as FlowTrigger);
         ship(P1, triggered('t', 'p1'));
         ship(P2, triggered('t', 'p2'));
         registry.unregisterItemsByPackage(P2);
         engine.withdrawFlowSlot(P2, 't');
         ship(P2, triggered('t', 'p2'));
-        const warned = engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message));
-        expect(warned).toHaveLength(4);
+        expect(started).toEqual(['t', `${P1}/t`, `${P2}/t`, 't', `${P1}/t`, `${P2}/t`]);
+        expect(stopped).toEqual(['t', `${P2}/t`, `${P1}/t`, 't']);
+        expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
     });
 });

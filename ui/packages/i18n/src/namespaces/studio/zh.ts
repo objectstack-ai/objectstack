@@ -252,6 +252,8 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.canvas.expandSection': '展开分组',
   'designer.canvas.moveSectionUp': '上移分组',
   'designer.canvas.moveSectionDown': '下移分组',
+  'designer.canvas.sectionFirst': '已是第一个分组',
+  'designer.canvas.sectionLast': '已是最后一个分组',
   'designer.canvas.removeSection': '删除分组',
   'designer.canvas.removeSectionHint': '删除分组（字段移至未分组）',
   'designer.canvas.renameHint': '双击重命名',
@@ -420,7 +422,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.currency.currencyFieldNone': '— 选择币种字段 —',
   'designer.field.currency.createCodeField': '创建币种字段',
   'designer.field.currency.codeFieldLabel': '币种',
-  'designer.field.currency.recordHint': '列出本对象中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，金额按该币种显示。',
+  'designer.field.currency.recordHint': '列出本对象及其主从父对象（关系.字段）中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，或沿用父记录的币种，金额按该币种显示。',
   'designer.field.currency.homeAmount': '本位币金额',
   'designer.field.currency.homeField': '本位币金额字段',
   'designer.field.currency.homeFieldNone': '— 不保存 —',
@@ -1481,6 +1483,8 @@ const STUDIO_ZH: Record<string, string> = {
   // Reorder buttons
   'engine.inspector.reorder.up': '上移',
   'engine.inspector.reorder.down': '下移',
+  'engine.inspector.reorder.atFirst': '已在最前',
+  'engine.inspector.reorder.atLast': '已在最后',
   // InspectorComboField defaults (objectui#10586).
   'engine.inspector.combo.search': '搜索或输入…',
   'engine.inspector.combo.noMatch': '无匹配项 —— 继续输入即可使用自定义值。',
@@ -2836,6 +2840,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.creating': '创建中…',
   'engine.studio.createItem.savedAs': '保存为',
   'engine.studio.createItem.notDerived': '显示名称里没有可用来生成标识的英文字母，请手动填写英文标识（小写字母、数字和下划线）。',
+  'engine.studio.createItem.needLabel': '请先填写显示名称',
+  'engine.studio.createItem.needName': '请先填写英文标识（小写字母、数字和下划线）',
   // `383502b23` — see the English entry. This value must share no leading
   // run with `engine.studio.app.create`, which opens the same dialog.
   'engine.studio.createDraft': '存为草稿',
@@ -3029,6 +3035,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.designer.fieldRole': '可拖动字段',
   'engine.studio.designer.groupUp': '上移分组',
   'engine.studio.designer.groupDown': '下移分组',
+  'engine.studio.designer.groupUpFirst': '已是第一个分组',
+  'engine.studio.designer.groupDownLast': '已是最后一个分组',
   'engine.studio.designer.groupDelete': '删除分组',
   'engine.studio.designer.groupDeleteTitle': '删除分组(字段归为未分组)',
   'engine.studio.designer.dropHere': '拖字段到这里',

@@ -71,6 +71,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 import { GetMetaItemResponseSchema } from '@objectstack/spec/api';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
 
 type Row = Record<string, any>;
@@ -152,6 +153,7 @@ function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unkn
             return { deleted };
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: () => {},
             registerObject: () => {},
             unregisterItem: () => {},

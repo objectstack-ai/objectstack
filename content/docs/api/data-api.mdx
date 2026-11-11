@@ -348,12 +348,16 @@ Execute a batch operation (create / update / upsert / delete) on multiple record
 
 `options.atomic` defaults to `false`: sequential best-effort that stops at the first failure. Records written before the failure stay written — nothing is rolled back on this arm — and every record after it is reported with `errors[0].code` `NOT_ATTEMPTED` rather than omitted, so `results` always covers all `total` records and `succeeded + failed === total` (#7539). Send `continueOnError: true` to process the remaining records instead of stopping. Set `atomic` to `true` and the whole batch runs inside one transaction: the first failure rolls back every prior write, and the response reports `succeeded: 0` — each row's `errors[0].code` says what happened: `ROLLED_BACK` (written, then undone), the causal row's own error code, or `NOT_ATTEMPTED` (never reached). A deployment whose driver cannot roll back rejects an atomic request with `501 NOT_IMPLEMENTED` instead of running it best-effort — probe `capabilities.transactionalBatch` on `/discovery` first. `atomic` takes precedence over `continueOnError`.
 
+**HTTP status.** `200` when every record succeeded (`failed` is `0`), and `207 Multi-Status` when any record failed, a rolled-back atomic batch included. The body is the same `BatchUpdateResponse` either way, so read `results` for what happened to each record. A client that reads only the status can tell an all-success call from one with failed rows; `207` is a 2xx, so a client that treats any 2xx as an answer (the `@objectstack/client` SDK does) still gets the per-record report rather than an error. `/updateMany` and `/deleteMany` answer the same way. A request the door refuses before any record runs (a malformed body, a batch over `batch.maxBatchSize`, an object that does not expose the write) answers its own `4xx`, not `207`.
+
 ### `POST /data/:object/createMany`
 
 Batch create multiple records.
 
 **Body**: a bare array of records — `[{ name: "A" }, { name: "B" }]`. The REST handler reads the request body directly as the records array, so do **not** wrap it in `{ records: [...] }`.  
 **Response**: `{ object: "account", records: [...], count: 2 }`
+
+`createMany` has no per-record report: it answers `201` when every record is created, and a record it refuses fails the whole call with that record's error status (for example `400 VALIDATION_FAILED`). It never answers `207`.
 
 ### `POST /data/:object/updateMany`
 
@@ -374,7 +378,7 @@ The body is validated against the contract and unknown keys are dropped. The
 target object always comes from the URL — an `object` key in the body is
 ignored, on this route and on `deleteMany`.
 
-**Response**: `BatchUpdateResponse`, one `results` entry per record.
+**Response**: `BatchUpdateResponse`, one `results` entry per record: `200` when every record succeeded, `207` when any failed (see `/batch` above).
 
 ### `POST /data/:object/deleteMany`
 
@@ -385,7 +389,7 @@ the same `BatchOptions` bag `/batch` takes. The body is validated against the
 contract and unknown keys are dropped: the id list is the *only* thing that
 selects rows, so no body key can widen the delete into a filter.
 
-**Response**: `BatchUpdateResponse` — one `results` entry per id. Records are
+**Response**: `BatchUpdateResponse` — one `results` entry per id, `200` when every id was deleted and `207` when any failed (see `/batch` above). Records are
 deleted one at a time by primary key, so each honours `deleteBehavior`
 (`cascade` / `set_null` / `restrict`) on relations pointing at it. The run stops
 at the first failure; `continueOnError: true` processes the remaining ids and

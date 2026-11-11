@@ -42,7 +42,7 @@
 
 import type { FormField } from '@object-ui/types';
 import { evalFieldPredicate, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
-import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
 import { findCustomFieldMember } from './customFieldsMerge';
@@ -345,7 +345,9 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     validation: buildValidationRules(field),
     // A home field (ADR-0144 D5) carries the amount, rate and document date
     // that produced it, so its widget can draw the read face and say so.
-    field: withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName),
+    // ... and an amount that follows its parent's currency carries the parent
+    // object (ADR-0144 D2 as amended), so its widget can read the parent's code.
+    field: withFollowedParentObject(withHomeAmountSource(field, ctx.objectSchema?.fields, fieldName), ctx.objectSchema?.fields),
     options: field.options,
     multiple: field.multiple,
     // Field-level conditional rules (ADR-0036) — the form renderer resolves

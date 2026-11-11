@@ -128,7 +128,17 @@ import type { TenancyService } from './tenancy-service.js';
 import { OtpSendGuard, assertOtpCooldownSeconds } from './otp-send-guard.js';
 import { assertPasswordResetEndsSessions } from './password-reset-ends-sessions.js';
 import type { CounterStore } from './rate-limit-storage.js';
-import type { SsoProviderDeleteRefusal } from './sign-in-method-floor.js';
+import { SSO_PROVIDER_DELETE_PATH, type SsoProviderDeleteRefusal } from './sign-in-method-floor.js';
+import {
+  SSO_PROVIDER_REGISTER_PATH,
+  SSO_PROVIDER_UPDATE_PATH,
+  findSsoDomainClaim,
+  providerDomains,
+  settleSsoProviderDelete as settleDeletedSsoProvider,
+  ssoDomainClaimedRefusal,
+  ssoDomainTooLong,
+  stageSsoProviderDeleteImpact,
+} from './sso-provider-lifecycle.js';
 import {
   applyUserBan,
   applyUserUnban,
@@ -267,6 +277,7 @@ import { readSamlAcsLanding, runSsoCallbackScope, type SamlLandingContext, type 
 import { createEngineSsoProviderConfigReader, emailClaimOfStoredOidcConfig, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { readSsoProviderSignInOptions, runWithSamlIdpInitiated } from './sso-sign-in-options.js';
 import { readStoredSamlConfig, runSsoSamlRefusalCauseScope } from './sso-saml-refusal-cause.js';
+import { readThirdPartyLoginProvider, runThirdPartyInitiatedLogin, type ThirdPartyLoginContext } from './sso-third-party-initiated-login.js';
 // [#25224 cut 16] The body of `buildPluginList`; the method of the same name
 // below hands it the members it reads (`PluginListHost`). The organization
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
@@ -2037,6 +2048,7 @@ export class AuthManager {
       assertRemoveMemberPermitted: (...a) => this.assertRemoveMemberPermitted(...a),
       assertRevokeSessionIdentifiesRecord: (...a) => this.assertRevokeSessionIdentifiesRecord(...a),
       assertSsoProviderDeletable: (...a) => this.assertSsoProviderDeletable(...a),
+      assertSsoProviderDomainFree: (...a) => this.assertSsoProviderDomainFree(...a),
       auditRefusedSignIn: (...a) => this.auditRefusedSignIn(...a),
       buildPluginList: (...a) => this.buildPluginList(...a),
       clearSignInLockout: (...a) => this.clearSignInLockout(...a),
@@ -2073,6 +2085,7 @@ export class AuthManager {
       sendChangeEmailNotice: (...a) => this.sendChangeEmailNotice(...a),
       sendExistingAccountSignUpNotice: (...a) => this.sendExistingAccountSignUpNotice(...a),
       settleSignInAttempt: (...a) => this.settleSignInAttempt(...a),
+      settleSsoProviderDelete: (...a) => this.settleSsoProviderDelete(...a),
       signUpForcedOff: (...a) => this.signUpForcedOff(...a),
       ssoDiscoveryTrustedOrigins: (...a) => this.ssoDiscoveryTrustedOrigins(...a),
       stampLastLogin: (...a) => this.stampLastLogin(...a),
@@ -4050,7 +4063,7 @@ export class AuthManager {
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
-    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback'> = {
+    const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
       config: this.config,
       betterAuthEndpointPath: (...a) => this.betterAuthEndpointPath(...a),
       getOrCreateAuth: (...a) => this.getOrCreateAuth(...a),
@@ -4058,6 +4071,7 @@ export class AuthManager {
       runSubjectErasureAtomically: (...a) => this.runSubjectErasureAtomically(...a),
       answerOAuthTokenRevocation: (...a) => this.answerOAuthTokenRevocation(...a),
       runSsoCallback: (...a) => this.runSsoCallback(...a),
+      resolveAuthSecret: (...a) => this.resolveAuthSecret(...a),
     };
     return handleRequest.call(host, request, transport);
   }
@@ -4069,9 +4083,17 @@ export class AuthManager {
    * one `warn` line on this manager's logger, and a SAML ACS
    * (`/sso/saml2/sp/acs/:providerId`) whose refusal lands on the sign-in's error
    * URL, read from the relay state before better-auth consumes it, or for an
-   * IdP-initiated response (no relay state) on the platform error page.
+   * IdP-initiated response (no relay state) on the platform error page. An
+   * OIDC callback of the third-party-initiated shape (`iss`, no code) passes
+   * the entry of `sso-third-party-initiated-login.ts` first. `transport` is the
+   * one {@link handleRequest} was handed for the callback: the entry's
+   * re-dispatched start is handed it too (#24877).
    */
-  private runSsoCallback(callback: SsoCallbackRequest, run: () => Promise<Response>): Promise<Response> {
+  private runSsoCallback(
+    callback: SsoCallbackRequest,
+    run: () => Promise<Response>,
+    transport?: { remoteAddress?: string },
+  ): Promise<Response> {
     // A SAML ACS request runs with its provider's IdP-initiated toggle in
     // scope: the vendor's one plugin-wide option answers it per provider
     // (`sso-sign-in-options.ts`, ruling record 6718355623).
@@ -4095,23 +4117,45 @@ export class AuthManager {
             );
           }
         : run;
-    return runSsoCallbackScope(
+    const callbackScope = (): Promise<Response> =>
+      runSsoCallbackScope(
+        callback,
+        this.config.logger,
+        async (saml) => {
+          const auth: any = await this.getOrCreateAuth();
+          const context = (await auth.$context) as SamlLandingContext;
+          return readSamlAcsLanding(context, saml.providerId, saml.request);
+        },
+        scoped,
+        // Read only when the vendor refused the sign-in for a missing email: the
+        // claim the provider's email mapping names, for the refusal's log line.
+        async (providerId) => {
+          const stored = await createEngineSsoProviderConfigReader(
+            () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
+          )(providerId);
+          return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
+        },
+      );
+    if (callback.protocol !== 'oidc') return callbackScope();
+    // [#32086] An IdP app tile's third-party-initiated request (`iss`, no code)
+    // starts the vendor's own sign-in when the four checks of ruling 6764924025
+    // hold; anything else reaches the vendor callback unchanged
+    // (`sso-third-party-initiated-login.ts`).
+    const engine = this.config.dataEngine;
+    return runThirdPartyInitiatedLogin(
       callback,
-      this.config.logger,
-      async (saml) => {
-        const auth: any = await this.getOrCreateAuth();
-        const context = (await auth.$context) as SamlLandingContext;
-        return readSamlAcsLanding(context, saml.providerId, saml.request);
+      {
+        readProvider: () =>
+          readThirdPartyLoginProvider(engine ? (withSystemReadContext(engine) as never) : undefined, callback.providerId),
+        context: async () => {
+          const auth: any = await this.getOrCreateAuth();
+          return (await auth.$context) as ThirdPartyLoginContext;
+        },
+        startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
+        dispatch: (request) => this.handleRequest(request, transport),
+        logger: this.config.logger,
       },
-      scoped,
-      // Read only when the vendor refused the sign-in for a missing email: the
-      // claim the provider's email mapping names, for the refusal's log line.
-      async (providerId) => {
-        const stored = await createEngineSsoProviderConfigReader(
-          () => this.config.dataEngine as SsoProviderConfigEngine | undefined,
-        )(providerId);
-        return stored ? emailClaimOfStoredOidcConfig(stored.oidcConfig) : undefined;
-      },
+      callbackScope,
     );
   }
 
@@ -5698,22 +5742,113 @@ export class AuthManager {
    * deployment-wide fact `/auth/config` already publishes (email and password
    * off, what else signs anyone in), so it is not held back for a caller the
    * vendor would refuse as not the provider's owner.
+   *
+   * [#32085] A delete the floor admits is then counted before the vendor's
+   * first write (`sso-provider-lifecycle.ts` `stageSsoProviderDeleteImpact`):
+   * the users it unlinks and, of those,
+   * users with no other sign-in method linked; the group mappings and
+   * projected grants it leaves behind. {@link settleSsoProviderDelete} removes those and
+   * names the counts in the answer. A count that cannot be read refuses the
+   * delete `503 SERVICE_UNAVAILABLE`, because an unlink cannot be taken back.
    */
   private async assertSsoProviderDeletable(ctx: any): Promise<void> {
-    const judge = this.ssoProviderDeleteFloor;
-    if (!judge) return;
     const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
     if (!providerId) return;
     const actor = await this.resolveActor(ctx);
     if (!actor?.userId) return;
-    const header = acceptLanguageHeader(ctx);
-    const refusal = await judge(providerId, header ? preferredLocaleFromHeader(header) : undefined);
-    if (!refusal) return;
     const { APIError } = await import('better-auth/api');
+    const judge = this.ssoProviderDeleteFloor;
+    if (judge) {
+      const header = acceptLanguageHeader(ctx);
+      const refusal = await judge(providerId, header ? preferredLocaleFromHeader(header) : undefined);
+      if (refusal) {
+        throw new APIError(refusal.status, {
+          code: refusal.code,
+          message: refusal.message,
+          lastSignInMethod: refusal.lastSignInMethod,
+        });
+      }
+    }
+    const unreadable = await stageSsoProviderDeleteImpact(ctx, this.getDataEngine(), providerId);
+    if (unreadable) throw new APIError(unreadable.status, { code: unreadable.code, message: unreadable.message });
+  }
+
+  /**
+   * [#32085] The after-hook half of {@link assertSsoProviderDeletable}: once
+   * the vendor answered a delete `success`, remove the provider's group
+   * mappings and the grants they projected, and name what the delete removed
+   * in the answer (`sso-provider-lifecycle.ts` `settleSsoProviderDelete`).
+   * Every other path, and a refused delete, is left untouched.
+   */
+  private async settleSsoProviderDelete(ctx: any): Promise<void> {
+    if (ctx?.path !== SSO_PROVIDER_DELETE_PATH) return;
+    await settleDeletedSsoProvider(ctx, this.getDataEngine(), (message) => {
+      const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+      if (typeof sink?.error === 'function') sink.error(message);
+      else console.error(message);
+    });
+  }
+
+  /**
+   * [#32085] One email domain, one provider: refuse `/sso/register`, and a
+   * domain edit on `/sso/update-provider`, onto a domain another provider
+   * already serves (`409 RESOURCE_CONFLICT`, `field: 'domain'`), before the
+   * vendor writes. Sign-in routes an address to a provider by its domain, so
+   * the second provider would not be reached by address
+   * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`): the same entry, or a
+   * subdomain and its parent where the subdomain's provider does not hold it
+   * as its whole domain, each entry compared as one ASCII spelling.
+   *
+   * Asked only of an authenticated caller whose body carries a domain: what
+   * the vendor itself answers (no session, a malformed body) falls through to
+   * it, and nothing of the domain is parsed for a caller without a session.
+   * A value longer than a provider row holds, or with an entry longer than a
+   * host name, is refused `400 VALIDATION_FAILED` on `domain` before it is
+   * parsed (`ssoDomainTooLong`).
+   *
+   * The holding provider is named to a platform administrator, who may read
+   * every provider; any other caller (an organization administrator on
+   * `/sso/update-provider`) is told only that a domain its request names, or
+   * a subdomain of it, is served, which `/sign-in/sso` already answers anyone
+   * for a name they supply: never the row, nor the subdomain another
+   * provider lists. A provider-table read that fails
+   * refuses `503`: a guard that could not be evaluated does not pass.
+   */
+  private async assertSsoProviderDomainFree(ctx: any): Promise<void> {
+    const path = ctx?.path;
+    if (path !== SSO_PROVIDER_REGISTER_PATH && path !== SSO_PROVIDER_UPDATE_PATH) return;
+    const requested: unknown = ctx?.body?.domain;
+    if (typeof requested !== 'string' || !requested.trim()) return;
+    const engine = this.getDataEngine();
+    if (!engine) return;
+    const actor = await this.resolveActor(ctx);
+    if (!actor?.userId) return;
+    const { APIError } = await import('better-auth/api');
+    // Lengths before any parse: the value is request-controlled.
+    const tooLong = ssoDomainTooLong(requested);
+    if (tooLong) {
+      throw new APIError(tooLong.status, { code: tooLong.code, message: tooLong.message, field: tooLong.field, fields: tooLong.fields });
+    }
+    const domains = providerDomains(requested);
+    if (domains.length === 0) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
+    let claim;
+    try {
+      claim = await findSsoDomainClaim(engine, requested, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
+    } catch {
+      throw new APIError('SERVICE_UNAVAILABLE', {
+        code: 'SERVICE_UNAVAILABLE',
+        message: `The SSO providers could not be read to check that no other provider serves '${domains.join(', ')}'; nothing was saved. Try again.`,
+      });
+    }
+    if (!claim) return;
+    const nameHolder = path === SSO_PROVIDER_REGISTER_PATH || (await this.isPlatformAdminUserId(actor.userId));
+    const refusal = ssoDomainClaimedRefusal(claim, nameHolder);
     throw new APIError(refusal.status, {
       code: refusal.code,
       message: refusal.message,
-      lastSignInMethod: refusal.lastSignInMethod,
+      field: refusal.field,
+      ...(refusal.heldBy ? { heldBy: refusal.heldBy } : {}),
     });
   }
 

@@ -16,7 +16,7 @@
  * those values into every bound widget's inline query.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   cn,
   Button,
@@ -35,6 +35,7 @@ import {
 import { CalendarIcon, RotateCcw } from 'lucide-react';
 import { useSafeTranslate, useObjectTranslation, useSafeFieldLabel, pickLocalized } from '@object-ui/i18n';
 import { useDataInvalidation } from '@object-ui/react';
+import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
 import {
   DATE_RANGE_PRESETS,
   toDisplayDate,
@@ -426,6 +427,9 @@ function SelectFilter({ def, value, onChange, dataSource }: { def: DashboardFilt
       ? from.object || undefined
       : undefined,
   );
+  // objectstack#32165 — the enclosing dashboard's coalescer: this option read
+  // joins the batch request the dashboard's widgets send in the same render.
+  const coalescer = useContext(DatasetQueryCoalescerContext);
   useEffect(() => {
     if (!from || !dataSource) return;
     let cancelled = false;
@@ -471,7 +475,8 @@ function SelectFilter({ def, value, onChange, dataSource }: { def: DashboardFilt
       if (from.labelField && from.labelField !== from.valueField) {
         dimensions.push({ name: from.labelField, field: from.labelField });
       }
-      dataSource
+      const door = coalescer && coalescer.source === dataSource ? coalescer : dataSource;
+      door
         .queryDataset(
           {
             name: 'dashboard_filter_options',

@@ -107,3 +107,34 @@ describe('ObjectChart — dataset-bound measure label resolution', () => {
     expect(visible.textContent).not.toContain('task_count');
   });
 });
+
+/* objectstack#32077 (ADR-0150 D5) — the host's package rides the query. */
+describe('ObjectChart — the host\'s package on a dataset-bound query (objectstack#32077)', () => {
+  const schema = {
+    type: 'object-chart' as const,
+    chartType: 'bar' as const,
+    dataset: 'showcase_task_metrics',
+    dimensions: ['status'],
+    values: ['task_count'],
+  };
+
+  it('two hosts in two packages: each query names its own package', async () => {
+    const ds = makeDS();
+    const { unmount } = render(<ObjectChart schema={schema} dataSource={ds} packageId="com.acme.alpha" />);
+    await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(1));
+    unmount();
+    render(<ObjectChart schema={schema} dataSource={ds} packageId="com.acme.beta" />);
+    await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(2));
+    expect(ds.queryDataset.mock.calls.map((c: unknown[]) => c[2])).toEqual([
+      { packageId: 'com.acme.alpha' },
+      { packageId: 'com.acme.beta' },
+    ]);
+  });
+
+  it('a host with no package sends none', async () => {
+    const ds = makeDS();
+    render(<ObjectChart schema={schema} dataSource={ds} />);
+    await waitFor(() => expect(ds.queryDataset).toHaveBeenCalledTimes(1));
+    expect(ds.queryDataset.mock.calls[0]).toHaveLength(2);
+  });
+});

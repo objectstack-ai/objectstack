@@ -638,7 +638,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "통화 필드",
-        helpText: "record 모드 전용이며 그 모드에서는 필수입니다. 각 레코드의 ISO 4217 코드를 담은 이 객체의 필드로, valueDomain이 iso_4217_currency인 텍스트 필드이며 관례상 currency_code입니다."
+        helpText: "record 모드 전용이며 그 모드에서는 필수입니다. 각 레코드의 ISO 4217 코드를 담은 이 객체의 필드로, valueDomain이 iso_4217_currency인 텍스트 필드이며 관례상 currency_code입니다. master-detail 자식 객체에서는 대신 부모의 코드 필드를 <master_detail 필드>.<부모 코드 필드>(예: invoice.currency_code)로 지정할 수 있습니다. 이 경우 레코드는 부모의 통화를 따르며, 그런 자식이 있는 동안 부모의 코드 변경은 거부됩니다."
       },
       "currencyConfig.defaultCurrency": {
         label: "기본 통화",

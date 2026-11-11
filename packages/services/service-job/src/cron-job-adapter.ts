@@ -7,6 +7,7 @@ import type {
   JobHandler,
   JobExecution,
   JobScheduleOptions,
+  JobRunTrigger,
 } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
@@ -191,7 +192,7 @@ export class CronJobAdapter implements IJobService {
   async trigger(name: string, data?: unknown): Promise<void> {
     const rec = this.jobs.get(name);
     if (!rec) throw new Error(`Job "${name}" not found`);
-    await this.execute(rec, data);
+    await this.execute(rec, 'manual', data);
   }
 
   async getExecutions(name: string, limit?: number): Promise<JobExecution[]> {
@@ -292,7 +293,7 @@ export class CronJobAdapter implements IJobService {
   /** The leader-elected half of {@link CronJobAdapter.runScheduled}. */
   private async runElected(name: string, record: CronJobRecord): Promise<void> {
     const lock = this.cluster?.lock;
-    if (!lock) { await this.execute(record); return; }
+    if (!lock) { await this.execute(record, 'schedule'); return; }
     // The timers above fire this as `void this.runScheduled(...)`, so a
     // rejection here is an unhandled one, and an unhandled rejection ends the
     // process: before this guard, a remote lock store going away crashed every
@@ -310,7 +311,7 @@ export class CronJobAdapter implements IJobService {
     if (!handle) return; // another node is the leader for this fire
     const stopHeartbeat = this.keepLeaseAlive(name, handle);
     try {
-      await this.execute(record);
+      await this.execute(record, 'schedule');
     } finally {
       stopHeartbeat();
       try {
@@ -386,7 +387,7 @@ export class CronJobAdapter implements IJobService {
     this.logger?.info?.('CronJobAdapter: the cluster lock answers again; scheduled fires resume.');
   }
 
-  private async execute(record: CronJobRecord, data?: unknown): Promise<void> {
+  private async execute(record: CronJobRecord, trigger: JobRunTrigger, data?: unknown): Promise<void> {
     const execution: JobExecution = {
       jobId: record.name,
       status: 'running',
@@ -394,7 +395,8 @@ export class CronJobAdapter implements IJobService {
     };
     const startMs = Date.now();
     try {
-      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
+      // [ADR-0153 D7] The handler is told why this run started.
+      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data, trigger }), record.options);
       // #5548 — same mapping as `IntervalJobAdapter.executeJob`, deliberately
       // one shape and not two spellings: a resolved `degraded` outcome is a
       // completed run whose work did not happen, never a `success`.

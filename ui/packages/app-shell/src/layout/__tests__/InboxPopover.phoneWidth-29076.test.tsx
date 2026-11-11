@@ -60,7 +60,7 @@ function bell(pendingApprovalsCount: number) {
 }
 
 function openInbox() {
-  fireEvent.click(screen.getByRole('button', { name: 'Open inbox' }));
+  fireEvent.click(screen.getByRole('button', { name: /^Notifications(,|$)/ }));
   return screen.getByRole('dialog');
 }
 

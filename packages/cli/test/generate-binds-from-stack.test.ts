@@ -78,11 +78,12 @@ function resolve(
 const shown = (v: ScaffoldBindingVerdict) => (v.ok ? '' : [v.headline, ...v.lines].join('\n'));
 
 describe('[#21325] the roster: which scaffold binds what', () => {
-  it('view is named after its object; action, flow and app take --object; action takes --flow', () => {
+  it('view is named after its object; action, flow and app take --object; action takes --flow, or none', () => {
     expect(binds('view')).toEqual({ object: 'name' });
     expect(binds('flow')).toEqual({ object: 'flag' });
     expect(binds('app')).toEqual({ object: 'flag' });
-    expect(binds('action')).toEqual({ object: 'flag', flow: 'flag' });
+    // #32153: with no flow declared an action is a declarative update.
+    expect(binds('action')).toEqual({ object: 'flag', flow: 'flag-or-none' });
     for (const type of ['object', 'dashboard', 'skill', 'picklist']) expect(binds(type)).toEqual({});
   });
 });
@@ -159,11 +160,49 @@ describe('[#21325] a view is named after the object it binds, which the stack mu
     expect(v.ok && v.bindings.object?.name).toBe(`${NS}_task`);
   });
 
-  it('an undeclared one is refused, with the declared objects listed', () => {
+  it('an undeclared one is refused, with the declared objects listed and --object named', () => {
     const v = resolve('view', 'task', project([`${NS}_project`]), {}, `${NS}_task`);
     expect(v.ok).toBe(false);
     expect(shown(v)).toContain(`'${NS}_task'`);
     expect(shown(v)).toContain(`'${NS}_project'`);
+    expect(shown(v)).toContain('--object');
+  });
+});
+
+describe('[#32153] with --object a view has a name of its own', () => {
+  it('--object binds the object, and the item name names nothing', () => {
+    // `open_tickets` names no object; it is the view's own name.
+    const v = resolve('view', 'open_tickets', project([`${NS}_ticket`, `${NS}_project`]), { object: 'ticket' });
+    expect(v.ok && v.bindings.object?.name).toBe(`${NS}_ticket`);
+  });
+
+  it('--object naming nothing declared is refused, with the declared objects listed', () => {
+    const v = resolve('view', 'open_tickets', project([`${NS}_project`]), { object: 'ticket' });
+    expect(v.ok).toBe(false);
+    expect(shown(v)).toContain('ticket');
+    expect(shown(v)).toContain(`'${NS}_project'`);
+  });
+
+  it('an object that already has a views container is refused before anything is written, naming listViews', () => {
+    const p: ProjectNamespace = {
+      kind: 'loaded',
+      configPath: '/project/objectstack.config.ts',
+      namespace: NS,
+      config: {
+        objects: [object(`${NS}_ticket`)],
+        views: [{ object: `${NS}_ticket`, list: { label: 'All Tickets', type: 'grid', columns: [{ field: 'name' }] } }],
+      },
+    };
+    const named = resolve('view', 'open_tickets', p, { object: 'ticket' });
+    expect(named.ok).toBe(false);
+    expect(shown(named)).toContain(`'${NS}_ticket'`);
+    expect(shown(named)).toContain('listViews');
+    expect(shown(named)).toContain('open_tickets:');
+    // The legacy spelling meets the same refusal up front, instead of a write
+    // the config's load then refuses.
+    const legacy = resolve('view', 'ticket', p, {}, `${NS}_ticket`);
+    expect(legacy.ok).toBe(false);
+    expect(shown(legacy)).toContain('listViews');
   });
 });
 
@@ -178,10 +217,32 @@ describe('[#21325] an action runs a flow the stack declares', () => {
     expect(only.ok && only.bindings).toEqual(expect.objectContaining({ flow: 'task_done_flow' }));
   });
 
-  it('never `<name>_flow`: no flow declared is refused, with `os g flow` as the remedy', () => {
+  it('never `<name>_flow`: no flow declared binds none (#32153 — a declarative update), said out loud', () => {
     const v = resolve('action', 'complete_task', project([`${NS}_task`], []));
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.bindings.flow).toBeUndefined();
+    expect(v.bindings.object?.name).toBe(`${NS}_task`);
+    expect(v.said.join('\n')).toContain('--flow');
+  });
+
+  it('no flow declared and an object with no field to write is refused, with `os g flow` as the remedy', () => {
+    const p: ProjectNamespace = {
+      kind: 'loaded',
+      configPath: '/project/objectstack.config.ts',
+      namespace: NS,
+      config: { objects: [object(`${NS}_task`, {})], flows: [] },
+    };
+    const v = resolve('action', 'complete_task', p);
     expect(v.ok).toBe(false);
+    expect(shown(v)).toContain(`'${NS}_task'`);
     expect(shown(v)).toContain('g flow');
+  });
+
+  it('an unknown --flow is still refused when the stack declares no flow', () => {
+    const v = resolve('action', 'complete_task', project([`${NS}_task`], []), { flow: 'complete_task_flow' });
+    expect(v.ok).toBe(false);
+    expect(shown(v)).toContain('complete_task_flow');
   });
 
   it('several flows and none named is refused and listed; an unknown --flow is refused and listed', () => {
@@ -220,7 +281,7 @@ describe('[#21325] --object / --flow on a type that takes neither is refused, no
     ['dashboard', { object: 'task' }],
     ['skill', { object: 'task' }],
     ['object', { object: 'task' }],
-    ['view', { object: 'task' }],
+    ['view', { flow: 'task_done_flow' }],
     ['flow', { flow: 'task_done_flow' }],
     ['app', { flow: 'task_done_flow' }],
     ['types', { object: 'task' }],
@@ -234,6 +295,8 @@ describe('[#21325] --object / --flow on a type that takes neither is refused, no
   it('a type that takes the flag, and an unknown type, are not refused here', () => {
     expect(unusedBindingFlagRefusal('action', { object: 'task', flow: 'task_done_flow' })).toBeUndefined();
     expect(unusedBindingFlagRefusal('flow', { object: 'task' })).toBeUndefined();
+    // #32153: a view's --object gives it a name of its own.
+    expect(unusedBindingFlagRefusal('view', { object: 'task' })).toBeUndefined();
     // The unknown-type answer lists the roster, which is the more useful one.
     expect(unusedBindingFlagRefusal('nonexistent', { object: 'task' })).toBeUndefined();
     expect(unusedBindingFlagRefusal('constructor', { object: 'task' })).toBeUndefined();

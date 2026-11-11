@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { findRelationshipField, deriveColumns, deriveDetail, deriveFormFields, resolveInlineMode, fieldTypeToColumnType, hydrateColumns } from './deriveMasterDetail';
 import { en } from '@object-ui/i18n';
+import { deriveInlineGridSortField } from '@objectstack/spec/data';
 
 /** The `en` session's word for a boolean value: what `useBooleanValueLabel`
  *  (`@object-ui/fields`) draws under `en`. The derive functions require one
@@ -465,5 +466,37 @@ describe('deriveDetail', () => {
   it('throws a helpful error when no relationship can be resolved', () => {
     expect(() => deriveDetail('showcase_task', { fields: { title: { type: 'text' } } }, 'showcase_project', { booleanLabel }))
       .toThrow(/could not find a lookup\/master_detail field/i);
+  });
+});
+
+describe('deriveDetail takes the line-position field from the spec (deriveInlineGridSortField)', () => {
+  /** A child with the parent link, the given fields, and one business column. */
+  const child = (fields: Record<string, unknown>) => ({
+    fields: {
+      invoice: { type: 'master_detail', reference: 'inv' },
+      ...fields,
+      description: { type: 'text', label: 'Description' },
+    },
+  });
+  const sortFieldOf = (schema: ReturnType<typeof child>) => deriveDetail('inv_line', schema, 'inv', { booleanLabel }).sortField;
+  /** Number fields whose names read like a position but are not the spec's names. */
+  const DECOYS = { order: { type: 'number' }, seq: { type: 'number' }, rank: { type: 'number' }, line: { type: 'number' }, sort_index: { type: 'number' } };
+
+  it.each(['position', 'sort_order', 'sequence', 'line_no', 'line_number', 'sort'])(
+    'a child whose only sort-named field is `%s` reads it, the same answer as the spec helper',
+    (name) => {
+      const schema = child({ ...DECOYS, [name]: { type: 'number' } });
+      expect({ renderer: sortFieldOf(schema), spec: deriveInlineGridSortField(schema) }).toEqual({ renderer: name, spec: name });
+    },
+  );
+
+  it('a child with no sort-named field has no sortField: no decoy is guessed, the same answer as the spec helper', () => {
+    const schema = child(DECOYS);
+    expect({ renderer: sortFieldOf(schema), spec: deriveInlineGridSortField(schema) }).toEqual({ renderer: undefined, spec: undefined });
+  });
+
+  it('the first sort-named field in field order wins', () => {
+    expect(sortFieldOf(child({ sequence: { type: 'number' }, position: { type: 'number' } }))).toBe('sequence');
+    expect(sortFieldOf(child({ position: { type: 'number' }, sequence: { type: 'number' } }))).toBe('position');
   });
 });

@@ -94,7 +94,7 @@ import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 // [#7414] The SHARED operation-message catalog #7307 built for the data path's
 // operation-level refusals. Second consumer, same mechanism — a second remedy
 // for one defect class is what that module exists to prevent.
-import { renderOperationMessage } from '@objectstack/spec/system';
+import { objectFieldLabelKey, renderOperationMessage } from '@objectstack/spec/system';
 // [#19989] The engine's own update-dispatch predicate, asked rather than
 // re-derived: step 3.6 needs to know which row the ENGINE will write.
 import { resolveEngineUpdateDispatch, type EngineUpdateDispatchData } from '@objectstack/metadata-core';
@@ -213,24 +213,132 @@ export interface WriteImageCheckSeam {
  */
 function userFacingDenialMessage(
   ctx: PluginContext,
-  messageKey: 'permission_denied' | 'record_access_denied' | 'record_change_not_allowed',
+  messageKey: UserFacingDenialKey,
   locale: string | undefined,
+  params?: Record<string, unknown>,
 ): string {
-  let translate:
-    | ((key: string, loc: string, params?: Record<string, unknown>) => string)
-    | undefined;
+  return renderOperationMessage({ messageKey, params }, { locale, translate: denialTranslator(ctx) });
+}
+
+/**
+ * The catalog keys this middleware renders. The first three are the `message`
+ * of the gates #7414 / #7451 localized; the rest are the `userMessage` of the
+ * owner-anchor, queue and field-write refusals ({@link withUserMessage}).
+ */
+type UserFacingDenialKey =
+  | 'permission_denied'
+  | 'record_access_denied'
+  | 'record_change_not_allowed'
+  | 'record_owner_change_denied'
+  | 'record_owner_assign_denied'
+  | 'record_owner_remove_denied'
+  | 'record_queue_change_denied'
+  | 'record_queue_assign_denied'
+  | 'field_edit_denied'
+  | 'field_edit_denied_opaque';
+
+/**
+ * The deployment's `II18nService.t`, when one is registered: the override rung
+ * of the catalog ladder, and the translated-label rung of
+ * {@link fieldEditDenialMessage}. Resolved per call.
+ */
+function denialTranslator(
+  ctx: PluginContext,
+): ((key: string, loc: string, params?: Record<string, unknown>) => string) | undefined {
   try {
     const i18n = ctx.getService<II18nService>('i18n');
     const t = i18n?.t;
     if (typeof t === 'function') {
-      translate = (key, loc, params) => t.call(i18n, key, loc, params);
+      return (key, loc, params) => t.call(i18n, key, loc, params);
     }
   } catch {
     // i18n is optional (ADR-0029 D8 registers it from another plugin, possibly
     // later than this one). The built-in catalog still renders the caller's
     // locale without it.
   }
-  return renderOperationMessage({ messageKey }, { locale, translate });
+  return undefined;
+}
+
+/**
+ * The end user's half of a refusal whose `message` stays the developer
+ * sentence: the owner-anchor, queue and field-write 403s.
+ *
+ * Those three keep `code`, status and `message` byte for byte (the sentence
+ * names `owner_id` and the transfer grants, which a developer reading the
+ * wire needs). What a console user never saw is any of it: the console
+ * replaces every unmarked `403 PERMISSION_DENIED` with its own generic toast,
+ * and shows the producer-declared `userMessage` instead when one is there. So
+ * the user's half rides that channel — `mapDataError` relays it to the REST
+ * body — rendered from the shared operation-message catalog in the caller's
+ * locale, never a grant or an API name.
+ */
+function withUserMessage(refusal: PermissionDeniedError, userMessage: string): PermissionDeniedError {
+  (refusal as PermissionDeniedError & { userMessage?: string }).userMessage = userMessage;
+  return refusal;
+}
+
+/**
+ * The field-write refusal's `userMessage` (step 2.5): `field_edit_denied`
+ * naming the refused fields' LABELS, or `field_edit_denied_opaque` naming none.
+ *
+ * #7451 made "may this sentence name anything?" a per-site judgement. Here the
+ * user did name the fields, by changing them, so naming them back is honest —
+ * but only in a spelling that may reach a toast and only where this caller may
+ * learn it. A field is nameable when BOTH hold:
+ *
+ *  - it has a LABEL: the deployment's translation of the field label in the
+ *    caller's locale, else the declared label. The API name is never the last
+ *    rung (#7414), and a declared label equal to the API name counts as none.
+ *  - the caller READS it: the caller's read guard leaves it readable
+ *    (`computeQueryGuardFieldPerms`, the guard the read path masks with). A
+ *    field withheld from the caller is not named to them, even by label.
+ *
+ * One field that fails either test makes the whole sentence opaque: naming
+ * the others would read as the complete list.
+ */
+function fieldEditDenialMessage(
+  ctx: PluginContext,
+  objectName: string,
+  forbidden: readonly string[],
+  schema: { fields?: Record<string, { label?: unknown } | null | undefined> } | null | undefined,
+  readable: Record<string, { readable: boolean }>,
+  locale: string | undefined,
+): string {
+  const translate = denialTranslator(ctx);
+  const loc = locale ?? 'en';
+  const labels: string[] = [];
+  for (const field of forbidden) {
+    if (readable[field]?.readable === false) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
+    let label: string | undefined;
+    if (translate) {
+      const key = objectFieldLabelKey(objectName, field);
+      try {
+        const translated = translate(key, loc);
+        if (typeof translated === 'string' && translated.trim().length > 0 && translated !== key) label = translated.trim();
+      } catch {
+        // A misbehaving i18n service must not turn a 403 into a 500.
+      }
+    }
+    if (label === undefined) {
+      const declared = schema?.fields?.[field]?.label;
+      if (typeof declared === 'string' && declared.trim().length > 0) label = declared.trim();
+    }
+    if (label === undefined || label === field) return userFacingDenialMessage(ctx, 'field_edit_denied_opaque', locale);
+    labels.push(label);
+  }
+  return userFacingDenialMessage(ctx, 'field_edit_denied', locale, { fields: labelList(labels, loc) });
+}
+
+/**
+ * The labels as one phrase in the caller's locale: each quoted the way the
+ * catalog quotes a field label (`delete_restricted`'s templates), and listed
+ * with the locale's enumeration mark.
+ */
+function labelList(labels: readonly string[], locale: string): string {
+  const lang = locale.toLowerCase();
+  if (lang.startsWith('zh') || lang.startsWith('ja')) return labels.map((l) => `「${l}」`).join('、');
+  if (lang.startsWith('es')) return labels.map((l) => `«${l}»`).join(', ');
+  return labels.map((l) => `“${l}”`).join(', ');
 }
 
 /**
@@ -1350,16 +1458,26 @@ export function registerAuthzMiddleware(
         },
       );
       if (forbidden.length > 0) {
-        throw new PermissionDeniedError(
-          `[Security] Field write denied: not permitted to edit ` +
-            `[${forbidden.join(', ')}] on '${opCtx.object}'`,
-          {
-            operation: opCtx.operation,
-            object: opCtx.object,
-            positions,
-            permissionSets: explicitPermissionSets,
-            forbiddenFields: forbidden,
-          },
+        throw withUserMessage(
+          new PermissionDeniedError(
+            `[Security] Field write denied: not permitted to edit ` +
+              `[${forbidden.join(', ')}] on '${opCtx.object}'`,
+            {
+              operation: opCtx.operation,
+              object: opCtx.object,
+              positions,
+              permissionSets: explicitPermissionSets,
+              forbiddenFields: forbidden,
+            },
+          ),
+          fieldEditDenialMessage(
+            ctx,
+            opCtx.object,
+            forbidden,
+            typeof ql?.getSchema === 'function' ? ql.getSchema(opCtx.object) as any : undefined,
+            this.computeQueryGuardFieldPerms(opCtx.object, secMeta, permissionSets, delegatorSets),
+            opCtx.context?.locale,
+          ),
         );
       }
     }
@@ -1541,27 +1659,42 @@ export function registerAuthzMiddleware(
           const hasQueue = fields.has(QUEUE_FIELD);
           const queues = hasQueue ? this.ownershipQueues() : null;
           const refusalDetails = { operation: opCtx.operation, object: opCtx.object, positions, permissionSets: explicitPermissionSets };
-          const denyOwnerWrite = (action: string): never => {
-            throw new PermissionDeniedError(
-              `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ` +
-                `${action} requires the transfer grant (allowTransfer or modifyAllRecords)`,
-              refusalDetails,
+          // The user's half of each refusal below is `userMessage`, one catalog
+          // key per situation the user is in ({@link withUserMessage}): another
+          // owner given (a transfer, or a claim not admitted), an owner removed
+          // (a disown, or a release with no queue to go back to), a record
+          // created for someone else, a record created in a queue the caller
+          // does not belong to, an existing record's queue changed.
+          const denyOwnerWrite = (action: string, userKey: UserFacingDenialKey): never => {
+            throw withUserMessage(
+              new PermissionDeniedError(
+                `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ` +
+                  `${action} requires the transfer grant (allowTransfer or modifyAllRecords)`,
+                refusalDetails,
+              ),
+              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
             );
           };
           // [ADR-0142 D4] A claim or a release the step did not admit names the
           // condition that failed, and still names the grant for everything else.
-          const denyOwnershipChange = (condition: string): never => {
-            throw new PermissionDeniedError(
-              `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ${condition}; any ` +
-                'other change of ownership requires the transfer grant (allowTransfer or modifyAllRecords)',
-              refusalDetails,
+          const denyOwnershipChange = (condition: string, userKey: UserFacingDenialKey): never => {
+            throw withUserMessage(
+              new PermissionDeniedError(
+                `[Security] Access denied: 'owner_id' on '${opCtx.object}' is system-managed — ${condition}; any ` +
+                  'other change of ownership requires the transfer grant (allowTransfer or modifyAllRecords)',
+                refusalDetails,
+              ),
+              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
             );
           };
-          const denyQueueWrite = (condition: string): never => {
-            throw new PermissionDeniedError(
-              `[Security] Access denied: 'queue' on '${opCtx.object}' is system-managed — ${condition} ` +
-                '(allowTransfer or modifyAllRecords)',
-              refusalDetails,
+          const denyQueueWrite = (condition: string, userKey: UserFacingDenialKey): never => {
+            throw withUserMessage(
+              new PermissionDeniedError(
+                `[Security] Access denied: 'queue' on '${opCtx.object}' is system-managed — ${condition} ` +
+                  '(allowTransfer or modifyAllRecords)',
+                refusalDetails,
+              ),
+              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
             );
           };
           // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
@@ -1624,7 +1757,7 @@ export function registerAuthzMiddleware(
                 if (hasTransferGrant()) {
                   park = writesOwner(row) && (row.owner_id == null || row.owner_id === '');
                 } else if (!(userId != null && queues && (await queues.isMember(String(userId), name, organizationId)))) {
-                  denyQueueWrite(INSERT_QUEUE_REFUSAL);
+                  denyQueueWrite(INSERT_QUEUE_REFUSAL, 'record_queue_assign_denied');
                 }
               }
               if (!writesOwner(row) || row.owner_id == null || row.owner_id === '') {
@@ -1645,7 +1778,7 @@ export function registerAuthzMiddleware(
               ) {
                 // A supplied owner that is not the acting user (or not a valid
                 // scalar id) is a forge — denied without the transfer grant.
-                denyOwnerWrite('creating a record owned by another user');
+                denyOwnerWrite('creating a record owned by another user', 'record_owner_assign_denied');
               }
             }
           } else {
@@ -1719,7 +1852,7 @@ export function registerAuthzMiddleware(
               if (queueWritten) {
                 const echo = !!pre && (row.queue == null || typeof row.queue === 'string') &&
                   queueName(row.queue) === queueName(pre.queue);
-                if (!echo) denyQueueWrite(MOVE_REFUSAL);
+                if (!echo) denyQueueWrite(MOVE_REFUSAL, 'record_queue_change_denied');
               }
               if (!ownerWritten) continue;
               const storedOwner = pre?.owner_id;
@@ -1740,7 +1873,7 @@ export function registerAuthzMiddleware(
                   opCtx.writePrecondition = { ...(opCtx.writePrecondition ?? {}), owner_id: null };
                   continue;
                 }
-                denyOwnershipChange(CLAIM_REFUSAL);
+                denyOwnershipChange(CLAIM_REFUSAL, 'record_owner_change_denied');
               }
               // [ADR-0142 D4] RELEASE — the owner hands the record back to its
               // home queue (the queue is unchanged: a change was refused above),
@@ -1748,9 +1881,12 @@ export function registerAuthzMiddleware(
               // queue it stays what it was: a disown, which needs the grant.
               if (pre && (row.owner_id == null || row.owner_id === '') && self !== null && storedOwner != null && String(storedOwner) === self) {
                 if (hasQueue && queueName(pre.queue) !== null) continue;
-                denyOwnershipChange(RELEASE_REFUSAL);
+                denyOwnershipChange(RELEASE_REFUSAL, 'record_owner_remove_denied');
               }
-              denyOwnerWrite(`changing record ownership on ${opCtx.operation}`);
+              denyOwnerWrite(
+                `changing record ownership on ${opCtx.operation}`,
+                row.owner_id == null || row.owner_id === '' ? 'record_owner_remove_denied' : 'record_owner_change_denied',
+              );
             }
           }
         }

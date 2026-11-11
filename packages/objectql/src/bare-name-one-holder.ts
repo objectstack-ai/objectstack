@@ -176,6 +176,7 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -183,6 +184,8 @@ import {
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
   type BareNameHolder,
   type BareNameOneHolderType,
   type BareNameRegistryType,
@@ -193,7 +196,9 @@ import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-govern
 // overridable baselines and the holder spelling — lives in `@objectstack/core`
 // (`package-scoped-resolution.ts`) beside the package-scoped resolution rule
 // that is written in it, so every reader of either reads one copy. Re-exported
-// here under the same names; the rule it serves is this module's.
+// here under the same names; the rule it serves is this module's. [#32076] The
+// narrowed types (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) joined them, so the
+// metadata protocol, which objectql depends on, reads the same list.
 export type { BareNameRegistryType, BareNameOneHolderType, BareNameHolder } from '@objectstack/core';
 export {
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -201,6 +206,8 @@ export {
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
 };
 
 /** The covered registry types, in the order a refusal lists them. */
@@ -319,25 +326,6 @@ export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unkn
 }
 
 /**
- * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
- * narrowed from the deployment to the namespace (module doc, "The narrowing").
- * Each type joins in its own trailing change, once its by-name readers, its
- * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701), then the object-less `action` (#31697).
- * A type not listed here keeps one package holder per deployment.
- */
-export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
-  'agent',
-  'skill',
-  'action',
-]);
-
-/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
-export function isNamespaceScopedBareNameType(type: unknown): boolean {
-  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
-}
-
-/**
  * Do two PACKAGE holders of `(type, name)` meet under the rule — may one be
  * refused because the other holds the name? Always, for a type that has not
  * narrowed. For a narrowed type, unless both packages declare a namespace and
@@ -345,6 +333,8 @@ export function isNamespaceScopedBareNameType(type: unknown): boolean {
  * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
  * a bare name by `(package, name)` or refuses it naming both. A package with
  * no namespace has no address of its own, so it still meets every holder.
+ * The namespace comparison is `namespacedHoldersMeet` (`@objectstack/spec`),
+ * the copy `composeStacks` reads for the same pair in one artifact.
  */
 export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
@@ -352,7 +342,8 @@ export function bareNameHoldersMeet(
   holderNamespace: string | undefined,
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
-  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+  // The namespace half is spec's one copy, which `composeStacks` reads too.
+  return namespacedHoldersMeet(incomingNamespace, holderNamespace);
 }
 
 /**
