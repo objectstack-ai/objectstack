@@ -71,7 +71,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
@@ -276,5 +276,105 @@ describe('[#21325] the starter ledger cannot outlive its defect or cover a scaff
     for (const { leg } of fired(key)) {
       expect(starterObjects, `${key} in leg ${leg}`).toContain(objectsOf(legs[leg].dir)[Number(index)]);
     }
+  });
+});
+
+/**
+ * PIN (#32153), end to end on a fresh `os init` project (template `app`):
+ * the generator variants this card added pass `os validate`, `os build` and
+ * `os lint` with ZERO findings, and the refusal it added writes nothing.
+ *
+ * The legs above run the `npm create objectstack` starter with each
+ * generator's default invocation; these are the invocations that did not
+ * exist before, on the other scaffolder's project, which carries a starter
+ * app (ADR-0019 D3: at most one) and a views container for its object:
+ *
+ *   os g object ticket                         the starter's style (`Field.*`,
+ *                                              a named export, a field group)
+ *   os g view open_tickets --object ticket     a view named apart from its object
+ *   os g action resolve --object ticket        no flow declared: a declarative update
+ *   os g dashboard overview                    prints the entry for the ONE app
+ *   os g view all_items --object item          the starter object already has a
+ *                                              container: refused, nothing written
+ */
+describe('[#32153] a fresh `os init` project: the new generator variants pass every gate', () => {
+  const INIT_PROJECT = 'gates-init';
+  const INIT_NS = 'gates_init';
+  const VARIANTS = [
+    ['g', 'object', 'ticket'],
+    ['g', 'view', 'open_tickets', '--object', 'ticket'],
+    ['g', 'action', 'resolve', '--object', 'ticket'],
+    ['g', 'dashboard', 'overview'],
+  ] as const;
+  let initRoot = '';
+  let dir = '';
+  const steps = new Map<string, Run>();
+  const gates = {} as Record<Gate, { run: Run; findings: string[] | null }>;
+  let refusal: Run;
+  let viewsBeforeRefusal: string[] = [];
+  let viewsAfterRefusal: string[] = [];
+
+  beforeAll(async () => {
+    initRoot = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-variants-init-'));
+    const init = await os(['init', INIT_PROJECT, '-t', 'app', '--no-install'], initRoot);
+    if (init.code !== 0) throw new Error(`os init failed: ${out(init)}`);
+    dir = join(initRoot, INIT_PROJECT);
+    for (const args of VARIANTS) steps.set(args.join(' '), await os([...args], dir));
+    for (const gate of GATES) {
+      const r = await os([gate, '--json'], dir);
+      gates[gate] = { run: r, findings: findingsOf(gate, r.stdout) };
+    }
+    viewsBeforeRefusal = readdirSync(join(dir, 'src', 'views')).sort();
+    refusal = await os(['g', 'view', 'all_items', '--object', 'item'], dir);
+    viewsAfterRefusal = readdirSync(join(dir, 'src', 'views')).sort();
+  }, RUN_TIMEOUT_MS);
+
+  afterAll(() => {
+    if (initRoot) rmSync(initRoot, { recursive: true, force: true });
+  });
+
+  const read = (...p: string[]) => readFileSync(join(dir, ...p), 'utf-8');
+
+  it.each(VARIANTS.map((args) => args.join(' ')))('`os %s` exits 0', (id) => {
+    const r = steps.get(id)!;
+    expect(r.code, out(r)).toBe(0);
+  });
+
+  it.each(GATES)('then `os %s`: exit 0 and no finding at any severity', (gate) => {
+    const { run: r, findings } = gates[gate];
+    expect(r.code, out(r)).toBe(0);
+    expect(findings, `os ${gate} --json printed no JSON:\n${out(r)}`).not.toBeNull();
+    expect(findings).toEqual([]);
+  });
+
+  it('the object is written in the starter style, and its barrel line re-exports it by name', () => {
+    const object = read('src', 'objects', 'ticket.object.ts');
+    expect(object).toContain('export const ticket = ObjectSchema.create({');
+    expect(object).toMatch(/name: Field\.text\(\{/);
+    expect(object).toContain("fieldGroups: [\n    { key: 'details', label: 'Details' },");
+    expect(read('src', 'objects', 'index.ts')).toContain("export { ticket } from './ticket.object';");
+  });
+
+  it('the view is a named list view of the object, and the action a declarative update', () => {
+    const view = read('src', 'views', 'open_tickets.view.ts');
+    expect(view).toContain(`object: '${INIT_NS}_ticket',`);
+    expect(view).toMatch(/listViews: \{\n {4}open_tickets: \{/);
+    const action = read('src', 'actions', 'resolve.action.ts');
+    expect(action).toContain("operation: 'update',");
+    expect(action).not.toContain("type: 'flow'");
+  });
+
+  it('the dashboard names the navigation entry that lists it, and the one app to add it to', () => {
+    const printed = out(steps.get('g dashboard overview')!);
+    expect(printed).toContain(`dashboardName: '${INIT_NS}_overview_dashboard'`);
+    expect(printed).toContain(`'${INIT_NS}_main_app'`);
+    // `os g` edits no app: the starter app is the one `os init` wrote.
+    expect(read('src', 'apps', 'main.app.ts')).not.toContain('overview');
+  });
+
+  it('a named view for an object that already has a container is refused, and nothing is written', () => {
+    expect(refusal.code, out(refusal)).toBe(1);
+    expect(out(refusal)).toContain('listViews');
+    expect(viewsAfterRefusal).toEqual(viewsBeforeRefusal);
   });
 });
