@@ -77,7 +77,7 @@ const SERVICE_ITEMS: Record<string, any> = {
     healthy_page: { name: 'healthy_page', label: 'Healthy', _packageId: HEALTHY_PKG },
 };
 
-function boot(opts: { getMetaTypes?: boolean } = {}) {
+function boot(opts: { getMetaTypes?: boolean; security?: Record<string, unknown> } = {}) {
     const disabled = { on: true };
     const getMetaItem = vi.fn(async ({ type, name, packageId }: any): Promise<any> => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
@@ -121,7 +121,9 @@ function boot(opts: { getMetaTypes?: boolean } = {}) {
         list: vi.fn(async () => []),
     };
     const auth = { api: { getSession: async () => ({ user: { id: 'u_session' } }) } };
-    const services: Record<string, any> = { protocol, auth, objectql: { registry }, metadata };
+    const services: Record<string, any> = {
+        protocol, auth, objectql: { registry }, metadata, ...(opts.security ? { security: opts.security } : {}),
+    };
     const get = (n: string) => services[n] ?? null;
     const kernel = {
         context: { getService: get },
@@ -334,4 +336,53 @@ describe('#24210 — the layered view of a disabled package\'s non-object item, 
         (stack.registry as { isPackageDisabled?: unknown }).isPackageDisabled = undefined;
         expect((await layers(stack, 'demo_page')).response?.body?.data?.effective?.name).toBe('demo_page');
     });
+});
+
+/**
+ * [ruling record 6787890900] An object the caller may not read is answered on
+ * every dispatcher object door exactly as a name with nothing behind it —
+ * decided BEFORE any store is read, so the protocol's own refusal of a
+ * disabled package's object never reaches that caller.
+ */
+describe('[ruling record 6787890900] the dispatcher: an object the caller may not read is answered as a missing name before any store read', () => {
+    /** Admits every object but {@link DISABLED}. */
+    const hiding = () => ({
+        getMetadataReadableFields: async () => ['status'],
+        canReadObject: async (object: string) => object !== DISABLED,
+    });
+    const DOORS: Record<string, (stack: ReturnType<typeof boot>, name: string) => Promise<any>> = {
+        plain: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}`, {}, {}, SESSION()),
+        layers: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}/layers`, {}, {}, SESSION()),
+        layersFlag: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}`, {}, { layers: 'true' }, SESSION()),
+        state: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}/state/status`, {}, { from: 'open' }, SESSION()),
+        published: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}/published`, {}, {}, SESSION()),
+        legacy: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/${name}`, {}, {}, SESSION()),
+    };
+
+    it('precondition: without the object read, each door answers the disabled package\'s object with the protocol\'s refusal', async () => {
+        const stack = boot();
+        for (const door of ['plain', 'layers', 'layersFlag', 'state', 'published', 'legacy']) {
+            expectObjectRefusal(await DOORS[door](stack, DISABLED));
+        }
+    });
+
+    for (const [door, read] of Object.entries(DOORS)) {
+        it(`${door}: byte for byte the missing name's answer, and no store is asked about the object`, async () => {
+            const stack = boot({ security: hiding() });
+            const missing = await read(stack, 'no_such_widget');
+            expect(missing.response?.status).toBe(404);
+            stack.getMetaItem.mockClear();
+            stack.getMetaItemLayered.mockClear();
+            stack.registry.getObject.mockClear();
+            const hidden = await read(stack, DISABLED);
+            expect(JSON.stringify(hidden.response)).toBe(JSON.stringify(missing.response));
+            for (const spy of [stack.getMetaItem, stack.getMetaItemLayered]) {
+                expect(spy.mock.calls.filter(([request]: any[]) => request?.name === DISABLED)).toEqual([]);
+            }
+            expect(stack.registry.getObject.mock.calls.filter(([name]) => name === DISABLED)).toEqual([]);
+            // Control: the readable object, same caller and service, is served
+            // (`/published` publishes nothing for it in this harness).
+            if (door !== 'published') expect((await read(stack, HEALTHY)).response?.status).toBe(200);
+        });
+    }
 });

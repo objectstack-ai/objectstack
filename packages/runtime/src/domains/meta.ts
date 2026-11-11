@@ -942,6 +942,10 @@ async function answerMetaLayered(
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture, memberSelector = {} } = request;
+    // [ruling record 6787890900] An object the caller may not read is the
+    // layered chain's absence, answered BEFORE the store is read, so no store
+    // answer about it (a disabled package's refusal among them) reaches them.
+    if (maskPosture.kind === 'hidden') return withHeaders(deps.error('Not found', 404), headers);
     const mayWriteItem = saveVerdict().allowed;
     // [#29814] The pending draft layer, asked for only when this caller may
     // read pending drafts ({@link mayReadPendingDrafts}, admitted in its own
@@ -1282,6 +1286,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const arity = metaQueryArityRefusal('state', query);
         if (arity) return queryRefusalAnswer(deps, arity);
         const from = query?.from !== undefined ? String(query.from) : undefined;
+        // [ruling record 6787890900] This door reads an object's schema, so it
+        // resolves the caller's posture first: an object the caller may not read
+        // is this door's answer for no object, before the registry is read.
+        let statePosture: ObjectSchemaMaskPosture;
+        try {
+            statePosture = await (await resolveObjectMasker(deps, _context, 'object'))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+        if (statePosture.kind === 'hidden') return { handled: true, response: deps.error('Object not found', 404) };
         const qlService = await deps.getObjectQL(_context);
         // [#7557, #24210] An API door reading the registry, a resolution
         // reader: an object of a disabled package gets the item read's answer.
@@ -1493,6 +1508,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
+
+        // [ruling record 6787890900] An object the caller may not read is this
+        // door's answer for a name with nothing published behind it, BEFORE any
+        // store is read, so no store answer about it (a disabled package's
+        // refusal among them) reaches the caller.
+        if (publishedMasker) {
+            let earlyPosture: ObjectSchemaMaskPosture;
+            try {
+                earlyPosture = await publishedMasker(name);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+                throw maskError;
+            }
+            if (earlyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
+        }
 
         // [#7557, #24210] A disabled package's item is answered as a name with
         // nothing behind it (every exit below ends in this same `404`), as
@@ -2068,6 +2098,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             // Try specific calls based on type
             if (type === 'objects' || type === 'object') {
+                // [ruling record 6787890900] An object the caller may not read
+                // is this branch's answer for a name with nothing behind it,
+                // BEFORE any store is read, so no store answer about it (a
+                // disabled package's refusal among them) reaches the caller. A
+                // NAMED member is the protocol's to refuse, for every name alike.
+                if (maskPosture.kind === 'hidden' && !memberNamed) {
+                    return { handled: true, response: deps.error('Not found', 404) };
+                }
                 // Check whether the kernel is project-scoped. When it is,
                 // the process-wide SchemaRegistry is unsafe to query
                 // directly — it would return objects that other projects
@@ -2566,6 +2604,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `book`) serves an object SCHEMA. An anonymous caller never reaches
             // a schema — the deny it skipped is answered here instead.
             if (anonymous) return anonymousDeny();
+            // [ruling record 6787890900] An object the caller may not read is
+            // this exit's answer for a name that names nothing (below), BEFORE
+            // the registry is asked about it.
+            const legacyMasker = await resolveObjectMasker(deps, _context, 'object');
+            let legacyPosture: ObjectSchemaMaskPosture;
+            try {
+                legacyPosture = await legacyMasker(typeOrName);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, typeOrName);
+                throw maskError;
+            }
+            if (legacyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
             // [#7557, #24210] The registry keeps serving a disabled package's
             // object (a resolution reader), so this exit answers it as the item
             // read does.

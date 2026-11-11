@@ -181,6 +181,7 @@ function setup(objectQLProvider?: () => Promise<unknown>, caller: Record<string,
     };
     return {
         ...h,
+        rest,
         snapshot,
         published: (type: string, name: string) => get('/:type/:name/published', `/${type}/${name}/published`, { type, name }),
         state: (name: string) => get('/object/:name/state/:field', `/object/${name}/state/status`, { name, field: 'status' }, { from: 'open' }),
@@ -420,5 +421,61 @@ describe('[#24210] RestServer: the layered view of a disabled package\'s item, b
         // No engine to ask, so nothing is withheld: the doors' answer before #24210.
         expect(await absent.layers('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
         expect(await absent.layersFlag('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
+    }, 60_000);
+});
+
+/**
+ * [ruling record 6787890900] An object the caller may not read is answered on
+ * every object door exactly as a name with nothing behind it — decided BEFORE
+ * the store is read, so no store answer about that object (the protocol's own
+ * refusal of a disabled package's object among them) reaches the caller.
+ */
+describe('[ruling record 6787890900] RestServer: an object the caller may not read is answered as a missing name before any store read', () => {
+    /** A security service that admits every object but `demo_gadget`. */
+    const hidingDemo = () => ({
+        getMetadataReadableFields: async () => ['name'],
+        canReadObject: async (object: string) => object !== 'demo_gadget',
+    });
+    const answerOf = (r: { status: number; body: unknown; headers?: Record<string, string> }) =>
+        JSON.stringify({ status: r.status, body: r.body, headers: r.headers ?? {} });
+
+    for (const disabledPackage of [false, true]) {
+        it(`the plain read, /layers, ?layers=true and /state answer exactly as for a missing name${disabledPackage ? ' — its package disabled' : ''}`, async () => {
+            const host = setup();
+            await seed(host.protocol, host.registry);
+            (host.rest as any).securityServiceProvider = async () => hidingDemo();
+            if (disabledPackage) host.registry.disablePackage(PKG);
+            const layered = vi.spyOn(host.protocol as any, 'getMetaItemLayered');
+            const doors = {
+                plain: (name: string) => host.plain('object', name),
+                layers: (name: string) => host.layers('object', name),
+                layersFlag: (name: string) => host.layersFlag('object', name),
+                state: (name: string) => host.state(name),
+            };
+            for (const [door, read] of Object.entries(doors)) {
+                const missing = await read('no_such_gadget');
+                expect(missing.status, door).toBe(404);
+                layered.mockClear();
+                expect(answerOf(await read('demo_gadget')), door).toBe(answerOf(missing));
+                // Decided before the store: the layered read is never asked about it.
+                expect(layered.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+            }
+            // Control: the readable object, same caller and service, is served on every door.
+            expect((await doors.plain('healthy_gadget')).status).toBe(200);
+            expect((await doors.layers('healthy_gadget')).status).toBe(200);
+            expect((await doors.state('healthy_gadget')).status).toBe(200);
+        }, 60_000);
+    }
+
+    it('/state: an object read that cannot be evaluated is the field-visibility fault, never the state answer', async () => {
+        const host = setup();
+        await seed(host.protocol, host.registry);
+        (host.rest as any).securityServiceProvider = async () => ({
+            getMetadataReadableFields: async () => ['name'],
+            canReadObject: async () => { throw new Error('security service unhealthy (test)'); },
+        });
+        const answer = await host.state('healthy_gadget');
+        expect({ status: answer.status, code: answer.body?.error?.code ?? answer.body?.code })
+            .toEqual({ status: 503, code: 'FIELD_VISIBILITY_UNRESOLVED' });
     }, 60_000);
 });
