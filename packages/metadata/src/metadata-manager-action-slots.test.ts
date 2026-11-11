@@ -66,7 +66,7 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
   describe('[contract review G1] an action is slotted by its identity, (package, object, name): two objects\' actions of one name never meet', () => {
     const bound = (packageId: string, label: string, objectName: string) => ({ ...shipped(packageId, label), objectName });
 
-    it('two packages\' same-named actions bound to two different objects are both kept, each read by its package; the bare read is not refused and answers the one written last, as the bare-name map did', async () => {
+    it('[#32244] two packages\' same-named actions bound to two different objects are both kept, each read by its package; the bare read is the D3 refusal naming each package with its object (BASE: the one written last answered)', async () => {
       const manager = new MetadataManager({ formats: ['json'], loaders: [] });
       manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'alpha_item'));
       manager.registerInMemory('action', 'digest', bound(BETA, 'beta', 'beta_item'));
@@ -74,10 +74,30 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
       expect(await manager.listNames('action')).toEqual(['digest']);
       expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label).toBe('alpha');
       expect(((await manager.get('action', 'digest', BETA)) as any)?.label).toBe('beta');
-      expect(((await manager.get('action', 'digest')) as any)?.label, 'not refused: two identities, one holder each').toBe('beta');
-      expect(((await manager.getDiagnosed('action', 'digest')).data as any)?.label).toBe('beta');
-      manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha again', 'alpha_item'));
-      expect(((await manager.get('action', 'digest')) as any)?.label, 'the one written last').toBe('alpha again');
+      for (const read of [() => manager.get('action', 'digest'), () => manager.getDiagnosed('action', 'digest')]) {
+        const err = await read().then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+        expect(err, 'the bare read refuses, never the one written last').toBeInstanceOf(PackageScopedNameRefusedError);
+        expect([err!.code, err!.status, err!.refusal.reason, err!.refusal.callerPackageId])
+          .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', null]);
+        expect(err!.refusal.candidates).toEqual([
+          { kind: 'package', packageId: ALPHA },
+          { kind: 'package', packageId: BETA },
+        ]);
+        // Each package is named with the object it binds the name to.
+        expect(err!.message).toContain(`package "${ALPHA}" binds it to object "alpha_item"`);
+        expect(err!.message).toContain(`package "${BETA}" binds it to object "beta_item"`);
+      }
+    });
+
+    it('[#32244] one package\'s action bound to an object beside another package\'s object-less one: the bare read is refused, naming the object-less one as such', async () => {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'alpha_item'));
+      manager.registerInMemory('action', 'digest', shipped(BETA, 'beta'));
+      const err = await manager.get('action', 'digest').then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+      expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect(err!.refusal.candidates.map((c: any) => c.packageId)).toEqual([ALPHA, BETA]);
+      expect(err!.message).toContain(`package "${BETA}" binds it to no object`);
+      expect(((await manager.get('action', 'digest', BETA)) as any)?.label, '?package= is unchanged').toBe('beta');
     });
 
     it('two packages\' same-named actions bound to ONE object are the two-holder case: the bare read is refused naming both', async () => {
@@ -99,6 +119,11 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
       manager.registerInMemory('action', 'digest', bound(ALPHA, 'on two', 'two_item'));
       expect(((await manager.list('action')) as any[]).map((item) => item.label)).toEqual(['on one', 'on two']);
       expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label).toBe('on two');
+      // [#32244] CONTROL: one holder, so the bare read is not refused; it answers the one written last, as before.
+      expect(((await manager.get('action', 'digest')) as any)?.label).toBe('on two');
+      expect(((await manager.getDiagnosed('action', 'digest')).data as any)?.label).toBe('on two');
+      manager.registerInMemory('action', 'digest', bound(ALPHA, 'on one again', 'one_item'));
+      expect(((await manager.get('action', 'digest')) as any)?.label).toBe('on one again');
       await manager.unregister('action', 'digest');
       expect(await manager.exists('action', 'digest')).toBe(false);
     });

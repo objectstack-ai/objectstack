@@ -49,7 +49,7 @@ import { RecordPageProvenanceContext } from './recordPageProvenance';
 import { SchemaRenderer, SchemaErrorBoundary, toRenderableSchema, useSafeFieldLabel, useDataInvalidation, useInlineEdit, useRowPredicate, resolveApprovalLock, usePrintPage, useRecordContext } from '@object-ui/react';
 import { buildExpandFields, declaredNameField, getRecordDisplayName, formatTitleTemplate, recordDelete, recordDisplayValueAt, resolveAffordance, toDisplayDate, userActionPredicates, withoutDeniedFields } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
-import { useLocalization, useDisplayLocale, resolveFieldCurrency } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, resolveFieldCurrency, recordCurrencyPath } from '@object-ui/i18n';
 import type { DetailViewSchema, DataSource, ActionSchema, SchemaNode } from '@object-ui/types';
 import { useDetailTranslation } from './useDetailTranslation';
 import { useRecordEditable } from './useRecordEditable';
@@ -751,7 +751,15 @@ export const DetailView: React.FC<DetailViewProps> = ({
         //
         // An unanswered policy filters nothing, exactly as `gatedSchema` above
         // defers; `perms` is in this effect's dependency list.
-        const expandable = buildExpandFields(resolvedSchema?.fields, allFields);
+        // [ADR-0144 D2] A shown amount that follows its parent's currency
+        // reads the code off the expanded `master_detail`, shown or not.
+        const parentCurrencyRoots = allFields
+          .map((f: any) => recordCurrencyPath((resolvedSchema?.fields as Record<string, any> | undefined)?.[typeof f === 'string' ? f : f?.name])?.via)
+          .filter((via): via is string => typeof via === 'string');
+        const expandable = buildExpandFields(
+          resolvedSchema?.fields,
+          allFields.length > 0 ? [...allFields, ...parentCurrencyRoots] : allFields,
+        );
         const expandFields = !perms?.isLoaded
           ? expandable
           : expandable.filter((f) => perms.checkField(objectName, f, 'read'));

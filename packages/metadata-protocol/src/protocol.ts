@@ -618,6 +618,7 @@ import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
 import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.js';
+import type { RegistryQuestion } from './registry-question.js';
 // [#29985 codemod] Package revert, duplicate, import, orphans, commits, revertCommit, rollback: the members below delegate to its facet, `ProtocolPackageCommitsFacet`.
 import { ProtocolPackageCommitsFacet } from './protocol-package-commits.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the members below delegate to its facet, `ProtocolDiffDeleteLoadFacet`.
@@ -3153,9 +3154,10 @@ export class ObjectStackProtocolImplementation implements
     private objectRegistrationRefusal(
         body: unknown,
         layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+        options: { againstRegistry?: boolean } = {},
     ): Error | null {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer);
+        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer, options);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -8853,7 +8855,9 @@ export class ObjectStackProtocolImplementation implements
      * unknown object at `objects.<name>`, naming it. [#29279] `door` names
      * what the finding says was looked for: a save counts an object saved
      * here, a draft's publish (`'publish'`) only a published object or an
-     * object draft of its batch.
+     * object draft of its batch. [#32162] `savingPackage` is the package the
+     * write lands in: the set's already-held grants are read from that
+     * package's own item (ADR-0150 D3), never another holder's of the name.
      */
     private unknownGrantObjectSaveRefusal(
         singularType: string,
@@ -8863,6 +8867,7 @@ export class ObjectStackProtocolImplementation implements
         writeFace?: MetadataWriteFace,
         door?: 'save' | 'publish',
         inherited?: readonly string[],
+        savingPackage?: string | null,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -8870,7 +8875,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited, savingPackage);
     }
 
     /**
@@ -9666,6 +9671,8 @@ export class ObjectStackProtocolImplementation implements
          * all address it, so the body judged is the body that goes live.
          */
         member?: string;
+        /** The registry question this promotion asks (`registry-question.ts`). */
+        registryQuestion: RegistryQuestion;
     }): Promise<{
         singularType: string;
         /**

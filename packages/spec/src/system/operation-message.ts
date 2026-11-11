@@ -34,7 +34,8 @@
  * | `record_owner_change_denied` | they tried to give this record a different owner (a transfer, or taking an unowned record they are not admitted to) | ask an administrator |
  * | `record_owner_assign_denied` | they tried to create a record owned by someone else | leave the owner blank or set it to themselves, or ask an administrator |
  * | `record_owner_remove_denied` | they tried to leave this record with no owner | ask an administrator |
- * | `record_queue_change_denied` | they tried to put this record in a queue, or move it to another, without the right to | ask an administrator |
+ * | `record_queue_change_denied` | they tried to change which queue an existing record is in (put it in one, take it out, or move it to another) without the right to | ask an administrator |
+ * | `record_queue_assign_denied` | they tried to create a record in a queue they do not belong to | leave the queue blank or choose one they belong to, or ask an administrator |
  * | `field_edit_denied` / `field_edit_denied_opaque` | they changed a field their permissions do not let them edit | undo that change, or ask an administrator |
  *
  * `record_write_denied` (commit aa5994e17) is NOT `record_access_denied` restated: the
@@ -210,10 +211,17 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * end user's half beside it, so a client that shows `userMessage` shows them.
  * They name no grant and no API name, re-derived per site:
  *
- *   - the four ownership and queue keys take no placeholders: the user knows
+ *   - the five ownership and queue keys take no placeholders: the user knows
  *     which record and which owner or queue they just entered, and the only
  *     other nameable facts are the transfer grants, which are internal
  *     authorization vocabulary.
+ *   - the queue keys split by verb for the same reason the owner keys do
+ *     (`record_owner_assign_denied` beside `record_owner_change_denied`): the
+ *     user can do something different. A create naming a queue is admitted
+ *     for a member of that queue, so the user refused there can leave the
+ *     queue blank or choose one they belong to. A change of an existing
+ *     record's queue is admitted for no member, so the only next step is an
+ *     administrator. One wire code, two sentences.
  *   - `field_edit_denied` takes `{{fields}}`: the refused fields' LABELS in the
  *     caller's locale, as a list. A label is named only when the field has one
  *     (a translated or declared label, never the API name as the last rung)
@@ -242,6 +250,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'You do not have permission to remove the owner from this record. Contact your administrator if it needs a different owner.',
     record_queue_change_denied:
       'You do not have permission to change which queue this record is in. Contact your administrator if it needs to be moved.',
+    record_queue_assign_denied:
+      'You do not have permission to create a record in that queue. Leave the queue blank or choose a queue you belong to, or contact your administrator.',
     field_edit_denied:
       'You do not have permission to edit {{fields}}. Undo those changes and try again, or contact your administrator if you need access.',
     field_edit_denied_opaque:
@@ -265,6 +275,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     record_owner_assign_denied: '您无权创建负责人为他人的记录，请将负责人留空或设为自己，或联系管理员。',
     record_owner_remove_denied: '您无权清除这条记录的负责人，如需更换负责人请联系管理员。',
     record_queue_change_denied: '您无权更改这条记录所在的队列，如需调整请联系管理员。',
+    record_queue_assign_denied: '您无权在该队列中创建记录，请将队列留空或选择您所属的队列，或联系管理员。',
     field_edit_denied: '您无权编辑{{fields}}，请撤销这些修改后重试，或联系管理员。',
     field_edit_denied_opaque: '您无权编辑所修改的部分字段，请撤销这些修改后重试，或联系管理员。',
     delete_restricted:
@@ -294,6 +305,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'このレコードの所有者を削除する権限がありません。所有者の変更が必要な場合は管理者にお問い合わせください。',
     record_queue_change_denied:
       'このレコードのキューを変更する権限がありません。移動が必要な場合は管理者にお問い合わせください。',
+    record_queue_assign_denied:
+      '指定したキューにレコードを作成する権限がありません。キューを空欄にするか自分が所属するキューを選択するか、管理者にお問い合わせください。',
     field_edit_denied:
       '{{fields}}を編集する権限がありません。その変更を取り消して再試行するか、管理者にお問い合わせください。',
     field_edit_denied_opaque:
@@ -326,6 +339,8 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
       'No tiene permiso para quitar el propietario de este registro. Póngase en contacto con su administrador si necesita otro propietario.',
     record_queue_change_denied:
       'No tiene permiso para cambiar la cola en la que está este registro. Póngase en contacto con su administrador si es necesario moverlo.',
+    record_queue_assign_denied:
+      'No tiene permiso para crear un registro en esa cola. Deje la cola vacía o elija una cola a la que pertenezca, o póngase en contacto con su administrador.',
     field_edit_denied:
       'No tiene permiso para editar {{fields}}. Deshaga esos cambios e inténtelo de nuevo, o póngase en contacto con su administrador si necesita acceso.',
     field_edit_denied_opaque:
