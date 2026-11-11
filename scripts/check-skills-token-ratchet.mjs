@@ -882,7 +882,21 @@ export const CEILINGS = new Map([
   // down at the landed count, zero headroom.
   ['skills/objectstack-data/rules/field-types.md', 3208],
   ['skills/objectstack-data/rules/indexing.md', 3241],
-  ['skills/objectstack-data/rules/lifecycle.md', 1590],
+  // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
+  // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
+  // `class: 'record'` + retention example (home: the Lifecycle Classes `record` row,
+  // "policies FORBIDDEN"), the ❌ `'2 weeks'` duration example (home: the "Duration
+  // literals" line), and the intro clause "this page covers the rows' retention,
+  // rotation and archival" (home: the first sentence). 6358 + 1574 - 296 = 7636 bytes
+  // -> 1909 tokens, zero headroom, ceiling +319, pinned AT the measurement. Standing
+  // ruling (2026-10-27, tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」;
+  // recognised path per ruling record 6513306068.
+  // 1909 -> 1931 (#32364 contract-review should-fix, 2026-11-11, same amendment): the
+  // section names its second limit, that no verifier reads the checkpoints back yet
+  // (+85 B, net of the expiry sentence it now shares). No same-file restatement was
+  // left to cut. 7636 + 85 = 7721 bytes -> 1931 tokens, zero headroom, pinned AT the
+  // measurement.
+  ['skills/objectstack-data/rules/lifecycle.md', 1931],
   ['skills/objectstack-data/rules/naming.md', 773],
   // 3778 -> 3676: RE-LOCK at the landed count (#19715, card item 4). A 5-line
   // table of contents (+154 tokens) landed inside the row's 256 tokens of
