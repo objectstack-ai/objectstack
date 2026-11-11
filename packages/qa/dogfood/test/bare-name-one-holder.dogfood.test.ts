@@ -18,7 +18,21 @@
 //     holders and the rename, and installs nothing;
 //   - the same door refusing a package that redeclares the showcase's own
 //     mapping and dataset names, naming the showcase;
-//   - CONTROL: a package declaring fresh names installs.
+//   - CONTROL: a package declaring fresh names installs;
+//   - [#32070] the picklist's by-name read on that clash answers by ADR-0150
+//     D3: the bare `GET /meta/picklist/NAME` is 409 naming both holders, each
+//     qualified address reaches its own list, a qualifier that does not hold
+//     the name is refused, and each field still serves its own package's
+//     options (child E6). CONTROL: a name one package holds is served as
+//     before at the bare and the holder's addresses.
+//
+// [#32071, ADR-0150 D3] The same boot drives `mapping`'s by-name readers,
+// which consult `(package, name)` and name no package: a name two packages
+// hold is refused naming both (bare `/meta`, the import door's `mappingName`),
+// the qualified address and `?package=` reach each holder, and one holder —
+// including a package's mapping into an object a package it depends on owns
+// (`zeta` into `alpha_item`) — answers as before. The connector pull's read is
+// the same protocol read, pinned in service-automation's `connector-pull.test.ts`.
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,6 +51,8 @@ const SHOWCASE_DATASET = 'showcase_task_metrics';
 const PICKLIST = 'qa_shared_status';
 const MAPPING = 'qa_shared_mapping';
 const DATASET = 'qa_shared_dataset';
+/** A picklist only `alpha` holds: the one-holder CONTROL. */
+const SOLO_PICKLIST = 'qa_alpha_status';
 
 const picklist = (p: string, name = PICKLIST) => ({
   name, label: `${p} status`, options: [{ label: `${p} one`, value: `${p}_one` }],
@@ -66,9 +82,24 @@ function bootPackage(p: 'alpha' | 'beta') {
         },
       },
     ],
-    picklists: [picklist(p)],
+    picklists: [picklist(p), ...(p === 'alpha' ? [picklist(p, SOLO_PICKLIST)] : [])],
     mappings: [mapping(p)],
     datasets: [dataset(p)],
+  } as never);
+}
+
+/**
+ * [#32071] A package that depends on `alpha` and ships the one holder of a
+ * mapping into `alpha`'s object: the cross-package one-holder import.
+ */
+const ZETA_MAPPING = 'qa_zeta_into_alpha';
+function zetaPackage() {
+  return defineStack({
+    manifest: {
+      id: 'com.qa.bare.zeta', namespace: 'zeta', name: 'qa_bare_zeta', version: '1.0.0', type: 'app',
+      dependencies: { 'com.qa.bare.alpha': '^1.0.0' },
+    },
+    mappings: [mapping('zeta', ZETA_MAPPING, 'alpha_item')],
   } as never);
 }
 
@@ -133,6 +164,7 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
       extraPlugins: [
         new AppPlugin(bootPackage('alpha') as never),
         new AppPlugin(bootPackage('beta') as never),
+        new AppPlugin(zetaPackage() as never),
         new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir }),
       ],
     }));
@@ -185,6 +217,121 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     expect(message).toContain(SHOWCASE_PKG);
     expect(message).toContain(`"delta_${SHOWCASE_MAPPING}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  });
+
+  // ── [#32071] mapping's by-name readers, on the clash this boot holds ──
+
+  const metaRead = async (path: string) => {
+    const r = await stack.apiAs(admin, 'GET', path);
+    return { status: r.status, body: (await r.json()) as any };
+  };
+  const importDry = async (object: string, mappingName: string) => {
+    const r = await stack.apiAs(admin, 'POST', `/data/${object}/import`, { format: 'csv', csv: 'Name\nx', mappingName, dryRun: true });
+    return { status: r.status, body: (await r.json()) as any };
+  };
+  const labelIn = (body: any) => body?.item?.label ?? body?.data?.item?.label;
+
+  it('mapping: the bare /meta read of a name two packages hold is 409 RESOURCE_CONFLICT naming both', async () => {
+    const { status, body } = await metaRead(`/meta/mapping/${MAPPING}`);
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    const message = JSON.stringify(body);
+    expect(message).toContain('com.qa.bare.alpha');
+    expect(message).toContain('com.qa.bare.beta');
+  });
+
+  it('mapping: the qualified address and ?package= each reach their own holder', async () => {
+    for (const p of ['alpha', 'beta'] as const) {
+      const qualified = await metaRead(`/meta/mapping/${p}/${MAPPING}`);
+      expect([qualified.status, labelIn(qualified.body)], JSON.stringify(qualified.body)).toEqual([200, `${p} mapping`]);
+      const byPackage = await metaRead(`/meta/mapping/${MAPPING}?package=com.qa.bare.${p}`);
+      expect([byPackage.status, labelIn(byPackage.body)], JSON.stringify(byPackage.body)).toEqual([200, `${p} mapping`]);
+    }
+  });
+
+  it('mapping: importing by a name two packages hold is 409 RESOURCE_CONFLICT naming both, never the first holder\'s MAPPING_TARGET_MISMATCH', async () => {
+    for (const object of ['alpha_item', 'beta_item']) {
+      const { status, body } = await importDry(object, MAPPING);
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(String(body?.error)).toContain('com.qa.bare.alpha');
+      expect(String(body?.error)).toContain('com.qa.bare.beta');
+    }
+  });
+
+  it('mapping: an address naming a package that does not hold the name is 409 naming its holder, never the holder\'s item under that address', async () => {
+    for (const path of [`/meta/mapping/beta/${ZETA_MAPPING}`, `/meta/mapping/${ZETA_MAPPING}?package=com.qa.bare.beta`]) {
+      const { status, body } = await metaRead(path);
+      expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(JSON.stringify(body)).toContain('com.qa.bare.zeta');
+    }
+  });
+
+  it('CONTROL — mapping: one holder answers as before, a package\'s mapping into the object of a package it depends on included', async () => {
+    const own = await metaRead(`/meta/mapping/${SHOWCASE_MAPPING}`);
+    expect([own.status, own.body?.item?._packageId ?? own.body?.data?.item?._packageId]).toEqual([200, SHOWCASE_PKG]);
+    const cross = await metaRead(`/meta/mapping/${ZETA_MAPPING}`);
+    expect([cross.status, labelIn(cross.body)], JSON.stringify(cross.body)).toEqual([200, 'zeta mapping']);
+    const imported = await importDry('alpha_item', ZETA_MAPPING);
+    expect([imported.status, imported.body?.ok, imported.body?.errors], JSON.stringify(imported.body)).toEqual([200, 1, 0]);
+    const mismatch = await importDry('beta_item', ZETA_MAPPING);
+    expect([mismatch.status, codeOf(mismatch.body)], JSON.stringify(mismatch.body)).toEqual([400, 'MAPPING_TARGET_MISMATCH']);
+  });
+
+  describe('[#32070] the picklist\'s by-name read answers by package (ADR-0150 D3)', () => {
+    const read = async (path: string) => {
+      const res = await stack.apiAs(admin, 'GET', path);
+      return { status: res.status, body: (await res.json()) as any };
+    };
+    const labelOf = (body: any) => body?.item?.label ?? body?.data?.item?.label;
+    const sentenceOf = (body: any) => String(typeof body?.error === 'string' ? body.error : body?.error?.message ?? '');
+
+    it('the bare read of a name both packages hold is 409 RESOURCE_CONFLICT naming both, never the first registered', async () => {
+      const { status, body } = await read(`/meta/picklist/${PICKLIST}`);
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([409, 'RESOURCE_CONFLICT']);
+      expect(sentenceOf(body)).toContain('com.qa.bare.alpha');
+      expect(sentenceOf(body)).toContain('com.qa.bare.beta');
+    });
+
+    it('each namespace address and each `?package=` reaches its own package\'s list', async () => {
+      for (const p of ['alpha', 'beta']) {
+        for (const path of [`/meta/picklist/${p}/${PICKLIST}`, `/meta/picklist/${PICKLIST}?package=com.qa.bare.${p}`]) {
+          const { status, body } = await read(path);
+          expect(status, `${path} ${JSON.stringify(body)}`).toBe(200);
+          expect(labelOf(body), path).toBe(`${p} status`);
+        }
+      }
+    });
+
+    // One case per shape, so each one reds on its own: before this card each
+    // answered 200 with alpha's list for an address that does not name alpha.
+    for (const [shape, path] of [
+      ['the namespace address', `/meta/picklist/beta/${SOLO_PICKLIST}`],
+      ['`?package=`', `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.beta`],
+      ['the `_env` address', `/meta/picklist/_env/${SOLO_PICKLIST}`],
+    ] as const) {
+      it(`${shape} of a qualifier that does not hold the name is refused naming its holder, never served another package's list`, async () => {
+        const { status, body } = await read(path);
+        expect([status, codeOf(body)], `${path} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(sentenceOf(body), path).toContain('com.qa.bare.alpha');
+      });
+    }
+
+    it('CONTROL: a name one package holds is served at the bare address and at the holder\'s qualified addresses', async () => {
+      for (const path of [`/meta/picklist/${SOLO_PICKLIST}`, `/meta/picklist/alpha/${SOLO_PICKLIST}`, `/meta/picklist/${SOLO_PICKLIST}?package=com.qa.bare.alpha`]) {
+        const { status, body } = await read(path);
+        expect(status, `${path} ${JSON.stringify(body)}`).toBe(200);
+        expect(labelOf(body), path).toBe('alpha status');
+      }
+    });
+
+    it('each field still serves its own package\'s options (child E6)', async () => {
+      for (const p of ['alpha', 'beta']) {
+        const { status, body } = await read(`/meta/object/${p}_item`);
+        expect(status).toBe(200);
+        const object = body?.data ?? body;
+        const options = object?.fields?.status?.options ?? object?.item?.fields?.status?.options;
+        expect(options, `${p}_item.status`).toEqual([{ label: `${p} one`, value: `${p}_one` }]);
+      }
+    });
   });
 
   it('CONTROL — install-local of a package declaring fresh names installs', async () => {

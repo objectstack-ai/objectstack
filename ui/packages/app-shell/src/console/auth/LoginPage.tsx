@@ -202,6 +202,7 @@ export function LoginPage() {
           usePhoneOtpText: t('auth.login.usePhoneOtpText'),
           usePasswordSignInText: t('auth.login.usePasswordSignInText'),
           ssoButton: t('auth.login.ssoButton'),
+          ssoEmailRequiredText: t('auth.login.ssoEmailRequiredText'),
           ssoOnlyDescription: t('auth.login.ssoOnlyDescription'),
           usePasswordText: t('auth.login.usePasswordText'),
           backToSsoText: t('auth.login.backToSsoText'),

@@ -20,6 +20,11 @@
  * (versus `engine-owned`, where the engine owns both). It is the only bucket
  * besides `platform`/`config` that defaults to writable.
  *
+ * `synced` (objectstack ADR-0153 D4) marks an object whose rows a pull copies
+ * from a connector or a federated source: read-only to members, its default
+ * row `engine-owned`'s, and `userActions` cannot open a write on it (the spec's
+ * `resolveCrudAffordances` keeps the four writes closed).
+ *
  * NOTE: distinct from the permission-set / metadata-record *provenance*
  * `managedBy` (`'platform' | 'package' | 'admin'`), which is an unrelated axis
  * that happens to share the word.
@@ -30,6 +35,7 @@ export type ManagedByBucket =
   | 'system-data'
   | 'engine-owned'
   | 'append-only'
+  | 'synced'
   | 'better-auth';
 
 /** All lifecycle buckets, in canonical order. */
@@ -39,5 +45,6 @@ export const MANAGED_BY_BUCKETS: readonly ManagedByBucket[] = [
   'system-data',
   'engine-owned',
   'append-only',
+  'synced',
   'better-auth',
 ];

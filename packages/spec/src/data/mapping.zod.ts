@@ -162,20 +162,76 @@ const CONNECTOR_SOURCE_CADENCE =
   + 'the connector-side `syncConfig.schedule` was deleted because nothing ever ran it';
 
 const CONNECTOR_SOURCE_NO_POLICY =
-  'version 1 is a one-way pull that writes through this mapping\'s `mode` and `upsertKey` — '
-  + 'there is no delete, conflict or direction policy to set';
+  'a pull is one-way and writes through this mapping\'s `mode` (`upsert`) and `upsertKey` — '
+  + 'there is no conflict or direction policy to set';
+
+// ADR-0153 D3: what a source delete does is the source block's `deletePolicy`.
+// `deleteMode` is the retired connector-side spelling an author reaches for; it
+// lands here rather than on an alias because its old values were not these.
+const SOURCE_DELETE_POLICY =
+  'a source delete is set with `deletePolicy`: \'mark\' stamps the row as deleted at the source '
+  + '(the default when the key is absent), \'ignore\' leaves the row as it is — a pull never deletes '
+  + 'a row physically';
 
 const CONNECTOR_SOURCE_GUIDANCE: Readonly<Record<string, string>> = {
   schedule: CONNECTOR_SOURCE_CADENCE,
   cron: CONNECTOR_SOURCE_CADENCE,
   interval: CONNECTOR_SOURCE_CADENCE,
-  deleteMode: CONNECTOR_SOURCE_NO_POLICY,
+  deleteMode: SOURCE_DELETE_POLICY,
   conflictResolution: CONNECTOR_SOURCE_NO_POLICY,
   direction: CONNECTOR_SOURCE_NO_POLICY,
   strategy: 'full vs incremental is whether `watermark` is set — there is no strategy switch',
   credentialRef: 'the connector instance holds the credential (its ADR-0097 `auth`) — a mapping never does',
   auth: 'the connector instance holds the credential (its ADR-0097 `auth`) — a mapping never does',
 };
+
+/**
+ * Keys an author reaches for on `datasourceSource` that it deliberately does
+ * not carry (ADR-0153 D1). The datasource, the remote table and its schema are
+ * the federated object's own binding, spelled once on that object, so each
+ * of their words lands on a prescription naming where the binding lives.
+ */
+const DATASOURCE_SOURCE_BINDING =
+  'a datasource source names a federated object, and that object\'s own `datasource` and `external` '
+  + 'binding (remoteName, remoteSchema, columnMap) say where its rows live — declare them there and '
+  + 'name the object in `object`';
+
+const DATASOURCE_SOURCE_GUIDANCE: Readonly<Record<string, string>> = {
+  datasource: DATASOURCE_SOURCE_BINDING,
+  remoteName: DATASOURCE_SOURCE_BINDING,
+  remoteSchema: DATASOURCE_SOURCE_BINDING,
+  table: DATASOURCE_SOURCE_BINDING,
+  schedule: CONNECTOR_SOURCE_CADENCE,
+  cron: CONNECTOR_SOURCE_CADENCE,
+  interval: CONNECTOR_SOURCE_CADENCE,
+  deleteMode: SOURCE_DELETE_POLICY,
+  conflictResolution: CONNECTOR_SOURCE_NO_POLICY,
+  direction: CONNECTOR_SOURCE_NO_POLICY,
+  paging: 'a datasource source is read in windows cut on `watermark.field` and paged by its key — '
+    + 'there is no paging to declare; `paging` belongs to a connector source',
+  strategy: 'full vs incremental is `full: true` — there is no strategy switch',
+};
+
+/**
+ * The two keys both source blocks carry for deletes (ADR-0153 D3).
+ *
+ * `deletePolicy` declares NO `.default()`: an absent value reads as `'mark'`,
+ * and keeping it absent in the parsed output is what lets the liveness lint
+ * tell an authored value from one the schema filled in. Module-private: both
+ * blocks spread the one pair, so the two cannot drift apart.
+ */
+const sourceDeleteFields = () => ({
+  deletePolicy: z.enum(['mark', 'ignore']).optional().describe(
+    'What a pull does with a row the source no longer has: \'mark\' stamps the row\'s source-deleted '
+    + 'mark and clears it if the row comes back, \'ignore\' leaves the row as it is. Absent reads as '
+    + '\'mark\'. A pull never deletes a row physically. A full pull marks only when its read was '
+    + 'complete; an incremental pull sees a delete only through `deletedField`',
+  ),
+  deletedField: z.string().min(1).optional().describe(
+    'Source field whose truthy value means the row was deleted at the source — how an incremental pull, '
+    + 'which cannot see an absent row, learns of a delete',
+  ),
+});
 
 /**
  * Transformation Logic
@@ -292,6 +348,28 @@ export const ImportFieldMappingSchema = lazySchema(() => strictObject({
 }));
 
 /**
+ * [ADR-0153 D1] A mapping pulls from one source. Two would be two definitions
+ * of where one target's rows come from, and no pull could honour both.
+ */
+const MAPPING_SOURCE_EXCLUSIVE =
+  'A mapping carries at most one source: `connectorSource` or `datasourceSource`, never both. A pull reads '
+  + 'its rows from one place; to copy from a second source, declare a second mapping.';
+
+/**
+ * [ADR-0153 D4] The refusal of a sourced mapping whose `mode` is not `upsert`.
+ * Each of the other two modes loses data on a repeated pull, and the sentence
+ * says which way, so the author sees why the rule is not a preference.
+ */
+function sourcedMappingModeRefusal(source: string, mode: string): string {
+  const loss = mode === 'update'
+    ? '`update` never creates a row, so every row the source adds is dropped without a word'
+    : '`insert` cannot match a row again, so every run adds a second copy of every row it reads';
+  return `A mapping with a \`${source}\` must write in \`mode: 'upsert'\` with an \`upsertKey\`; `
+    + `it declares mode '${mode}' (the default is 'insert'). A pull reads the same rows again on every run: `
+    + `${loss}. Write mode: 'upsert' and name the upsertKey field the source key is copied onto.`;
+}
+
+/**
  * Data Mapping Schema
  * Defines a reusable data mapping configuration for ETL operations.
  * 
@@ -361,8 +439,12 @@ export const MappingSchema = lazySchema(() => strictObject({
    * - **no cadence** — a `job` (`Job.schedule`) drives the pull; the
    *   2026-09-10 ruling that deleted `syncConfig.schedule` stands;
    * - **no credential** — the connector instance holds it;
-   * - **no delete or conflict policy** — a pull writes through this mapping's
-   *   `mode` / `upsertKey`, and nothing else is claimed.
+   * - **no conflict or direction policy** — a pull writes through this
+   *   mapping's `mode` / `upsertKey`, which must be `upsert` with a key (the
+   *   mapping's refinement below, ADR-0153 D4). What a source DELETE does is
+   *   `deletePolicy` / `deletedField` (ADR-0153 D3), and how the read action
+   *   pages is `paging` (D2): both declared spec-first, `planned` in the
+   *   liveness ledger until the P2 engine card's pull reads them.
    *
    * EXECUTED WHEN A JOB PULLS IT: `@objectstack/service-automation`'s
    * connector sync executor (`pullConnectorSource`, on the `automation`
@@ -425,10 +507,142 @@ export const MappingSchema = lazySchema(() => strictObject({
       + 'yields its first page only — and an incremental pull over a newest-first paged endpoint moves its '
       + 'starting point past the pages it never read',
     ),
+    // ADR-0153 D2 — the connector's declared paging convention. Declared
+    // spec-first: the pull's paging loop is the P2 engine card's, so the
+    // liveness row is `planned` and warns its author until that reader lands.
+    // `style`'s companions are judged by the block's own refinement below.
+    paging: strictObject({
+      surface: 'this connector source’s paging',
+      history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+      aliases: {
+        type: 'style', mode: 'style',
+        pageParam: 'param', cursorParam: 'param', offsetParam: 'param',
+        next: 'nextPath', cursorPath: 'nextPath', nextCursorPath: 'nextPath',
+      },
+    }, {
+      style: z.enum(['page', 'cursor', 'offset', 'none']).describe(
+        'How the read action pages: `page` sends `param` = 1, 2, …; `offset` sends `param` = the count of '
+        + 'records read so far; `cursor` sends `param` = the value read at `nextPath` in the previous '
+        + 'response; `none` sends nothing and states that one response is the whole set',
+      ),
+      param: z.string().min(1).optional().describe(
+        'Query parameter of the read action that receives the page, offset or cursor — required for '
+        + '`page`, `offset` and `cursor`, refused beside `none`',
+      ),
+      nextPath: z.string().min(1).optional().describe(
+        'Dot path, within the action\'s result, to the next cursor (`cursor`, where it is required) or to '
+        + 'the "more pages" marker (`page` / `offset`, optional: without it a pull stops at the first page '
+        + 'that carries no records); refused beside `none`',
+      ),
+    }).superRefine((paging, ctx) => {
+      if (paging.style === 'none') {
+        for (const key of ['param', 'nextPath'] as const) {
+          if (paging[key] !== undefined) {
+            ctx.addIssue({
+              code: 'custom',
+              path: [key],
+              message: `\`paging.${key}\` is refused beside \`style: 'none'\`: a source that does not page `
+                + 'sends nothing and reads no next page. Remove the key, or name the style the source pages by.',
+            });
+          }
+        }
+        return;
+      }
+      if (paging.param === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['param'],
+          message: `\`paging.style: '${paging.style}'\` needs \`param\`, the query parameter the read action `
+            + 'receives each page on.',
+        });
+      }
+      if (paging.style === 'cursor' && paging.nextPath === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['nextPath'],
+          message: '`paging.style: \'cursor\'` needs `nextPath`, the dot path in the response the next cursor '
+            + 'is read from.',
+        });
+      }
+    }).optional().describe(
+      'The connector\'s paging convention: page, cursor or offset, or `none` for a source whose one '
+      + 'response is the whole set. Omitted ⇒ a pull reads one response and does not treat it as complete',
+    ),
+    ...sourceDeleteFields(),
   }).optional().describe(
     'Pull binding: the rest/openapi connector this mapping pulls rows from (one-way, full or '
     + 'timestamp-incremental; a `job` sets the cadence). Pulled when a job drives it — a `job` whose '
     + '`pull: { mapping }` names this mapping, on the job\'s schedule; the binding alone moves no rows',
+  ),
+
+  /**
+   * Datasource source — a federated object as the pull's source (ADR-0153 D1),
+   * the sibling of {@link connectorSource}; a mapping carries at most one of
+   * the two (the refinement below).
+   *
+   * `object` names a FEDERATED object (ADR-0015): one whose own `external`
+   * binding (`remoteName`, `remoteSchema`, `columnMap`) addresses the remote
+   * table, a warehouse table included. Reading through a declared object keeps
+   * the pull inside the platform's own read path: the binding is federation's,
+   * the field types the windows compare by are the object's, and the pull
+   * writes no driver state of its own. The windows are cut on
+   * `watermark.field`, and the rows are keyed by the source column the
+   * object's `external.columnMap` maps onto `id`.
+   *
+   * Judged when it lands, by `defineStack` / `os validate` (the stack knows
+   * the objects): the source is a declared federated object; its `columnMap`
+   * maps a column onto `id` (`source_key_missing`) of a string or exact integer
+   * type (`source_key_not_exact`); `watermark.field` is a `datetime`, a `date`
+   * or a `scale: 0` `number` field (an exact one, `watermark_not_exact`); a
+   * `fieldMapping` entry copies it unchanged onto a target field of its type
+   * (`watermark_field_unmapped`); and the target is a `synced` object.
+   *
+   * READ BY NOTHING YET: the windowed reader is the P2 engine card's
+   * (ADR-0153's children table), so the liveness row is `planned` and warns
+   * its author until that reader lands.
+   */
+  datasourceSource: strictObject({
+    surface: 'this mapping’s datasource source',
+    history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+    aliases: {
+      sourceObject: 'object', objectName: 'object', from: 'object',
+      cursor: 'watermark', incremental: 'watermark', since: 'watermark',
+      fullRefresh: 'full', fullSync: 'full',
+    },
+    guidance: DATASOURCE_SOURCE_GUIDANCE,
+  }, {
+    object: z.string().min(1).describe(
+      'Name of the federated object (ADR-0015) whose rows the pull reads — an object whose own `external` '
+      + 'binding addresses the remote table, and whose `external.columnMap` maps the source key onto `id`',
+    ),
+    watermark: strictObject({
+      surface: 'this datasource source’s watermark',
+      history: 'Declared closed from its first day: an unrecognized key is refused, never dropped.',
+      aliases: {
+        timestampField: 'field', cursorField: 'field', column: 'field',
+        from: 'start', since: 'start', initial: 'start', startAt: 'start',
+      },
+    }, {
+      field: z.string().min(1).describe(
+        'Field of the source object the read windows are cut on: a `datetime`, a `date`, or a `number` '
+        + 'field declaring `scale: 0` (and, as an integer, a `precision` of 15 digits or fewer). Its value '
+        + 'must only grow — an update clock or a source-wide sequence, never a per-row version counter — '
+        + 'and a `fieldMapping` entry must copy it unchanged onto a target field of the same type',
+      ),
+      start: z.union([z.string().min(1), z.number().int()]).describe(
+        'The lowest watermark value a pull reads, where the first pull (and every `full` pull) starts: an '
+        + 'ISO date or date-time for a `date` / `datetime` field, an integer for an integer field',
+      ),
+    }).describe('The field the read windows are cut on, and where the first read starts'),
+    full: z.boolean().optional().describe(
+      'Re-read from `watermark.start` on every run (a full pull, the one that can mark deletes by '
+      + 'absence); omitted ⇒ each run reads on from the position the last run committed',
+    ),
+    ...sourceDeleteFields(),
+  }).optional().describe(
+    'Pull binding: the federated object this mapping pulls rows from (one-way; a `job` sets the cadence), '
+    + 'read in windows cut on `watermark.field`. Exclusive with `connectorSource`. Pulled when a job drives '
+    + 'it — a `job` whose `pull: { mapping }` names this mapping; the binding alone moves no rows',
   ),
 
   // `extractQuery`, `errorPolicy` and `batchSize` were removed in 17.0.0
@@ -445,6 +659,38 @@ export const MappingSchema = lazySchema(() => strictObject({
   ...MetadataProtectionFields,
   // ADR-0146 D2 — the override declaration (authored; travels with the item).
   ...OverrideDeclarationFields,
+// ADR-0153 D1 / D4 — the rules over a SOURCED mapping that the mapping alone
+// can judge, refused at parse on every door. The rules that need the objects
+// (a federated source, a `synced` target, the key and the watermark's types)
+// are `defineStack`'s, where the stack's objects are known. No arm in the
+// closed projection list states either rule, so the published JSON Schema
+// stays wider than this parse; the site is recorded in
+// `dropped-refinements.baseline.json`.
+}).superRefine((mapping, ctx) => {
+  const sources = (['connectorSource', 'datasourceSource'] as const).filter((key) => mapping[key] !== undefined);
+  if (sources.length === 2) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['datasourceSource'],
+      message: MAPPING_SOURCE_EXCLUSIVE,
+    });
+  }
+  if (sources.length === 0) return;
+  if (mapping.mode !== 'upsert') {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['mode'],
+      message: sourcedMappingModeRefusal(sources[0], mapping.mode),
+    });
+  } else if (!Array.isArray(mapping.upsertKey) || mapping.upsertKey.length === 0) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['upsertKey'],
+      message: `A mapping with a \`${sources[0]}\` writes in \`mode: 'upsert'\`, which needs \`upsertKey\`: the `
+        + 'target fields a pulled row is matched on, so a row the source sends again updates its copy '
+        + 'instead of adding a second one. Name the field the source key is copied onto.',
+    });
+  }
 }));
 
 export type Mapping = z.input<typeof MappingSchema>;

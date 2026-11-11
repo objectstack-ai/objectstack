@@ -30,6 +30,11 @@
  *   - Run-问数: one turn per (question, persona); it passes when the answer is
  *     correct AND cited AND leaks nothing. Leaks are also counted apart, so a
  *     leaking answer shows up even when it is otherwise right.
+ *   - Author cost: the sum of what every authoring turn (build and iterate)
+ *     reported as its cost (`TurnSummary.reportedCostUsd`), per mode and for
+ *     the card. It is stated only when EVERY authoring turn that ran reported
+ *     one; otherwise it is `not reported` — a turn that reported none is never
+ *     read as zero, and a partial sum is never shown as the channel's cost.
  *   - Run-operations: one per operation; it passes when its grade passes.
  *   - A turn that errored counts in the total and not in passed.
  *   - Seed: rows loaded of rows sent. A refused row is shown as
@@ -39,7 +44,7 @@
  *     half with nothing measured is `not-run` in the record, never `fail`.
  */
 
-import type { CardRun, ModeRun, RunHalf, BuildHalf } from './orchestrate.js';
+import type { CardRun, ModeRun, RunHalf, BuildHalf, OperationResult, TurnSummary } from './orchestrate.js';
 import type { DriverInfo } from './driver.js';
 import { packagesLine, type PackageSource } from './packages.js';
 import { cycleText } from './seed.js';
@@ -61,7 +66,12 @@ export interface HalfScores {
   /** Rows the app took of the rows the runner sent. */
   seed?: { inserted: number; total: number; refused: number };
   ask?: Tally & { leaks: number; notMeasured: number };
-  operations?: Tally & { notMeasured: number };
+  /**
+   * `platformNotMeasured`: measured operations whose platform half met the
+   * build's own lock — graded on the agent half alone, the reason in the
+   * mode's findings ({@link platformNotMeasuredFindings}). Absent ⇒ none.
+   */
+  operations?: Tally & { notMeasured: number; platformNotMeasured?: number };
   /** The models the half's question and operation turns were served ({@link modelTally}). */
   models?: ModelTally;
 }
@@ -78,11 +88,23 @@ export interface ModelTally {
 
 export const MODEL_NOT_REPORTED = '(not reported)';
 
+/** What the authoring turns cost, as their driver reported it ({@link authorCost}). */
+export interface AuthorCost {
+  /** The authoring turns that ran: each build and iterate turn with a `TurnSummary`. */
+  turns: number;
+  /** Of those, the turns that reported a cost (`TurnSummary.reportedCostUsd`). */
+  reported: number;
+  /** Their sum, USD — only when every one of `turns` reported a cost (and there was one): a turn that reported none is never read as zero. */
+  usd?: number;
+}
+
 export interface ModeScorecard {
   mode: 'scratch' | 'template';
   skipped?: string;
   first: HalfScores;
   iterate?: HalfScores & { changeSize?: number };
+  /** The mode's authoring turns, build and iterate; absent on a record written before the scorecard carried it. */
+  authorCost?: AuthorCost;
   tags: Array<{ tag: string; status: string }>;
   findings: string[];
 }
@@ -92,6 +114,8 @@ export interface CardScorecard {
   /** Where the run's `@objectstack/*` packages came from (`--packages`); the table's first line states it. */
   packages?: PackageSource;
   counts: CardRun['counts'];
+  /** Every authoring turn of the card, across its modes: the channel's cost on this card. Absent on a record written before the scorecard carried it. */
+  authorCost?: AuthorCost;
   modes: ModeScorecard[];
 }
 
@@ -138,7 +162,26 @@ export function askTally(r: RunHalf | undefined): HalfScores['ask'] | undefined 
 export function opsTally(r: RunHalf | undefined): HalfScores['operations'] | undefined {
   if (!r) return undefined;
   const measured = r.operations.filter((o) => !o.notMeasured);
-  return { passed: measured.filter((o) => o.grade?.pass).length, total: measured.length, notMeasured: r.operations.length - measured.length };
+  const platformNotMeasured = measured.filter((o) => platformNotMeasuredReason(o) !== undefined).length;
+  return {
+    passed: measured.filter((o) => o.grade?.pass).length,
+    total: measured.length,
+    notMeasured: r.operations.length - measured.length,
+    ...(platformNotMeasured ? { platformNotMeasured } : {}),
+  };
+}
+
+/** Why an operation's platform half was not measured (its `platform:` checks' shared reason), or `undefined`. */
+function platformNotMeasuredReason(o: OperationResult): string | undefined {
+  return o.grade?.checks.find((c) => c.check.startsWith('platform:') && c.notMeasured !== undefined)?.notMeasured;
+}
+
+/** One finding per operation whose platform half was not measured, naming the operation, its persona and the reason. */
+export function platformNotMeasuredFindings(r: RunHalf | undefined, half: string): string[] {
+  return (r?.operations ?? []).flatMap((o) => {
+    const why = o.notMeasured ? undefined : platformNotMeasuredReason(o);
+    return why === undefined ? [] : [`${half}: operation ${o.operation} (as ${o.persona}): platform half not measured, ${why}`];
+  });
 }
 
 export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
@@ -148,6 +191,38 @@ export function modelTally(r: RunHalf | undefined): ModelTally | undefined {
   for (const t of turns) served[t.model ?? MODEL_NOT_REPORTED] = (served[t.model ?? MODEL_NOT_REPORTED] ?? 0) + 1;
   const requested = [...new Set(turns.flatMap((t) => (t.requestedModel ? [t.requestedModel] : [])))];
   return { served, requested, mismatched: turns.filter((t) => t.modelMismatch).length };
+}
+
+/** Sum USD figures without float noise (`0.1 + 0.2`): to the millionth of a dollar. */
+const sumUsd = (xs: readonly number[]): number => Math.round(xs.reduce((a, x) => a + x, 0) * 1e6) / 1e6;
+
+/**
+ * What these authoring turns cost: the sum of their reported costs, stated
+ * only when every turn reported one. A turn that reported none (a driver that
+ * does not report cost, a command that left the field out, a turn that failed
+ * before it answered) leaves the whole figure unstated — never a zero, never
+ * a partial sum read as the channel's cost.
+ */
+export function authorCost(turns: ReadonlyArray<{ reportedCostUsd?: number }>): AuthorCost {
+  const costs = turns.flatMap((t) => (t.reportedCostUsd !== undefined ? [t.reportedCostUsd] : []));
+  return { turns: turns.length, reported: costs.length, ...(turns.length > 0 && costs.length === turns.length ? { usd: sumUsd(costs) } : {}) };
+}
+
+/** A mode's authoring turns that ran, build and iterate, in that order. */
+const authorTurnsOf = (m: ModeRun): TurnSummary[] => [m.build?.author, m.iterate?.build.author].filter((t): t is TurnSummary => t !== undefined);
+
+/** `$0.42`; `$0.0031` under a cent; `$0`. */
+export const usdText = (usd: number): string => (usd === 0 ? '$0' : usd < 0.01 ? `$${Number(usd.toPrecision(2))}` : `$${usd.toFixed(2)}`);
+
+/**
+ * `$0.84 over 3 author turns`; `not reported (2 of 3 author turns reported a
+ * cost)`; `not reported`. A record written before the scorecard carried the
+ * cost has no {@link AuthorCost}, and reads as not reported.
+ */
+export function authorCostText(c: AuthorCost | undefined): string {
+  if (c?.usd !== undefined) return `${usdText(c.usd)} over ${c.turns} author turn${c.turns === 1 ? '' : 's'}`;
+  if (c && c.reported > 0) return `not reported (${c.reported} of ${c.turns} author turns reported a cost)`;
+  return 'not reported';
 }
 
 /** An artifact-less build scores 0 of 1 — a degraded build is never "nothing to score". */
@@ -180,13 +255,16 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
   const out: ModeScorecard = {
     mode: m.mode,
     first,
+    authorCost: authorCost(authorTurnsOf(m)),
     tags: (m.build?.score ?? m.iterate?.build.score)?.tags.map((t) => ({ tag: t.tag, status: t.status })) ?? [],
     findings: [
       ...m.findings,
       ...bareNameFindings(m.build, 'build'),
       ...requiredCycleFindings(m.build, 'build'),
+      ...platformNotMeasuredFindings(m.run, 'run'),
       ...bareNameFindings(m.iterate?.build, 'iterate build'),
       ...requiredCycleFindings(m.iterate?.build, 'iterate build'),
+      ...platformNotMeasuredFindings(m.iterate?.run, 'iterate run'),
     ],
   };
   if (m.skipped) out.skipped = m.skipped;
@@ -209,10 +287,17 @@ export function modeScorecard(m: ModeRun): ModeScorecard {
 }
 
 export function cardScorecard(run: CardRun, packages?: PackageSource): CardScorecard {
-  return { card: run.card, ...(packages ? { packages } : {}), counts: run.counts, modes: run.modes.map((m) => modeScorecard(m)) };
+  return {
+    card: run.card,
+    ...(packages ? { packages } : {}),
+    counts: run.counts,
+    authorCost: authorCost(run.modes.flatMap(authorTurnsOf)),
+    modes: run.modes.map((m) => modeScorecard(m)),
+  };
 }
 
-const cell = (t: (Tally & { notMeasured?: number }) | undefined) => (t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}` : '—');
+const cell = (t: (Tally & { notMeasured?: number; platformNotMeasured?: number }) | undefined) =>
+  t ? `${t.passed}/${t.total}${t.notMeasured ? ` · ${t.notMeasured} not measured` : ''}${t.platformNotMeasured ? ` · ${t.platformNotMeasured} platform half not measured` : ''}` : '—';
 const seedCell = (s: HalfScores['seed']) => (s ? `${s.inserted}/${s.total}${s.refused ? ` ⚠ seed: ${s.refused} refused` : ''}` : '—');
 
 /** `42s`, `15m 00s`. */
@@ -253,6 +338,8 @@ export function renderScorecard(sc: CardScorecard): string {
     `### \`${sc.card}\` — ${sc.counts.questions} questions (${sc.counts.questionTurns} persona turns), ${sc.counts.operations} operations, ${sc.counts.personas} personas`,
     '',
     ...(sc.packages ? [packagesLine(sc.packages), ''] : []),
+    `author cost: ${authorCostText(sc.authorCost)}`,
+    '',
     `| Half | ${sc.modes.map((m) => m.mode).join(' | ')} |`,
     `|:---|${sc.modes.map(() => ':---').join('|')}|`,
   ];
@@ -270,6 +357,7 @@ export function renderScorecard(sc: CardScorecard): string {
   row('Iterate · Run-operations', (m) => cell(m.iterate?.operations));
   row('Iterate · Run · model', (m) => modelCell(m.iterate?.models));
   row('AI change size (items)', (m) => (m.iterate?.changeSize !== undefined ? String(m.iterate.changeSize) : '—'));
+  row('Author cost', (m) => (m.authorCost === undefined || m.authorCost.turns > 0 ? authorCostText(m.authorCost) : '—'));
   const tags = sc.modes.find((m) => m.tags.length)?.tags ?? [];
   if (tags.length) {
     lines.push('', '| Tag | ' + sc.modes.map((m) => m.mode).join(' | ') + ' |', '|:---|' + sc.modes.map(() => ':---').join('|') + '|');

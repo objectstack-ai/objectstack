@@ -60,6 +60,7 @@
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*",
     "better-auth": "1.7.12",
+    "fast-xml-parser": "5.10.1",
     "jose": "^6.2.12"
   },
   "devDependencies": {

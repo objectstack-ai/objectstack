@@ -519,7 +519,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | JSX / React page source parses (ADR-0080/0081) | ✓ | ✓ | ✓ | — |
 | Approval-node approvers (ADR-0090 D3) | ✓ | ✓ | ✓ | ✓ᶠ |
 | Security posture (ADR-0090 — e.g. every custom object declares `sharingModel`) | ✓ | ✓ | ✓ | ✓ˢᵖᵉᵇᵒ |
-| Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃ |
+| Security vocabulary freeze (ADR-0090 D3 — the reserved word, replaced by `permission_set` / `position` / `business_unit`) | ✓ | ✓ | ✓ | ✓ᵒᵖᵉᵇᵖᵒᵃᵒˣ |
 | Organization-axis red lines (ADR-0105 D6) | ✓ | ✓ | ✓ | — |
 | Declared enforcement that cannot run, **declared on the object being written** — a validation rule's regex / JSON Schema (#4762) and its `format` names (#5178) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Declared enforcement that cannot run, **declared on another collection** — sharing-rule conditions (#4698) | ✓ | ✓ | ✓ | — |
@@ -556,12 +556,12 @@ orthogonal to both, and no cell here can carry it; it is written out in
 writes that rule inspects: `✓ᶠ` `flow`, `✓ᵛ` `view`, `✓ᵈ` `dashboard`, `✓ᵒ`
 `object`, `✓ᵖ` `page`, `✓ˢ` `seed`, `✓ᵇ` `book`, `✓ᵖᵉ` `permission`,
 `✓ᵖᵒ` `position`, `✓ᵃ` `app`, `✓ᵉ` `email_template`, `✓ᵈᵗ` `dataset`, `✓ʳ` `report`,
-`✓ᵃᶜ` `action`, `✓ʰ` `hook`, `✓ᵐ` `mapping`, `✓ᵈˢ` `datasource`, `✓ᶜ` `connector`** — the two
+`✓ᵃᶜ` `action`, `✓ʰ` `hook`, `✓ᵐ` `mapping`, `✓ᵈˢ` `datasource`, `✓ᶜ` `connector`, `✓ᵒˣ` `object_extension`** — the two
 `ᵖ`-initial pairs carry a second letter because `page` already holds `ᵖ` on its
 own, `dataset` and `datasource` carry `ᵈᵗ` and `ᵈˢ` because `dashboard` holds `ᵈ`,
-and `action` carries `ᵃᶜ` because `app` holds `ᵃ`, while `connector` takes the bare `ᶜ`. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
+`action` carries `ᵃᶜ` because `app` holds `ᵃ`, and `object_extension` carries `ᵒˣ` because `object` holds `ᵒ`, while `connector` takes the bare `ᶜ`. Read the codes **longest-first**: `ᵖᵒ` is `position`, never `page`
 followed by `object`, `ᵖᵉ` is `permission`, never `page` followed by
-`email_template`, `ᵈᵗ` is `dataset`, `ᵈˢ` is `datasource` and `ᵃᶜ` is `action`.
+`email_template`, `ᵈᵗ` is `dataset`, `ᵈˢ` is `datasource`, `ᵃᶜ` is `action` and `ᵒˣ` is `object_extension`.
 A row whose rules are members of the reference-integrity suite reads the
 members' own `runtimeTypes` in `packages/lint/src/reference-integrity-suite.ts`,
 and a member that declares none runs on `flow` writes only (the suite's frozen
@@ -594,6 +594,16 @@ reserved word appears in an object, field, action or field-group identifier or
 label, a permission-set name or label, a book's, a **position's**, or an
 **app's**. The CLI verdict is unchanged: both security entries have run on all
 three commands since the split.
+
+**What an object extension writes is judged the same way (#31998).** An
+`objectExtensions` entry's fields land in the object it extends, so the rule
+judges each field it adds by name and label, the entry's own `label`, and each
+`fieldPatches` relabel, with the messages the object's own declarations get and
+located at the entry (`objectExtensions[0].fields.FIELD.name`). The
+`object_extension` publish door (Studio's add-field on a customization package,
+`/api/v1/meta`) runs the same rule. A field an extension adds to a `sys_*`
+object is judged too: the system-object exemption covers the platform's own
+declarations, not words an app adds.
 
 **Declared enforcement that cannot run** is two rows for the mirror-image
 reason, and #4716 is where it split. That heading covers four rule ids, and
@@ -812,7 +822,7 @@ A clean run walks the registry and reports timing:
   Config: /path/to/support-desk/objectstack.config.ts
   Load time: 21ms
   → Validating against ObjectStack Protocol...
-  → Running author-time rules (64)...
+  → Running author-time rules (65)...
   → Checking that every required capability has a provider installable in this edition...
   → Checking package docs (ADR-0046)...
 

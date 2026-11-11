@@ -384,6 +384,22 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
             selection: { dimensions: ['stage'], measures: ['revenue'] },
         },
     },
+    // [#32200] The batch door answers per query, inside its `200`: a refused
+    // query's entry carries the single door's sentence for that throw.
+    'POST /api/v1/analytics/dataset/query/batch': {
+        called: 'analytics.queryDataset',
+        body: {
+            queries: [{
+                dataset: {
+                    name: 'pipeline', label: 'Pipeline', object: OBJECT,
+                    dimensions: [{ name: 'stage', field: 'stage', type: 'string' }],
+                    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+                },
+                selection: { dimensions: ['stage'], measures: ['revenue'] },
+            }],
+        },
+        answer: (res) => res.body?.data?.results?.[0]?.error?.message,
+    },
     'POST /api/v1/security/explain': { called: 'security.explain', body: { object: OBJECT, operation: 'read' } },
     // [#30205] The hand-over answers per row, inside its `200`: a refused row's
     // entry in `failures` carries the `/data` door's sentence for that throw.

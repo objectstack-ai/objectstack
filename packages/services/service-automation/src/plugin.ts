@@ -4,7 +4,6 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
 import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import { installedManifestsOf, type InstalledPackageSource } from '@objectstack/metadata-core';
-import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
     ConnectorInstanceAuth,
@@ -21,14 +20,15 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
 import { SysMetadataRepository, shadowedStoredRowsOf } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowContender, FlowHistorySource, FlowNameResolver, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { FlowParsed } from '@objectstack/spec/automation';
 // [ADR-0150 D3] The ONE package-scoped resolver, read through its exports only
 // — never a second implementation of the rule in this package.
 import { resolvePackageScopedName } from '@objectstack/objectql';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
-import { resolveFlowPrecedence, renderFlowContender } from './flow-precedence.js';
+import { resolveFlowPrecedence, renderFlowContender, type FlowPrecedenceWinner } from './flow-precedence.js';
 import { installBuiltinNodes, rearmSuspendedWaitTimers } from './builtin/index.js';
 import { resolveRunDataContext } from './runtime-identity.js';
 import { SysAutomationRun } from './sys-automation-run.object.js';
@@ -74,6 +74,7 @@ import { connectorReadWithheldText, type ConnectorFailureTextRewrite } from './c
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
 import { connectorNameResolver, packageScopedRegistryOf, refusedConnectorNames } from './connector-package-scope.js';
+import { functionResolverOf, packageScopedFunctionEngineOf } from './function-package-scope.js';
 import type { PackageScopedRefusal, PackageScopedRegistry } from '@objectstack/objectql';
 import { createConnectorRequestSigner } from './request-signing/index.js';
 import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
@@ -772,6 +773,49 @@ function stableStringify(input: unknown): string {
  * definition that does not parse is not held — `registerFlow` refuses it and
  * says why.
  */
+/**
+ * [ADR-0150 D4, #31696] A flow this plugin registered, by the slot the engine
+ * holds it in — `(package, name)`, `null` for a package-less flow — so a
+ * re-sync tears down exactly the slot the artifact no longer ships, and a
+ * name two packages hold is two entries.
+ */
+function flowSlotIdentity(packageId: string | null, name: string): string {
+    return JSON.stringify([packageId, name]);
+}
+
+function parseFlowSlotIdentity(identity: string): { packageId: string | null; name: string } {
+    const [packageId, name] = JSON.parse(identity) as [string | null, string];
+    return { packageId, name };
+}
+
+/** [#31696] The arm precedence hands the engine: its contender, naming its slot when precedence named one. */
+function armOfWinner(entry: FlowPrecedenceWinner): FlowContender {
+    return entry.holder !== undefined ? { ...entry.contender, holder: entry.holder } : entry.contender;
+}
+
+/** [#31696] The identity of the slot the engine holds `parsed` in, or `undefined`. */
+function slotIdentityOf(engine: AutomationEngine, name: string, parsed: FlowParsed | null): string | undefined {
+    if (!parsed) return undefined;
+    const slot = engine.getFlowSlots(name).find((s) => engine.getFlowSlot(s.packageId, name) === parsed);
+    return slot ? flowSlotIdentity(slot.packageId, name) : undefined;
+}
+
+/**
+ * [#31696] What the engine holds in a precedence winner's slot: its named
+ * slot, else the name's one slot; `null` when it holds none — or holds the
+ * name in two slots and the winner names neither.
+ */
+function heldForWinner(engine: AutomationEngine, entry: FlowPrecedenceWinner): FlowParsed | null {
+    if (entry.holder !== undefined) return engine.getFlowSlot(entry.holder, entry.name);
+    const slots = engine.getFlowSlots(entry.name);
+    return slots.length === 1 ? engine.getFlowSlot(slots[0].packageId, entry.name) : null;
+}
+
+/** [#31696] The mutation sync's mark of a winner's slot (see `mutationArmedFlows`). */
+function winnerMark(entry: FlowPrecedenceWinner): string {
+    return flowSlotIdentity(entry.holder ?? null, entry.name);
+}
+
 function holdsFlowDefinition(engine: AutomationEngine, name: string, held: unknown, definition: unknown): boolean {
     try {
         return stableStringify(engine.canonicalizeStoredFlow(name, definition).parsed) === stableStringify(held);
@@ -1247,14 +1291,38 @@ export function findInertDeclaredConnectors(
  * the answer is "none": the §7.3 guards then protect nothing and the
  * activation door refuses every flow, which fails closed rather than trusting
  * a definition's own stamps.
+ *
+ * [ADR-0150 D4, #31696] Asked with a package id, it answers that package's
+ * own question through the protocol's `shippedArtifactsOf` — see
+ * `PackagedFlowSource`. ⚠️ That method is TypeScript-`private` on
+ * `ObjectStackProtocolImplementation` and is reached here at runtime, by
+ * duck type, as the service is. A protocol that does not carry it answers
+ * `undefined` for every package: precedence then takes the one-owner path,
+ * where a name two packages hold is refused (E1) — fail-safe, never a pick.
+ * A protocol refactor that renames it turns two packages' same-named flows
+ * back into that refusal, which `flow-slots-per-package.test.ts` and the boot
+ * pull's integration test would read as red.
  */
-export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string) => string | undefined {
-    return (name) => {
-        let protocol: { packagedArtifactOwner?: (request: { type: string; name: string }) => string | undefined } | undefined;
+export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (name: string, packageId?: string) => string | undefined {
+    return (name, packageId) => {
+        let protocol: {
+            packagedArtifactOwner?: (request: { type: string; name: string }) => string | undefined;
+            shippedArtifactsOf?: (type: string, name: string) => unknown[];
+        } | undefined;
         try {
             protocol = ctx.getService('protocol');
         } catch {
             return undefined;
+        }
+        // [ADR-0150 D4, #31696] Asked for one package: does ITS loader set
+        // hold a flow `name`? The protocol's every-shipper read, judged on
+        // each artifact's own package — never the one owner of the name.
+        if (packageId !== undefined) {
+            if (typeof protocol?.shippedArtifactsOf !== 'function') return undefined;
+            const shipped = protocol.shippedArtifactsOf('flow', name);
+            return shipped.some((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === packageId)
+                ? packageId
+                : undefined;
         }
         if (typeof protocol?.packagedArtifactOwner !== 'function') return undefined;
         return protocol.packagedArtifactOwner({ type: 'flow', name });
@@ -1414,8 +1482,10 @@ export class AutomationServicePlugin implements Plugin {
     private engine?: AutomationEngine;
     private readonly options: AutomationServicePluginOptions;
     /**
-     * Flow names this plugin has registered into the engine from the
-     * artifact / ObjectQL registry, tracked so a `metadata:reloaded` re-sync
+     * Flows this plugin has registered into the engine from the
+     * artifact / ObjectQL registry — [#31696] by slot identity
+     * (`flowSlotIdentity`), so two packages' flows of one name are two
+     * entries — tracked so a `metadata:reloaded` re-sync
      * can tear down flows that were removed from the artifact (stopping their
      * triggers/jobs). Seeded by the boot pull, then replaced on each re-sync.
      * Plugin-contributed node packs never enter this set, so re-sync never
@@ -1584,7 +1654,7 @@ export class AutomationServicePlugin implements Plugin {
     /** [#21725] Flow names the metadata mutation signal reported, awaiting one coalesced re-read. */
     private pendingFlowMutations = new Set<string>();
     /**
-     * [#21725] Flow name → signature of the stored body the mutation sync
+     * [#21725] Flow slot (`winnerMark`) → signature of the stored body the mutation sync
      * armed since the last `metadata:reloaded` re-sync. A publish raises both
      * signals, so that re-sync skips a flow armed from this exact body: one
      * registration per publish, not two.
@@ -1850,7 +1920,18 @@ export class AutomationServicePlugin implements Plugin {
         // [#20790] The write-only flow credential channel — the engine reads a
         // flow's credentials from it at verification and execution, and the
         // metadata save door stores them in it (registered at `start()`).
-        this.credentialChannel = new FlowCredentialChannel(() => this.resolveDataEngine(ctx));
+        // [ADR-0150 D8 row R9, #31696] Each row it writes names the flow's one package holder, and a
+        // read for a slot of a shared name answers by that package (a row naming none is refused). Under a
+        // shared name a save writes no row: one that would set, clear or remove a stored credential is refused.
+        const engine = this.engine;
+        this.credentialChannel = new FlowCredentialChannel(
+            () => this.resolveDataEngine(ctx),
+            (name) => {
+                const answer = engine.flowHolder(name);
+                return answer?.status === 'refused' ? answer : undefined;
+            },
+            (name) => engine.flowHolderPackage(name),
+        );
         this.engine.setFlowCredentialSource(this.credentialChannel);
 
         // [#27237] The connector credential store, and the door the
@@ -2153,35 +2234,22 @@ export class AutomationServicePlugin implements Plugin {
         // count-based bound the declarative contract can't express).
 
         // #1870 — bridge `script`-node function calls to the host function
-        // registry. ObjectQL holds the name→handler map populated from
-        // `bundle.functions` / `defineStack({ functions })` (the same registry
-        // hooks/actions resolve through). Wiring it here lets a `script` node
-        // invoke an authored function by name; an unresolved name fails the step
-        // loudly. Best-effort: without ObjectQL, function-calling script nodes
-        // fail with a clear "no function registered" error when executed.
+        // registry. ObjectQL holds the functions populated from
+        // `bundle.functions` / `defineStack({ functions })`, by registering
+        // package. Wiring it here lets a `script` node invoke an authored
+        // function by name; an unresolved name fails the step loudly.
+        // [ADR-0150 D3, #32073] The name is resolved in the package of the
+        // calling flow (`resolvePackageScopedFunction`), never as the bare
+        // map's last registration: a name that means no single function for
+        // that caller throws the resolver's refusal and the step fails with it.
+        // Best-effort: without ObjectQL (or one that keeps no holder set),
+        // function-calling script nodes fail with a clear "no function
+        // registered" error when executed.
         try {
-            const fnRegistry = ctx.getService<{
-                resolveFunction?: (name: string) => ((c: unknown) => unknown) | undefined;
-                // #4396 — the same lookup, with what the function declared about
-                // itself. Optional: an older/foreign `objectql` service exposes
-                // only the handler, and every such function is then read as the
-                // contract's default (pure), exactly as before this existed.
-                resolveFunctionEntry?: (name: string) => {
-                    handler?: (c: unknown) => unknown;
-                    effect?: FlowFunctionEffect;
-                } | undefined;
-            }>('objectql');
-            if (fnRegistry && typeof fnRegistry.resolveFunction === 'function') {
-                this.engine.setFunctionResolver((name) => {
-                    const entry = fnRegistry.resolveFunctionEntry?.(name);
-                    const fn = entry?.handler ?? fnRegistry.resolveFunction!(name);
-                    if (typeof fn !== 'function') return undefined;
-                    return {
-                        handler: (fnCtx) => (fn as (c: unknown) => unknown)(fnCtx),
-                        ...(entry?.effect ? { effect: entry.effect } : {}),
-                    };
-                });
-                ctx.logger.debug('[Automation] script-node function registry bridged to objectql.resolveFunction');
+            const fnEngine = packageScopedFunctionEngineOf(ctx.getService('objectql'));
+            if (fnEngine) {
+                this.engine.setFunctionResolver(functionResolverOf(fnEngine));
+                ctx.logger.debug('[Automation] script-node function registry bridged to objectql functionHoldersOf (by package)');
             }
         } catch {
             ctx.logger.debug('[Automation] objectql not present — script-node function calls will fail loudly when used');
@@ -2372,8 +2440,9 @@ export class AutomationServicePlugin implements Plugin {
                 const def = entry.definition as { name?: string };
                 if (!def?.name) continue;
                 try {
-                    this.engine.registerFlow(entry.name, def as never, entry.contender);
-                    this.syncedFlowNames.add(entry.name);
+                    const parsed = this.engine.registerFlow(entry.name, def as never, armOfWinner(entry));
+                    const identity = slotIdentityOf(this.engine, entry.name, parsed);
+                    if (identity) this.syncedFlowNames.add(identity);
                     // The receipt, so the shadowed contender is observable at all.
                     if (entry.shadowing) this.engine.recordFlowShadowing(entry.shadowing);
                     registered++;
@@ -2590,6 +2659,10 @@ export class AutomationServicePlugin implements Plugin {
         // startup summary. The warn matters for embedded hosts and tests.
         ctx.hook('kernel:bootstrapped', async () => {
             if (!this.engine) return;
+
+            // [#31696, ADR-0150 D4] Every package of this boot has registered (the pull, then the
+            // `kernel:ready` rehydrate): the flow holders seal with the registry's (`sealFlowHolders`).
+            this.engine.sealFlowHolders();
 
             // ── ADR-0018 §M1 node-type audit, at the ONE moment it can be true
             // (#4771). The vocabulary is open by design: a plugin contributes
@@ -5478,7 +5551,9 @@ export class AutomationServicePlugin implements Plugin {
         return resolveFlowPrecedence(
             items,
             ctx.logger,
-            engine ? (name) => engine.packagedFlowOwner(name) : undefined,
+            // [#31696] The loader's set, asked per package too: precedence arms
+            // one slot per package that holds the name.
+            engine ? (name, packageId) => (packageId === undefined ? engine.packagedFlowOwner(name) : engine.packagedFlowSlotOwner(name, packageId)) : undefined,
             installedManifestsOf(objectqlRegistryOf(ctx)),
             (name) => {
                 const resolution = resolver(name, null);
@@ -5524,22 +5599,28 @@ export class AutomationServicePlugin implements Plugin {
         // [#20913] Same-named contenders in the view resolve through the ONE
         // precedence the boot pull used — never "last one registered wins".
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
-            freshNames.add(entry.name);
+            const held = heldForWinner(this.engine, entry);
+            const heldIdentity = slotIdentityOf(this.engine, entry.name, held);
             // [#21725] A publish raises the metadata mutation signal before this
             // re-sync, and the mutation sync armed the published flow from this
             // same stored body. Registering it again would arm it twice per publish.
-            const armedFrom = this.mutationArmedFlows.get(entry.name);
+            const armedFrom = this.mutationArmedFlows.get(winnerMark(entry));
             if (
                 armedFrom !== undefined
                 && armedFrom === stableStringify(entry.definition)
-                && (await this.engine.getFlow(entry.name)) !== null
+                && held !== null
             ) {
+                if (heldIdentity) freshNames.add(heldIdentity);
                 continue;
             }
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
+                const parsed = this.engine.registerFlow(entry.name, entry.definition as never, armOfWinner(entry));
+                const identity = slotIdentityOf(this.engine, entry.name, parsed);
+                if (identity) freshNames.add(identity);
                 resynced++;
             } catch (err) {
+                // The engine keeps the registration it had, if any: still live.
+                if (heldIdentity) freshNames.add(heldIdentity);
                 // #5048 — see ./thrown-cause-diagnostics.ts.
                 ctx.logger.warn('[Automation] flow re-sync: failed to register flow', {
                     flow: entry.name,
@@ -5559,7 +5640,8 @@ export class AutomationServicePlugin implements Plugin {
         for (const prev of this.syncedFlowNames) {
             if (!freshNames.has(prev)) {
                 try {
-                    this.engine.withdrawFlow(prev);
+                    const { packageId, name } = parseFlowSlotIdentity(prev);
+                    this.engine.withdrawFlowSlot(packageId, name);
                 } catch {
                     /* best-effort */
                 }
@@ -5613,8 +5695,9 @@ export class AutomationServicePlugin implements Plugin {
         // re-binding the body the boot pull armed is safe.
         for (const entry of this.resolveFlowContenders(ctx, defs)) {
             try {
-                this.engine.registerFlow(entry.name, entry.definition as never, entry.contender);
-                this.syncedFlowNames.add(entry.name);
+                const parsed = this.engine.registerFlow(entry.name, entry.definition as never, armOfWinner(entry));
+                const identity = slotIdentityOf(this.engine, entry.name, parsed);
+                if (identity) this.syncedFlowNames.add(identity);
                 bound++;
             } catch (err) {
                 // #5048 — see ./thrown-cause-diagnostics.ts.
@@ -5624,9 +5707,12 @@ export class AutomationServicePlugin implements Plugin {
                 });
                 // [#21848] The boot pull's registration of this flow does not
                 // outlive this refusal — see the docblock.
-                if ((await this.engine.getFlow(entry.name)) !== null) {
-                    this.engine.withdrawFlow(entry.name);
-                    this.syncedFlowNames.delete(entry.name);
+                const held = heldForWinner(this.engine, entry);
+                const heldIdentity = slotIdentityOf(this.engine, entry.name, held);
+                if (heldIdentity) {
+                    const { packageId } = parseFlowSlotIdentity(heldIdentity);
+                    this.engine.withdrawFlowSlot(packageId, entry.name);
+                    this.syncedFlowNames.delete(heldIdentity);
                 }
                 // [#23316] …and the refusal is readable: the engine holds
                 // nothing under the name now, so the metadata read serves the
@@ -5773,43 +5859,59 @@ export class AutomationServicePlugin implements Plugin {
         if (!defs) return;
         const reported = new Set(names);
         const contenders = defs.filter((def) => typeof def?.name === 'string' && reported.has(def.name));
-        const resolved = new Map(this.resolveFlowContenders(ctx, contenders).map((entry) => [entry.name, entry] as const));
+        // [#31696] A name two packages hold has a winner per package.
+        const resolved = new Map<string, FlowPrecedenceWinner[]>();
+        for (const entry of this.resolveFlowContenders(ctx, contenders)) {
+            resolved.set(entry.name, [...(resolved.get(entry.name) ?? []), entry]);
+        }
 
         const armed: string[] = [];
         const unregistered: string[] = [];
         for (const name of names) {
-            const entry = resolved.get(name);
-            if (!entry) {
-                if (!this.syncedFlowNames.delete(name)) continue;
-                this.mutationArmedFlows.delete(name);
-                if ((await engine.getFlow(name)) === null) continue;
-                try {
-                    engine.withdrawFlow(name);
-                    unregistered.push(name);
-                } catch (err) {
-                    ctx.logger.warn('[Automation] a flow deleted from the metadata store could not be unregistered', {
-                        flow: name,
-                        ...describeThrownForLog(err),
-                    });
+            const entries = resolved.get(name);
+            if (!entries) {
+                const synced = [...this.syncedFlowNames].filter((identity) => parseFlowSlotIdentity(identity).name === name);
+                if (synced.length === 0) continue;
+                for (const mark of [...this.mutationArmedFlows.keys()]) {
+                    if (parseFlowSlotIdentity(mark).name === name) this.mutationArmedFlows.delete(mark);
+                }
+                for (const identity of synced) {
+                    this.syncedFlowNames.delete(identity);
+                    const { packageId } = parseFlowSlotIdentity(identity);
+                    if (engine.getFlowSlot(packageId, name) === null) continue;
+                    try {
+                        engine.withdrawFlowSlot(packageId, name);
+                        unregistered.push(name);
+                    } catch (err) {
+                        ctx.logger.warn('[Automation] a flow deleted from the metadata store could not be unregistered', {
+                            flow: name,
+                            ...describeThrownForLog(err),
+                        });
+                    }
                 }
                 continue;
             }
-            this.syncedFlowNames.add(name);
-            const held = await engine.getFlow(name);
-            if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
-            try {
-                engine.registerFlow(name, entry.definition as never, entry.contender);
-                this.mutationArmedFlows.set(name, stableStringify(entry.definition));
-                armed.push(name);
-            } catch (err) {
-                // #5048 — see ./thrown-cause-diagnostics.ts.
-                ctx.logger.warn(
-                    '[Automation] a flow changed in the metadata store could not be registered — the engine keeps the '
-                        + 'registration it had, if any',
-                    { flow: name, ...describeThrownForLog(err) },
-                );
-                // [#23316] With none to keep, the stored flow is readable as refused.
-                engine.recordFlowRefusal(name, err);
+            for (const entry of entries) {
+                const held = heldForWinner(engine, entry);
+                const heldIdentity = slotIdentityOf(engine, name, held);
+                if (heldIdentity) this.syncedFlowNames.add(heldIdentity);
+                if (held && holdsFlowDefinition(engine, name, held, entry.definition)) continue;
+                try {
+                    const parsed = engine.registerFlow(name, entry.definition as never, armOfWinner(entry));
+                    const identity = slotIdentityOf(engine, name, parsed);
+                    if (identity) this.syncedFlowNames.add(identity);
+                    this.mutationArmedFlows.set(winnerMark(entry), stableStringify(entry.definition));
+                    armed.push(name);
+                } catch (err) {
+                    // #5048 — see ./thrown-cause-diagnostics.ts.
+                    ctx.logger.warn(
+                        '[Automation] a flow changed in the metadata store could not be registered — the engine keeps the '
+                            + 'registration it had, if any',
+                        { flow: name, ...describeThrownForLog(err) },
+                    );
+                    // [#23316] With none to keep, the stored flow is readable as refused.
+                    engine.recordFlowRefusal(name, err);
+                }
             }
         }
         if (armed.length > 0 || unregistered.length > 0) {

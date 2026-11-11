@@ -17,6 +17,8 @@
  * transport — it writes a row in our own DB — so it needs no connector.
  */
 
+import type { NotificationTextKeys } from './notification-text.js';
+
 /**
  * A platform → user notification, before fan-out to channels.
  *
@@ -62,6 +64,16 @@ export interface Notification {
      * single actor.
      */
     readonly actorId?: string;
+    /**
+     * [#32240] The catalog keys `title` / `body` were rendered from
+     * (`EmitInput.keyedText`), set by the messaging service on the inline
+     * fan-out and by the dispatcher on the durable path — never read from
+     * `payload`, whose free-form members a producer spells. A channel that
+     * STORES the text (the inbox) keeps them beside it, so a later reader can
+     * read the same notification in their own language. Absent when the emit
+     * keyed nothing, and on a digest delivery (a composed group has no one key).
+     */
+    readonly keyedText?: NotificationTextKeys;
     /** Arbitrary structured payload carried to renderers / webhook receivers. */
     readonly payload?: Record<string, unknown>;
 }

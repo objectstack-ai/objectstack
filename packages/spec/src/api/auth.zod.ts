@@ -185,7 +185,8 @@ export const MePermissionsAuthenticatedResponseSchema = lazySchema(() => z.objec
   ),
   permissionSets: z.array(z.string()).describe('The names of the permission sets resolved for the caller.'),
   objects: z.record(z.string(), EffectiveObjectPermissionSchema).describe(
-    'The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server.',
+    'The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server, '
+      + 'except that `allowTransfer` follows edit here: it reads true only where the entry grants edit.',
   ),
   fields: z.record(z.string(), z.object({
     readable: z.boolean().describe('The caller may read the field.'),

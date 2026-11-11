@@ -94,6 +94,11 @@ import { registerUserPreferenceHooks } from './user-preference-hooks.js';
 import { registerServiceAccountRowGuard } from './service-account-identity.js';
 import { personalViewCallerResolver, registerPersonalViewRoutes, PERSONAL_VIEW_REMOVE_ROUTE, type PersonalViewEngine } from './personal-view-routes.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
+import {
+  IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
+  refreshAllMappingMatches,
+  registerIdpGroupMappingMatchTrigger,
+} from './idp-group-mapping-match.js';
 import { registerServiceAccountOwnerLeavesTrigger } from './service-account-owner-leaves.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
@@ -102,7 +107,7 @@ import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
-import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoGroupsClaim, runShowSsoGroupsClaim, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
+import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoAttributeMapping, runSetSsoGroupsClaim, runShowSsoAttributeMapping, runShowSsoGroupsClaim, runSsoProviderDeleteImpact, runUpdateSsoProviderFromForm, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
 import { runSysSessionRevoke, sysSessionRevokeDepsFor } from './sys-session-revoke.js';
 import { oneAccountReadFaultAtMount, oneAccountRefusalAtMount } from './one-account-per-request.js';
@@ -2112,6 +2117,25 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.service-account-owner-leaves',
           logger: ctx.logger,
         });
+        // An IdP group mapping says whether it matches a group its SCIM
+        // connection pushes now, kept current on every write to either side
+        // and re-judged once per boot. It describes the row; the projection
+        // still decides every grant. See idp-group-mapping-match.ts.
+        registerIdpGroupMappingMatchTrigger(engine, {
+          packageId: IDP_GROUP_MAPPING_MATCH_PACKAGE_ID,
+          logger: ctx.logger,
+        });
+        try {
+          await refreshAllMappingMatches(engine);
+        } catch (e) {
+          ctx.logger.error(
+            '[auth] re-judging which IdP group mappings match a current SCIM group FAILED at boot, so a mapping '
+              + 'saved before match_status existed may read empty, and one whose group moved below the engine may '
+              + 'read stale (it never changes a grant). Each heals on the next write to a group or mapping of its '
+              + 'connection, or at the next boot once the cause is fixed.',
+            e instanceof Error ? e : undefined,
+          );
+        }
       } catch {
         // Engine not available (mock mode) — permission-set defaults remain
         // the only gate, exactly the pre-guard status quo.
@@ -3760,7 +3784,9 @@ export class AuthPlugin implements Plugin {
     // the wildcard below forwards the request and better-auth returns 404.
     rawApp.get(`${basePath}/config`, async (c: any) => {
       try {
-        const config = this.authManager!.getPublicConfig();
+        // The request goes along so the host's organization-create choices
+        // come back in the language this request asked for.
+        const config = this.authManager!.getPublicConfig(c.req.raw);
         // Refine the coarse "SSO wired" flag to "SSO usable" (≥1 provider
         // configured) so the login UI also hides the "Sign in with SSO" button
         // when SSO is enabled but no IdP exists yet — not just when it's off.
@@ -5096,6 +5122,85 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // The provider's attribute mapping (`mapping.email` / `firstName` /
+    // `lastName` / `name`: the IdP attributes or claims a sign-in reads the
+    // user's email and name from): show it, and change it, for the
+    // `sys_sso_provider` "Show Attribute Mapping" / "Edit Attribute Mapping"
+    // actions. Same shape and gate as the groups-claim pair above: the stored
+    // blob is read through the system read seam, only the mapped members are
+    // answered, and the write goes through the vendor's /sso/update-provider.
+    rawApp.post(`${basePath}/admin/sso/get-attribute-mapping`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runShowSsoAttributeMapping(c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/get-attribute-mapping bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.post(`${basePath}/admin/sso/set-attribute-mapping`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runSetSsoAttributeMapping(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/set-attribute-mapping bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
+    // [#32085] The provider lifecycle's two console doors, same ADR-0068 D4
+    // platform-admin gate as the other `/admin/sso/*` bridges, judged first:
+    //   • edit — the "Edit SAML Settings" / "Edit OIDC Settings" actions post
+    //     flat fields; the bridge writes through the vendor's own
+    //     /sso/update-provider (provider access, the held-caller refusal and
+    //     the identity-while-linked refusal all run) and answers the names of
+    //     the fields it changed, never a value (`register-sso-provider.ts`);
+    //   • delete impact — the delete action's preflight: how many users the
+    //     delete unlinks, how many of them have no other sign-in method
+    //     linked, and the group mappings and projected grants that go with it
+    //     (`sso-provider-lifecycle.ts`).
+    rawApp.post(`${basePath}/admin/sso/update-provider`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const { status, body } = await runUpdateSsoProviderFromForm(handleWithTransportOf(c), c.req.raw, readSsoProviderConfigs);
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/update-provider bridge failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    rawApp.get(`${basePath}/admin/sso/delete-impact`, async (c: any) => {
+      try {
+        const gated = await gateAdmin(c);
+        if (gated instanceof Response) return gated;
+        const engine = this.authManager!.getDataEngine();
+        if (!engine) {
+          return c.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'No data engine is wired, so the users linked to the provider cannot be counted.' } }, 503);
+        }
+        const { status, body } = await runSsoProviderDeleteImpact(
+          (c.req.queries() ?? {}) as Record<string, string[]>,
+          readSsoProviderConfigs,
+          engine,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] sso/delete-impact read failed', err);
         return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
       }
     });

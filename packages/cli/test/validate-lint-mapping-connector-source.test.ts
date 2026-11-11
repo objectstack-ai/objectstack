@@ -86,6 +86,8 @@ function stack(extra: Record<string, unknown> = {}): Record<string, unknown> {
       {
         name: 'fx_account',
         label: 'Account',
+        // [ADR-0153 D4] a mapping that pulls writes into a synced object only.
+        managedBy: 'synced',
         sharingModel: 'private',
         fields: { name: { type: 'text', label: 'Name' }, external_id: { type: 'text', label: 'External ID' } },
       },
@@ -97,6 +99,7 @@ function stack(extra: Record<string, unknown> = {}): Record<string, unknown> {
         sourceFormat: 'json',
         targetObject: 'fx_account',
         mode: 'upsert',
+        upsertKey: ['external_id'],
         fieldMapping: [
           { source: 'id', target: 'external_id', transform: 'none' },
           { source: 'name', target: 'name', transform: 'none' },

@@ -20,7 +20,7 @@
     "objects": ["employee", "account", "product", "sales_order", "order_line", "invoice", "payment", "activity"],
     "minFieldsPerObject": 4,
     "selectFields": [
-      {"object": "employee", "field": "role", "minOptions": 4},
+      {"object": "employee", "field": "job_function", "minOptions": 4},
       {"object": "employee", "field": "team", "minOptions": 3},
       {"object": "account", "field": "payment_terms", "minOptions": 2},
       {"object": "product", "field": "category", "minOptions": 3},
@@ -68,16 +68,16 @@
   "run": {
     "seed": {
       "employee": [
-        {"id": "e01", "name": "Grace Lin", "role": "sales_manager", "team": "east", "manager": null},
-        {"id": "e02", "name": "Omar Haddad", "role": "sales_rep", "team": "east", "manager": "e01"},
-        {"id": "e03", "name": "Priya Nair", "role": "sales_rep", "team": "east", "manager": "e01"},
-        {"id": "e04", "name": "Lucas Moreau", "role": "sales_rep", "team": "east", "manager": "e01"},
-        {"id": "e05", "name": "Hana Sato", "role": "sales_manager", "team": "west", "manager": null},
-        {"id": "e06", "name": "Diego Alvarez", "role": "sales_rep", "team": "west", "manager": "e05"},
-        {"id": "e07", "name": "Nora Becker", "role": "sales_rep", "team": "west", "manager": "e05"},
-        {"id": "e08", "name": "Sam Okafor", "role": "sales_rep", "team": "west", "manager": "e05"},
-        {"id": "e09", "name": "Mei Wong", "role": "ar_clerk", "team": "finance", "manager": "e10"},
-        {"id": "e10", "name": "Victor Hale", "role": "finance_manager", "team": "finance", "manager": null}
+        {"id": "e01", "name": "Grace Lin", "job_function": "sales_manager", "team": "east", "manager": null},
+        {"id": "e02", "name": "Omar Haddad", "job_function": "sales_rep", "team": "east", "manager": "e01"},
+        {"id": "e03", "name": "Priya Nair", "job_function": "sales_rep", "team": "east", "manager": "e01"},
+        {"id": "e04", "name": "Lucas Moreau", "job_function": "sales_rep", "team": "east", "manager": "e01"},
+        {"id": "e05", "name": "Hana Sato", "job_function": "sales_manager", "team": "west", "manager": null},
+        {"id": "e06", "name": "Diego Alvarez", "job_function": "sales_rep", "team": "west", "manager": "e05"},
+        {"id": "e07", "name": "Nora Becker", "job_function": "sales_rep", "team": "west", "manager": "e05"},
+        {"id": "e08", "name": "Sam Okafor", "job_function": "sales_rep", "team": "west", "manager": "e05"},
+        {"id": "e09", "name": "Mei Wong", "job_function": "ar_clerk", "team": "finance", "manager": "e10"},
+        {"id": "e10", "name": "Victor Hale", "job_function": "finance_manager", "team": "finance", "manager": null}
       ],
       "account": [
         {"id": "a01", "name": "Northwind Supply", "industry": "retail", "billing_city": "Portland", "owner": "e02", "payment_terms": "net_30"},

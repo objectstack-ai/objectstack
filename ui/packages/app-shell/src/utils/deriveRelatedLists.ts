@@ -62,6 +62,11 @@
  *     `lookup` children, preserving discovery order within each group. The
  *     primary flag places a list and no longer orders it; consumers that split
  *     body tables from side cards keep this order within each half.
+ *   - A child object the data API does not expose (`enable.apiEnabled:
+ *     false`, e.g. a credential or device table) yields no record-page list:
+ *     every read of its records answers `404 OBJECT_API_DISABLED`. The
+ *     authoring surface (`includeHidden`) lists such a relationship flagged
+ *     `isHidden`, as it lists a `relatedList: false` one.
  *   - Object-level READ permission gates the whole list (objectui#2359): the
  *     relationship graph says nothing about the CURRENT USER, so callers pass
  *     a `canRead` predicate (wired from `usePermissions().can`) and children
@@ -200,6 +205,12 @@ interface MergedObjectLike {
    * recomputes and the sort appears.
    */
   list?: { sort?: Array<{ field?: string; order?: 'asc' | 'desc' }> };
+  /**
+   * The spec's `enable` block, read for `apiEnabled` only: an object declared
+   * `apiEnabled: false` is not exposed through the data API, so a list of its
+   * records can never be read on any record page.
+   */
+  enable?: { apiEnabled?: boolean };
 }
 
 /**
@@ -347,6 +358,13 @@ export function deriveRelatedLists(
 
   for (const child of objects) {
     if (!child?.name) continue;
+    // An object the data API does not expose (`enable.apiEnabled: false`)
+    // answers every read of its records `404 OBJECT_API_DISABLED`, whoever
+    // asks: a list of them is never derived for the record page. The
+    // authoring surface still lists the relationship, flagged hidden, since an
+    // entry may name it.
+    const apiDisabled = child.enable?.apiEnabled === false;
+    if (apiDisabled && !options?.includeHidden) continue;
     // Permission gate: a related list surfaces the CHILD object's records, so
     // it requires read access on the child — the FK's mere existence does not
     // grant the current user anything (objectui#2359).
@@ -372,7 +390,7 @@ export function deriveRelatedLists(
       if (fieldDef.reference !== parentName) continue;
       if (AUDIT_FK_FIELDS.has(fieldName)) continue;
       // Explicit opt-out lives on the relationship.
-      const hidden = fieldDef.relatedList === false;
+      const hidden = fieldDef.relatedList === false || apiDisabled;
       if (hidden && !options?.includeHidden) continue;
 
       const entry: Working = {

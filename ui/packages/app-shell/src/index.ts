@@ -337,6 +337,9 @@ export { connectAssistantPath } from './console/connect/connectAssistantPath.js'
 // connect an AI assistant), so the console's first-run checklist and this
 // package's Home cards say each one once (#32021).
 export { useHomeItemClaim, useHomeItemClaimed, type HomeItem } from './console/home/homeItemClaims.js';
+// The frame the lazy `developer` i18n namespace's readers render under
+// (#32225): the console's Developer pages wrap their bodies in it.
+export { DeveloperNamespaceGate } from './console/connect/DeveloperNamespaceGate.js';
 export { OrganizationsLayout as DefaultOrganizationsLayout } from './console/organizations/OrganizationsLayout.js';
 export { OrganizationsPage as DefaultOrganizationsPage } from './console/organizations/OrganizationsPage.js';
 

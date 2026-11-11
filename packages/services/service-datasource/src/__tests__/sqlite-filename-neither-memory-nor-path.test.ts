@@ -118,9 +118,13 @@ function expectRefusal(res: { status: number; body: any }, value: string, why: R
   expect(res.body.success).toBe(false);
   // The envelope and code every bad config already answers with (#4410).
   expect(res.body.error.code).toBe('DATASOURCE_ADMIN_ERROR');
-  expect(res.body.error.message).toContain('Invalid configuration for driver');
-  expect(res.body.error.message).toContain(value);
-  expect(res.body.error.message).toMatch(why);
+  expect(res.body.error.details?.reason).toBe('invalid_config');
+  // The whole account of a refusal: its one-line message, then its hint.
+  const hint = res.body.error.details?.hint;
+  const account = hint ? `${res.body.error.message}\n${hint}` : res.body.error.message;
+  expect(account).toContain('Invalid configuration for driver');
+  expect(account).toContain(value);
+  expect(account).toMatch(why);
 }
 
 describe('#30331 — a filename that is neither `:memory:` nor a usable path is refused', () => {

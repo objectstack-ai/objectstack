@@ -7,6 +7,7 @@ import {
   FLOW_UPDATE_READONLY_WHEN_FIELD,
 } from './validate-readonly-flow-writes.js';
 import { explainRule } from './rule-explanations.js';
+import { ObjectSchema } from '@objectstack/spec/data';
 
 // [#22161] Each finding of the rule ids this file's rule shortened is one
 // verdict sentence; the reasoning it used to carry is the id's `os explain`
@@ -492,7 +493,7 @@ describe('validateReadonlyFlowWrites', () => {
     });
 
     // The engine's create-side strip does not judge a PLATFORM-INTERNAL object
-    // at all (`staticReadonlyInsertSubject`: a `sys_` name, or one of the three
+    // at all (`staticReadonlyInsertSubject`: a `sys_` name, or one of the four
     // `managedBy` buckets whose own 403 write guard governs it), so a create
     // finding there would describe a strip that never runs. The UPDATE path
     // applies no such exclusion, which the update controls pin.
@@ -500,6 +501,8 @@ describe('validateReadonlyFlowWrites', () => {
       ['a sys_ object', { name: 'sys_audit_entry', fields: { verdict: { type: 'text', readonly: true } } }],
       ['an engine-owned object', { name: 'audit_entry', managedBy: 'engine-owned', fields: { verdict: { type: 'text', readonly: true } } }],
       ['an append-only object', { name: 'audit_trail', managedBy: 'append-only', fields: { verdict: { type: 'text', readonly: true } } }],
+      // [ADR-0153 D4] a pulled copy — the engine write guard refuses a member's write on it.
+      ['a synced object', { name: 'erp_order_copy', managedBy: 'synced', fields: { verdict: { type: 'text', readonly: true } } }],
       ['a better-auth object', { name: 'identity_row', managedBy: 'better-auth', fields: { verdict: { type: 'text', readonly: true } } }],
     ])('does NOT flag a create_record into %s — outside the create-side strip; the same update_record is still flagged', (_label, platformObject) => {
       const create = {
@@ -537,6 +540,31 @@ describe('validateReadonlyFlowWrites', () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].rule).toBe(FLOW_UPDATE_READONLY_FIELD);
       expect(findings[0].path).toBe('flows[0].nodes[0].config.fields.verdict');
+    });
+
+    // [ADR-0153 D4] This mirror of objectql's `PLATFORM_INTERNAL_MANAGED_BUCKETS`
+    // is pinned against the spec enum: every bucket the enum declares lands on
+    // exactly one side, so a new bucket fails here until it is classified.
+    it('classifies EVERY `managedBy` value the spec enum declares — a new bucket fails here', () => {
+      const PLATFORM_INTERNAL = ['engine-owned', 'append-only', 'synced', 'better-auth'];
+      const USER_WRITABLE = ['platform', 'config', 'system-data'];
+      const enumDef = (ObjectSchema.shape.managedBy as any)?.def?.innerType
+        ?? (ObjectSchema.shape.managedBy as any)?._def?.innerType;
+      const declared: string[] = [...(enumDef?.options ?? [])];
+      expect(declared.length, 'the enum must be readable').toBeGreaterThan(0);
+      expect([...declared].sort()).toEqual([...PLATFORM_INTERNAL, ...USER_WRITABLE].sort());
+      for (const bucket of declared) {
+        const objectName = `deal_${bucket.replace(/-/g, '_')}`;
+        const obj = { name: objectName, managedBy: bucket, fields: { verdict: { type: 'text', readonly: true } } };
+        const create = {
+          name: 'seed_deal',
+          runAs: 'user',
+          nodes: [{ id: 'c', type: 'create_record', label: 'C', config: { objectName, fields: { verdict: 'ok' } } }],
+          edges: [],
+        };
+        const findings = validateReadonlyFlowWrites({ objects: [obj], flows: [create] });
+        expect(findings.length, bucket).toBe(PLATFORM_INTERNAL.includes(bucket) ? 0 : 1);
+      }
     });
 
     it('skips a templated objectName and a non-literal fields map on create, as on update', () => {

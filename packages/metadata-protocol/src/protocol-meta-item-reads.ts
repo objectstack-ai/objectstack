@@ -39,7 +39,7 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, exactQualifierItem } from './protocol-exact-qualifier.js';
+import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -101,10 +101,32 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // packages hold is refused HERE, before any layer below is read, naming
     // both (a thrown `409 RESOURCE_CONFLICT`); it served the first registered.
     // Step 3 serves this answer in place of `getItem`'s, and nothing else
-    // below changes. A read that names a package (`?package=`) keeps
-    // `getItem`'s prefer-local read: that address is the exact qualifier of
-    // child G1 (ADR-0150 D5), not a caller.
+    // below changes. A read that names a package (`?package=`) is not a
+    // caller: that address is the exact qualifier of child G1 (ADR-0150 D5),
+    // judged below for every covered type.
+    // [ADR-0150 D3, epic #31527] The read that names no package of a type
+    // ADR-0150 addresses by `(package, name)` cannot be judged on an engine
+    // whose registry cannot say how it reads the type, or reads it by
+    // package with no resolver, or reads through `getItem` a type whose
+    // names are scoped to the namespace (two packages may hold one): nothing
+    // can count its holders, and `getItem` would serve the first match.
+    // Refused here, before any layer is read ({@link refuseUnjudgeableByNameRead}).
+    // Any other type the registry reads through `getItem` keeps that read,
+    // as on `main` (seat ruling (a)): it narrows in its own reader card.
+    if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
     const registry = host.engine?.registry;
+    // [ADR-0150 D5, #31697] An object-less action two packages hold — two
+    // namespaces may, once the action's one-holder rule narrowed to the
+    // namespace — is refused here when the read names no package, naming
+    // each (a thrown `409 RESOURCE_CONFLICT`), before any layer is read; it
+    // served the first registered. So is a package's beside a package-less
+    // item the environment's store does not hold (the platform's: host code
+    // or a plugin), as the action doors refuse it; the store's own row is the
+    // environment's and answers first. A disabled package holds nothing here.
+    // An action bound to an object reads as before (`getItem`).
+    if (!request.packageId && request.type === 'action' && typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
+        await registry.refuseAmbiguousObjectLessAction(request.name, () => host.readItemActiveRows('action', request.name));
+    }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
             ? { item: registry.resolveItem(request.type, request.name, null, member) }

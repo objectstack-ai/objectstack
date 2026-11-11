@@ -82,6 +82,22 @@ const SYSTEM_CTX = { isSystem: true } as const;
 const MAX_TEXT = 255;
 const MAX_SET_NAME = 100;
 const SET_BODY_KEYS = new Set(['connectionId', 'providerId', 'groupExternalId', 'groupDisplayName', 'permissionSet']);
+/**
+ * The one key a save admits beyond {@link SET_BODY_KEYS}, and reads nothing from.
+ *
+ * Every `type: 'api'` action aimed at an `/api/v1/auth/` path is forwarded with
+ * the caller's active organization stamped into its body as `organizationId`:
+ * the action door does it (`buildApiActionRequest` in
+ * `packages/runtime/src/action-execution.ts`), and so does the console's
+ * direct fetch (`useConsoleActionRuntime`'s api handler). Setup's declared
+ * "Map … Group" actions on `sys_idp_group_mapping` reach this door that way,
+ * so a closed key set without this entry refused every one of them as
+ * `unknown_field`. The stamp names where the administrator is working, not
+ * where the grant lands: the grant's organization is the source's (see the
+ * module header), so the value is never read. Every other unknown key is
+ * still refused.
+ */
+const ACTION_DOOR_STAMP_KEY = 'organizationId';
 const GRANT_OBJECT = 'sys_user_permission_set';
 
 interface FieldRefusal {
@@ -316,7 +332,7 @@ export async function runSetIdpGroupMapping(
 
   const refusals: FieldRefusal[] = [];
   for (const key of Object.keys(body)) {
-    if (!SET_BODY_KEYS.has(key)) {
+    if (!SET_BODY_KEYS.has(key) && key !== ACTION_DOOR_STAMP_KEY) {
       refusals.push({ field: key, code: 'unknown_field', message: `${key} is not a field of a group mapping (connectionId, providerId, groupExternalId, groupDisplayName, permissionSet).` });
     }
   }

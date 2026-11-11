@@ -43,6 +43,8 @@
  * removed the entry.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry, assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/objectql';
@@ -427,7 +429,7 @@ describe('#5079 — list / get / dispatch agree immediately after deleteMeta', (
         await protocol.saveMetaItem({
             type: 'flow',
             name: 'twin',
-            item: { name: 'twin', label: 'Flow Twin', type: 'autolaunched', nodes: [], edges: [] },
+            item: { name: 'twin', label: 'Flow Twin', type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] },
         });
 
         await protocol.deleteMetaItem({ type: 'action', name: 'twin' });

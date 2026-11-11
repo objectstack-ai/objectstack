@@ -371,6 +371,8 @@ export {
 // plugin-hono-server, which re-exports them under the same names.
 export {
   buildEffectiveObjectPermissions,
+  // [Ruling of record 6755714726] The slot `/auth/me/permissions` serves, derived from that map.
+  servedObjectPermissions,
   // [#28877] The map's disabled-package accessor over an engine registry.
   registryObjectPackageDisabled,
   // [#30370] The map's external-write-gate accessor over an engine.

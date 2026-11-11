@@ -126,6 +126,52 @@ describe('the federation twins on a datasource that exists and is not a federati
 });
 
 /**
+ * A refusal the federation guard declared with its own envelope carries
+ * `details`: the reason a client branches on, and the rationale as `hint`
+ * beside a one-line message. This family's catch relays them as thrown, as the
+ * admin routes relay the same throw, under the door's own status and code.
+ * Only a declared `400` under the door's code is relayed: an error that merely
+ * carries a field named `details` answers the bare sentence.
+ */
+describe('the federation twins relay the details a declared refusal carries', () => {
+  it.each(TWINS)('%s on a managed datasource: reason not_federation_source, the remedy in the hint', async (_d, method, path, code) => {
+    const call = mount();
+
+    const answer = await call(method, path('warehouse'));
+
+    expect({ status: answer.status, code: answer.body.error?.code }).toEqual({ status: 400, code });
+    expect(answer.body.error.details).toMatchObject({ reason: 'not_federation_source' });
+    expect(answer.body.error.details.hint).toContain('use a datasource the platform does not own');
+  });
+
+  it.each(TWINS)('%s on the primary datasource: reason primary_not_federated', async (_d, method, path, code) => {
+    const call = mount();
+
+    const answer = await call(method, path('default'));
+
+    expect({ status: answer.status, code: answer.body.error?.code }).toEqual({ status: 400, code });
+    expect(answer.body.error.details).toMatchObject({ reason: 'primary_not_federated' });
+  });
+
+  it('CONTROL: an undeclared error carrying a stray `details` answers the bare sentence', async () => {
+    const call = mount({
+      introspect: async () => {
+        throw Object.assign(new Error('driver says no'), { details: { internal: 'not for the wire' } });
+      },
+    });
+
+    const answer = await call('GET', '/lake/external/tables');
+
+    expect({ status: answer.status, code: answer.body.error?.code }).toEqual({
+      status: 400,
+      code: 'EXTERNAL_DATASOURCE_ERROR',
+    });
+    expect(answer.body.error.message).toBe('driver says no');
+    expect(answer.body.error).not.toHaveProperty('details');
+  });
+});
+
+/**
  * [#27696] `POST …/external/validate`, the one by-name federation door the
  * pins above left out. It answered an unknown name `200` with an empty,
  * vacuously `ok` report, so a caller could not tell "nothing on this

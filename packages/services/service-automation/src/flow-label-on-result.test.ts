@@ -282,7 +282,7 @@ describe('AutomationResult.flowLabel — the authored flow label rides the resul
     });
 
     describe('absent — a refusal carrying `code`, or no registered flow', () => {
-        it('never-dispatched refusals: FLOW_DISABLED and FLOW_NO_START_NODE', async () => {
+        it('never-dispatched refusals: FLOW_DISABLED, and a start-less flow refused at registration', async () => {
             // [#20726] Disabled through the toggle, which switches packaged flows only.
             engine.registerFlow('approve_orders', { ...chain('approve_orders', PARENT_LABEL, [{ id: 'w', type: 'work' }]), _packageId: 'crm' } as never);
             await engine.toggleFlow('approve_orders', false);
@@ -290,12 +290,16 @@ describe('AutomationResult.flowLabel — the authored flow label rides the resul
             expect(disabled.code).toBe('FLOW_DISABLED');
             expect(disabled).not.toHaveProperty('flowLabel');
 
-            engine.registerFlow('no_start', {
+            // A start-less definition is refused at registration now, so it is
+            // never armed: a run of the name answers the unregistered refusal,
+            // which carries no label either.
+            expect(() => engine.registerFlow('no_start', {
                 name: 'no_start', label: PARENT_LABEL, type: 'autolaunched',
                 nodes: [{ id: 'end', type: 'end', label: 'End' }], edges: [],
-            } as never);
+            } as never)).toThrow(/hold no `start` node/);
             const noStart = await engine.execute('no_start');
-            expect(noStart.code).toBe('FLOW_NO_START_NODE');
+            expect(noStart.success).toBe(false);
+            expect(noStart.error).toContain('not found');
             expect(noStart).not.toHaveProperty('flowLabel');
         });
 

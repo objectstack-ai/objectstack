@@ -422,7 +422,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `list.loadErrorUnknownColumnMessage` and `list.loadErrorUnknownFieldMessage`,
     // the rejected list panel naming a refused column („{{column}}“) and field
     // („{{field}}“, twice) — three interpolated spans, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(114);
+    // 115 once objectstack-ai/objectstack#32087 added
+    // `auth.login.errors.ssoStartFromLoginPage`, the refused single sign-on
+    // that names the button to press („Mit SSO anmelden“) — one literal span.
+    // 116 once objectstack-ai/objectstack#32040 added
+    // `marketplace.install.targetNamespace.taken`, the refused install naming
+    // the namespace another package owns („{{namespace}}“) — one interpolated
+    // span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(116);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -523,8 +530,12 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // objectstack-ai/objectstack#30239 added `objectActions.restoredNamed`, one
     // more matched pair. 114 / 114 / 0 after objectstack-ai/objectstack#31893
     // (2026-11-09) added `list.loadErrorUnknownColumnMessage` and
-    // `list.loadErrorUnknownFieldMessage`, three more matched pairs.
-    expect({ open, close, rdq }).toEqual({ open: 114, close: 114, rdq: 0 });
+    // `list.loadErrorUnknownFieldMessage`, three more matched pairs. 115 / 115 /
+    // 0 after objectstack-ai/objectstack#32087 added
+    // `auth.login.errors.ssoStartFromLoginPage`, one more matched pair. 116 /
+    // 116 / 0 after objectstack-ai/objectstack#32040 added
+    // `marketplace.install.targetNamespace.taken`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 116, close: 116, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

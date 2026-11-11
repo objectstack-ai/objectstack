@@ -49,6 +49,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { postureUsesUnionScope } from '@objectstack/spec/security';
 import { EXCHANGE_RATE_OBJECT, homeAmountsTouched, memoizeHomeAmountServing, planHomeAmounts, projectHomeAmounts } from './home-amount-projection.js';
 import type { HomeAmountPlanEntry, HomeAmountReads, HomeAmountServing, HomeLocalization, HomeLocalizationResolver } from './home-amount-projection.js';
+import { PARENT_CODE_UNREAD } from './validation/record-currency-code.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { collectCascadeDeleteObjects } from './engine-delete-cascade.js';
@@ -125,7 +126,7 @@ export class ReferencesAndMasterDetailFacet {
    * amount. An install without the rate object registered has no rate for any
    * currency.
    */
-  static homeAmountServing(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'find' | 'homeLocalizationResolver'>, context: ExecutionContext | undefined): HomeAmountServing {
+  static homeAmountServing(this: Pick<ReferencesAndMasterDetailHost, '_registry' | 'find' | 'homeLocalizationResolver' | 'masterDetailHeadersCallerReads'>, context: ExecutionContext | undefined): HomeAmountServing {
     // One settings read per organization per write answers both the home
     // currency and the timezone.
     const localizations = new Map<string, Promise<HomeLocalization | undefined>>();
@@ -161,6 +162,31 @@ export class ReferencesAndMasterDetailFacet {
           rate: row.rate,
           effectiveDate: effective instanceof Date ? effective.toISOString().slice(0, 10) : (typeof effective === 'string' ? effective : undefined),
         };
+      },
+      // [ADR-0144 D2, amended] The parents a child amount follows the code of,
+      // in the two reads the write's other header reads make (#22519), once
+      // per batch. 1. The WRITER's read door (`masterDetailHeadersCallerReads`,
+      // every enforcement layer answering; a system writer has none, and a
+      // read that fails returns nothing): a parent it does not return answers
+      // PARENT_CODE_UNREAD and is never read elevated, so the guard answers it
+      // `reference_not_found` before any currency verdict. 2. The write's own
+      // elevated read, keeping the organization (`referenceCheckContext`), for
+      // the parents read 1 returned, so a writer reads its parent's code
+      // whatever its field-level read of the parent. A failed read 2 fails the
+      // write; no currency is ever assumed.
+      parentRows: async (master, ids, fields) => {
+        const out = new Map<string, Record<string, unknown> | typeof PARENT_CODE_UNREAD>();
+        const readable = await this.masterDetailHeadersCallerReads(master, ids, context);
+        for (const id of ids) if (!readable.has(id)) out.set(id, PARENT_CODE_UNREAD);
+        const served = ids.filter((id) => readable.has(id));
+        if (served.length === 0) return out;
+        const rows = await this.find(master, {
+          where: { id: { $in: served } },
+          fields: ['id', ...fields],
+          context: ObjectQL.referenceCheckContext(context),
+        }) as Array<Record<string, unknown>>;
+        for (const row of Array.isArray(rows) ? rows : []) if (row?.id != null && readable.has(String(row.id))) out.set(String(row.id), row);
+        return out;
       },
     });
   }

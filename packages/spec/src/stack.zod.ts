@@ -11,7 +11,7 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -4719,8 +4719,9 @@ function lineItemsChildObject(
 
 /**
  * A job's `pull.mapping` must name a mapping this stack declares, and that
- * mapping must carry a `connectorSource` (ruling Q1-B on the connector-sync
- * card: "`os validate` checks the mapping name").
+ * mapping must carry a source — a `connectorSource`, or since ADR-0153 D1 a
+ * `datasourceSource` (ruling Q1-B on the connector-sync card: "`os validate`
+ * checks the mapping name").
  *
  * Both halves are refused here rather than at the first tick, where the
  * automation service would reject the run (`mapping_not_found` /
@@ -4734,7 +4735,7 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const jobs = Array.isArray(config.jobs) ? config.jobs : [];
   if (jobs.length === 0) return errors;
-  const mappings = new Map<string, { connectorSource?: unknown }>();
+  const mappings = new Map<string, { connectorSource?: unknown; datasourceSource?: unknown }>();
   for (const m of Array.isArray(config.mappings) ? config.mappings : []) {
     if (isRecord(m) && typeof m.name === 'string') mappings.set(m.name, m);
   }
@@ -4747,15 +4748,227 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
       errors.push(
         `Job '${String(job.name)}' pulls mapping '${name}' which is not defined in mappings. ` +
           `Declare the mapping (its targetObject, fieldMapping and a connectorSource naming the ` +
-          `rest or openapi connector it pulls from) or correct the name.`,
+          `rest or openapi connector it pulls from, or a datasourceSource naming the federated ` +
+          `object it reads) or correct the name.`,
       );
       continue;
     }
-    if (mapping.connectorSource === undefined) {
+    // [ADR-0153 D1] `job.pull` accepts either source.
+    if (mapping.connectorSource === undefined && mapping.datasourceSource === undefined) {
       errors.push(
-        `Job '${String(job.name)}' pulls mapping '${name}', which declares no connectorSource — ` +
+        `Job '${String(job.name)}' pulls mapping '${name}', which declares no source — ` +
           `there is nothing to pull. Add connectorSource: { connector, action } to the mapping, ` +
-          `naming the rest or openapi connector it reads from.`,
+          `naming the rest or openapi connector it reads from, or datasourceSource: { object, watermark } ` +
+          `naming the federated object it reads.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * [ADR-0153 D2 invariant 7] The largest number of decimal digits an integer
+ * column may declare and still read back as an exact JavaScript number: every
+ * 15-digit integer is inside ±2^53. A 16-digit one may not be, and no dialect
+ * client is verified (by the P2 engine card) to read wider ones as a `bigint`
+ * or a string, so a wider or undeclared precision is refused at build.
+ */
+const SYNC_EXACT_INTEGER_PRECISION = 15;
+
+/**
+ * The field types whose value a pull reads as a string (ADR-0153 D2 invariant
+ * 7: "the key is a string or an integer"). A key of any other type — a
+ * fraction, a date, a JSON value — is not one a key cursor compares exactly.
+ */
+const SYNC_STRING_KEY_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'select', 'radio', 'autonumber', 'lookup', 'master_detail', 'user',
+]);
+
+/**
+ * A field's declared exactness as a pull key or an integer watermark: an
+ * integer `number` (`scale: 0`) that declares a `precision` of at most
+ * {@link SYNC_EXACT_INTEGER_PRECISION} digits. Answers why it is not, or
+ * `undefined` when it is.
+ */
+function inexactIntegerReason(field: Record<string, unknown>): string | undefined {
+  const precision = field.precision;
+  if (typeof precision !== 'number') {
+    return `declares no precision, so a value past 2^53 could read back rounded — declare precision: ` +
+      `${SYNC_EXACT_INTEGER_PRECISION} or fewer digits`;
+  }
+  if (precision > SYNC_EXACT_INTEGER_PRECISION) {
+    return `declares precision ${precision}, past the ${SYNC_EXACT_INTEGER_PRECISION} digits every value of ` +
+      `which reads back as an exact JavaScript integer — declare precision: ${SYNC_EXACT_INTEGER_PRECISION} ` +
+      `or fewer, or key the source on a string column`;
+  }
+  return undefined;
+}
+
+/**
+ * [ADR-0153 D1–D4] The build refusals over a SOURCED mapping that need the
+ * stack's objects — live as they land, ahead of the pull that reads the keys
+ * (the P2 engine card), because each one refuses a binding no pull could
+ * honour. The rules the mapping alone can judge (one source, `upsert` with a
+ * key) are `MappingSchema`'s own refinement and are refused at parse.
+ *
+ *  - **A `synced` target** (D4): a mapping carrying either source writes an
+ *    object whose `managedBy` is `'synced'`, the bucket every write guard
+ *    holds read-only to members. A pull into an ordinary object leaves the
+ *    rows editable by members, and the next pull keeps or overwrites the edit
+ *    silently.
+ *  - **A federated source object** (D1): `datasourceSource.object` names an
+ *    object of this stack that declares an `external` binding (ADR-0015). A
+ *    managed object's rows are already local.
+ *  - **`source_key_missing`** (D2 invariant 6): that object's
+ *    `external.columnMap` maps a remote column onto `id`, the key the rows are
+ *    matched and paged by.
+ *  - **`source_key_not_exact`** (invariant 7): the key's declared type (the
+ *    object's own `id` field, when it declares one) is a string, or an
+ *    integer of an exact precision.
+ *  - **A halvable `watermark.field`** (invariant 1): a field of the source
+ *    object of type `datetime`, `date`, or `number` with `scale: 0` — and an
+ *    integer one of an exact precision (**`watermark_not_exact`**, invariant 7).
+ *  - **`watermark_field_unmapped`** (D3): a `fieldMapping` entry copies
+ *    `watermark.field` unchanged (transform `none`) onto a target field of
+ *    the same type, which the mark's range compares with `watermark.start`.
+ *
+ * Resolved against this stack's own objects, like the mapping's `targetObject`
+ * above it; a target this stack does not define is already refused there and
+ * gets no second finding here.
+ */
+function collectSourcedMappingErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const mappings = Array.isArray(config.mappings) ? config.mappings : [];
+  if (mappings.length === 0) return errors;
+  const objects = new Map<string, Record<string, unknown>>();
+  for (const obj of Array.isArray(config.objects) ? config.objects : []) {
+    if (isRecord(obj) && typeof obj.name === 'string') objects.set(obj.name, obj);
+  }
+  const fieldOf = (obj: Record<string, unknown> | undefined, name: string): Record<string, unknown> | undefined => {
+    const fields = obj?.fields;
+    const field = isRecord(fields) ? fields[name] : undefined;
+    return isRecord(field) ? field : undefined;
+  };
+
+  for (const m of mappings) {
+    if (!isRecord(m)) continue;
+    const source = m.datasourceSource !== undefined ? 'datasourceSource'
+      : m.connectorSource !== undefined ? 'connectorSource' : undefined;
+    if (source === undefined) continue;
+    const subject = `Mapping '${String(m.name)}'`;
+
+    const target = typeof m.targetObject === 'string' ? objects.get(m.targetObject) : undefined;
+    if (target !== undefined && target.managedBy !== 'synced') {
+      errors.push(
+        `${subject} pulls rows into object '${String(m.targetObject)}' through its ${source}, but that object ` +
+          `is not managedBy: 'synced' (it is ${target.managedBy === undefined ? 'unset' : `'${String(target.managedBy)}'`}). ` +
+          `A pulled copy is read-only to members, so a member's edit is never kept or lost silently by the next ` +
+          `pull; declare managedBy: 'synced' on the target object (ADR-0153 D4).`,
+      );
+    }
+
+    if (source !== 'datasourceSource' || !isRecord(m.datasourceSource)) continue;
+    const ds = m.datasourceSource;
+    const objectName = typeof ds.object === 'string' ? ds.object : undefined;
+    if (objectName === undefined) continue;
+    const at = `${subject} (datasourceSource.object '${objectName}')`;
+    const sourceObject = objects.get(objectName);
+    if (sourceObject === undefined) {
+      errors.push(
+        `${at} names an object which is not defined in objects. A datasource source reads a federated object ` +
+          `this stack declares; declare it (its datasource and external binding) or correct the name.`,
+      );
+      continue;
+    }
+    if (!isRecord(sourceObject.external)) {
+      errors.push(
+        `${at} names an object that is not federated: it declares no external binding (ADR-0015), so its rows ` +
+          `are already local and there is nothing to copy. Name a federated object — one on an external ` +
+          `datasource whose external binding addresses the remote table.`,
+      );
+      continue;
+    }
+
+    // Invariant 6: the key is the remote column the binding maps onto `id`.
+    const columnMap = isRecord(sourceObject.external.columnMap) ? sourceObject.external.columnMap : {};
+    const keyColumn = Object.keys(columnMap).find((remote) => columnMap[remote] === 'id');
+    if (keyColumn === undefined) {
+      errors.push(
+        `${at}: source_key_missing — the object's external.columnMap maps no remote column onto 'id', so the ` +
+          `pull has no key to match a row's copy by or to page by. Map the source's unique, never-null key ` +
+          `column onto id in external.columnMap.`,
+      );
+    } else {
+      const idField = fieldOf(sourceObject, 'id');
+      const idType = typeof idField?.type === 'string' ? idField.type : undefined;
+      let notExact: string | undefined;
+      if (idField !== undefined && idType === 'number') {
+        notExact = idField.scale !== 0
+          ? 'its id field is a number that does not declare scale: 0, and a key is a string or an integer'
+          : (() => {
+            const why = inexactIntegerReason(idField);
+            return why === undefined ? undefined : `its integer id field ${why}`;
+          })();
+      } else if (idType !== undefined && !SYNC_STRING_KEY_TYPES.has(idType)) {
+        notExact = `its id field is of type '${idType}', and a key is a string or an integer`;
+      }
+      if (notExact !== undefined) {
+        errors.push(
+          `${at}: source_key_not_exact — the key column '${keyColumn}' cannot be compared exactly: ${notExact}.`,
+        );
+      }
+    }
+
+    // Invariant 1 and 7: the watermark field windows are cut on.
+    const watermark = isRecord(ds.watermark) ? ds.watermark : undefined;
+    const wmName = typeof watermark?.field === 'string' ? watermark.field : undefined;
+    if (wmName === undefined) continue;
+    const wmField = fieldOf(sourceObject, wmName);
+    const wmType = typeof wmField?.type === 'string' ? wmField.type : undefined;
+    if (wmField === undefined) {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is not a field of the source object. Name the datetime, date or ` +
+          `integer field the source stamps on every write.`,
+      );
+      continue;
+    }
+    if (wmType === 'number' && wmField.scale === 0) {
+      const why = inexactIntegerReason(wmField);
+      if (why !== undefined) {
+        errors.push(`${at}: watermark_not_exact — watermark.field '${wmName}' is an integer field that ${why}.`);
+      }
+    } else if (wmType !== 'datetime' && wmType !== 'date') {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is ${wmType === 'number' ? "a number field that does not declare scale: 0" : `of type '${String(wmType)}'`}, ` +
+          `which a read window cannot be halved on. Name a datetime or date field, or a number field that ` +
+          `declares scale: 0 (an integer).`,
+      );
+      continue;
+    }
+
+    // D3: the watermark is copied unchanged onto a target field of its type.
+    const copies = (Array.isArray(m.fieldMapping) ? (m.fieldMapping as unknown[]) : []).filter(
+      (entry): entry is Record<string, unknown> =>
+        isRecord(entry) &&
+        (entry.transform === undefined || entry.transform === 'none') &&
+        (entry.source === wmName || (Array.isArray(entry.source) && entry.source.length === 1 && entry.source[0] === wmName)),
+    );
+    const targetName = (entry: Record<string, unknown>): string | undefined =>
+      typeof entry.target === 'string' ? entry.target
+        : Array.isArray(entry.target) && entry.target.length === 1 && typeof entry.target[0] === 'string'
+          ? entry.target[0] : undefined;
+    const typed = copies.some((entry) => {
+      const name = targetName(entry);
+      if (name === undefined) return false;
+      if (target === undefined) return true; // no target to judge the type against; refused above
+      return fieldOf(target, name)?.type === wmType;
+    });
+    if (!typed) {
+      errors.push(
+        `${at}: watermark_field_unmapped — no fieldMapping entry copies watermark.field '${wmName}' unchanged ` +
+          `(transform none) onto a ${wmType} field of the target object. Every pulled row must carry its ` +
+          `watermark value, which a delete mark's range compares with watermark.start; add ` +
+          `{ source: '${wmName}', target: FIELD } to fieldMapping, FIELD naming a ${wmType} field of the target.`,
       );
     }
   }
@@ -5481,6 +5694,10 @@ function validateCrossReferences(
       }
     }
   }
+
+  // [ADR-0153 D1–D4] A sourced mapping's target, source object, key and
+  // watermark, judged against this stack's objects.
+  errors.push(...collectSourcedMappingErrors(config));
 
   // Validate permission-set / profile object grants → object references.
   // ARTIFACT-SCOPED (#18202) — the rule's own doc carries why it fails loudly.
@@ -7554,9 +7771,11 @@ function mergeObjects(
  * - An embedded action reaches the output through exactly ONE stack's object —
  *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
  *   Under `objectConflict: 'override'` the other stacks' embedded declarations
- *   on that object are not in the artifact at all, so they cannot collide with
+ *   on that object are not in the COMPOSED object, so they cannot collide with
  *   anything; that loss is the object strategy's own semantics, not an action
- *   collision. Under `'merge'` two objects declaring DIFFERENT `actions` are
+ *   collision. (A `manifest: 'preserve'` artifact still carries them in their
+ *   own package bodies; the runtime binder binds what the composed artifact
+ *   carries, so they are bound at no address.) Under `'merge'` two objects declaring DIFFERENT `actions` are
  *   refused at `mergeObjects` before this walk runs (#14848), and identical
  *   ones are one declaration carried once — so the array attributed here never
  *   displaced another stack's entries.
@@ -7571,6 +7790,19 @@ function mergeObjects(
  * Deliberately NOT refused, as in `defineStack`: the cross-scope pair (a global
  * and an object-bound action sharing a name — two keys) and one name bound to
  * two different objects.
+ *
+ * [ADR-0150 D2/D4] Nor, under `manifest: 'preserve'` (`preserve`), two
+ * packages' object-less action of one name when the packages hold the name
+ * apart ({@link composedPackagesHoldApart}): the rule the install gate applies
+ * to the same pair, so one artifact carries what two installs carry. Preserve
+ * keeps each body under its own package, the boot registers each under that
+ * package, and a call reaches each by its namespace's address
+ * (`/actions/NS/global/NAME`) while the call that names no package is refused
+ * naming both. Under the default (flattening) manifest the package identity
+ * is lost, so the pair stays refused, and the refusal names `preserve`
+ * ({@link formatComposedActionKeyCollisions}). Two packages of one namespace,
+ * two bodies of one package, and a package with no namespace stay refused
+ * under either manifest, and an object-bound key keeps the one-holder rule.
  *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
@@ -7590,10 +7822,13 @@ function collectComposedActionKeyCollisions(
   stacks: ObjectStackDefinition[],
   composedObjects: ObjectStackDefinition['objects'],
   actionsOwner: ReadonlyMap<string, number>,
-): string[] {
+  preserve: boolean,
+): { lines: string[]; preserveWouldAdmit: boolean } {
   type Action = NonNullable<ObjectStackDefinition['actions']>[number];
   // key → stack index → where that stack declares it
   const sitesByKey = new Map<string, Map<number, string[]>>();
+  // Keys some object EMBEDS: object-bound, whatever the scope string reads.
+  const embeddedKeys = new Set<string>();
   const note = (scope: string, name: string, stackIndex: number, site: string): void => {
     const key = `${scope}:${name}`;
     const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
@@ -7634,12 +7869,26 @@ function collectComposedActionKeyCollisions(
     for (const [j, action] of (embedded as Action[]).entries()) {
       if (!isRecord(action)) continue;
       note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
+      embeddedKeys.add(`${obj.name}:${action.name}`);
     }
   }
 
   const errors: string[] = [];
+  // [ADR-0150 D2/D4] Whether `preserve` would admit EVERY refused key: the
+  // refusal names it only then, never beside a key it would refuse too.
+  let admissible = 0;
+  let inadmissible = 0;
   for (const [key, byStack] of sitesByKey) {
     if (byStack.size < 2) continue;
+    // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
+    // under `preserve`, and under the flattening manifest the refusal names it.
+    if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
+      && composedPackagesHoldApart(stacks, [...byStack.keys()])) {
+      if (preserve) continue;
+      admissible += 1;
+    } else {
+      inadmissible += 1;
+    }
     // Stack order, not note order — standalone declarations are walked before
     // embedded ones, so a later stack's standalone would otherwise be named
     // ahead of an earlier stack's embedded action.
@@ -7648,7 +7897,38 @@ function collectComposedActionKeyCollisions(
       .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
     errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
   }
-  return errors;
+  return { lines: errors, preserveWouldAdmit: admissible > 0 && inadmissible === 0 };
+}
+
+/**
+ * [ADR-0150 D2/D4] Do the input stacks at `indices` hold one object-less
+ * action name APART, as packages the install gate would admit side by side?
+ * Each must be ONE package — a `manifest` with an `id`, and no `packages` list
+ * of its own (a nested artifact's top-level actions belong to no single body)
+ * — no two may be one package (two bodies of one package are one holder, and
+ * it holds one body per name), and no two may meet under
+ * {@link namespacedHoldersMeet}, the namespace half of the install gate's rule,
+ * read from its one copy: a package with no namespace, or two packages of one
+ * namespace, meet.
+ * @internal
+ */
+function composedPackagesHoldApart(stacks: readonly ObjectStackDefinition[], indices: readonly number[]): boolean {
+  const holders: Array<{ id: string; namespace: string | undefined }> = [];
+  for (const index of indices) {
+    const stack = stacks[index] as Record<string, unknown> & ObjectStackDefinition;
+    if (Array.isArray(stack.packages)) return false;
+    const id = stack.manifest?.id;
+    if (typeof id !== 'string' || id === '') return false;
+    const namespace = stack.manifest?.namespace;
+    holders.push({ id, namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined });
+  }
+  for (let a = 0; a < holders.length; a += 1) {
+    for (let b = a + 1; b < holders.length; b += 1) {
+      if (holders[a].id === holders[b].id) return false;
+      if (namespacedHoldersMeet(holders[a].namespace, holders[b].namespace)) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -7658,7 +7938,7 @@ function collectComposedActionKeyCollisions(
  * carries. Names no strategy option: there is none for actions by ruling.
  * @internal
  */
-function formatComposedActionKeyCollisions(lines: readonly string[]): string {
+function formatComposedActionKeyCollisions(lines: readonly string[], preserveWouldAdmit: boolean): string {
   const header =
     `composeStacks conflict: cross-stack action key collision ` +
     `(${lines.length} issue${lines.length === 1 ? '' : 's'}):`;
@@ -7672,7 +7952,14 @@ function formatComposedActionKeyCollisions(lines: readonly string[]): string {
   const fix =
     `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
     `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
-  return `${header}\n\n${body}\n\n${why}\n${fix}`;
+  // [ADR-0150 D2/D4] Only where `preserve` would admit every refused key:
+  // each package of its own namespace keeps its object-less action there.
+  const preserve = preserveWouldAdmit
+    ? `\nTo keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's ` +
+      `body under its own package, so two packages of two namespaces may each declare one object-less ` +
+      `action of a name, called at '/actions/NAMESPACE/${GLOBAL_ACTION_SCOPE}/NAME'.`
+    : '';
+  return `${header}\n\n${body}\n\n${why}\n${fix}${preserve}`;
 }
 
 /**
@@ -8485,11 +8772,13 @@ function composeBuiltStacks(
   //    copies each bound standalone action into its object: that copy is the
   //    echo an input built by `defineStack` already carries, and counting it
   //    would make every bound action collide with itself.
-  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
-  if (actionCollisions.length > 0) {
+  //    [ADR-0150 D2/D4] Under `manifest: 'preserve'`, two packages' object-less
+  //    action of one name is admitted when the packages hold it apart.
+  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner, opts.manifest === 'preserve');
+  if (actionCollisions.lines.length > 0) {
     throw new StackComposeActionKeyCollisionError(
-      formatComposedActionKeyCollisions(actionCollisions),
-      actionCollisions,
+      formatComposedActionKeyCollisions(actionCollisions.lines, actionCollisions.preserveWouldAdmit),
+      actionCollisions.lines,
     );
   }
 
