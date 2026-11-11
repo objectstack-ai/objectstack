@@ -69,49 +69,6 @@
  * does today. The fail direction is toward isolation, never toward exposure.
  */
 
-import { isFederatedObject } from '@objectstack/core';
-
-// [#6562] The injected-column DEFINITION table lives in `@objectstack/metadata-core`
-// (the registry that provisions the columns re-exports it from there, and the `/meta`
-// read path consumes the same one). Importing the constant — rather than restating
-// its shape here — is what makes the provenance test track the producer instead of a
-// copy that can drift silently.
-import { TENANT_SCOPE_FIELD_DEF } from '@objectstack/metadata-core';
-
-/** The one column Layer 0 ever emits a predicate for. */
-const TENANT_SCOPE_COLUMN = 'organization_id';
-
-/** Pick a field definition out of either registered `fields` shape. */
-function readFieldDef(schema: unknown, name: string): unknown {
-  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
-  if (Array.isArray(fields)) {
-    return fields.find((f) => (f as { name?: unknown } | null)?.name === name);
-  }
-  if (fields && typeof fields === 'object') {
-    return (fields as Record<string, unknown>)[name];
-  }
-  return undefined;
-}
-
-/**
- * Structural identity against the shipped constant. Flat by construction —
- * every value in {@link TENANT_SCOPE_FIELD_DEF} is a primitive — so a flat
- * comparison is exact rather than a shortcut, and an extra or missing key is a
- * mismatch (see "Direction of an inexact match" above).
- *
- * The array shape carries an additional `name` key that the object shape
- * expresses as the map key; it is excluded so both shapes reach the same
- * verdict about the same column.
- */
-function equalsShippedDef(def: unknown, shipped: Readonly<Record<string, unknown>>): boolean {
-  if (!def || typeof def !== 'object' || Array.isArray(def)) return false;
-  const actual = { ...(def as Record<string, unknown>) };
-  delete actual.name;
-  const shippedKeys = Object.keys(shipped);
-  if (Object.keys(actual).length !== shippedKeys.length) return false;
-  return shippedKeys.every((k) => actual[k] === shipped[k]);
-}
-
 /**
  * Is `schema` a federated (ADR-0015 `external`) object binding a remote table?
  * The platform provisions no storage for one, so nothing it injects is real.
@@ -119,20 +76,14 @@ function equalsShippedDef(def: unknown, shipped: Readonly<Record<string, unknown
  * Re-exported, not restated: `@objectstack/core`'s binding is the runtime's one
  * answer (it reads the spec's `platformProvisionsStorage`), and this module path
  * keeps exporting it so every importer here resolves to that same function.
- */
-export { isFederatedObject };
-
-/**
- * Does this object's `organization_id` exist only in the registry — i.e. is it
- * the platform's injected anchor on an object whose storage the platform never
- * provisioned?
  *
- * `true` ⇒ Layer 0 must treat the object as carrying NO tenant column, because
- * it does not (see the module docs). `false` for every local object (the
- * platform DID provision the column there) and for a federated object whose
- * author declared a real remote `organization_id`.
+ * {@link hasPhantomTenantAnchor} — the provenance test this module's docs
+ * describe — is re-exported the same way. It lives in `@objectstack/core`'s
+ * security module beside `externalOrganizationScopeOf`, the one reading of an
+ * external object's organization scope, which it feeds and which a service
+ * asks without loading this plugin (`external-organization-scope.ts`). Its
+ * identity comparison against `TENANT_SCOPE_FIELD_DEF` (`@objectstack/metadata-core`)
+ * is unchanged: exact and flat, and any mismatch answers `false`, toward
+ * isolation (see "Direction of an inexact match" above).
  */
-export function hasPhantomTenantAnchor(schema: unknown): boolean {
-  if (!isFederatedObject(schema)) return false;
-  return equalsShippedDef(readFieldDef(schema, TENANT_SCOPE_COLUMN), TENANT_SCOPE_FIELD_DEF);
-}
+export { hasPhantomTenantAnchor, isFederatedObject } from '@objectstack/core';

@@ -48,6 +48,7 @@ vi.mock('../../../providers/MetadataProvider.js', () => ({
 import { notifyDataChanged } from '@object-ui/react';
 import { ConnectAssistantCard } from '../ConnectAssistantCard';
 import { connectAssistantCardKey } from '../connectAssistantCardGate';
+import { useHomeItemClaim } from '../homeItemClaims';
 
 const ACCOUNT_APP = {
   name: 'account',
@@ -205,5 +206,29 @@ describe('§6 connecting while it is shown', () => {
     keyRows = [{ ...LIVE_KEY }];
     act(() => notifyDataChanged({ objectName: 'sys_api_key' }));
     await waitFor(() => expect(screen.queryByTestId('home-connect-assistant')).toBeNull());
+  });
+});
+
+/** The first-run checklist drawing its Connect an AI assistant row, not done. */
+function ChecklistRow() {
+  useHomeItemClaim('connect_assistant', true);
+  return null;
+}
+
+describe('§7 said once on Home (objectstack#32021 item 3)', () => {
+  it('while the checklist draws its assistant row, the card stands aside', async () => {
+    const row = render(<ChecklistRow />);
+    renderHome();
+    await settled();
+    expect(screen.queryByTestId('home-connect-assistant')).toBeNull();
+
+    // The checklist hidden or done: the card comes back.
+    row.unmount();
+    expect(await screen.findByTestId('home-connect-assistant')).toBeInTheDocument();
+  });
+
+  it('CONTROL: with no row drawn (a member, who gets no checklist), the card is shown', async () => {
+    renderHome();
+    expect(await screen.findByTestId('home-connect-assistant')).toBeInTheDocument();
   });
 });

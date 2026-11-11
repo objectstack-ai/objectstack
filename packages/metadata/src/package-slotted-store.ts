@@ -36,6 +36,13 @@
  *    it, and is refused naming every holder when two or more do (D3), so it
  *    never takes both and never picks one.
  *
+ * [#32246] The loaders under the registry hold these types by the same rules:
+ * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
+ * row per `(package, name)`; and a read the registry cannot answer reads the
+ * loaders' stored items of the name through {@link readStoreEntry}
+ * ({@link slotStoreOf}). A loader's own unscoped read still answers the item
+ * of a name written last ({@link lastWrittenOf}), as it did.
+ *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
  * every package's endpoint instead of the last one registered under a name.
@@ -64,6 +71,13 @@
  * owner, answers the item written last under the name — what the bare-name
  * map answered — and refuses only if one identity among them is itself a
  * two-holder name ({@link readStoreEntry}).
+ *
+ * `permission` (#32162): two packages of two namespaces may each ship a
+ * permission set of one name once its one-holder rule narrows (#31698), and
+ * the security registrars write each package's set here — the artifact door
+ * stamped with `_packageId`, the stack registrar (`AppPlugin`) likewise for
+ * this type — so a read naming one package (`/meta/permission/NAME?package=`)
+ * is served that package's grants, never the set registered last.
  */
 
 import {
@@ -81,9 +95,9 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * then every namespace-scoped type (#32151, #31697; see "Which types" above):
  * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
  * ADR-0150 child B), which joins in the same change that adds it to
- * `NAMESPACE_SCOPED_BARE_NAME_TYPES`.
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
@@ -124,7 +138,7 @@ function slotIdentityOf(type: string, name: string, data: unknown): string {
 }
 
 /** The identity a store key addresses: the key without its package. */
-function keyIdentityOf(key: string): string {
+export function keyIdentityOf(key: string): string {
   const at = key.indexOf(SLOT_SEPARATOR);
   return at === -1 ? key : key.slice(at + 1);
 }
@@ -169,9 +183,60 @@ export function storedNameOf(key: string): string {
 }
 
 /** The package of a package slot's key; `undefined` for a bare key. */
-function slotPackageOf(key: string): string | undefined {
+export function slotPackageOf(key: string): string | undefined {
   const at = key.indexOf(SLOT_SEPARATOR);
   return at === -1 ? undefined : key.slice(0, at);
+}
+
+/**
+ * [#32246] The store key of `data`, an item of `name` held for `packageId`:
+ * that package's slot of the item's identity ({@link slotIdentityOf} — the
+ * name, or an object-bound action's object and name), or the identity's bare
+ * slot when it is held for no package.
+ */
+export function storeSlotKey(type: string, name: string, packageId: string | null | undefined, data: unknown): string {
+  const identity = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? slotIdentityOf(type, name, data) : name;
+  return isPackageCaller(packageId) ? slotKey(packageId, identity) : identity;
+}
+
+/**
+ * [#32246] The key of a `DatabaseLoader` row of `name` held for `packageId`:
+ * one slot per `(package, name)`, whatever object an action is bound to
+ * (see {@link storeRowWriteKey}).
+ */
+export function storeRowKey(name: string, packageId: string | null | undefined): string {
+  return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
+}
+
+/**
+ * [ADR-0150 D3/D4, #32246] Loaders' stored items of `name` (one loader's, or
+ * every loader's in precedence order), keyed the way the in-memory store keys
+ * them ({@link storeSlotKey}), the first item of a slot kept. The store's own
+ * rule ({@link readStoreEntry}) then answers for the loaders exactly as it
+ * answers for the registry, so the rule stays here, once.
+ */
+export function slotStoreOf<T>(
+  type: string,
+  name: string,
+  items: Iterable<{ readonly packageId?: string; readonly data: T }>,
+): Map<string, T> {
+  const store = new Map<string, T>();
+  for (const { packageId, data } of items) {
+    const key = storeSlotKey(type, name, packageId, data);
+    if (!store.has(key)) store.set(key, data);
+  }
+  return store;
+}
+
+/**
+ * [#32246] The item of `name` written last among every slot of it — what a
+ * store keyed by bare name held. The loaders' own unscoped reads (`load`,
+ * `loadMany`, `loadManyKeyed`) answer it, as they answered before they kept a
+ * slot per package; `undefined` when no slot of the name is held.
+ */
+export function lastWrittenOf(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): unknown {
+  const keys = storeKeysNamed(store, type, name);
+  return keys.length === 0 ? undefined : store!.get(writtenLast(store!, keys));
 }
 
 /**
@@ -218,9 +283,9 @@ export function storeWriteKey(
   type: string,
   name: string,
   data: unknown,
+  identity: string = slotIdentityOf(type, name, data),
 ): { key: string; replaces: string[] } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { key: name, replaces: [] };
-  const identity = slotIdentityOf(type, name, data);
   if (!store) {
     const packageId = storedItemPackageId(data);
     return { key: packageId === undefined ? identity : slotKey(packageId, identity), replaces: [] };
@@ -232,6 +297,21 @@ export function storeWriteKey(
   }
   const others = holders.filter((holder) => holder !== packageId);
   return { key: slotKey(packageId, identity), replaces: others.length === 0 && store.has(identity) ? [identity] : [] };
+}
+
+/**
+ * [#32246] {@link storeWriteKey} for a store with one slot per `(package,
+ * name)` whatever object an action is bound to: `DatabaseLoader`'s rows,
+ * which `sys_metadata`'s unique key `(type, name, package_id, bundle_member)`
+ * holds once per package of a name.
+ */
+export function storeRowWriteKey(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  data: unknown,
+): { key: string; replaces: string[] } {
+  return storeWriteKey(store, type, name, data, name);
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
@@ -286,6 +366,33 @@ export function storeRemovalKeys(
     throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
   }
   return { keys: storeKeysNamed(store, type, name) };
+}
+
+/**
+ * [ADR-0150 D3, #32246 R1/R1b] Refuse a write by name that cannot tell which
+ * slot of `name` it means: `store` holds more than one slot of the name — two
+ * packages', or a package's beside the name's package-less slot. The refusal
+ * names every holder in the store's order (each package, and the environment
+ * for the package-less slot), and nothing picks one. `DatabaseLoader`'s
+ * rollback by name asks it over the name's rows.
+ *
+ * @throws {PackageScopedNameRefusedError} two or more slots of the name.
+ */
+export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): void {
+  const keys = storeKeysNamed(store, type, name);
+  if (keys.length <= 1) return;
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'ambiguous-in-environment',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: null,
+    candidates: keys.map((key) => {
+      const packageId = slotPackageOf(key);
+      return packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId };
+    }),
+  };
+  throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
 }
 
 /**

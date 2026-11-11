@@ -12,8 +12,11 @@
 export type ConnectorPullRefusalReason =
     | 'mapping_not_found'
     /**
-     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
-     * than one package holds it. The message names every candidate.
+     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item for the
+     * caller: two packages hold it in the caller's reach (for a caller with no
+     * package, the whole environment), only a package outside the caller's
+     * closure holds it, or, for a package caller, only the environment holds
+     * it (D3 (a)). The message names every candidate.
      */
     | 'mapping_name_refused'
     | 'no_connector_source'
@@ -43,7 +46,17 @@ export type ConnectorPullRefusalReason =
     | 'source_key_missing'
     | 'source_binding_invalid'
     | 'source_organization_scope_unstated'
-    | 'job_organization_missing';
+    | 'job_organization_missing'
+    /**
+     * [ADR-0153 D7] The run record (`sys_sync_run`) failed the pull, in one of
+     * four places. Before any read, so nothing was read: the run row could not
+     * be opened (before the mapping is read), could not be told what the pull
+     * reads, or the position the last run committed could not be read. Or at a
+     * window's end: the position reached could not be stored, so the windows
+     * finished before stay written and the next run reads again from the last
+     * position stored.
+     */
+    | 'run_record_unavailable';
 
 /**
  * A refused pull. `code` + `status` are the ADR-0112 pair a door would put on

@@ -251,6 +251,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'onlyWhen',
     why: "the mirror of `retention.onlyWhen` — one shape by design (`lifecycleOnlyWhenSchema`, object.zod.ts) — with the same boundary: a row-filter map with no scalar rendering among the ttl block's text inputs, and its one writer today is the code-declared sys_session object (`revoked_at: { $null: true }`). Offering it needs a structured control, a form-face addition rather than a reconciliation",
   },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: 'lifecycle',
+    key: 'seal',
+    why: "ADR-0154 D10's tamper-evidence opt-in for an `audit`-class compliance ledger, written today only by platform objects declared in code (the first default, sys_audit_log's, lands with the expiry amendments, ADR-0154 P4), and nothing checks a seal before `os audit verify` (P2). Revisited in P2, or by the card that offers it: offering it needs a picker of the object's own declared fields for `valueFields`, a form-face addition rather than a reconciliation",
+  },
   // ── The `fieldGroups` repeater (ruling record 5861442317, #19332) ──
   //
   // The three `[DEPRECATED → collapse]` aliases of a field group, the

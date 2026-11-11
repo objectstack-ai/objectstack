@@ -29,6 +29,17 @@ export {
   collectInternalWriteResponseFields,
 } from './write-response-internal-fields.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
+// [ADR-0144 D2 and D6, amended] Which metadata doors ask the registry the
+// question that reads its other objects, in one place: exported so the
+// runtime's repo-tier census can pin every producer against it.
+export {
+    AGAINST_REGISTRY_SAVE_FACES,
+    PROMOTION_REGISTRY_QUESTION,
+    REGISTRY_QUESTION_PRODUCERS,
+    saveRegistryQuestion,
+    type RegistryQuestion,
+    type RegistryQuestionProducer,
+} from './registry-question.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
 // [#20312] The service key a host registers its SDUI component manifest under, read by the save door per publish.
 export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';

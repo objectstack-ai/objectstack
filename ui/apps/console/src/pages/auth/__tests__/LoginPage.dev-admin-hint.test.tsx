@@ -39,6 +39,11 @@ import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
 import { followOauthAuthorize } from '../followAuthorize';
 import { withConsoleBase } from '../../../utils/consoleBase';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 // The SSO hand-off replays the authorize request through this helper, a
 // fetch-and-follow; the pins below read whether the page called it, and with
