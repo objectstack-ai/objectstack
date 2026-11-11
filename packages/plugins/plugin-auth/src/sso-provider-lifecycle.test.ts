@@ -633,10 +633,16 @@ describe('an email domain another provider serves is refused on register and on 
     expect(dotted.status, JSON.stringify(dotted.body)).toBe(409);
     expect(dotted.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: OTHER });
 
+    // And the other way round: the name requested bare beside a provider stored with the root dot.
+    await storeProvider(s, { providerId: 'rooted', domain: 'globex.example.' });
+    const bare = await register(s, 'bare', 'globex.example');
+    expect(bare.status, JSON.stringify(bare.body)).toBe(409);
+    expect(bare.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: 'rooted' });
+
     // Control: a different name that only looks alike is registered.
     const other = await registerSaml(s, 'bucher', 'bucher.example');
     expect(other.status, await other.clone().text()).toBe(200);
-    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, 'bucher', OTHER]);
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, 'bucher', OTHER, 'rooted']);
   }, 30_000);
 
   it('a caller who is not a platform administrator is told the domain is served, not by which provider', async () => {
