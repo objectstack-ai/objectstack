@@ -56,7 +56,8 @@ export function saveRegistryQuestion(request: { mode?: 'draft' | 'publish'; writ
  * request's required `registryQuestion`): the per-item publish
  * (`POST /meta/:type/:name/publish`) has no sibling and asks against the
  * registry; a package publish promotes its drafts as one batch, and asks the
- * unit once every draft is promoted (#32369).
+ * unit once every draft is promoted, before its commit (#32369) — on a runtime
+ * that cannot roll back, also before any draft is promoted.
  */
 export const PROMOTION_REGISTRY_QUESTION = {
     'item-publish': 'against-registry',

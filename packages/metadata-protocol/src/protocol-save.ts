@@ -82,7 +82,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
-import { canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, type WrittenBatchRow } from './batch-object-registration.js';
+import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -2638,7 +2638,8 @@ export class ProtocolSaveFacet {
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 const entry: StoredMigrationRow = { ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' };
-                record(entry);
+                // [#32369] Read back BEFORE the row is recorded rewritten: a read
+                // that fails records the row failed alone (the `catch` below).
                 if (judging && state === 'active' && organizationId === null && isBatchObjectType(singular)) {
                     const stored = await readActiveBatchRow(host, { type: singular, name: base.name, packageId });
                     const address = {
@@ -2661,6 +2662,7 @@ export class ProtocolSaveFacet {
                         },
                     });
                 }
+                record(entry);
             } catch (e: any) {
                 // [#8333 · P13] `rows[].reason` is REPORT DATA — it rides on the
                 // migration report, not on a thrown message — so no HTTP
@@ -2711,13 +2713,17 @@ export class ProtocolSaveFacet {
             entry.reason = clientFacingFailureText(out.refusal, 'the registry refused the rewrite')
                 + (out.undoError === undefined
                     ? ' The rewrite was taken back: the row is stored as it was before this pass.'
-                    : ` The rewrite could NOT be taken back (${clientFacingFailureText(out.undoError, 'undo failed')}): `
-                        + 'the row is stored rewritten although the registry refuses it; correct it by hand.');
+                    : out.undoError instanceof BatchRowHealError
+                        ? ' The rewrite was taken back: the row is stored as it was before this pass, but the registry '
+                            + `could not be put back to it (${clientFacingFailureText(out.undoError.healError, 'heal failed')}) `
+                            + 'and may serve the refused rewrite until the server restarts.'
+                        : ` The rewrite could NOT be taken back (${clientFacingFailureText(out.undoError, 'undo failed')}): `
+                            + 'the row is stored rewritten although the registry refuses it; correct it by hand.');
             report.rewritten--;
             report.failed++;
             console.warn(
                 `[protocol.migrateStoredMetadata] the rewrite of ${entry.type}/${entry.name} was refused by the registry and `
-                + `${out.undoError === undefined ? 'taken back' : `could NOT be taken back (${(out.undoError as any)?.message ?? out.undoError})`}: `
+                + `${undoOutcomeForLog(out.undoError)}: `
                 + `${out.refusal.message}`,
             );
         }

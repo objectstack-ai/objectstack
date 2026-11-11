@@ -268,18 +268,12 @@ export class RegistrationFacet {
       this._registry.installPackage(manifest, source, undefined, scope);
       this.logger.debug('Installed Package', { id: manifest.id, name: manifest.name, namespace });
 
-      // [#32369] What steps 2 and 2b register, asked again once both are in
-      // (step 2c below).
-      const unitObjects: Array<{ schema: ServiceObject; ownership: 'own' | 'extend' }> = [];
-
       // 2. Register owned objects
       if (manifest.objects) {
           if (Array.isArray(manifest.objects)) {
              this.logger.debug('Registering objects from manifest (Array)', { id, objectCount: manifest.objects.length });
              for (const objDef of manifest.objects) {
-                const stamped = stampObjectPackage(objDef, id, version);
-                const fqn = this._registry.registerObject(stamped, id, namespace, 'own');
-                unitObjects.push({ schema: stamped, ownership: 'own' });
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           } else {
@@ -292,9 +286,7 @@ export class RegistrationFacet {
              for (const [name, objDef] of Object.entries(manifest.objects) as [string, ServiceObject][]) {
                 // Ensure name in definition matches key
                 objDef.name = name;
-                const stamped = stampObjectPackage(objDef, id, version);
-                const fqn = this._registry.registerObject(stamped, id, namespace, 'own');
-                unitObjects.push({ schema: stamped, ownership: 'own' });
+                const fqn = this._registry.registerObject(stampObjectPackage(objDef, id, version), id, namespace, 'own');
                 this.logger.debug('Registered Object', { fqn, from: id });
              }
           }
@@ -322,32 +314,8 @@ export class RegistrationFacet {
                   indexes: ext.indexes,
               };
               // Register as extension (namespace is undefined since we're targeting by FQN)
-              const stamped = stampPackage(extDef, id, version);
-              this._registry.registerObject(stamped, id, undefined, 'extend', priority);
-              unitObjects.push({ schema: stamped as ServiceObject, ownership: 'extend' });
+              this._registry.registerObject(stampPackage(extDef, id, version), id, undefined, 'extend', priority);
               this.logger.debug('Registered Object Extension', { target: targetFqn, priority, from: id });
-          }
-      }
-
-      // 2c. [#32369, ADR-0144 D2 and D6, amended] The follow pair, once this
-      //     body's objects (step 2) and the extensions that can supply their
-      //     parents' code fields (step 2b) are both in: each is asked again
-      //     against the registry the unit leaves — D6's roll-up half and the
-      //     follow door, which `registerObject` never asks. Thrown, the refusal
-      //     ends this body's `restoringOnRefusal` run, which puts back every
-      //     entry the body wrote, and reaches the caller as the install's own
-      //     refusal (a local install answers it `422 PLUGIN_REGISTER_FAILED`;
-      //     a reload logs it and keeps the version that served). Only once
-      //     the cold boot has sealed the registry, as the single save asks it
-      //     (`objectRegistrationRefusal`): before the seal, another package's
-      //     extension can still register and supply the parent's field, so the
-      //     boot registers the pair as before. Judged after step 2b, never per
-      //     object, so an object whose parent's code field this package's own
-      //     `objectExtensions` supply installs.
-      if (this._registry.bareNameHoldersAreSealed) {
-          for (const { schema, ownership } of unitObjects) {
-              const refusal = this._registry.objectRegistrationRefusal(schema, id, ownership, { againstRegistry: true });
-              if (refusal) throw refusal;
           }
       }
 

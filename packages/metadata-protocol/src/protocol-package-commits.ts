@@ -49,6 +49,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { planNamespaceRename } from './package-namespace-rename.js';
 import {
+    BatchRowHealError,
     canJudgeBatchObjects,
     isBatchObjectType,
     judgeBatchObjectRegistrations,
@@ -57,6 +58,7 @@ import {
     settleBatchObjectRows,
     syncAdmittedBatchStorage,
     undoBatchRowWrite,
+    undoOutcomeForLog,
     type BatchObjectRow,
     type WrittenBatchRow,
 } from './batch-object-registration.js';
@@ -532,10 +534,17 @@ export class ProtocolPackageCommitsFacet {
                     ...(singular === 'permission' ? { inheritedGrantObjects: storedGrantObjectKeys(body) } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
-                copied.push({ type: row.type, name: newName });
+                // [#32369] Read back BEFORE the row is answered copied: a read
+                // that fails lands the row in `failed[]` alone (the `catch`
+                // below), never in both lists.
                 if (judging && isBatchObjectType(singular)) {
                     const stored = await readActiveBatchRow(host, { type: singular, name: newName, packageId: request.targetPackageId });
-                    const address = { type: singular, name: newName, packageId: request.targetPackageId, prevVersion: before?.version ?? null };
+                    const address = {
+                        type: singular, name: newName, packageId: request.targetPackageId,
+                        prevVersion: before?.version ?? null,
+                        // The stamp this copy wrote: an undo of a row it created locks on it.
+                        writtenHash: stored?.hash ?? null,
+                    };
                     writtenObjects.push({
                         type: singular, name: newName, body: stored?.body ?? rewritten, packageId: request.targetPackageId,
                         source: { type: row.type, name: row.name },
@@ -546,6 +555,7 @@ export class ProtocolPackageCommitsFacet {
                         }),
                     });
                 }
+                copied.push({ type: row.type, name: newName });
             } catch (e: any) {
                 // [#8333 · P10] `failed[].error` is copy-response DATA.
                 // Measured on `origin/main` by failing the `sys_metadata`
@@ -593,14 +603,17 @@ export class ProtocolPackageCommitsFacet {
                 name: out.row.source.name,
                 error: out.undoError === undefined
                     ? refusal
-                    : `${refusal} The copy '${out.row.name}' could not be taken back `
-                        + `(${clientFacingFailureText(out.undoError, 'undo failed')}): it is stored although the registry refuses it; `
-                        + 'delete it, then copy the corrected source again.',
+                    : out.undoError instanceof BatchRowHealError
+                        ? `${refusal} The copy '${out.row.name}' was taken back, but the registry could not be put back `
+                            + `(${clientFacingFailureText(out.undoError.healError, 'heal failed')}) and may serve it until the server restarts.`
+                        : `${refusal} The copy '${out.row.name}' could not be taken back `
+                            + `(${clientFacingFailureText(out.undoError, 'undo failed')}): it is stored although the registry refuses it; `
+                            + 'delete it, then copy the corrected source again.',
             });
             console.warn(
                 `[protocol.duplicatePackage] the copy of ${out.row.source.type}/${out.row.source.name} → `
                 + `'${request.targetPackageId}' was refused by the registry and `
-                + `${out.undoError === undefined ? 'taken back' : `could NOT be taken back (${(out.undoError as any)?.message ?? out.undoError})`}: `
+                + `${undoOutcomeForLog(out.undoError)}: `
                 + `${out.refusal.message}`,
             );
         }

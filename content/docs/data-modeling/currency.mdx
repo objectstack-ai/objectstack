@@ -116,10 +116,9 @@ stored-metadata migration pass) judges them together once all are written, so a 
 written before its parent in the same batch passes. An object the pair refuses is reported
 in the batch's own answer and is not left stored as written: the duplicate lists it as
 failed and takes its copy back, the migration pass lists it as failed and keeps the row as
-it was, and the install and the publish are refused whole. A package installed
-on a running server is judged once its objects and its `objectExtensions` are registered,
-so a code field its own extension adds to the parent counts, and a refused pair refuses
-the install. Objects registered while the server boots are not judged this way.
+it was, and the unmanaged install and the publish are refused whole. Objects registered
+while the server boots, or by a code package installed or reloaded on a running server,
+are not judged this way.
 
 ### Writing a record
 

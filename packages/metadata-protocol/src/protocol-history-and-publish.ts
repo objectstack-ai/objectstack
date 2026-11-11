@@ -58,7 +58,7 @@ import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
 import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
 import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-question.js';
-import { judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
+import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -712,6 +712,14 @@ export class ProtocolHistoryAndPublishFacet {
             /** What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly` was stated. */
             result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
             /**
+             * [#32369] What a judge-only call judged: the draft body the
+             * promotion would make active and the package it would write it
+             * under, for `publishPackageDrafts`' Phase 0 to judge the batch's
+             * objects as one unit. Present only on a judge-only call that read
+             * a draft.
+             */
+            judged?: { body: unknown; packageId: string | null };
+            /**
              * [#32396] The draft row this promotion consumed — the body and
              * hash it judged and `repo.promoteDraft` promoted (`expectedDraftHash`
              * holds the two to one row). `publishPackageDrafts` puts it back
@@ -1191,7 +1199,13 @@ export class ProtocolHistoryAndPublishFacet {
         if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         // [#32396] Every refusal above has had its turn; a judge-only call stops
         // here, before the one write this method makes.
-        if (request.judgeOnly) return { singularType, advisories: runtimeAdvisories };
+        if (request.judgeOnly) {
+            return {
+                singularType,
+                advisories: runtimeAdvisories,
+                ...(draftForGate ? { judged: { body: draftForGate.body, packageId: promoteInto } } : {}),
+            };
+        }
         const artifactBacked = host.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
@@ -2062,13 +2076,26 @@ export class ProtocolHistoryAndPublishFacet {
         try {
             // ═══ [#32396] Phase 0 — judge the whole batch, write nothing ═══
             if (!canRollBack) {
+                const judgedObjects: BatchObjectRow[] = [];
+                const judgedDrafts: Array<(typeof ordered)[number]> = [];
                 for (const d of ordered) {
                     try {
-                        await this.promoteDraftForPublish({ ...promotionRequest(d), judgeOnly: true });
+                        const { singularType, judged } = await this.promoteDraftForPublish({ ...promotionRequest(d), judgeOnly: true });
+                        if (judged && isBatchObjectType(singularType)) {
+                            judgedObjects.push({ type: singularType, name: d.name, body: judged.body, packageId: judged.packageId });
+                            judgedDrafts.push(d);
+                        }
                     } catch (e: unknown) {
                         throw tagCausal(e, d);
                     }
                 }
+                // [#32369, ADR-0144 D2 and D6] …and the drafts' objects as ONE
+                // unit, the question Phase 1 asks once every draft is promoted
+                // (below): asked here too, so a pair the registry refuses
+                // refuses the batch with nothing promoted, rather than after
+                // every promotion and an undo of each.
+                const [firstRefused] = judgeBatchObjectRegistrations(this, judgedObjects).refused;
+                if (firstRefused) throw tagCausal(firstRefused[1], judgedDrafts[firstRefused[0]]!);
             }
             await inTxn(async () => {
                 for (const d of ordered) {
@@ -2110,8 +2137,12 @@ export class ProtocolHistoryAndPublishFacet {
                 // the registry refuses — at registration (D6's roll-up door) or
                 // against the unit (the follow door) — refuses the batch with
                 // that row as its cause, before the commit is recorded: the
-                // transaction rolls the promotions back, or the `catch` below
-                // undoes them, and the refusal is answered in `failed[]`.
+                // transaction rolls the promotions back, and the refusal is
+                // answered in `failed[]`. A runtime that cannot roll back asked
+                // the same question in Phase 0, before any promotion; asked
+                // again here, as Phase 1 judges each draft again, a refusal
+                // only the promoted bodies provoke is undone by the `catch`
+                // below.
                 promotedObjects = promoted.map((p) => ({
                     type: p.singularType, name: p.d.name, body: p.body, packageId: p.packageId,
                 }));

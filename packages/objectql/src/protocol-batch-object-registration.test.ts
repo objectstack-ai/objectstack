@@ -19,18 +19,19 @@
  *  - `duplicatePackage` — per row, in `failed[]`; the copy is taken back
  *    (removed, or restored to the copy it overwrote);
  *  - `importUnmanagedPackage` — the whole import refused and rolled back;
- *  - `publishPackageDrafts` — the batch refused with the row as its cause,
- *    every promotion undone (here on a runtime that cannot roll back);
+ *  - `publishPackageDrafts` — the batch refused with the row as its cause;
+ *    on a runtime that cannot roll back (this one), before any draft is
+ *    promoted;
  *  - `saveMetaItem` on the `external-import` face — one object, so it asks
- *    against the registry like a single save: `422`, nothing stored;
- *  - `registerApp` after the seal — the follow pair asked once the body's
- *    objects AND its `objectExtensions` are in.
+ *    against the registry like a single save: `422`, nothing stored.
  * And each pins the #29673 case: a row whose pair a later sibling of the same
- * batch completes still succeeds.
+ * batch completes still succeeds. The duplicate also pins how it takes a row
+ * back: under the lock of the stamp it wrote, and a row it could not read back
+ * is answered failed, never copied as well.
  *
  * Real kernel, real `SchemaRegistry`, real protocol; only the driver is an
  * in-memory double. It declares `transactionsUnsupported` because it cannot
- * roll a transaction back — the runtime the publish's undo path serves.
+ * roll a transaction back — the runtime the publish's Phase 0 serves.
  */
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -244,6 +245,53 @@ describe('duplicatePackage: a copy the registry refuses is reported failed, and 
         expect(registered(h, 'dupdst_invoice')).toBeDefined();
         expect(registered(h, 'dupdst_own_line')).toBeDefined();
     });
+
+    it('takes a created copy back only under the stamp it wrote: a row saved there since is reported, not deleted', async () => {
+        const h = await boot();
+        await sourcePackage(h);
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        // Another writer saves the refused copy's address between the copy's
+        // write and its undo: the first question asked against the registry
+        // runs after the copy loop, before any undo.
+        const concurrent = 'c'.repeat(64);
+        const ask = h.protocol.objectRegistrationRefusal.bind(h.protocol);
+        vi.spyOn(h.protocol, 'objectRegistrationRefusal').mockImplementation((...a: any[]) => {
+            const row = activeRow(h, 'object', 'dupdst_bad_line', Q);
+            if (a[2]?.againstRegistry === true && row && row.checksum !== concurrent) row.checksum = concurrent;
+            return ask(...a);
+        });
+
+        const res = await h.protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });
+
+        const bad = res.failed.find((f: any) => f.name === 'dupsrc_bad_line');
+        expect(bad.error).toMatch(/could not be taken back/);
+        expect(res.copied.map((c: any) => c.name)).not.toContain('dupdst_bad_line');
+        expect(activeRow(h, 'object', 'dupdst_bad_line', Q)?.checksum, 'the other writer\'s row is not deleted').toBe(concurrent);
+    });
+
+    it('answers a copy it could not read back in failed[] alone, never in copied[] as well', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: 'com.qa.rbsrc', name: 'Source', type: 'app' } });
+        await h.protocol.saveMetaItem({ type: 'object', name: 'rbsrc_invoice', packageId: 'com.qa.rbsrc', item: invoice('rbsrc') });
+        // The first read of the copy's address is before its write; the
+        // second, the read-back after it, meets a store fault.
+        const read = h.protocol.findEnvironmentRow.bind(h.protocol);
+        let reads = 0;
+        vi.spyOn(h.protocol, 'findEnvironmentRow').mockImplementation(async (table: string, query: any) => {
+            if (table === 'sys_metadata' && query?.where?.name === 'rbdst_invoice' && query?.where?.state === 'active' && ++reads === 2) {
+                throw new Error('store fault on the read-back');
+            }
+            return read(table, query);
+        });
+
+        const res = await h.protocol.duplicatePackage({ sourcePackageId: 'com.qa.rbsrc', targetPackageId: 'com.qa.rbdst' });
+
+        expect(reads).toBe(2);
+        expect(res.copied).toEqual([]);
+        expect(res.failed.map((f: any) => f.name)).toEqual(['rbsrc_invoice']);
+        expect(res).toMatchObject({ success: false, copiedCount: 0, failedCount: 1 });
+    });
 });
 
 describe('importUnmanagedPackage: a refused object refuses the import and nothing of the package stays (#32369)', () => {
@@ -309,6 +357,7 @@ describe('publishPackageDrafts: a promoted unit the registry refuses refuses the
         for (const item of [invoice('pubpkg'), followingLine('pubpkg', 'bad_line', 'invoice.title')]) {
             await h.protocol.saveMetaItem({ type: 'object', name: item.name, packageId: P, item, mode: 'draft' });
         }
+        const historyBefore = h.stores.get('sys_metadata_history')?.size ?? 0;
 
         const res = await h.protocol.publishPackageDrafts({ packageId: P });
 
@@ -317,6 +366,19 @@ describe('publishPackageDrafts: a promoted unit the registry refuses refuses the
         const causal = res.failed.find((f: any) => f.code !== 'BATCH_ABORTED');
         expect(causal).toMatchObject({ name: 'pubpkg_bad_line', code: 'INVALID_METADATA' });
         expect(causal.error).toMatch(/title/);
+        // [#32396] Judged in Phase 0 on a runtime that cannot roll back: the
+        // invoice ahead of the refused line was never promoted (and undone),
+        // so no promote or undo event was appended and both drafts still wait.
+        const aborted = res.failed.find((f: any) => f.name === 'pubpkg_invoice');
+        expect(aborted).toMatchObject({ code: 'BATCH_ABORTED' });
+        expect(aborted.error).toMatch(/nothing was promoted$/);
+        expect(h.stores.get('sys_metadata_history')?.size ?? 0, 'no history event was written').toBe(historyBefore);
+        for (const name of ['pubpkg_invoice', 'pubpkg_bad_line']) {
+            const draft = Array.from(h.stores.get('sys_metadata')?.values() ?? []).find(
+                (r) => r.type === 'object' && r.name === name && r.package_id === P && r.state === 'draft',
+            );
+            expect(draft, `${name} is still a pending draft`).toBeDefined();
+        }
         for (const name of ['pubpkg_invoice', 'pubpkg_bad_line']) {
             expect(activeRow(h, 'object', name, P), `${name} is not left live`).toBeUndefined();
             expect(registered(h, name), `${name} is not left registered`).toBeUndefined();
@@ -369,53 +431,6 @@ describe('the external-import face saves one object, so it asks against the regi
         expect(error).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
         expect(Array.from(h.stores.get('sys_metadata')?.values() ?? []).some((r) => r.name === 'ext_bad_line')).toBe(false);
         expect(registered(h, 'ext_bad_line')).toBeUndefined();
-    });
-});
-
-describe('registerApp after the seal asks the follow pair once the body is whole (#32369)', () => {
-    const parentPackage = {
-        id: 'com.qa.ledger', name: 'Ledger', version: '1.0.0', type: 'app', namespace: 'ledger',
-        objects: [{ name: 'ledger_invoice', label: 'Invoice', sharingModel: 'private', fields: { title: { name: 'title', type: 'text', label: 'Title' } } }],
-    };
-    const childLine = (pointer: string) => ({
-        name: 'lines_line', label: 'Line', sharingModel: 'private',
-        fields: {
-            invoice: { name: 'invoice', type: 'master_detail', reference: 'ledger_invoice', label: 'Invoice' },
-            amount: { name: 'amount', type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: pointer } },
-        },
-    });
-
-    it('installs a package whose own objectExtensions supply the code field its object follows', async () => {
-        const h = await boot();
-        expect((h.engine.registry as any).bareNameHoldersAreSealed).toBe(true);
-        h.engine.registerApp(parentPackage);
-
-        h.engine.registerApp({
-            id: 'com.qa.lines', name: 'Lines', version: '1.0.0', type: 'app', namespace: 'lines',
-            objects: [childLine('invoice.lines_currency_code')],
-            objectExtensions: [{ extend: 'ledger_invoice', fields: { lines_currency_code: { name: 'lines_currency_code', type: 'text', label: 'Currency', ...CODE } } }],
-        });
-
-        expect(registered(h, 'lines_line')).toBeDefined();
-        expect(registered(h, 'ledger_invoice')?.fields?.lines_currency_code).toBeDefined();
-    });
-
-    it('refuses a package whose object follows no code field, and puts back everything it registered', async () => {
-        const h = await boot();
-        h.engine.registerApp(parentPackage);
-        let error: any;
-        try {
-            h.engine.registerApp({
-                id: 'com.qa.lines', name: 'Lines', version: '1.0.0', type: 'app', namespace: 'lines',
-                objects: [childLine('invoice.title')],
-            });
-        } catch (e) {
-            error = e;
-        }
-
-        expect(error).toMatchObject({ status: 422, code: 'INVALID_METADATA' });
-        expect(registered(h, 'lines_line')).toBeUndefined();
-        expect(h.engine.registry.getPackage('com.qa.lines')).toBeUndefined();
     });
 });
 

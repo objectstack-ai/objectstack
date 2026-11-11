@@ -302,20 +302,25 @@ export async function settleBatchObjectRows<R extends WrittenBatchRow>(
 
 /**
  * The active row stored at `(type, name, packageId)`: its version (what an
- * undo restores) and its body (what the registry registers), or `null` when
- * there is none.
+ * undo restores), its stored stamp (what an undo of a row the batch created
+ * locks on) and its body (what the registry registers), or `null` when there
+ * is none.
  */
 export async function readActiveBatchRow(
     host: Pick<ProtocolHost, 'findEnvironmentRow'>,
     address: { type: string; name: string; packageId: string | null },
-): Promise<{ version: number | null; body: unknown } | null> {
+): Promise<{ version: number | null; hash: string | null; body: unknown } | null> {
     // [#21911] The explicit system opt-in, as the publish's pre-publish capture reads it.
     const row = (await host.findEnvironmentRow('sys_metadata', {
         where: { type: address.type, name: address.name, state: 'active', package_id: address.packageId },
         context: { isSystem: true },
     })) as Record<string, unknown> | null;
     if (!row) return null;
-    return { version: typeof row.version === 'number' ? row.version : null, body: storedRowDocument(row) };
+    return {
+        version: typeof row.version === 'number' ? row.version : null,
+        hash: typeof row.checksum === 'string' ? row.checksum : null,
+        body: storedRowDocument(row),
+    };
 }
 
 /**
@@ -325,10 +330,16 @@ export async function readActiveBatchRow(
  * rows the store then serves. Each step appends its own history event, as a
  * revert does. The table a removed object's write created is left in place,
  * as a delete leaves it (`dropStorage` is a delete's own opt-in).
+ *
+ * A row the batch created is removed under the lock of the stamp the batch
+ * itself wrote (`writtenHash`, read right after its write), as
+ * `undoLandedPromotions` locks on the version it promoted: a row another
+ * writer saved to the address since is not the batch's to remove, so the
+ * delete's conflict is thrown, and the face reports the undo as failed.
  */
 export async function undoBatchRowWrite(
     host: Pick<ProtocolHost, 'getOverlayRepo' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>,
-    row: { type: string; name: string; packageId: string | null; prevVersion: number | null },
+    row: { type: string; name: string; packageId: string | null; prevVersion: number | null; writtenHash?: string | null },
     trail: { actor?: string; source: string; message: string },
 ): Promise<void> {
     const repo: SysMetadataRepository = host.getOverlayRepo();
@@ -339,8 +350,35 @@ export async function undoBatchRowWrite(
     if (row.prevVersion !== null) {
         await repo.restoreVersion(ref, row.prevVersion, options);
     } else {
-        const written = await repo.get(ref, { state: 'active', packageId: row.packageId });
-        if (written) await repo.delete(ref, { ...options, parentVersion: written.hash, state: 'active' });
+        if (typeof row.writtenHash !== 'string') {
+            throw new Error(`the stamp the batch wrote for ${row.type}/${row.name} is unknown, so it cannot be removed under its own lock`);
+        }
+        await repo.delete(ref, { ...options, parentVersion: row.writtenHash, state: 'active' });
     }
-    await host.restoreArtifactRegistryView(row.type, row.name, null);
+    try {
+        await host.restoreArtifactRegistryView(row.type, row.name, null);
+    } catch (healError) {
+        throw new BatchRowHealError(healError);
+    }
+}
+
+/**
+ * An undo whose store move landed and whose registry heal then failed: the
+ * store holds the row as it was, and the registry may still serve what the
+ * batch registered until the next boot registers the stored rows. A face
+ * words it apart from an undo that left the batch's write stored.
+ */
+export class BatchRowHealError extends Error {
+    readonly storeRestored = true;
+    constructor(readonly healError: unknown) {
+        super(`the registry could not be put back to the stored row: ${healError instanceof Error ? healError.message : String(healError)}`);
+        this.name = 'BatchRowHealError';
+    }
+}
+
+/** How an undo ended, for a face's server-log line. */
+export function undoOutcomeForLog(undoError: unknown): string {
+    if (undoError === undefined) return 'taken back';
+    if (undoError instanceof BatchRowHealError) return `taken back in the store, but ${undoError.message}`;
+    return `could NOT be taken back (${undoError instanceof Error ? undoError.message : String(undoError)})`;
 }
