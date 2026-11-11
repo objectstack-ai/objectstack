@@ -171,3 +171,79 @@ export function assertFlowSystemIdentityWriteAllowed(opCtx: {
     { operation, object },
   );
 }
+
+/**
+ * [Ruling record 6787890900] App-authored automation's system elevation does
+ * not change or delete the rows of an append-only object.
+ *
+ * An object declared `managedBy: 'append-only'` is a ledger: its rows record
+ * what happened, and the platform service that owns the object writes them
+ * (the audit and activity writers, the mail log, the job runner, the approval
+ * engine). A flow that runs as system, a hook that runs as system and an
+ * action body are app-authored, and their elevation is the one the identity
+ * refusal above judges, read by the same predicate ({@link elevationSource}):
+ * `isSystem` AND (`flowRunId` OR the app-automation mark). The set is the live
+ * registry's `managedBy`, never a list of names, so an append-only object a
+ * plugin registers tomorrow is covered the day it registers.
+ *
+ * ## What is judged
+ *
+ * The verbs that change or remove a stored row
+ * ({@link APPEND_ONLY_REFUSED_OPERATIONS}). Reads are not judged, and neither
+ * is an insert. As with the identity refusal, the operation is judged as the
+ * engine hands it to the middleware, at any depth: a cascade leg the
+ * automation's own write sets off under the same context is its write too.
+ *
+ * ## What is not
+ *
+ * The platform's own writers — the retention sweeper, the migrations and
+ * backfills, the audit seal, every service writing under a system context of
+ * its own — carry neither a run nor the mark, and pass as before.
+ *
+ * The answer is the standard catalog's `PERMISSION_DENIED` (403), the code
+ * and status the identity refusal answers with; no code is minted.
+ */
+export const APPEND_ONLY_REFUSED_OPERATIONS: ReadonlySet<string> = new Set([
+  'update',
+  'transfer',
+  'delete',
+  'purge',
+  'restore',
+]);
+
+/** The bucket {@link assertAppAutomationAppendOnlyWriteAllowed} reads. */
+const APPEND_ONLY_BUCKET = 'append-only';
+
+/**
+ * Refuse a change or a delete of an append-only object's rows from a system
+ * context a flow run opened, an app-authored hook elevated, or an action body
+ * runs under; return for every other operation.
+ *
+ * `schemaOf` is asked only once the context is such an elevation and the verb
+ * is judged, so the platform's own writes and every user's write cost no
+ * registry lookup. Called by the data middleware beside
+ * {@link assertFlowSystemIdentityWriteAllowed}, ahead of its `isSystem`
+ * bypass, so the refused write never reaches the engine's write path.
+ */
+export function assertAppAutomationAppendOnlyWriteAllowed(
+  opCtx: {
+    object?: unknown;
+    operation?: unknown;
+    context?: { isSystem?: unknown; flowRunId?: unknown } | null;
+  },
+  schemaOf: (object: string) => { managedBy?: unknown } | null | undefined,
+): void {
+  const source = elevationSource(opCtx?.context);
+  if (!source) return;
+  const operation = typeof opCtx.operation === 'string' ? opCtx.operation : '';
+  if (!APPEND_ONLY_REFUSED_OPERATIONS.has(operation)) return;
+  const object = typeof opCtx.object === 'string' ? opCtx.object : '';
+  if (!object || schemaOf(object)?.managedBy !== APPEND_ONLY_BUCKET) return;
+  throw new PermissionDeniedError(
+    `[Security] Access denied: '${operation}' on '${object}' from ${SUBJECT[source]} is refused — ` +
+      `'${object}' is append-only (managedBy: 'append-only'): its rows are a record of what happened, written ` +
+      `by the platform service that owns it, and ${ELEVATION[source]} does not lift that. ` +
+      'Keep a value the automation must change on an object of its own.',
+    { operation, object, managedBy: APPEND_ONLY_BUCKET },
+  );
+}

@@ -45,7 +45,9 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { GOVERNED_OPERATIONS } from './delegated-admin-gate.js';
 import {
+  APPEND_ONLY_REFUSED_OPERATIONS,
   FLOW_SYSTEM_IDENTITY_WRITE_OBJECTS,
+  assertAppAutomationAppendOnlyWriteAllowed,
   assertFlowSystemIdentityWriteAllowed,
 } from './flow-system-identity-write-refusal.js';
 import { SysUserPermissionSet, SysUserPosition } from './objects/index.js';
@@ -138,6 +140,9 @@ async function boot(): Promise<ObjectQL> {
         managedBy: 'better-auth',
       },
       inline('qa_note', ['title', 'organization_id', 'owner_id']),
+      // Two append-only stand-ins, named for the audit ledger and the activity feed.
+      { ...inline('sys_audit_log', ['action', 'object_name']), managedBy: 'append-only', systemFields: { tenant: false } },
+      { ...inline('sys_activity', ['type', 'summary']), managedBy: 'append-only', systemFields: { tenant: false } },
       SysPermissionSet,
       SysPosition,
       SysPositionPermissionSet,
@@ -414,5 +419,131 @@ describe('[#25653] the predicate also reads the app-automation elevation mark', 
   it('reads a mark value other than the two sources as no mark', () => {
     const forged = { isSystem: true, [Symbol.for('objectstack.core.appAutomationElevation')]: 'platform' };
     expect(() => assertFlowSystemIdentityWriteAllowed({ object: 'sys_member', operation: 'insert', context: forged as never })).not.toThrow();
+  });
+});
+
+describe('[ruling record 6787890900] app-automation elevation does not change or delete an append-only object\'s rows', () => {
+  /** The two append-only stand-ins `boot` registers, with a row and an edit each. */
+  const LEDGERS: Record<string, { row: (id: string) => Record<string, unknown>; edit: Record<string, unknown> }> = {
+    sys_audit_log: { row: (id) => ({ id, action: 'create', object_name: 'qa_note' }), edit: { action: 'delete' } },
+    sys_activity: { row: (id) => ({ id, type: 'created', summary: 'Note created' }), edit: { summary: 'Note edited' } },
+  };
+  const LEDGER_NAMES = Object.keys(LEDGERS);
+  const appendOnly = (object: string) => (LEDGER_NAMES.includes(object) ? { managedBy: 'append-only' } : { managedBy: 'platform' });
+
+  const SOURCES = [
+    ['flow', FLOW_SYSTEM, /from a flow that runs as system/],
+    ['flow, user-less', FLOW_SYSTEM_USERLESS, /from a flow that runs as system/],
+    ['hook', HOOK_SYSTEM, /from a hook that runs as system/],
+    ['action', ACTION_SYSTEM, /from an action body/],
+  ] as const;
+
+  function expectLedgerRefusal(err: any, object: string, operation: string, subject: RegExp): void {
+    expect(err, `${operation} on ${object} was not refused`).not.toBe(null);
+    expect(err.code).toBe('PERMISSION_DENIED');
+    expect(err.statusCode ?? err.status).toBe(403);
+    expect(err.details).toMatchObject({ object, operation, managedBy: 'append-only' });
+    expect(err.message).toMatch(subject);
+    expect(err.message).toMatch(new RegExp(`'${object}' is append-only`));
+  }
+
+  it('judges the verbs that change or remove a stored row', () => {
+    expect([...APPEND_ONLY_REFUSED_OPERATIONS].sort()).toEqual(['delete', 'purge', 'restore', 'transfer', 'update']);
+  });
+
+  for (const [label, context, subject] of SOURCES) {
+    for (const object of LEDGER_NAMES) {
+      for (const operation of APPEND_ONLY_REFUSED_OPERATIONS) {
+        it(`refuses '${operation}' on ${object} from a ${label} elevation`, () => {
+          const err = (() => {
+            try {
+              assertAppAutomationAppendOnlyWriteAllowed({ object, operation, context }, appendOnly);
+              return null;
+            } catch (e) {
+              return e;
+            }
+          })();
+          expectLedgerRefusal(err, object, operation, subject);
+        });
+      }
+    }
+  }
+
+  it('reads the bucket off the schema it is handed, never the object name', () => {
+    const plain = () => ({ managedBy: 'platform' });
+    const ledger = () => ({ managedBy: 'append-only' });
+    expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object: 'sys_audit_log', operation: 'update', context: FLOW_SYSTEM }, plain)).not.toThrow();
+    expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object: 'qa_journal', operation: 'update', context: FLOW_SYSTEM }, ledger)).toThrow(/'qa_journal' is append-only/);
+    expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object: 'qa_unknown', operation: 'delete', context: FLOW_SYSTEM }, () => undefined)).not.toThrow();
+  });
+
+  it('passes a platform writer, a run or a mark without isSystem, reads, and other objects, and asks no schema of a context it does not judge', () => {
+    const schemaOf = vi.fn(appendOnly);
+    const deElevated = markAppAutomationElevation({ isSystem: false, userId: ADMIN }, 'hook');
+    for (const object of LEDGER_NAMES) {
+      for (const operation of APPEND_ONLY_REFUSED_OPERATIONS) {
+        for (const context of [SEEDER, { ...SEEDER, flowRunId: '' }, FLOW_USER_ADMIN, deElevated, undefined]) {
+          expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object, operation, context: context as never }, schemaOf)).not.toThrow();
+        }
+      }
+    }
+    expect(schemaOf).not.toHaveBeenCalled();
+    for (const object of LEDGER_NAMES) {
+      for (const operation of ['find', 'findOne', 'count', 'aggregate']) {
+        expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object, operation, context: FLOW_SYSTEM }, appendOnly)).not.toThrow();
+      }
+    }
+    for (const operation of APPEND_ONLY_REFUSED_OPERATIONS) {
+      expect(() => assertAppAutomationAppendOnlyWriteAllowed({ object: 'qa_note', operation, context: FLOW_SYSTEM }, appendOnly)).not.toThrow();
+    }
+  });
+
+  describe('through the middleware, over a real engine: the store does not move', () => {
+    for (const [label, context, subject] of SOURCES) {
+      for (const object of LEDGER_NAMES) {
+        it(`${object}: an update and a delete from a ${label} elevation are refused`, async () => {
+          const engine = await boot();
+          await engine.insert(object, LEDGERS[object].row('seeded'), opts(SEEDER));
+          const before = await stored(engine, object, 'seeded');
+
+          expectLedgerRefusal(
+            await refusal(() => engine.update(object, LEDGERS[object].edit, { where: { id: 'seeded' }, context: { ...context } } as never)),
+            object, 'update', subject,
+          );
+          expectLedgerRefusal(
+            await refusal(() => engine.delete(object, { where: { id: 'seeded' }, context: { ...context } } as never)),
+            object, 'delete', subject,
+          );
+          expect(await stored(engine, object, 'seeded')).toEqual(before);
+        });
+      }
+    }
+
+    it("CONTROL: a platform writer's system context updates and deletes both ledgers as before", async () => {
+      const engine = await boot();
+      for (const object of LEDGER_NAMES) {
+        await engine.insert(object, LEDGERS[object].row('swept'), opts(SEEDER));
+        await engine.update(object, LEDGERS[object].edit, { where: { id: 'swept' }, context: { ...SEEDER } } as never);
+        expect(await stored(engine, object, 'swept')).toMatchObject(LEDGERS[object].edit);
+        await engine.delete(object, { where: { id: 'swept' }, context: { ...SEEDER } } as never);
+        expect(await stored(engine, object, 'swept')).toBe(null);
+      }
+    });
+
+    it("CONTROL: the same elevations still read both ledgers and update and delete an ordinary object", async () => {
+      const engine = await boot();
+      for (const object of LEDGER_NAMES) await engine.insert(object, LEDGERS[object].row('seeded'), opts(SEEDER));
+      for (const [label, context] of SOURCES) {
+        for (const object of LEDGER_NAMES) {
+          const rows = (await engine.find(object, { where: { id: 'seeded' }, context: { ...context } } as never)) as any[];
+          expect(rows.map((r) => r.id), `${label} reading ${object}`).toEqual(['seeded']);
+        }
+        await engine.insert('qa_note', { id: 'note_1', title: 'Note' }, opts(SEEDER));
+        await engine.update('qa_note', { title: 'Edited' }, { where: { id: 'note_1' }, context: { ...context } } as never);
+        expect(await stored(engine, 'qa_note', 'note_1'), label).toMatchObject({ title: 'Edited' });
+        await engine.delete('qa_note', { where: { id: 'note_1' }, context: { ...context } } as never);
+        expect(await stored(engine, 'qa_note', 'note_1'), label).toBe(null);
+      }
+    });
   });
 });
