@@ -41,7 +41,6 @@ import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
-import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -522,32 +521,6 @@ export function writeFailureLogMeta(
   return logged instanceof Error
     ? { ...meta, error: { message: logged.message, stack: logged.stack } }
     : { ...(logged as Record<string, unknown> | undefined), ...meta };
-}
-
-/**
- * [#32154] The level a write door reports its refused write at: `debug` for
- * the engine's own refusal of the caller's input, `warn` for everything else.
- *
- * The `… operation failed` line exists to carry what the DATABASE said (#8682,
- * #14095, and {@link writeFailureLogMeta} above): the failing column, the
- * index name, the driver's own frames. A {@link ValidationError} the engine
- * raised itself, before any statement ran (a `required` field missing, a value
- * out of range, a validation rule's message), carries none of that. Its stack
- * is the engine's own frames and its message is already the caller's answer,
- * delivered by the `throw e` that follows the line. At `warn`, every refused
- * form submission printed a WARN with a stack trace into the server's log,
- * and every test that asserts a refusal printed one into a passing run.
- *
- * At `debug` the line is still there, whole, for a developer chasing a
- * refusal (`OS_LOG_LEVEL=debug`).
- *
- * ⛔ A {@link NotNullRefusalError} stays at `warn`: it is the DATABASE's NOT
- * NULL refusal under a validation envelope (#24768), and its line carries the
- * driver's error. So does every other refusal: a driver fault, a duplicate, a
- * hook's refusal, a permission denial.
- */
-export function writeFailureLogLevel(error: unknown): 'debug' | 'warn' {
-  return error instanceof ValidationError && !(error instanceof NotNullRefusalError) ? 'debug' : 'warn';
 }
 
 /**

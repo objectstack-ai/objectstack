@@ -847,10 +847,7 @@ export class MetadataManager implements IMetadataService {
   registerLoader(loader: MetadataLoader) {
     assertWritableLoaderContract(loader);
     this.loaders.set(loader.contract.name, loader);
-    // [#32154] `debug`: registration chatter, and this manager's own logger is
-    // built at `info` in the constructor, before any host can hand it a level,
-    // so at `info` this line printed into every quiet (`warn`) boot.
-    this.logger.debug(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
+    this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
 
   // ==========================================

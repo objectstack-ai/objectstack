@@ -68,8 +68,7 @@ import {
   computeStoredExpressions, declaredDatetimeLowering, foldEngineOptionAliases, hydrateWriteFormulas,
   lowerWhereFilterArray, masterIdOf, planStoredExpressions, rejectUnknownEngineOptions,
   replacedStoredExpressionFields, settleBulkStoredExpressions, shouldSkipStateMachine, staticReadonlyStoredView,
-  stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogLevel,
-  writeFailureLogMeta,
+  stripComputedWriteFields, undeclaredWriteFieldErrors, updateStaticReadonlySubject, writeFailureLogMeta,
 } from './engine-top-level.js';
 import type { OperationContext, StoredExpressionServing } from './engine-top-level.js';
 import { ObjectQLStatics as ObjectQL } from './engine.js';
@@ -2274,10 +2273,8 @@ export class UpdateFacet {
           //
           // [#17052] The insert door's twin here too: the level is `warn`,
           // because `throw e` on the next line IS the answer to the caller.
-          // [#32154] …and, as there, the engine's own refusal of the caller's
-          // input logs at `debug` (see `writeFailureLogLevel`).
           const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
-          this.logger[writeFailureLogLevel(e)](
+          this.logger.warn(
             'Update operation failed',
             writeFailureLogMeta(redactBoundStatement(logged), { object }),
           );
