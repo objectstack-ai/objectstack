@@ -6493,8 +6493,8 @@ const warnedAddressLiteralNamespaces = new Set<string>();
  * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
  * namespace this stack declares (its own `manifest.namespace` or a
  * `packages[]` body's) that spells a literal segment of the address grammar
- * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
- * sentence is the install door's own judge
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`).
+ * The sentence is the install door's own judge
  * (`validateNamespaceNotAddressLiteral`).
  *
  * ## Why a warning here and a refusal at the build
