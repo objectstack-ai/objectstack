@@ -15,6 +15,8 @@ import { RAW_FILE_VALUES_CONTEXT_KEY, seedFile } from '@objectstack/spec/data';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// `protocol.ts` reaches `@objectstack/lint` lazily; pay its first load during collection, never inside a case's clock.
+import '@objectstack/lint';
 
 /**
  * [#25779] A seed record writes `seedFile(path)` into a file field; `os build`
