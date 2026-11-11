@@ -728,14 +728,21 @@ Where a source leans one way, the lean is quoted here, not adopted. This record 
       verb vouches for (`isVouchedReference`). Both fail closed. A parent the writer's read door does not return is
       answered `reference_not_found` on the `master_detail` field, and a parent that a system writer's elevated read
       does not find is answered `ERR_CURRENCY_CODE_REQUIRED`. Neither answer states a currency. The review of record
-      accepted this as the conservative reading of D2 and D5 (nit F6 in
+      accepted this as the conservative reading of its finding F1 (nit F6 in
       [`6775262964`](https://github.com/objectstack-ai/objectstack/issues/32216#issuecomment-6775262964) on PR
-      #32216).
+      #32216), and the carry to this record names it the conservative reading of D2 and D5
+      ([`6775317822`](https://github.com/objectstack-ai/objectstack/issues/31957#issuecomment-6775317822)).
     - **Grouping that makes a raw aggregate single-currency.** Does an ObjectQL aggregate, or a dataset or cube
       measure, over such a child amount that groups by the parent path (the code field reached through the
       `master_detail`) count as grouped by its code field (D6's first bullet)? That half is #31911's reading of D6.
       Grouping by the `master_detail` field itself would widen D6 past ruling A, so that half takes a maintainer
       ruling.
+
+      *Note (2026-11-11):* the parent-path half has its reading. PR #32216 (`193491823`) refuses an ObjectQL aggregate
+      over such a child amount whatever it groups by: grouping by the parent path does not count as grouping by the
+      code field (`packages/objectql/src/record-currency-aggregate-door.ts`, module header), since the engine reads
+      the dotted key as a column of the child and measured USD 100 and EUR 100 under two parents summed to 200 in one
+      null group. The `master_detail` half still takes a maintainer ruling, so this edge stays open.
     - **The code backfill** (item 13) for an amount whose code lives on the parent. The command writes a code into the
       amount's own object today.
 

@@ -93,7 +93,7 @@ options: [
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
-| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default — declared, deleting the user acts as on `lookup`: `cascade` deletes the holders, `set_null` clears the field or drops that member, `restrict` refuses with `409 DELETE_RESTRICTED`; undeclared, the field keeps the deleted user's id) |
+| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
 `master_detail`): a pick copies the picked record's `source` into this object's
@@ -181,7 +181,8 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 may be `'<master_detail field>.<parent code field>'`: one hop (a `lookup` path
 is refused) to the parent's `iso_4217_currency` field. The line stores no code:
 a blank parent code refuses its amount (`ERR_CURRENCY_CODE_REQUIRED`), and the
-code backfill refuses a path (write the parents' codes).
+code backfill refuses a path (write the parents' codes). Until the Console reads
+the path, it draws such an amount and its roll-up without the parent's currency.
 
 ```typescript
 invoice: Field.masterDetail('invoice'),  // on invoice_line

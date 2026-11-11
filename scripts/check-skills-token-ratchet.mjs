@@ -852,11 +852,18 @@ export const CEILINGS = new Map([
   // 848 bytes (232 + 616), 212 tokens: the dataset-measure `currency` sentence, cut to a
   // pointer (home: objectstack-ui rules/dashboards.md, the money-measure paragraph; the
   // refusal code stays in the pointer), and the autonumber "Incorrect vs Correct" pair
-  // with its TOC line (home: § Autonumber rules 1 and 2). `wc -c` = 12999 bytes -> ceil(12999 / 4) = 3250 tokens, zero headroom, ceiling
-  // +51, pinned AT the measurement. Standing ruling (2026-10-27, tap A, verbatim and
-  // untranslated): 「A:先削重复,余额按实测提高」; recognised path per ruling record
-  // 6513306068; seat widening record 6784270263.
-  ['skills/objectstack-data/rules/field-types.md', 3250],
+  // with its TOC line (home: § Autonumber rules 1 and 2). `wc -c` = 12999 bytes ->
+  // ceil(12999 / 4) = 3250 tokens, zero headroom, ceiling +51, pinned AT the measurement.
+  // Standing ruling (2026-10-27, tap A, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068; seat
+  // widening record 6784270263.
+  // 3250 -> 3234 (#31957, same PR, contract-review should-fix S1): one sentence says the
+  // Console does not yet draw a path amount or its roll-up in the parent's currency
+  // (+105 bytes), paid by cutting the `user` row's `deleteBehavior` parenthetical to a
+  // pointer (-168 bytes; home: rules/relationships.md § Delete Behaviors, every fact).
+  // `wc -c` = 12936 bytes -> ceil(12936 / 4) = 3234 tokens: RE-LOCK down at the landed
+  // count, zero headroom.
+  ['skills/objectstack-data/rules/field-types.md', 3234],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
