@@ -375,6 +375,82 @@ describe('#32201 — the 409 carries `details.candidates` on every read form', (
 });
 
 /**
+ * [#32244, ADR-0150 D3] The bare `GET /meta/action/:name` of an action name two
+ * packages hold on any object key — each on its own object, or both on one —
+ * answers `409 RESOURCE_CONFLICT` naming every holder (`details.candidates`)
+ * with its object (the message), on this transport too. `?package=` and a
+ * name one package holds answer as before.
+ *
+ * BASE (main 9bff554e): 200 with the first registered package's action.
+ */
+describe('#32244 — the bare read of an action name two packages hold answers 409', () => {
+    const shipAction = (packageId: string, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId.split('.').pop(), type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, codeOf(answer), answer.body?.details?.candidates];
+
+    it('two packages, two objects: 409 naming both, each with its object', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+        expect(messageOf(answer)).toContain(`package "${A}" binds it to object "account"`);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('two packages, one object: 409 naming both', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'account');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+    });
+
+    it('CONTROL — `?package=` reaches the package\'s own action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const qualified = await drive(ITEM, { type: 'action', name: 'approve' }, { package: A });
+        expect(qualified.status, JSON.stringify(qualified.body)).toBe(200);
+        expect(labelOf(qualified)).toBe('alpha');
+    });
+
+    it('CONTROL — one package holding the name answers the bare read', async () => {
+        shipAction(A, 'account');
+        const single = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(single.status, JSON.stringify(single.body)).toBe(200);
+        expect(labelOf(single)).toBe('alpha');
+    });
+
+    it('[review 6781770671 S2] the layered read `/layers` of a name the registry counts two holders of: 409 naming both with their objects', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${A}" binds it to object "account"`);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('[review 6781770671 S2] the published read `/published` of such a name: 409 too, never one package\'s action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('CONTROL — `/layers` and `/published` of a name one package holds answer as before', async () => {
+        shipAction(A, 'account');
+        const layers = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([layers.status, layers.body?.code?.label], JSON.stringify(layers.body)).toEqual([200, 'alpha']);
+        // This harness wires no metadata service, so a read the judge passes
+        // reaches the code-store fallback and answers its 501, never the 409.
+        const published = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([501, 'NOT_IMPLEMENTED']);
+    });
+});
+
+/**
  * [#32310, ADR-0150 D3] The caller arm on this transport's `/meta` item read:
  * `GET /meta/dataset/:name?callerPackage=P` resolves the name FROM P (its own
  * dataset, else the unique holder in its declared closure plus `sys`, else

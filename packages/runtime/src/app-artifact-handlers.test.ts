@@ -26,6 +26,7 @@ import '@objectstack/metadata';
 import { ObjectQL } from '@objectstack/objectql';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { bindAppArtifactHandlers, appArtifactHandlerOwner, collectHooksWithoutBody } from './app-artifact-handlers.js';
+import { isActionNotRegisteredError } from './action-execution.js';
 
 const APP_ID = 'com.example.tasksapp';
 const OWNER = appArtifactHandlerOwner(APP_ID);
@@ -241,11 +242,23 @@ describe('[ADR-0150 D4] bindAppArtifactHandlers on a multi-package artifact', ()
         const bound = bind(ql, artifact);
 
         expect(rowsOf(ql, OBJECT, STAMP)).toEqual([bound.owner]);
-        await expect(ql.executeAction(OBJECT, STAMP, { params: {} })).resolves.toEqual({ from: runs });
-        for (const packageId of ['app:com.qa.share.one', 'app:com.qa.share.two']) {
-            const answer = await ql.executeAction(OBJECT, STAMP, { params: {} }, { packageId }).catch((e: Error) => e);
-            if (replaced) expect(answer, packageId).not.toEqual({ from: replaced });
+        expect(bound.owner, 'precondition: the artifact\'s owner is the second package').toBe('app:com.qa.share.two');
+        // A package-qualified call names the engine's package COORDINATE, the bare
+        // id (`actionHandlerCoordinate`), never the `app:` owner key. The first
+        // package's declaration was reconciled away, so its coordinate holds no
+        // handler: the call is the engine's not-registered miss, the answer the
+        // action door reads as absence. The owner's coordinate runs the
+        // reconciled body. Asked before the unqualified call, so a replaced body
+        // bound under its package reds here, naming the address.
+        const answerAt = (packageId: string) =>
+            ql.executeAction(OBJECT, STAMP, { params: {} }, { packageId }).catch((e: Error) => e);
+        const atOne = await answerAt('com.qa.share.one');
+        expect(isActionNotRegisteredError(atOne), `com.qa.share.one answered ${JSON.stringify(atOne)}`).toBe(true);
+        expect(await answerAt('com.qa.share.two'), 'com.qa.share.two').toEqual({ from: runs });
+        if (replaced) for (const packageId of ['com.qa.share.one', 'com.qa.share.two']) {
+            expect(await answerAt(packageId), packageId).not.toEqual({ from: replaced });
         }
+        await expect(ql.executeAction(OBJECT, STAMP, { params: {} })).resolves.toEqual({ from: runs });
     });
 
     it('a hand-built artifact whose two bodies of ONE namespace carry one object-less key binds it once, under the artifact\'s owner', async () => {

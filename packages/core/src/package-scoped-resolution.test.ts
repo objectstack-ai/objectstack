@@ -22,6 +22,7 @@ import {
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
   isNamespaceScopedBareNameType,
   isPackageScopedType,
+  packageScopedActionOwnersSentence,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
@@ -236,5 +237,25 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
     }
     expect(isNamespaceScopedBareNameType('flow')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
+  });
+});
+
+describe('[#32244, review 6781770671 N1] packageScopedActionOwnersSentence', () => {
+  it('two packages on two objects: each is a different action, naming each package with its object', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['contact']]]))).toBe(
+      `Each is a different action: package "${A}" binds it to object "account"; package "${B}" binds it to object "contact".`,
+    );
+  });
+
+  it('an object and none are different actions too', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, [undefined]]]))).toBe(
+      `Each is a different action: package "${A}" binds it to object "account"; package "${B}" binds it to no object.`,
+    );
+  });
+
+  it('two packages on ONE object are not called different actions: the sentence only names them', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['account']]]))).toBe(
+      `Package "${A}" binds it to object "account"; package "${B}" binds it to object "account".`,
+    );
   });
 });
