@@ -7,6 +7,7 @@ import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
+import { createRestApiPlugin } from '@objectstack/rest';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
@@ -227,6 +228,9 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     await kernel.use(fakeAuthPlugin());
     // port 0 → OS-assigned free port; resolved via getPort() after listening.
     await kernel.use(new HonoServerPlugin({ port: 0 }));
+    // [#32444] The generic data door (`/api/v1/data/:object`) the console's
+    // New/Edit forms post to, so the inbox write refusal is asserted on the wire.
+    await kernel.use(createRestApiPlugin({}));
     await kernel.use(createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false, requireAuth: false }));
 
     await kernel.bootstrap();
@@ -462,4 +466,57 @@ describe('in-app notifications over a real hono server (integration, #3362)', ()
     // and because the read below needs a live engine.
     await expectResolverAuthzReadsSucceed();
   }, 120_000);
+
+  it('[#32444] the generic data door refuses an inbox write with 405; the channel-written row stays markable read', async () => {
+    // The defect, on the wire: the console's generic New form posts to the data
+    // door, which answered 201 with a row carrying no `notification_id`. Read
+    // state is keyed by that id, so such a row could never be marked read
+    // (`markRead` answered `readCount: 0`). ADR-0030: "No producer writes an
+    // inbox/materialization row directly." `sys_inbox_message` now declares
+    // `enable.apiMethods: ['get', 'list']` like its siblings, so the data door
+    // refuses create, update and delete before any handler runs.
+    const USER = 'usr_notif_door';
+    const data = kernel.getService<IDataEngine>('data');
+    const SYSTEM = { context: { isSystem: true } } as const;
+
+    // CONTROL setup: the one legitimate writer — `emit()` → the inbox channel.
+    await messaging.emit({ topic: 'deal.won', audience: [USER], payload: { title: 'Channel row', body: 'via emit' } });
+    const [row] = (await data.find('sys_inbox_message', { where: { user_id: USER } }, SYSTEM)) as any[];
+    expect(row?.title).toBe('Channel row');
+
+    const refusedAs405 = async (res: Response): Promise<void> => {
+      expect(res.status).toBe(405);
+      const body = await res.json() as { code?: string; error?: { code?: string } | string };
+      const code = body.code ?? (typeof body.error === 'object' ? body.error?.code : undefined);
+      expect(code).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
+    };
+
+    await refusedAs405(await as(USER, '/api/v1/data/sys_inbox_message', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: USER, title: 'Hand-written', body_md: 'generic New form', severity: 'info' }),
+    }));
+    await refusedAs405(await as(USER, `/api/v1/data/sys_inbox_message/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: 'Hand-edited' }),
+    }));
+    await refusedAs405(await as(USER, `/api/v1/data/sys_inbox_message/${row.id}`, { method: 'DELETE' }));
+
+    // Nothing landed through the refused door: still exactly the channel's row, unedited.
+    const rows = (await data.find('sys_inbox_message', { where: { user_id: USER } }, SYSTEM)) as any[];
+    expect(rows.map((r) => r.title)).toEqual(['Channel row']);
+
+    // CONTROL: the channel-written row is served and flips to read.
+    const listed = await (await as(USER, '/api/v1/notifications')).json();
+    expect(listed.data.unreadCount).toBe(1);
+    const readOne = await as(USER, '/api/v1/notifications/read', {
+      method: 'POST',
+      body: JSON.stringify({ ids: [listed.data.notifications[0].id] }),
+    });
+    expect(readOne.status).toBe(200);
+    expect((await readOne.json()).data).toMatchObject({ success: true, readCount: 1 });
+    const after = await (await as(USER, '/api/v1/notifications')).json();
+    expect(after.data.unreadCount).toBe(0);
+
+    await expectResolverAuthzReadsSucceed();
+  });
 });
