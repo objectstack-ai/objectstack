@@ -4,7 +4,7 @@
 
 fix(cli): `os generate` writes the starter's authoring style, a view can be named apart from its object, an action without a flow is a declarative update, `os g dashboard` names the app navigation entry that lists it, and `os --help` describes each topic
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 What a newcomer, or a coding agent following the CLI's output, meets on the documented path, FROM → TO:
