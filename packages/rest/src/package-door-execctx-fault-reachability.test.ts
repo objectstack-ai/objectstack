@@ -142,6 +142,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import {
   ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
   // [commit 6a180e42d] The loud permission-store outage, and its brand predicate.

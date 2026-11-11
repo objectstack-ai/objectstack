@@ -44,6 +44,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { hashApiKey, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 

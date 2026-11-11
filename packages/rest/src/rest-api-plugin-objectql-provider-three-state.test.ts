@@ -58,6 +58,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import {
     ObjectKernel,
     LiteKernel,

@@ -58,6 +58,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// The source under test reaches `@objectstack/metadata` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/metadata';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { HttpDispatcher, type HttpDispatcherResult } from '../http-dispatcher.js';
 import { bindCatalogFromTables } from '../security/security-catalog.testkit.js';

@@ -28,6 +28,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Paid at collection: the dispatcher reaches it through a dynamic import.
+import '@objectstack/metadata';
 
 import { ObjectKernel, isAuthzStoreUnavailableError } from '@objectstack/core';
 import { ApiErrorSchema, BaseResponseSchema } from '@objectstack/spec/api';
