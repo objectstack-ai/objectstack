@@ -130,7 +130,7 @@ policy layer over an existing pipeline, never a second execution dialect.
 | Use | When |
 |:---|:---|
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
-| **A flow that runs your code** | The endpoint needs real handler CODE: point a `type: 'flow'` endpoint at a flow whose `script` node names a stack function (`defineStack({ functions })`), or whose `connector_action` node calls a declared connector (outbound). The URL stays declarative; the code runs where the automation surface already runs it. |
+| **A flow that runs your code** | The endpoint needs real handler CODE: point a `type: 'flow'` endpoint at a flow whose `script` node names a stack function (`defineStack({ functions })`; which one runs: [objectstack-automation](../objectstack-automation/SKILL.md#valid-but-silently-wrong-passes-build-fails-at-runtime) item 3), or whose `connector_action` node calls a declared connector (outbound). The URL stays declarative; the code runs where the automation surface already runs it. |
 
 An inbound webhook is a `type: 'api'` flow (objectstack-automation →
 **Inbound webhook (`api`) triggers**): it verifies ObjectStack's own
@@ -366,9 +366,10 @@ A flow door — `POST /api/v1/automation/{name}/trigger`, resume, `/actions`, a
 declared `type: 'flow'` endpoint — answers a failed run with `400 FLOW_FAILED`;
 its `error.details` is `FlowFailureDetailsSchema` (`api/automation-api.zod.ts`):
 `errorMessage?` (the flow author's text), `summary?` (which node failed) and
-`innerRefusal?`, the `{ code, message }` a node's write was refused with, `code`
-in its wire spelling (`UNIQUE_VIOLATION`, `VALIDATION_FAILED`,
-`PERMISSION_DENIED`). Render it as a record form renders a refused save:
+`innerRefusal?`, the `{ code, message }` refusal a node met (a data node's read
+or write, a `script` node's function name), `code` an `ErrorCode` member in wire
+spelling (e.g. `UNIQUE_VIOLATION`, `PERMISSION_DENIED`, `RESOURCE_CONFLICT`).
+Render it as a record form renders a refused save:
 top-level `userMessage`, then `details.innerRefusal`, then `message`. Absent
 keys mean the run produced none — never invent an empty.
 
