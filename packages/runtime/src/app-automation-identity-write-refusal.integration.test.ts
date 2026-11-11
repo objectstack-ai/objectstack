@@ -43,6 +43,8 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+// Paid at collection: the action path reaches a dynamic import of this package inside a clocked case.
+import '@objectstack/metadata';
 import { ObjectQL, bindHooksToEngine, wrapDeclarativeHook } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { PermissionSetSchema } from '@objectstack/spec/security';
