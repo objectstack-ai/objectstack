@@ -240,7 +240,8 @@ function printReport(report: StoredPackageReferenceReport, database: string): vo
     for (const f of report.pairMembers) {
       console.log(`  • ${f.table} "${f.id}" ${f.type} "${f.name}"${f.member ? ` member "${f.member}"` : ''} in "${f.pairId}"`);
       console.log(`      could be the added member of: ${f.candidates.map(describeCandidate).join('; ')}`);
-      console.log('      No door binds an added member to one base today (the save gate refuses overrides.package naming a base that does not ship it, #28777): the row stays refused, and listed here, until it is deleted.');
+      // The save gate's `declared_package_ships_no_such_item` refusal (#28777).
+      console.log('      No door binds an added member to one base today (the save gate refuses overrides.package naming a base that does not ship it): the row stays refused, and listed here, until it is deleted.');
     }
     console.log('');
   }
