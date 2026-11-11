@@ -660,9 +660,12 @@ describe('a money aggregate over a `record`-mode amount is left out of the whole
     const schemaRead = new Promise<void>((resolve) => { land = resolve; });
     const ds = makeDataSource({ fields: SIBLING, schemaRead });
     render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
-    await waitFor(() => expect(screen.getByText('Line 0')).toBeInTheDocument());
+    // The untyped cells stay withheld until the definition lands (objectui#10657),
+    // so the page's footer is what marks the grid as drawn.
+    await waitFor(() => expect(footerText('qty')).toMatch(/^Qty: Sum \(this page\): /));
     await new Promise((resolve) => setTimeout(resolve, 50));
-    // Unknown currency mode: no guess is sent, and the footer is the page's.
+    // Unknown currency mode: no guess is sent, and the footer stays the page's.
+    expect(ds.getObjectSchema).toHaveBeenCalled();
     expect(ds.queryGroupHeaders).not.toHaveBeenCalled();
     expect(footerText('qty')).toMatch(/^Qty: Sum \(this page\): /);
 
