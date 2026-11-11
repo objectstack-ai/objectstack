@@ -501,7 +501,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.currency.currencyFieldNone': '— Pick a currency field —',
   'designer.field.currency.createCodeField': 'Create currency field',
   'designer.field.currency.codeFieldLabel': 'Currency',
-  'designer.field.currency.recordHint': 'Lists the text fields of this object whose value domain is ISO 4217 currency. Each record stores its own code there; the amount shows in that currency.',
+  'designer.field.currency.recordHint': 'Lists the text fields of this object whose value domain is ISO 4217 currency, and those of a master-detail parent (relation.field). Each record stores its own code there, or follows its parent record; the amount shows in that currency.',
   'designer.field.currency.homeAmount': 'Home currency amount',
   'designer.field.currency.homeField': 'Home amount field',
   'designer.field.currency.homeFieldNone': '— Not stored —',
