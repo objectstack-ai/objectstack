@@ -189,8 +189,8 @@ export function assertFlowSystemIdentityWriteAllowed(opCtx: {
  * ## What is judged
  *
  * The verbs that change or remove a stored row
- * ({@link APPEND_ONLY_REFUSED_OPERATIONS}). Reads are not judged, and neither
- * is an insert. As with the identity refusal, the operation is judged as the
+ * ({@link APPEND_ONLY_REFUSED_OPERATIONS}). Reads are not judged. As with
+ * the identity refusal, the operation is judged as the
  * engine hands it to the middleware, at any depth: a cascade leg the
  * automation's own write sets off under the same context is its write too.
  *
