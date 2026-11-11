@@ -914,6 +914,7 @@ export class ProtocolHistoryAndPublishFacet {
         if (draftForGate) {
             const grantRefusal = await host.unknownGrantObjectSaveRefusal(
                 singularType, draftForGate.body, request.name, request.batchObjects, undefined, 'publish',
+                undefined, promoteInto,
             );
             if (grantRefusal) throw grantRefusal;
         }

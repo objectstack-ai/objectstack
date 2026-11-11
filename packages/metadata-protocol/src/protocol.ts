@@ -8853,7 +8853,9 @@ export class ObjectStackProtocolImplementation implements
      * unknown object at `objects.<name>`, naming it. [#29279] `door` names
      * what the finding says was looked for: a save counts an object saved
      * here, a draft's publish (`'publish'`) only a published object or an
-     * object draft of its batch.
+     * object draft of its batch. [#32162] `savingPackage` is the package the
+     * write lands in: the set's already-held grants are read from that
+     * package's own item (ADR-0150 D3), never another holder's of the name.
      */
     private unknownGrantObjectSaveRefusal(
         singularType: string,
@@ -8863,6 +8865,7 @@ export class ObjectStackProtocolImplementation implements
         writeFace?: MetadataWriteFace,
         door?: 'save' | 'publish',
         inherited?: readonly string[],
+        savingPackage?: string | null,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -8870,7 +8873,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited, savingPackage);
     }
 
     /**
