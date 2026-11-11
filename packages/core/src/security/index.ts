@@ -353,6 +353,21 @@ export {
 // same bindings) and the import runner's match lookup.
 export { DEFAULT_TENANT_FIELD, isFederatedObject, resolveTenantFieldName } from './tenant-field.js';
 
+// [ADR-0015 §10, ADR-0095 D1] The one reading of the organization scope an
+// external object states, its Layer 0 projection, the provenance test of a
+// federated object's `organization_id` it composes, and the three ways out.
+// Askers: `@objectstack/plugin-security` (boot refusal, Layer 0 input and write
+// wall; it re-exports these same bindings) and the sync-in pull in
+// `@objectstack/service-automation`.
+export {
+  declaredForeignTenantField,
+  EXTERNAL_SCOPE_REMEDY,
+  externalOrganizationScopeIsUndeclared,
+  externalOrganizationScopeOf,
+  hasPhantomTenantAnchor,
+  type ExternalOrganizationScope,
+} from './external-organization-scope.js';
+
 // [ADR-0138 D4] The located refusal an anonymous request meets where it needs
 // an organization the deployment cannot resolve for it — a standard-catalog
 // code (`NOT_IMPLEMENTED`), naming the missing site binding (D5).

@@ -276,9 +276,7 @@ import {
   owdOpenWritesCoversOperation,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
-import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
-  externalOrganizationScopeIsUndeclared,
   refuseUndeclaredExternalObjectScope,
   registeredObjectsOf,
   undeclaredExternalScopeDenialWarning,
@@ -317,6 +315,10 @@ import {
   readDeploymentOrgScopingEntitlement,
   type DeploymentOrgScopingEntitlementReading,
 } from '@objectstack/core';
+// [ADR-0015 §10] The one reading of an external object's organization scope and
+// the provenance test it composes: `@objectstack/core`'s, which this plugin's
+// `external-organization-scope.ts` and `federated-phantom-anchors.ts` re-export.
+import { externalOrganizationScopeIsUndeclared, hasPhantomTenantAnchor } from '@objectstack/core';
 import {
   securityObjects,
   securityDefaultPermissionSets,

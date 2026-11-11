@@ -53,86 +53,31 @@
  * reads it for the Layer 0 input (`externalOrganizationScopeUndeclared`), so an
  * object the boot never saw meets the same verdict at its first read. The two
  * cannot disagree, because neither re-derives the question.
+ *
+ * The reading, its Layer 0 projection and {@link EXTERNAL_SCOPE_REMEDY} live in
+ * `@objectstack/core`'s security module (`external-organization-scope.ts`
+ * there), because a service asks the same question — the sync-in pull in
+ * `@objectstack/service-automation` decides by it whose rows it may copy — and
+ * should not load this plugin to ask it. This module re-exports those
+ * bindings, so its public surface is unchanged and every importer resolves to
+ * the one implementation.
  */
 
-import { isTenancyDisabled } from '@objectstack/spec/data';
+import {
+  declaredForeignTenantField,
+  EXTERNAL_SCOPE_REMEDY,
+  externalOrganizationScopeOf,
+} from '@objectstack/core';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 
-import { hasPhantomTenantAnchor, isFederatedObject } from './federated-phantom-anchors.js';
-
-/** The one column the Layer 0 wall keys on. */
-const TENANT_SCOPE_COLUMN = 'organization_id';
-
-/**
- * What an external object states about its organization scope.
- *
- * - `tenant-field-unenforceable` — `tenancy.tenantField` names a column other
- *   than `organization_id`, which the wall does not read on an external object
- *   (judged first: a tenant field the wall cannot read is refused whatever
- *   else the object declares, unless it opted out of tenancy altogether).
- * - `shared` — the wall's own two opt-out clauses, `tenancy.enabled: false` or
- *   `systemFields.tenant: false`; the whole-block `systemFields: false` is in
- *   neither and states nothing.
- * - `walled` — it declares its own `organization_id` (any definition other
- *   than the platform's injected one; a parsed copy of the shipped definition
- *   carries the parser's defaults and so counts as the author's). An object
- *   with its own column is never answered `shared` unless it also opted out,
- *   because the wall walls it.
- * - `undeclared` — none of the above.
- */
-export type ExternalOrganizationScope = 'walled' | 'shared' | 'undeclared' | 'tenant-field-unenforceable';
-
-function readFieldDef(schema: unknown, name: string): unknown {
-  const fields = (schema as { fields?: unknown } | null | undefined)?.fields;
-  if (Array.isArray(fields)) return fields.find((f) => (f as { name?: unknown } | null)?.name === name);
-  if (fields && typeof fields === 'object') return (fields as Record<string, unknown>)[name];
-  return undefined;
-}
-
-/** The declared `tenancy.tenantField`, when it names a column other than the wall's. */
-export function declaredForeignTenantField(schema: unknown): string | null {
-  const declared = (schema as { tenancy?: { tenantField?: unknown } } | null | undefined)?.tenancy?.tenantField;
-  if (typeof declared !== 'string' || declared === '' || declared === TENANT_SCOPE_COLUMN) return null;
-  return declared;
-}
-
-/**
- * The declaration an external object makes, or `null` for an object that is
- * not external (the question does not arise: the platform provisions its
- * columns, so its `organization_id` is real wherever it is registered).
- */
-export function externalOrganizationScopeOf(schema: unknown): ExternalOrganizationScope | null {
-  if (!isFederatedObject(schema)) return null;
-  // The wall's two opt-out clauses, exactly as `getObjectSecurityMeta` reads
-  // `tenancyDisabled`: an object that opted out is shared whatever column it
-  // carries, because the wall composes nothing on it.
-  const systemFields = (schema as { systemFields?: unknown }).systemFields;
-  const optedOut =
-    isTenancyDisabled(schema) ||
-    (!!systemFields && typeof systemFields === 'object' && (systemFields as { tenant?: unknown }).tenant === false);
-  if (!optedOut && declaredForeignTenantField(schema) !== null) return 'tenant-field-unenforceable';
-  if (optedOut) return 'shared';
-  if (readFieldDef(schema, TENANT_SCOPE_COLUMN) !== undefined && !hasPhantomTenantAnchor(schema)) return 'walled';
-  return 'undeclared';
-}
-
-/**
- * Does Layer 0 deny this object under a walled posture because it is external
- * and states no enforceable organization scope? `false` for every local
- * object and for an external object that declared `walled` or `shared`.
- */
-export function externalOrganizationScopeIsUndeclared(schema: unknown): boolean {
-  const scope = externalOrganizationScopeOf(schema);
-  return scope === 'undeclared' || scope === 'tenant-field-unenforceable';
-}
-
-/** The three ways out, as every refusal and warning spells them. */
-export const EXTERNAL_SCOPE_REMEDY =
-  'Declare one of three on each: an `organization_id` field of its own, when the remote rows carry the ' +
-  'organization column and the driver returns it (a remote column of another name is mapped onto it with ' +
-  "`external.columnMap: { <remote column>: 'organization_id' }`) — the rows are then walled by organization; " +
-  '`tenancy: { enabled: false }` — the object is shared by every organization; or ' +
-  '`systemFields: { tenant: false }` — the same opt-out, spelled on the system fields.';
+// Re-exported, not restated: `@objectstack/core`'s bindings are the one reading.
+export {
+  declaredForeignTenantField,
+  EXTERNAL_SCOPE_REMEDY,
+  externalOrganizationScopeIsUndeclared,
+  externalOrganizationScopeOf,
+  type ExternalOrganizationScope,
+} from '@objectstack/core';
 
 /**
  * The write wall's refusal of an external object that states no organization
