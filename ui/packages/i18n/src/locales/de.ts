@@ -2323,6 +2323,13 @@ const de = {
         done: "Kollegen sind beigetreten oder wurden eingeladen.",
         action: "Einladen",
       },
+      aiProvider: {
+        title: 'Eingebaute KI einrichten',
+        todo: 'Noch kein KI-Anbieter in Gebrauch. Wählen Sie einen aus und hinterlegen Sie seinen Schlüssel.',
+        doneSettings: '{{provider}}, in Setup eingerichtet.',
+        doneEnvironment: '{{provider}}, aus der Serverumgebung erkannt.',
+        action: 'Einrichten',
+      },
       connectAssistant: {
         title: 'Externen KI-Assistenten verbinden',
         todo: 'Arbeiten Sie in diesem System als Sie selbst aus Claude, Doubao und ähnlichen Assistenten, über MCP. Die eingebaute KI wird separat eingerichtet, unter Setup → KI und Embedder.',

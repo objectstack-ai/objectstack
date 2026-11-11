@@ -2325,6 +2325,13 @@ const ja = {
         done: "同僚が参加済みか、招待済みです。",
         action: "招待",
       },
+      aiProvider: {
+        title: '内蔵 AI を設定',
+        todo: '使用中の AI プロバイダーはまだありません。プロバイダーを選び、キーを追加してください。',
+        doneSettings: '{{provider}}（Setup で設定）。',
+        doneEnvironment: '{{provider}}（サーバー環境から検出）。',
+        action: '設定する',
+      },
       connectAssistant: {
         title: '外部の AI アシスタントを接続',
         todo: 'MCP 経由で、Claude や Doubao などのアシスタントから、あなた自身としてこのシステムを使えます。内蔵 AI は別途 Setup → AI と Embedder で設定します。',

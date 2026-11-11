@@ -2323,6 +2323,13 @@ const ko = {
         done: "동료가 참여했거나 초대되었습니다.",
         action: "초대",
       },
+      aiProvider: {
+        title: '내장 AI 설정',
+        todo: '아직 사용 중인 AI 제공자가 없습니다. 제공자를 선택하고 키를 추가하세요.',
+        doneSettings: '{{provider}}, Setup에서 설정됨.',
+        doneEnvironment: '{{provider}}, 서버 환경에서 감지됨.',
+        action: '설정',
+      },
       connectAssistant: {
         title: '외부 AI 어시스턴트 연결',
         todo: 'MCP를 통해 Claude, Doubao 같은 어시스턴트에서 본인으로서 이 시스템을 사용하세요. 내장 AI는 Setup → AI 및 Embedder에서 따로 설정합니다.',

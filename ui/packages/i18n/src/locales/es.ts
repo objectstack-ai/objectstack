@@ -2389,6 +2389,13 @@ const es = {
         done: "Hay compañeros que se han unido o han sido invitados.",
         action: "Invitar",
       },
+      aiProvider: {
+        title: 'Configurar la IA integrada',
+        todo: 'Todavía no hay ningún proveedor de IA en uso. Elija uno y añada su clave.',
+        doneSettings: '{{provider}}, configurado en Setup.',
+        doneEnvironment: '{{provider}}, detectado en el entorno del servidor.',
+        action: 'Configurar',
+      },
       connectAssistant: {
         title: 'Conectar un asistente de IA externo',
         todo: 'Trabaja en este sistema como tú mismo desde Claude, Doubao y asistentes similares, mediante MCP. La IA integrada se configura aparte, en Setup → IA y Embedder.',

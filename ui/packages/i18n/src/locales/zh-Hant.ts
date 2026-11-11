@@ -2079,6 +2079,13 @@ const zhHant = {
         done: '已有同事加入或已發出邀請。',
         action: '邀請',
       },
+      aiProvider: {
+        title: '設定內建 AI',
+        todo: '尚未啟用 AI 服務商。請選擇一個並填寫其金鑰。',
+        doneSettings: '{{provider}}，在 Setup 中設定。',
+        doneEnvironment: '{{provider}}，從伺服器環境中檢測到。',
+        action: '去設定',
+      },
       connectAssistant: {
         title: '連線外部 AI 助手',
         todo: '通過 MCP，在 Claude、豆包等助手裡以你自己的身份使用本系統。內建 AI 需另行在 Setup → AI 與向量化 中設定。',

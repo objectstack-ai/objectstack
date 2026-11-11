@@ -2079,6 +2079,13 @@ const zh = {
         done: '已有同事加入或已发出邀请。',
         action: '邀请',
       },
+      aiProvider: {
+        title: '设置内置 AI',
+        todo: '尚未启用 AI 服务商。请选择一个并填写其密钥。',
+        doneSettings: '{{provider}}，在 Setup 中设置。',
+        doneEnvironment: '{{provider}}，从服务器环境中检测到。',
+        action: '去设置',
+      },
       connectAssistant: {
         title: '连接外部 AI 助手',
         todo: '通过 MCP，在 Claude、豆包等助手里以你自己的身份使用本系统。内置 AI 需另行在 Setup → AI 与向量化 中设置。',

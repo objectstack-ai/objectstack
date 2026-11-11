@@ -36,7 +36,14 @@
  *      what that notice says is ruled (objectstack#30120), so the row yields.
  *   6. Invite colleagues: a second member or a pending invitation; links to
  *      Setup → Users, where Invite User is.
- *   7. Connect an external AI assistant: done once this administrator has
+ *   7. The built-in AI: a provider is in use in the running system, as the
+ *      server states it (`live.provider` of `GET /api/settings/ai`, never the
+ *      saved `values.provider`, which misses a provider the runtime detected
+ *      from its boot environment). The row names the provider and where it
+ *      came from (Setup, or the server's environment) and links to Setup →
+ *      AI & Embedder. Only for a session that may write `ai`; a server that
+ *      states nothing about the provider gets no row (unknown is not unset).
+ *   8. Connect an external AI assistant: done once this administrator has
  *      authorized an AI assistant or holds an API key that still works, read
  *      from those records by `useConnectedAccess` (the read Connect an AI
  *      Assistant's Connected line uses), never from a click; links to that
@@ -97,6 +104,8 @@ import { resolveLabel, type ResolvedSettingValue } from './types';
 import { useSettingsLabel, type SettingsLabelHelpers } from './useSettingsLabel';
 import { whenBootPainted } from '../../loadLocales';
 import {
+  AI_NAMESPACE,
+  AI_PROVIDER_KEY,
   COUNTRY_KEY,
   CURRENCY_KEY,
   LOCALE_KEY,
@@ -384,6 +393,7 @@ export function FirstRunChecklist() {
   const { systemPermissions } = usePermissions();
   const { apps } = useMetadata();
   const labels = useSettingsLabel(LOCALIZATION_NAMESPACE);
+  const aiLabels = useSettingsLabel(AI_NAMESPACE);
 
   const [editing, setEditing] = useState<ChecklistSettingsRow['id'] | null>(null);
   // The browser's answers are read once per mount: what the rows offer does not
@@ -592,6 +602,37 @@ export function FirstRunChecklist() {
               to={`${setupPath}/sys_user/view/all_users`}
               label={colleagues ? t('console.firstRunChecklist.view') : t('console.firstRunChecklist.invite.action')}
               testId="first-run-checklist-link-invite"
+            />
+          }
+        />
+      ),
+    });
+  }
+
+  if (settings.ai) {
+    const ai = settings.ai;
+    const provider = ai.value ? aiLabels.optionLabel(AI_PROVIDER_KEY, ai.value, ai.optionLabel ?? ai.value) : '';
+    rows.push({
+      id: 'ai_provider',
+      done: ai.done,
+      node: (
+        <ChecklistRow
+          key="ai_provider"
+          id="ai_provider"
+          done={ai.done}
+          title={t('console.firstRunChecklist.aiProvider.title')}
+          detail={
+            !ai.done
+              ? t('console.firstRunChecklist.aiProvider.todo')
+              : ai.source === 'environment'
+                ? t('console.firstRunChecklist.aiProvider.doneEnvironment', { provider })
+                : t('console.firstRunChecklist.aiProvider.doneSettings', { provider })
+          }
+          action={
+            <RowLink
+              to={`${setupPath}/system/settings/${AI_NAMESPACE}`}
+              label={ai.done ? t('console.firstRunChecklist.change') : t('console.firstRunChecklist.aiProvider.action')}
+              testId="first-run-checklist-link-ai_provider"
             />
           }
         />

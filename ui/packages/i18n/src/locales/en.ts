@@ -2499,6 +2499,13 @@ const en = {
         done: 'Colleagues have joined or been invited.',
         action: 'Invite',
       },
+      aiProvider: {
+        title: 'Set up the built-in AI',
+        todo: 'No AI provider is in use yet. Choose one and add its key.',
+        doneSettings: '{{provider}}, set in Setup.',
+        doneEnvironment: '{{provider}}, detected from the server environment.',
+        action: 'Set up',
+      },
       connectAssistant: {
         title: 'Connect an external AI assistant',
         todo: 'Work in this system as yourself from Claude, Doubao and similar assistants, over MCP. The built-in AI is set up separately, in Setup → AI & Embedder.',
