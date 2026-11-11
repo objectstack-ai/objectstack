@@ -853,8 +853,12 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
     subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
   }, 'name' as never, packageId);
+  // The row as the store writes it: the canonical member (`en-US`) is
+  // `bundle_member: null`, never its value (`overlayMemberValue`,
+  // metadata-protocol `migrations/overlay-index.ts`); any other member, its value.
   const envRow = (locale: string) => rows.push({
-    id: `env_${locale}`, type: 'email_template', name: 'welcome', state: 'active', package_id: null, bundle_member: locale,
+    id: `env_${locale}`, type: 'email_template', name: 'welcome', state: 'active', package_id: null,
+    bundle_member: locale === 'en-US' ? null : locale,
     metadata: JSON.stringify({ name: 'welcome', label: `env ${locale}`, locale, subject: `env ${locale}`, bodyHtml: '<p>e</p>' }),
   });
   const read = (packageId: string, member: string) => protocol.getMetaItem({
@@ -923,15 +927,21 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     });
   }
 
-  it('a member the holder itself ships, beside a package-less row of a name two packages hold: the exact read and the holder\'s list both serve the holder\'s own shipped member, never the row (R2-B)', async () => {
+  // [contract review R3-A; epic ruling 6792134290, answer 2 as first given]
+  // The package-less canonical row, stored as the store stores it, is the
+  // member the exact read of the holder's own shipped member reaches: it is
+  // refused, as at a member the holder does not ship. The list and the send
+  // keep serving the holder's own, the row withheld (the ruled split).
+  it('a member the holder itself ships, beside a package-less row of a name two packages hold: the exact read refuses 409 naming both; the holder\'s list and the send\'s read serve its own shipped member, the row withheld (R3-A)', async () => {
     tpl('en-US', A);
     tpl('en-US', B);
     envRow('en-US');
     for (const [at, own] of [[A, 'alpha en-US'], [B, 'beta en-US']] as const) {
-      const answer = await read(at, 'en-US');
-      expect(labelOf(answer), at).toBe(own);
-      expect((answer as { item?: { _packageId?: string } }).item?._packageId, at).toBe(at);
+      const err = await refusalOf(() => read(at, 'en-US'));
+      expect([err.code, err.status, err.refusal.reason], at).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
       expect(await listed(at), at).toEqual([own]);
+      expect(await forSend(at), at).toEqual([own]);
     }
   });
 
