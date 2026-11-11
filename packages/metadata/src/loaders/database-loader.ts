@@ -1943,7 +1943,9 @@ function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: s
  * [#31699 R4-B] Whether `data` is `row`'s stored body plus nothing but a
  * `_packageId` stamp naming the package `row` is already bound to: the stamp
  * `MetadataManager.loadMany` puts on a body its row binds by the `package_id`
- * column alone. Such a save writes nothing new, so it is no change.
+ * column alone. Such a save writes nothing new, so it is no change. Kept
+ * after R5-A: the boot pass's source skip covers that pass only, not any other
+ * register of such a body.
  */
 function onlyBoundStampAdded(row: Record<string, unknown>, type: string, data: unknown, packageId: string | undefined): boolean {
   if (packageId === undefined || storedRowPackageId(row) !== packageId) return false;

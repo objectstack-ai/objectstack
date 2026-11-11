@@ -1842,7 +1842,7 @@ describe('[#31699 R4-A] the save of a bundled type writes its own member\'s row'
     m.registerLoader(new DatabaseLoader({ driver }));
     return m;
   };
-  /** `MetadataPlugin._loadFromFileSystem`'s priming pass, over the manager's loaders. */
+  /** Each `loadMany` item registered back WITHOUT the R5-A source skip: the pass as it ran before, or any other caller. */
   const prime = async (m: MetadataManager) => {
     for (const item of (await m.loadMany('email_template')) as Array<{ name?: string }>) {
       if (item?.name) await m.register('email_template', item.name, item, { notify: false });
