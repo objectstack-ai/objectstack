@@ -3442,6 +3442,7 @@ const es = {
     back: "Atrás",
     recordNotFound: "Registro no encontrado",
     recordNotFoundDescription: "El registro que busca no existe, puede haber sido eliminado o es posible que no tenga acceso a él.",
+    backToList: 'Volver a {{name}}',
     recordAccessDenied: "No tiene acceso a los registros de {{object}}",
     recordAccessDeniedDescription: "No tiene permiso para ver registros de este tipo. Contacte a su administrador si cree que debería tener acceso.",
     recordLoadFailed: "No se pudo cargar este registro",

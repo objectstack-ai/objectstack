@@ -3370,6 +3370,7 @@ const ja = {
     back: "戻る",
     recordNotFound: "レコードが見つかりません",
     recordNotFoundDescription: "お探しのレコードは存在しないか、削除されたか、アクセス権がない可能性があります。",
+    backToList: '{{name}} に戻る',
     recordAccessDenied: "{{object}}レコードへのアクセス権がありません",
     recordAccessDeniedDescription: "この種類のレコードを表示する権限がありません。必要な場合は管理者にお問い合わせください。",
     recordLoadFailed: "このレコードを読み込めませんでした",

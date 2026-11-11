@@ -3525,6 +3525,7 @@ const ru = {
     back: "Назад",
     recordNotFound: "Запись не найдена",
     recordNotFoundDescription: "Искомая запись не существует, была удалена или у вас нет к ней доступа.",
+    backToList: 'Вернуться к «{{name}}»',
     recordAccessDenied: "Нет доступа к записям «{{object}}»",
     recordAccessDeniedDescription: "У вас нет прав на просмотр записей этого типа. Обратитесь к администратору, если считаете, что доступ вам нужен.",
     recordLoadFailed: "Не удалось загрузить эту запись",

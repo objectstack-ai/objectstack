@@ -50,6 +50,7 @@ import { ConsoleLayout } from '../layout/ConsoleLayout.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 import { ObjectView } from '../views/ObjectView.js';
 // objectui#13052 — on its own line: the line above is the eager-walk control
@@ -1324,18 +1325,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               }),
             };
     return (
-      <div className="h-screen flex items-center justify-center">
-        <Empty data-testid={verdictScreen.testId}>
-          <EmptyTitle>{verdictScreen.title}</EmptyTitle>
-          <EmptyDescription>{verdictScreen.description}</EmptyDescription>
-          <div className="mt-4 flex items-center justify-center gap-2">
+      <NotFoundState
+        testId={verdictScreen.testId}
+        className="h-screen p-0"
+        title={verdictScreen.title}
+        description={verdictScreen.description}
+        actions={
+          <>
             <Button onClick={() => setMissingRecheckRun(null)} data-testid={`${verdictScreen.testId}-retry`}>
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
-            {renderBackHomeButton(`${verdictScreen.testId}-home`)}
-          </div>
-        </Empty>
-      </div>
+            <BackToHomeButton testId={`${verdictScreen.testId}-home`} />
+          </>
+        }
+      />
     );
   }
 
@@ -2104,26 +2107,29 @@ function ShorthandRecordRedirect() {
  * Visible "not found" fallback rendered for any unmatched URL inside the
  * console app shell. Previously these URLs produced a fully blank content
  * area with no indication that anything had gone wrong — users would think
- * the app had crashed. An explicit Empty state with a "back to app home"
- * action turns an opaque failure into a recoverable one.
+ * the app had crashed. The shared `NotFoundState` with two ways out, back in
+ * the history and to Home, turns an opaque failure into a recoverable one.
  */
 function RouteNotFound() {
   const navigate = useNavigate();
   const { t } = useObjectTranslation();
   return (
-    <div className="flex h-full w-full items-center justify-center p-8">
-      <Empty>
-        <EmptyTitle>{t('console.notFound.title', { defaultValue: 'Page not found' })}</EmptyTitle>
-        <EmptyDescription>
-          {t('console.notFound.description', { defaultValue: 'The URL you followed does not match any view in this app.' })}
-        </EmptyDescription>
-        <div className="mt-4">
-          <Button variant="outline" onClick={() => navigate(-1)}>
+    <NotFoundState
+      testId="route-not-found"
+      className="p-8"
+      title={t('console.notFound.title', { defaultValue: 'Page not found' })}
+      description={t('console.notFound.description', {
+        defaultValue: 'The URL you followed does not match any view in this app.',
+      })}
+      actions={
+        <>
+          <Button variant="outline" onClick={() => navigate(-1)} data-testid="route-not-found-back">
             {t('console.notFound.back', { defaultValue: 'Go back' })}
           </Button>
-        </div>
-      </Empty>
-    </div>
+          <BackToHomeButton testId="route-not-found-home" />
+        </>
+      }
+    />
   );
 }
 

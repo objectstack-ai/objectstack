@@ -3368,6 +3368,7 @@ const de = {
     back: "Zurück",
     recordNotFound: "Datensatz nicht gefunden",
     recordNotFoundDescription: "Der gesuchte Datensatz existiert nicht, wurde möglicherweise gelöscht, oder Sie haben keinen Zugriff darauf.",
+    backToList: 'Zurück zu {{name}}',
     recordAccessDenied: "Kein Zugriff auf {{object}}-Datensätze",
     recordAccessDeniedDescription: "Sie haben keine Berechtigung, Datensätze dieses Typs anzuzeigen. Wenden Sie sich an Ihren Administrator, wenn Sie Zugriff benötigen.",
     recordLoadFailed: "Dieser Datensatz konnte nicht geladen werden",

@@ -3421,6 +3421,7 @@ const zh = {
     interfacePageSourceMissing: '此界面页引用了 “{{name}}”，但该来源不可用。',
     recordNotFound: '未找到记录',
     recordNotFoundDescription: '您查找的记录不存在、已被删除，或您没有访问权限。',
+    backToList: '返回{{name}}',
     recordAccessDenied: '无权访问{{object}}记录',
     recordAccessDeniedDescription: '你没有查看此类记录的权限。如需访问，请联系管理员。',
     recordLoadFailed: '无法加载此记录',

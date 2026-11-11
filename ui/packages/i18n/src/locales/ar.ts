@@ -3661,6 +3661,7 @@ const ar = {
     back: "رجوع",
     recordNotFound: "السجل غير موجود",
     recordNotFoundDescription: "السجل الذي تبحث عنه غير موجود، أو ربما تم حذفه، أو ربما لا تملك صلاحية الوصول إليه.",
+    backToList: 'العودة إلى {{name}}',
     recordAccessDenied: "ليس لديك صلاحية الوصول إلى سجلات {{object}}",
     recordAccessDeniedDescription: "ليس لديك إذن لعرض السجلات من هذا النوع. تواصل مع المسؤول إذا كنت تعتقد أنه يجب أن يكون لديك وصول.",
     recordLoadFailed: "تعذّر تحميل هذا السجل",

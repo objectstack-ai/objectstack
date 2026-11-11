@@ -3421,6 +3421,7 @@ const zhHant = {
     interfacePageSourceMissing: '此介面頁引用了 “{{name}}”，但該來源不可用。',
     recordNotFound: '未找到記錄',
     recordNotFoundDescription: '您查詢的記錄不存在、已被刪除，或您沒有訪問權限。',
+    backToList: '返回{{name}}',
     recordAccessDenied: '無權訪問{{object}}記錄',
     recordAccessDeniedDescription: '你沒有檢視此類記錄的權限。如需訪問，請聯絡管理員。',
     recordLoadFailed: '無法載入此記錄',

@@ -3437,6 +3437,7 @@ const pt = {
     back: "Voltar",
     recordNotFound: "Registro não encontrado",
     recordNotFoundDescription: "O registro que você está procurando não existe, pode ter sido excluído ou você pode não ter acesso a ele.",
+    backToList: 'Voltar para {{name}}',
     recordAccessDenied: "Você não tem acesso aos registros de {{object}}",
     recordAccessDeniedDescription: "Você não tem permissão para ver registros deste tipo. Contate seu administrador se acha que deveria ter acesso.",
     recordLoadFailed: "Não foi possível carregar este registro",

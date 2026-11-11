@@ -4002,6 +4002,7 @@ const en = {
     interfacePageSourceMissing: 'This interface page references "{{name}}", which is not available.',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
+    backToList: 'Back to {{name}}',
     recordAccessDenied: 'You don’t have access to {{object}} records',
     recordAccessDeniedDescription: 'You don’t have permission to view records of this type. Contact your administrator if you think you should have access.',
     recordLoadFailed: 'Couldn’t load this record',
