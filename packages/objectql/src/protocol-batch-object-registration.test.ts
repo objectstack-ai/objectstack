@@ -418,3 +418,48 @@ describe('registerApp after the seal asks the follow pair once the body is whole
         expect(h.engine.registry.getPackage('com.qa.lines')).toBeUndefined();
     });
 });
+
+describe('migrateStoredMetadata: a rewrite the registry refuses is reported failed and taken back (#32369)', () => {
+    const P = 'com.qa.migpkg';
+
+    it('answers the row failed with the registry refusal, and the store holds the row as it was before the pass', async () => {
+        const h = await boot();
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
+        await h.protocol.installPackage({ manifest: { id: P, name: 'Mig', type: 'app' } });
+        const inv = invoice('migpkg');
+        await h.protocol.saveMetaItem({ type: 'object', name: inv.name, packageId: P, item: inv });
+        // A line whose amount follows the invoice's TEXT field, saved on a face
+        // that asks the body alone (as a batch wrote it), with a lookup the
+        // conversion chain rewrites: at rest it still spells the retired
+        // `reference_to` alias (protocol 17), in the row and in its history.
+        const bad = followingLine('migpkg', 'bad_line', 'invoice.title');
+        const line = {
+            ...bad,
+            fields: { ...bad.fields, source_ref: { name: 'source_ref', type: 'lookup', label: 'Source', reference: 'migpkg_invoice' } },
+        };
+        await h.protocol.saveMetaItem({ type: 'object', name: line.name, packageId: P, item: line });
+        const legacy = (body: any) => {
+            const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+            const { reference, ...rest } = parsed.fields.source_ref;
+            const out = { ...parsed, fields: { ...parsed.fields, source_ref: { ...rest, reference_to: reference } } };
+            return typeof body === 'string' ? JSON.stringify(out) : out;
+        };
+        const stored = activeRow(h, 'object', line.name, P)!;
+        stored.metadata = legacy(stored.metadata);
+        for (const r of h.stores.get('sys_metadata_history')?.values() ?? []) {
+            if (r.name === line.name && r.version === stored.version) r.metadata = legacy(r.metadata);
+        }
+
+        const report: any = await h.protocol.migrateStoredMetadata({ types: ['object'], apply: true });
+
+        const row = report.rows.find((r: any) => r.name === line.name);
+        expect(row?.outcome).toBe('failed');
+        expect(row.reason).toMatch(/title/);
+        expect(row.reason).toMatch(/taken back/);
+        expect(report).toMatchObject({ rewritten: 0, failed: 1 });
+        // The store holds the row the pass read — the alias, not the rewrite.
+        const after = bodyOf(activeRow(h, 'object', line.name, P));
+        expect(after.fields.source_ref.reference_to).toBe('migpkg_invoice');
+        expect(after.fields.source_ref.reference).toBeUndefined();
+    });
+});
