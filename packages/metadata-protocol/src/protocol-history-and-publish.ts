@@ -106,8 +106,9 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * undone rather than pretending it never ran. Phase 2 never ran for a refused
  * batch, so there is no event, materialization or audit row to undo, and the
  * registry still serves the pre-publish state; each undo write still takes the
- * registry route every stored-row write takes (`revertCommit`'s two), which
- * re-asserts that state.
+ * registry route every stored-row write takes, the heal
+ * (`restoreArtifactRegistryView`), which re-derives the item's entry from the
+ * active rows the store serves and so re-asserts that state.
  *
  * Returns the promotions it could NOT undo, each with its failure; empty means
  * the store is back to its pre-publish state. Never throws: one item's failure
@@ -117,7 +118,7 @@ function unwrittenPromotionError(type: string, name: string): Error {
  * active row stored, its history append then failed) is not in `landed` — the
  * promotion threw — and is the store's own non-atomicity on such a runtime.
  */
-async function undoLandedPromotions(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
     repo: SysMetadataRepository;
     landed: ReadonlyArray<LandedPromotion>;
     /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
@@ -144,17 +145,14 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'applyRegistryWrite
                 if (before.prevVersion === null) {
                     throw new Error(`${item.d.type}/${item.d.name} was live before the publish, at no recorded version to restore`);
                 }
-                const restored = await args.repo.restoreVersion(ref, before.prevVersion, {
+                await args.repo.restoreVersion(ref, before.prevVersion, {
                     actor, source, message, intent, packageId: item.packageId, ...memberOption(item.d.member),
                 });
-                // The registry route every stored-row write takes, as
-                // `revertCommit`'s restore writes it through. Phase 2 never ran,
-                // so the registry still serves this body: a write-through of
-                // what it already holds.
-                await host.applyRegistryWriteThrough({
-                    type: item.singularType, name: item.d.name, item: restored.item.body,
-                    packageId: item.packageId, organizationId: null,
-                });
+                // The registry route every stored-row write takes. Phase 2 never
+                // ran, so the registry still serves this body; the heal
+                // re-registers the active row the store now serves, the one just
+                // restored, without opening another write-through caller.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
             } else {
                 await args.repo.delete(ref, {
                     parentVersion: item.version, actor, source, message, intent,
@@ -1424,7 +1422,7 @@ export class ProtocolHistoryAndPublishFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#publishPackageDrafts`; the method's docblock there is its contract. */
-    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applyRegistryWriteThrough' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
+    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
         packageId: string;
         actor?: string;
         /**

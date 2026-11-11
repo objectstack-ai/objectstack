@@ -168,8 +168,8 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     // [#30000] `os migrate packageless-overlays --apply`: the unbound row, once its pair's row reads back.
     { member: 'migratePackagelessOverlays', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     // [#32396] A refused package publish on a runtime that cannot roll back undoes its promotions: the
-    // edited row restored and written through, the created row removed and healed, the draft put back and healed.
-    { member: 'undoLandedPromotions', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
+    // edited row restored, the created row removed, the draft put back, each healed from what the store serves.
+    { member: 'undoLandedPromotions', verb: 'repo.restoreVersion(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.put(', route: { sameMember: 'restoreArtifactRegistryView' } },
 ];
