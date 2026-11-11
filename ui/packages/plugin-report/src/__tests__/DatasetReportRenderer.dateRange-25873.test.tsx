@@ -241,6 +241,43 @@ describe('DatasetReportRenderer reads the date dimension as the report\'s reader
     expect(src.queryDataset).not.toHaveBeenCalled();
   });
 
+  it('the caller package is part of the read: the same report served from another package re-reads, and never windows on the first one\'s dimension', async () => {
+    const sent: Array<{ caller: unknown; timeDimensions: unknown }> = [];
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, selection: any, options?: { callerPackage?: string }) => {
+        sent.push({ caller: options?.callerPackage, timeDimensions: selection?.timeDimensions });
+        return { rows: [{ stage: 'Won', amount: 10 }] };
+      }),
+    };
+    const urls: string[] = [];
+    const apiFetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      urls.push(url);
+      const dimension = url.endsWith('?callerPackage=com.acme.app') ? 'won_on'
+        : url.endsWith('?callerPackage=com.acme.other') ? 'closed_on' : undefined;
+      return dimension
+        ? new Response(JSON.stringify({ item: { name: 'opportunity_metrics', dimensions: [{ name: dimension, type: 'date' }] } }), { status: 200 })
+        : new Response('{}', { status: 404 });
+    });
+    const tree = (packageId: string) => (
+      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+        <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
+          <DatasetReportRenderer report={{ ...BASE, _packageId: packageId, dateRange: { defaultRange: 'last_90_days' } }} dataSource={src as any} />
+        </SchemaRendererProvider>
+      </I18nProvider>
+    );
+    const { rerender } = render(tree('com.acme.app'));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    rerender(tree('com.acme.other'));
+    await waitFor(() => expect(sent.some((s) => s.caller === 'com.acme.other')).toBe(true));
+    expect(urls).toEqual([
+      '/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.app',
+      '/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.other',
+    ]);
+    expect(sent.filter((s) => s.caller === 'com.acme.other').map((s) => s.timeDimensions))
+      .toEqual([[{ dimension: 'closed_on', dateRange: 'last_90_days' }]]);
+  });
+
   it.each([
     ['no _packageId', undefined],
     ['the package-less sentinel', 'sys_metadata'],
