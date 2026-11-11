@@ -571,7 +571,7 @@ describe("[seat decision on the contract review] an elevated automation's delete
     }
     expect(err?.code).toBe('PERMISSION_DENIED');
     expect(err?.statusCode ?? err?.status).toBe(403);
-    expect(err.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system is refused/);
+    expect(err.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system \(runAs: 'system'\) is refused/);
     expect(err.message).toMatch(CLEANUP);
     expect(err.message).toMatch(/an insert is not judged by it/);
     expect(err.message).toMatch(/Keep the record/);

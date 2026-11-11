@@ -175,7 +175,7 @@ describe("a runAs:'system' flow does not change or delete an append-only object'
       const res: any = await run(remove('sys_user', user));
       expect(res.success, `the run succeeded: ${JSON.stringify(res)}`).toBe(false);
       expect(res.innerRefusal?.code).toBe('PERMISSION_DENIED');
-      expect(res.innerRefusal?.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system is refused/);
+      expect(res.innerRefusal?.message).toMatch(/deleting a 'sys_user' record from a flow that runs as system \(runAs: 'system'\) is refused/);
       expect(res.innerRefusal?.message).toMatch(/deleting this record would change a record in an append-only ledger that references it/);
       expect(await stored('sys_user', user)).toEqual(userBefore);
       expect(await stored(object, ledgerId)).toEqual(ledgerBefore);
