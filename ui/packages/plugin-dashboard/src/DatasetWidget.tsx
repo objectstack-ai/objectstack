@@ -33,7 +33,7 @@
  * objectui bumps its `@objectstack/spec` dependency (cross-repo spec skew).
  */
 
-import { useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useContext, useEffect, useMemo, useState, type ReactElement, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 // `useDatasetDimensionMeta` is the analytics label net's SHARED React glue
 // (objectui#4389): the locale-free metadata read this widget and the dataset
 // report block both take, lifted out of the two longhand copies PR #4388 left
@@ -106,6 +106,7 @@ import {
   metricTileValueTitle,
 } from './metricTile';
 import { DrillDownDrawer } from './DrillDownDrawer';
+import { DatasetQueryCoalescerContext } from './datasetQueryBatch';
 import { metricDrillFilter, readMeasureDrillScope } from './metricDrill';
 import { sharedMeasureDrillScope, scopeDrillFilter } from './measureDrill';
 import { specDefaultWidgetType } from './widgetDispatch';
@@ -118,7 +119,7 @@ type Row = Record<string, unknown>;
 interface DatasetResultTotals { dimensions: string[]; rows: Row[] }
 interface DatasetResult { rows: Row[]; fields?: DatasetResultField[]; object?: string; dimensionFields?: Record<string, string>; drillRawRows?: Row[]; drillRanges?: Array<Record<string, DatasetDrillRange>>; totals?: DatasetResultTotals[]; drillScopes?: Record<string, unknown> }
 interface DatasetCapableSource {
-  queryDataset?: (dataset: string, selection: unknown) => Promise<DatasetResult>;
+  queryDataset?: (dataset: string, selection: unknown, options?: { packageId?: string }) => Promise<DatasetResult>;
 }
 
 /**
@@ -676,10 +677,19 @@ function MetricHeadingRow({ heading, label }: { heading: DatasetMetricHeading; l
   );
 }
 
-export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
+export function DatasetWidget({ widget, dataSource, heading, onForbidden, packageId }: {
   widget: any;
   dataSource: unknown;
   heading?: DatasetMetricHeading;
+  /**
+   * The package of the dashboard this widget belongs to, as served
+   * (`servedPackageId` of the dashboard document, ADR-0150 D5). The widget's
+   * `dataset` was authored against it, so the query names it as `?package=`.
+   * Absent for a dashboard authored in the environment: the query then sends
+   * the bare name, and a name two packages hold is refused with the server's
+   * sentence naming both, which the error state shows as it came.
+   */
+  packageId?: string;
   /**
    * Called when the server refuses this widget's query as a READ refusal
    * (`classifyLoadError(e) === 'forbidden'`). A host that can leave the tile
@@ -919,7 +929,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   // render-time `now` and would otherwise force a refetch loop. The
   // query-affecting options join it so editing a widget's granularity/sort in
   // the designer refetches instead of re-rendering the previous grid.
-  const signature = `${widgetType}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`;
+  const signature = `${widgetType}|${packageId ?? ''}|${datasetName}|${dimensions.join(',')}|${values.join(',')}|${JSON.stringify(rawFilter ?? null)}|${JSON.stringify(compareTo ?? null)}|${dateGranularity ?? ''}|${JSON.stringify(order ?? null)}|${limit ?? ''}`;
 
   // ── The data-invalidation bus (objectui#10815) ───────────────────────────
   // `notifyDataChanged` from `@object-ui/react`, read the objectui#10623 /
@@ -939,6 +949,10 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
   // subscribe either.
   const [datasetObject, setDatasetObject] = useState<string | undefined>(undefined);
   const invalidationNonce = useDataInvalidation(values.length > 0 ? datasetObject : undefined);
+  // objectstack#32165 — the enclosing dashboard's coalescer, which sends the
+  // queries its widgets ask in one render as one batch request. This widget's
+  // query, its answer and its refetch stay its own; only the request is shared.
+  const coalescer = useContext(DatasetQueryCoalescerContext);
 
   useEffect(() => {
     const src = dataSource as DatasetCapableSource | undefined;
@@ -957,7 +971,10 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
     setState((prev) => (prev.status === 'ok' && prev.signature === signature
       ? { ...prev, refreshing: true }
       : { status: 'loading', rows: [] }));
-    src.queryDataset(datasetName, {
+    const door: Required<DatasetCapableSource> = coalescer && coalescer.source === (src as unknown)
+      ? coalescer
+      : (src as Required<DatasetCapableSource>);
+    door.queryDataset(datasetName, {
       dimensions,
       measures: values,
       ...(selectionFilter ? { runtimeFilter: selectionFilter } : {}),
@@ -967,7 +984,7 @@ export function DatasetWidget({ widget, dataSource, heading, onForbidden }: {
       ...(dateGranularity ? { dateGranularity } : {}),
       ...(order ? { order } : {}),
       ...(limit != null ? { limit } : {}),
-    })
+    }, ...(packageId ? [{ packageId }] : []))
       .then((res) => {
         if (cancelled) return;
         setState({ status: 'ok', rows: Array.isArray(res?.rows) ? res.rows : [], fields: Array.isArray(res?.fields) ? res.fields : [], object: res?.object, dimensionFields: res?.dimensionFields, drillRawRows: Array.isArray(res?.drillRawRows) ? res.drillRawRows : undefined, drillRanges: Array.isArray(res?.drillRanges) ? res.drillRanges : undefined, totals: Array.isArray(res?.totals) ? res.totals : undefined, drillScopes: res?.drillScopes, signature });

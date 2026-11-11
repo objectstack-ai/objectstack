@@ -7,6 +7,9 @@ import {
   GetRecordFieldAccessResponse,
   RecordPageRequest,
   RecordPageResponse,
+  // [#32200] The batch dataset-query answer `analytics.queryDatasetBatch`
+  // resolves to the `data` of.
+  DatasetQueryBatchResponse,
   AppMetadataBundleResponse,
   UpdateManyRequest,
   DeleteManyRequest,
@@ -288,6 +291,25 @@ export interface RecycleBinRestoreReport {
   recordId: string;
   rows: Array<{ object: string; id: string }>;
   relinked: number;
+}
+
+/**
+ * One `POST /analytics/dataset/query` body, as `analytics.queryDataset` sends
+ * it and as each entry of `analytics.queryDatasetBatch` carries it: `dataset`
+ * (an inline definition, Studio preview) or `datasetName` (a saved one), plus
+ * `selection.measures`; `previewDrafts` runs over draft-overlaid definitions
+ * (ADR-0037 P3), for a caller the server admits to drafts.
+ *
+ * [#32200] Named so the batch method types its entries as the single door's
+ * body rather than as records of `unknown` (the contract's
+ * `DatasetQueryBatchRequest['queries']` deliberately does not parse an entry:
+ * the server judges each one as the single door does).
+ */
+export interface DatasetQueryBody {
+  dataset?: any;
+  datasetName?: string;
+  selection: { measures: string[]; [k: string]: any };
+  previewDrafts?: boolean;
 }
 
 export interface ClientConfig {
@@ -2082,6 +2104,12 @@ export class ObjectStackClient {
      *   manifest namespace, or `'_env'` for the environment's own item, and
      *   reads the qualified path `GET /meta/:type/:ns/:name` (ADR-0150 D5).
      *   Send one of the two: the door refuses both on one read with `400`.
+     *   [ADR-0150 D3] `callerPackage` (`?callerPackage=`, `dataset` only) is
+     *   the READER's package instead — a dashboard, report or chart of that
+     *   package naming the item: the name resolves from it (its own item, else
+     *   the unique holder in its declared dependency closure plus `sys`, else
+     *   `409 RESOURCE_CONFLICT` naming the candidates). The door refuses it
+     *   `400` beside `packageId` or `namespace`, and on any other type.
      *
      * Answers the spec's `GetMetaItemResponseSchema` envelope: the metadata
      * document lives under `item`, NOT spread at the top level. Naming that
@@ -2100,11 +2128,16 @@ export class ObjectStackClient {
      * …) has no qualified path, so a `namespace` for it is refused before any
      * request with `400 VALIDATION_ERROR`: read it with `packageId`.
      */
-    getItem: async (type: string, name: string, options?: { packageId?: string } & QualifiedAddressOptions): Promise<GetMetaItemResponse> => {
+    getItem: async (
+        type: string,
+        name: string,
+        options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+    ): Promise<GetMetaItemResponse> => {
         const route = this.getRoute('metadata');
         const qualifier = metaItemQualifier(type, name, options);
         const params = new URLSearchParams();
         if (options?.packageId) params.set('package', options.packageId);
+        if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
         const qs = params.toString();
         const url = `${this.baseUrl}${route}/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`;
         const res = await this.fetch(url);
@@ -2764,20 +2797,62 @@ export class ObjectStackClient {
      * halves measured on the real route in
      * `analytics-automation-json-erasure.test.ts`; the shape is
      * `IAnalyticsService.queryDataset`'s declared return.
+     *
+     * [ADR-0150 D3] `options.callerPackage` (`?callerPackage=`) names the
+     * package of the dashboard, report or chart that reads a saved
+     * `datasetName`: the name resolves from that package (its own dataset,
+     * else the unique holder in its declared dependency closure plus `sys`,
+     * else `409 RESOURCE_CONFLICT` naming the candidates), so a package's
+     * dashboard reads its dependency's dataset. Omitted, the name is read as a
+     * caller with no package, as before.
      */
-    queryDataset: async (payload: {
-        dataset?: any;
-        datasetName?: string;
-        selection: { measures: string[]; [k: string]: any };
-        previewDrafts?: boolean;
-    }): Promise<AnalyticsResult> => {
+    queryDataset: async (payload: DatasetQueryBody, options?: { callerPackage?: string }): Promise<AnalyticsResult> => {
         const route = this.getRoute('analytics');
-        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query`, {
+        const qs = options?.callerPackage ? `?${new URLSearchParams({ callerPackage: options.callerPackage })}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query${qs}`, {
             method: 'POST',
             body: JSON.stringify(payload),
         });
         return res.json();
-    }
+    },
+    /**
+     * [#32200] Several dataset queries in ONE request
+     * (`POST /analytics/dataset/query/batch`), so a dashboard render sends one
+     * POST instead of one per widget. Each entry is a `queryDataset` body, and
+     * the server judges each one exactly as that door does, as the same caller.
+     *
+     * Resolves to the batch answer's `data`, `{ results }`: one entry per query,
+     * in the order sent. An entry is `{ data }` (that query's `AnalyticsResult`)
+     * or `{ status, error }` (that query's own refusal, in the house error
+     * envelope). One refused query never fails the others, so branch per entry.
+     *
+     * Throws, like every method of this client, when the server refuses the
+     * WHOLE batch: a malformed batch (`400 VALIDATION_FAILED`, including more
+     * than `DATASET_QUERY_BATCH_MAX_QUERIES` queries), an identity refusal, or
+     * no analytics service (`501`). It sends what it is given: it neither
+     * bounds nor splits `queries` — a caller with more than the bound sends
+     * consecutive batches.
+     *
+     * Unlike `queryDataset`, this door answers the `{ success, data }`
+     * envelope, so `unwrapResponse` is the right read here.
+     *
+     * [ADR-0150 D3] `options.callerPackage` (`?callerPackage=`) is
+     * `queryDataset`'s, once for every query: each saved `datasetName`
+     * resolves from that package, and a name it cannot resolve (`409`, `404`)
+     * is that query's own entry. A malformed value refuses the whole batch.
+     */
+    queryDatasetBatch: async (
+        queries: DatasetQueryBody[],
+        options?: { callerPackage?: string },
+    ): Promise<DatasetQueryBatchResponse['data']> => {
+        const route = this.getRoute('analytics');
+        const qs = options?.callerPackage ? `?${new URLSearchParams({ callerPackage: options.callerPackage })}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/dataset/query/batch${qs}`, {
+            method: 'POST',
+            body: JSON.stringify({ queries }),
+        });
+        return this.unwrapResponse<DatasetQueryBatchResponse['data']>(res);
+    },
   };
 
   /**
@@ -8600,12 +8675,18 @@ export class ScopedEnvironmentClient {
     },
     /**
      * Same `{ type, name, item }` envelope as the unscoped surface (#5563),
-     * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5).
+     * and the same qualifiers: `packageId` or `namespace` (ADR-0150 D5), and
+     * the same caller arm, `callerPackage` (ADR-0150 D3).
      */
-    getItem: async (type: string, name: string, options?: { packageId?: string } & QualifiedAddressOptions): Promise<GetMetaItemResponse> => {
+    getItem: async (
+      type: string,
+      name: string,
+      options?: { packageId?: string; callerPackage?: string } & QualifiedAddressOptions,
+    ): Promise<GetMetaItemResponse> => {
       const qualifier = metaItemQualifier(type, name, options);
       const params = new URLSearchParams();
       if (options?.packageId) params.set('package', options.packageId);
+      if (options?.callerPackage) params.set('callerPackage', options.callerPackage);
       const qs = params.toString();
       const res = await this.parent._fetch(this.metaUrl(`/${encodeURIComponent(type)}${qualifier}/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`));
       return this.parent._unwrap<GetMetaItemResponse>(res);

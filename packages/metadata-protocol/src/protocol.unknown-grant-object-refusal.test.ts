@@ -40,6 +40,7 @@ import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -89,6 +90,7 @@ function makeSession(opts: { objects?: string[]; looksUpObjects?: boolean } = {}
         return null;
     };
     const registry: any = {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem: () => {},
         registerObject: () => {},
         listItems: () => [],

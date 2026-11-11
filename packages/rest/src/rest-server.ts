@@ -3696,7 +3696,7 @@ export class RestServer {
             ...this.metaListSource(p, environmentId),
             serviceProbe: (caller) => this.serviceProbeFor((caller as any)?.__kernel),
             navPruneLogged: this.navPruneLogged,
-            isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+            isItemOfDisabledPackage: async ({ type, name, packageId, member }) => {
                 if (typeof p.getMetaItem !== 'function') return false;
                 // [#30218] The REQUEST's environment's engine, through the
                 // shared resolver: the raw `undefined` of the unscoped mount
@@ -3712,6 +3712,8 @@ export class RestServer {
                     type,
                     name,
                     ...(packageId ? { packageId } : {}),
+                    // [#32076] The member the layers were read at.
+                    ...(member !== undefined ? { member } : {}),
                     ...(environmentId ? { environmentId } : {}),
                 };
                 const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;

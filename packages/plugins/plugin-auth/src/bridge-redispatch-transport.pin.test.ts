@@ -30,7 +30,8 @@
 // declaring `trustProxy`. Every request also carries the platform-owned header
 // naming another address, set by the caller, and it may decide nothing on either
 // branch. Nothing reaches the network: every re-dispatch below is answered by
-// the vendor's own refusal before any discovery or DNS work.
+// the vendor's own refusal before any discovery or DNS work, and the IdP app
+// tile's start (#32086) builds its authorization URL from the stored endpoint.
 //
 // The library's handler is observed through a plain instance wrapper, not
 // `vi.spyOn`: the imported `impersonation-bearer-rotation.test` registers
@@ -64,6 +65,9 @@ const PROXY_HOP = '10.0.0.2';
 /** `@better-auth/sso` reserves this id, and refuses it before any discovery or endpoint validation. */
 const RESERVED_PROVIDER_ID = 'credential';
 const UNKNOWN_PROVIDER_ID = 'pin-24877-no-such-provider';
+/** [#32086] A registered OIDC provider whose IdP-initiated toggle is on: an app tile's `iss` request starts its sign-in. */
+const TILE_PROVIDER_ID = 'pin-24877-tile';
+const TILE_ISSUER = 'https://idp.pin-24877-tile.example.com';
 
 const mockCtx = (): PluginContext =>
   ({
@@ -143,6 +147,27 @@ async function stage(deployment: { trustProxy?: boolean }): Promise<Stage> {
   };
 
   const auth = await (manager as any).getOrCreateAuth();
+  // [#32086] The provider an IdP app tile's third-party-initiated request names
+  // (`sso-third-party-initiated-login.ts`): OIDC, toggle on, its domain verified.
+  await (await auth.$context).adapter.create({
+    model: 'ssoProvider',
+    data: {
+      providerId: TILE_PROVIDER_ID,
+      issuer: TILE_ISSUER,
+      domain: 'pin-24877-tile.example.com',
+      domainVerified: true,
+      allowIdpInitiated: true,
+      oidcConfig: JSON.stringify({
+        issuer: TILE_ISSUER,
+        clientId: 'pin-24877-tile-client',
+        authorizationEndpoint: `${TILE_ISSUER}/authorize`,
+        tokenEndpoint: `${TILE_ISSUER}/token`,
+        jwksEndpoint: `${TILE_ISSUER}/jwks`,
+        pkce: true,
+        scopes: ['openid', 'email'],
+      }),
+    },
+  });
   const handler = auth.handler;
   const handed: Handed[] = [];
   auth.handler = async (request: Request) => {
@@ -225,6 +250,14 @@ const BRIDGES: Bridge[] = [
     route: 'POST /send-verification-email',
     inner: '/send-verification-email',
     request: async (s) => ({ bearer: s.memberBearer, body: {} }),
+  },
+  // [#32086] An IdP app tile's third-party-initiated request: the vendor's
+  // callback route (the catch-all), whose entry re-dispatches the vendor's start.
+  {
+    route: `GET /sso/callback/${TILE_PROVIDER_ID}?iss=${encodeURIComponent(TILE_ISSUER)}`,
+    inner: '/sign-in/sso',
+    // A GET: no credential and no body.
+    request: async () => ({ body: undefined }),
   },
   // The owner lane of the session revoke (`sys-session-revoke.ts`).
   {
