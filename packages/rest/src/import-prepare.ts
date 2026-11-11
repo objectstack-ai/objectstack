@@ -561,6 +561,8 @@ export async function prepareImportRequest(
     // (defineMapping / stack `mappings:`) — the reusable, governed form for
     // recurring & programmatic imports. Mutually exclusive with the inline
     // `mapping` rename: one mapping source of truth per request.
+    // [ADR-0150 D5, #32079] `NAMESPACE/NAME` or `_env/NAME` names the holder,
+    // read as the `/meta` door reads that address (`resolveNamedMapping`).
     const mappingName: string | undefined =
         typeof body?.mappingName === 'string' && body.mappingName.length > 0 ? body.mappingName : undefined;
     const hasInlineMapping =

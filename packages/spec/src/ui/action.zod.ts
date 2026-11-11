@@ -1371,7 +1371,10 @@ const actionObject = () => strictObject({
    * `'user'` (an action of `type: 'flow'` runs it as the invoking user);
    * invitations and memberships through the organization endpoints.
    */
-  body: HookBodySchema.optional().describe('Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`.'),
+  body: HookBodySchema.optional().describe(
+    'Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. '
+      + "An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule.",
+  ),
 
   /**
    * The declarative single-record field write — the row-level counterpart of
