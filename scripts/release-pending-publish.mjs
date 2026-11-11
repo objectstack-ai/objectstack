@@ -1486,7 +1486,9 @@ const RUN_LIST_PAGE = 100;
  * the board-read policy, spending the run's `budget` (`boardReadBudget`):
  * up to `attemptsPerRead` reads, `backoffMs` apart, each re-read one of the
  * run's `retriesPerRun`. The first read the count agrees with is the one
- * judged, and the note says what came before it.
+ * judged, and the note says what came before it, each short page with the
+ * ids it listed (the refused run's own reason named none, so which run the
+ * count was read against could not be told afterwards).
  *
  * ⛔ Fail-closed, as before the re-read: a count still above the page when the
  * ladder or the budget is spent throws, naming the reads. A count that is no
@@ -1506,7 +1508,9 @@ async function readWholeRunList({ http, path, what, budget }) {
     if (page.total_count <= runs.length) {
       return { runs, note: short.length === 0 ? '' : ` (whole on read ${read}; before it: ${short.join('; ')})` };
     }
-    short.push(`total_count ${page.total_count} but ${runs.length} listed`);
+    // A short page names the runs it did list, so a refusal says which one the count was read against.
+    const named = runs.length < RUN_LIST_PAGE ? ` [${runs.map((r) => r.id).join(', ')}]` : '';
+    short.push(`total_count ${page.total_count} but ${runs.length} listed${named}`);
     const stop =
       runs.length >= RUN_LIST_PAGE
         ? `the page is full, so the rest sit on a page this read does not take`
