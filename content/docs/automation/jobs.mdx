@@ -305,7 +305,10 @@ export const OrdersPullJob = defineJob({
   runner refused completes as `degraded`, with the counts as its reason; retrying
   would refuse the same rows. Otherwise the run is `success`, including a pull
   that found nothing new. Every pull also leaves one `sys_sync_run` row in the
-  job's organization: the mapping, where it read from and from which position,
+  job's organization: the mapping, the job run that drove it (`job_run_id`, the
+  attempt's `sys_job_run` id, and `trigger`, `schedule` or `manual`; both empty
+  under a job service that keeps no run history, where only the trigger may be
+  kept), where it read from and from which position,
   the rows read, created, updated and refused, the position it committed, and
   how it ended (`completed`, `degraded` or `failed` with the refusal's reason).
   A pull still `running` when the server stopped is closed `failed`

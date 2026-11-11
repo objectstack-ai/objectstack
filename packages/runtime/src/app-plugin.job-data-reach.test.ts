@@ -98,6 +98,14 @@ const ADDED_KEYS = ['logger', 'ql'] as const;
  * `{ isSystem: true }`. Additive, like #14094's: `ql` stays the raw engine.
  */
 const ORGANIZATION_KEYS = ['executionContext'] as const;
+/**
+ * What ADR-0153 D7 added to `JobHandler`'s context, which the handler form
+ * passes through from the job service: why the run started (`trigger`). The
+ * contract's other new member, `runId`, comes only from an adapter that
+ * writes run history (`DbJobAdapter`); this harness's `CronJobAdapter`
+ * writes none, so it sends none.
+ */
+const RUN_KEYS = ['trigger'] as const;
 
 interface Harness {
     engine: ObjectQL;
@@ -266,7 +274,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
 
         expect(seen).toHaveLength(1);
         const keys = Object.keys(seen[0]).sort();
-        expect(keys).toEqual([...PRE_14094_KEYS, ...ADDED_KEYS, ...ORGANIZATION_KEYS].sort());
+        expect(keys).toEqual([...PRE_14094_KEYS, ...ADDED_KEYS, ...ORGANIZATION_KEYS, ...RUN_KEYS].sort());
 
         // The pre-existing members keep their meaning — `jobId` is the job's
         // name, `bundle` is the metadata bundle, `data` is the trigger payload.
@@ -279,6 +287,8 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
         expect(seen[0].logger).toBe(h.ctx.logger);
         // A job that declares no organization runs as plain system.
         expect(seen[0].executionContext).toEqual({ isSystem: true });
+        // The job service's own member: this run was `trigger()`.
+        expect(seen[0].trigger).toBe('manual');
     });
 
     it('`data` from a manual trigger still reaches the handler beside the new members', async () => {
