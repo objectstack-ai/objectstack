@@ -618,6 +618,7 @@ import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
 import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.js';
+import type { RegistryQuestion } from './registry-question.js';
 // [#29985 codemod] Package revert, duplicate, import, orphans, commits, revertCommit, rollback: the members below delegate to its facet, `ProtocolPackageCommitsFacet`.
 import { ProtocolPackageCommitsFacet } from './protocol-package-commits.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the members below delegate to its facet, `ProtocolDiffDeleteLoadFacet`.
@@ -3153,9 +3154,10 @@ export class ObjectStackProtocolImplementation implements
     private objectRegistrationRefusal(
         body: unknown,
         layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+        options: { againstRegistry?: boolean } = {},
     ): Error | null {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer);
+        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer, options);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -9669,6 +9671,8 @@ export class ObjectStackProtocolImplementation implements
          * all address it, so the body judged is the body that goes live.
          */
         member?: string;
+        /** The registry question this promotion asks (`registry-question.ts`). */
+        registryQuestion: RegistryQuestion;
     }): Promise<{
         singularType: string;
         /**

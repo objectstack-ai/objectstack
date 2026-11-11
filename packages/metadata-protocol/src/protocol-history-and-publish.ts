@@ -57,6 +57,7 @@ import type { ProtocolHost } from './protocol-host.js';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
 import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
+import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-question.js';
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
@@ -375,7 +376,7 @@ export class ProtocolHistoryAndPublishFacet {
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, advisories, result } = await host.promoteDraftForPublish({ ...request, member })
+        const { singularType, advisories, result } = await host.promoteDraftForPublish({ ...request, member, registryQuestion: PROMOTION_REGISTRY_QUESTION['item-publish'] })
             .catch(async (err: unknown) => {
                 await host.recordPendingDenialAudit(err);
                 throw err;
@@ -547,6 +548,14 @@ export class ProtocolHistoryAndPublishFacet {
              * all address it, so the body judged is the body that goes live.
              */
             member?: string;
+            /**
+             * [ADR-0144 D2 and D6, amended] The registry question this
+             * promotion asks before the row goes live, stated by every producer
+             * ({@link PROMOTION_REGISTRY_QUESTION}, `registry-question.ts`): the
+             * per-item publish asks against the registry, a package publish
+             * body-only.
+             */
+            registryQuestion: RegistryQuestion;
         }): Promise<{
             singularType: string;
             /**
@@ -733,7 +742,15 @@ export class ProtocolHistoryAndPublishFacet {
             // writes, the per-item publish answers the registry's own envelope
             // and a batch publish aborts on it into `failed[]` as on the
             // refusals below (ADR-0067 D2). See {@link objectRegistrationRefusal}.
-            const registration = host.objectRegistrationRefusal(draftForGate.body, layer);
+            //
+            // [ADR-0144 D2 and D6, amended] The per-item publish has no
+            // sibling, so it also asks the doors that read the registry's
+            // other objects (#29673's batch reason does not reach it); a
+            // package publish keeps the body-only question
+            // (`registry-question.ts`).
+            const registration = host.objectRegistrationRefusal(draftForGate.body, layer, {
+                againstRegistry: request.registryQuestion === 'against-registry',
+            });
             if (registration) throw registration;
         }
 
@@ -1802,6 +1819,7 @@ export class ProtocolHistoryAndPublishFacet {
                             if (draft?.body) seedBodies.push(draft.body);
                         }
                         const { singularType, advisories, result } = await this.promoteDraftForPublish({
+                            registryQuestion: PROMOTION_REGISTRY_QUESTION['package-publish'],
                             // [#8908] The stored spelling, FOLDED — this route's
                             // boundary, the analogue of `canonicalizeMetaRequestType`
                             // on the six `/meta` entry points. Every row that
