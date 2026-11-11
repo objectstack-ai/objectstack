@@ -44,7 +44,7 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
-import { collectJobsWithoutBody, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 // The source under test reaches `@objectstack/metadata` by dynamic import
 // (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
 import '@objectstack/metadata';
@@ -146,7 +146,7 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         expect([...h.scheduled.keys()]).toEqual(['orders_pull_hourly']);
 
         const outcome = await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
         expect(outcome).toEqual({ outcome: 'completed' });
     });
 
@@ -215,7 +215,7 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         expect(out.pulls).toEqual(['orders_pull_hourly']);
         expect(out.notScheduled).toEqual([]);
         const outcome = (await h.run('orders_pull_hourly')) as { outcome: string; reason?: string };
-        expect(h.defaultAutomation.pullConnectorSource).toHaveBeenCalledWith({ mapping: 'orders_pull', context: { isSystem: true } });
+        expect(h.defaultAutomation.pullConnectorSource).toHaveBeenCalledWith({ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID });
         expect(outcome.outcome).toBe('degraded');
         expect(outcome.reason).toContain("from 'erp_order'");
         expect(outcome.reason).toContain('1 of 4');
@@ -245,6 +245,10 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
             { appId: APP_ID, ql: undefined, source: 'Test' },
         );
         expect(out.pulls).toEqual(['orders_pull_hourly']);
+        // [#32071] …and the pull is asked as the body that declares the job,
+        // not the top-level id the job service keys it under.
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: 'com.example.jobs' }]);
     });
 
     it('with no automation service serving pullConnectorSource the pull job is NOT scheduled, and the composition remedy is said', async () => {
@@ -334,7 +338,7 @@ describe('#20281 stage ③ (Q2-O1): every run form runs as the job\'s declared o
         await h.schedule([{ ...PULL_JOB, organization: 'org_a' }]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' }, callerPackageId: APP_ID }]);
     });
 
     it('a body job\'s ctx.api write runs under { isSystem: true, tenantId } — the real QuickJS sandbox', async () => {
@@ -471,8 +475,8 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.run('orders_pull_hourly');
         await h.run('orders_pull_hourly');
         expect(h.pulls).toEqual([
-            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
-            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' }, callerPackageId: APP_ID },
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' }, callerPackageId: APP_ID },
         ]);
         expect(systemWriteOrganization).toHaveBeenCalledTimes(2);
     });
@@ -483,7 +487,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([{ ...PULL_JOB, organization: 'org_a' }]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' }, callerPackageId: APP_ID }]);
         expect(systemWriteOrganization).not.toHaveBeenCalled();
     });
 
@@ -498,7 +502,7 @@ describe('a pull of a job with no organization runs as the organization its writ
             await h.schedule([PULL_JOB]);
 
             expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
-            expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+            expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
             expect(h.said('warn')).toEqual([]);
         });
     }
@@ -508,7 +512,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([PULL_JOB]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
     });
 
     it('a probe that throws is said once at warn, naming the job, and the run goes on with today\'s context', async () => {
@@ -517,7 +521,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([PULL_JOB]);
 
         expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
         const warns = h.logger.warn.mock.calls.filter((c) => String(c[0]).includes("'orders_pull_hourly'"));
         expect(warns).toHaveLength(1);
         expect(warns[0][1]).toMatchObject({ job: 'orders_pull_hourly', mapping: 'orders_pull', error: 'connection reset' });
@@ -668,5 +672,99 @@ describe('a no-organization job pull on a real engine: the match lookup carries 
         expect(b.summaries[0]).toMatchObject({ errors: 2, created: 0 });
         expect(JSON.stringify(b.summaries[0].results)).toContain('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
         expect(await b.stored()).toEqual([]);
+    });
+});
+
+/**
+ * [#32071 Part B, ADR-0150 D3] A pull job's run names the package that
+ * declares the job as `callerPackageId`, so the automation service reads its
+ * mapping from that package. On an artifact of several packages that is the
+ * body declaring the job (`jobDeclaringPackages`, over
+ * `resolveArtifactPackageOrder`), never the top-level id the job service keys
+ * every job under; a top-level job no body declares is the residual, declared
+ * from the top-level id.
+ */
+describe('[#32071] a pull job names the package that declares it', () => {
+    withPosture(undefined);
+
+    it('a single-package artifact: the app itself', async () => {
+        const h = harness();
+        await h.schedule([PULL_JOB]);
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
+    });
+
+    it('several packages: each body\'s job its own body; a residual top-level job no package', async () => {
+        const residual = { ...PULL_JOB, name: 'residual_pull' };
+        const bundle = {
+            manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app' },
+            jobs: [residual],
+            packages: [
+                { manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app', mappings: [MAPPING] } },
+                { manifest: { id: 'com.example.jobs', name: 'Jobs', version: '0.1.0', type: 'module', jobs: [PULL_JOB] } },
+            ],
+        };
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        expect(of(PULL_JOB)).toBe('com.example.jobs');
+        // A top-level copy of a body's job (an assembled artifact) is that body's.
+        expect(of({ ...PULL_JOB })).toBe('com.example.jobs');
+        // The residual's owner is no package (`recordResidualOwner`)…
+        expect(of(residual)).toBeUndefined();
+        // …unless a body carries the top-level id: then that body is its package.
+        expect(jobDeclaringPackages(bundle, 'com.example.maps')(residual)).toBe('com.example.maps');
+        // No `packages[]`: every job is the app's.
+        expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
+    });
+    it('two bodies each declaring job `sync`, loaded as top-level copies: neither run pulls as the other — each is refused 409 naming both', async () => {
+        // A JSON-loaded artifact binds the flattened top-level copies, so the
+        // job is met by name, and the name is the two bodies'.
+        const h = harness();
+        const runs: Array<(c: unknown) => Promise<unknown>> = [];
+        h.services.job = { ...(h.services.job as object), schedule: async (_n: string, _s: unknown, run: (c: unknown) => Promise<unknown>) => { runs.push(run); } };
+        const sync = { ...PULL_JOB, name: 'sync' };
+        const bundle = JSON.parse(JSON.stringify({
+            manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+            jobs: [sync, sync],
+            packages: [
+                { manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+                { manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+            ],
+        }));
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        expect(typeof of({ ...sync }), 'never the first body').toBe('object');
+        await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            bundle,
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(runs.length).toBeGreaterThan(0);
+        for (const run of runs) {
+            const err = await run({ jobId: 'sync' }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect(err?.message).toContain('com.example.alpha');
+            expect(err?.message).toContain('com.example.beta');
+        }
+        // Before any call or write: no pull was asked for, as any package or as none.
+        expect(h.pulls).toEqual([]);
+    });
+
+    it('a residual top-level job\'s run names no package, so the pull reads by no package as before', async () => {
+        const h = harness();
+        const residual = { ...PULL_JOB, name: 'residual_pull' };
+        const out = await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            {
+                manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+                jobs: [residual],
+                packages: [
+                    { manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app', mappings: [MAPPING] } },
+                ],
+            },
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(out.pulls).toEqual(['residual_pull']);
+        await h.run('residual_pull');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(Object.keys(h.pulls[0] as object)).not.toContain('callerPackageId');
     });
 });
