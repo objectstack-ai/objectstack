@@ -59,14 +59,14 @@ import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
 import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
-import { assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
+import { ROLLUP_AGGREGATE_OPTION, assertRecordCurrencyAggregatesGrouped } from './record-currency-aggregate-door.js';
 import {
     assertAggregatedColumnsAreDistinct,
     assertDateBucketTargetsAreTemporal,
     assertGroupByTargetsAreStored,
 } from './aggregate-query-shape-door.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
-import { aggregatedRowColumnClasses, aggregatedRowColumnTypes, aggregatedRowColumns, applyHaving, assertAggregationFilterIsEvaluable, assertHavingIsEvaluable, assertHavingIsFilterCondition } from './having-filter.js';
+import { aggregatedRowColumnClasses, aggregatedRowColumnTypes, aggregatedRowColumns, applyHaving, assertAggregationFilterIsEvaluable, assertFilterNodeShapes, assertHavingIsEvaluable, assertHavingIsFilterCondition } from './having-filter.js';
 import { coerceBooleanFields } from './validation/record-validator.js';
 import { declaredColumnSet, rowsWithDeclaredColumnsOnly, withDeclaredColumnsOnly } from './declared-read-columns.js';
 import { externalPredicateWriteRefusal, isExternalDriverFloor } from './external-driver-floor.js';
@@ -924,7 +924,13 @@ export class DeleteAndAggregateFacet {
       // amount that does not group by its code field: the rows hold amounts in
       // different currencies, which add into one number under one label.
       // After the type door, so a type it refuses keeps that door's words.
-      assertRecordCurrencyAggregatesGrouped(object, this._registry.getObject(object), query.groupBy, query.aggregations);
+      // [ADR-0144 D6, amended] A roll-up's own recompute names the
+      // master_detail it totals one parent's rows through, on a module-private
+      // symbol no door can set: an amount following that parent is one currency.
+      assertRecordCurrencyAggregatesGrouped(
+        object, this._registry.getObject(object), query.groupBy, query.aggregations,
+        (options as Record<symbol, unknown> | undefined)?.[ROLLUP_AGGREGATE_OPTION],
+      );
       // [#25818] …and the two shapes that answered a plausible wrong table: a
       // `dateGranularity` over a field declared neither a date nor a datetime
       // (every row in one null bucket), and two columns of the aggregated row
@@ -994,6 +1000,15 @@ export class DeleteAndAggregateFacet {
                       `unapplied filter would have aggregated every row of each group for that aggregation.`,
                   );
               }
+              // …and the drivers' shape gate on `where`, one level down: a
+              // `$and` / `$or` operand that is not a list, and an element of
+              // one or a `$not` operand that is not a filter node (a condition
+              // array, `null`, a string), refused in `where`'s words at
+              // `aggregations[i].filter.$and[0]`. The walker read a condition
+              // array's index positions as columns (no row counted) and a
+              // `null` / string element as no constraint (every row counted).
+              // First among the doors below, which step around a non-node.
+              assertFilterNodeShapes(aggFilter, `aggregations[${i}].filter`);
               assertListComparandShapes(object, 'aggregate', aggFilter, `aggregations[${i}].filter`);
               assertFilterIsMaterializable(object, 'aggregate', this._registry.getObject(object), aggFilter);
               // [#15661] …and the declared-type door for the text operators: a
@@ -1131,6 +1146,12 @@ export class DeleteAndAggregateFacet {
       // A reference that passes is then RESOLVED against each aggregated row
       // (having-filter.ts `compareWithReference`) on both doors below.
       assertHavingIsFilterCondition(query.having);
+      // …and one level down, the same shape gate the per-aggregation `filter`
+      // takes above: a non-list `$and` / `$or` and a non-node element or `$not`
+      // operand are refused in `where`'s words at `having.$and[0]`. A `null` or
+      // string element kept every group's rows unconstrained; a condition
+      // array was refused as a key naming no column ('0').
+      assertFilterNodeShapes(query.having, 'having');
       assertListComparandShapes(object, 'aggregate', query.having, 'having');
       // [#20176] The object's declaration, read once: the per-aggregation
       // `filter` reads a temporal comparand by its column's storage rule

@@ -16,10 +16,11 @@
  *    the picklist `m31693_tone` too;
  *  - C (`m31693c`) declares the picklist `m31693_hue`, which A does not depend on.
  *
- * A and B also each declare the agent `m31693_helper` and the skill
- * `m31693_triage`: two namespaces' holders of one agent and one skill name,
- * which the one-holder rule no longer calls a clash (#31701, ADR-0150 D2/D9),
- * so the sealed-clash section never lists them.
+ * A and B also each declare the agent `m31693_helper`, the skill
+ * `m31693_triage` and the object-less action `m31693_digest`: two namespaces'
+ * holders of one agent, one skill and one object-less action name, which the
+ * one-holder rule no longer calls a clash (#31701, #31697, ADR-0150 D2/D9), so
+ * the sealed-clash section never lists them.
  *
  * Over a database an older release left: two managed `sys_sharing_rule` rows
  * naming `m31693_share` (two holders: ambiguous) and `m31693_only_a` (one
@@ -37,6 +38,12 @@
  * that is not a candidate, and a candidate set that changed since the report
  * (stale) are refused, writing nothing. CONTROL: a database of one package
  * reports nothing and binds nothing.
+ *
+ * [#32095] The same database as the release before D8 left it, with no
+ * package column yet: the report reads each such table as nothing bound yet
+ * and lists the same rows, exits 0, says so once, and adds no column; the row
+ * it lists binds there. Only a column the boot measured missing is read that
+ * way: a refused read is still thrown.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -51,7 +58,13 @@ import { isExitSignal } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import MigrateStoredReferences from './stored-references/index.js';
 import MigrateStoredReferencesBind from './stored-references/bind.js';
-import { bindStoredPackageReference, type StoredReferenceEngine } from '../../utils/stored-package-references.js';
+import {
+  bindStoredPackageReference,
+  collectStoredPackageReferences,
+  STORED_PACKAGE_REFERENCES,
+  type StoredReferenceEngine,
+  type StoredReferenceRegistry,
+} from '../../utils/stored-package-references.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD: the commands reach them through dynamic `import()`s inside
@@ -78,10 +91,11 @@ const rule = (name: string) => ({
   accessLevel: 'read', sharedWith: { type: 'user', value: 'u1' }, active: true,
 });
 const list = (name: string) => ({ name, label: name, options: [{ label: 'One', value: 'one' }] });
-/** The agent and the skill A and B both declare, in their own namespaces (#31701). */
+/** The agent, the skill (#31701) and the object-less action (#31697) A and B both declare, in their own namespaces. */
 const ai = (tag: string) => ({
   agents: [{ name: 'm31693_helper', label: `${tag} helper`, role: `${tag} role`, instructions: `${tag} helper instructions` }],
   skills: [{ name: 'm31693_triage', label: `${tag} triage`, description: `${tag} triage`, instructions: `${tag} triage instructions`, tools: [] }],
+  actions: [{ name: 'm31693_digest', label: `${tag} digest`, type: 'script', body: { language: 'js', source: `return '${tag}';`, capabilities: [] } }],
 });
 const pkgA = {
   manifest: {
@@ -180,7 +194,7 @@ async function seedDatabase(file: string): Promise<void> {
   }
 }
 
-interface RunResult { payload: any; raw: string; exitCode: number }
+interface RunResult { payload: any; raw: string; exitCode: number; stderr: string }
 
 /** Run a command through oclif and capture its one JSON document. */
 async function run(command: typeof MigrateStoredReferences | typeof MigrateStoredReferencesBind, argv: string[]): Promise<RunResult> {
@@ -194,7 +208,7 @@ async function run(command: typeof MigrateStoredReferences | typeof MigrateStore
   vi.spyOn(process.stderr, 'write').mockImplementation(swallow);
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  vi.spyOn(console, 'error').mockImplementation(() => {});
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   let thrownExit: number | undefined;
   try {
     try {
@@ -206,7 +220,8 @@ async function run(command: typeof MigrateStoredReferences | typeof MigrateStore
     const raw = stdout.mock.calls.map((c) => String(c[0])).join('').trim();
     let payload: any;
     try { payload = JSON.parse(raw); } catch { payload = { unparsed: raw.slice(-400) }; }
-    return { payload, raw, exitCode: thrownExit ?? (process.exitCode as number | undefined) ?? 0 };
+    const stderr = errors.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+    return { payload, raw, exitCode: thrownExit ?? (process.exitCode as number | undefined) ?? 0, stderr };
   } finally {
     process.exitCode = savedExit;
     vi.restoreAllMocks();
@@ -282,7 +297,7 @@ describe('os migrate stored-references (the report)', () => {
       d8: 'R17', object: 'm31693a_task', field: 'hue', packageId: A, name: 'm31693_hue', reason: 'outside-closure',
       candidates: [{ holder: 'package', packageId: C, address: 'm31693c/m31693_hue' }],
     }]);
-    // [#31701] Only the picklist: never the agent and the skill A and B hold in two namespaces.
+    // [#31701, #31697] Only the picklist: never the agent, the skill and the object-less action A and B hold in two namespaces.
     expect(payload.sealedClashes).toEqual([{ type: 'picklist', name: 'm31693_tone', candidates: [`package "${A}"`, `package "${B}"`] }]);
     // The served platform carries no automation or approvals table here: named, not silently skipped.
     expect(payload.tablesNotCarried).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_credential', 'sys_approval_request']));
@@ -443,4 +458,107 @@ describe('os migrate stored-references — a host config under an address-litera
       message: expect.stringContaining("Namespace 'hooks' spells a literal segment of the address grammar"),
     }]);
   }, CASE_TIMEOUT_MS);
+});
+
+/** The columns of `table`, read on a connection of our own. */
+async function columnsOf(dbFile: string, table: string): Promise<string[]> {
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
+  try {
+    return Object.keys(await (driver as any).knex(table).columnInfo());
+  } finally {
+    await driver.disconnect();
+  }
+}
+
+/**
+ * [#32095] The database as the release before D8 (18.3.0) left it: a copy of
+ * the template with every D8 package column dropped, and each index naming one
+ * (that release declared neither). Returns the file and the `TABLE.COLUMN`s
+ * dropped.
+ */
+async function unbootedDb(): Promise<{ db: string; dropped: string[] }> {
+  const db = caseDb();
+  const dropped: string[] = [];
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: db }, useNullAsDefault: true });
+  try {
+    const knex = (driver as any).knex;
+    for (const { table, packageColumn } of STORED_PACKAGE_REFERENCES) {
+      if (!packageColumn || !(await knex.schema.hasTable(table)) || !(await knex.schema.hasColumn(table, packageColumn))) continue;
+      const indexes: Array<{ name: string }> = await knex.raw(
+        'SELECT DISTINCT il.name AS name FROM pragma_index_list(?) AS il, pragma_index_info(il.name) AS ii WHERE ii.name = ?',
+        [table, packageColumn],
+      );
+      for (const { name } of indexes) await knex.raw('DROP INDEX ??', [name]);
+      await knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, packageColumn]);
+      dropped.push(`${table}.${packageColumn}`);
+    }
+  } finally {
+    await driver.disconnect();
+  }
+  return { db, dropped };
+}
+
+describe('os migrate stored-references — a database this release has not booted yet (#32095, ADR-0150 D10)', () => {
+  // The D8 tables predate their package columns, and the report's boot is
+  // read-only, so it adds none. (Before: exit 1, `INVALID_FILTER` on the first
+  // D8 table, `sys_user_permission_set`.)
+  it('THE PIN: reads each table as nothing bound yet: exit 0, the rows the backfill will leave null, one notice, no column added', async () => {
+    const booted = await report(caseDb());
+    const { db, dropped } = await unbootedDb();
+    expect(dropped).toEqual(expect.arrayContaining([
+      'sys_user_permission_set.permission_set_package', 'sys_audience_binding_suggestion.permission_set_package', 'sys_sharing_rule.package_id',
+    ]));
+    const before = [await rowsOf(db, 'sys_sharing_rule'), await rowsOf(db, 'sys_audience_binding_suggestion')];
+
+    const { payload, exitCode, stderr } = await report(db);
+    expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
+    expect(exitCode).toBe(0);
+    // The rows the backfill will leave null are the rows it left null on the
+    // database whose columns exist: the refused ones, never the one-holder row.
+    expect(payload.stored.map((f: any) => [f.d8, f.reason])).toEqual([['R3', 'environment-only'], ['R5', 'ambiguous']]);
+    expect(payload.stored).toEqual(booted.payload.stored);
+    expect(payload.tablesAbsent).toEqual([]);
+    // Said once, naming each table with the column it has not got yet.
+    const notice = stderr.split('\n').filter((l) => l.includes('no package column yet'));
+    expect(notice).toHaveLength(1);
+    for (const column of ['sys_user_permission_set (permission_set_package)', 'sys_audience_binding_suggestion (permission_set_package)', 'sys_sharing_rule (package_id)']) {
+      expect(notice[0]).toContain(column);
+    }
+    // Read-only: no column added, no row moved.
+    for (const at of dropped) {
+      const [table, column] = at.split('.');
+      expect(await columnsOf(db, table!), at).not.toContain(column);
+    }
+    expect([await rowsOf(db, 'sys_sharing_rule'), await rowsOf(db, 'sys_audience_binding_suggestion')]).toEqual(before);
+  }, CASE_TIMEOUT_MS);
+
+  it('the row it lists binds on that database: the bind boots as a write, which adds the columns, and writes that one row', async () => {
+    const { db } = await unbootedDb();
+    const share = await shareRow(db);
+    const { payload, exitCode } = await bind(db, 'sys_sharing_rule', String(share.id), B);
+    expect(payload, JSON.stringify(payload).slice(0, 600)).toMatchObject({ outcome: 'bound', written: 1, packageId: B, d8: 'R5' });
+    expect(exitCode).toBe(0);
+    expect((await shareRow(db)).package_id).toBe(B);
+  }, CASE_TIMEOUT_MS);
+
+  it('only a column the boot measured missing is read that way: a refused read is thrown, never read as nothing bound', async () => {
+    const refusal = Object.assign(
+      new Error("A filter on object 'sys_user_permission_set' names a column the database could not resolve"),
+      { code: 'INVALID_FILTER', status: 400 },
+    );
+    const asked: Array<{ object: string; options: any }> = [];
+    const engine: StoredReferenceEngine = {
+      find: async (object, options) => { asked.push({ object, options }); throw refusal; },
+      update: async () => { throw new Error('the report never writes'); },
+    };
+    const registry = { getObject: (name: string) => (name === 'sys_user_permission_set' ? { name } : undefined) } as unknown as StoredReferenceRegistry;
+    // The boot measured a column missing on ANOTHER table only.
+    await expect(collectStoredPackageReferences(engine, registry, {
+      packageColumnAbsent: (table, column) => table === 'sys_sharing_rule' && column === 'package_id',
+    })).rejects.toMatchObject({ code: 'INVALID_FILTER', status: 400 });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.object).toBe('sys_user_permission_set');
+    expect(asked[0]!.options.where).toEqual({ permission_set_package: null });
+    expect(asked[0]!.options.fields).toContain('permission_set_package');
+  });
 });

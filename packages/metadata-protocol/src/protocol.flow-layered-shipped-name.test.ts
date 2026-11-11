@@ -28,9 +28,12 @@
  * naming an organization reads as the environment does, and a type in the
  * overlay regime keeps overlay-wins.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const PACKAGE_ID = 'com.example.pkg';
 const SHIPPED = 'pkg_flow';
@@ -81,6 +84,7 @@ function registryDouble() {
         return byType.get(type)!;
     };
     return {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem(type: string, item: Record<string, unknown>, keyField = 'name', packageId?: string) {
             const name = String(item[keyField]);
             if (packageId) {

@@ -16,7 +16,7 @@
 // file `install-local-declared-datasources.dogfood.test.ts`.
 
 import { describe, it, expect, vi } from 'vitest';
-import { connectPackageDatasources, datasourceNameHolder } from './declared-datasources.js';
+import { connectPackageDatasources, datasourceNameHolder, recordBootDatasourceConnect } from './declared-datasources.js';
 import { CODE_DATASOURCE_NAMES_SERVICE, CodeDatasourceNames, contributeCodeDatasourceNames } from './code-datasource-names.js';
 
 type Verdict = { name: string; status: string; reason?: string };
@@ -326,5 +326,253 @@ describe('connectPackageDatasources — a name another holder already holds (a r
         });
         expect(k.disconnected).toEqual(['pkg_vault']);
         expect(k.codeNames()).toEqual([]);
+    });
+});
+
+describe('connectPackageDatasources — a boot composing two packages that declare one datasource name', () => {
+    // Configuration values that must never reach the log line.
+    const ALPHA = { name: 'pkg_store', driver: 'postgres', config: { url: 'postgres://alpha-user:alpha-pass@alpha-host:5432/alpha_db' } };
+    const BETA = { name: 'pkg_store', driver: 'postgres', config: { url: 'postgres://beta-user:beta-pass@beta-host:5432/beta_db' } };
+    const SECRETS = ['alpha-user', 'alpha-pass', 'alpha-host', 'alpha_db', 'beta-user', 'beta-pass', 'beta-host', 'beta_db', 'postgres://'];
+
+    /** A kernel booting AppPlugins: `init()` has put the code-datasource set in place before any `start()`. */
+    function booting() {
+        const k = kernel();
+        contributeCodeDatasourceNames(k.ctx as never, ['pkg_store']);
+        return k;
+    }
+    const bootOne = (k: ReturnType<typeof kernel>, appId: string, datasource: object) =>
+        connectPackageDatasources(k.ctx, {
+            appId,
+            datasources: [datasource],
+            objects: [{ name: `${appId.split('.').pop()}_note`, datasource: 'pkg_store' }],
+        });
+    const errors = (k: ReturnType<typeof kernel>) => k.logger.error.mock.calls.map((c) => String(c[0]));
+
+    it('two packages declaring one name log one error naming the name and both packages, with no configuration value', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(errors(k)).toEqual([]);
+        await bootOne(k, 'com.example.beta', BETA);
+
+        expect(errors(k)).toHaveLength(1);
+        const line = errors(k)[0];
+        expect(line).toContain("'pkg_store'");
+        expect(line).toContain("'com.example.alpha'");
+        expect(line).toContain("'com.example.beta'");
+        for (const secret of SECRETS) expect(line).not.toContain(secret);
+    });
+
+    it('the holder named is the package whose declaration opened the connection serving the name', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        const verdicts = await bootOne(k, 'com.example.beta', BETA);
+        expect(verdicts).toEqual([{ name: 'pkg_store', status: 'already-registered' }]);
+        expect(errors(k)[0]).toContain("opened from the declaration of 'com.example.alpha'");
+    });
+
+    it('the boot continues: nothing throws, and each package still registers and connects as before', async () => {
+        const k = booting();
+        await expect(bootOne(k, 'com.example.alpha', ALPHA)).resolves.toEqual([{ name: 'pkg_store', status: 'connected' }]);
+        await expect(bootOne(k, 'com.example.beta', BETA)).resolves.toEqual([{ name: 'pkg_store', status: 'already-registered' }]);
+        expect(k.connectCalls).toHaveLength(2);
+    });
+
+    it('a package whose declaration opened the connection before any start (its datasourceMapping) is the holder named', async () => {
+        const k = booting();
+        // The drivers-ready hook connects a mapping-routed datasource before every `start()`.
+        k.drivers.add('pkg_store');
+        recordBootDatasourceConnect(k.ctx, 'com.example.beta', [{ datasource: BETA, owner: { packageId: 'com.example.beta' } }], [
+            { name: 'pkg_store', status: 'connected' },
+        ]);
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        await bootOne(k, 'com.example.beta', BETA);
+        expect(errors(k)).toHaveLength(1);
+        expect(errors(k)[0]).toContain("opened from the declaration of 'com.example.beta'");
+        expect(errors(k)[0]).toContain("'com.example.alpha'");
+    });
+
+    it('one artifact whose two package bodies declare one name logs one error naming both', async () => {
+        const k = booting();
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.host',
+            datasources: [ALPHA, BETA],
+            owned: [
+                { datasource: ALPHA, owner: { packageId: 'com.example.alpha' } },
+                { datasource: BETA, owner: { packageId: 'com.example.beta' } },
+            ],
+            objects: [{ name: 'alpha_note', datasource: 'pkg_store' }, { name: 'beta_note', datasource: 'pkg_store' }],
+        });
+        expect(errors(k)).toHaveLength(1);
+        expect(errors(k)[0]).toContain("opened from the declaration of 'com.example.alpha'");
+        expect(errors(k)[0]).toContain("'com.example.beta'");
+        for (const secret of SECRETS) expect(errors(k)[0]).not.toContain(secret);
+    });
+
+    it('the clash is logged once per boot: a later call for a package already reported logs nothing more', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        await bootOne(k, 'com.example.beta', BETA);
+        await bootOne(k, 'com.example.beta', BETA);
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(errors(k)).toHaveLength(1);
+    });
+
+    it('CONTROL: one package alone logs no error', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(errors(k)).toEqual([]);
+    });
+
+    it('CONTROL: a package re-declaring its own datasource, or composed twice, logs no error', async () => {
+        const own = booting();
+        await connectPackageDatasources(own.ctx, {
+            appId: 'com.example.alpha',
+            datasources: [ALPHA, { ...ALPHA }],
+            objects: [{ name: 'alpha_note', datasource: 'pkg_store' }],
+        });
+        expect(errors(own)).toEqual([]);
+
+        const twice = booting();
+        await bootOne(twice, 'com.example.alpha', ALPHA);
+        await bootOne(twice, 'com.example.alpha', { ...ALPHA });
+        expect(errors(twice)).toEqual([]);
+    });
+});
+
+describe('connectPackageDatasources — a datasource name two packages of one boot declare is registered as its holder\'s declaration', () => {
+    const ALPHA = { name: 'pkg_store', label: 'Alpha store', driver: 'postgres', config: { url: 'postgres://alpha-host:5432/alpha_db' } };
+    const BETA = { name: 'pkg_store', label: 'Beta store', driver: 'postgres', config: { url: 'postgres://beta-host:5432/beta_db' } };
+
+    /** A booting kernel whose metadata registry records every registration, in order. */
+    function booting(opts: Parameters<typeof kernel>[0] = {}) {
+        const k = kernel(opts);
+        contributeCodeDatasourceNames(k.ctx as never, ['pkg_store']);
+        const metadata = (k.ctx as unknown as { getService(n: string): any }).getService('metadata');
+        const register = metadata.registerInMemory;
+        const registered: string[] = [];
+        metadata.registerInMemory = (type: string, name: string, data: any) => {
+            registered.push(`${data?._packageId}:${data?.label}`);
+            return register(type, name, data);
+        };
+        const listed = () => k.items.get('datasource/pkg_store');
+        return { ...k, registered, listed };
+    }
+    const bootOne = (k: ReturnType<typeof booting>, appId: string, datasource: object) =>
+        connectPackageDatasources(k.ctx, {
+            appId,
+            datasources: [datasource],
+            objects: [{ name: `${appId.split('.').pop()}_note`, datasource: 'pkg_store' }],
+        });
+    const holderSeenByAnInstall = (k: ReturnType<typeof booting>) => datasourceNameHolder(k.ctx, 'com.example.gamma', 'pkg_store');
+
+    it('the registry lists the declaration of the package whose connection serves the name, never the later declarer\'s', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        await bootOne(k, 'com.example.beta', BETA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.alpha', label: 'Alpha store', config: ALPHA.config, origin: 'code' });
+        expect(k.registered).toEqual(['com.example.alpha:Alpha store']);
+    });
+
+    it('in the other boot order the other package holds the name, and its declaration is the one listed', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.beta', BETA);
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+        expect(k.registered).toEqual(['com.example.beta:Beta store']);
+    });
+
+    it('the install door\'s judge names the package whose connection serves the name', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        await bootOne(k, 'com.example.beta', BETA);
+        await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.alpha'" });
+    });
+
+    it('a package whose declaration opened the connection before any start (its datasourceMapping) is the one listed, from the first start on', async () => {
+        const k = booting();
+        k.drivers.add('pkg_store');
+        recordBootDatasourceConnect(k.ctx, 'com.example.beta', [{ datasource: BETA, owner: { packageId: 'com.example.beta' } }], [
+            { name: 'pkg_store', status: 'connected' },
+        ]);
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+        await bootOne(k, 'com.example.beta', BETA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+        expect(k.registered.every((entry) => entry.startsWith('com.example.beta:'))).toBe(true);
+        await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.beta'" });
+    });
+
+    it('when the first declarer\'s connect fails and a later declarer\'s opens the name, the registration follows the connect verdict', async () => {
+        const answer: Record<string, string> = { pkg_store: 'failed-degraded' };
+        const k = booting({ answer });
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.alpha' });
+        delete answer.pkg_store;
+        await expect(bootOne(k, 'com.example.beta', BETA)).resolves.toEqual([{ name: 'pkg_store', status: 'connected' }]);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', label: 'Beta store', config: BETA.config });
+        expect(k.logger.error.mock.calls.map((c) => String(c[0]))[0]).toContain("opened from the declaration of 'com.example.beta'");
+        await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.beta'" });
+    });
+
+    it('in one artifact, when the first body\'s connect fails and the second body\'s opens the name, the second body\'s declaration is the holder listed', async () => {
+        const k = booting();
+        const alpha = { ...ALPHA, autoConnect: true };
+        const beta = { ...BETA, autoConnect: true };
+        // Each declaration answers its own verdict, in the order the connect attempts them.
+        (k.ctx as unknown as { getService(n: string): any }).getService('datasource-connection').connectDeclared = async (input: { datasources: any[] }) =>
+            input.datasources.map((ds) => ({ name: ds.name, status: ds === alpha ? 'failed-degraded' : 'connected' }));
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.host',
+            datasources: [alpha, beta],
+            owned: [
+                { datasource: alpha, owner: { packageId: 'com.example.alpha' } },
+                { datasource: beta, owner: { packageId: 'com.example.beta' } },
+            ],
+            objects: [],
+        });
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+        expect(k.logger.error.mock.calls.map((c) => String(c[0]))[0]).toContain("opened from the declaration of 'com.example.beta'");
+        await expect(holderSeenByAnInstall(k)).resolves.toEqual({ status: 'held', holder: "the package 'com.example.beta'" });
+    });
+
+    it('one artifact whose two package bodies declare one name lists the declaration that opened the connection', async () => {
+        const k = booting();
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.host',
+            datasources: [ALPHA, BETA],
+            owned: [
+                { datasource: ALPHA, owner: { packageId: 'com.example.alpha' } },
+                { datasource: BETA, owner: { packageId: 'com.example.beta' } },
+            ],
+            objects: [{ name: 'alpha_note', datasource: 'pkg_store' }, { name: 'beta_note', datasource: 'pkg_store' }],
+        });
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.alpha', config: ALPHA.config });
+        expect(k.registered).toEqual(['com.example.alpha:Alpha store']);
+    });
+
+    it('with no connection to open, the first package to declare the name holds it and is the one listed', async () => {
+        const k = booting({ withConnection: false });
+        await bootOne(k, 'com.example.alpha', ALPHA);
+        await bootOne(k, 'com.example.beta', BETA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.alpha', config: ALPHA.config });
+        expect(k.registered).toEqual(['com.example.alpha:Alpha store']);
+    });
+
+    it('CONTROL: one package alone is listed with its declaration', async () => {
+        const k = booting();
+        await bootOne(k, 'com.example.beta', BETA);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.beta', config: BETA.config });
+    });
+
+    it('CONTROL: a package re-declaring its own datasource is listed with its last declaration, as before', async () => {
+        const k = booting();
+        await connectPackageDatasources(k.ctx, {
+            appId: 'com.example.alpha',
+            datasources: [ALPHA, { ...ALPHA, label: 'Alpha store, again' }],
+            objects: [{ name: 'alpha_note', datasource: 'pkg_store' }],
+        });
+        expect(k.registered).toEqual(['com.example.alpha:Alpha store', 'com.example.alpha:Alpha store, again']);
+        expect(k.listed()).toMatchObject({ _packageId: 'com.example.alpha', label: 'Alpha store, again' });
     });
 });

@@ -22,6 +22,8 @@
  * describe block pins that — and, more importantly, pins the general rule, so a
  * future third decoration key fails here instead of in a production boot log.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions (#4550 delete /
 // #5480 update), so the fake engine below cannot accept a call ObjectQL
@@ -31,6 +33,7 @@ import { describe, expect, it } from 'vitest';
 // of this package's (file, verb) pairs sat in the gate's DEBT ledger until
 // #5619 sank the two predicates into a package both sides already depend on.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 import { FlowSchema } from '@objectstack/spec/automation';
 import { METADATA_READ_DECORATIONS, getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import {
@@ -107,6 +110,7 @@ function makeStubEngine() {
         async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> { return cb(undefined, { owned: true }); },
         async syncObjectSchema() { /* no DDL in this stub */ },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             getItem: () => undefined,

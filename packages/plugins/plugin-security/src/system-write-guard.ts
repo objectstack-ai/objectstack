@@ -55,8 +55,15 @@ import { PermissionDeniedError } from './errors.js';
  * for a fail-closed guard to close on, and their authz is adjudicated by the
  * DelegatedAdminGate / RLS / permission sets. Net enforcement change: none — the
  * 8 objects passed before and pass now, for the same resolved-affordance reason.
+ *
+ * `synced` (ADR-0153 D4) joins them: rows a pull copies from a connector or a
+ * federated source, read-only to members. The pull writes as the system and
+ * passes by construction. Unlike the other two, `userActions` cannot open a
+ * verb on it — {@link resolveCrudAffordances} keeps its four writes closed
+ * (`MANAGED_BY_WRITE_LOCKED_BUCKETS`), so the affordance check below refuses
+ * every member write to it, an administrator's included.
  */
-export const ENGINE_OWNED_BUCKETS: ReadonlySet<string> = new Set(['engine-owned', 'append-only']);
+export const ENGINE_OWNED_BUCKETS: ReadonlySet<string> = new Set(['engine-owned', 'append-only', 'synced']);
 
 /**
  * Engine write operation → the {@link resolveCrudAffordances} flag it needs.
@@ -98,7 +105,7 @@ function isUserContextWrite(context: any): boolean {
 
 /**
  * Fail-closed on a user-context generic write to an engine-owned
- * `engine-owned`/`append-only` object. No-op for: reads, non-engine-owned
+ * `engine-owned`/`append-only`/`synced` object. No-op for: reads, non-engine-owned
  * buckets, system/context-less writes, and objects whose `userActions` open the
  * verb.
  *
@@ -121,6 +128,16 @@ export function assertEngineOwnedWriteAllowed(
 
   const affordances = resolveCrudAffordances(schema as any);
   if (affordances[need]) return; // userActions opened it → writable set
+
+  if (bucket === 'synced') {
+    throw new PermissionDeniedError(
+      `[Security] Access denied: '${schema?.name ?? 'object'}' is synced ` +
+        `(managedBy:'synced', ADR-0153) — direct ${operation} via the data API is disabled. ` +
+        `Its rows are copied from their source by a pull, which would keep or overwrite the change; ` +
+        `change the source through a declared action instead, and the next pull brings it home.`,
+      { operation, object: schema?.name, managedBy: bucket },
+    );
+  }
 
   throw new PermissionDeniedError(
     `[Security] Access denied: '${schema?.name ?? 'object'}' is engine-owned ` +

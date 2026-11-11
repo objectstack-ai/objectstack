@@ -8,8 +8,10 @@
  * name through R's resolver (`resolveActionByPackage` in
  * `@objectstack/objectql`) and answers the holder's package coordinate;
  * `executeRegisteredAction` given that coordinate runs that package's handler.
- * A caller that names no package resolves and dispatches exactly as before
- * (the #31697 interim, ruling 6728550494 on epic #31527).
+ * A caller that names no package, while two packages hold the name on the
+ * object, is refused naming both, at the declaration and at the dispatch
+ * (#31697, ruling 6729825528 letter A on epic #31527); one holder answers as
+ * before.
  *
  * Real: `ObjectQL` (its `SchemaRegistry` and action engine),
  * `ObjectStackProtocolImplementation`'s execution read. Doubled: the row store
@@ -21,7 +23,11 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// dispatcher chain this file reaches loads it dynamically.
+import '@objectstack/metadata';
 import { ObjectQL, assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { PackageScopedNameRefusedError, resolvePackageScopedHolders } from '@objectstack/core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { actionHandlerOwnerRefusal, executeRegisteredAction, resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
 
@@ -37,6 +43,9 @@ const manifest = (id: string, deps: string[] = []) => ({
 
 let engine: ObjectQL;
 let deps: ActionExecutionDeps;
+let protocol: ObjectStackProtocolImplementation;
+/** The environment store's active `sys_metadata` rows the row store answers (empty unless a case seeds it). */
+let storedRows: any[] = [];
 
 const install = (id: string, deps: string[] = []) => engine.registry.installPackage(manifest(id, deps), 'code');
 const ship = (packageId: string, objectName = OBJECT) =>
@@ -54,13 +63,23 @@ const resolve = (callerPackageId?: string) => resolveRouteActionDeclaration(deps
 beforeEach(() => {
     engine = new ObjectQL();
     engine.registry.logLevel = 'silent';
+    storedRows = [];
     const rowStore: any = {
         registry: engine.registry,
-        find: async () => [],
+        find: async (object: string, query: any) => {
+            if (object !== 'sys_metadata') return [];
+            const where: Record<string, any> = query?.where ?? {};
+            const rows = storedRows.filter((row) => Object.keys(where).every((field) => {
+                if (field.startsWith('$')) throw new Error(`row store double: combinator ${field} is not implemented`);
+                const want = where[field];
+                return Array.isArray(want?.$in) ? want.$in.includes(row[field]) : row[field] === want;
+            }));
+            return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
+        },
         findOne: async (object: string, query: any) => { assertEngineFindOnePredicate(object, query); return null; },
         count: async () => 0, aggregate: async () => [],
     };
-    const protocol = new ObjectStackProtocolImplementation(rowStore);
+    protocol = new ObjectStackProtocolImplementation(rowStore);
     deps = {
         resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? protocol : undefined)) as any,
         getObjectQL: async () => engine,
@@ -187,8 +206,8 @@ describe('ADR-0150 D4 — the owner gate judges the handler the package call run
     });
 });
 
-describe('[#31697 interim] a caller that names no package', () => {
-    it('resolves and dispatches exactly as before: no refusal, no package, the last registered handler runs', async () => {
+describe('[#31697] a caller that names no package', () => {
+    it('is refused naming both packages when two hold the name on the object — at the declaration (D5) and at the dispatch (409), never the last registered', async () => {
         install(A);
         install(B);
         ship(A);
@@ -196,9 +215,396 @@ describe('[#31697 interim] a caller that names no package', () => {
         bind(A);
         bind(B);
         const declaration = await resolve();
+        expect(declaration.action).toBeUndefined();
+        expect(declaration.refusal).toMatchObject({
+            reason: 'ambiguous-in-environment',
+            candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+        });
+        await expect(executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).rejects.toMatchObject({
+            code: 'RESOURCE_CONFLICT', status: 409, owners: [`app:${A}`, `app:${B}`],
+        });
+        // Each package's address still reaches its own.
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, A)).result).toBe(`ran ${A}`);
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, B)).result).toBe(`ran ${B}`);
+    });
+
+    it('CONTROL — one package holding the name answers as before: no refusal, no package, its handler runs', async () => {
+        install(A);
+        ship(A);
+        bind(A);
+        const declaration = await resolve();
         expect(declaration.refusal).toBeUndefined();
         expect(declaration.packageId).toBeUndefined();
-        expect(declaration.action).toMatchObject({ name: 'approve' });
-        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe(`ran ${B}`);
+        expect(declaration.action).toMatchObject({ name: 'approve', label: 'alpha' });
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {})).result).toBe(`ran ${A}`);
+    });
+});
+
+/**
+ * [#31697, step-0 ruling Q1 = A] `/meta/action/NAME` (the protocol's by-name
+ * read, the Console's ActionNavItem read) with no package: an OBJECT-LESS
+ * action two packages hold — two namespaces may, now that its one-holder rule
+ * narrowed to the namespace — is refused naming both, `409
+ * RESOURCE_CONFLICT`; it served the first registered. A read naming a package
+ * reaches that package's. Object-bound same-name reads are not this card's.
+ */
+describe('[#31697] the by-name read of an object-less action two packages hold', () => {
+    const shipObjectLess = (packageId: string | undefined, name = 'digest') =>
+        engine.registry.registerItem('action', {
+            name, label: packageId?.split('.').pop() ?? 'env', type: 'script',
+            body: { language: 'js', source: 'return 1;', capabilities: [] },
+        } as never, 'name' as never, packageId);
+    const read = (packageId?: string) =>
+        protocol.getMetaItem({ type: 'action', name: 'digest', ...(packageId ? { packageId } : {}) } as any) as Promise<any>;
+
+    it('is refused when the read names no package, naming both; a read naming each package reaches its own', async () => {
+        install(A);
+        install(B);
+        shipObjectLess(A);
+        shipObjectLess(B);
+        const refused = await read().then(() => undefined, (e: any) => e);
+        expect(refused, 'the read was refused').toBeDefined();
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(refused.status ?? refused.httpStatus).toBe(409);
+        expect(String(refused.message)).toContain(A);
+        expect(String(refused.message)).toContain(B);
+        expect((await read(A)).item).toMatchObject({ name: 'digest', label: 'alpha' });
+        expect((await read(B)).item).toMatchObject({ name: 'digest', label: 'beta' });
+    });
+
+    it('CONTROL — one package\'s object-less action answers the bare read', async () => {
+        install(A);
+        shipObjectLess(A);
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'alpha' });
+    });
+
+    it('CONTROL — the environment\'s own item, a row its store holds bound to no package, answers first beside a package\'s (ADR-0150 D3)', async () => {
+        install(A);
+        shipObjectLess(A);
+        shipObjectLess(undefined);
+        storedRows = [{
+            id: 'env-digest', type: 'action', name: 'digest', state: 'active', package_id: null,
+            metadata: JSON.stringify({ name: 'digest', label: 'env', type: 'script', body: { language: 'js', source: 'return 1;', capabilities: [] } }),
+        }];
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'env' });
+    });
+
+    it('[#31697 review F3] a package-less item the store does not hold is the platform\'s (host code or a plugin): beside a package it is refused naming both, as on the action doors', async () => {
+        install(A);
+        shipObjectLess(A);
+        shipObjectLess(undefined);
+        const refused = await read().then(() => undefined, (e: any) => e);
+        expect(refused, 'the read was refused').toBeDefined();
+        expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT' });
+        expect(refused.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'platform' }]);
+        // A store row bound to an OBJECT is not the environment's object-less item (F5's key).
+        storedRows = [{ id: 'env-bound', type: 'action', name: 'digest', state: 'active', package_id: null, metadata: { name: 'digest', objectName: OBJECT } }];
+        expect(await read().then(() => undefined, (e: any) => e?.code)).toBe('RESOURCE_CONFLICT');
+    });
+
+    it('[#31697 review F4] a disabled package holds nothing: the enabled holder answers the bare read, and the bare REST door serves it, never "degraded"', async () => {
+        install(A);
+        install(B);
+        shipObjectLess(A);
+        shipObjectLess(B);
+        engine.registry.disablePackage(B);
+        expect((await read()).item).toMatchObject({ name: 'digest', label: 'alpha' });
+        const declaration = await resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName: 'global', actionName: 'digest' });
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal).toBeUndefined();
+        expect(declaration.action).toMatchObject({ name: 'digest', label: 'alpha' });
+    });
+
+    it('[#31697 contract review G3] the bare REST door judges two holders whenever the merged listing answers, even where the protocol\'s engine reports no `sys_metadata` schema', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        ship(B);
+        (protocol as any).engine.getSchema = () => undefined;
+        const declaration = await resolve();
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('[#31697 contract review G4] a disabled package\'s handler is no owner at the engine either: the bare call resolves and DISPATCHES the enabled holder\'s handler, though the disabled package bound last', async () => {
+        install(A);
+        install(B);
+        ship(A);
+        ship(B);
+        bind(A);
+        bind(B);
+        engine.registry.disablePackage(B);
+        const declaration = await resolve();
+        expect(declaration.refusal).toBeUndefined();
+        expect(declaration.action).toMatchObject({ name: 'approve', label: 'alpha' });
+        expect(await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, undefined)).toEqual({ dispatched: true, result: `ran ${A}` });
+        engine.registry.enablePackage(B);
+        await expect(executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, undefined), 'CONTROL: both enabled, refused naming both')
+            .rejects.toMatchObject({ code: 'RESOURCE_CONFLICT' });
+    });
+});
+
+describe('[#31697 review F4] the bare REST door reads the by-name read\'s refusal as a refusal', () => {
+    it('a refusal the protocol\'s by-name read throws answers the refusal naming its holders — never `degraded`', async () => {
+        const refused = resolvePackageScopedHolders(
+            { type: 'action', name: 'digest', callerPackageId: null },
+            { packageHolders: [A, B], packageItem: (id) => ({ name: 'digest', _packageId: id }), environmentItem: () => undefined },
+            () => new Set<string>(),
+        );
+        if (refused.status !== 'refused') throw new Error('expected a refusal');
+        const stub: any = {
+            getMetaItems: async () => ({ items: [] }),
+            getMetaItemForExecution: async () => { throw new PackageScopedNameRefusedError(refused); },
+        };
+        const stubDeps = { ...deps, resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? stub : undefined)) as any };
+        const declaration = await resolveRouteActionDeclaration(stubDeps, { request: {} } as any, { ql: engine, objectName: 'global', actionName: 'digest' });
+        expect(declaration.degraded).toBeFalsy();
+        expect(declaration.refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+});
+
+/**
+ * [#32244, ADR-0150 D3] The by-name read naming no package of an action name
+ * two packages hold on ANY object key — two objects, or one — is refused
+ * naming each package with its object (`409 RESOURCE_CONFLICT`); it served the
+ * first registered, one package's action picked over another's. The route
+ * (`/actions/:object/:name`) can see the object, so each object's call still
+ * reaches its own holder's declaration; the in-process store refuses the same
+ * bare read, and the protocol never reads that refusal as a miss.
+ *
+ * BASE (main 9bff554e): the bare read answered 200 with A's action (the first
+ * registered), and the store refusal of the same-object pair was swallowed.
+ */
+describe('[#32244] the bare read of an action name two packages hold on any object key', () => {
+    const read = (packageId?: string) =>
+        protocol.getMetaItem({ type: 'action', name: 'approve', ...(packageId ? { packageId } : {}) } as any) as Promise<any>;
+    const refusalOfRead = (packageId?: string) => read(packageId).then(() => undefined, (e: any) => e);
+    const routeTo = (objectName: string) =>
+        resolveRouteActionDeclaration(deps, { request: {} } as any, { ql: engine, objectName, actionName: 'approve' });
+
+    it('two packages, two objects: refused, naming both with their objects — never the first registered', async () => {
+        install(A);
+        install(B);
+        ship(A, 'account');
+        ship(B, 'contact');
+        const refused = await refusalOfRead();
+        expect(refused, 'the read was refused').toBeInstanceOf(PackageScopedNameRefusedError);
+        expect([refused.code, refused.status, refused.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+        expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+        expect(refused.message).toContain(`package "${A}" binds it to object "account"`);
+        expect(refused.message).toContain(`package "${B}" binds it to object "contact"`);
+        // `?package=` is unchanged: each package's address reaches its own.
+        expect((await read(A)).item).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+        expect((await read(B)).item).toMatchObject({ name: 'approve', label: 'beta', objectName: 'contact' });
+    });
+
+    it('two packages, ONE object: refused naming both, too', async () => {
+        install(A);
+        install(B);
+        ship(A, 'account');
+        ship(B, 'account');
+        const refused = await refusalOfRead();
+        expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('the route sees the object: `/actions/account/approve` gets A\'s declaration and `/actions/contact/approve` B\'s, never the 409', async () => {
+        install(A);
+        install(B);
+        ship(A, 'account');
+        ship(B, 'contact');
+        const onAccount = await routeTo('account');
+        expect([onAccount.refusal, onAccount.degraded]).toEqual([undefined, undefined]);
+        expect(onAccount.action).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+        const onContact = await routeTo('contact');
+        expect([onContact.refusal, onContact.degraded]).toEqual([undefined, undefined]);
+        expect(onContact.action).toMatchObject({ name: 'approve', label: 'beta', objectName: 'contact' });
+        // An object neither package binds the name to has no declaration, as before.
+        expect(await routeTo('lead')).toMatchObject({ action: undefined });
+    });
+
+    it('CONTROL — one package holding the name answers the bare read as before', async () => {
+        install(A);
+        ship(A, 'account');
+        expect((await read()).item).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+    });
+
+    it('CONTROL — one package binding the name to two objects is one holder: the bare read answers as before', async () => {
+        install(A);
+        ship(A, 'account');
+        ship(A, 'contact');
+        expect((await read()).item).toMatchObject({ name: 'approve', label: 'alpha' });
+    });
+
+    it('CONTROL — a disabled package holds nothing: the enabled holder answers the bare read', async () => {
+        install(A);
+        install(B);
+        ship(A, 'account');
+        ship(B, 'contact');
+        engine.registry.disablePackage(B);
+        expect((await read()).item).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+    });
+
+    describe('the metadata service\'s refusal is an answer, never a miss', () => {
+        /** The protocol over a real `MetadataManager` in the `metadata` slot. */
+        const withService = async () => {
+            const { MetadataManager } = await import('@objectstack/metadata');
+            const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+            const services = new Map<string, unknown>([['metadata', manager]]);
+            protocol = new ObjectStackProtocolImplementation((protocol as any).engine, () => services as Map<string, any>);
+            return manager;
+        };
+        const item = (packageId: string, objectName: string) => ({
+            name: 'approve', label: packageId.split('.').pop(), type: 'script', objectName, target: 'approve', _packageId: packageId,
+        });
+
+        it('the service holds two packages\' items the registry does not count (one registered there): refused naming both — never the registry\'s item', async () => {
+            const manager = await withService();
+            install(A);
+            install(B);
+            ship(A, 'account');
+            manager.registerInMemory('action', 'approve', item(A, 'account'));
+            manager.registerInMemory('action', 'approve', item(B, 'contact'));
+            const refused = await refusalOfRead();
+            expect(refused, 'the store\'s refusal reaches the caller').toBeInstanceOf(PackageScopedNameRefusedError);
+            expect(refused.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+            expect(refused.message).toContain(`package "${B}" binds it to object "contact"`);
+            const layered = await (protocol as any).getMetaItemLayered({ type: 'action', name: 'approve' }).then(() => undefined, (e: any) => e);
+            expect(layered, 'the layered read\'s code layer rethrows it too').toBeInstanceOf(PackageScopedNameRefusedError);
+        });
+
+        it('[review 6781770671 S1] the same state: `/actions/account/approve` answers A\'s declaration, never the refusal of B\'s address that names A', async () => {
+            const manager = await withService();
+            install(A);
+            install(B);
+            ship(A, 'account');
+            manager.registerInMemory('action', 'approve', item(A, 'account'));
+            manager.registerInMemory('action', 'approve', item(B, 'contact'));
+            // B's own address refuses (the registry holds only A's `approve`).
+            expect(await refusalOfRead(B).then((e: any) => e?.refusal?.reason)).toBe('not-held-by-qualifier');
+            const onAccount = await routeTo('account');
+            expect([onAccount.refusal, onAccount.degraded]).toEqual([undefined, undefined]);
+            expect(onAccount.action).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+        });
+
+        it('CONTROL — the service\'s refusal naming a disabled package is no refusal: the enabled holder answers', async () => {
+            const manager = await withService();
+            install(A);
+            install(B);
+            ship(A, 'account');
+            manager.registerInMemory('action', 'approve', item(A, 'account'));
+            manager.registerInMemory('action', 'approve', item(B, 'contact'));
+            engine.registry.disablePackage(B);
+            expect((await read()).item).toMatchObject({ name: 'approve', label: 'alpha', objectName: 'account' });
+        });
+    });
+
+    it('[review 6781770671 S5] two object-less holders and a third package bound to an object: the 409 names all three, and the third\'s own route resolves to it', async () => {
+        const C = 'com.acme.gamma';
+        install(A);
+        install(B);
+        install(C);
+        for (const packageId of [A, B]) {
+            engine.registry.registerItem('action', {
+                name: 'approve', label: packageId.split('.').pop(), type: 'script', target: 'approve',
+                body: { language: 'js', source: 'return 1;', capabilities: [] },
+            } as never, 'name' as never, packageId);
+        }
+        ship(C, 'account');
+        const refused = await refusalOfRead();
+        expect(refused).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect(refused.refusal.candidates).toEqual([
+            { kind: 'package', packageId: A }, { kind: 'package', packageId: B }, { kind: 'package', packageId: C },
+        ]);
+        expect(refused.message).toContain(`package "${C}" binds it to object "account"`);
+        const onAccount = await routeTo('account');
+        expect([onAccount.refusal, onAccount.degraded]).toEqual([undefined, undefined]);
+        expect(onAccount.action).toMatchObject({ name: 'approve', label: 'gamma', objectName: 'account' });
+        // Another object reaches only the two object-less holders: refused naming those two.
+        expect((await routeTo('contact')).refusal?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    describe('[review 6781770671 N6] each branch of the route\'s recovery from a refused bare read', () => {
+        const refusal = (candidates: any[], reason = 'ambiguous-in-environment') => new PackageScopedNameRefusedError({
+            status: 'refused', reason, type: 'action', name: 'approve', callerPackageId: null, candidates,
+            message: 'refused',
+        } as any);
+        /** What a candidate's exact address answers when it holds no item of the name. */
+        const notHeld = () => refusal([{ kind: 'package', packageId: A }], 'not-held-by-qualifier');
+        const declared = (packageId: string, objectName?: string) => ({
+            item: { name: 'approve', label: packageId.split('.').pop(), type: 'script', ...(objectName ? { objectName } : {}), _packageId: packageId },
+        });
+        /** A protocol whose bare read throws `bare`, and whose read at each package answers `at[packageId]` (a thrown value throws). */
+        const routeWith = (bare: unknown, at: Record<string, unknown>, objectName = 'account') => {
+            const stub: any = {
+                getMetaItems: async () => ({ items: [] }),
+                getMetaItemForExecution: async (request: { packageId?: string }) => {
+                    if (!request.packageId) throw bare;
+                    const answer = at[request.packageId];
+                    if (answer instanceof Error) throw answer;
+                    return answer ?? { item: null };
+                },
+            };
+            const stubDeps = { ...deps, resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol' ? stub : undefined)) as any };
+            return resolveRouteActionDeclaration(stubDeps, { request: {} } as any, { ql: engine, objectName, actionName: 'approve' });
+        };
+        const AB = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
+
+        it('no candidate bound to the route: the one object-less candidate answers', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'contact'), [B]: declared(B) });
+            expect([answer.refusal, answer.degraded]).toEqual([undefined, undefined]);
+            expect(answer.action).toMatchObject({ label: 'beta' });
+        });
+
+        it('the bound candidate wins over an object-less one', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'account'), [B]: declared(B) });
+            expect(answer.action).toMatchObject({ label: 'alpha' });
+        });
+
+        it('two candidates on one rung: the refusal stands', async () => {
+            const bare = refusal(AB);
+            const answer = await routeWith(bare, { [A]: declared(A), [B]: declared(B) });
+            expect(answer.action).toBeUndefined();
+            expect(answer.refusal).toBe(bare.refusal);
+        });
+
+        it('a candidate that is not a package: the refusal stands, and no package is read', async () => {
+            const bare = refusal([{ kind: 'package', packageId: A }, { kind: 'platform' }]);
+            const answer = await routeWith(bare, { [A]: new Error('must not be read') });
+            expect([answer.action, answer.degraded]).toEqual([undefined, undefined]);
+            expect(answer.refusal).toBe(bare.refusal);
+        });
+
+        it('a candidate its own address says it does not hold owns nothing: the other candidate answers', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'account'), [B]: notHeld() });
+            expect([answer.refusal, answer.degraded]).toEqual([undefined, undefined]);
+            expect(answer.action).toMatchObject({ label: 'alpha' });
+        });
+
+        it('a candidate its own address says it does not hold, and no other owner: the bare read\'s refusal stands', async () => {
+            const bare = refusal(AB);
+            const answer = await routeWith(bare, { [A]: declared(A, 'contact'), [B]: notHeld() });
+            expect(answer.action).toBeUndefined();
+            expect(answer.refusal).toBe(bare.refusal);
+        });
+
+        it('[epic red-line read 6784464520 R1] a candidate read refused for any reason other than not held: the bare read\'s refusal stands, though another candidate owns the route', async () => {
+            for (const reason of ['ambiguous-in-closure', 'ambiguous-in-environment', 'outside-closure']) {
+                const bare = refusal(AB);
+                const answer = await routeWith(bare, { [A]: declared(A, 'account'), [B]: refusal(AB, reason) });
+                expect(answer.action, reason).toBeUndefined();
+                expect(answer.refusal, reason).toBe(bare.refusal);
+            }
+        });
+
+        it('a candidate read that throws anything else is an outage, never a declaration', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'account'), [B]: new Error('store down') });
+            expect(answer).toMatchObject({ action: undefined, degraded: true, reason: 'store down' });
+        });
+
+        it('no candidate owns the route: no declaration, no refusal', async () => {
+            const answer = await routeWith(refusal(AB), { [A]: declared(A, 'contact'), [B]: declared(B, 'lead') });
+            expect([answer.action, answer.refusal, answer.degraded]).toEqual([undefined, undefined, undefined]);
+        });
     });
 });

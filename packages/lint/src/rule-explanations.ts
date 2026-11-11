@@ -62,12 +62,15 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'A declared field is CONSUMED when something in this stack reads or displays it: a view column, ' +
       'an inline grid column, a form section, a page binding, a flow node, a dataset or cube member, a ' +
-      'dashboard widget, a formula, a validation, a hook or an action that names it; a declared field ' +
+      'dashboard widget, a formula, a validation, a hook or an action that names it; a row-level ' +
+      'security predicate (`rowLevelSecurity[].using` / `.check`, or an object\'s `defaultRowScope`) that ' +
+      'filters or checks rows by it; the ' +
+      'line-position field an inline grid stamps on drag-reorder and orders its lines by; a declared field ' +
       'group (`group` naming one of the object\'s `fieldGroups`) that places it on the synthesized ' +
       'layout; or a seed or import mapping that matches on it (`externalId` / `upsertKey`). One such ' +
       'site is enough: a field that is only drawn is the ordinary state of most fields, not a defect.',
     'A CARRIER names a field without reading it, so it does not count: a translation label, a seed ' +
-      'value, an import-mapping target, a permission grant, a flow that only WRITES it, an ' +
+      'value, an import-mapping target, a field-level permission grant, a flow that only WRITES it, an ' +
       '`inlineColumns` entry on a relationship field that does not set `inlineEdit` (no grid is ' +
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
@@ -766,6 +769,55 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
       'caller against) and key the policy on it, or drop the policy. The opt-in is refused by the parse ' +
       'on an object whose `sharingModel` is not `controlled_by_parent`, so it cannot be declared where ' +
       'nothing reads it.',
+  ],
+};
+
+const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-master-reference-hidden',
+  covers: 'why a hidden master reference still decides a detail write',
+  paragraphs: [
+    'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
+      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
+      'and does not take it out of the decision: the master it names still decides whether each holder may ' +
+      'write the row.',
+    'What the field-level security does change is the refusal. A writer who can read the master reference ' +
+      'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
+      'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
+      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'writer has no way to tell from the refusal which record to ask for access to.',
+    'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
+      'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
+      'same set holds View All or Modify All on the detail, because that bit makes the entry inert ' +
+      '(`security-superuser-field-mask-inert`).',
+    'This is a warning, not an error: hiding the reference is legal and no door refuses it. To fix it, make ' +
+      'the reference readable (`readable: true`, or delete the entry) when the set\'s holders should see why ' +
+      'a write is refused. Keep it hidden when a generic refusal is what is meant.',
+  ],
+};
+
+const SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'security-synced-private-unreadable',
+  covers: 'why members read no row of a private synced object',
+  paragraphs: [
+    'A pull writes the rows of a `managedBy: \'synced\'` object with no person owner: the run is the ' +
+      'attribution, never an owner (ADR-0153 D4). On `sharingModel: \'private\'` record sharing shows a ' +
+      'member the rows they own plus the rows a share grants them, so with no share a member whose ' +
+      'permission set grants `allowRead` lists no row at all. Members never write a synced object ' +
+      'whatever the model says.',
+    'A sharing rule grants read on the object when its `object` names it, it is not `active: false`, and ' +
+      'its `accessLevel` is `read` or `edit` (absent reads as `read`). Any recipient and any `condition` ' +
+      'count. A condition that does not lower grants nothing at runtime, and that is reported on the rule ' +
+      'itself (`os explain sharing-rule-unlowerable-condition`), not here.',
+    'There are two ways out. Declare `sharingModel: \'public_read\'` (recommended): every member who ' +
+      'holds `allowRead` reads the pulled rows. Or keep \'private\' and declare a sharing rule that grants ' +
+      'read to the members who should see the rows.',
+    'Not judged here: an object with no `sharingModel` (that is the `security-owd-unset` error, whose fix ' +
+      'line for a synced object names the same two ways out), any model other than \'private\', and a ' +
+      'permission set\'s read depth (`readScope: \'org\'`, `viewAllRecords`), which also reaches owner-less ' +
+      'rows. A sharing rule another installed package declares is not visible to this stack; if one ' +
+      'grants read, ignore the warning.',
   ],
 };
 
@@ -2060,12 +2112,35 @@ const FLOW_NODE_UNREACHABLE_EXPLANATION: RuleExplanation = {
       'reached by attachment to its host node rather than by an edge, so it and the nodes only it leads to ' +
       'are not judged. Nodes inside a region body (`loop`, `parallel`, `try_catch` and the rest) are not ' +
       'judged here either: a region is a single-entry acyclic graph, which the region validator already ' +
-      'holds, so every node in it is reached. A flow with no start node, or with an edge whose endpoint ' +
-      'names no node, is not judged: the flow parse refuses those shapes first.',
+      'holds, so every node in it is reached. A flow with an edge whose endpoint names no node is not ' +
+      'judged: the flow parse refuses that edge first. A flow with no start node is not judged here either: ' +
+      'the parse accepts it, and `flow-start-node-missing` names it.',
     'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
       'save, drafts included: a designer that deletes a node and leaves its successor unwired must still ' +
       'be able to save the draft. The draft stores with the finding in its diagnostics, and publish ' +
       'refuses it.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_START_NODE_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-start-node-missing',
+  covers: 'why a flow with no start node never runs and what to add',
+  paragraphs: [
+    'A flow run begins at the flow\'s first `start` node and follows edges from there; nothing else ' +
+      'schedules a top-level node. A flow whose top-level `nodes` hold no node of type `start` can ' +
+      'therefore never run: every trigger and every explicit run would be refused with ' +
+      '`FLOW_NO_START_NODE`, and the automation engine refuses to register the flow at all, so the stored ' +
+      'row reads `registration: refused`.',
+    'The cure is one node: add a node with `type: \'start\'` to the top-level `nodes` and an edge from it ' +
+      'to the first step. A record-change or schedule flow declares its trigger in that node\'s `config`.',
+    'Only a flow with no start node is reported. A flow with more than one registers and runs from the ' +
+      'first, and `flow-node-unreachable` names each extra start node. Region bodies (`loop`, `parallel`, ' +
+      '`try_catch` and the rest) are entered at their single entry node, not at a start node, so they are ' +
+      'not judged.',
+    'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
+      'save, drafts included: a designer draft may hold no start node mid-edit and must still save. The ' +
+      'draft stores with the finding in its diagnostics, and a live save and a publish refuse it.',
     FLOW_GATE_REACH,
   ],
 };
@@ -5867,7 +5942,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
+  [SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION.rule]: SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION,
   [SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION.rule]: SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION,
+  [SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION.rule]: SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
@@ -5914,6 +5991,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
+  [FLOW_START_NODE_MISSING_EXPLANATION.rule]: FLOW_START_NODE_MISSING_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,

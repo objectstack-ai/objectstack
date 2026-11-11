@@ -58,6 +58,7 @@ import '@objectstack/lint';
 // [#20611] Not on the package entry — the gate's half of the carry-forward,
 // consumed inside this package only.
 import { redactedPathsCarriedForward } from './metadata-redaction.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -129,6 +130,7 @@ function makeStubEngine() {
         },
         async syncObjectSchema() { /* no DDL in this stub */ },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             getItem: () => undefined,

@@ -1303,7 +1303,8 @@ const RUN_RESTORE_SEGMENT = 'restore-suspension';
  * so the two spellings stay byte-identical. `POST /automation/trigger/:name`
  * is the LEGACY EXECUTION door, answered ABOVE the flow-scoped block, so for a
  * flow literally named `runs` the path `/automation/trigger/runs/x/cancel`
- * RUNS that flow. Gating it would over-block an execution door — the one thing
+ * is that door's: past its two-part bound, so the door declines it and it
+ * runs nothing (before the bound it RAN that flow). Gating it would over-block an execution door — the one thing
  * the ruling commit 266436a7f landed did not do — and dispatching a cancel from it would be the
  * mirror bypass.
  *
@@ -2821,7 +2822,7 @@ async function unregisterAndDeleteFlow(
  * |----------------------------|--------------------|-----------------------|
  * | flow not found             | never dispatched   | `404`                 |
  * | flow disabled              | never dispatched   | `409` `FLOW_DISABLED` |
- * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` |
+ * | flow has no start node     | never dispatched   | `422` `FLOW_NO_START_NODE` (defensive: no door reaches it since #32273, a start-less flow is never armed and answers `404`) |
  * | node config violates its declared `inputSchema` | never dispatched | `422` `FLOW_INPUT_SCHEMA_INVALID` |
  * | ran and failed (incl. the retry-strategy exits) | ran, rejected | `400` `FLOW_FAILED` |
  * | ran and PAUSED (whichever attempt) | ran, suspended | `200` + `runId` / `screen` |
@@ -2874,7 +2875,7 @@ async function unregisterAndDeleteFlow(
  * #9384 ruling (which keeps the union closed — a new member is a deliberate
  * widening, not a call-site mint). #9415 is that widening: the engine's
  * disabled-flow exit stamps `'FLOW_DISABLED'`, its start-node-less exit
- * stamps `'FLOW_NO_START_NODE'`, and the arms below read those. #10025
+ * stamps `'FLOW_NO_START_NODE'` (a defensive exit since #32273), and the arms below read those. #10025
  * repeated the same shape for the definition-level input-schema refusal —
  * spec seat first (commit f90e82024 registered `'FLOW_INPUT_SCHEMA_INVALID'`), then the
  * engine's non-retryable short-circuit stamps it — so its 422 is read here
@@ -3341,7 +3342,8 @@ export async function classifyResumeResult(
  *                                    holds → 404 `RESOURCE_NOT_FOUND`
  *   POST   /:name/trigger        → execute (legacy: trigger/:name also supported;
  *                                  unknown name → 404, disabled → 409 `FLOW_DISABLED`,
- *                                  no start node → 422 `FLOW_NO_START_NODE`, node config
+ *                                  no start node → 404, as the flow is refused at save and never armed (the
+ *                                  engine's 422 `FLOW_NO_START_NODE` exit is defensive), node config
  *                                  violating its `inputSchema` → 422
  *                                  `FLOW_INPUT_SCHEMA_INVALID` (#10025), a run that
  *                                  ran and failed → 400 `FLOW_FAILED`; #9378 + #9415;
@@ -3655,7 +3657,20 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // rest. Only `POST` is that arm's: another verb is the flow `trigger`'s
     // (`GET trigger/runs/:runId`). Declined — behind every gate above, so none becomes narrower than
     // its route — as `/actions` declines a path past its arity.
-    if (parts[0] === 'trigger' && parts.length === 3 && m === 'POST') return { handled: false };
+    //
+    // The same decline bounds every depth past it. After the address read, a
+    // `POST` this arm serves is exactly two parts: `trigger/:name` bare, and
+    // `trigger/:ns/:name` stripped to it. A deeper `POST` is no route on any
+    // host. Before the bound, a catch-all host (`createHonoApp`) ran the flow
+    // `:x` of `trigger/:x/…` and ignored the tail, and so did a mounted host
+    // for each deep `POST` mount a `trigger/…` path matches by its parameters
+    // (`/:name/runs/:runId/cancel` with `:name` = `trigger` ran the flow
+    // `runs`). No gate above reads a `trigger/…` `POST`: each one excludes
+    // `parts[0] === 'trigger'`, reads `GET` only, or reads another first
+    // segment. So only the domain's floor and its service probe answer ahead of
+    // the decline, as for every path of this domain. Another verb at any depth
+    // is still the flow `trigger`'s.
+    if (parts[0] === 'trigger' && parts.length >= 3 && m === 'POST') return { handled: false };
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {

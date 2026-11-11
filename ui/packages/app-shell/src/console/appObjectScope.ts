@@ -19,9 +19,10 @@
  * (`PageView`).
  *
  * A dashboard (`dashboard/:dashboardName`, objectstack#28784) reads only the
- * objects its widgets require ({@link dashboardObjectNames}), by name, the
- * way a page reads the ones it binds; its widgets' dataset queries wait for
- * those names alone, and for nothing when it names none.
+ * objects its widgets require ({@link dashboardObjectNames}): which of them
+ * this runtime registers in one `?names=` read, then the registered ones by
+ * name, the way a page reads the ones it binds; its widgets' dataset queries
+ * wait for that presence answer alone, and for nothing when it names none.
  *
  * An object's list in an app whose package holds no objects of its own
  * (objectui#13046: cloud's control-plane app, whose package ships only the
@@ -317,24 +318,31 @@ export function dashboardObjectNames(dashboard: unknown): string[] {
 }
 
 /**
+ * `readObjectScope` with the provider's package-local `batch: true` hand-off
+ * beside `views: false` (objectstack#29444, `MetadataProvider`): the names not
+ * asked yet are asked in one `GET /meta/object?names=` request, whose answer
+ * leaves an absent name out instead of answering it 404.
+ */
+type ReadNamesInOneRequest = (
+  scope: { names: readonly string[]; views: false; batch: true },
+) => ReturnType<ReadNamesWithoutViews>;
+
+/**
  * objectstack#28784 — whether this runtime registers the objects a
  * dashboard's widgets require ({@link dashboardObjectNames}): those names
- * alone, by name, riding the app's package scope when the app names a
- * package, and without views (a presence answer: `missing` lists the names
- * the server answered without a definition). No name asks nothing and is
- * settled at once, so a dashboard that names none never waits for the
- * package list.
+ * alone, without views (a presence answer: `missing` lists the names the
+ * server answered without a definition). No name asks nothing and is settled
+ * at once, so a dashboard that names none never waits for anything.
+ *
+ * Asked in ONE `?names=` read, never by name: a widget's `requiresObject` is
+ * by contract a name this runtime may not register (a cloud-only object on a
+ * single-environment boot), and the list door answers such a name by leaving
+ * it out, where a by-name read answers it 404 on every open of the dashboard.
  */
-export function readDashboardWidgetObjects(
-  readObjectScope: ReadObjectScope,
-  app: Record<string, any> | undefined,
-  dashboard: unknown,
-): AppObjectScope {
-  const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+export function readDashboardWidgetObjects(readObjectScope: ReadObjectScope, dashboard: unknown): AppObjectScope {
   const names = dashboardObjectNames(dashboard);
   if (names.length === 0) return NO_OBJECT_SCOPE;
-  const read = readObjectScope as ReadNamesWithoutViews;
-  return packageId ? read({ packageId, names, views: false }) : read({ names, views: false });
+  return (readObjectScope as unknown as ReadNamesInOneRequest)({ names, views: false, batch: true });
 }
 
 /**
@@ -344,6 +352,10 @@ export function readDashboardWidgetObjects(
  * is true once the widgets' names have answered ({@link
  * readDashboardWidgetObjects}): the widgets' dataset queries wait for nothing
  * else. No lookup targets are asked: no widget reads them.
+ *
+ * A widget's name joins the route's scope only once that presence read has
+ * answered it served: a name the runtime does not register is never asked by
+ * name.
  */
 export function readDashboardObjectScope(
   readObjectScope: ReadObjectScope,
@@ -352,8 +364,11 @@ export function readDashboardObjectScope(
   extraNames: readonly string[] = [],
 ): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[]; failedAnswer: AnsweredLoadFailure | null } {
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
-  const widgetRead = readDashboardWidgetObjects(readObjectScope, app, dashboard);
-  const names = [...new Set([...dashboardObjectNames(dashboard), ...extraNames])];
+  const widgetRead = readDashboardWidgetObjects(readObjectScope, dashboard);
+  const ready = routeReadDone(widgetRead);
+  const served = new Set(widgetRead.objects.map((o: any) => o?.name).filter((n: unknown): n is string => typeof n === 'string'));
+  const widgetNames = ready ? dashboardObjectNames(dashboard).filter((name) => served.has(name)) : [];
+  const names = [...new Set([...widgetNames, ...extraNames])];
   const scope = packageId
     ? readObjectScope({ packageId, names })
     : names.length > 0
@@ -361,7 +376,7 @@ export function readDashboardObjectScope(
       : NO_OBJECT_SCOPE;
   return {
     scope,
-    ready: routeReadDone(widgetRead),
+    ready,
     failedNames: failedNamesOf(widgetRead),
     failedAnswer: failedAnswerOf(widgetRead),
   };

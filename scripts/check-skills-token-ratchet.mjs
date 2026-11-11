@@ -584,7 +584,26 @@ export const CEILINGS = new Map([
   // bytes -> ceil(26746 / 4) = 6687; the ceiling moves +119, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26746 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6687],
+  // 6687 -> 6861 (2026-11-11, card #32264, the ADR-0150 D3 skills follow-up of
+  // #32073): silently-wrong item 3 teaches how a `script` node's
+  // `config.function` resolves from the calling flow's package (as `subflow`'s
+  // `flowName` does), the platform's owner-less function in every flow's reach,
+  // a `.custom` override read package-less, the two-package `normalize_phone`
+  // example (the boot still warns), the guard refusal (`$error.code:
+  // 'RESOURCE_CONFLICT'`; a flow door's `400 FLOW_FAILED` with
+  // `error.details.innerRefusal`) and the two fixes. Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling
+  // record 6513306068, letter B; seat amendment 6782965220). PAID DOWN FIRST —
+  // one restatement cut: item 3's `defineStack({ functions: { my_fn: (ctx) => … } })`
+  // example, whose surviving home is the same item's
+  // `defineStack({ functions: { 'helpdesk.aiTriageStub': … } })` block.
+  // Arithmetic in priced bytes (stamp line excluded), against `main`'s 26746
+  // (headroom 2): the paragraph adds 715, the cut removes 18, so the LANDED
+  // priced text is 27443 bytes -> ceil(27443 / 4) = 6861; the ceiling moves
+  // +174, the measured remainder only (contract review's should-fix scoped the
+  // status to a flow door: +37 bytes, no further restatement left to cut).
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27443 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6861],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -1041,8 +1060,17 @@ export const CEILINGS = new Map([
   // Ctrl+Z works too` — the `undoable` bullet). The file is 8602 -> 9035 bytes -> 2259 tokens,
   // zero headroom to absorb any of it, ceiling +108, pinned AT the measurement. Same ruling as
   // the line above (2026-10-27, tap A: 「A:先削重复,余额按实测提高」).
-  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9035 / 4)
-  ['skills/objectstack-ui/rules/actions.md', 2259],
+  // 2259 -> 2453: the `preflight` teaching beside `submitText` — one bullet (the read's shape, its
+  // closed hole set, `GET` only, `fields` rows as in `resultDialog.fields`, `seed` filling a
+  // read-only param, the two places it is refused). PAID DOWN FIRST by 79 bytes of true
+  // restatement in this file: the H2 "Opening in a New Tab" loses its key list (the two H3s right
+  // below it name `openIn` and `opensInNewTab` + `newTabUrl`), and the `openIn` H3 loses its tail
+  // "— simplest case (static `target`)" (the paragraph's first sentence says "A static `target`
+  // URL on a `type: 'url'` action"). The file is 9028 -> 9810 bytes -> 2453 tokens, the row's 8
+  // bytes of headroom absorbed, ceiling +194, pinned AT the measurement. Same ruling as the lines
+  // above (2026-10-27, tap A): 「A:先削重复,余额按实测提高」.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/actions.md) / 4) == ceil(9810 / 4)
+  ['skills/objectstack-ui/rules/actions.md', 2453],
   // 6090 -> 6252 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +162 tokens,
   // zero headroom to absorb any of it, ceiling +162. Maintainer ruling

@@ -276,6 +276,10 @@ export {
   // keyed by `(packageId, name)` and asked through this one predicate.
   permissionSetAddressKey,
   permissionSetSwitchedOff,
+  // ADR-0150 D3/D4 — the platform's holder of a name, and a ledger row or grant read per holder.
+  ledgerRowSwitchesOff,
+  platformPermissionSet,
+  grantNamesPlatformPermissionSet,
   catalogEntryAddress,
   type DisabledCatalogItems,
   // [ADR-0150 D8 R3] The `everyone` anchor's accepted sets resolve through
@@ -349,6 +353,21 @@ export {
 // same bindings) and the import runner's match lookup.
 export { DEFAULT_TENANT_FIELD, isFederatedObject, resolveTenantFieldName } from './tenant-field.js';
 
+// [ADR-0015 §10, ADR-0095 D1] The one reading of the organization scope an
+// external object states, its Layer 0 projection, the provenance test of a
+// federated object's `organization_id` it composes, and the three ways out.
+// Askers: `@objectstack/plugin-security` (boot refusal, Layer 0 input and write
+// wall; it re-exports these same bindings) and the sync-in pull in
+// `@objectstack/service-automation`.
+export {
+  declaredForeignTenantField,
+  EXTERNAL_SCOPE_REMEDY,
+  externalOrganizationScopeIsUndeclared,
+  externalOrganizationScopeOf,
+  hasPhantomTenantAnchor,
+  type ExternalOrganizationScope,
+} from './external-organization-scope.js';
+
 // [ADR-0138 D4] The located refusal an anonymous request meets where it needs
 // an organization the deployment cannot resolve for it — a standard-catalog
 // code (`NOT_IMPLEMENTED`), naming the missing site binding (D5).
@@ -367,6 +386,8 @@ export {
 // plugin-hono-server, which re-exports them under the same names.
 export {
   buildEffectiveObjectPermissions,
+  // [Ruling of record 6755714726] The slot `/auth/me/permissions` serves, derived from that map.
+  servedObjectPermissions,
   // [#28877] The map's disabled-package accessor over an engine registry.
   registryObjectPackageDisabled,
   // [#30370] The map's external-write-gate accessor over an engine.
@@ -488,6 +509,10 @@ export {
   resolveCatalogReference,
   // ADR-0150 D8 — a stored reference read by its package column (R1, R3).
   storedPermissionSetScope,
+  // ADR-0150 D2/D3 — an identity read from a set's name reads the platform's holder only.
+  permissionSetHolderIsPlatform,
+  holdsPlatformPermissionSet,
+  type HeldPermissionSets,
   type SecurityCatalogPackageScopedRegistry,
   type SecurityCatalogReferenceScope,
   type SecurityCatalogResolution,

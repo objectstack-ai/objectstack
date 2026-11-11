@@ -10,7 +10,7 @@
  * leaves the format up to the implementation. Where the caller *records*
  * the handle differs per producer — see "Producers" below.
  *
- * Producers — three independent call sites construct a
+ * Producers — four independent call sites construct a
  * {@link CryptoContext}, and only the first of them means "settings". Each
  * names itself with its own member of {@link CRYPTO_CONTEXT_SCOPES}
  * (`ctx.scope`, ADR-0128 D1):
@@ -26,8 +26,16 @@
  *     `'datasource_credential'`) — `ctx.namespace` is caller-supplied
  *     (default `'datasource'`), `ctx.key` the datasource name; `handle.id`
  *     is recorded as the artefact's `sys_secret:` credentialsRef.
+ *  4. **Audit seal** (the audit ledger's sealer, scope `'audit_seal'`,
+ *     ADR-0154) — a checkpoint's seed: `ctx.namespace` is the sealed
+ *     object's name, `ctx.key` the JCS array `[organization id or null,
+ *     sequence]`, `handle.id` recorded in `sys_audit_checkpoint.seed_handle`;
+ *     the signing key's private half: `ctx.namespace` is
+ *     `sys_audit_signing_key`, `ctx.key` the key's fingerprint, `handle.id`
+ *     recorded in `sys_audit_signing_key.private_handle`. Neither passes a
+ *     `tenantId` (see {@link CryptoContext.tenantId}).
  *
- * All three persist a `sys_secret` row keyed by `handle.id`, and the three
+ * All four persist a `sys_secret` row keyed by `handle.id`, and the four
  * `(namespace, key)` vocabularies are uncoordinated: `sys_secret` declares
  * that pair **non-unique** precisely because it does not attribute a row to
  * a producer. The scope is what does — see {@link CryptoContext} for how an
@@ -104,6 +112,14 @@ export interface CryptoHandle {
  *    object name + field name.
  *  - `'datasource_credential'` — the datasource secret binder:
  *    caller-supplied namespace (default `'datasource'`) + datasource name.
+ *  - `'audit_seal'` — the audit ledger's sealer (ADR-0154 D2, D6): a
+ *    checkpoint's seed under the sealed object's name + the JCS array
+ *    `[organization id or null, sequence]`, and the signing key's private
+ *    half under `sys_audit_signing_key` + the key's fingerprint. The seed's
+ *    handle id is recorded inside a signed checkpoint body; the private
+ *    half's sits in the unsigned `sys_audit_signing_key.private_handle`.
+ *    Nothing rewrites either holder, so this scope alone requires a stable
+ *    handle id across {@link ICryptoProvider.rotateKey}.
  *
  * Closed on purpose. A new producer of `CryptoContext` adds its own member
  * here in the same change that adds the producer — ⛔ it never borrows an
@@ -115,6 +131,7 @@ export const CRYPTO_CONTEXT_SCOPES = [
   'settings',
   'object_secret_field',
   'datasource_credential',
+  'audit_seal',
 ] as const;
 
 /** A producer vocabulary — derived from {@link CRYPTO_CONTEXT_SCOPES}. */
@@ -126,13 +143,14 @@ export type CryptoContextScope = (typeof CRYPTO_CONTEXT_SCOPES)[number];
  *
  * **What the binding covers (ADR-0128).** The AAD binds a ciphertext to the
  * triple `(scope, namespace, key)`. `(namespace, key)` alone is not a
- * coordinate: the three producer vocabularies share it, uncoordinated, and
- * nothing reserves a name in one against another. `scope` names which
- * vocabulary the pair is drawn from, so under a conforming provider a
- * ciphertext sealed by one producer does not authenticate under another
- * producer's context — however the two pairs are spelled — and within one
- * producer a ciphertext moved to another coordinate does not authenticate
- * either.
+ * coordinate: the four producer vocabularies share it, uncoordinated, and
+ * nothing reserves a name in one against another (the audit sealer's
+ * `namespace` is a sealed object's name, an object name the secret-field
+ * path uses too). `scope` names which vocabulary the pair is drawn from, so
+ * under a conforming provider a ciphertext sealed by one producer does not
+ * authenticate under another producer's context — however the two pairs are
+ * spelled — and within one producer a ciphertext moved to another
+ * coordinate does not authenticate either.
  *
  * Every provider that binds AAD MUST:
  *
@@ -173,17 +191,29 @@ export interface CryptoContext {
    */
   scope: CryptoContextScope;
   /**
-   * Producer-scoped namespace: a settings namespace, an **object name**
-   * (secret fields), or a caller-supplied datasource namespace (default
-   * `'datasource'`). Not a settings namespace in general.
+   * Producer-scoped namespace, one per producer: a settings namespace, an
+   * **object name** (secret fields), a caller-supplied datasource namespace
+   * (default `'datasource'`), or for the audit sealer (`'audit_seal'`) the
+   * sealed object's name (a checkpoint's seed) or `sys_audit_signing_key` (a
+   * signing key's private half). Not a settings namespace in general.
    */
   namespace: string;
   /**
-   * Producer-scoped key within {@link CryptoContext.namespace}: a settings
-   * specifier key, a **field name** (secret fields), or a datasource name.
+   * Producer-scoped key within {@link CryptoContext.namespace}, one per
+   * producer: a settings specifier key, a **field name** (secret fields), a
+   * datasource name, or for the audit sealer the JCS array
+   * `[organization id or null, sequence]` (a checkpoint's seed) or the
+   * signing key's fingerprint (its private half).
    */
   key: string;
-  /** Optional tenant id for multi-tenant key segregation. */
+  /**
+   * Optional tenant id for multi-tenant key segregation.
+   *
+   * The audit sealer (`'audit_seal'`) passes none, even for an
+   * organization's chain: the audit ledger is deployment-level (ADR-0131 D7)
+   * and so are its seeds and signing key, and a chain must stay verifiable
+   * after its organization, and any key held for it, is gone (ADR-0154 D5).
+   */
   tenantId?: string;
 }
 
@@ -216,6 +246,16 @@ export interface ICryptoProvider {
    * Implementations SHOULD bump `version` and update `kmsKeyId` while
    * leaving `id` stable, so no producer's stored reference to the handle
    * has to be rewritten.
+   *
+   * Under scope `'audit_seal'` the returned handle's `id` MUST equal the
+   * input's (ADR-0154 D2), because that producer never rewrites a holder. A
+   * seed's handle id is recorded inside a signed checkpoint body, which
+   * nothing may rewrite afterwards: a provider that re-ids a seed handle
+   * makes every checkpoint holding it unverifiable. The signing key's private
+   * handle is NOT in a signed body; it sits in the unsigned
+   * `sys_audit_signing_key.private_handle` of an append-only row, so a
+   * provider that re-ids it leaves the key unable to sign or to vouch for its
+   * own public half.
    */
   rotateKey(handle: CryptoHandle, ctx: CryptoContext): Promise<CryptoHandle>;
 

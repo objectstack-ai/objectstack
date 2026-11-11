@@ -127,6 +127,31 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
 }
 
 /**
+ * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
+ * narrowed from the deployment to the namespace (`@objectstack/objectql`'s
+ * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
+ * its own trailing change, once its by-name readers, its AI faces and its
+ * stored references all carry the package: the AI family's `agent` and
+ * `skill` first (#31701), then the object-less `action` (#31697). A type not
+ * listed here keeps one package holder per deployment.
+ *
+ * Here, not in objectql, so a reader objectql depends on can read it too: the
+ * metadata protocol refuses a bare read of a narrowed type that an engine
+ * reads through `getItem` (epic #31527, #32076), since two packages may hold
+ * its name. objectql re-exports it under the same name.
+ */
+export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
+  'agent',
+  'skill',
+  'action',
+]);
+
+/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
+export function isNamespaceScopedBareNameType(type: unknown): boolean {
+  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
+}
+
+/**
  * Per covered type, the packages whose items are an OVERRIDABLE BASELINE: the
  * platform's copies, which that type's one consumer serves any other package's
  * same-named item over, by contract. Such a package neither holds a name of
@@ -490,6 +515,29 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
       return `${subject} is held by ${refusal.candidates.length} packages that share the namespace the address names ` +
         `(ADR-0150 D2): ${named}. Nothing picks one of them: address it by its package.`;
   }
+}
+
+/**
+ * [ADR-0150 D3, #32244] The sentence a refusal of an ACTION name appends to
+ * {@link packageScopedRefusalMessage}'s when its package holders each bind the
+ * name to their own object: two packages' actions of one name on two objects
+ * are two different actions, and a read that cannot see the object would pick
+ * one. Names each package with the object(s) it binds the name to, in the
+ * map's order; `undefined` is an object-less action. Where every package binds
+ * it to the one same object (or each holds it object-less), the sentence only
+ * names them, without calling them different actions.
+ */
+export function packageScopedActionOwnersSentence(
+  objectsByPackage: ReadonlyMap<string, ReadonlyArray<string | undefined>>,
+): string {
+  const owners = [...objectsByPackage].map(([packageId, objects]) => {
+    const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
+    return `package "${packageId}" binds it to ${named.join(' and ')}`;
+  });
+  const objects = new Set([...objectsByPackage.values()].flatMap((bound) => [...bound]));
+  if (objects.size > 1) return `Each is a different action: ${owners.join('; ')}.`;
+  const sentence = owners.join('; ');
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`;
 }
 
 /**

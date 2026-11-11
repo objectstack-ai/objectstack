@@ -351,6 +351,7 @@ export {
   detectRecordWrite,
   detectAnswerSource,
   detectSampleDataCleanup,
+  detectPackageRemoval,
   detectProposedChanges,
   detectReplayOutcome,
   detectAuthoringVerdict,
@@ -367,11 +368,15 @@ export type {
   BuilderHandoff,
   RecordWrite,
   RecordWriteField,
-  AnswerSource,
   SampleDataCleanup,
+  PackageRemoval,
+  PackageRemovalObject,
   ProposedChanges,
   ReplayOutcome,
 } from './mapMessages';
+// The answer-source block's type is the published contract's; the package
+// keeps exporting it under the name its consumers already import.
+export type { ObjectQuerySource as AnswerSource } from '@objectstack/spec/ai';
 
 // `@object-ui/types` ChatMessage (the JSON/SDUI AUTHORING contract) → the
 // runtime `ChatbotEnhancedMessage` above. Exported for the same reason as the

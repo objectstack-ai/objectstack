@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// ADR-0103 — engine-owned write guard for the `engine-owned` / `append-only` buckets.
+// ADR-0103 — engine-owned write guard for the `engine-owned` / `append-only` / `synced` buckets.
 // #3355 — `system` left this guard in v17: it was renamed `system-data` with a
 // WRITABLE default, which puts it with `platform` / `config` on the unguarded side.
 
@@ -43,8 +43,8 @@ function expectDenied(fn: () => void): void {
 }
 
 describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
-  it('scopes to the engine-owned and append-only buckets', () => {
-    expect([...ENGINE_OWNED_BUCKETS].sort()).toEqual(['append-only', 'engine-owned']);
+  it('scopes to the engine-owned, append-only and synced buckets', () => {
+    expect([...ENGINE_OWNED_BUCKETS].sort()).toEqual(['append-only', 'engine-owned', 'synced']);
   });
 
   // #3355 pin: the retired bucket must not linger in the guard's scope set, and
@@ -92,6 +92,38 @@ describe('assertEngineOwnedWriteAllowed (ADR-0103)', () => {
     it('treats a provenance-only context exactly like no context', () => {
       for (const op of ['insert', 'update', 'delete']) {
         expect(() => assertEngineOwnedWriteAllowed(engineOwned, op, { flowRunId: 'run_1' })).not.toThrow();
+      }
+    });
+  });
+
+  // [ADR-0153 D4] A pulled copy: a member's generic write is refused 403, the
+  // pull (which writes as the system) passes, and `userActions` — which opens a
+  // verb on the other two buckets — opens nothing here.
+  describe('synced objects', () => {
+    const synced = { name: 'erp_order_copy', managedBy: 'synced' };
+
+    it("refuses a member's generic insert/update/delete/upsert, naming the bucket", () => {
+      for (const op of ['insert', 'update', 'delete', 'upsert', 'transfer', 'restore']) {
+        expectDenied(() => assertEngineOwnedWriteAllowed(synced, op, USER_CTX));
+      }
+      let message = '';
+      try { assertEngineOwnedWriteAllowed(synced, 'update', USER_CTX); } catch (e) { message = (e as Error).message; }
+      expect(message).toContain("managedBy:'synced'");
+    });
+
+    it('refuses even when userActions opens the verb (the ADR-0103 D1 exception)', () => {
+      const opened = { ...synced, userActions: { create: true, edit: { enabled: true }, delete: true } };
+      for (const op of ['insert', 'update', 'delete']) {
+        expectDenied(() => assertEngineOwnedWriteAllowed(opened, op, USER_CTX));
+      }
+    });
+
+    it('twins: reads pass, and the system-context pull passes', () => {
+      for (const op of ['find', 'findOne', 'count']) {
+        expect(() => assertEngineOwnedWriteAllowed(synced, op, USER_CTX)).not.toThrow();
+      }
+      for (const op of ['insert', 'update', 'delete']) {
+        expect(() => assertEngineOwnedWriteAllowed(synced, op, SYSTEM_CTX)).not.toThrow();
       }
     });
   });

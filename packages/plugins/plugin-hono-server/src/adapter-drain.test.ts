@@ -3,7 +3,9 @@
 import { connect, type Socket } from 'node:net';
 import type { ServerResponse } from 'node:http';
 import { describe, it, expect } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
 import { HonoHttpServer } from './adapter';
+import { HonoServerPlugin } from './hono-plugin';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -310,5 +312,116 @@ describe('HonoHttpServer — graceful close drains in-flight requests (P1-3)', (
 
     expect(elapsed).toBeLessThan(2000); // didn't wait out the 5s request
     await reqP; // the aborted request settled — fine
+  });
+});
+
+/** A logger that records nothing: the window-end cases below close a socket under a reading handler on purpose. */
+const silentLogger = { debug() {}, info() {}, warn() {}, error() {}, fatal() {} } as never;
+
+/** The request line and headers of a `POST /upload` whose JSON body is `body`, sent before any of the body. */
+function uploadHead(body: string): string {
+  return 'POST /upload HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\n'
+    + `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`;
+}
+
+/**
+ * A request whose body is still arriving when shutdown begins (a slow link, a
+ * file, a large import) is answered: served to completion if its body arrives
+ * inside the drain window, refused with a 503 and `Connection: close` if it is
+ * still arriving when the window ends — never closed with no answer.
+ */
+describe('HonoHttpServer — a request still uploading when shutdown begins is answered', () => {
+  it('through the kernel: shutdown waits for it, and it is served while the services it needs are still up', async () => {
+    // `os serve` registers the HTTP plugin before the plugins that serve the
+    // routes, and the kernel destroys plugins in reverse order, then exits the
+    // process once `shutdown()` resolves. So the drain has to finish before
+    // the first `destroy()` runs, and `shutdown()` must not resolve before it.
+    const kernel = new ObjectKernel({ gracefulShutdown: false, logger: { level: 'fatal' } });
+    const events: string[] = [];
+    let serviceUp = true;
+    await kernel.use(new HonoServerPlugin({ port: 0, cors: false }));
+    await kernel.use({
+      name: 'test.route-owner',
+      init: async (ctx: any) => {
+        ctx.registerService('data', {});
+        ctx.hook('kernel:ready', async () => {
+          ctx.getService('http.server').getRawApp().post('/upload', async (c: any) => {
+            const body = await c.req.text();
+            events.push('handler read the body');
+            return serviceUp ? c.text(`stored:${body}`) : c.text('service already destroyed', 500);
+          });
+        });
+      },
+      destroy: async () => {
+        serviceUp = false;
+        events.push('route owner destroyed');
+      },
+    } as never);
+    await kernel.bootstrap();
+    const port = (kernel.getService('http.server') as HonoHttpServer).getPort();
+
+    const body = JSON.stringify({ email: 'member@example.com', password: 'not-a-real-password' });
+    const conn = await rawConnection(port);
+    conn.socket.write(uploadHead(body) + body.slice(0, 5));
+    await sleep(100); // the request is in: its headers arrived, its body has not
+    const shutdown = kernel.shutdown().then(() => { events.push('shutdown resolved'); });
+    await sleep(300); // shutdown is under way while the body is still arriving
+    conn.socket.write(body.slice(5));
+
+    await conn.ended;
+    const { head, headers, body: received } = splitResponse(conn.received());
+    expect(head, 'the request was answered').toMatch(/^HTTP\/1\.1 200/);
+    expect(received.toString('utf8')).toBe(`stored:${body}`);
+    expect(headers.connection).toBe('close');
+    await shutdown;
+    expect(events).toEqual(['handler read the body', 'route owner destroyed', 'shutdown resolved']);
+  });
+
+  it('a body still arriving when the drain window ends is refused with a 503 and Connection: close, then its connection closes', async () => {
+    const server = new HonoHttpServer(0, undefined, 300);
+    server.setLogger(silentLogger);
+    server.getRawApp().post('/upload', async (c) => c.text(`stored:${await c.req.text()}`));
+    await server.listen(0);
+    const body = JSON.stringify({ file: 'x'.repeat(64) });
+    const conn = await rawConnection(server.getPort());
+    conn.socket.write(uploadHead(body) + body.slice(0, 5)); // the rest never arrives
+    await sleep(100);
+
+    const t0 = Date.now();
+    await server.close();
+    const elapsed = Date.now() - t0;
+    await conn.ended; // the server closed the connection after the refusal
+
+    const { head, headers, body: received } = splitResponse(conn.received());
+    expect(head, 'the request was answered, not cut off').toMatch(/^HTTP\/1\.1 503/);
+    expect(headers.connection).toBe('close');
+    expect(JSON.parse(received.toString('utf8'))).toMatchObject({
+      success: false,
+      error: { code: 'SERVICE_UNAVAILABLE' },
+    });
+    expect(elapsed).toBeGreaterThanOrEqual(250); // the request had the whole window
+    expect(elapsed).toBeLessThan(2000); // the 300 ms window, not the stalled upload
+  });
+
+  it('an event stream open when the drain begins does not hold the drain for its window', async () => {
+    // An event stream does not end on its own (the Console holds one open
+    // during development). The drain releases it at the start, so a restart
+    // is not held for the whole window; its client reconnects.
+    const server = new HonoHttpServer(0, undefined, 3000);
+    server.getRawApp().get('/events', () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(': open\n\n'));
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } }));
+    await server.listen(0);
+    const conn = await rawConnection(server.getPort());
+    conn.socket.write('GET /events HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n');
+    await sleep(100);
+    expect(splitResponse(conn.received()).head, 'the stream is open').toMatch(/^HTTP\/1\.1 200/);
+
+    const t0 = Date.now();
+    await server.close();
+    await conn.ended;
+    expect(Date.now() - t0).toBeLessThan(1000); // released at drain start, not at the 3 s window
   });
 });

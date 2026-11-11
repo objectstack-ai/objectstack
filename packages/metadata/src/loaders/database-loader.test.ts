@@ -311,6 +311,70 @@ describe('DatabaseLoader', () => {
     });
   });
 
+  describe('delete scoped to one package (ADR-0150 D4, #32198)', () => {
+    it('keeps the row when it holds another package\'s item, and deletes it when it holds that package\'s', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'beta', _packageId: 'com.acme.beta' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect((await loader.load('agent', 'helper')).data).toMatchObject({ label: 'beta' });
+
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.beta' });
+      expect((await loader.load('agent', 'helper')).data).toBeNull();
+    });
+
+    it('reads the package off a stored envelope\'s `packageId` as well as the `_packageId` stamp', async () => {
+      await loader.save('agent', 'helper', { packageId: 'com.acme.beta', metadata: { name: 'helper' } });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect(await loader.exists('agent', 'helper')).toBe(true);
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.beta' });
+      expect(await loader.exists('agent', 'helper')).toBe(false);
+    });
+
+    it('keeps a row it cannot attribute to the package (a package-less row is a customization, D4)', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'env' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect(await loader.exists('agent', 'helper')).toBe(true);
+    });
+
+    it('CONTROL: with no package it deletes by name, as before', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', _packageId: 'com.acme.beta' });
+      await loader.delete('agent', 'helper');
+      expect(await loader.exists('agent', 'helper')).toBe(false);
+    });
+
+    // [#32246 item 5] The loader now fills `package_id`, so the column branch
+    // of the row's package is live: a customization's body names no package.
+    it('reads the package off the `package_id` column — a package-less customization in a holder\'s row goes with that holder (#32246)', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
+      await loader.save('agent', 'helper', { name: 'helper', label: 'customized' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.beta' });
+      expect((await loader.load('agent', 'helper')).data).toMatchObject({ label: 'customized' });
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect(await loader.exists('agent', 'helper')).toBe(false);
+    });
+
+    it('keeps a row per package, its own unscoped reads answer the one saved last, and a delete naming no package of a name two packages hold is refused (#32246)', async () => {
+      await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
+      await loader.save('agent', 'helper', { name: 'helper', label: 'beta', _packageId: 'com.acme.beta' });
+      expect((await loader.loadSlots('agent', 'helper')).map((slot) => [slot.packageId, slot.data.label])).toEqual([
+        ['com.acme.alpha', 'alpha'],
+        ['com.acme.beta', 'beta'],
+      ]);
+      // One item per name, the one saved last, as when the loader kept one row
+      // (`load` asks for the highest version; the endpoint pins read it on a
+      // driver that orders).
+      expect(await loader.list('agent')).toEqual(['helper']);
+      expect((await loader.loadMany('agent')).map((item: any) => item.label)).toEqual(['beta']);
+      expect((await loader.loadManyKeyed('agent')).map((entry) => [entry.name, entry.data.label])).toEqual([['helper', 'beta']]);
+      await loader.save('agent', 'helper', { name: 'helper', label: 'alpha again', _packageId: 'com.acme.alpha' });
+      expect((await loader.loadManyKeyed('agent')).map((entry) => entry.data.label)).toEqual(['alpha again']);
+
+      await expect(loader.delete('agent', 'helper')).rejects.toMatchObject({ status: 409 });
+      expect(await loader.loadSlots('agent', 'helper')).toHaveLength(2);
+      await loader.delete('agent', 'helper', { packageId: 'com.acme.alpha' });
+      expect((await loader.load('agent', 'helper')).data).toMatchObject({ label: 'beta' });
+    });
+  });
+
   describe('exists', () => {
     it('should return false for non-existent items', async () => {
       expect(await loader.exists('object', 'nope')).toBe(false);

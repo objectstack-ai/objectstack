@@ -25,7 +25,7 @@ import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/secu
 import { SeedLoaderService } from './seed-loader.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
-import { connectPackageDatasources } from './declared-datasources.js';
+import { connectPackageDatasources, recordBootDatasourceConnect } from './declared-datasources.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
 import { describeSeedLocale, resolveSeedLocaleForLoad } from './seed-locale.js';
 import { declareSeedSource, recordOrganizationReplay, type SeedLandingReport } from './seed-settlement.js';
@@ -1107,6 +1107,9 @@ export class AppPlugin implements Plugin {
                 objects: Array.isArray(declaredObjects) ? declaredObjects : [],
                 mappedObjects,
             });
+            // A connection opened here, before any `start()`, serves its name
+            // for every package this boot composes that declares it too.
+            recordBootDatasourceConnect(ctx, appId, () => this.codeDefinedDatasourceOwners(ctx), results);
             const connected = results.filter((r) => r.status === 'connected');
             if (connected.length > 0) {
                 ctx.logger.info('Auto-connected declared datasources', {
@@ -1657,6 +1660,24 @@ export class AppPlugin implements Plugin {
                     // already handed the `manifest` service, so the registry and
                     // this registrar cannot read two conversions of one bundle.
                     const securityBundle: any = this.forwardConverted(ctx).definition;
+                    // [ADR-0150 D3/D4, #32162] A permission set is stored per
+                    // `(package, name)` in the metadata service
+                    // (`PACKAGE_SLOTTED_STORE_TYPES`), and an item fills its
+                    // package's slot only when it carries its package. So each
+                    // set is stamped with the stack's own package — the id
+                    // `registerApp` installs it under, as the artifact door
+                    // stamps — or two packages' sets of one name would share
+                    // the bare slot and a read naming one package
+                    // (`/meta/permission/NAME?package=`) would be served the set
+                    // registered last. The stack's own package always wins: a
+                    // body that wears another package's `_packageId` is filed
+                    // in the stack's slot, never in that package's, so no stack
+                    // can have `?package=<another>` serve its set (the engine
+                    // seam refuses such a body at `registerApp`,
+                    // `collectionItemOwnerStampRefusal`; this registrar does not
+                    // judge it a second time). The other three collections keep
+                    // their bytes.
+                    const permissionOwner = artifactPackageId(this.bundle.manifest || this.bundle);
                     let count = 0;
                     for (const [field, type] of SECURITY_FIELDS) {
                         const arr = securityBundle?.[field];
@@ -1678,7 +1699,13 @@ export class AppPlugin implements Plugin {
                             members = arr.length;
                             for (const item of arr) {
                                 if (!item?.name) { dropped += 1; continue; }
-                                metadata.registerInMemory(type, item.name, item);
+                                metadata.registerInMemory(
+                                    type,
+                                    item.name,
+                                    type === 'permission' && permissionOwner
+                                        ? { ...item, _packageId: permissionOwner }
+                                        : item,
+                                );
                                 count += 1;
                             }
                         }

@@ -444,7 +444,7 @@ describe('install-local refuses an enabled job whose pull does not bind, by the 
 
         expect(res.status).toBe(422);
         expect(res.payload.error.code).toBe('VALIDATION_ERROR');
-        expect(res.payload.error.message).toContain(`its enabled job '${PULL_JOB.name}' (pull.mapping: mapping 'orders_pull' declares no connectorSource`);
+        expect(res.payload.error.message).toContain(`its enabled job '${PULL_JOB.name}' (pull.mapping: mapping 'orders_pull' declares no source`);
         expect(registered(register)).toEqual([]);
         expect(jobs.svc.schedule).not.toHaveBeenCalled();
     });

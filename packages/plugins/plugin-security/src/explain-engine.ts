@@ -24,6 +24,7 @@ import {
   isGrantExpired,
   derivePosture as deriveAdminPosture,
   catalogEntryAddress,
+  holdsPlatformPermissionSet,
   permissionSetSwitchedOff,
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
@@ -161,13 +162,14 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *         role positions are a provisioning source only and are no longer read
  *         as posture evidence — closing the same #2836 dual-track explain-side.
  */
-function derivePosture(context: any): AuthzPosture {
+function derivePosture(ql: unknown, context: any): AuthzPosture {
   if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
   if (isAuthzPosture(context?.posture)) return context.posture;
-  const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [ADR-0150 D3] The PLATFORM's organization-administrator set, as the
+    // resolver reads the rung: another package's set of that name confers none.
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => holdsPlatformPermissionSet(ql, context, n)),
     // [Ruling of record 6355206139] The same evidence the resolver reads: the
     // projected `org_external` identity.
     isExternal: holdsExternalPosition(context?.positions),
@@ -277,6 +279,33 @@ const EXPLAIN_TO_ENGINE_OP: Record<ExplainOperation, string> = {
  */
 function dataOpOf(operation: ExplainOperation, engineOp: string): string {
   return operation === 'export' ? 'find' : engineOp;
+}
+
+/**
+ * [Ruling of record 6755714726 on #32004] The object grant the `object_crud`
+ * layer reports for `engineOp`, asked of one set list.
+ *
+ * A `transfer` is reported only where the record could be edited AND its
+ * owner changed: its door is the by-id update of `owner_id`, which is admitted
+ * by the update grant (edit, which implies read) and then by the ownership
+ * gate's transfer grant. The evaluator's `transfer` cell is the second half
+ * alone — the grant that gate reads on an update and on an insert naming
+ * another owner (ADR-0142's create-and-assign), and it stays exactly that — so
+ * the composition lives here, in the explanation, and enforcement is unchanged.
+ * Both halves are asked of the same set list, as the door asks them: the edit
+ * may come from one set and the transfer grant from another. Every other
+ * operation is its evaluator cell, unchanged.
+ */
+function objectGrantOf(
+  evaluator: PermissionEvaluator,
+  engineOp: string,
+  object: string,
+  sets: PermissionSet[],
+  opts: { isPrivate?: boolean },
+): boolean {
+  const grant = evaluator.checkObjectPermission(engineOp, object, sets, opts);
+  if (engineOp !== 'transfer') return grant;
+  return grant && evaluator.checkObjectPermission('update', object, sets, opts);
 }
 
 export interface ExplainEngineDeps {
@@ -1816,7 +1845,7 @@ async function applyRecordAttribution(
     declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
-  const posture = derivePosture(context);
+  const posture = derivePosture(deps.ql, context);
 
   const record = deps.fetchRecord
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
@@ -3011,11 +3040,14 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   }
 
   // ── 3. object_crud — the core grant, with per-set attribution ─────────
-  const agentCrud = deps.evaluator.checkObjectPermission(engineOp, object, sets, { isPrivate: secMeta.isPrivate });
+  // [Ruling of record 6755714726 on #32004] A `transfer` is the grant of edit
+  // AND of the transfer grant ({@link objectGrantOf}); every other operation
+  // is its evaluator cell.
+  const agentCrud = objectGrantOf(deps.evaluator, engineOp, object, sets, { isPrivate: secMeta.isPrivate });
   // [ADR-0090 D10] Both principals must grant the CRUD op; the agent may not
   // act beyond the delegator's own reach (and vice-versa).
   const delegatorCrud = delegatorSets
-    ? deps.evaluator.checkObjectPermission(engineOp, object, delegatorSets, { isPrivate: secMeta.isPrivate })
+    ? objectGrantOf(deps.evaluator, engineOp, object, delegatorSets, { isPrivate: secMeta.isPrivate })
     : true;
   // [#3545] An UNRESOLVED posture is a denial in the middleware, so it must read
   // as one here too — explain and enforcement disagreeing on a security surface
@@ -3033,11 +3065,27 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
     ? await deps.delegatedUnitReadScope(sets, object, engineOp, context, delegatorSets).catch(() => null)
     : null;
   const crudAllowed = (agentCrud || delegatedUnitScope !== null) && delegatorCrud && !delegatorRefused && !postureUnresolved;
+  const setsGranting = (op: string): string[] => sets
+    .filter((s) => deps.evaluator.checkObjectPermission(op, object, [s], { isPrivate: secMeta.isPrivate }))
+    .map((s: any) => String(s.name ?? '?'));
+  // [Ruling of record 6755714726 on #32004] A transfer's two halves may come
+  // from two sets, so each half names its own: the sets granting edit, and the
+  // sets holding the transfer grant. A set is attributed only where the
+  // composition holds: the transfer grant without edit grants no transfer.
+  const transferHalves = engineOp === 'transfer' && !postureUnresolved
+    ? { edit: setsGranting('update'), grant: setsGranting('transfer') }
+    : undefined;
   const granting = postureUnresolved
     ? []
-    : sets
-        .filter((s) => deps.evaluator.checkObjectPermission(engineOp, object, [s], { isPrivate: secMeta.isPrivate }))
-        .map((s: any) => String(s.name ?? '?'));
+    : transferHalves
+      ? agentCrud
+        ? sets.map((s: any) => String(s.name ?? '?')).filter((n) => transferHalves.edit.includes(n) || transferHalves.grant.includes(n))
+        : []
+      : setsGranting(engineOp);
+  // Read only where the agent's own sets hold the transfer grant and grant no edit.
+  const transferGrantWithoutEdit = transferHalves !== undefined
+    && deps.evaluator.checkObjectPermission('transfer', object, sets, { isPrivate: secMeta.isPrivate })
+    && !deps.evaluator.checkObjectPermission('update', object, sets, { isPrivate: secMeta.isPrivate });
   layers.push({
     layer: 'object_crud',
     verdict: crudAllowed ? 'grants' : 'denies',
@@ -3046,7 +3094,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
         ? `No resolved permission set grants ${operation} on '${object}'; the business units the principal's ` +
           `delegated admin scope covers are read as delegated administration (ADR-0090 D12), and no other ` +
           `(see readFilter).`
-        : `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
+        : (transferHalves
+          ? `${operation} on '${object}' is granted: edit by [${transferHalves.edit.join(', ')}] and the transfer ` +
+            `grant by [${transferHalves.grant.join(', ')}]`
+          : `${operation} on '${object}' is granted by [${granting.join(', ')}]`) +
           (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
       : postureUnresolved
         // [#10401] One wording, shared with the middleware's own throw, so
@@ -3062,7 +3113,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
                 `runs in — D10 fails closed (access denied).`
               : agentCrud && !delegatorCrud
                 ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
-                : `No resolved permission set grants ${operation} on '${object}'` +
+                : transferGrantWithoutEdit
+                  ? `No resolved permission set grants edit on '${object}'. A transfer is an update of the record's ` +
+                    `owner, so it needs edit beside the transfer grant: the transfer grant alone transfers no record.`
+                  : `No resolved permission set grants ${operation} on '${object}'` +
                   (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
     contributors: granting.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
   });

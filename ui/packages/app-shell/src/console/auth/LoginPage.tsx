@@ -165,7 +165,9 @@ export function LoginPage() {
         // An invitee's header is drawn above the prompt, below.
         hideHeader={invitationRedirect}
         linkComponent={RouterLink}
-        errorMessages={signInRefusalMessages(t)}
+        // No mail leaves the deployment: the wrong-password copy names the
+        // administrator, not a reset (`features.emailDelivery`).
+        errorMessages={signInRefusalMessages(t, { emailDelivery: authConfig?.features?.emailDelivery })}
         labels={{
           emailLabel: t('auth.login.emailLabel'),
           emailPlaceholder: t('auth.login.emailPlaceholder'),
@@ -200,6 +202,7 @@ export function LoginPage() {
           usePhoneOtpText: t('auth.login.usePhoneOtpText'),
           usePasswordSignInText: t('auth.login.usePasswordSignInText'),
           ssoButton: t('auth.login.ssoButton'),
+          ssoEmailRequiredText: t('auth.login.ssoEmailRequiredText'),
           ssoOnlyDescription: t('auth.login.ssoOnlyDescription'),
           usePasswordText: t('auth.login.usePasswordText'),
           backToSsoText: t('auth.login.backToSsoText'),

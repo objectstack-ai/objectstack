@@ -20,7 +20,8 @@
  * and then swapped in, so a re-export first deletes the old directory and
  * nothing stale survives (see {@link APP_LAYOUT}):
  *
- *   apps/<id>/README.md               what the app is, the driver that ran it ({@link driverText}), its scorecard, the files
+ *   apps/<id>/README.md               what the app is, the driver that ran it ({@link driverText}), what its authoring cost
+ *                                     ({@link authorCostText}: stated only when every authoring turn reported a cost), its scorecard, the files
  *   apps/<id>/source/…                the authored metadata source (`source.ts`)
  *   apps/<id>/run-record.json         the run record, the work directories redacted (`workDirsOf`)
  *   apps/<id>/scorecard.json|.md      the per-half scorecard
@@ -50,7 +51,7 @@ import { scenarioNamespace } from '../schema.js';
 import type { Recording } from '../runner/driver.js';
 import { modeDir } from '../runner/orchestrate.js';
 import { readArtifact } from '../runner/project.js';
-import { renderScorecard, type CardScorecard } from '../runner/scorecard.js';
+import { authorCostText, renderScorecard, type CardScorecard } from '../runner/scorecard.js';
 import { APP_LAYOUT } from './contract.js';
 import { GALLERY_GUARD, type GalleryGuard } from './generic.js';
 import { parseIndex, serializeIndex, type GalleryApp, type GalleryIndex } from './manifest.js';
@@ -141,6 +142,7 @@ function appReadme(scenario: LoadedScenario, record: ScenarioRunRecord, entry: G
     `- Scenario: \`${c.id}\` · business functions ${c.businessFunctions.map((f) => `\`${f}\``).join(', ')} · namespace \`${entry.namespace}\``,
     `- Framework: @objectstack/spec ${entry.framework.version} (runner checkout ${entry.framework.runner}) · run ${entry.run} on ${entry.runDate}`,
     `- Driver: ${driverText(record.env.driver)}`,
+    `- Author cost (as the driver reported it): ${authorCostText(scorecard.authorCost)}`,
     `- 问数: ${entry.qa.questions} questions, ${entry.qa.turns} persona turns · ${entry.operations} write operations`,
     '',
     '## The requirement',

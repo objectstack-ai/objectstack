@@ -27,6 +27,11 @@ import { AuthProvider } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
 import { AuthLayout } from '../AuthLayout';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 

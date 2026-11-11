@@ -84,12 +84,14 @@ import type { FlowFailureDetails } from '@objectstack/spec/api';
 // nothing on an assembly where the protocol plugin is absent, which is exactly
 // when the fallback runs.
 import { recordNotFoundError, omitInternalFieldsFromWriteResponse } from '@objectstack/metadata-protocol';
+// [#31697] The environment store's rows are the resync's: a legacy organization's rows left out off the physical column.
+import { readLegacyOrganizationRows } from '@objectstack/metadata-core';
 import { serveStoredMetadataRead, serveStoredMetadataReadsThrough } from './stored-metadata-reader-seam.js';
 import { actionInvocationBranch, actionInvocationFailure, actionInvocationTarget, recordActionInvocation, withActionSurface } from './action-invocation-audit.js';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 // The ONE admitted sequence every action door shares; `invokeBusinessAction`
 // below is its MCP door (posture `ai`).
-import { refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
+import { addressedUnknownNameRefusal, refusalOfThrown, refuseDispatchToDisabledObject, runResolvedAction, type ActionRefusal } from './action-dispatch.js';
 import { admittingCredentialKind, type AdmittingCredentialKind } from './security/admitting-credential.js';
 import {
     GLOBAL_ACTION_OBJECT_KEY,
@@ -4510,13 +4512,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     const objectsListing = await readObjects?.();
     const resolved = await resolveActionByName(
         deps, meta, name, input?.objectName, objectsListing, await readActions?.(), qualifier,
+        environmentStoredActionNames(await deps.getObjectQL(requestContext, envId).catch(() => null)),
     );
     if (!resolved && !askedObject) {
         // No object named: nothing for the shared undeclared answer to name.
         // Refused `404` as the REST door refuses a name nothing declares.
-        throw Object.assign(new Error(`Action '${name}' not found`), {
-            code: standardErrorCodeForHttpStatus(404), status: 404,
-        });
+        throw objectlessNameNotFoundError(name);
     }
     // [ADR-0150 D4] Set only for a qualified call: the resolved holder's
     // package, whose handler the dispatch runs (the engine's package key).
@@ -4560,6 +4561,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
         objectName,
         actionName: name,
         declaration: { action, obj, ...(packageId !== undefined ? { packageId } : {}) },
+        // [ADR-0106 D1] This door's answer for a name nothing declares, where
+        // it is not the shared undeclared `404`: an action the caller is not
+        // shown is answered with it.
+        ...(qualifier
+            ? { unknownName: addressedUnknownNameRefusal(name, input?.objectName, qualifier) }
+            : askedObject ? {} : { unknownName: refusalOfThrown(objectlessNameNotFoundError(name)) }),
         body: { params, ...(recordId !== undefined ? { recordId } : {}) },
         confirmation: input,
         ql: engine,
@@ -4628,6 +4635,17 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 }
 
 /**
+ * The MCP `run_action` door's `404` for a name nothing declares, on a call
+ * naming no object — and, [ADR-0106 D1], for an action the caller is not
+ * shown, on such a call ({@link invokeBusinessAction}).
+ */
+function objectlessNameNotFoundError(name: string): Error & { code: string; status: number } {
+    return Object.assign(new Error(`Action '${name}' not found`), {
+        code: standardErrorCodeForHttpStatus(404), status: 404,
+    });
+}
+
+/**
  * The MCP bridge's throw for a refusal of the shared sequence: an `Error`
  * carrying the ADR-0112 envelope's `code` + `status`, and the refusal's
  * `details` and `userMessage` — what the `run_action` tool renders through the
@@ -4688,6 +4706,12 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
      * by name. Omitted, the bare name resolves as below.
      */
     qualifier?: ActionAddressQualifier,
+    /**
+     * [#31697] Where a package-less declaration came from: the environment
+     * store's package-less names ({@link environmentStoredActionNames}).
+     * Omitted, every package-less declaration is the platform's.
+     */
+    environmentStore?: EnvironmentStoredActionNames,
 ): Promise<{ action: any; objectName: string; obj: any; packageId?: string } | null> {
     const decls = await collectActionDeclarations(deps, meta, objects, actions);
     if (qualifier) {
@@ -4698,16 +4722,11 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
     if (objectName) {
         const hits = decls.filter((d) => d.objectName === objectName && d.action?.name === name);
         if (hits.length === 0) return null;
-        // [ADR-0150 D3] Two packages' object-less action of one name: R's rule
-        // for a caller with no package, never the first listed.
-        if (isObjectLessActionKey(objectName)) return pickActionHolder(hits, name, false);
-        // ⛔ An object-bound pair two packages bind to ONE object keeps today's
-        // answer (the first declaration — the object's own, since the
-        // collector lists embedded rows first and keeps another package's
-        // standalone row beside it): its no-package refusal is the action
-        // family's own card (ADR-0150 "Covered and uncovered types", record
-        // 6729825528), not this door's.
-        return { action: hits[0].action, objectName, obj: hits[0].obj };
+        // [ADR-0150 D3/D5] Two holders' action of one name on one owner key —
+        // the object-less key, or ONE object two packages bind it to (#31697,
+        // epic ruling record 6729825528, letter A): R's rule for a caller with
+        // no package, a refusal naming both, never the first listed.
+        return pickActionHolder(hits, name, false, await packagelessOriginOf(hits, environmentStore));
     }
     const matches = decls.filter((d) => d.action?.name === name);
     if (matches.length === 0) return null;
@@ -4716,8 +4735,7 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
         const where = matches.map((m) => m.objectName).join(', ');
         throw new Error(`Action '${name}' exists on multiple objects (${where}); pass objectName to disambiguate`);
     }
-    if (isObjectLessActionKey(owners[0])) return pickActionHolder(matches, name, false);
-    return { action: matches[0].action, objectName: matches[0].objectName, obj: matches[0].obj };
+    return pickActionHolder(matches, name, false, await packagelessOriginOf(matches, environmentStore));
 }
 
 type ActionDeclarationRow = Awaited<ReturnType<typeof collectActionDeclarations>>[number];
@@ -4742,31 +4760,146 @@ export type ActionAddressQualifier =
  * `qualified` (the caller named a namespace) carries the holder's package to
  * the dispatch, so that package's handler runs; a bare call carries none and
  * dispatches unqualified, as before.
+ *
+ * [#31697, epic obligation record 6742974046] A declaration with no package is
+ * the ENVIRONMENT's only when it came from the environment's own store
+ * (`isEnvironmentRow`, {@link packagelessOriginOf}): the row's SOURCE, never a
+ * byte of the definition, which its author can write. Any other package-less
+ * declaration is code the host or a plugin registered with no package: the
+ * PLATFORM's (the engine's `(host)` handler coordinate, R2's owner-less
+ * function). On the OBJECT-LESS key the platform is one more holder beside
+ * the packages — alone it answers, beside a package holder the name is
+ * refused naming both; it never answers first, as the environment's own item
+ * does. With no `isEnvironmentRow`, every package-less declaration is the
+ * environment's, as before: the addressed calls, whose candidates are one
+ * holder's.
+ *
+ * [#31697, epic ruling record 6762267053 item 1] On an OBJECT-BOUND key the
+ * platform is not judged: only two packages are refused (ruling record
+ * 6729825528, letter A). Beside a platform declaration that is not refused,
+ * the answer is today's, the first declaration (the object's own, since the
+ * collector lists embedded rows first) — refusing a platform declaration
+ * beside a package's on one object is the maintainer's to rule.
  */
 function pickActionHolder(
     hits: readonly ActionDeclarationRow[],
     name: string,
     qualified: boolean,
+    isEnvironmentRow: (row: ActionDeclarationRow) => boolean = () => true,
 ): { action: any; objectName: string; obj: any; packageId?: string } {
     const holdings: Array<readonly [string | null, ActionDeclarationRow]> = [];
     const held = new Set<string | null>();
+    let platform: ActionDeclarationRow | undefined;
     for (const hit of hits) {
+        if (hit.packageId === undefined && !isEnvironmentRow(hit)) {
+            platform ??= hit; // the platform holds a name once: its first declaration
+            continue;
+        }
         const holder = hit.packageId ?? null;
         if (held.has(holder)) continue; // one holder holds a name once: its first declaration
         held.add(holder);
         holdings.push([holder, hit]);
     }
+    const objectLess = hits.length > 0 && isObjectLessActionKey(hits[0].objectName);
+    const holders = packageScopedHolderSource(holdings);
     const resolution = resolvePackageScopedHolders<ActionDeclarationRow>(
         { type: 'action', name, callerPackageId: null },
-        packageScopedHolderSource(holdings),
+        platform !== undefined && objectLess ? { ...holders, platformItem: () => platform } : holders,
         // A caller with no package is never asked for a closure.
         () => new Set<string>(),
     );
     if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
-    const hit = resolution.status === 'resolved' ? resolution.item : hits[0];
+    const hit = resolution.status === 'resolved' && (platform === undefined || objectLess) ? resolution.item : hits[0];
     return {
         action: hit.action, objectName: hit.objectName, obj: hit.obj,
         ...(qualified && hit.packageId !== undefined ? { packageId: hit.packageId } : {}),
+    };
+}
+
+/**
+ * [#31697] The action keys the environment's own store holds bound to no
+ * package — its active `sys_metadata` rows (ADR-0131 D6), a row's
+ * `package_id` column deciding its binding — read once, when a package-less
+ * declaration stands beside another holder ({@link packagelessOriginOf}).
+ * Keyed by the row's identity, never its bare name (review 6762242732 F5):
+ *
+ *  - `actions` — `OWNER:NAME` of each package-less standalone action row,
+ *    OWNER its owner key ({@link standaloneActionOwnerKey}: its object, or
+ *    {@link GLOBAL_ACTION_OBJECT_KEY} when object-less);
+ *  - `embedded` — `OBJECT:NAME` of each action a package-less object row
+ *    embeds.
+ */
+export type EnvironmentStoredActionNames = () => Promise<{ actions: ReadonlySet<string>; embedded: ReadonlySet<string> }>;
+
+/**
+ * [#31697] {@link EnvironmentStoredActionNames} over the engine's own read of
+ * the store — the rows the engine plugin's authored-action resync binds
+ * (`type: 'action'`, its legacy plural when none, and `type: 'object'`;
+ * `state: 'active'`; the system opt-in), leaving a legacy organization's rows
+ * out off the physical column as the resync does (ADR-0131 D6/D7). A row whose
+ * body does not parse names nothing. `undefined` on a host whose engine has
+ * no `find`. A read that throws travels to the caller: the store failing to
+ * answer is never read as "no row" (ADR-0110 D3).
+ */
+export function environmentStoredActionNames(ql: any): EnvironmentStoredActionNames | undefined {
+    if (typeof ql?.find !== 'function') return undefined;
+    const read = async (type: string): Promise<any[]> =>
+        (await ql.find('sys_metadata', { where: { type, state: 'active' }, context: { isSystem: true } })) ?? [];
+    const body = (row: any): any => {
+        try {
+            return typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+        } catch {
+            return undefined;
+        }
+    };
+    const packageless = (row: any): boolean => row?.package_id === null || row?.package_id === undefined || row?.package_id === '';
+    return async () => {
+        let actionRows = await read('action');
+        if (actionRows.length === 0) actionRows = await read('actions');
+        const objectRows = await read('object');
+        const legacy = actionRows.length + objectRows.length === 0
+            ? new Set<string>()
+            : new Set((await readLegacyOrganizationRows(ql.getDriverForObject?.('sys_metadata'))).keys());
+        const actions = new Set<string>();
+        const embedded = new Set<string>();
+        for (const row of actionRows) {
+            if (!packageless(row) || legacy.has(String(row?.id))) continue;
+            const action = body(row);
+            const name = typeof action?.name === 'string' ? action.name : row?.name;
+            if (typeof name === 'string') actions.add(`${standaloneActionOwnerKey(action)}:${name}`);
+        }
+        for (const row of objectRows) {
+            if (!packageless(row) || legacy.has(String(row?.id))) continue;
+            const obj = body(row);
+            const objectName = typeof obj?.name === 'string' ? obj.name : row?.name;
+            if (typeof objectName !== 'string' || !Array.isArray(obj?.actions)) continue;
+            for (const action of obj.actions) {
+                if (typeof action?.name === 'string') embedded.add(`${objectName}:${action.name}`);
+            }
+        }
+        return { actions, embedded };
+    };
+}
+
+/**
+ * [#31697] Which package-less declarations among `hits` came from the
+ * environment's store: a standalone row whose owner key and name the store
+ * holds bound to no package, or an action embedded in an object the store
+ * holds so — that embeds that action. Read only when a package-less
+ * declaration stands beside another holder — the only case the answer changes
+ * ({@link pickActionHolder}); otherwise, and with no `store`, none did.
+ */
+async function packagelessOriginOf(
+    hits: readonly ActionDeclarationRow[],
+    store: EnvironmentStoredActionNames | undefined,
+): Promise<(row: ActionDeclarationRow) => boolean> {
+    const none = () => false;
+    if (store === undefined || !hits.some((d) => d.packageId === undefined) || hits.length < 2) return none;
+    const { actions, embedded } = await store();
+    return (row) => {
+        const key = `${row.objectName}:${row.action?.name}`;
+        const isEmbedded = Array.isArray(row.obj?.actions) && row.obj.actions.includes(row.action);
+        return isEmbedded ? embedded.has(key) : actions.has(key);
     };
 }
 
@@ -4796,7 +4929,7 @@ function resolveQualifiedActionDeclaration(
         );
     }
     const inNamespace = decls.filter((d) => d.action?.name === name && d.packageId !== undefined && owners.has(d.packageId));
-    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, `namespace '${namespace}'`), name, true);
+    return pickActionHolder(addressedActionHits(inNamespace, name, objectName, actionAddressScope(qualifier)), name, true);
 }
 
 /**
@@ -4811,7 +4944,27 @@ function resolveEnvironmentActionDeclaration(
     objectName: string | undefined,
 ): { action: any; objectName: string; obj: any; packageId?: string } {
     const own = decls.filter((d) => d.action?.name === name && d.packageId === undefined);
-    return pickActionHolder(addressedActionHits(own, name, objectName, 'the environment'), name, false);
+    return pickActionHolder(addressedActionHits(own, name, objectName, actionAddressScope({ environment: true })), name, false);
+}
+
+/** [ADR-0150 D5] The scope an addressed call names, as its refusals word it. */
+export function actionAddressScope(qualifier: ActionAddressQualifier): string {
+    return 'environment' in qualifier ? 'the environment' : `namespace '${qualifier.namespace}'`;
+}
+
+/**
+ * [ADR-0150 D5] The `404` an addressed call answers for a name its scope
+ * (`where`, {@link actionAddressScope}) declares none of — and, [ADR-0106 D1],
+ * for an action the caller is not shown, which is answered as one
+ * (`action-dispatch.ts`).
+ */
+export function addressedActionNotFoundError(name: string, objectName: string | undefined, where: string): Error & { code: string; status: number } {
+    return Object.assign(
+        new Error(objectName
+            ? `Action '${name}' not found on object '${objectName}' in ${where}`
+            : `Action '${name}' not found in ${where}`),
+        { code: standardErrorCodeForHttpStatus(404), status: 404 },
+    );
 }
 
 /**
@@ -4845,14 +4998,7 @@ function addressedActionHits(
             );
         }
     }
-    if (hits.length === 0) {
-        throw Object.assign(
-            new Error(objectName
-                ? `Action '${name}' not found on object '${objectName}' in ${where}`
-                : `Action '${name}' not found in ${where}`),
-            { code: standardErrorCodeForHttpStatus(404), status: 404 },
-        );
-    }
+    if (hits.length === 0) throw addressedActionNotFoundError(name, objectName, where);
     return hits;
 }
 
@@ -5462,6 +5608,16 @@ export interface RouteActionDeclaration {
     packageId?: string;
 }
 
+/**
+ * [#31697] The refusal a thrown {@link PackageScopedNameRefusedError} carries —
+ * also when it crossed a package boundary as another copy of the class (its
+ * `409 RESOURCE_CONFLICT` code and its `refusal`) — else `undefined`.
+ */
+function refusalOf(err: any): PackageScopedRefusal | undefined {
+    if (err instanceof PackageScopedNameRefusedError) return err.refusal;
+    return err?.code === 'RESOURCE_CONFLICT' && err?.refusal?.status === 'refused' ? err.refusal as PackageScopedRefusal : undefined;
+}
+
 /** Does `ql.registry` carry the reads R's resolver needs? */
 function packageScopedRegistryOf(ql: any): PackageScopedRegistry | undefined {
     const registry = ql?.registry;
@@ -5518,6 +5674,102 @@ async function resolveRouteActionByPackage(deps: ActionExecutionDeps,
     const declared = item !== null && typeof item === 'object' && item.name === actionName
         && (owner === objectName || isObjectLessActionKey(owner));
     return { action: declared ? item : undefined, obj, packageId };
+}
+
+/**
+ * [ADR-0150 D5, #31697; epic ruling record 6729825528, letter A] The bare
+ * `/actions/:object/:action` door's holder rule: the declarations the route's
+ * key reaches — bound to the routed object first, the object-less ones after
+ * (the order {@link resolveAddressedRouteActionDeclaration} reads, and the
+ * engine reaches a handler in) — read from the SAME declarations the MCP
+ * bridge and the addressed door read ({@link collectActionDeclarations} over
+ * the protocol's merged listings, else the metadata service's). With two or
+ * more declarations on the key, the answer is {@link pickActionHolder}'s, the
+ * one MCP's bare `run_action` gives: its refusal naming every holder (two
+ * packages on the key; on the object-less key, a package beside the
+ * platform), or the declaration it chose, which this door then serves — never
+ * the object's own by rung precedence (review 6762242732 F2). `undefined`
+ * when one declaration or none is on the key: the rungs of
+ * {@link resolveRouteActionDeclaration} read it as before.
+ *
+ * Fail closed (epic record 6762108144, review F1). A CAPABILITY that is
+ * absent judges nothing — no `protocol` with a merged listing and no
+ * `metadata` service with a listing (`listObjects` / `loadMany`), or a
+ * merged listing that fails for want of any metadata store — its engine
+ * registers no `sys_metadata` object ({@link listingNotServed}; the in-process
+ * fixtures that compose a bare engine). The test is the listing's own
+ * failure, never the engine's schema, so a kernel whose listing answers is
+ * judged whatever its topology (contract review G3). Any other read that THROWS
+ * once the capability is there is the metadata plane failing to answer
+ * (ADR-0110 D3): `degraded` (503), ⛔ never the rungs, which would serve the
+ * object's own declaration or the first registered while the refusal is
+ * skipped. So is a store read that throws while it is needed — an owner-less
+ * declaration beside another holder ({@link packagelessOriginOf}).
+ */
+async function bareRouteHolderRefusal(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    args: { objectName: string; actionName: string; envId?: string; obj: any },
+): Promise<RouteActionDeclaration | undefined> {
+    const { objectName, actionName, envId, obj } = args;
+    const degraded = (err: any): RouteActionDeclaration => ({ action: undefined, obj, degraded: true, reason: err?.message ?? String(err) });
+    // A service that does not resolve is absent: `resolveService` swallows its
+    // own resolution failures in production, and a host without the slot says
+    // the same thing by throwing.
+    const resolved = async (name: string): Promise<any> => {
+        try {
+            return await deps.resolveService(requestContext, name, envId);
+        } catch {
+            return undefined;
+        }
+    };
+    const protocol = await resolved('protocol');
+    const merged = typeof protocol?.getMetaItems === 'function';
+    let meta: any;
+    if (!merged) {
+        meta = await resolved('metadata');
+        if (typeof meta?.listObjects !== 'function' && typeof meta?.loadMany !== 'function') return undefined;
+    }
+    let decls: ActionDeclarationRow[];
+    try {
+        const objects = merged ? await readMergedItems(protocol, 'object') : undefined;
+        const actions = merged ? await readMergedItems(protocol, 'action') : undefined;
+        decls = await collectActionDeclarations(deps, meta, objects, actions);
+    } catch (err: any) {
+        // [contract review G3] A merged listing whose engine registers no
+        // metadata store at all is not served: it judges nothing, as an
+        // absent capability. Any other failure is the plane failing to answer.
+        if (merged && listingNotServed(err)) return undefined;
+        return degraded(err);
+    }
+    const named = decls.filter((d) => d.action?.name === actionName);
+    const bound = isObjectLessActionKey(objectName) ? [] : named.filter((d) => d.objectName === objectName);
+    const hits = bound.length > 0 ? bound : named.filter((d) => isObjectLessActionKey(d.objectName));
+    if (hits.length < 2) return undefined;
+    try {
+        const store = environmentStoredActionNames(await deps.getObjectQL(requestContext, envId).catch(() => null));
+        const picked = pickActionHolder(hits, actionName, false, await packagelessOriginOf(hits, store));
+        return { action: picked.action, obj };
+    } catch (err: any) {
+        if (err instanceof PackageScopedNameRefusedError) return { action: undefined, obj, refusal: err.refusal };
+        return degraded(err);
+    }
+}
+
+/**
+ * [#31697, contract review G3] Is a merged listing's failure the one that says
+ * the listing is not served at all: the protocol's engine registers no
+ * `sys_metadata` object (`OBJECT_NOT_FOUND` naming it, anywhere in the
+ * `cause` chain) — a bare engine with no metadata store behind it? Asked of
+ * the listing's own failure, not of the engine's schema: a kernel that serves
+ * the listing judges two holders whatever its topology (an `environmentId`
+ * kernel included), and only a listing that cannot be read for want of a
+ * store judges nothing.
+ */
+function listingNotServed(err: unknown): boolean {
+    for (let at: any = err, depth = 0; at && depth < 8; at = at.cause, depth++) {
+        if (at.code === 'OBJECT_NOT_FOUND' && String(at.message ?? '').includes('sys_metadata')) return true;
+    }
+    return false;
 }
 
 /**
@@ -5582,6 +5834,14 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
             ql, objectName, actionName, envId, callerPackageId, obj,
         });
         if (byPackage !== undefined) return byPackage;
+    } else {
+        // [ADR-0150 D5, #31697; epic ruling record 6729825528, letter A] A call
+        // that names no package, on a name two declarations hold on this
+        // route's key, answers what MCP's bare call answers — a refusal naming
+        // the holders, or the holder the rule chose — never the object's own
+        // by precedence.
+        const judged = await bareRouteHolderRefusal(deps, requestContext, { objectName, actionName, envId, obj });
+        if (judged !== undefined) return judged;
     }
     const embedded = Array.isArray(obj?.actions)
         ? obj.actions.find((a: any) => a?.name === actionName)
@@ -5613,6 +5873,18 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
         try {
             envelope = await byName.call(protocol, { type: 'action', name: actionName });
         } catch (err: any) {
+            // [#31697, review 6762242732 F4] The read's own refusal of a name
+            // two holders hold is that refusal, naming them — never an outage.
+            const refusal = refusalOf(err);
+            if (refusal !== undefined) {
+                // [ADR-0150 D3, #32244] …unless this route's key tells them
+                // apart: the bare read refuses a name two packages hold on
+                // ANY object key, and this route is one object's.
+                return routeOwnerOfRefusedRead(refusal, {
+                    obj, actionName, ownsRoute, objectName,
+                    readAt: (packageId) => byName.call(protocol, { type: 'action', name: actionName, packageId }),
+                });
+            }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
         }
         const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
@@ -5667,6 +5939,79 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
     }
 
     return { action: undefined, obj, degraded, reason };
+}
+
+/**
+ * [ADR-0150 D3, #32244] The declaration a route names when the protocol's bare
+ * by-name read refused its action name. That read cannot see the object, so it
+ * refuses a name two packages hold on any object key: A's `notify` on X beside
+ * B's `notify` on Y. The route can see the object. Each package candidate is
+ * read at its own address (`?package=`, which the disabled-package face
+ * withholds as the bare read does) and the route takes the one declaration
+ * that owns it, the object's own first and then an object-less one, the order
+ * the router reaches a handler in. `bareRouteHolderRefusal` has already found
+ * fewer than two holders on this route's key, so the call is not ambiguous.
+ *
+ * The refusal stands when a candidate is not a package (the platform's or the
+ * environment's item has no address of its own) or two candidates own the
+ * route on one rung. No candidate owning the route is no declaration, as when
+ * the bare read served another object's action. A candidate its own address
+ * says it does not hold (`not-held-by-qualifier`) owns nothing, so another
+ * candidate that owns the route answers; with none, the bare read's refusal
+ * stands, since the unread candidate may own it. Any other refusal of a
+ * candidate's own address leaves its action unknown, so the bare read's
+ * refusal stands whatever the others answer. A candidate read that throws
+ * anything else is an outage, as the bare read's throw would be.
+ */
+async function routeOwnerOfRefusedRead(
+    refusal: PackageScopedRefusal,
+    args: {
+        obj: any;
+        actionName: string;
+        objectName: string;
+        ownsRoute: (action: any) => boolean;
+        readAt: (packageId: string) => Promise<unknown>;
+    },
+): Promise<RouteActionDeclaration> {
+    const { obj, actionName, objectName, ownsRoute, readAt } = args;
+    if (refusal.candidates.length < 2 || refusal.candidates.some((c) => c.kind !== 'package')) {
+        return { action: undefined, obj, refusal };
+    }
+    const owners: any[] = [];
+    let unread = false;
+    for (const candidate of refusal.candidates) {
+        if (candidate.kind !== 'package') continue;
+        let envelope: unknown;
+        try {
+            envelope = await readAt(candidate.packageId);
+        } catch (err: any) {
+            // [review 6781770671 S1] A candidate its own address says it does
+            // not hold (`not-held-by-qualifier`: the store holds a package's
+            // item the registry does not, so `?package=` names another holder)
+            // owns nothing here. Its refusal is about a package the caller
+            // never named, never this route's answer.
+            // [epic red-line read 6784464520 R1] Any other refusal says the
+            // candidate's own address cannot be told: its action is unknown
+            // and may own this route beside another candidate's, so serving
+            // the other would pick. The bare read's refusal stands.
+            const refused = refusalOf(err);
+            if (refused !== undefined) {
+                if (refused.reason !== 'not-held-by-qualifier') return { action: undefined, obj, refusal };
+                unread = true;
+                continue;
+            }
+            return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
+        }
+        const item: any = (envelope as { item?: unknown } | null | undefined)?.item;
+        if (item !== null && typeof item === 'object' && item.name === actionName && ownsRoute(item)) owners.push(item);
+    }
+    const bound = owners.filter((item) => !isObjectLessActionKey(standaloneActionOwnerKey(item)) && standaloneActionOwnerKey(item) === objectName);
+    const rung = bound.length > 0 ? bound : owners.filter((item) => isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    if (rung.length === 1) return { action: rung[0], obj };
+    // A candidate that could not be read may own the route: with no other
+    // owner, the bare read's refusal stands rather than "no declaration".
+    if (rung.length === 0) return unread ? { action: undefined, obj, refusal } : { action: undefined, obj };
+    return { action: undefined, obj, refusal };
 }
 
 /**

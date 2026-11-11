@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, within, fireEvent } from '@testing-library/react';
 import { DatasetWidget, buildDrillFilter, buildPivot, pivotCellKey, toCsv } from '../DatasetWidget';
+import { DashboardRenderer } from '../DashboardRenderer';
 // The drill-through case below mounts DrillDownDrawer's record list, which is
 // rendered through the component registry. Imported at module scope, not in a
 // hook: the cold transform must not be billed to a bounded test/hook budget
@@ -1228,5 +1229,88 @@ describe('DatasetWidget table drill — measure drill scopes (#30615)', () => {
     fireEvent.click(screen.getByTestId('dataset-drill-cell'));
     await waitFor(() => expect(src.find).toHaveBeenCalled());
     expect(sentFilter(src)).toEqual({ $and: [{ status: 'paid' }, { $and: [{ status: 'sent' }, { region: 'emea' }] }] });
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * objectstack#32077 (ADR-0150 D5) — a dataset query names the package of the
+ * dashboard it belongs to, as served (`_packageId`), so a dataset name two
+ * packages hold reaches each dashboard's own dataset. A dashboard authored in
+ * the environment sends no package, and the server's refusal for a name two
+ * packages hold is shown as it came, naming both, never retried bare.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe('DatasetWidget — the dashboard\'s package on its dataset query (objectstack#32077)', () => {
+  const salesDashboard = (packageId?: string) => ({
+    type: 'dashboard',
+    name: 'sales_overview',
+    ...(packageId !== undefined ? { _packageId: packageId } : {}),
+    widgets: [{ id: 'revenue_tile', type: 'metric', title: 'Revenue', dataset: 'sales', values: ['revenue'] }],
+  }) as any;
+
+  /** Two packages each ship a `sales` dataset; the adapter answers per qualifier, as the server's exact read does. */
+  const twoHolderSource = () => ({
+    queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
+      if (options?.packageId === 'com.acme.alpha') return { rows: [{ revenue: 111 }] };
+      if (options?.packageId === 'com.acme.beta') return { rows: [{ revenue: 222 }] };
+      throw new Error(
+        'Dataset query failed: 409 Conflict — dataset "sales" is held by 2 packages in this environment and the caller '
+        + 'names no package: package "com.acme.alpha", package "com.acme.beta". Nothing picks one of them: address it by its package.',
+      );
+    }),
+  });
+
+  it('two packages hold one dataset name: each dashboard queries its own, under its own package', async () => {
+    const src = twoHolderSource();
+    const { unmount } = render(<DashboardRenderer schema={salesDashboard('com.acme.alpha')} dataSource={src} />);
+    expect(await screen.findByText('111')).toBeInTheDocument();
+    unmount();
+    render(<DashboardRenderer schema={salesDashboard('com.acme.beta')} dataSource={src} />);
+    expect(await screen.findByText('222')).toBeInTheDocument();
+    expect(src.queryDataset.mock.calls.map((c) => [c[0], c[2]])).toEqual([
+      ['sales', { packageId: 'com.acme.alpha' }],
+      ['sales', { packageId: 'com.acme.beta' }],
+    ]);
+  });
+
+  it.each([
+    ['no _packageId', undefined],
+    ['the package-less sentinel', 'sys_metadata'],
+  ])('a dashboard authored in the environment (%s) sends no package', async (_label, packageId) => {
+    const src = makeSource(async () => ({ rows: [{ revenue: 5 }] }));
+    render(<DashboardRenderer schema={salesDashboard(packageId)} dataSource={src} />);
+    expect(await screen.findByText('5')).toBeInTheDocument();
+    expect(src.queryDataset).toHaveBeenCalledTimes(1);
+    expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
+  });
+
+  it('a dashboard in P whose dataset only P\'s dependency holds sends ?package=P and shows the 409, never retried bare (interim, ruling A)', async () => {
+    // `?package=` is the exact qualifier (ADR-0150 D5), not the D3 closure
+    // read: the server refuses a package that does not hold the name, naming
+    // the holder. Follow-ups #32310 / #32311 restore the dependency case.
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
+        if (options?.packageId === undefined) return { rows: [{ revenue: 999 }] };
+        throw new Error(
+          `Dataset query failed: 409 Conflict — dataset "sales" is not held by package "${options.packageId}", which the `
+          + 'address names exactly (ADR-0150 D5): it is held by package "com.acme.lib". Address it by its holder.',
+        );
+      }),
+    };
+    render(<DashboardRenderer schema={salesDashboard('com.acme.app')} dataSource={src} />);
+    const alert = await screen.findByText(/is not held by package "com\.acme\.app"/);
+    expect(alert.textContent).toContain('com.acme.lib');
+    expect(screen.queryByText('999')).not.toBeInTheDocument();
+    expect(src.queryDataset).toHaveBeenCalledTimes(1);
+    expect(src.queryDataset.mock.calls[0][2]).toEqual({ packageId: 'com.acme.app' });
+  });
+
+  it('a widget with no package, where two packages hold the name, shows the conflict naming both, queried once', async () => {
+    const src = twoHolderSource();
+    render(<DatasetWidget widget={{ type: 'metric', dataset: 'sales', values: ['revenue'] }} dataSource={src} />);
+    const alert = await screen.findByText(/held by 2 packages/);
+    expect(alert.textContent).toContain('com.acme.alpha');
+    expect(alert.textContent).toContain('com.acme.beta');
+    expect(src.queryDataset).toHaveBeenCalledTimes(1);
+    expect(src.queryDataset.mock.calls[0]).toHaveLength(2);
   });
 });

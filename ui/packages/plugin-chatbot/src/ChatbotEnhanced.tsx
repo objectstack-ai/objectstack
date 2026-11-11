@@ -21,7 +21,7 @@ import * as React from 'react';
 import { cn, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
 import { SchemaRenderer } from '@object-ui/react';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
-import { AlertCircle, ArrowRight, Copy, Check, RefreshCw, CornerDownLeft, Bot, Eye, GitCompareArrows, Rocket, Clock3, CheckCircle2, ChevronDown, XCircle, Loader2, ShieldCheck, TriangleAlert, ClipboardList, HelpCircle, Info, Table2, WifiOff, Sparkles, Hourglass } from 'lucide-react';
+import { AlertCircle, ArrowRight, Copy, Check, RefreshCw, CornerDownLeft, Bot, Eye, GitCompareArrows, Rocket, Clock3, CheckCircle2, ChevronDown, XCircle, Loader2, ShieldCheck, TriangleAlert, ClipboardList, HelpCircle, Info, Table2, WifiOff, Sparkles, Hourglass, Trash2 } from 'lucide-react';
 import type { ChatStatus } from 'ai';
 import {
   humanizeToolName,
@@ -93,6 +93,8 @@ import {
   detectBuildChecklist,
   detectPublishedBuildReview,
   buildProgressFromDraftReview,
+  detectPackageRemovedResult,
+  supersededPlanIds,
   type BuildResultChecklist,
   type DraftReview,
   type ProposedChanges,
@@ -100,9 +102,10 @@ import {
   type ProposedPlanCard,
   type RecordWrite,
   type SampleDataCleanup,
+  type PackageRemoval,
   type ReplayOutcome,
-  type AnswerSource,
 } from './mapMessages';
+import type { ObjectQuerySource } from '@objectstack/spec/ai';
 import { AnswerSourceBlock } from './AnswerSource';
 
 /**
@@ -399,13 +402,19 @@ export interface ChatbotEnhancedToolInvocation {
    * "How this was computed" block. Only this lifted copy is drawn there, never
    * `result` itself.
    */
-  answerSource?: AnswerSource;
+  answerSource?: ObjectQuerySource;
   /**
    * cloud#3565 — 「清理示例数据」: the tables and counts the seed ledger
    * recorded, listed on the card before the user confirms (the generic
    * Approve / Deny strip is the decision).
    */
   sampleDataCleanup?: SampleDataCleanup;
+  /**
+   * objectstack#31025 — 「删除软件包」: the objects with their row counts, the
+   * other items by type, and whether the tables are dropped, listed on the card
+   * before the user confirms (the generic Approve / Deny strip is the decision).
+   */
+  packageRemoval?: PackageRemoval;
   /**
    * objectui#5695 — the terminal verdict of a confirm-replay (`replay_<id>`
    * tool results; cloud `runApprovedProposalReplay`). Rendered as a terminal
@@ -876,6 +885,28 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
   sampleDataCleanupAbsentLabel?: (count: number) => string;
   /** cloud#3565 — the line for the recorded rows kept because someone edited them (shown when `edited` > 0). */
   sampleDataCleanupEditedLabel?: (count: number) => string;
+  /** objectstack#31025 — the package-removal card's title, given the package's label. */
+  packageRemovalTitleLabel?: (packageLabel: string) => string;
+  /** objectstack#31025 — an object's row count on the package-removal card. */
+  packageRemovalRowsLabel?: (count: number) => string;
+  /** objectstack#31025 — what a draft object (no table yet) shows in place of a count. */
+  packageRemovalDraftLabel?: string;
+  /** objectstack#31025 — what a published object whose rows could not be counted shows in place of a count. */
+  packageRemovalRowsUnknownLabel?: string;
+  /** objectstack#31025 — the display name of a metadata type in the other-items list (default: the type itself). */
+  packageRemovalItemTypeLabel?: (type: string) => string;
+  /** objectstack#31025 — the total-rows line. */
+  packageRemovalTotalLabel?: (count: number) => string;
+  /** objectstack#31025 — the line saying the total is short by the objects that could not be counted (shown when above 0). */
+  packageRemovalUncountedLabel?: (count: number) => string;
+  /** objectstack#31025 — the destructive line, shown only when the tables are dropped. */
+  packageRemovalPermanentLabel?: string;
+  /** objectstack#31025 — the line shown when the tables and their records are kept. */
+  packageRemovalKeptLabel?: string;
+  /** objectstack#31025 — the outcome once the package was removed. */
+  packageRemovalRemovedLabel?: string;
+  /** objectstack#31025 — the outcome when some items could not be removed, given how many. */
+  packageRemovalPartialLabel?: (failed: number) => string;
   /** Label for the publish-drafts button (default "Publish"). */
   publishDraftsLabel?: string;
   /** Label for the published-state badge that replaces the button (default "Published"). */
@@ -1223,7 +1254,9 @@ export function isProposalResult(result: unknown): boolean {
   );
 }
 
-export function getToolState(tool: ChatbotEnhancedToolInvocation): ToolSummaryState {
+export function getToolState(
+  tool: ChatbotEnhancedToolInvocation & { planSuperseded?: true },
+): ToolSummaryState {
   const state =
     tool.state ??
     (tool.errorText
@@ -1240,8 +1273,9 @@ export function getToolState(tool: ChatbotEnhancedToolInvocation): ToolSummarySt
   }
   if (state === 'output-available') {
     // A returned-but-not-applied confirm preview is AWAITING the user, not done
-    // (#772): the change only commits when they approve on the next turn.
-    return isProposalResult(tool.result) ? 'awaiting' : 'completed';
+    // (#772): the change only commits when they approve on the next turn. A
+    // plan a newer plan of the same turn replaced awaits nothing: it is done.
+    return isProposalResult(tool.result) && !tool.planSuperseded ? 'awaiting' : 'completed';
   }
   return 'running';
 }
@@ -1744,6 +1778,22 @@ function isBuildProposalTool(tool: ChatbotEnhancedToolInvocation): boolean {
 }
 
 /**
+ * An invocation as the message list draws it. `planSuperseded` marks a plan a
+ * later plan in the same build turn replaced (`supersededPlanIds`): its
+ * `proposedPlan` is withheld, so it draws as a completed step, not as a plan
+ * card and not as the unstructured confirm card below.
+ */
+type RenderedToolInvocation = ChatbotEnhancedToolInvocation & { planSuperseded?: true };
+
+function withoutSupersededPlan(
+  tool: ChatbotEnhancedToolInvocation,
+  superseded: ReadonlySet<string>,
+): RenderedToolInvocation {
+  if (!tool.proposedPlan || !superseded.has(tool.toolCallId)) return tool;
+  return { ...tool, proposedPlan: undefined, planSuperseded: true };
+}
+
+/**
  * A COMPLETED propose_blueprint whose result the detector could not turn into a
  * rich `proposedPlan` card (e.g. the model returned a thin/oddly-shaped envelope,
  * or proposed in prose). We still owe the user an explicit confirm gate, so the
@@ -1752,11 +1802,12 @@ function isBuildProposalTool(tool: ChatbotEnhancedToolInvocation): boolean {
  * "确认" phrase. Only the finished, non-error state qualifies: a running proposal
  * keeps its live timer, an errored one keeps its error card.
  */
-function isUnstructuredBuildProposal(tool: ChatbotEnhancedToolInvocation): boolean {
+function isUnstructuredBuildProposal(tool: RenderedToolInvocation): boolean {
   return (
     isBuildProposalTool(tool) &&
     getToolState(tool) === 'completed' &&
     !tool.proposedPlan &&
+    !tool.planSuperseded &&
     !tool.proposedChanges &&
     !tool.draftReview?.items.length
   );
@@ -1831,7 +1882,7 @@ export function classifyAssumptions(assumptions: readonly string[]): {
   return { designNotes, deferred };
 }
 
-function shouldRenderDetailedTool(tool: ChatbotEnhancedToolInvocation): boolean {
+function shouldRenderDetailedTool(tool: RenderedToolInvocation): boolean {
   const state = getToolState(tool);
   return (
     state === 'awaiting' ||
@@ -2304,6 +2355,19 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         `${count} recorded ${count === 1 ? 'row is' : 'rows are'} not listed: you cannot see ${count === 1 ? 'it' : 'them'}, or ${count === 1 ? 'it is' : 'they are'} already gone.`,
       sampleDataCleanupEditedLabel = (count) =>
         `${count} ${count === 1 ? 'row' : 'rows'} edited since being seeded ${count === 1 ? 'stays' : 'stay'}.`,
+      packageRemovalTitleLabel = (packageLabel) => `Delete the package ${packageLabel}`,
+      packageRemovalRowsLabel = (count) => `${count} ${count === 1 ? 'record' : 'records'}`,
+      packageRemovalDraftLabel = 'Draft, no table',
+      packageRemovalRowsUnknownLabel = 'Record count unavailable',
+      packageRemovalItemTypeLabel = (type) => type,
+      packageRemovalTotalLabel = (count) => `${count} ${count === 1 ? 'record' : 'records'} in total`,
+      packageRemovalUncountedLabel = (count) =>
+        `The total leaves out ${count} ${count === 1 ? 'object whose records' : 'objects whose records'} could not be counted.`,
+      packageRemovalPermanentLabel = 'The tables are dropped permanently, with every record in them. Dropped tables do not go to the recycle bin and cannot be restored.',
+      packageRemovalKeptLabel = 'The database tables and every record in them are kept; only the package is removed.',
+      packageRemovalRemovedLabel = 'The package was deleted.',
+      packageRemovalPartialLabel = (failed) =>
+        `The package was partly deleted: ${failed} ${failed === 1 ? 'item was' : 'items were'} not removed.`,
       builderHandoffSupersededTitle = 'A newer request is available',
       onOpenBuilder,
       onOpenRecord,
@@ -3192,7 +3256,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onPlanApprovalPendingChangeRef.current?.(planApprovalPending, planApprovalPendingCount);
     }, [planApprovalPending, planApprovalPendingCount]);
 
-    const renderToolDetail = (tool: ChatbotEnhancedToolInvocation) => {
+    // Read fresh each render from the messages themselves; consulted by value
+    // (`has`) only, never as a dependency.
+    const supersededPlans = supersededPlanIds(messages);
+
+    const renderToolDetail = (tool: RenderedToolInvocation) => {
       const state =
         tool.state ??
         (tool.errorText
@@ -3230,7 +3298,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       // the whole-app blueprint JSON and "status: drafted" envelopes stay hidden.
       const showPayload =
         processVisibility === 'debug' ||
-        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup);
+        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup && !tool.packageRemoval);
       // Lifecycle truth for this card's draft package, in precedence order:
       // the server's live pending-draft count (host wired
       // `fetchPendingDraftCount`), else this session's in-memory publish
@@ -3264,7 +3332,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
         approved: approvedPlanIds.has(tool.toolCallId),
       });
       const headerState =
-        state === 'output-available' && isProposalResult(tool.result)
+        state === 'output-available' && isProposalResult(tool.result) && !tool.planSuperseded
           ? PROPOSAL_HEADER_STATE[proposalCardState]
           : state;
       const titleNode = (
@@ -3305,6 +3373,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             Boolean(tool.builderHandoff) ||
             Boolean(tool.recordHandoff) ||
             Boolean(tool.recordWrite) ||
+            Boolean(tool.packageRemoval) ||
             // Fallback confirm gate (unstructured proposal) must open so its
             // "Build it" button is visible without an extra click.
             isUnstructuredBuildProposal(tool)
@@ -3643,6 +3712,100 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                     {sampleDataCleanupAbsentLabel(tool.sampleDataCleanup.absent)}
                   </p>
                 ) : null}
+              </div>
+            ) : null}
+            {/* objectstack#31025 — 「删除软件包」: what goes, per object with its
+                row count, the other items by type, and the total, so the user
+                confirms a list rather than a payload. A draft object has no
+                table and an uncounted one says so; neither reads as 0. When the
+                tables are dropped the card says they are gone for good and skip
+                the recycle bin (the shape's `recycleBin: false`); when they are
+                kept it says so. The generic Approve / Deny strip below stays the
+                decision; once approved, the outcome says removed or partial. */}
+            {tool.packageRemoval ? (
+              <div
+                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
+                data-testid="package-removal"
+                data-data={tool.packageRemoval.data}
+              >
+                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
+                  <Trash2 className="size-3.5" />
+                  {packageRemovalTitleLabel(tool.packageRemoval.label)}
+                </span>
+                {tool.packageRemoval.objects.length > 0 ? (
+                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-objects">
+                    {tool.packageRemoval.objects.map((o) => (
+                      <li
+                        key={o.name}
+                        className="flex items-baseline justify-between gap-3"
+                        data-testid={`package-removal-object-${o.name}`}
+                      >
+                        <span className="min-w-0 truncate">{o.label}</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {o.rows !== undefined
+                            ? packageRemovalRowsLabel(o.rows)
+                            : o.draft
+                              ? packageRemovalDraftLabel
+                              : packageRemovalRowsUnknownLabel}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                {Object.keys(tool.packageRemoval.items).length > 0 ? (
+                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-items">
+                    {Object.entries(tool.packageRemoval.items).map(([type, n]) => (
+                      <li
+                        key={type}
+                        className="flex items-baseline justify-between gap-3"
+                        data-testid={`package-removal-item-${type}`}
+                      >
+                        <span className="min-w-0 truncate">{packageRemovalItemTypeLabel(type)}</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">{n}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p className="text-xs text-muted-foreground" data-testid="package-removal-total">
+                  {packageRemovalTotalLabel(tool.packageRemoval.totalRows)}
+                </p>
+                {tool.packageRemoval.uncountedObjects > 0 ? (
+                  <p className="text-xs text-muted-foreground" data-testid="package-removal-uncounted">
+                    {packageRemovalUncountedLabel(tool.packageRemoval.uncountedObjects)}
+                  </p>
+                ) : null}
+                {tool.packageRemoval.data === 'dropped' ? (
+                  <p className="text-xs font-medium text-destructive" data-testid="package-removal-permanent">
+                    {packageRemovalPermanentLabel}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground" data-testid="package-removal-kept">
+                    {packageRemovalKeptLabel}
+                  </p>
+                )}
+                {(() => {
+                  const outcome =
+                    decision?.state === 'success' && decision.decision === 'approved'
+                      ? detectPackageRemovedResult(decision.result)
+                      : undefined;
+                  if (!outcome) return null;
+                  return (
+                    <p
+                      className={
+                        'text-xs font-medium ' +
+                        (outcome.status === 'removed'
+                          ? 'text-emerald-700 dark:text-emerald-400'
+                          : 'text-amber-700 dark:text-amber-400')
+                      }
+                      data-testid="package-removal-outcome"
+                      data-state={outcome.status}
+                    >
+                      {outcome.status === 'removed'
+                        ? packageRemovalRemovedLabel
+                        : packageRemovalPartialLabel(outcome.failed)}
+                    </p>
+                  );
+                })()}
               </div>
             ) : null}
             {/* cloud#3565 — the ONE-record write the user confirms. The card is
@@ -4586,7 +4749,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 // draws no bubble: live, after a reload, or on a shared
                 // transcript. The model still received it.
                 if (isUser && isHitlContinuation(message.content)) return null;
-                const tools = message.toolInvocations ?? [];
+                // One plan card per build turn: the newest plan, the one the
+                // runtime builds; earlier plans of the turn draw as steps.
+                const tools = (message.toolInvocations ?? []).map((tool) =>
+                  withoutSupersededPlan(tool, supersededPlans),
+                );
                 const reasoning = message.reasoning?.trim();
                 const sources = message.sources ?? [];
                 const buildProgress = !isUser ? message.buildProgress : undefined;

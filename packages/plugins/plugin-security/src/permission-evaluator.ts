@@ -740,6 +740,13 @@ async function inListedOrder(
  * loader, as it read before ADR-0150: the metadata service's list (async or a
  * synchronous stand-in), then the bootstrap sets, then `dbLoader` for the
  * names still unresolved, one set per name.
+ *
+ * [ADR-0150 D3] ⛔ It never picks one of two holders. A name the list holds
+ * from two holders (two `_packageId`s, or a package's and the environment's)
+ * cannot be told apart without the catalog, so it grants nothing this request
+ * — neither the list's first nor a bootstrap or loader body of that name — and
+ * is said, naming every holder. One holder per name, which
+ * phase 1 still keeps, answers exactly as before.
  */
 async function resolveByName(
   identifiers: readonly string[],
@@ -761,6 +768,16 @@ async function resolveByName(
   const wanted = new Set(identifiers);
   const result: PermissionSet[] = [];
   const seen = new Set<string>();
+  for (const [name, holders] of listedHoldersOf(listed, wanted)) {
+    if (holders.length < 2) continue;
+    // Refused: marked seen, so no later source answers the name either.
+    seen.add(name);
+    logger?.warn?.(
+      `[security] permission set "${name}" grants nothing: ${holders.length} holders serve that name `
+        + `(${holders.join(', ')}) and no security catalog is bound to tell them apart — never one of them picked.`,
+      { permissionSet: name, holders },
+    );
+  }
   for (const ps of [...(Array.isArray(listed) ? listed : []), ...bootstrapPermissionSets]) {
     if (ps && wanted.has(ps.name) && !seen.has(ps.name)) {
       seen.add(ps.name);
@@ -786,6 +803,25 @@ async function resolveByName(
     }
   }
   return result;
+}
+
+/**
+ * [ADR-0150 D3] Each wanted name's distinct holders in the metadata list, in
+ * listed order: a definition's `_packageId`, or `environment` for one that
+ * names none.
+ */
+function listedHoldersOf(listed: unknown, wanted: ReadonlySet<string>): Map<string, string[]> {
+  const holders = new Map<string, string[]>();
+  for (const ps of Array.isArray(listed) ? listed : []) {
+    const name = (ps as { name?: unknown } | null)?.name;
+    if (typeof name !== 'string' || !wanted.has(name)) continue;
+    const owner = (ps as { _packageId?: unknown })._packageId;
+    const holder = typeof owner === 'string' && owner !== '' ? `package "${owner}"` : 'the environment';
+    const known = holders.get(name) ?? [];
+    if (!known.includes(holder)) known.push(holder);
+    holders.set(name, known);
+  }
+  return holders;
 }
 
 /** [ADR-0150 D3] The address a context carries for one granted set — `ExecutionContext.permissionSetAddresses`' entry. */

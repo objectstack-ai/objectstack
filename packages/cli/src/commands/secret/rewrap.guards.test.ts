@@ -288,7 +288,7 @@ describe('os secret rewrap — guards that stop a run before any row is opened o
 
     expect(payload.mode).toBe('dry-run');
     expect(payload.report.counts).toEqual({ total: 1, rewrap: 1, done: 0, left: 0, refused: 0, notWritten: 0 });
-    expect(payload.report.rewrapByScope).toEqual({ settings: 1, object_secret_field: 0, datasource_credential: 0 });
+    expect(payload.report.rewrapByScope).toEqual({ settings: 1, object_secret_field: 0, datasource_credential: 0, audit_seal: 0 });
     expect(payload.report.keySource).toBe('env:OS_SECRET_KEY');
     expect(exitCode).toBe(0);
     expect(h.writes).toEqual([]);

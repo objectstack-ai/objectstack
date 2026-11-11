@@ -111,8 +111,23 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
     'sys_approval_request',
     'sys_approval_token',
   ],
-  /** `@objectstack/plugin-audit` — audit trail & activity feed (ADR-0052). */
-  'plugin-audit': ['sys_activity', 'sys_audit_log', 'sys_comment', 'sys_comment_reaction'],
+  /**
+   * `@objectstack/plugin-audit` — audit trail & activity feed (ADR-0052), and
+   * the audit ledger's checkpoints, amendments and signing keys (ADR-0154).
+   * The package registers the checkpoints and the signing keys, ahead of the
+   * sealer and signer that write them. `sys_audit_amendment` is declared and
+   * registered with its first writer, the redaction amendments; until then it
+   * is the one name in this group the package does not register.
+   */
+  'plugin-audit': [
+    'sys_activity',
+    'sys_audit_amendment',
+    'sys_audit_checkpoint',
+    'sys_audit_log',
+    'sys_audit_signing_key',
+    'sys_comment',
+    'sys_comment_reaction',
+  ],
   /** `@objectstack/plugin-security` — ADR-0090 permission model v2. */
   'plugin-security': [
     'sys_audience_binding_suggestion',
@@ -131,8 +146,8 @@ export const PLATFORM_OBJECTS_BY_PACKAGE: Readonly<Record<string, readonly strin
   ],
   /** `@objectstack/plugin-webhooks` — outbound webhook registrations. */
   'plugin-webhooks': ['sys_webhook'],
-  /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow and connector credentials, connector connections (ADR-0143 D3). */
-  'service-automation': ['sys_automation_run', 'sys_connector_connection', 'sys_connector_credential', 'sys_flow_credential', 'sys_flow_dispatch'],
+  /** `@objectstack/service-automation` — flow run history, dispatch-idempotency ledger, write-only flow and connector credentials, connector connections (ADR-0143 D3), the sync-in pull's run record and read position (ADR-0153 D7). */
+  'service-automation': ['sys_automation_run', 'sys_connector_connection', 'sys_connector_credential', 'sys_flow_credential', 'sys_flow_dispatch', 'sys_sync_run'],
   /** `@objectstack/service-mailbox` — inbound mail: mailboxes, mirrored messages, record associations. */
   'service-mailbox': ['sys_mail_association', 'sys_mail_message', 'sys_mailbox'],
   /** `@objectstack/service-messaging` — notification & delivery pipeline. */

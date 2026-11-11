@@ -416,3 +416,61 @@ describe('[#30958] revoke: the bearer is refused from the next request on; rotat
     expect((await provision(minted.token, 'revoked-while-off')).status).toBe(401);
   }, 30_000);
 });
+
+describe('[#32120] the credential row tells two credentials of one connection apart: token hint and last use', () => {
+  /** The stored `last_used_at` as epoch ms, `undefined` when none is stored. */
+  const lastUsedMs = (row: Record<string, unknown>): number | undefined =>
+    row.last_used_at == null ? undefined : new Date(String(row.last_used_at)).getTime();
+
+  it('the mint answers the hint beside the token and stores it; the IdP\'s use stamps last_used_at once a minute; a refused bearer stamps nothing', async () => {
+    const first = (await door('mint-credential', { connectionId: 'okta-32120', label: 'old' })).body.data;
+    const second = (await door('mint-credential', { connectionId: 'okta-32120', label: 'new' })).body.data;
+    for (const minted of [first, second]) {
+      expect(minted.tokenHint).toBe(minted.token.slice(-4));
+    }
+
+    // Before any use: both rows carry their own hint and no last use.
+    const before = await credentialRows('okta-32120');
+    expect(before).toHaveLength(2);
+    for (const minted of [first, second]) {
+      const row = before.find((r) => r.id === minted.credentialId)!;
+      expect(row.token_hint).toBe(minted.tokenHint);
+      expect(row.last_used_at ?? null).toBeNull();
+    }
+
+    // The IdP uses the NEW credential: only its row is stamped.
+    const startedAt = Date.now();
+    expect((await provision(second.token, 'use-32120-a')).status).toBe(201);
+    const afterFirstUse = await credentialRows('okta-32120');
+    const stamped = lastUsedMs(afterFirstUse.find((r) => r.id === second.credentialId)!);
+    expect(stamped).toBeDefined();
+    expect(stamped!).toBeGreaterThanOrEqual(startedAt - 1000);
+    expect(afterFirstUse.find((r) => r.id === first.credentialId)!.last_used_at ?? null).toBeNull();
+
+    // A second use inside the minute writes nothing: the stored stamp is unchanged.
+    const update = vi.spyOn(engine, 'update');
+    try {
+      expect((await provision(second.token, 'use-32120-b')).status).toBe(201);
+      expect(update.mock.calls.filter(([object]) => object === SCIM_CREDENTIAL_OBJECT)).toEqual([]);
+      expect(lastUsedMs((await credentialRows('okta-32120')).find((r) => r.id === second.credentialId)!)).toBe(stamped);
+
+      // Revoke the OLD credential; its refused bearer stamps nothing.
+      expect((await door('revoke-credential', { credentialId: first.credentialId })).status).toBe(200);
+      update.mockClear();
+      expect((await provision(first.token, 'use-32120-refused')).status).toBe(401);
+      expect(update.mock.calls.filter(([object]) => object === SCIM_CREDENTIAL_OBJECT)).toEqual([]);
+      expect((await credentialRows('okta-32120')).find((r) => r.id === first.credentialId)!.last_used_at ?? null).toBeNull();
+    } finally {
+      update.mockRestore();
+    }
+
+    // What every read of the row serves: the hint and the last use, never the
+    // bearer or its digest (`expectSecretNowhereElse` holds the digest to its
+    // own column at rest and out of every engine read).
+    const served = JSON.stringify(await credentialRows('okta-32120'));
+    expect(served).toContain(second.tokenHint);
+    expect(served).toContain('last_used_at');
+    await expectSecretNowhereElse(first.token, first.credentialId);
+    await expectSecretNowhereElse(second.token, second.credentialId);
+  }, 30_000);
+});

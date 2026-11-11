@@ -49,8 +49,8 @@ export interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<{ twoFactorRequired: boolean }>;
   /**
    * objectstack#29105 — the pending two-factor sign-in, or `null`. Set by a
-   * `signIn` whose password the server accepted for an account with
-   * two-factor sign-in on; cleared when the code is verified, when
+   * `signIn` or `signInWithPhonePassword` whose password the server accepted for an account with
+   * two-factor sign-in on, or a `signInWithPhoneOtp` whose code it accepted for one; cleared when the code is verified, when
    * `cancelTwoFactorChallenge` runs, and when the server reports the pending
    * sign-in spent or expired.
    */
@@ -109,10 +109,19 @@ export interface AuthContextValue {
   resetPassword: (token: string, newPassword: string) => Promise<void>;
   /** framework#2780 — request a sign-in OTP SMS for the phone number. */
   sendPhoneOtp: (phoneNumber: string) => Promise<void>;
-  /** framework#2780 — sign in by verifying a phone OTP. */
-  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<void>;
-  /** framework#2780 — sign in with phone number + password (no SMS required). */
-  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<void>;
+  /**
+   * framework#2780 — sign in by verifying a phone OTP. `twoFactorRequired` is
+   * true when the account has an enrolled second factor, as for `signIn`:
+   * `twoFactorChallenge` is set and `verifySignInTwoFactor` finishes the sign-in.
+   */
+  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<{ twoFactorRequired: boolean }>;
+  /**
+   * framework#2780 — sign in with phone number + password (no SMS required).
+   * `twoFactorRequired` is true when the account has two-factor sign-in on,
+   * as for `signIn` (objectstack#32107): `twoFactorChallenge` is set and
+   * `verifySignInTwoFactor` finishes the sign-in.
+   */
+  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<{ twoFactorRequired: boolean }>;
   /** framework#2780 — request a password-reset OTP SMS for the phone number. */
   requestPhonePasswordReset: (phoneNumber: string) => Promise<void>;
   /** framework#2780 — reset the password with a phone OTP. */
@@ -179,11 +188,18 @@ export interface AuthContextValue {
   /** Switch the active organization (workspace) */
   switchOrganization: (orgId: string) => Promise<void>;
   /**
-   * Create a new organization. `timezone` is the creator's IANA zone, sent as
-   * the `timezone` query parameter, never in the body; see
+   * Create a new organization. `timezone` is the creator's IANA zone and
+   * `edition` names one of the host's `features.organizationEditions`; both
+   * are sent as query parameters, never in the body. See
    * `AuthClient.createOrganization` (objectui#11908).
    */
-  createOrganization: (data: { name: string; slug: string; logo?: string; timezone?: string }) => Promise<AuthOrganization>;
+  createOrganization: (data: {
+    name: string;
+    slug: string;
+    logo?: string;
+    timezone?: string;
+    edition?: string;
+  }) => Promise<AuthOrganization>;
   /**
    * Refresh the organizations list. Returns the freshly fetched list so
    * callers that need it right away (e.g. the first-run wizard's rename

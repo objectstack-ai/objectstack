@@ -780,7 +780,7 @@
       "title": "The Studio CEL editors reach the SAME verdict as the engine: formula result-type inference, previous. completion in conditional rules, and RLS lint + test-run — the editor UI, not a second grammar",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -795,7 +795,7 @@
           "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead",
           "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs from ui/, the objectui root, with its path written relative to ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`. ⛔ Not `pnpm --filter @object-ui/PKG exec vitest run FILE`: that runs in the package directory, and the ui vitest guard (ui/scripts/vitest-invocation-guard.mjs, which ui/vitest.config.mts calls) refuses any run whose Vitest root is not ui/ (its package-cwd verdict). a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
           "acceptance[7] (graceful degradation) is PIN-ONLY BY DESIGN: its verify forbids hand-breaking the bundle. The environment it needs is this checkout with its install done, to run ui/packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (describe 'celAuthoring · graceful degradation') with `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts` (the `pnpm --filter @object-ui/app-shell exec vitest run` form is refused by the ui vitest guard, knownGaps[1]). QA run #21784 had no runnable checkout and recorded blocked(environment) (parked on #22017 row 16), which is the right verdict without one: never a hand-driven verdict, never inferred from the source. CI in this repository now runs the ui/ suites (the Test UI job), which is evidence about the commit CI built, not about the run subject: cite a run of the file at the subject sha",
-          "THE FORMULA-FIELD PROBE FAILS TODAY (QA run #26715, Data card, at 3fcafcd3; re-read at 3230bdbf; read live again by QA run #28656, W3-RT, at 6e11a929): the Studio RLS editor reads 'Valid CEL' for a USING predicate on a formula field (record.f_formula > 5), and only the publish refuses it, rls-predicate-unenforceable at INVALID_FIELD — the editor's lint judges a one-clause stack that names no object (celAuthoring.ts rlsPredicateVerdict), so the rule's virtual-field branch cannot fire there. #26707 is closed by 57820085, which fixed the draft half: a draft read's _diagnostics carries the publish verdict. The editor half is #27482, which is open. Its layers #27612, #27643 and #27644 have landed, so a server error at the clause's path now holds the autosave from the server re-read on: the FIRST autosave of each newly refused text still goes out and answers 200, and the edit after it is held (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.serverVerdictHold-27482.test.tsx, case (b): the refused clause saves once, its re-read holds the next edit). That first PUT is the residual #27482 carries. Until #27482 is ruled, acceptance[2] and acceptance[4] FAIL on this probe as written, acceptance[4]'s 'no PUT issued' included: score them fail citing the run"
+          "THE FORMULA-FIELD PROBE IS HELD FROM THE SERVER VERDICT, NOT BEFORE THE FIRST SAVE. #27482 is closed (2026-11-08, by PR #31549). The Studio RLS editor still reads 'Valid CEL' for a USING predicate on a formula field (record.f_formula > 5): its lint judges a one-clause stack that names no object (celAuthoring.ts rlsPredicateVerdict), so the rule's virtual-field branch cannot fire there, and no client copy of the publish rule is wanted (#26858). The draft read's _diagnostics carries the publish verdict (#26707, 57820085), and #27612, #27643, #27644 and PR #31549 make it hold: the first save of each newly refused text goes out and answers 200, and the edit after it is held (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.serverVerdictHold-27482.test.tsx, case (b): the refused clause saves once, its re-read holds the next edit). That first save is #27482's ruled acceptance (PR #31549, 'Acceptance reading (seat ruling on the step-1 report)'), not a residual, and acceptance[4].verify and negative[1] read the hold that way. The held line reads \"Fix the expression errors before saving.\" (zh 「请先修复表达式错误再保存。」; perm.cel.saveBlocked in ui/packages/i18n/src/namespaces/studio/en.ts and zh.ts). PR #31549 changed it from \"Fix the CEL syntax errors before saving.\" because it holds the server's refusals too. QA run #32102 (at ff04ad81, repro rule R-2) read this live and scored acceptance[4] and negative[1] FAIL as then written, and acceptance[2] pass. Earlier readings: QA run #26715 (Data card, at 3fcafcd3), re-read at 3230bdbf, QA run #28656 (W3-RT, at 6e11a929)"
         ]
       },
       "steps": [
@@ -836,7 +836,7 @@
         {
           "clause": "the RLS lint and the save gate agree with the engine: a non-pushdownable USING read filter raises a blocking ERROR, not an advisory warning, because the engine refuses it (rls-predicate-unenforceable, ADR-0056 D4) and the runtime fails CLOSED — the policy is dropped and grants no access, it never widens access — and a parse fault raises a blocking ERROR too; with either error present the save is held (celErrorCount>0) — a predicate the engine refuses cannot be persisted",
           "oracle": "screenshot",
-          "verify": "the non-pushdownable filter shows an error-tier finding and the save is held; a parse-faulted predicate and the formula-field predicate are held the same way. Held means: on the environment door, Save disabled with title perm.cel.saveBlocked; on the Studio package door, which autosaves and has no Save button, the perm-autosave-held status with no PUT issued (only the package door is writable on stock showcase)",
+          "verify": "the non-pushdownable filter shows an error-tier finding and the save is held; a parse-faulted predicate is held the same way. Held means: on the environment door, Save disabled with title perm.cel.saveBlocked; on the Studio package door, which autosaves and has no Save button, the perm-autosave-held status with no PUT issued (only the package door is writable on stock showcase). The editor judges both of these in the browser before the first save: lintCelPredicate parses the text with @objectstack/formula and, for a using or check clause, runs the published RLS rule (ui/packages/app-shell/src/views/metadata-admin/celAuthoring.ts rlsPredicateVerdict), so neither sends a PUT. The formula-field predicate (record.FORMULA_FIELD > 5) is NOT judged before the first save: rlsPredicateVerdict lints a one-clause stack that names no object, so the rule's virtual-field branch cannot fire and the editor reads 'Valid CEL'; only the draft re-read's _diagnostics at rowLevelSecurity.N.using refuses it (CelPredicateField useServerHoldAt, draftVerdict.ts serverHoldAt). For that probe, held reads per #27482's ruled acceptance, PR #31549, 'Acceptance reading (seat ruling on the step-1 report)': \"The server judges only a saved draft, and no metadata validate-only door exists, so the first save of a refused guard goes out: it is the save whose re-read brings the verdict. Once the verdict shows, the next save is held … An edit of the guard text itself goes out, to be judged again\". So it passes when: the first save goes out (one PUT 200) and its re-read shows the server verdict on the field (INVALID_FIELD, as QA run #32102 read it); an edit beside the guard while it still shows the judged text is held, perm-autosave-held reading \"Fix the expression errors before saving.\" with no PUT; each new text of the guard PUTs once more, to be judged again; and publish (POST /api/v1/meta/permission/NAME/publish, or the package's publish-drafts) answers 422 naming the rule, so the predicate never reaches the live set. For this probe the clause's 'cannot be persisted', steps[4]'s 'issues no PUT' and the evidence's 'no save PUT' read as: no PUT after the first save's verdict other than a new text of the guard, and never published. A PUT for an edit beside the judged guard, or a publish that is not refused, is the FAIL. No validate-only door is expected, and no client copy of the publish rule (#26858)",
           "evidence": "the two held editor states + the network trace showing no save PUT"
         },
         {
@@ -860,7 +860,7 @@
       ],
       "negative": [
         "an editor verdict that DIFFERS from the engine (validate_expression / build) for the same expression is a FAIL — a second grammar in the GUI is exactly what celAuthoring exists to prevent (ADR-0032)",
-        "a parse-fault formula or RLS predicate that Saves anyway (Save not gated on celErrorCount) is a FAIL — a malformed RLS predicate silently mis-scopes rows and some evaluation paths FAIL OPEN, widening access with no error",
+        "a parse-fault formula or RLS predicate that Saves anyway (Save not gated on celErrorCount) is a FAIL — a malformed RLS predicate silently mis-scopes rows and some evaluation paths FAIL OPEN, widening access with no error. Both editors judge a parse fault in the browser before the first save (the formula field's editor in ObjectFieldInspector and the RLS editor in PermissionAdvancedFacets lint through celAuthoring.ts lintCelPredicate), so for a parse fault one PUT is the FAIL. A formula-field RLS predicate the engine refuses is not judged before the first save, and its hold reads per #27482's ruled acceptance (PR #31549, quoted in acceptance[4].verify): its first save goes out and is judged on the re-read, and each new text of the guard saves once more to be judged again. For it, the FAIL is an edit beside the judged guard that saves, or a publish that does not answer 422, so the predicate reaches the live set",
         "record. / previous. completion offering an unbound root's members, or a bare field ref not flagged in record scope, is a FAIL — it authors a predicate that silently never fires / evaluates to null"
       ],
       "variants": [
@@ -878,6 +878,8 @@
         "objectui: packages/app-shell/src/views/metadata-admin/CelTestRunDialog.tsx (USING/CHECK dry-run allow/deny/value/unavailable through the server's own engine)",
         "objectui: packages/app-shell/src/views/metadata-admin/inspectors/ObjectFieldInspector.tsx (formula role=value scope=record → Field.returnType stamped from the inferred type ONLY once edited; FIELD_RULE_ROOTS record/previous/parent for conditional rules)",
         "objectui: packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx (RLS facet hosts CelPredicateField + CelTestRunDialog; onCelErrorsChange → celErrorCount gates Save)",
+        "objectui: packages/app-shell/src/views/metadata-admin/draftVerdict.ts (serverHoldAt: the server's errors at a clause path hold the save while the field shows the text they judged; CelPredicateField reads it through useServerHoldAt) — the hold for the formula-field RLS predicate the editor cannot judge before the first save (#27482, PR #31549)",
+        "objectui: packages/i18n/src/namespaces/studio/en.ts + zh.ts (perm.cel.saveBlocked, the held line \"Fix the expression errors before saving.\" / 「请先修复表达式错误再保存。」, worded by PR #31549)",
         "ai.mcp-validate-expression + api-backend.formula-gates (the ENGINE parity — cross-referenced; this item only proves the editor agrees)",
         "objectui#2413 (RLS CEL editor + test-run), objectui#1582 (conditional-rule/formula scope + inferred type), ADR-0032 (one CEL engine across GUI/SDK/CLI)",
         "examples/app-showcase/src/data/objects/invoice.object.ts + project.object.ts + field-zoo.object.ts (stock formula-field expressions to author against)"
@@ -931,6 +933,12 @@
           "date": "2026-11-04",
           "change": "fixtures.requires[0] corrected from QA run #29890 (W5-FAIL, at 589049b0): the authored object needs a sharingModel, or publish refuses it with security-owd-unset. Read at base f68b47ca",
           "ref": "#29906"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-10",
+          "change": "acceptance[4].verify and negative[1] re-pointed to #27482's ruled acceptance (stale spec R-2 of QA run #32102, at ff04ad81; card #32112). Both read the formula-field RLS predicate's hold as 'no PUT ever', but the editor cannot judge that predicate before the first save and #26858 forbids a client copy of the publish rule; the ruling in PR #31549 ('Acceptance reading (seat ruling on the step-1 report)') is that the first save of a refused guard goes out, its re-read brings the verdict, the next edit beside it is held, and an edit of the guard text goes out to be judged again. For that probe 'held' now means held after the first save's verdict and never published (publish 422). The parse-fault and non-pushdownable halves are unchanged: celAuthoring.ts judges both in the browser before the first save, for the RLS editor and (parse fault) the formula field's editor. fixtures.knownGaps[3] records that #27482 is closed and that the held line reads \"Fix the expression errors before saving.\" (perm.cel.saveBlocked); source[] cites draftVerdict.ts and the studio i18n packs. acceptance[2] and steps[4] are not edited. Read at base 45f0f81f",
+          "ref": "#32112"
         }
       ]
     },
@@ -4951,6 +4959,481 @@
           "date": "2026-11-04",
           "change": "acceptance[0].verify and fixtures.requires[2] corrected from QA run #29893 (W5-STUDIO, at 589049b0): the pair link's href names the pair, but Studio redirects a pair URL to its base (customizationPairBaseOf), and the pair-added fixture item may be written by API. Read at base f68b47ca",
           "ref": "#29906"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.currency-home-amount-editor",
+      "title": "Studio's Home currency amount editor on a record-mode amount offers only the fields the engine can write, saves the three homeAmount pointers, and clears them",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh showcase boot on its own port and DB (dogfood §0) with OS_PORT exported and a console built from this tree (pnpm console:build)",
+          "a writable package PKG (studio-authoring.object-designer-roundtrip's requires) holding the scratch object qa_fx_order with: currency_code (text, valueDomain iso_4217_currency); amount (currency, currencyMode record, currencyField currency_code); order_date (date); amount_home (currency, dynamic, readonly: true); amount_rate (number, scale 12, readonly: true); and three decoys: amount_home_rw (currency, dynamic, not readonly), rate_low (number, scale 4, readonly: true) and total_fixed (currency, fixed USD, readonly: true)"
+        ]
+      },
+      "steps": [
+        "open qa_fx_order in /_console/studio/PKG/data → Form and select the field amount; in its inspector find the Home currency amount section (data-testid currency-config-home-amount) and open each of its three pickers",
+        "pick Home amount field amount_home, Document date order_date, Rate field amount_rate; save, publish, and GET /api/v1/meta/object/qa_fx_order",
+        "POST /api/v1/data/qa_fx_order with currency_code EUR, amount 100 and an order_date the stock EUR rates cover; read amount_home and amount_rate",
+        "back in the inspector set all three pickers to their empty choice; save and GET the object again"
+      ],
+      "acceptance": [
+        {
+          "clause": "each picker lists only the fields the engine may write into, of the right type",
+          "oracle": "dom",
+          "verify": "Home amount field lists amount_home and not amount_home_rw (not readonly), total_fixed (not dynamic) or amount itself; Document date lists order_date; Rate field lists amount_rate and not rate_low (scale below 12) (ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#homeAmountCandidates)",
+          "evidence": "a screenshot of each open picker"
+        },
+        {
+          "clause": "the save stores the three pointers on the amount's currencyConfig",
+          "oracle": "api",
+          "verify": "fields.amount.currencyConfig.homeAmount reads { field: 'amount_home', rateDate: 'order_date', rateField: 'amount_rate' }",
+          "evidence": "the meta read"
+        },
+        {
+          "clause": "a record saved after publish stores its home amount through what the editor wrote",
+          "oracle": "api",
+          "verify": "amount_rate is the EUR rate in force on order_date and amount_home = 100 ÷ that rate rounded to 2 decimals (the arithmetic records-forms.multi-currency-invoice acceptance[0] checks)",
+          "evidence": "the record read and the rate row"
+        },
+        {
+          "clause": "emptying the three pickers removes homeAmount from the config",
+          "oracle": "api",
+          "verify": "the second meta read has no homeAmount key on fields.amount.currencyConfig (setHomeAmountPointer deletes homeAmount once no pointer is left, ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#setHomeAmountPointer)",
+          "evidence": "the meta read"
+        }
+      ],
+      "negative": [
+        "a picker that offers a field the save door then refuses (a writable home field, a rate field under scale 12) is a FAIL",
+        "reading the editor's absence on a dynamic or fixed amount as a defect is wrong: the section is offered on a record-mode amount only"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.recordMode-27188.test.tsx; no live spec drives the editor"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/metadata-admin/inspectors/CurrencyConfigField.tsx#homeAmountCandidates and #setHomeAmountPointer",
+        "ui/packages/i18n/src/namespaces/studio/en.ts (designer.field.currency.homeAmount, homeField, rateDate, rateField)",
+        "packages/spec/src/data/field.zod.ts#CurrencyConfigSchema (homeAmount: a dynamic currency field, a date field and a number field, all three required)",
+        "#31638 (the Studio homeAmount editor and the converted-at hint)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0144 multi-currency: the Studio homeAmount editor (#31638). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.currency-field-repointed-refusal",
+      "title": "A save that re-points a stored record-mode amount's currencyField answers 409 DESTRUCTIVE_CHANGE with the currency_field_repointed finding, naming what it does to stored rows and the remedies, and force lifts it",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every call"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), signed in as the seeded admin",
+          "the environment object qa_fx_repoint saved with PUT /api/v1/meta/object/qa_fx_repoint (no ?package=): code_a and code_b (text, valueDomain iso_4217_currency), amount (currency, currencyMode record, currencyField code_a, homeAmount { field: amount_home, rateDate: doc_date, rateField: amount_rate }), doc_date (date), amount_home (currency, dynamic, readonly: true), amount_rate (number, scale 12, readonly: true); one row with code_a EUR, amount 100 and a covered doc_date"
+        ]
+      },
+      "steps": [
+        "GET /api/v1/meta/object/qa_fx_repoint, change fields.amount.currencyConfig.currencyField to code_b, and PUT it back",
+        "PUT the same body with ?force=true, then GET the object and the row",
+        "PUT the body unchanged (currencyField code_b again)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the re-point is refused 409 DESTRUCTIVE_CHANGE with one currency_field_repointed issue for the field, and nothing is saved",
+          "oracle": "api",
+          "verify": "the PUT answers 409 code DESTRUCTIVE_CHANGE with issues holding { code: 'currency_field_repointed', field: 'amount', message }; a GET still reads currencyField code_a (packages/metadata-protocol/src/protocol-write-face.ts, the \"currency_field_repointed\" finding; packages/metadata-protocol/src/protocol-save.ts, the 409)",
+          "evidence": "the 409 body and the unchanged read"
+        },
+        {
+          "clause": "the finding says what happens to stored rows and names the remedies that exist",
+          "oracle": "api",
+          "verify": "the message names code_a and code_b, says no stored amount is converted, names the code backfill (os migrate record-currency-codes --object qa_fx_repoint --field amount, or POST /api/v1/meta/_migrate-record-currency-codes, packages/metadata-protocol/src/protocol-write-face.ts#recordCurrencyCodeBackfillRemedy), and, since the amount declares homeAmount, os migrate recompute-home-amounts --object qa_fx_repoint --field amount as a shell command with no REST door",
+          "evidence": "the message text"
+        },
+        {
+          "clause": "force lifts it and converts nothing; an identical pointer raises nothing",
+          "oracle": "api",
+          "verify": "the forced PUT answers 200 and the object reads currencyField code_b; the row keeps amount 100, amount_home and amount_rate as before; the unchanged PUT answers 200 with no finding",
+          "evidence": "the forced answer, the two reads and the last answer"
+        }
+      ],
+      "negative": [
+        "a re-point saved without force, or a forced save that rewrites stored amounts or home amounts, is a FAIL"
+      ],
+      "traps": [
+        "destructive-in-place"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/objectql/src/protocol-destructive-currency-mode.test.ts (the currency_field_repointed describe; run with --project local)"
+      },
+      "source": [
+        "docs/adr/0144-multi-currency-record-currency-dated-rates-write-time-home-projection.md (D5, the currency_field_repointed finding, #31986)",
+        "packages/metadata-protocol/src/protocol-write-face.ts#recordCurrencyCodeBackfillRemedy and the \"currency_field_repointed\" finding",
+        "packages/metadata-protocol/src/protocol-save.ts (DESTRUCTIVE_CHANGE, 409, issues)",
+        "#31969 (the refusal), #31986 (the ADR record)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0144 multi-currency: the currency_field_repointed destructive finding (#31969, #31986). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.action-preflight-authoring-refusals",
+      "title": "The action save door refuses a contradictory `preflight` at its located path: no params, beside execution 'aggregate', a hole outside the closed set (its own sentence for `${result.*}`), an undeclared param, an unclosed hole, a URL off this origin, a non-GET method, and each seed contradiction",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the base body every variant edits: { name: 'qa_pf_base', label: 'QA preflight base', objectName: 'showcase_task', operation: 'update', execution: 'perRecord', locations: ['record_header'], params: [{ name: 'estimate_hours', label: 'Estimate (h)', type: 'number', required: true }, { name: 'notes', label: 'Notes', type: 'textarea', required: true }], preflight: { read: { url: '/api/v1/data/showcase_task/${ctx.recordId}' }, path: 'record', fields: [{ path: 'title', label: 'Title' }, { path: 'status', label: 'Status' }], seed: [{ param: 'notes', path: 'title' }] } }. Scratch names only (qa_pf_*), so nothing shipped is touched"
+        ]
+      },
+      "steps": [
+        "PUT /api/v1/meta/action/qa_pf_base with the base body as written; GET it back",
+        "PUT /api/v1/meta/action/qa_pf_bad with the base body edited one way per call: (a) params: [] and no seed; (b) execution: 'aggregate'; (c) read.url '/api/v1/data/showcase_task/${result.id}'; (d) read.url '/api/v1/data/showcase_task?u=${user.id}'; (e) read.url '/api/v1/data/showcase_task/${param.version}'; (f) read.url '/api/v1/data/showcase_task/${param.estimate_hours'; (g) read.url 'https://example.com/api/v1/data/showcase_task'; (h) read.url '${ctx.recordId}'; (i) read.method 'POST'; (j) a `write` key beside `read`; (k) a `title` key on preflight",
+        "the seed variants on qa_pf_bad: (l) seed [{ param: 'qa_nope', path: 'title' }]; (m) seed notes twice; (n) the notes param with defaultValue 'x'; (o) read.url '/api/v1/data/showcase_task/${ctx.recordId}?select=${param.notes}' with notes seeded",
+        "after every refused PUT, GET /api/v1/meta/action/qa_pf_bad"
+      ],
+      "acceptance": [
+        {
+          "clause": "the base body is admitted: a preflight with read, path, fields and a seed into a declared param saves and reads back as written",
+          "oracle": "api",
+          "verify": "PUT answers 200; the GET returns the preflight block unchanged (packages/spec/src/ui/action.zod.ts, the `preflight` key of the action shape)",
+          "evidence": "the PUT status and the GET body"
+        },
+        {
+          "clause": "each refused body answers 422 INVALID_METADATA with an issue at the located path, zod code custom, and the GET afterwards finds nothing stored",
+          "oracle": "api",
+          "verify": "(a) and (b) at `preflight` (no `params`; not beside `execution: 'aggregate'`); (c)-(f) at `preflight.read.url`; (l)-(o) at `preflight.seed.N.param` (packages/spec/src/ui/action.zod.ts#refusePreflightContradictions). (b) may carry other issues for the aggregate shape; the one at `preflight` is the one scored",
+          "evidence": "one line per PUT: status, code, the issue path, and the GET status after it"
+        },
+        {
+          "clause": "the hole sentences: `${result.*}` is told the preflight runs before the action, any other unknown hole gets the closed list, an undeclared param is named, and an unclosed hole is told to close or percent-encode",
+          "oracle": "api",
+          "verify": "(c) says \"the preflight is sent BEFORE the action runs, so there is no result yet\"; (d) says \"which is not one a preflight reads\" and lists `${param.NAME}`, `${ctx.recordId}`, `${ctx.record.FIELD}`; (e) says \"declares no param named `version`\"; (f) says \"opens a `${` hole it never closes\" (packages/spec/src/ui/action.zod.ts#refusePreflightContradictions)",
+          "evidence": "the four messages"
+        },
+        {
+          "clause": "the read is a same-origin GET: an absolute URL, a URL opening with a hole, a non-GET method, a write block and a title are each refused with the sentence that names the rule",
+          "oracle": "api",
+          "verify": "(g) refused at `preflight.read.url` by the same-origin rule; (h) says the URL \"must open with `/`, and this value opens with a `${…}`\" (packages/spec/src/ui/action.zod.ts#preflightReadUrlRefusal); (i) says the read \"is sent as `GET`\"; (j) says \"A preflight only reads\"; (k) says a preflight declares no `title` and the console draws its panel under a generic translated heading",
+          "evidence": "the five messages"
+        },
+        {
+          "clause": "the seed refusals: a seed naming no param, a param seeded twice, a seeded param that also declares a default, and a seeded param a hole reads",
+          "oracle": "api",
+          "verify": "(l) \"declares no param of that name\"; (m) \"is seeded twice by this preflight\"; (n) \"also declares `defaultValue`\"; (o) \"read by a hole of its `read.url`\" (packages/spec/src/ui/action.zod.ts#refusePreflightContradictions)",
+          "evidence": "the four messages"
+        }
+      ],
+      "negative": [
+        "any refused variant answering 200, or a GET after it finding qa_pf_bad stored, is a FAIL",
+        "a refusal located at the action root instead of the preflight path is a FAIL: the author is told where"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/ui/action-preflight.test.ts (every refusal class, at parse, asserted on code and path); no pin drives the save door with a preflight, so acceptance[1]-[4] are the run's"
+      },
+      "source": [
+        "packages/spec/src/ui/action.zod.ts#refusePreflightContradictions",
+        "packages/spec/src/ui/action.zod.ts#preflightReadUrlRefusal",
+        "packages/spec/src/ui/action.zod.ts#preflightHoleParam (the closed hole set)",
+        "studio-authoring.save-door-runs-authoring-rules (the action save door answers 422 INVALID_METADATA with located issues)",
+        "#31840"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the spec half of an action's `preflight` read, refused at the save door (#31840). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.page-row-table-block",
+      "title": "A `row-table` block draws the rows a page `api` binding answers: columns in authored order, enum values through the label map, datetimes in the display zone, a missing value as \"—\", the empty label, and an error panel for rows that are not a list or a format it does not draw",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`; showcase_inquiry seeds three rows, one each of status new, contacted and closed (examples/app-showcase/src/data/seed/index.ts)",
+          "a scratch page, PUT /api/v1/meta/page/qa_rows_page: { name: 'qa_rows_page', label: 'QA rows', type: 'app', regions: [{ name: 'main', components: [ROWS, EMPTY, BAD_ROWS, BAD_FORMAT] }] }. ROWS = { type: 'row-table', id: 'qa_inquiries', dataSource: { provider: 'api', read: { url: '/api/v1/data/showcase_inquiry' }, path: PATH }, properties: { rows: '${data.records}', columns: [{ path: 'name', label: { en: 'Name', 'zh-CN': '姓名' } }, { path: 'status', label: 'Status', format: 'enum', enum: { new: 'New', contacted: { en: 'Contacted' } } }, { path: 'created_at', label: 'Created', format: 'datetime' }, { path: 'qa_absent', label: 'Absent' }] } }. EMPTY = ROWS with id qa_empty, rows: [] and emptyLabel: 'No inquiries yet', and no dataSource. BAD_ROWS = ROWS with id qa_bad_rows and rows: '${data.total}'. BAD_FORMAT = ROWS with id qa_bad_format and the status column's format 'currency'",
+          "PATH: curl GET /api/v1/data/showcase_inquiry once; omit `path` when it answers `{ object, records, total }` bare, and use 'data' when that sits inside `{ success, data }`, so `${data.records}` reads the list either way"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/page/qa_rows_page with the network panel recording; wait for the table, then screenshot",
+        "read the header cells and the cells of each body row of qa_inquiries",
+        "read qa_empty, qa_bad_rows and qa_bad_format"
+      ],
+      "acceptance": [
+        {
+          "clause": "one GET of the bound URL, and every row it answers drawn, the columns in authored order",
+          "oracle": "dom",
+          "verify": "[data-testid=row-table-block] with row-table-row-0..2; the header cells read Name, Status, Created, Absent; the network panel holds one GET /api/v1/data/showcase_inquiry (ui/packages/app-shell/src/console/blocks/productBlocks.tsx#RowTableBlock)",
+          "evidence": "the screenshot, the header texts and the GET"
+        },
+        {
+          "clause": "an enum value is drawn through its label map and a value the map does not name as written; a datetime is drawn in the display zone; a field a row lacks is drawn \"—\"",
+          "oracle": "dom",
+          "verify": "Status reads New and Contacted for those rows and closed as written; Created is a formatted instant, not the raw ISO string; every Absent cell is —",
+          "evidence": "the cell texts per row"
+        },
+        {
+          "clause": "an empty list draws the authored empty label",
+          "oracle": "dom",
+          "verify": "qa_empty draws [data-testid=row-table-empty] reading 'No inquiries yet' (the bundle's 'No rows to display' when no emptyLabel is authored)",
+          "evidence": "the element text"
+        },
+        {
+          "clause": "rows that resolve to a non-list, and a column format the block does not draw, draw the error panel and never the empty state or the table",
+          "oracle": "dom",
+          "verify": "qa_bad_rows draws [data-testid=row-table-datasource-error] with role alert, saying 'rows resolved to' and 'not a list of rows'; qa_bad_format's panel says 'columns[1].format \"currency\" is not one of text, datetime, enum.' (ui/packages/app-shell/src/console/blocks/productBlocks.tsx#readRowTable)",
+          "evidence": "both panel texts"
+        }
+      ],
+      "negative": [
+        "an empty table or the empty label for qa_bad_rows is a FAIL: a non-list is an error, not zero rows",
+        "a raw ISO timestamp in Created is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/console/blocks/__tests__/rowTable-31856.test.tsx (a stubbed binding through the real SchemaRenderer); no live spec saves or opens a page with this block"
+      },
+      "source": [
+        "ui/packages/app-shell/src/console/blocks/productBlocks.tsx#readRowTable",
+        "ui/packages/app-shell/src/console/blocks/productBlocks.tsx#RowTableBlock",
+        "packages/spec/src/ui/page.zod.ts (the element `api` data source: `data` is the selected answer in the element's holes)",
+        "#31856"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the `row-table` block over a page `api` binding (#31856). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.page-api-binding-reread-after-action",
+      "title": "A page's `api`-bound elements read again after the page's own successful action: one more GET, the old rows kept while it is in flight, the new answer drawn in place; a failed action reads nothing",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), signed in through the form"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the qa_rows_page fixture of studio-authoring.page-row-table-block, with two components added to its region beside ROWS",
+          "ADD = { type: 'action:button', id: 'qa_add_inquiry', properties: { name: 'qa_add_inquiry', label: 'Add probe inquiry', actionType: 'api', target: '/api/v1/forms/contact-us/submit', method: 'POST', bodyExtra: { name: 'QA reread probe', email: 'qa-reread@example.com', company: 'QA', message: 'reread probe' } } }, the showcase contact form's endpoint and body (examples/app-showcase/src/ui/pages/contact-form.page.ts, submit_inquiry)",
+          "FAIL = ADD with id and name qa_fail_inquiry, label 'Probe a missing form' and target '/api/v1/forms/qa-no-such-form/submit'"
+        ],
+        "knownGaps": [
+          "a change declared on the data bus outside the page's own actions reads nothing, and a failed re-read draws the binding's error face rather than the rows from before: both are scored from the pins in acceptance[3], since a live re-read failure needs the endpoint to fail between two reads"
+        ]
+      },
+      "steps": [
+        "open /_console/apps/showcase_app/page/qa_rows_page; wait for qa_inquiries to draw its rows; note their count",
+        "press Probe a missing form with the network panel recording; read the toast; count GETs of /api/v1/data/showcase_inquiry after the POST",
+        "press Add probe inquiry; screenshot while the re-read is in flight (throttle the network panel) and after it answers"
+      ],
+      "acceptance": [
+        {
+          "clause": "after the successful action the page sends exactly one more GET of the bound URL, without reloading the page",
+          "oracle": "network",
+          "verify": "the POST to /api/v1/forms/contact-us/submit answers 2xx, then one GET /api/v1/data/showcase_inquiry follows (ui/packages/app-shell/src/views/PageView.tsx#declarePageDataChanged, which calls the page scope's reread)",
+          "evidence": "the network list"
+        },
+        {
+          "clause": "the old rows stay on screen while the re-read is in flight, and the new answer is drawn in place with the probe row",
+          "oracle": "dom",
+          "verify": "during the throttled GET the table still shows the earlier rows and no loading panel replaces it; after it, a row reads QA reread probe and the row count is one more (ui/packages/react/src/element-data-source/useElementApiDataSource.ts)",
+          "evidence": "the two screenshots and the row counts"
+        },
+        {
+          "clause": "a failed action reads nothing",
+          "oracle": "network",
+          "verify": "the POST to the missing form answers non-2xx, an error toast shows, and no GET of /api/v1/data/showcase_inquiry follows it",
+          "evidence": "the network list after the failed POST"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: a cancelled confirmation reads nothing, a bus change alone reads nothing, a failed re-read draws the error face, and a request in flight is not joined",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a full page reload, or the table remounting to a loading panel, in place of the re-read is a FAIL",
+        "a GET after the failed action is a FAIL"
+      ],
+      "traps": [
+        "hydration-race",
+        "eventual-consistency"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/__tests__/PageView.apiElementReread-31891.test.tsx, ui/packages/react/src/element-data-source/__tests__/elementApiReread-31891.test.tsx; no live spec drives a page action"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/PageView.tsx#declarePageDataChanged",
+        "ui/packages/app-shell/src/views/PageView.tsx#createPageRefresh",
+        "ui/packages/react/src/element-data-source/useElementApiDataSource.ts",
+        "ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx (the refresh after a successful api, flow or script action)",
+        "#31891"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the page `api` binding re-read after the page's own action (#31891). Scoped sweep #32269 (epic #32022 M3, theme 6: action preflight and page bindings), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "studio-authoring.dataset-member-vocabulary",
+      "title": "A dataset member's synonyms and description: the save door refuses a repeated synonym, one another member answers to, an untrimmed or overlong one and an overlong description, Studio's dataset form edits both, and list_datasets matches a saved synonym",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over REST and in Studio",
+        "the same admin holding an osk_ API key, over MCP HTTP"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "a scratch dataset body every PUT edits: { name: 'qa_vocab_metrics', label: 'QA vocab', object: 'showcase_invoice', dimensions: [{ name: 'status', label: 'Status', field: 'status', type: 'string' }], measures: [{ name: 'invoice_count', label: 'Invoices', aggregate: 'count', synonyms: ['bill count', '账单数'], description: 'Count of invoices, every status.' }] }",
+          "MCP HTTP reachable with an osk_ key minted via POST /api/v1/keys (see ai.mcp-http-surface): initialize, then tools/call"
+        ]
+      },
+      "steps": [
+        "PUT /api/v1/meta/dataset/qa_vocab_metrics with the measure's synonyms edited per call: (a) ['bill count', 'Bill_Count']; (b) ['status']; (c) [' bill']; (d) one synonym of 61 characters; then (e) the description at 501 characters",
+        "after each refused PUT, GET /api/v1/meta/dataset/qa_vocab_metrics",
+        "PUT the body as written; GET it back",
+        "call list_datasets { terms: ['Bill-Count', '账单数'] } over MCP",
+        "open /_console/studio/~all/metadata/dataset/qa_vocab_metrics and the invoice_count measure row; read its Synonyms and Description fields"
+      ],
+      "acceptance": [
+        {
+          "clause": "a synonym repeated within its member once case, width, spacing, `_` and `-` are folded is refused at its position",
+          "oracle": "api",
+          "verify": "(a) answers 422 INVALID_METADATA at measures.0.synonyms.1 with 'repeats synonyms[0]' (packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm, the vocabulary check)",
+          "evidence": "status, path and message"
+        },
+        {
+          "clause": "a synonym another member answers to is refused, naming that member",
+          "oracle": "api",
+          "verify": "(b) is refused at measures.0.synonyms.0 saying it is also the name of dimension \"status\" in this dataset",
+          "evidence": "status, path and message"
+        },
+        {
+          "clause": "an untrimmed synonym, one over 60 characters and a description over 500 characters are refused",
+          "oracle": "api",
+          "verify": "(c) says 'no leading or trailing whitespace' and that the schema refuses rather than trims; (d) says 'a synonym is at most 60 characters'; (e) is refused at measures.0.description, 'at most 500 per locale' (packages/spec/src/ui/dataset.zod.ts#DatasetMemberSynonymsSchema)",
+          "evidence": "the three messages"
+        },
+        {
+          "clause": "no refused body is stored, and the valid body reads back as written",
+          "oracle": "api",
+          "verify": "each GET after a refusal answers 404 (or the earlier stored body); the valid PUT answers 200 and its GET carries both synonyms and the description",
+          "evidence": "the GET statuses and the final body"
+        },
+        {
+          "clause": "list_datasets matches a saved synonym through the same folding",
+          "oracle": "network",
+          "verify": "qa_vocab_metrics carries matches { term: 'Bill-Count', member: 'measures.invoice_count', matchedOn: 'synonym' } and { term: '账单数', member: 'measures.invoice_count', matchedOn: 'synonym' }; its invoice_count entry lists the synonyms and the description",
+          "evidence": "the qa_vocab_metrics entry"
+        },
+        {
+          "clause": "Studio's dataset form offers Synonyms and Description on the measure row, with the help text that states the limits",
+          "oracle": "dom",
+          "verify": "the measure row shows Synonyms holding 'bill count' and '账单数', and Description holding the sentence; the Synonyms help text says 'At most 20, each at most 60 characters' (packages/spec/src/ui/dataset.form.ts#datasetForm)",
+          "evidence": "a screenshot of the measure row"
+        }
+      ],
+      "negative": [
+        "a refused body stored, or one synonym silently trimmed, is a FAIL",
+        "a synonym rendered as a label anywhere in the console is a FAIL: synonyms are matched, never shown"
+      ],
+      "traps": [
+        "silent-coercion"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/spec/src/ui/dataset-member-vocabulary.test.ts (the vocabulary refusals, at parse) and packages/services/service-analytics/src/__tests__/dataset-term-matcher.test.ts (the matching); no pin drives the save door or the Studio form with synonyms"
+      },
+      "source": [
+        "docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md D1",
+        "packages/spec/src/ui/dataset.zod.ts#normalizeDatasetTerm",
+        "packages/spec/src/ui/dataset.zod.ts#DatasetMemberSynonymsSchema",
+        "packages/spec/src/ui/dataset.zod.ts#checkDatasetVocabulary",
+        "packages/spec/src/ui/dataset.form.ts#datasetForm"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — ADR-0149 D1, the dataset member vocabulary. Scoped sweep #32269 (epic #32022 M3, theme 7: AI data tools and MCP), read from source at 9091955b; no live run made",
+          "ref": "#32269"
         }
       ]
     }

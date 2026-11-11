@@ -46,6 +46,10 @@ Detailed rules, with incorrect/correct examples:
 - **[Lifecycle Hooks](./references/data-hooks.md)** — the lifecycle events, the sandboxed `body` (ctx + capability contract; the inline `handler` is deprecated), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 - **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
+- **[Quick-Start Template](./references/examples-objects.md#quick-start-template)** — one complete object: fields, `sharingModel`, `enable`, validations
+- **[Metadata Protection](./references/examples-objects.md#metadata-protection-protection)** — the `protection` block that locks shipped metadata against edits and deletes
+- **[Seed Data & Fixtures](./references/seeds.md)** — `defineSeed()`, import modes, `externalId`, relationship references, CEL values
+- **[Linting & Generation Quality](./references/lint-rules.md)** — the `os lint` data-model rules and severities
 
 ---
 
@@ -209,15 +213,12 @@ export const Invoice = ObjectSchema.create({
   incoming changes when the predicate is `TRUE` (for everyone; per permission
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
-  A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
+  A non-system write (REST/UI, and any `runAs:'user'` flow) has
   the field **stripped**; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
-  and DO write it. So the pattern "users can't edit this, but automation
-  maintains it" is expressed by declaring the field `readonly` **and** running
-  the maintaining flow `runAs:'system'` (see **objectstack-automation**), not by
-  removing `readonly`. Writing a `readonly` field from a `runAs:'user'`
-  `update_record` node is a build-time **error** (`os validate` / `os build`).
+  and DO write it. Keep the field `readonly` when automation maintains it; the
+  flow side: [objectstack-automation → Failure routing & `runAs`](../objectstack-automation/SKILL.md#failure-routing--runas).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in
   protocol 17 — emitting it is a parse error.
@@ -233,10 +234,6 @@ export const Invoice = ObjectSchema.create({
 - For complex predicates, load **objectstack-formula** and emit CEL via
   `P\`...\``; do not use Salesforce-style `AND`, `IN (...)`, or `{field}`
   syntax.
-
----
-
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Quick-Start Template.
 
 ---
 
@@ -364,8 +361,6 @@ See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
 refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
 database layer.
 
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks.
-
 ---
 
 ## Object Extension Model
@@ -449,18 +444,6 @@ CONCURRENT_UPDATE`. **Release**: the owner writes `owner_id: null` and the recor
 sits in its home queue again. **Move**: writing another `queue` is a transfer
 (`allowTransfer` or `modifyAllRecords`). ⛔ Never a per-record `assigned_to`
 picklist, a round-robin counter field, or a hook that picks an owner.
-
----
-
-→ Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Metadata Protection (`protection`).
-
----
-
-→ Seed Data & Fixtures (`defineSeed()`) moved verbatim to [references/seeds.md](./references/seeds.md).
-
----
-
-→ Linting & Generation Quality moved verbatim to [references/lint-rules.md](./references/lint-rules.md).
 
 ---
 

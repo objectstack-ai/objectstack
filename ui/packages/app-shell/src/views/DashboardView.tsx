@@ -222,10 +222,11 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
   // backing object isn't in this runtime (e.g. cloud-only
   // `sys_package_installation` on system_overview).
   //
-  // objectstack#28784 — asked by name (`readDashboardWidgetObjects`): a widget
-  // is hidden once the server answered its object absent. A hand-rolled
+  // objectstack#28784 — asked in one `?names=` read
+  // (`readDashboardWidgetObjects`): a widget is hidden once the server
+  // answered its object absent, which costs no 404. A hand-rolled
   // metadata context has no scope to offer, and its `objects` is what it holds.
-  const widgetObjects = readObjectScope && dashboard ? readDashboardWidgetObjects(readObjectScope, activeApp as Record<string, any> | undefined, dashboard) : null;
+  const widgetObjects = readObjectScope && dashboard ? readDashboardWidgetObjects(readObjectScope, dashboard) : null;
   const absentObjectNames = widgetObjects ? widgetObjects.missing : null;
   const listedObjects = readObjectScope ? null : metadata.objects;
   const unregistered = useMemo((): ((name: string) => boolean) | null => {

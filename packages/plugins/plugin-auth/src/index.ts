@@ -52,6 +52,22 @@ export {
   type OneTimeTokenHandoffServing,
   type HandoffAnswer,
 } from './one-time-token-handoff.js';
+// The OAuth consent page's account of the request it asks a person to approve,
+// for the same kind of host: `POST /oauth-consent/request` is answered with
+// `runOAuthConsentRequestRead(oauthConsentRequestDepsFor(authManager), request)`,
+// the same two calls AuthPlugin's own mount makes, so the answer and every
+// refusal stay the framework's. The page keeps Authorize disabled until this
+// route answers 200, so a host that forwards the auth routes without it serves
+// a consent page nobody can approve.
+export {
+  runOAuthConsentRequestRead,
+  oauthConsentRequestDepsFor,
+  type OAuthConsentRequestManager,
+  type OAuthConsentRequestDeps,
+  type OAuthConsentRequestResult,
+  type OAuthConsentRequestData,
+  type ConsentRequestClient,
+} from './oauth-consent-request.js';
 export * from './ensure-default-organization.js';
 // [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
 // v18 organization-ownership ceremony (`os migrate organization-ownership
@@ -106,12 +122,21 @@ export * from './rate-limit-storage.js';
 export * from './secondary-storage.js';
 export * from './register-sso-provider.js';
 // The closed list of causes an enterprise OIDC callback names when it refuses
-// the IdP's ID token (`error_description` on the redirect, and the log line).
+// the IdP's ID token (`error_description` on the redirect, and the log line),
+// and the one it names when the accepted claims carry no email address.
 export {
+  SSO_OIDC_EMAIL_CLAIM_MISSING,
   SSO_OIDC_REFUSAL_CAUSES,
   SSO_OIDC_UNCLASSIFIED_REFUSAL,
   type SsoOidcRefusalCause,
 } from './sso-oidc-refusal-cause.js';
+// [#32086] The SAML counterpart: the closed list of causes a refused SAML
+// response names in place of the vendor's opaque `Invalid SAML response`.
+export {
+  SSO_SAML_REFUSAL_CAUSES,
+  SSO_SAML_UNCLASSIFIED_REFUSAL,
+  type SsoSamlRefusalCause,
+} from './sso-saml-refusal-cause.js';
 export * from './send-verification-email.js';
 export * from './objectql-adapter.js';
 // [#7732] ADR-0069 D4's revoke-audit trail. Exported alongside the adapter it

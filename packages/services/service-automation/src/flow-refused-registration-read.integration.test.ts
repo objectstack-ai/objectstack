@@ -33,11 +33,11 @@ import type { AutomationEngine, NodeExecutor } from './engine.js';
 
 /** The read surface these tests drive: `ObjectStackProtocolImplementation`'s meta doors. */
 interface MetadataReadDoors {
-    getMetaItem(request: { type: string; name: string }): Promise<GetMetaItemResponse>;
+    getMetaItem(request: { type: string; name: string; state?: 'draft' }): Promise<GetMetaItemResponse>;
     /** The default door's producer: REST's cached branch serves `data` and `registration` from it. */
     getMetaItemCached(request: { type: string; name: string }): Promise<GetMetaItemCachedResponse>;
     getMetaItems(request: { type: string }): Promise<GetMetaItemsResponse>;
-    saveMetaItem(request: { type: string; name: string; item: unknown }): Promise<unknown>;
+    saveMetaItem(request: { type: string; name: string; item: unknown; mode?: 'draft' }): Promise<unknown>;
 }
 
 const SYS = { isSystem: true } as const;
@@ -192,5 +192,84 @@ describe('a stored flow the engine refuses at boot is not served as running (#23
             expect(await automation.getFlow('typo'), 'the mutation sync registered the corrected row').not.toBeNull();
         });
         expect((await protocol.getMetaItem({ type: 'flow', name: 'typo' })).registration).toEqual({ state: 'registered' });
+    });
+});
+
+/**
+ * A flow stored with no `start` node, now that registration refuses that shape:
+ * what each path does with a row stored before the refusal existed, or kept
+ * mid-edit through the metadata save door.
+ *
+ *  - Boot: the kernel still reaches `running`; the bind refuses the row, warns,
+ *    and records the refusal; every other stored flow is armed as before.
+ *  - Read: the stored row is served unchanged (it does not vanish), beside
+ *    `registration: refused` and the engine's words naming the missing node.
+ *  - Save: since #32289 the metadata save door's own lint rule
+ *    (`flow-start-node-missing`) refuses a live start-less save, whatever the
+ *    flow's `status`, so nothing reaches the engine; a metadata draft
+ *    (`mode: 'draft'`) still stores mid-edit, with the finding on its draft read.
+ */
+describe('a stored flow with no start node: refused at the bind, never at the boot, and readable as refused', () => {
+    let kernel: ObjectKernel;
+
+    afterEach(async () => {
+        if (kernel?.getState() === 'running') await kernel.shutdown();
+    });
+
+    const startless = (name: string, status: string) => ({
+        ...stampFlow(name, { count: 1 }),
+        status,
+        nodes: [
+            { id: 'stamp', type: STAMP, label: 'Stamp', config: { count: 1 } },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [{ id: 'e1', source: 'stamp', target: 'end' }],
+    });
+
+    async function boot() {
+        kernel = new ObjectKernel({ logger: { level: 'fatal' }, gracefulShutdown: false } as never);
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.use(new AutomationServicePlugin({ suspendedRunStore: 'memory' }));
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+        await kernel.use(storedFlowsPlugin(driver, [startless('no_start', 'active'), stampFlow('valid', { count: 2 })]));
+        await kernel.bootstrap();
+        return {
+            protocol: kernel.getService<MetadataReadDoors>('protocol'),
+            automation: kernel.getService<AutomationEngine>('automation'),
+        };
+    }
+
+    it('the boot completes, the row is not armed, and the read serves it as stored beside the refusal', async () => {
+        const { protocol, automation } = await boot();
+        expect(kernel.getState()).toBe('running');
+        expect(await automation.getFlow('no_start')).toBeNull();
+        expect(await automation.getFlow('valid'), 'control: the other stored flow is armed').not.toBeNull();
+
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'no_start' });
+        expect((read.item as { status?: string }).status).toBe('active');
+        expect(read.registration?.state).toBe('refused');
+        const reason = read.registration?.state === 'refused' ? read.registration.reason.message : '';
+        expect(reason).toMatch(/^Flow 'no_start' rejected: the flow's top-level `nodes` hold no `start` node/);
+    });
+
+    // [#32289] The save door's own lint rule (`flow-start-node-missing`) now
+    // refuses the live save, whatever the flow's `status`, so nothing reaches
+    // the engine; a metadata draft (`mode: 'draft'`) still stores mid-edit,
+    // with the finding on its draft read.
+    it('the metadata save door refuses a live start-less save, and keeps a start-less draft with the finding', async () => {
+        const { protocol, automation } = await boot();
+        const refusal = await protocol
+            .saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft') })
+            .then(() => null, (e: unknown) => e as { code?: string; status?: number; issues?: Array<{ rule?: string }> });
+        expect({ code: refusal?.code, status: refusal?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect((refusal?.issues ?? []).map((i) => i.rule)).toContain('flow-start-node-missing');
+        expect(await automation.getFlow('draft_no_start')).toBeNull();
+
+        await protocol.saveMetaItem({ type: 'flow', name: 'draft_no_start', item: startless('draft_no_start', 'draft'), mode: 'draft' });
+        const read = await protocol.getMetaItem({ type: 'flow', name: 'draft_no_start', state: 'draft' });
+        const diagnostics = (read.item as { _diagnostics?: { valid: boolean; errors?: Array<{ code?: string }> } })._diagnostics;
+        expect(diagnostics?.valid).toBe(false);
+        expect((diagnostics?.errors ?? []).map((e) => e.code)).toContain('flow-start-node-missing');
+        expect(await automation.getFlow('draft_no_start')).toBeNull();
     });
 });

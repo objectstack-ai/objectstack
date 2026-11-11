@@ -673,10 +673,11 @@ is how an operator clears that residue deliberately.
 
 **A row is removed only when it is attributable to a declared encrypted settings
 specifier *and* named by no family of the complete reference union.** `sys_secret` is
-written by three producers and carries no producer column, so "unreferenced by
+written by four producers and carries no producer column, so "unreferenced by
 `sys_setting`" is not "unreferenced" — a live credential belonging to an object's
-`secret` field or to a datasource can share a settings specifier's `(namespace, key)`.
-The command therefore reads all three holder families, and **refuses to delete whenever
+`secret` field or to a datasource, or a seed or signing key of the audit ledger's
+sealer, can share a settings specifier's `(namespace, key)`.
+The command therefore reads all four holder families, and **refuses to delete whenever
 any of them could not be enumerated, naming the family**. A host that says nothing about
 its code-declared datasources leaves that family a gap; `--no-declared-datasources` is
 how you state there are none. Rows nothing attributes are never deleted, nor are rows
@@ -738,7 +739,7 @@ What a run guarantees:
 - **The scope comes from the holder, never from a guess.** A row that nothing
   references, a row whose holders belong to different producers, and every row while a
   holder family could not be read are **left as they are** and counted. Like
-  `os secret orphans`, it reads all three holder families, and a host that says nothing
+  `os secret orphans`, it reads all four holder families, and a host that says nothing
   about its code-declared datasources leaves that family a gap. `--apply` then refuses
   and names the family.
 - **Resumable.** A row already sealed under the current binding is skipped as done. A run
@@ -790,7 +791,7 @@ os compile --json                    # JSON output for CI pipelines
   → Normalizing stack definition...
   → Lowering inline handlers...
   → Validating protocol compliance...
-  → Running author-time rules (64)...
+  → Running author-time rules (65)...
   → Checking that every required capability has a provider installable in this edition...
   → Collecting package docs (ADR-0046)... 0 collected
   → Writing artifact...
@@ -884,7 +885,7 @@ for the full matrix. Every failing rule is reported in a single run rather than
 stopping at the first, so one pass shows the whole hole.
 
 **Options:**
-- `--strict` — Treat warnings as errors (exit code 1)
+- `--strict` — Treat warnings as errors (exit code 1); `info` findings stay advisory
 - `--json` — Output results as JSON
 
 **Warnings checked (advisory, non-blocking unless `--strict`):**
@@ -892,8 +893,18 @@ stopping at the first, so one pass shows the whole hole.
 - Missing `manifest.namespace` (required for multi-app hosting)
 - No objects defined
 - No apps or plugins defined
-- Every advisory the rule registry raised (dangling `stageField` /
-  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status, …)
+- Every `warning`-severity finding the rule registry raised (dangling
+  `stageField` / `highlightFields` pointers, replay-unsafe seeds, ambiguous
+  flow status, …)
+- ADR-0087 conversion notices (a deprecated shape converted at load)
+
+**What fails the run under `--strict`.** `--strict` makes a run with one or
+more warnings exit 1 exactly as an error does, and says why — `Strict mode:
+warnings treated as errors`. An `info`-severity finding from the rule registry
+(the same finding `os lint` grades as a `suggestion`) is printed under `ℹ` and
+stays in the `--json` payload's `warnings`, but it stays advisory either way:
+a run whose only findings are `info` exits 0 under `--strict` and prints no
+strict verdict. The `--json` face reaches the same exit status as the text face.
 
 <Callout type="tip">
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
@@ -1339,7 +1350,7 @@ where the data lives.
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
 | `os migrate packageless-overlays` | List the package-less view, dashboard, report, translation and email-template rows stored over a name exactly one installed package ships — the customizations Setup saved before ADR-0146 D11 closed that write — and with `--apply` move each into that package's paired `<base>.custom` (created when absent) as a declared override, `basedOn` the base's installed version; the package-less row is deleted only after the moved one reads back as served. A name no package ships is environment metadata and is not touched; a name several packages ship, or one the pair already holds a row of, is listed and left with the reason. So is a view container (`list`, `listViews`, `form`, `formViews`): only a single view declares an override, so it is listed `cannot_declare` and never attempted, with the way out — save each of its views into the pair as a single view, then delete the container row. Takes `serve`'s `--preset` and `--dev`. Idempotent: a second run moves nothing. Run it once after upgrading |
-| `os migrate stored-references` | List the stored references the upgrade left naming no package because the one resolution rule (ADR-0150 D3) refuses them: a user's permission-set assignment, an audience-binding suggestion, a managed sharing rule, a queue membership, an open approval request, a paused flow run, a flow credential, a flow dispatch key, a connector connection, an assignment cursor or a legacy email template whose name more than one package holds, each with its row id and every candidate by its qualified address (`namespace/name`). A suggestion a package wrote naming an environment-authored permission set, or one held only outside the package's declared dependencies, is listed with the fix and is never bindable. Also lists the packaged fields whose picklist the rule refuses (served with no options) the names two packages held before the one-holder rule, and each installed package whose namespace spells a literal segment of the address grammar (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`): the boot keeps it with one warning, its items are read with `?package=ID`, and only a rename of its namespace gives them qualified addresses. Read-only, and `--json` prints the same bytes on every run. A table this composition does not carry (automation, approvals) is named, not skipped: compose as `os serve` does, with `--preset`/`--dev`. Then `os migrate stored-references bind --table T --id ID --package P` writes the package you chose into that one row: it asks the rule again first and refuses, writing nothing, when the row is already bound, now resolves on its own, or the package is no longer a candidate (a stale report). Each bind leaves a `sys_audit_log` row; a second run writes nothing. Confirm with `--yes` |
+| `os migrate stored-references` | List the stored references the upgrade left naming no package because the one resolution rule (ADR-0150 D3) refuses them: a user's permission-set assignment, an audience-binding suggestion, a managed sharing rule, a queue membership, an open approval request, a paused flow run, a flow credential, a flow dispatch key, a connector connection, an assignment cursor or a legacy email template whose name more than one package holds, each with its row id and every candidate by its qualified address (`namespace/name`). A suggestion a package wrote naming an environment-authored permission set, or one held only outside the package's declared dependencies, is listed with the fix and is never bindable. Also lists the packaged fields whose picklist the rule refuses (served with no options) the names two packages held before the one-holder rule, and each installed package whose namespace spells a literal segment of the address grammar (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`): the boot keeps it with one warning, its items are read with `?package=ID`, and only a rename of its namespace gives them qualified addresses. Read-only, and `--json` prints the same bytes on every run. Run before the release's first boot, it reads a table that has no package column yet as nothing bound yet, lists the rows that boot's backfill will leave unbound, and says so once; it adds no column. A table this composition does not carry (automation, approvals) is named, not skipped: compose as `os serve` does, with `--preset`/`--dev`. Then `os migrate stored-references bind --table T --id ID --package P` writes the package you chose into that one row: it asks the rule again first and refuses, writing nothing, when the row is already bound, now resolves on its own, or the package is no longer a candidate (a stale report). Each bind leaves a `sys_audit_log` row; a second run writes nothing. Confirm with `--yes` |
 | `os migrate duplicates` | Report business identifiers already minted twice across the organization partitions, and the rows blocking the boot-time NULL-safe index tightenings — a read-only inventory as JSON on stdout. Renumbers nothing and writes no row and no schema; run it before the boot-time tenancy repair, which overwrites part of the evidence |
 
 **The boot itself writes no row and no schema you did not ask for.** Each of these commands boots
@@ -2390,15 +2401,25 @@ config loads before anything is written:
   the views of the object `os g object customer` writes, prefix included. The
   container carries no `name` or `label` of its own (the server registers it
   under its object), and its list shows every field the object declares, under
-  a `list.label` that `os lint` requires.
+  a `list.label` that `os lint` requires. With `--object`, the name is the
+  view's own: `os g view open_customers --object customer` writes a list view
+  named `open_customers` (under the container's `listViews`) for Customer. A
+  stack holds one views container per object, so for an object that already
+  has one the command refuses and prints the `listViews` entry to add to that
+  container instead.
 - A **flow**, **action** or **app** binds the object you name with
   `--object` — as declared (`my_app_customer`) or without the namespace prefix
   (`customer`). Without `--object`, it binds the stack's only object.
 - An **action** runs the flow you name with `--flow`, or the stack's only flow.
+  In a stack that declares no flow it is a declarative update instead:
+  `operation: 'update'` with a `params` entry naming one field of the object,
+  so the button opens a dialog for that value and writes it to the record as
+  the signed-in user — no handler and no flow to write.
 
-When the stack declares none, or several and you named none, or the one you
-named is not declared, the command refuses, lists what the stack does declare,
-and writes nothing: which object a scaffold acts on is yours to say. Outside a
+When the stack declares none (except an action's flow, above), or several and
+you named none, or the one you named is not declared, the command refuses,
+lists what the stack does declare, and writes nothing: which object a scaffold
+acts on is yours to say. Outside a
 project (no config) a scaffold that binds is refused too, because there is no
 stack to check it against. `--object` and `--flow` on a type that takes neither
 are refused rather than ignored.
@@ -2430,14 +2451,24 @@ After writing, `os g` loads the config again and says which of these holds:
   `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
-command only loads it.
+command only loads it. Nor does it edit an app: a dashboard reaches people
+through an app's navigation, so `os g dashboard` prints the navigation entry
+that lists it, and the app to add it to, and writes the same line into the
+dashboard file's header.
+
+`os g object` writes the authoring style the `npm create objectstack` starter
+uses: each field through a `Field.*` builder (`Field.text({ … })`), placed in a
+declared `fieldGroups` section, and the object exported by name
+(`export const customer = ObjectSchema.create({ … })`), which is the name its
+barrel line re-exports.
 
 ```bash
 os g object customer                          # Generate a Customer object
 os g view customer                            # Generate the Customer list view
+os g view open_customers --object customer    # Generate a named list view of Customer
 os g flow customer_changed --object customer  # Generate a flow that runs when a Customer changes
-os g action approve --object customer         # Generate an action on Customer records that runs the flow
-os g dashboard sales                          # Generate a dashboard
+os g action approve --object customer         # Generate an action on Customer records that runs the flow (a declarative update when there is no flow)
+os g dashboard sales                          # Generate a dashboard, and print the app navigation entry that lists it
 os g app sales --object customer              # Generate an app whose navigation opens Customer
 os g skill lead_qual                          # Generate an AI skill
 os g picklist industry                        # Generate a shared option list select fields name
@@ -2675,7 +2706,18 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    view-container-name checks and `--strict` stay `os validate`'s, so run it
    too.
 2. **Runtime.** Boot the app in-process and exercise it through the real HTTP
-   stack: for each object, a record derived from its fields is created, read
+   stack. The boot reads the project's `.env*` files first, the ones `os dev`
+   reads, from the directory holding the config (a variable already exported
+   in the shell wins), so a value the app pins there, such as its home
+   currency, is in force as it is under `os dev`. The boot's seed is judged
+   before anything runs against it: every record the seed drops, every
+   reference field it drops from a written record and every marketplace install
+   that comes up empty fails the run, and the seed line names the count (the
+   run's `[Seeder]` warnings name each record and why it was refused). A seed
+   still writing when the wait ends, or one that reports no outcome, fails the
+   run too; a multi-tenant boot, which replays the seed per organization
+   instead, is reported as not judged. Then, for each object, a record derived
+   from its fields is created, read
    back and compared (CRUD round-trip fidelity), and a create, read or
    fidelity failure fails the run. With `--rls`, a second fresh boot proves the
    cross-owner invariant — a member must not write what it cannot read — for a
@@ -2816,7 +2858,8 @@ document carries depends on where the run ended:
   `path`, `message`, `hint`, plus `package` for a finding raised inside one
   package of the artifact), or the schema issues when the stack does not parse.
 - **Reached the runtime stage:** the report — `app`, `config`, `multiTenant`,
-  `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
+  `seed` (the boot's seed: its `status`, per-source counts, `totals` and the
+  `hardFailures` it adds), `crud`, `rls` (with `--rls`), `referenceShapes` (with `--reference-shapes`),
   `deleteBehaviors` (with `--delete-behaviors`), `uniqueScopes` (with
   `--unique-scopes`; its `boot` names the legs the run could prove),
   `parentWriteReach` (with `--parent-write-reach`; its `personas` name who

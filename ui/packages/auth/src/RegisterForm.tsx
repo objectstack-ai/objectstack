@@ -33,6 +33,12 @@ export interface RegisterFormLabels {
   confirmPasswordPlaceholder?: string;
   passwordMismatchError?: string;
   passwordTooShortError?: string;
+  /** Under the name field when it is left empty. */
+  nameRequiredError?: string;
+  /** Under the email field when it is left empty. */
+  emailRequiredError?: string;
+  /** Under the email field when it does not read as an address. */
+  emailInvalidError?: string;
   submitButton?: string;
   submittingButton?: string;
   hasAccountText?: string;
@@ -125,6 +131,24 @@ export interface RegisterFormProps {
 /** The confirm field's own error line, named by its `aria-describedby`. */
 const CONFIRM_ERROR_ID = 'register-confirm-password-error';
 
+/** The minimum the form asks for; better-auth's own default. */
+const MIN_PASSWORD_LENGTH = 8;
+
+/** One `@` with something on both sides and no spaces: the server judges the rest. */
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+$/;
+
+/** The fields the form checks before it sends anything, each with its own line. */
+type RegisterField = 'name' | 'email' | 'password' | 'confirm';
+type FieldErrors = Partial<Record<RegisterField, string>>;
+
+/** Each field's error line, named by that field's `aria-describedby`. */
+const FIELD_ERROR_ID: Record<RegisterField, string> = {
+  name: 'register-name-error',
+  email: 'register-email-error',
+  password: 'register-password-error',
+  confirm: CONFIRM_ERROR_ID,
+};
+
 const DefaultLink = ({ href, className, children }: AuthLinkComponentProps) => (
   <a href={href} className={className}>{children}</a>
 );
@@ -146,6 +170,29 @@ const DefaultUserPlusIcon = () => (
     <line x1="22" y1="11" x2="16" y2="11" />
   </svg>
 );
+
+/** An input's error wiring: invalid, described by its line, outlined red. */
+function fieldErrorProps(field: RegisterField, errors: FieldErrors) {
+  const message = errors[field];
+  return {
+    'aria-invalid': message ? true : undefined,
+    'aria-describedby': message ? FIELD_ERROR_ID[field] : undefined,
+    className: message
+      ? `${AUTH_INPUT_CLASS} border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30`
+      : AUTH_INPUT_CLASS,
+  } as const;
+}
+
+/** A field's error line, under the field. */
+function FieldErrorLine({ field, errors }: { field: RegisterField; errors: FieldErrors }) {
+  const message = errors[field];
+  if (!message) return null;
+  return (
+    <p id={FIELD_ERROR_ID[field]} role="alert" className="text-[13px] font-medium text-destructive">
+      {message}
+    </p>
+  );
+}
 
 /**
  * Registration form component with name, email, and password fields.
@@ -184,7 +231,17 @@ export function RegisterForm({
   const [error, setError] = useState<string | null>(null);
   // #25885 — the mismatch belongs to the confirm field, under it, not to the
   // top banner above the first field; the banner keeps the server's refusals.
-  const [confirmError, setConfirmError] = useState<string | null>(null);
+  // Every field's own problem is drawn under that field, all at once: the form
+  // is `noValidate`, so the browser's one-at-a-time bubble (in the browser's
+  // language, not the page's) never shows.
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const clearFieldError = (...fields: RegisterField[]) =>
+    setFieldErrors((prev) => {
+      if (!fields.some((f) => prev[f])) return prev;
+      const next = { ...prev };
+      for (const f of fields) delete next[f];
+      return next;
+    });
   // The Turnstile token (single-use) and the counter that discards it after
   // every server answer. Only read with `turnstileSiteKey`.
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
@@ -202,6 +259,9 @@ export function RegisterForm({
     confirmPasswordPlaceholder: labels.confirmPasswordPlaceholder ?? 'Confirm your password',
     passwordMismatchError: labels.passwordMismatchError ?? 'Passwords do not match',
     passwordTooShortError: labels.passwordTooShortError ?? 'Password must be at least 8 characters',
+    nameRequiredError: labels.nameRequiredError ?? 'Enter your name',
+    emailRequiredError: labels.emailRequiredError ?? 'Enter your email address',
+    emailInvalidError: labels.emailInvalidError ?? 'Enter an email address such as name@example.com',
     submitButton: labels.submitButton ?? 'Create Account',
     submittingButton: labels.submittingButton ?? 'Creating account…',
     hasAccountText: labels.hasAccountText ?? 'Already have an account?',
@@ -213,21 +273,19 @@ export function RegisterForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setConfirmError(null);
-
-    if (password !== confirmPassword) {
-      setConfirmError(l.passwordMismatchError);
-      return;
-    }
-
-    if (password.length < 8) {
-      setError(l.passwordTooShortError);
-      return;
-    }
 
     // Autofill and copy-paste routinely smuggle in leading/trailing whitespace
     // that the server rejects as "Invalid email" (#3238) — trim before use.
     const trimmedEmail = email.trim();
+
+    const found: FieldErrors = {};
+    if (name.trim() === '') found.name = l.nameRequiredError;
+    if (trimmedEmail === '') found.email = l.emailRequiredError;
+    else if (!EMAIL_SHAPE.test(trimmedEmail)) found.email = l.emailInvalidError;
+    if (password.length < MIN_PASSWORD_LENGTH) found.password = l.passwordTooShortError;
+    if (password !== confirmPassword) found.confirm = l.passwordMismatchError;
+    setFieldErrors(found);
+    if (Object.keys(found).length > 0) return;
     if (captchaRequired && !captchaToken) {
       setError(l.captchaFailed);
       return;
@@ -275,7 +333,7 @@ export function RegisterForm({
           buttonText={labels.socialButton}
         />
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           {/* No divider here: SocialSignInButtons already renders its own
               "or continue with email" divider under the provider buttons —
               stacking a second "or" line read as a rendering glitch (#2625,
@@ -291,12 +349,16 @@ export function RegisterForm({
               type="text"
               placeholder={l.namePlaceholder}
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                clearFieldError('name');
+              }}
               required
               autoComplete="name"
               disabled={isLoading}
-              className={AUTH_INPUT_CLASS}
+              {...fieldErrorProps('name', fieldErrors)}
             />
+            <FieldErrorLine field="name" errors={fieldErrors} />
           </div>
 
           <div className="space-y-2">
@@ -308,12 +370,16 @@ export function RegisterForm({
               type="email"
               placeholder={l.emailPlaceholder}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                clearFieldError('email');
+              }}
               required
               autoComplete="email"
               disabled={isLoading}
-              className={AUTH_INPUT_CLASS}
+              {...fieldErrorProps('email', fieldErrors)}
             />
+            <FieldErrorLine field="email" errors={fieldErrors} />
           </div>
 
           <div className="space-y-2">
@@ -327,14 +393,15 @@ export function RegisterForm({
               value={password}
               onChange={(e) => {
                 setPassword(e.target.value);
-                setConfirmError(null);
+                clearFieldError('password', 'confirm');
               }}
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               autoComplete="new-password"
               disabled={isLoading}
-              className={AUTH_INPUT_CLASS}
+              {...fieldErrorProps('password', fieldErrors)}
             />
+            <FieldErrorLine field="password" errors={fieldErrors} />
           </div>
 
           <div className="space-y-2">
@@ -348,25 +415,15 @@ export function RegisterForm({
               value={confirmPassword}
               onChange={(e) => {
                 setConfirmPassword(e.target.value);
-                setConfirmError(null);
+                clearFieldError('confirm');
               }}
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               autoComplete="new-password"
               disabled={isLoading}
-              aria-invalid={confirmError ? true : undefined}
-              aria-describedby={confirmError ? CONFIRM_ERROR_ID : undefined}
-              className={
-                confirmError
-                  ? `${AUTH_INPUT_CLASS} border-destructive focus-visible:border-destructive focus-visible:ring-destructive/30`
-                  : AUTH_INPUT_CLASS
-              }
+              {...fieldErrorProps('confirm', fieldErrors)}
             />
-            {confirmError && (
-              <p id={CONFIRM_ERROR_ID} role="alert" className="text-[13px] font-medium text-destructive">
-                {confirmError}
-              </p>
-            )}
+            <FieldErrorLine field="confirm" errors={fieldErrors} />
           </div>
 
           {turnstileSiteKey && (
