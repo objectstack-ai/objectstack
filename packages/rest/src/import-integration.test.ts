@@ -728,6 +728,12 @@ describe('import route — named mapping artifact (#2611)', () => {
     };
     const BARE_ONE_HOLDER_WIRE: string[] = [];
 
+    // The exact qualifier reads the stored rows bound to the package it names
+    // (`findServedOverlayRow`) before it refuses a non-holder, as a deployed
+    // server's provisioned `sys_metadata` answers. `boot()` registers that
+    // object after its DDL; provision it here.
+    beforeEach(async () => { await engine.syncSchemas(); });
+
     it('two holders: each qualified request answers 200 with its own holder\'s mapping, where the bare name answers 409', async () => {
       shipMapping(ALPHA, 1);
       shipMapping(BETA, 2);
