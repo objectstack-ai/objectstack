@@ -50,6 +50,13 @@ const DESIGN_RECORD_VOCABULARY: ReadonlyArray<readonly [string, RegExp]> = [
   ['an internal component', /\bmiddleware\b|\bbetter-auth is oblivious\b|\bReaper\b/i],
   ['a column-history note', /\bNULL only on\b/],
   ['an inert-column notice', /\bInert today\b/i],
+  // [#32444] The two developer notes the inbox object's field help carried
+  // past the list above: a column reference in arrow form ("FK →
+  // sys_notification", "外键 → sys_notification" in a locale), and a rollout
+  // phase ("null until P1", "P1 之前为空"). Matched on the object name and the
+  // phase id, so a translated leaf is caught in every locale.
+  ['an object-reference arrow', /\bFK\b|→\s*sys_[a-z_]+/],
+  ['a rollout-phase note', /\bP\d+\b/],
 ];
 
 function vocabularyIn(text: string): string[] {
@@ -123,6 +130,10 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
     expect(vocabularyIn('Batch cadence (P3 digest middleware).')).toEqual(['an internal component']);
     expect(vocabularyIn('NULL only on a grant written before the column existed.')).toEqual(['a column-history note']);
     expect(vocabularyIn('Inert today: nothing reads it.')).toEqual(['an inert-column notice']);
+    expect(vocabularyIn('FK → sys_notification (the L2 event this row materializes)')).toEqual(['an object-reference arrow']);
+    expect(vocabularyIn('外键 → sys_notification_delivery(发件箱行)')).toEqual(['an object-reference arrow']);
+    expect(vocabularyIn('The delivery record; null until P1.')).toEqual(['a rollout-phase note']);
+    expect(vocabularyIn('发件箱行;P1 之前为空')).toEqual(['a rollout-phase note']);
     expect(vocabularyIn('Which topics and channels each user receives.')).toEqual([]);
   });
 
@@ -131,7 +142,7 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
     const names = objects.map((o) => o.name);
     for (const name of [
       'sys_notification_preference', 'sys_notification_template',
-      'sys_http_delivery', 'sys_notification_delivery',
+      'sys_http_delivery', 'sys_notification_delivery', 'sys_inbox_message',
     ]) {
       expect(names, `${name} is in the population`).toContain(name);
     }
