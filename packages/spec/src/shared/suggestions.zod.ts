@@ -358,7 +358,8 @@ export interface StrictUnknownKeyErrorOptions {
  * `strictObject`, which derives the candidate list from the shape, and
  * deleted the registry with the last of them.
  *
- * This factory stays PUBLISHED and unchanged for external callers, but inside
+ * This factory stays PUBLISHED for external callers (its options only grew the
+ * optional `retiredKeyUpgradeGuide`, default unchanged), but inside
  * `packages/spec` the only caller is `strictObject` itself. That is enforced,
  * not merely true: `alias-integrity.test.ts` fails on any new direct call site
  * here, because a new one would mint a fresh second copy of a key list and
@@ -454,7 +455,7 @@ export function strictUnknownKeyError(options: StrictUnknownKeyErrorOptions): z.
     // ruling moved last. A surface that declares it has no retirement history
     // (`retiredKeyUpgradeGuide: false`) has nothing to point at, so it ends at
     // its fix channels.
-    if (!retiredKeyUpgradeGuide) return `${message} ${history}`;
+    if (retiredKeyUpgradeGuide === false) return `${message} ${history}`;
     return `${message} ${RETIRED_KEY_UPGRADE_GUIDE_SENTENCE} ${history}`;
   };
 }

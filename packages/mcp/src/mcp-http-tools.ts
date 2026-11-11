@@ -1711,10 +1711,11 @@ function strictToolInput<T extends z.ZodRawShape>(
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
         history: '',
-        // Tool arguments are not protocol metadata and never carried a
+        // These argument shapes are not protocol metadata and never carried a
         // retirement kit, so no unknown key here is a retired key: the
         // upgrade-guide pointer would send an agent to a page unrelated to
-        // its mistake.
+        // its mistake. Only the tools closed HERE opt out; the dataset pair
+        // takes spec `strictObject` schemas and keeps the spec refusal.
         retiredKeyUpgradeGuide: false,
       })),
     })
@@ -1734,13 +1735,13 @@ const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
  * What every `recordId` argument holds, said where an agent reads it: the
  * record-scoped tools take the id under the name `recordId`, while the answers
  * it comes from (`create_record`'s `{ object, id, record }`, a `query_records`
- * row) carry it as `id` — the data protocol's own spelling
+ * row unless a `fields` projection drops it) carry it as `id` — the data protocol's own spelling
  * (`CreateDataResponseSchema`). The two names stay as they are: an `id` alias
  * and a `recordId` → `id` rename were both refused on this surface, so the
  * hand-off is stated rather than accepted under a second spelling.
  */
 const RECORD_ID_DESCRIPTION =
-  'The record id: the `id` that create_record answers and that each query_records row carries, '
+  'The record id: the `id` that create_record answers and that each query_records row carries by default, '
   + 'sent under the name recordId.';
 
 /**

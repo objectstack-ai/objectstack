@@ -25,9 +25,12 @@ export const PROTOCOL_UPGRADE_GUIDE_URL = 'https://objectstack.ai/docs/protocol-
 /**
  * The sentence every strict unknown-key refusal on a protocol metadata surface
  * carries, after its fix channels and ahead of the history sentence (#5955
- * order). A surface that never carried a retirement kit — an MCP tool's
- * arguments — opts out with `retiredKeyUpgradeGuide: false` on
- * `strictUnknownKeyError`, since no unknown key there can be a retired one.
+ * order). A surface that never carried a retirement kit opts out with
+ * `retiredKeyUpgradeGuide: false` on `strictUnknownKeyError`, since no unknown
+ * key there can be a retired one: the MCP tools whose arguments
+ * `strictToolInput` closes are the first. Tool inputs that ARE spec schemas
+ * (`list_datasets` / `query_dataset`, built with `strictObject`) keep the
+ * sentence, because a published spec schema can carry a kit.
  * Static on purpose:
  * it names no major, so the pins on the refusal text do not move once per
  * release, and the page it links indexes every migrated major itself.

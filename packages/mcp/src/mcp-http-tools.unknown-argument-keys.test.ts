@@ -379,7 +379,10 @@ describe('MCP tool arguments — no upgrade-guide pointer, and the recordId hand
     expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
   });
 
-  it('no advertised tool\'s refusal points at the upgrade guide', async () => {
+  // The stub registers the fifteen `strictToolInput` tools only; the dataset
+  // pair keeps the spec refusal, pinned as the CONTROL in
+  // `mcp-dataset-tools.test.ts`.
+  it('no tool closed by strictToolInput points its refusal at the upgrade guide', async () => {
     const json = await rpc(runtime, bridge, 'tools/list');
     const names: string[] = (json.result?.tools ?? []).map((t: any) => t.name);
     expect(names).toHaveLength(15);
