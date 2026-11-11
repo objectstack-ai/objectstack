@@ -638,7 +638,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "Currency Field",
-        helpText: "Record mode only, and required there: the field on this object holding each record's ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code."
+        helpText: "Record mode only, and required there: the field on this object holding each record's ISO 4217 code — a text field with valueDomain iso_4217_currency, conventionally currency_code. On a master-detail child it may instead name the parent's code field as <master_detail field>.<parent code field> (e.g. invoice.currency_code): the record then follows its parent's currency, and a change of the parent's code is refused while such a child exists."
       },
       "currencyConfig.defaultCurrency": {
         label: "Default Currency",

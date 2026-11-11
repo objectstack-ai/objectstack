@@ -169,6 +169,7 @@ export type {
     SyncRunEnd,
     SyncRunLedger,
     SyncRunLedgerEngine,
+    SyncRunOrigin,
     SyncRunPosition,
     SyncRunScope,
     SyncRunStatus,

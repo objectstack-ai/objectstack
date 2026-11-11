@@ -638,7 +638,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "Поле валюты",
-        helpText: "Только для режима record, и там обязательно: поле этого объекта с кодом ISO 4217 каждой записи — текстовое поле с valueDomain iso_4217_currency, обычно currency_code."
+        helpText: "Только для режима record, и там обязательно: поле этого объекта с кодом ISO 4217 каждой записи — текстовое поле с valueDomain iso_4217_currency, обычно currency_code. В дочернем объекте master-detail вместо этого можно указать поле кода родителя в виде <поле master_detail>.<поле кода родителя> (например, invoice.currency_code): тогда запись следует валюте родителя, а изменение кода родителя отклоняется, пока существует такая дочерняя запись."
       },
       "currencyConfig.defaultCurrency": {
         label: "Валюта по умолчанию",
