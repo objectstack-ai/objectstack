@@ -29,6 +29,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 const DISABLED_PKG = 'app.disabled_demo';
 const HEALTHY_PKG = 'app.healthy_demo';
