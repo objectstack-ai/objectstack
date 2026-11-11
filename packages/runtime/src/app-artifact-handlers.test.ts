@@ -429,6 +429,34 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(ql.functionHoldersOf('alpha_fn').packageItem(ALPHA)?.packageId).toBe(appArtifactHandlerOwner(ALPHA));
     });
 
+    it('a function no body declares that two bodies\' hooks name stays under the artifact\'s id with those hooks: one package holder, nothing for the cold boot to warn of', async () => {
+        // `os build` lowers ONE callable two bodies' hooks share to one ref the
+        // runtime module serves at the top level, which no body declares.
+        const body = (ns: Ns, hooks: unknown[]) => ({
+            id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
+            objects: [{ name: `${ns}_doc`, fields: {} }],
+            hooks,
+        });
+        const artifact = {
+            manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+            packages: [
+                { manifest: body('beta', [hookOn('beta', 'qa_beta_shared', 'qa_shared_ref')]) },
+                { manifest: body('alpha', [hookOn('alpha', 'qa_alpha_shared', 'qa_shared_ref')]) },
+            ],
+            functions: { qa_shared_ref: stamp('shared') },
+        };
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(artifact, logger);
+
+        bind(ql, artifact);
+
+        expect(errors.map((e) => e.meta?.code), 'no hook refused').toEqual([]);
+        expect(await insertInto(ql, 'beta')).toBe('shared;');
+        expect(await insertInto(ql, 'alpha')).toBe('shared;');
+        expect(ql.functionHoldersOf('qa_shared_ref').packageHolders, 'one package holder').toEqual([ALPHA]);
+        expect(ql.registry.sealBareNameHolders(), 'the cold boot finds no function held twice').toEqual([]);
+    });
+
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {
         // `os build` lowers an inline hook handler it cannot extract to a ref the
         // runtime module serves; the artifact loader merges the module's callables

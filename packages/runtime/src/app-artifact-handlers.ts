@@ -608,9 +608,9 @@ interface HookBindingGroup {
  * namespace co-owner rule (`namespaceNameConflicts`: two packages of ONE
  * judged namespace may not hold one hook name; two namespaces, a shareable
  * namespace or none may) — and then each body binds its OWN hooks of the name
- * under its own package (`split` once). The groups are created in the order
- * their first hook appears in the reconciled list, so hooks of one priority
- * fire in the order they did when one owner held them all.
+ * under its own package (`split` once). Each owner's hooks keep the order the
+ * reconciled list carries them in, and the owners bind in the order their
+ * first hook appears there.
  *
  * **Functions, by name.** One body declares the name in its `functions` (read
  * by name, with or without a callable: a built artifact's body carries the ref
@@ -619,11 +619,14 @@ interface HookBindingGroup {
  * `owner`, never held apart — a function keeps one package holder per
  * deployment (ADR-0150 phase 1, `function` is not narrowed to the namespace,
  * and `composeStacks` refuses the pair). No body declares it: under the owner
- * of each group whose hooks name it as their `handler` — the ref `os build`
+ * of the group whose hooks name it as their `handler` — the ref `os build`
  * lowered out of a body's hook that it could not extract, which only the
- * runtime module serves — else under the artifact's `owner`. So a hook's
- * `handler` reaches its own body's functions, and a function another body
- * declares is not its own (`bindHooksToEngine` refuses it at registration).
+ * runtime module serves — else under the artifact's `owner`. When the hooks of
+ * two or more owners name it (one callable two bodies' hooks share, lowered to
+ * one ref), it has no one package to go under, so it and every hook that names
+ * it stay under the artifact's `owner`, as before. So a hook's `handler`
+ * reaches its own body's functions, and a function another body declares is
+ * not its own (`bindHooksToEngine` refuses it at registration).
  */
 function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
     const reconciledHooks = collectBundleHooks(bundle);
@@ -685,15 +688,35 @@ function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
             declaredBy.set(name, declaring);
         }
     }
+    const handlerOf = (hook: unknown): string | undefined => {
+        const handler = (hook as { handler?: unknown } | null | undefined)?.handler;
+        return typeof handler === 'string' && handler !== '' ? handler : undefined;
+    };
     const namedBy = new Map<string, Set<string>>();
     for (const [groupOwner, group] of byOwner) {
         for (const hook of group.hooks) {
-            const handler = (hook as { handler?: unknown } | null | undefined)?.handler;
-            if (typeof handler !== 'string' || handler === '') continue;
+            const handler = handlerOf(hook);
+            if (handler === undefined) continue;
             const owners = namedBy.get(handler) ?? new Set<string>();
             owners.add(groupOwner);
             namedBy.set(handler, owners);
         }
+    }
+    // A function no body declares that the hooks of two or more owners name
+    // has no one package to go under: a function keeps one package holder
+    // (`claimBareNameFunctions` — two would warn at the cold boot and refuse
+    // the later body once sealed). Those hooks stay under the artifact's
+    // owner with it, as every hook and function was before.
+    for (const [name, owners] of namedBy) {
+        if (owners.size < 2 || declaredBy.has(name) || !(name in reconciledFunctions)) continue;
+        for (const from of owners) {
+            if (from === owner) continue;
+            const group = byOwner.get(from)!;
+            const moving = group.hooks.filter((hook) => handlerOf(hook) === name);
+            group.hooks = group.hooks.filter((hook) => handlerOf(hook) !== name);
+            groupOf(owner).hooks.push(...moving);
+        }
+        namedBy.set(name, new Set([owner]));
     }
     for (const [name, entry] of Object.entries(reconciledFunctions)) {
         const declaring = declaredBy.get(name) ?? [];
@@ -703,7 +726,9 @@ function hookBindingGroups(bundle: unknown, owner: string): HookBindingGroup[] {
         for (const to of owners) groupOf(to).functions[name] = entry;
     }
 
-    return [...byOwner].map(([groupOwner, group]) => ({ owner: groupOwner, hooks: group.hooks, functions: group.functions }));
+    return [...byOwner]
+        .filter(([, group]) => group.hooks.length > 0 || Object.keys(group.functions).length > 0)
+        .map(([groupOwner, group]) => ({ owner: groupOwner, hooks: group.hooks, functions: group.functions }));
 }
 
 /** A hook's name, the key {@link hookBindingGroups} reads it by; `undefined` for one with none. */
