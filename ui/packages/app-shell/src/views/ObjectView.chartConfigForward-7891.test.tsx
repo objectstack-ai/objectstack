@@ -118,10 +118,12 @@ vi.mock('sonner', () => ({
  * is what the dynamic import resolves to.
  */
 let capturedChartSchema: any = null;
+let capturedChartPackageId: unknown = null;
 vi.mock('@object-ui/plugin-charts', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ObjectChart: (props: any) => {
     capturedChartSchema = props.schema;
+    capturedChartPackageId = props.packageId;
     return null;
   },
   ChartRenderer: () => null,
@@ -367,5 +369,28 @@ describe('the flat-key warning names only declared keys (objectui#6152 round 15)
       warn.mockRestore();
       vi.unstubAllEnvs();
     }
+  });
+});
+
+/*
+ * ADR-0150 D3 — a dataset-bound list-view chart hands `ObjectChart` the VIEW's
+ * own served package, which the chart sends as the reader's package
+ * (`callerPackage`) on its query and its definition read
+ * (`ObjectChart.optionColors.test.tsx`, `ObjectChart.datasetMeasureLabel.test.tsx`).
+ */
+describe('a dataset-bound list-view chart names the view\'s served package (ADR-0150 D3)', () => {
+  it('the view\'s `_packageId` reaches the chart as its package', async () => {
+    capturedChartPackageId = null;
+    await mountChartView(DATASET_BLOCK, { _packageId: 'com.acme.app' });
+    expect(capturedChartPackageId).toBe('com.acme.app');
+  });
+
+  it.each([
+    ['no _packageId', {}],
+    ['the package-less sentinel', { _packageId: 'sys_metadata' }],
+  ])('CONTROL: a view authored in the environment (%s) hands the chart no package', async (_label, extras) => {
+    capturedChartPackageId = 'unset';
+    await mountChartView(DATASET_BLOCK, extras);
+    expect(capturedChartPackageId).toBeUndefined();
   });
 });
