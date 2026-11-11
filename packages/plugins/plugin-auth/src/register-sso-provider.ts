@@ -28,6 +28,9 @@ import { readJsonRequestBody } from './request-json-body.js';
 import { recoverInternalFieldsForSystemRead, type InternalFieldResolvingEngine } from './internal-field-readback.js';
 import { SSO_GROUPS_USER_INFO_KEY } from './sso-group-projection.js';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
+import { repeatedQueryParamMessage, unknownQueryParamRefusalMessage } from '@objectstack/rest';
+import type { IDataEngine } from '@objectstack/core';
+import { readSsoProviderDeleteImpact, ssoProviderDeleteSummary, type SsoProviderDeleteImpact } from './sso-provider-lifecycle.js';
 
 export interface RegisterSsoFormResult {
   /** HTTP status to return to the caller. */
@@ -36,12 +39,28 @@ export interface RegisterSsoFormResult {
   body: {
     success: boolean;
     data?: { providerId: string };
-    error?: { code: string; message: string };
+    error?: { code: string; message: string; field?: string; heldBy?: string };
   };
 }
 
 /** A better-auth universal handler: `(request) => Response`. */
 export type AuthRequestHandler = (request: Request) => Promise<Response>;
+
+/**
+ * [#32085] The register bridges' failure answer. A register onto a domain
+ * another provider already serves is refused by plugin-auth's before-hook
+ * with a located `409 RESOURCE_CONFLICT` (`field: 'domain'`, and `heldBy`,
+ * the provider that serves it); the bridge relays that refusal as it came,
+ * so the form can mark the field. Every other refusal keeps the bridge's own
+ * code and the vendor's message, as before.
+ */
+function registerRefusal(parsed: any, fallbackCode: string, fallbackMessage: string): NonNullable<RegisterSsoFormResult['body']['error']> {
+  const message = typeof parsed?.message === 'string' && parsed.message ? parsed.message : fallbackMessage;
+  if (parsed?.code === 'RESOURCE_CONFLICT' && parsed?.field === 'domain') {
+    return { code: 'RESOURCE_CONFLICT', message, field: 'domain', ...(typeof parsed.heldBy === 'string' ? { heldBy: parsed.heldBy } : {}) };
+  }
+  return { code: fallbackCode, message };
+}
 
 /**
  * [#24032] The four bridges' body read. A declared-JSON body that does not
@@ -102,7 +121,8 @@ async function resolveActiveOrganizationId(
  * @param request the raw Web `Request` — its headers carry the caller's session
  *                cookie / bearer + Origin; its body carries the flat form
  *                fields ({ providerId, issuer, domain, clientId, clientSecret,
- *                discoveryEndpoint?, scopes?, mapEmail?, mapName? }).
+ *                discoveryEndpoint?, userInfoEndpoint?, scopes?, mapEmail?,
+ *                mapName?, mapGroups?, skipUserInfo? }).
  *                `mapId` is NOT among them any more: #8222 removed it from the
  *                `register_sso_provider` action, so the admin form no longer
  *                offers a user-ID claim mapping. The guard below is kept as
@@ -125,6 +145,7 @@ export async function runRegisterSsoProviderFromForm(
   const clientId = str(body?.clientId);
   const clientSecret = str(body?.clientSecret);
   const discoveryEndpoint = str(body?.discoveryEndpoint);
+  const userInfoEndpoint = str(body?.userInfoEndpoint);
   const scopesRaw = str(body?.scopes);
 
   const missing = (
@@ -147,6 +168,11 @@ export async function runRegisterSsoProviderFromForm(
 
   const oidcConfig: Record<string, unknown> = { clientId, clientSecret };
   if (discoveryEndpoint) oidcConfig.discoveryEndpoint = discoveryEndpoint;
+  // An explicit userinfo endpoint: `/sso/register` keeps it over the one the
+  // discovery document names, and trusts its origin for this registration
+  // (`AuthManager.ssoDiscoveryTrustedOrigins`), the remedy the refusal of an
+  // untrusted discovery endpoint names.
+  if (userInfoEndpoint) oidcConfig.userInfoEndpoint = userInfoEndpoint;
   oidcConfig.scopes = scopesRaw ? scopesRaw.split(/[\s,]+/).filter(Boolean) : ['openid', 'email', 'profile'];
 
   // `oidcConfig.mapping` is a `z.strictObject`. Measured 2026-08-20 against the
@@ -198,6 +224,11 @@ export async function runRegisterSsoProviderFromForm(
     str(body?.mapGroups),
   );
 
+  // The OIDC userinfo opt-out (`sso-sign-in-options.ts`): a provider additional
+  // field, sent at the top level of the register body where the vendor reads
+  // it. Claims then come from the verified ID token only.
+  const skipUserInfo = body?.skipUserInfo === true || body?.skipUserInfo === 'true';
+
   // Re-dispatch to the real /sso/register (same origin, sibling path) so the
   // admin gate + public-IdP trustedOrigins allowance + discovery hydration run.
   let innerUrl: string;
@@ -226,7 +257,14 @@ export async function runRegisterSsoProviderFromForm(
   const innerReq = new Request(inProcessRedispatchUrl(innerUrl, headers), {
     method: 'POST',
     headers,
-    body: JSON.stringify({ providerId, issuer, domain, oidcConfig, ...(organizationId ? { organizationId } : {}) }),
+    body: JSON.stringify({
+      providerId,
+      issuer,
+      domain,
+      oidcConfig,
+      ...(skipUserInfo ? { skipUserInfo: true } : {}),
+      ...(organizationId ? { organizationId } : {}),
+    }),
   });
 
   const resp = await handle(innerReq);
@@ -240,7 +278,7 @@ export async function runRegisterSsoProviderFromForm(
   if (!resp.ok) {
     return {
       status: resp.status,
-      body: { success: false, error: { code: 'SSO_REGISTER_FAILED', message: parsed?.message || 'SSO provider registration failed' } },
+      body: { success: false, error: registerRefusal(parsed, 'SSO_REGISTER_FAILED', 'SSO provider registration failed') },
     };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId } } };
@@ -348,7 +386,7 @@ export async function runRegisterSamlProviderFromForm(
   let parsed: any = {};
   try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
   if (!resp.ok) {
-    return { status: resp.status, body: { success: false, error: { code: 'SAML_REGISTER_FAILED', message: parsed?.message || 'SAML provider registration failed' } } };
+    return { status: resp.status, body: { success: false, error: registerRefusal(parsed, 'SAML_REGISTER_FAILED', 'SAML provider registration failed') } };
   }
   return { status: 200, body: { success: true, data: { providerId: parsed?.providerId ?? providerId }, acsUrl, spMetadataUrl } };
 }
@@ -634,6 +672,16 @@ export function groupsClaimOfMapping(mapping: unknown): string | null {
   return typeof claim === 'string' && claim.trim() !== '' ? claim : null;
 }
 
+/**
+ * The claim a stored OIDC config's mapping reads the email address from
+ * (`mapping.email`), or the vendor's default `email` when it names none.
+ */
+export function emailClaimOfStoredOidcConfig(config: unknown): string {
+  const parsed = parseStoredConfig(config);
+  const claim = isPlainObject(parsed?.mapping) ? parsed!.mapping.email : undefined;
+  return typeof claim === 'string' && claim.trim() !== '' ? claim : 'email';
+}
+
 /** A stored protocol blob (JSON text, or an object on a driver that hands one back); `null` when unusable. */
 function parseStoredConfig(value: unknown): Record<string, unknown> | null {
   if (isPlainObject(value)) return value;
@@ -646,10 +694,12 @@ function parseStoredConfig(value: unknown): Record<string, unknown> | null {
   }
 }
 
-/** One provider's two stored protocol blobs, as the store holds them. */
+/** One provider's two stored protocol blobs, as the store holds them, and its stored issuer. */
 export interface StoredSsoProviderConfigs {
   oidcConfig: unknown;
   samlConfig: unknown;
+  /** The row's `issuer` (for SAML, the IdP entity ID the register form stored). Read by the edit bridge only. */
+  issuer?: unknown;
 }
 
 /** Reads a provider's stored blobs by its `providerId`; `null` when no provider has that id. */
@@ -664,7 +714,7 @@ export interface SsoProviderConfigEngine extends InternalFieldResolvingEngine {
  * The reader over the data engine: a system read of the `sys_sso_provider` row,
  * with the two `internal` blobs recovered through the system read seam
  * (`internal-field-readback.ts`). Nothing it reads leaves this module except
- * the claim name.
+ * the claim name and, from the edit bridge, the names of the fields it changed.
  */
 export function createEngineSsoProviderConfigReader(getEngine: () => SsoProviderConfigEngine | null | undefined): SsoProviderConfigReader {
   return async (providerId) => {
@@ -677,7 +727,7 @@ export function createEngineSsoProviderConfigReader(getEngine: () => SsoProvider
     )) as Record<string, unknown> | null;
     if (!row || row.provider_id !== providerId) return null;
     await recoverInternalFieldsForSystemRead(engine, 'sys_sso_provider', row, ['oidc_config', 'saml_config']);
-    return { oidcConfig: row.oidc_config, samlConfig: row.saml_config };
+    return { oidcConfig: row.oidc_config, samlConfig: row.saml_config, issuer: row.issuer };
   };
 }
 
@@ -796,6 +846,287 @@ export async function runSetSsoGroupsClaim(
   return { status: 200, body: { success: true, data: { providerId, groupsClaim: groupsClaimOfMapping(saved.mapping) } } };
 }
 
+
+// ── Editing a provider (#32085) ─────────────────────────────────────────────
+//
+// Rotating an IdP signing certificate, or an OIDC client secret, used to mean
+// delete and re-register, and the delete unlinks every user of the provider.
+// The edit bridge writes through the vendor's own `/sso/update-provider` (so
+// its provider-access check, plugin-auth's held-caller refusal and the domain
+// check run), from the flat fields the two `sys_sso_provider` edit actions
+// post. Measured on the installed `@better-auth/sso` 1.7.12: the vendor merges
+// an update member by member (`mergeSAMLConfig` / `mergeOIDCConfig`:
+// `updates.X ?? current.X`; `idpMetadata` and `spMetadata` shallow-merged),
+// and replaces only `mapping` whole. So the bridge sends exactly the members
+// the form changed and never `mapping`; every member it does not send is kept
+// as stored. A blank field means "keep what is stored", so a write-only secret
+// is never read back into the form.
+//
+// What the vendor treats as the provider's identity (the SAML IdP entity ID
+// and SSO URL, the OIDC client ID) changes only while no account is linked to
+// the provider; otherwise it answers `409`, which the bridge relays with that
+// reason. A certificate or a client secret is not identity and changes with
+// users linked: that is the rotation the door exists for.
+//
+// Not offered: an OIDC issuer or discovery URL. The vendor resolves an OIDC
+// provider's endpoints from its discovery document at registration only, and
+// an update keeps the stored endpoints, so a new issuer would be saved while
+// sign-in kept going to the old IdP. A new issuer is a new identity provider,
+// refused anyway while users are linked; with none linked, re-registering it
+// loses nothing.
+
+/** The flat fields each protocol's edit action posts, besides `providerId`. */
+const SAML_EDIT_FIELDS = ['issuer', 'entryPoint', 'cert', 'keepCurrentCert'] as const;
+const OIDC_EDIT_FIELDS = ['clientId', 'clientSecret', 'scopes'] as const;
+
+/** The members the vendor treats as the provider's identity, by the form field that changes them. */
+const IDENTITY_EDIT_FIELDS: ReadonlySet<string> = new Set(['issuer', 'entryPoint', 'clientId']);
+
+/** The edit bridge's answer: what changed, by field name; never a value. */
+export interface UpdateSsoProviderResult {
+  status: number;
+  body: {
+    success: boolean;
+    data?: { providerId: string; protocol: 'oidc' | 'saml'; updated: string[]; message: string };
+    error?: { code: string; message: string; field?: string };
+  };
+}
+
+function updateRefusal(status: number, code: string, message: string, field?: string): UpdateSsoProviderResult {
+  return { status, body: { success: false, error: { code, message, ...(field ? { field } : {}) } } };
+}
+
+/** The certificate's PEM body, whitespace and armour removed: two spellings of one certificate compare equal. */
+function certificateBody(pem: string): string {
+  return pem.replace(/-----(BEGIN|END) CERTIFICATE-----/g, '').replace(/\s+/g, '');
+}
+
+/** Whether `pem` parses as an X.509 certificate, with or without its armour (the vendor's own reading). */
+async function isX509Certificate(pem: string): Promise<boolean> {
+  try {
+    const { X509Certificate } = await import('node:crypto');
+    new X509Certificate(pem.includes('-----BEGIN') ? pem : `-----BEGIN CERTIFICATE-----\n${pem}\n-----END CERTIFICATE-----`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The stored signing certificates of a SAML config's top-level `cert`: one string or a list. */
+function storedCertificates(saml: Record<string, unknown>): string[] {
+  const cert = saml.cert;
+  if (typeof cert === 'string' && cert.trim()) return [cert];
+  if (Array.isArray(cert)) return cert.filter((c): c is string => typeof c === 'string' && c.trim() !== '');
+  return [];
+}
+
+/**
+ * Edit a registered provider from the flat form of "Edit SAML Settings" or
+ * "Edit OIDC Settings". Body: `providerId`, then the protocol's own fields,
+ * each optional and blank meaning "keep":
+ *
+ *   - SAML: `issuer` (the IdP entity ID), `entryPoint` (the IdP SSO URL),
+ *     `cert` (a new signing certificate) and `keepCurrentCert` (true to keep
+ *     trusting the stored certificate beside the new one while the IdP
+ *     switches over; false or absent replaces it);
+ *   - OIDC: `clientId`, `clientSecret` (write-only), `scopes` (space- or
+ *     comma-separated).
+ *
+ * The stored configuration says which protocol the provider speaks; a field
+ * of the other protocol is refused `400` naming the action to use. Answers
+ * the names of the members it changed, never a value.
+ */
+export async function runUpdateSsoProviderFromForm(
+  handle: AuthRequestHandler,
+  request: Request,
+  read: SsoProviderConfigReader,
+): Promise<UpdateSsoProviderResult> {
+  const reading = await readFormBody(request);
+  if (!reading.ok) return reading.refusal as UpdateSsoProviderResult;
+  const body = reading.body ?? {};
+  const str = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
+  const providerId = str(body.providerId);
+  if (!providerId) return updateRefusal(400, 'INVALID_REQUEST', 'Missing required field: providerId', 'providerId');
+
+  const stored = await read(providerId);
+  if (!stored) return updateRefusal(404, 'RESOURCE_NOT_FOUND', `SSO provider "${providerId}" was not found.`, 'providerId');
+  const saml = parseStoredConfig(stored.samlConfig);
+  const oidc = saml ? null : parseStoredConfig(stored.oidcConfig);
+  if (!saml && !oidc) {
+    return updateRefusal(400, 'INVALID_REQUEST', `SSO provider "${providerId}" has no OIDC or SAML configuration to edit.`, 'providerId');
+  }
+  const protocol: 'saml' | 'oidc' = saml ? 'saml' : 'oidc';
+  const [ownFields, otherFields, otherAction, ownAction] = protocol === 'saml'
+    ? [SAML_EDIT_FIELDS, OIDC_EDIT_FIELDS, 'Edit OIDC Settings', 'Edit SAML Settings']
+    : [OIDC_EDIT_FIELDS, SAML_EDIT_FIELDS, 'Edit SAML Settings', 'Edit OIDC Settings'];
+  const providerLabel = protocol === 'saml' ? 'a SAML provider' : 'an OIDC provider';
+  if (protocol === 'oidc' && str(body.issuer) && str(body.issuer) !== str(stored.issuer)) {
+    return updateRefusal(
+      400,
+      'INVALID_REQUEST',
+      `The issuer of OIDC provider "${providerId}" is not edited here: its endpoints come from the issuer's discovery document at registration, `
+        + 'and an edit keeps the stored ones, so sign-in would keep going to the old identity provider. A new issuer is a new identity provider: '
+        + 'register it as a new provider.',
+      'issuer',
+    );
+  }
+  // An unchanged issuer (the SAML form fills it from the row) is not a field of the other protocol.
+  const foreign = (otherFields as readonly string[]).filter(
+    (k) => !(ownFields as readonly string[]).includes(k)
+      && !(k === 'issuer' && str(body.issuer) === str(stored.issuer))
+      && body[k] !== undefined && body[k] !== null && body[k] !== '' && body[k] !== false,
+  );
+  if (foreign.length > 0) {
+    return updateRefusal(
+      400,
+      'INVALID_REQUEST',
+      `SSO provider "${providerId}" is ${providerLabel}, so ${foreign.join(', ')} ${foreign.length === 1 ? 'does' : 'do'} not apply to it`
+        + ` (that is "${otherAction}"). Use "${ownAction}".`,
+      foreign[0],
+    );
+  }
+
+  const updated: string[] = [];
+  const update: Record<string, unknown> = { providerId };
+  if (protocol === 'saml') {
+    const samlUpdate: Record<string, unknown> = {};
+    const entityId = str(body.issuer);
+    if (entityId && entityId !== str(stored.issuer)) {
+      update.issuer = entityId;
+      samlUpdate.idpMetadata = { entityID: entityId };
+      updated.push('issuer');
+    }
+    const entryPoint = str(body.entryPoint);
+    if (entryPoint && entryPoint !== str(saml!.entryPoint)) {
+      samlUpdate.entryPoint = entryPoint;
+      updated.push('entryPoint');
+    }
+    const cert = str(body.cert);
+    if (cert) {
+      const idp = isPlainObject(saml!.idpMetadata) ? saml!.idpMetadata : {};
+      if (idp.cert !== undefined || (typeof idp.metadata === 'string' && idp.metadata.trim() !== '')) {
+        return updateRefusal(
+          400,
+          'INVALID_REQUEST',
+          `SSO provider "${providerId}" reads its signing certificates from its IdP metadata, which take precedence over a certificate set here, `
+            + 'so this edit would change nothing. Update the certificate in the IdP metadata instead.',
+          'cert',
+        );
+      }
+      if (!(await isX509Certificate(cert))) {
+        return updateRefusal(400, 'INVALID_REQUEST', 'cert is not an X.509 certificate: paste the IdP signing certificate (PEM, with or without its BEGIN/END lines).', 'cert');
+      }
+      const keep = body.keepCurrentCert === true || body.keepCurrentCert === 'true';
+      const certs = keep ? [...storedCertificates(saml!), cert] : [cert];
+      const unique = certs.filter((c, i) => certs.findIndex((d) => certificateBody(d) === certificateBody(c)) === i);
+      samlUpdate.cert = unique.length === 1 ? unique[0] : unique;
+      updated.push('cert');
+    }
+    if (Object.keys(samlUpdate).length > 0) update.samlConfig = samlUpdate;
+  } else {
+    const oidcUpdate: Record<string, unknown> = {};
+    const clientId = str(body.clientId);
+    if (clientId && clientId !== str(oidc!.clientId)) {
+      oidcUpdate.clientId = clientId;
+      updated.push('clientId');
+    }
+    const clientSecret = str(body.clientSecret);
+    if (clientSecret) {
+      oidcUpdate.clientSecret = clientSecret;
+      updated.push('clientSecret');
+    }
+    const scopesRaw = str(body.scopes);
+    if (scopesRaw) {
+      oidcUpdate.scopes = scopesRaw.split(/[\s,]+/).filter(Boolean);
+      updated.push('scopes');
+    }
+    if (Object.keys(oidcUpdate).length > 0) update.oidcConfig = oidcUpdate;
+  }
+  if (updated.length === 0) {
+    return updateRefusal(400, 'INVALID_REQUEST', `Nothing to change on SSO provider "${providerId}": every field was left blank or equal to what is stored.`);
+  }
+
+  const rw = rewriteSsoAdminUrl(request, /\/admin\/sso\/update-provider$/, '/sso/update-provider');
+  if (!rw) return updateRefusal(400, 'INVALID_REQUEST', 'Bad request URL');
+  const headers = forwardAuthHeaders(request, rw.origin);
+  // [#22398] The inner route reads the session (`sessionMiddleware`); only its
+  // status and body come back from here.
+  const resp = await handle(new Request(inProcessRedispatchUrl(rw.innerUrl, headers), { method: 'POST', headers, body: JSON.stringify(update) }));
+  let parsed: any = {};
+  try { const t = await resp.text(); parsed = t ? JSON.parse(t) : {}; } catch { parsed = {}; }
+  if (!resp.ok) {
+    const reason = typeof parsed?.message === 'string' && parsed.message.trim() ? parsed.message.trim() : `the provider update was refused (HTTP ${resp.status})`;
+    const identity = updated.filter((f) => IDENTITY_EDIT_FIELDS.has(f));
+    const hint = resp.status === 409 && identity.length > 0
+      ? ` ${identity.join(', ')} identif${identity.length === 1 ? 'ies' : 'y'} the IdP account each linked user signs in with, so ${identity.length === 1 ? 'it changes' : 'they change'} only while no user is linked to the provider.`
+      : '';
+    return {
+      status: resp.status,
+      body: {
+        success: false,
+        error: {
+          code: standardErrorCodeForHttpStatus(resp.status),
+          message: `SSO provider "${providerId}" was not updated: ${reason}${/[.!?]$/.test(reason) ? '' : '.'}${hint}`,
+          ...(typeof parsed?.field === 'string' ? { field: parsed.field } : {}),
+        },
+      },
+    };
+  }
+  return {
+    status: 200,
+    body: {
+      success: true,
+      data: { providerId, protocol, updated, message: `SSO provider "${providerId}" updated: ${updated.join(', ')}.` },
+    },
+  };
+}
+
+/** The delete-impact read's closed query-parameter set (AGENTS.md route rule 5). */
+export const SSO_PROVIDER_DELETE_IMPACT_QUERY_PARAMS: readonly string[] = ['providerId'];
+
+/** The delete-impact read's answer: the counts and one sentence naming them. */
+export interface SsoProviderDeleteImpactResult {
+  status: number;
+  body: {
+    success: boolean;
+    data?: SsoProviderDeleteImpact & { summary: string };
+    error?: { code: string; message: string };
+  };
+}
+
+function impactRefusal(status: number, code: string, message: string): SsoProviderDeleteImpactResult {
+  return { status, body: { success: false, error: { code, message } } };
+}
+
+/**
+ * `GET /admin/sso/delete-impact?providerId=…` — what deleting the provider
+ * would remove, for the delete action's confirmation (its preflight read):
+ * the users it unlinks, those of them with no other sign-in method linked,
+ * and the group mappings and projected grants that go with it
+ * (`sso-provider-lifecycle.ts`). Reads only; the delete door counts again
+ * when it runs. The caller has passed the platform-admin gate.
+ *
+ * `queries` is the request's parsed query, every value a list: an unknown
+ * parameter or a repeated `providerId` is refused `400 VALIDATION_ERROR`; an
+ * unknown provider `404`.
+ */
+export async function runSsoProviderDeleteImpact(
+  queries: Record<string, readonly string[]>,
+  read: SsoProviderConfigReader,
+  engine: IDataEngine,
+): Promise<SsoProviderDeleteImpactResult> {
+  const unknown = unknownQueryParamRefusalMessage(queries, SSO_PROVIDER_DELETE_IMPACT_QUERY_PARAMS);
+  if (unknown !== undefined) return impactRefusal(400, 'VALIDATION_ERROR', unknown);
+  const ids = queries.providerId ?? [];
+  if (ids.length > 1) return impactRefusal(400, 'VALIDATION_ERROR', repeatedQueryParamMessage('providerId', ids.length));
+  const providerId = (ids[0] ?? '').trim();
+  if (!providerId) {
+    return impactRefusal(400, 'VALIDATION_ERROR', 'The "providerId" query parameter is required: the provider whose delete is being confirmed.');
+  }
+  if (!(await read(providerId))) return impactRefusal(404, 'RESOURCE_NOT_FOUND', `SSO provider "${providerId}" was not found.`);
+  const impact = await readSsoProviderDeleteImpact(engine, providerId);
+  return { status: 200, body: { success: true, data: { ...impact, summary: ssoProviderDeleteSummary(impact, false) } } };
+}
 
 // ── The attribute mapping (who a sign-in resolves to) ───────────────────────
 //

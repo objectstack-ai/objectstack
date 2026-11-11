@@ -2106,6 +2106,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Just-in-Time-Bereitstellung zulassen",
         help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
       },
+      skip_user_info: {
+        label: "Claims nur aus dem ID-Token lesen",
+        help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2156,7 +2160,15 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "Discovery-URL",
-            helpText: "Optional. URL des OIDC-Discovery-Dokuments. Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten."
+            helpText: "Optional. URL des OIDC-Discovery-Dokuments (https). Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo-URL",
+            helpText: "Optional. URL des OIDC-Userinfo-Endpunkts (https); ersetzt den im Discovery-Dokument genannten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig: Geben Sie ihn an, wenn die Registrierung abgelehnt wird, weil das Discovery-Dokument einen Userinfo-Host nennt, dem der Server nicht vertraut."
+          },
+          skipUserInfo: {
+            label: "Claims nur aus dem ID-Token lesen",
+            helpText: "Optional. Die Claims des Benutzers nur aus dem verifizierten ID-Token lesen und den Userinfo-Endpunkt nie aufrufen. Microsoft Entra ID: Aktivieren Sie dies, um „preferred_username“ zuzuordnen, das der Userinfo-Endpunkt nicht liefert."
           },
           scopes: {
             label: "Bereiche",
@@ -2165,7 +2177,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Zuordnung: E-Mail-Claim",
-            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“.",
+            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“. Microsoft Entra ID (Aussteller auf login.microsoftonline.com): Benutzer ohne Postfach haben keinen „email“-Claim; ordnen Sie daher „preferred_username“ (oder „upn“) zu und aktivieren Sie „Claims nur aus dem ID-Token lesen“.",
             placeholder: "email"
           },
           mapName: {
@@ -2254,12 +2266,78 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO-Anbieter löschen",
-        description: "Diesen SSO-Anbieter löschen? Benutzer seiner Domäne können sich dann nicht mehr darüber anmelden.",
-        successMessage: "SSO-Anbieter gelöscht"
+        description: "Diesen SSO-Anbieter löschen? Jeder damit verknüpfte Benutzer wird getrennt, auch Benutzer ohne andere verknüpfte Anmeldemethode (kein Passwort, kein anderer Anbieter). Seine IdP-Gruppenzuordnungen und die damit vergebenen Berechtigungssätze werden mit entfernt. Dies kann nicht rückgängig gemacht werden.",
+        resultDialog: {
+          title: "SSO-Anbieter gelöscht",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Entfernt"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "Was dieses Löschen entfernt",
+            linkedUsers: "Getrennte Benutzer",
+            usersWithoutOtherSignIn: "Benutzer ohne andere verknüpfte Anmeldemethode"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Anmeldeoptionen bearbeiten",
         successMessage: "Anmeldeoptionen gespeichert"
+      },
+      edit_saml_provider: {
+        label: "SAML-Einstellungen bearbeiten",
+        params: {
+          issuer: {
+            label: "Entity-ID des IdP",
+            helpText: "Die SAML-EntityID des IdP. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          entryPoint: {
+            label: "SSO-URL des IdP",
+            helpText: "Der Single-Sign-On-Endpunkt des IdP. Leer lassen, um den gespeicherten Wert zu behalten. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          cert: {
+            label: "Neues Signaturzertifikat des IdP",
+            helpText: "Das neue X.509-Signaturzertifikat des IdP (PEM). Leer lassen, um das gespeicherte Zertifikat zu behalten."
+          },
+          keepCurrentCert: {
+            label: "Dem aktuellen Zertifikat weiter vertrauen",
+            helpText: "Während der IdP umstellt, werden Assertions akzeptiert, die mit einem der beiden Zertifikate signiert sind. Erneut ohne diese Option bearbeiten, um das alte zu entfernen."
+          }
+        },
+        resultDialog: {
+          title: "SAML-Einstellungen gespeichert",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Geändert"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC-Einstellungen bearbeiten",
+        params: {
+          clientId: {
+            label: "Client-ID",
+            helpText: "Vom IdP ausgestellte OAuth-Client-ID. Leer lassen, um den gespeicherten Wert zu behalten. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          clientSecret: {
+            label: "Neues Client-Geheimnis",
+            helpText: "Leer lassen, um das gespeicherte Geheimnis zu behalten. Das gespeicherte Geheimnis wird nie angezeigt."
+          },
+          scopes: {
+            label: "Bereiche",
+            helpText: "Durch Leerzeichen oder Kommas getrennte OAuth-Bereiche; sie ersetzen die gespeicherte Liste. Leer lassen, um sie zu behalten.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC-Einstellungen gespeichert",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Geändert"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Gruppen-Claim anzeigen",

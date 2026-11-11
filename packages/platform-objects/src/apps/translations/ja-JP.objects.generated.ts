@@ -2106,6 +2106,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "ジャストインタイムのプロビジョニングを許可",
         help: "招待制のオーディエンス方針のもとで、アカウントも招待もないままこのプロバイダー経由でサインインした人のアカウントを作成します。既定ではオフで、そのような人は拒否されます。ほかの方針では従来どおりプロビジョニングされます。「サインインオプションを編集」で変更します。"
       },
+      skip_user_info: {
+        label: "ID トークンのみからクレームを読み取る",
+        help: "OIDC のみ。ID プロバイダーの検証済み ID トークンからメールアドレス、名前、グループを読み取り、userinfo エンドポイントは呼び出しません。Microsoft Entra ID ではオンにしてください。その userinfo 応答にはグループも preferred_username も含まれません。既定はオフで、userinfo エンドポイントを持つプロバイダーはその応答からクレームを読み取ります。「サインインオプションを編集」で変更します。"
+      },
       user_id: {
         label: "登録者",
         help: "このプロバイダーを登録したユーザー"
@@ -2156,7 +2160,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "ディスカバリ URL",
-            helpText: "任意。OIDC ディスカバリドキュメントの URL。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。"
+            helpText: "任意。OIDC ディスカバリドキュメントの URL（https）。空欄の場合は `<issuer>/.well-known/openid-configuration` を導出します。ここで指定したエンドポイントはこのプロバイダーで信頼されます。"
+          },
+          userInfoEndpoint: {
+            label: "Userinfo エンドポイント URL",
+            helpText: "任意。OIDC userinfo エンドポイントの URL（https）。ディスカバリドキュメントが示すものの代わりに使われます。ここで指定したエンドポイントはこのプロバイダーで信頼されます。ディスカバリドキュメントが示す userinfo ホストをサーバーが信頼せず登録が拒否された場合に指定してください。"
+          },
+          skipUserInfo: {
+            label: "ID トークンのみからクレームを読み取る",
+            helpText: "任意。ユーザーのクレームを検証済みの ID トークンのみから読み取り、userinfo エンドポイントを呼び出しません。Microsoft Entra ID: userinfo エンドポイントが返さない「preferred_username」をマッピングするにはオンにします。"
           },
           scopes: {
             label: "スコープ",
@@ -2165,7 +2177,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "マッピング: メールクレーム",
-            helpText: "任意。メールにマッピングするクレーム。既定値は「email」。",
+            helpText: "任意。メールにマッピングするクレーム。既定値は「email」。Microsoft Entra ID（発行者が login.microsoftonline.com）: メールボックスのないユーザーには「email」クレームがないため、「preferred_username」（または「upn」）をマッピングし、「ID トークンのみからクレームを読み取る」をオンにしてください。",
             placeholder: "email"
           },
           mapName: {
@@ -2254,12 +2266,78 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO プロバイダーを削除",
-        description: "この SSO プロバイダーを削除しますか？そのドメインのユーザーは、これを通じてサインインできなくなります。",
-        successMessage: "SSO プロバイダーを削除しました"
+        description: "この SSO プロバイダーを削除しますか？リンクされているすべてのユーザーのリンクが解除されます。これには、他のサインイン方法がリンクされていないユーザー（パスワードも他のプロバイダーもないユーザー）も含まれます。IdP グループマッピングと、それによって付与された権限セットも一緒に削除されます。この操作は元に戻せません。",
+        resultDialog: {
+          title: "SSO プロバイダーを削除しました",
+          acknowledge: "完了",
+          fields: {
+            message: "削除済み"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "この削除で削除されるもの",
+            linkedUsers: "リンクが解除されるユーザー",
+            usersWithoutOtherSignIn: "他のサインイン方法がリンクされていないユーザー"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "サインインオプションを編集",
         successMessage: "サインインオプションを保存しました"
+      },
+      edit_saml_provider: {
+        label: "SAML 設定を編集",
+        params: {
+          issuer: {
+            label: "IdP エンティティ ID",
+            helpText: "IdP の SAML EntityID。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP のシングルサインオンエンドポイント。空欄のままにすると保存済みの値を維持します。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          cert: {
+            label: "新しい IdP 署名証明書",
+            helpText: "IdP の新しい X.509 署名証明書（PEM）。空欄のままにすると保存済みの証明書を維持します。"
+          },
+          keepCurrentCert: {
+            label: "現在の証明書も引き続き信頼する",
+            helpText: "IdP の切り替え中は、どちらの証明書で署名されたアサーションも受け入れます。古い証明書を外すには、このオプションなしで再度編集します。"
+          }
+        },
+        resultDialog: {
+          title: "SAML 設定を保存しました",
+          acknowledge: "完了",
+          fields: {
+            message: "変更内容"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC 設定を編集",
+        params: {
+          clientId: {
+            label: "クライアント ID",
+            helpText: "IdP が発行した OAuth クライアント ID。空欄のままにすると保存済みの値を維持します。プロバイダーにリンクされたユーザーがいない間のみ変更できます。"
+          },
+          clientSecret: {
+            label: "新しいクライアントシークレット",
+            helpText: "空欄のままにすると保存済みのシークレットを維持します。保存済みのシークレットは表示されません。"
+          },
+          scopes: {
+            label: "スコープ",
+            helpText: "スペースまたはカンマ区切りの OAuth スコープ。保存済みのリストを置き換えます。空欄のままにすると維持します。",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 設定を保存しました",
+          acknowledge: "完了",
+          fields: {
+            message: "変更内容"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "グループクレームを表示",

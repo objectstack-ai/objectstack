@@ -38,6 +38,8 @@
  * in to test this.
  */
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { describe, it, expect, vi } from 'vitest';
 // The producer's OWN write-verb dispatch decisions, so the fake engine below
 // cannot accept a call ObjectQL itself would refuse — a double looser than the
@@ -518,6 +520,10 @@ describe('[#21002] the published door follows the layered read for a shipped flo
         const { engine, rows } = makeStubEngine();
         const loaderEntry = { ...flowBody(SHIPPED, 'LOADER'), _packageId: 'com.example.pkg' };
         engine.registry = {
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
+            readsByPackage: () => false,
             registerItem: () => {},
             registerObject: () => {},
             getPackage: installedPackage,

@@ -86,6 +86,7 @@ import {
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
+    metaCallerPackageQuery,
     metaListNames,
     metaListQueryRefusal,
     metaMemberSelector,
@@ -553,11 +554,14 @@ function metaItemReadGateSources(
             }
         },
         navPruneLogged: NAV_PRUNE_LOGGED,
-        isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+        isItemOfDisabledPackage: async ({ type, name, packageId, member }) => {
             if (typeof protocol?.getMetaItem !== 'function') return false;
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
-            const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+            // [#32076] At the member the layers were read at (`MetaItemReadGateSources.isItemOfDisabledPackage`).
+            const envelope = await protocol.getMetaItem({
+                type, name, ...(packageId ? { packageId } : {}), ...(member !== undefined ? { member } : {}),
+            });
             return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
         ...(typeof protocol?.packagelessLayeredReadRefusal === 'function'
@@ -1015,6 +1019,15 @@ function isPackageScopedRefusal(e: unknown): boolean {
 }
 
 /**
+ * [ADR-0150 D3/D5] Whether a thrown value is a refusal the protocol DECLARED
+ * (`refusal: true`, the 5xx boundary's mark of an authored refusal rather than
+ * a fault) — the read's answer, never a miss.
+ */
+function isDeclaredRefusal(e: unknown): boolean {
+    return (e as { refusal?: unknown } | null | undefined)?.refusal === true;
+}
+
+/**
  * [#32201, ADR-0150 D5] The package-scoped refusal on the wire: `409
  * RESOURCE_CONFLICT`, the refusal's own sentence (the message
  * `errorFromThrown` answered, unchanged), and every holder as
@@ -1113,6 +1126,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             throw e;
         }
         if (address) {
+            // [ADR-0150 D3, #32310] A qualified address is already exact, so
+            // the caller arm beside it names a second address: refused like
+            // `?package=`, naming both, as `RestServer` refuses it.
+            if (query?.callerPackage !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${parts[1]}'`} `
+                        + 'as the exact qualifier, so `?callerPackage=` cannot resolve the name from another package. Send one '
+                        + 'of the two: the bare path with `?callerPackage=`, or the qualified path (ADR-0150 D3, D5).',
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
             // Two qualifiers on one read name two addresses; neither is picked.
             if (query?.package !== undefined) {
                 return {
@@ -1891,8 +1919,33 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // third (a member on the layered view) is answered where the layered
         // view is chosen, below. This branch declared no set, so `?member=` and
         // every misspelling were dropped and answered with the canonical item.
-        const queryRefusal = metaItemQueryRefusal('item', query);
+        // [ADR-0150 D3, #32310] …its fourth rule, the caller arm's, reads the type.
+        const queryRefusal = metaItemQueryRefusal('item', query, { type });
         if (queryRefusal && queryRefusal.rule !== 'layered-member') return queryRefusalAnswer(deps, queryRefusal);
+        // [ADR-0150 D3, #32310] The caller arm (`?callerPackage=P`), read ONCE,
+        // here, by `RestServer`'s reading (`metaCallerPackageQuery` in
+        // `@objectstack/rest`): the name resolves FROM P by D3, and this read
+        // then reads the resolved holder at its exact qualifier (`?package=`),
+        // so every branch below answers as that address answers; a refusal is
+        // the `409` naming the candidates, answered like the item read's.
+        if (query?.callerPackage !== undefined) {
+            try {
+                const callerQuery = metaCallerPackageQuery(
+                    await resolveProtocol(deps, _context), { type, name, ...metaMemberSelector(query) }, query,
+                );
+                if (callerQuery) query = callerQuery;
+            } catch (e) {
+                if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
+                // The arm's fail-closed refusal (a protocol or registry that
+                // cannot resolve by caller): its own `503`, answered here as
+                // `RestServer` answers it, never left to an outer catch.
+                if ((e as { code?: unknown; status?: unknown })?.code === 'SERVICE_UNAVAILABLE'
+                    && (e as { status?: unknown }).status === 503) {
+                    return { handled: true, response: deps.errorFromThrown(e, 503) };
+                }
+                throw e;
+            }
+        }
         const packageId = packageBinding();
         // [#23072] …and the member it names (`metaMemberSelector`, the one
         // reading `RestServer`'s doors read), handed to EVERY protocol read
@@ -2159,6 +2212,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // for the by-name service read below to answer with
                     // whichever item it finds first.
                     if (isPackageScopedRefusal(e)) throw e;
+                    // [ADR-0150 D3/D5, epic #31527] …and so is any refusal the
+                    // protocol DECLARED (`refusal: true`): the read's answer,
+                    // such as a by-name read an engine with no package-scoped
+                    // resolver cannot judge (`501`), never a miss for the
+                    // by-name service read below to answer with a first match.
+                    if (isDeclaredRefusal(e)) throw e;
                  }
             }
             if (found) return serveItem(protocol, found);

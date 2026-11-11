@@ -1,6 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+// Pay the driver's first load at collection, not inside a clocked `it()`
+// (`check:test-source-alias`).
+import '@objectstack/driver-sql';
 import { DatasourceSchema } from '@objectstack/spec/data';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 import { registerDatasourceAdminRoutes } from '../admin-routes.js';
@@ -132,14 +135,30 @@ function specRefusal(keys: string[]): string {
   return issue.message;
 }
 
+/**
+ * The whole account the doors answer for `keys` under `heading`: the one-line
+ * message naming the keys (`details.reason: 'undeclared_key'`), then the
+ * spec's own prescription as the hint.
+ */
+function keyRefusal(heading: string, keys: string[]): string {
+  const lead = heading.endsWith('.') ? `${heading.slice(0, -1)}:` : `${heading}:`;
+  return `${lead} unrecognized key(s) ${keys.map((k) => `\`${k}\``).join(', ')}.\n${specRefusal(keys)}`;
+}
+
 async function expectRefusal(res: Response): Promise<string> {
-  const body = (await res.json()) as { success: boolean; error?: { code: string; message: string } };
+  const body = (await res.json()) as {
+    success: boolean;
+    error?: { code: string; message: string; details?: { reason?: string; hint?: string } };
+  };
   expect({ status: res.status, success: body.success, code: body.error?.code }).toEqual({
     status: 400,
     success: false,
     code: 'DATASOURCE_ADMIN_ERROR',
   });
-  return body.error!.message;
+  expect(typeof body.error?.details?.reason).toBe('string');
+  // The whole account of a refusal: its one-line message, then its hint.
+  const hint = body.error?.details?.hint;
+  return hint ? `${body.error!.message}\n${hint}` : body.error!.message;
 }
 
 const BASE = { driver: 'postgres', config: { host: 'db.example.invalid', database: 'analytics' } };
@@ -153,7 +172,7 @@ describe('#28549 — POST /api/v1/datasources refuses a top-level credential by 
       await send('POST', '/datasources', { name: 'r7p_top', ...BASE, password: PLACEHOLDER_PASSWORD }),
     );
 
-    expect(message).toBe(`Invalid datasource 'r7p_top'.\n${specRefusal(['password'])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'r7p_top'.`, ['password']));
     expect(message).toContain('`password`');
     expect(message).toContain('external.credentialsRef');
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
@@ -169,7 +188,7 @@ describe('#28549 — POST /api/v1/datasources refuses a top-level credential by 
       await send('POST', '/datasources', { name: 'r7p_top2', ...BASE, connectionString: PLACEHOLDER_DSN }),
     );
 
-    expect(message).toBe(`Invalid datasource 'r7p_top2'.\n${specRefusal(['connectionString'])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'r7p_top2'.`, ['connectionString']));
     expect(message).toContain('`connectionString`');
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(message).not.toContain('db.example.invalid');
@@ -190,7 +209,7 @@ describe('#28549 — POST /api/v1/datasources refuses a top-level credential by 
       }),
     );
 
-    expect(message).toBe(`Invalid datasource 'r7p_both'.\n${specRefusal(['password', 'connectionString'])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'r7p_both'.`, ['password', 'connectionString']));
     expect(records.has('r7p_both')).toBe(false);
   });
 
@@ -221,7 +240,7 @@ describe('#28549 — PATCH /api/v1/datasources/:name refuses a top-level credent
 
     const message = await expectRefusal(await send('PATCH', '/datasources/wh', { config: BASE.config, ...extra }));
 
-    expect(message).toBe(`Invalid datasource 'wh'.\n${specRefusal([key])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'wh'.`, [key]));
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(records.get('wh')).toEqual(STORED);
     expect(ops).toEqual([]);
@@ -271,7 +290,7 @@ describe('#28549 — controls: the doors keep their other answers', () => {
       }),
     );
 
-    expect(message.split('\n')[0]).toBe("Invalid configuration for driver 'postgres'.");
+    expect(message.split('\n')[0]).toMatch(/^Invalid configuration for driver 'postgres': /);
     expect(message).toContain('config.password');
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(records.has('wh_cfg')).toBe(false);
@@ -304,7 +323,7 @@ describe('#28612 — POST /api/v1/datasources/test refuses a top-level key the s
 
     const message = await expectRefusal(await send('POST', '/datasources/test', { ...BASE, ...extra }));
 
-    expect(message).toBe(`${PROBE_HEADING}\n${specRefusal([key])}`);
+    expect(message).toBe(keyRefusal(PROBE_HEADING, [key]));
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(records.size).toBe(0);
     expect(secrets.size).toBe(0);
@@ -318,7 +337,7 @@ describe('#28612 — POST /api/v1/datasources/test refuses a top-level key the s
       await send('POST', '/datasources/test', { ...BASE, password: PLACEHOLDER_PASSWORD, secret: PLACEHOLDER_PASSWORD }),
     );
 
-    expect(message).toBe(`${PROBE_HEADING}\n${specRefusal(['password'])}`);
+    expect(message).toBe(keyRefusal(PROBE_HEADING, ['password']));
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(ops).toEqual([]);
   });
@@ -335,7 +354,7 @@ describe('#28612 — the write doors refuse every top-level key the schema refus
 
     const message = await expectRefusal(await send('POST', '/datasources', { name: 'u_key', ...BASE, ...extra }));
 
-    expect(message).toBe(`Invalid datasource 'u_key'.\n${specRefusal([key])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'u_key'.`, [key]));
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(records.has('u_key')).toBe(false);
     expect(secrets.size).toBe(0);
@@ -349,7 +368,7 @@ describe('#28612 — the write doors refuse every top-level key the schema refus
       await send('POST', '/datasources', { name: 'u_many', ...BASE, foo: 1, host: 'db.example.invalid', password: PLACEHOLDER_PASSWORD }),
     );
 
-    expect(message).toBe(`Invalid datasource 'u_many'.\n${specRefusal(['foo', 'host', 'password'])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'u_many'.`, ['foo', 'host', 'password']));
     expect(records.has('u_many')).toBe(false);
   });
 
@@ -362,7 +381,7 @@ describe('#28612 — the write doors refuse every top-level key the schema refus
 
     const message = await expectRefusal(await send('PATCH', '/datasources/wh', body));
 
-    expect(message).toBe(`Invalid datasource 'wh'.\n${specRefusal([key])}`);
+    expect(message).toBe(keyRefusal(`Invalid datasource 'wh'.`, [key]));
     expect(records.get('wh')).toEqual(STORED);
     expect(ops).toEqual([]);
   });

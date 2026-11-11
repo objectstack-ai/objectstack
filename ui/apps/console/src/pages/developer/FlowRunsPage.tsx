@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useDisplayLocale, useObjectTranslation } from '@object-ui/i18n';
-import { ConsolePageHeader, useAdapter, useMetadata, FlowRunner, type ScreenFlowState } from '@object-ui/app-shell';
+import { ConsolePageHeader, useAdapter, useMetadata, FlowRunner, type ScreenFlowState, DeveloperNamespaceGate } from '@object-ui/app-shell';
 import { createAuthenticatedFetch } from '@object-ui/auth';
 import {
   Card,
@@ -206,7 +206,19 @@ function FlowPicker({
   );
 }
 
+/**
+ * Its strings are the lazy `developer` i18n namespace's, so the page body
+ * renders under `DeveloperNamespaceGate` (objectstack#32225).
+ */
 export function FlowRunsPage() {
+  return (
+    <DeveloperNamespaceGate>
+      <FlowRunsPageBody />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function FlowRunsPageBody() {
   const { t } = useObjectTranslation();
   const adapter = useAdapter();
   const client: any = adapter?.getClient?.();

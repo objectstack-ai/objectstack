@@ -41,6 +41,7 @@
 import {
     buildEffectiveFieldPermissions,
     buildEffectiveObjectPermissions,
+    servedObjectPermissions,
     registryObjectPackageDisabled,
     engineExternalWriteForbidden,
     IDataEngine,
@@ -1028,11 +1029,13 @@ export function registerCurrentUserEndpoints(
             // `ISecurityService.getEffectiveObjectPermissions` answers from —
             // so what the console is told here and the map the server's own
             // `current_user.can()` reads are the same answer, byte for byte,
-            // for the same sets. The merge → seed → fold → clamp → annotate
-            // order, and why each step exists (ADR-0124 D1/D4, ADR-0092 D2,
-            // #3391, #18990), is documented once, on
+            // for the same sets, but for the one derivation the served slot
+            // adds: [ruling of record 6755714726] `allowTransfer` follows edit
+            // (`servedObjectPermissions`). The merge → seed → fold → clamp →
+            // annotate order, and why each step exists (ADR-0124 D1/D4,
+            // ADR-0092 D2, #3391, #18990), is documented once, on
             // `buildEffectiveObjectPermissions` in `@objectstack/core`.
-            const objects = buildEffectiveObjectPermissions(resolved, {
+            const objects = servedObjectPermissions(buildEffectiveObjectPermissions(resolved, {
                 // The contract's registry view returns `unknown[]` (schema
                 // shape is engine-local); narrow to the slice the seed reads.
                 allSchemas: () => ql?.registry?.getAllObjects?.() as ApiExposureSchemaLike[] | undefined,
@@ -1046,7 +1049,7 @@ export function registerCurrentUserEndpoints(
                 // refuses every one.
                 isExternalWriteForbidden: engineExternalWriteForbidden(ql),
                 logger: ctx.logger,
-            });
+            }));
             // Spread into a literal ON PURPOSE, here and in the `catch`: the
             // route-envelope gate counts only object-literal bodies and reads a
             // bare call as a RELAYED one, so `c.json(mePermissionsBody(…))`

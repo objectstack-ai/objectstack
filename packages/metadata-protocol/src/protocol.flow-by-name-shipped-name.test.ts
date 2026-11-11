@@ -33,6 +33,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import type { FlowRegistration } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const PACKAGE_ID = 'com.example.pkg';
 const SHIPPED = 'pkg_flow';
@@ -89,6 +90,7 @@ function registryDouble() {
         return byType.get(type)!;
     };
     return {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem(type: string, item: Record<string, unknown>, keyField = 'name', packageId?: string) {
             const name = String(item[keyField]);
             if (packageId) {

@@ -142,9 +142,12 @@ describe('[#28609] POST /data/:object/query — an aggregation entry refuses an 
     expect(res._status).toBe(400);
     expect(res._json.code).toBe('VALIDATION_FAILED');
     expect(calls).toEqual({ aggregate: 0, find: 0 });
-    const fields = res._json.fields as Array<{ field: string; message: string }>;
+    const fields = res._json.fields as Array<{ field: string; message: string; hint?: string }>;
     const tombstone = fields.find((f) => f.field === 'query.aggregations.1.distinct');
-    expect(tombstone?.message.split(' — ')[0]).toBe('`query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049)');
+    // [#32279] The tombstone answers its one-line head as `message` and its
+    // whole sentence as `hint`; both are the tombstone's, neither the generic one.
+    expect(tombstone?.message).toContain('`query.aggregations[].distinct` was removed in @objectstack/spec 17');
+    expect(tombstone?.hint?.split(' — ')[0]).toBe('`query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049)');
     expect(fields.some((f) => f.message.startsWith('Unrecognized key'))).toBe(false);
   });
 

@@ -1280,6 +1280,27 @@ export default defineConfig({
             { name: 'i18n-ns-marketplace-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]marketplace[\\/]ko\.ts$/, priority: 84 },
             { name: 'marketplace-namespace-gate', test: /[\\/]packages[\\/]app-shell[\\/]src[\\/]console[\\/]marketplace[\\/](?:MarketplaceNamespaceGate\.tsx|marketplaceFrameHolding\.ts)$/, priority: 84, includeDependenciesRecursively: false },
             //
+            // The `developer` namespace (objectstack#32225): `console.developer.*` and
+            // `connectAgent.*`, moved out of the packs for the same reason. Every
+            // catalogue is `import()`ed by `packages/i18n/src/namespaces/developer/index.ts`
+            // when a surface that reads them mounts, so one group per catalogue for
+            // the rule above. The loader module takes no group of its own: its one
+            // importer is app-shell's `DeveloperNamespaceGate`, which the two
+            // `console/connect/` widgets render and app-shell registers eagerly, so
+            // the loader (with `../packNamespace.ts`) is honestly eager and sits in
+            // `i18n-runtime` below; only the catalogues are lazy.
+            { name: 'i18n-ns-developer-en', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]en\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-zh-Hans', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]zh-Hans\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-zh-Hant', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]zh-Hant\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-es', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]es\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-ar', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ar\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-fr', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]fr\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-pt-BR', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]pt-BR\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-ru', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ru\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-de', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]de\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-ja', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ja\.ts$/, priority: 84 },
+            { name: 'i18n-ns-developer-ko', test: /[\\/]packages[\\/]i18n[\\/]src[\\/]namespaces[\\/]developer[\\/]ko\.ts$/, priority: 84 },
+            //
             // ⛔ `i18n-runtime` takes `includeDependenciesRecursively: false`
             // for the reason `data-adapter` below does (objectui#9345, read out
             // there in full): it outranks `framework` (83 over 80), and since

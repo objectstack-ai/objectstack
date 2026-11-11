@@ -61,58 +61,16 @@ import {
     judgeConnectorInput,
     type ConnectorInputSchemaSource,
 } from './connector-input-schema.js';
+import { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
+import { pullDatasourceSource, type DatasourcePullResult } from './datasource-pull.js';
 
 /** The connector providers a v1 pull reads through (the ruling's "rest / openapi only"). */
 export const CONNECTOR_PULL_PROVIDERS: readonly string[] = Object.freeze(['rest', 'openapi']);
 
-/** Which part of the binding a refused pull failed on. */
-export type ConnectorPullRefusalReason =
-    | 'mapping_not_found'
-    /**
-     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
-     * than one package holds it. The message names every candidate.
-     */
-    | 'mapping_name_refused'
-    | 'no_connector_source'
-    | 'connector_not_registered'
-    | 'connector_plugin_origin'
-    | 'connector_degraded'
-    | 'connector_provider_unsupported'
-    | 'connector_action_unknown'
-    | 'upsert_key_empty'
-    | 'unsupported_transform'
-    | 'watermark_field_unmapped'
-    | 'input_query_not_object'
-    | 'input_schema_mismatch'
-    | 'mapping_target_refused'
-    | 'upstream_not_ok'
-    | 'records_not_array'
-    | 'record_not_object'
-    | 'mapping_apply_refused';
-
-/**
- * A refused pull. `code` + `status` are the ADR-0112 pair a door would put on
- * the wire; `reason` is the machine discriminator a caller branches on; the
- * message names the mapping and says what to change.
- */
-export class ConnectorPullError extends Error {
-    readonly code: string;
-    readonly status: number;
-    readonly reason: ConnectorPullRefusalReason;
-    readonly mapping: string;
-
-    constructor(
-        init: { code: string; status: number; reason: ConnectorPullRefusalReason; mapping: string },
-        message: string,
-    ) {
-        super(message);
-        this.name = 'ConnectorPullError';
-        this.code = init.code;
-        this.status = init.status;
-        this.reason = init.reason;
-        this.mapping = init.mapping;
-    }
-}
+// The refusal a pull throws, and its reason union, live in `./pull-refusal.ts`
+// so the datasource source's windowed read (`./datasource-window-read.ts`)
+// throws the same type without importing this module.
+export { ConnectorPullError, type ConnectorPullRefusalReason } from './pull-refusal.js';
 
 /** The protocol surface a pull reads and writes through: the import runner's, plus the metadata read. */
 export interface ConnectorPullProtocol extends ImportProtocolLike {
@@ -145,7 +103,7 @@ export interface ConnectorPullDeps {
 }
 
 export interface ConnectorPullOptions {
-    /** Name of the `mapping` whose `connectorSource` is pulled. */
+    /** Name of the `mapping` whose source (`connectorSource` or `datasourceSource`) is pulled. */
     mapping: string;
     /** Execution context the target read and the writes run under — the caller's (a `job`'s, built from its `organization`). */
     context?: any;
@@ -154,7 +112,16 @@ export interface ConnectorPullOptions {
     automation?: AutomationContext;
 }
 
-export interface ConnectorPullResult {
+/**
+ * What one pull did: the connector arm here, or the datasource arm
+ * ({@link DatasourcePullResult}, ADR-0153 D1), told apart by `source` — the
+ * contract's `ConnectorSourcePullResult`, with the runner's full report.
+ */
+export type ConnectorPullResult = ConnectorSourcePullOutcome | DatasourcePullResult;
+
+/** A connector source's pull: one action call. */
+export interface ConnectorSourcePullOutcome {
+    source: 'connector';
     mapping: string;
     targetObject: string;
     connector: string;
@@ -181,7 +148,7 @@ interface ConnectorSourceLike {
     watermark?: { field?: unknown; param?: unknown };
 }
 
-type PulledMapping = MappingArtifactLike & { connectorSource?: ConnectorSourceLike };
+type PulledMapping = MappingArtifactLike & { connectorSource?: ConnectorSourceLike; datasourceSource?: unknown };
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -314,12 +281,19 @@ async function pullOnce(
     if (!isPlainObject(artifact) || !Array.isArray(artifact.fieldMapping) || typeof artifact.targetObject !== 'string') {
         return refuse('MAPPING_NOT_FOUND', 404, 'mapping_not_found', `No mapping artifact named "${mappingName}" is registered`);
     }
+    // [ADR-0153 D1] A datasource source is the other way in: a federated
+    // object read in windows (`./datasource-pull.ts`). The mapping's schema
+    // refuses carrying both sources, so whichever it carries is the one read.
+    if (isPlainObject(artifact.datasourceSource)) {
+        return pullDatasourceSource(deps, opts, artifact as PulledMapping & { datasourceSource: Record<string, unknown> });
+    }
     const source = artifact.connectorSource;
     if (!isPlainObject(source) || typeof source.connector !== 'string' || typeof source.action !== 'string') {
         return refuse(
             'VALIDATION_ERROR', 400, 'no_connector_source',
-            `Mapping "${mappingName}" declares no connectorSource, so there is nothing to pull; `
-            + 'add `connectorSource: { connector, action }` naming a rest or openapi connector',
+            `Mapping "${mappingName}" declares no source, so there is nothing to pull; add `
+            + '`connectorSource: { connector, action }` naming a rest or openapi connector, or '
+            + '`datasourceSource: { object, watermark: { field, start } }` naming the federated object it copies',
         );
     }
     const connector = source.connector;
@@ -390,7 +364,7 @@ async function pullOnce(
 
     // 4. The watermark (W1): read from the TARGET, never stored elsewhere.
     const declaredWatermark = isPlainObject(source.watermark) ? source.watermark : undefined;
-    let watermark: ConnectorPullResult['watermark'];
+    let watermark: ConnectorSourcePullOutcome['watermark'];
     if (declaredWatermark) {
         const field = String(declaredWatermark.field);
         const param = String(declaredWatermark.param);
@@ -542,6 +516,7 @@ async function pullOnce(
     }
 
     return {
+        source: 'connector',
         mapping: mappingName,
         targetObject: objectName,
         connector,
@@ -561,7 +536,7 @@ async function pullOnce(
  * the tallies move with it. The import door's own blank-key behaviour is
  * untouched — this is the pull's reading of the runner's report.
  */
-function refuseBlankMatchKeys(
+export function refuseBlankMatchKeys(
     summary: ImportRunSummary,
     mappingName: string,
     matchFields: string[],

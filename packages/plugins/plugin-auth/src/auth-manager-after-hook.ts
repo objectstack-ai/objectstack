@@ -50,9 +50,11 @@ import { rotateCallerBearerOnImpersonation } from './impersonation-bearer-rotati
 import { stampInvitationDeliveryOutcome } from './invitation-delivery-outcome.js';
 import { retireExpiredInvitationsOnReissue } from './invitation-expired-supersede.js';
 import { codeInviteRoleNotFound } from './invite-role-not-found-code.js';
+import { explainUntrustedDiscoveryRefusal } from './sso-discovery-companion-origins.js';
 import { readRequestClientAddress } from './request-client-address.js';
 import { stampRoleChangeGrantedSet } from './role-change-granted-set.js';
 import { attachSessionToCredentialResponse } from './session-envelope-completion.js';
+import { SSO_PROVIDER_DELETE_PATH } from './sign-in-method-floor.js';
 import { resetVerifiedOnTwoFactorReenrollment } from './two-factor-reenrollment-verified-reset.js';
 import { echoInstalledSessionToken } from './two-factor-rotated-token-echo.js';
 
@@ -72,6 +74,7 @@ export interface AfterHookHost {
   roleChangeGrantDeps: AuthManager['roleChangeGrantDeps'];
   sendChangeEmailNotice: AuthManager['sendChangeEmailNotice'];
   settleSignInAttempt: AuthManager['settleSignInAttempt'];
+  settleSsoProviderDelete: AuthManager['settleSsoProviderDelete'];
   stampLastLogin: AuthManager['stampLastLogin'];
   stampPasswordChangedAt: AuthManager['stampPasswordChangedAt'];
 }
@@ -220,6 +223,16 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // whose ban holds becomes `{ active: false }`, the answer a token that is
   // not valid gets. See `oauth-token-read-ban-refusal.ts`.
   await refuseIntrospectionForBannedSubject(ctx);
+
+  // ── [#32085] A deleted SSO provider takes its dependents with it ──────
+  // `/sso/delete-provider` only, and only once the vendor answered
+  // `success`: remove the provider's IdP group mappings and the grants
+  // whose reason is its projection marker, then name in the answer the
+  // users the delete unlinked, those with no other sign-in method linked,
+  // and what was removed (counted by the before-hook ahead of the
+  // vendor's writes).
+  // See `sso-provider-lifecycle.ts`.
+  if (ctx?.path === SSO_PROVIDER_DELETE_PATH) await this.settleSsoProviderDelete(ctx);
 
   // ── ADR-0069 D2: account lockout (counter) ──────────────────
   // better-auth catches an INVALID_EMAIL_OR_PASSWORD APIError and runs
@@ -417,6 +430,11 @@ export async function globalAfterHook(this: AfterHookHost, ctx: any) {
   // `ROLE_NOT_FOUND` (see `invite-role-not-found-code.ts`). It throws
   // on a match, so it stays after every section above.
   await codeInviteRoleNotFound(ctx);
+
+  // ── An untrusted discovery endpoint: say how to name it explicitly ──
+  // `/sso/register` only; the same status and code, the remedy appended to
+  // the vendor's message (`sso-discovery-companion-origins.ts`).
+  await explainUntrustedDiscoveryRefusal(ctx);
 
   // ── #29163: update-user's uncoded refusal carries its code ──
   // Same seam as the change-email section above; throws on a match.

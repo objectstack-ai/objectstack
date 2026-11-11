@@ -61,7 +61,16 @@
 
 import { isValueDomainMember } from '@objectstack/spec/shared';
 import { CURRENCY_FRACTION_DIGITS } from '@objectstack/spec/data';
-import { isRecordCurrencyBlank, recordCurrencyFieldOf } from './validation/record-currency-code.js';
+import {
+  PARENT_CODE_UNREAD,
+  followParentCurrencyCodes,
+  isRecordCurrencyBlank,
+  recordCurrencyFieldOf,
+  recordCurrencyInputOf,
+  recordCurrencyPathOf,
+  type ParentRowsReader,
+  type RecordCurrencyPath,
+} from './validation/record-currency-code.js';
 import { ValidationError } from './validation/record-validator.js';
 
 // The conversion arithmetic and the document date live in `@objectstack/formula`
@@ -85,8 +94,18 @@ export const HOME_CURRENCY_UNSET_CODE = 'ERR_HOME_CURRENCY_UNSET' as const;
 export interface HomeAmountPlanEntry {
   /** The `record`-mode `currency` field declaring `homeAmount`. */
   readonly amountField: string;
-  /** Its `currencyConfig.currencyField`: the ISO 4217 code of the amount. */
+  /**
+   * Its `currencyConfig.currencyField` as written: the sibling field holding
+   * the ISO 4217 code of the amount, or a `MASTER_DETAIL.CODE` path ({@link path}).
+   */
   readonly codeField: string;
+  /**
+   * [ADR-0144 D2, amended] Set when the amount follows its parent's code
+   * through a `master_detail`: the image is read with the parent's code laid
+   * under {@link codeField} (`followParentCurrencyCodes`), and the payload key
+   * that moves the currency is the `master_detail` field.
+   */
+  readonly path?: RecordCurrencyPath;
   /** `homeAmount.field`: where the home amount is stored. */
   readonly homeField: string;
   /** `homeAmount.rateDate`: the document date that picks the rate. */
@@ -120,21 +139,33 @@ export function planHomeAmounts(schema: unknown): HomeAmountPlanEntry[] {
     const { field, rateDate, rateField } = home as { field?: unknown; rateDate?: unknown; rateField?: unknown };
     if (typeof field !== 'string' || typeof rateDate !== 'string' || typeof rateField !== 'string') continue;
     const rateDateType = ((fields as Record<string, unknown>)[rateDate] as { type?: unknown } | undefined)?.type;
-    plan.push({ amountField, codeField, homeField: field, rateDateField: rateDate, rateDateIsInstant: rateDateType === 'datetime', rateField });
+    const path = recordCurrencyPathOf(codeField, fields);
+    plan.push({
+      amountField, codeField, homeField: field, rateDateField: rateDate, rateDateIsInstant: rateDateType === 'datetime', rateField,
+      ...(path ? { path } : {}),
+    });
   }
   return plan;
 }
 
-/** The keys whose presence in an update payload makes the projection run for `entry`. */
+/**
+ * The keys whose presence in an update payload makes the projection run for
+ * `entry`. For an amount that follows its parent's code the code's key is the
+ * `master_detail` field: a child moved to another parent is converted from
+ * that parent's code, as a written sibling code converts.
+ */
 function projectionInputs(entry: HomeAmountPlanEntry): readonly string[] {
-  return [entry.amountField, entry.codeField, entry.rateDateField, entry.homeField, entry.rateField];
+  return [entry.amountField, recordCurrencyInputOf(entry), entry.rateDateField, entry.homeField, entry.rateField];
 }
 
 /**
- * The entries an update payload moves: it carries the amount, its code, its
- * document date, or one of the two projected fields. Only these are projected
- * on an update, so an edit of any other field never re-reads a rate (a
- * corrected rate reaches stored rows only through an explicit recompute).
+ * The entries an update payload moves: it carries the amount, its code (for a
+ * child following its parent, the `master_detail` field), its document date,
+ * or one of the two projected fields. Only these are projected on an update,
+ * so an edit of any other field never re-reads a rate (a corrected rate
+ * reaches stored rows only through an explicit recompute), and an edit of the
+ * parent's code never reaches here: the parent's code locks once a child
+ * follows it (ADR-0144 D2, amended).
  */
 export function homeAmountsTouched(
   plan: readonly HomeAmountPlanEntry[],
@@ -176,6 +207,18 @@ export interface HomeAmountServing {
   timezone(organizationId: string | undefined): Promise<string | undefined>;
   /** The `currency` row with the latest `effective_date` on or before `onOrBefore`, or `undefined`. */
   rateOn(organizationId: string | undefined, currency: string, onOrBefore: string): Promise<ExchangeRateRow | undefined>;
+  /**
+   * [ADR-0144 D2, amended] The parent rows a child amount following its
+   * parent's code reads that code from: `ids` of `master`, each with
+   * `fields`. A parent the writer's read door does not return answers
+   * `PARENT_CODE_UNREAD` and is never read elevated; the others are read
+   * under the write's elevated, organization-kept authority, and one not
+   * found has no entry (see `ParentRowsReader`). Optional only so a serving
+   * built by hand for a sibling-code amount needs none: without it every
+   * following amount reads as having no code, so it is never converted and
+   * its write is refused `ERR_CURRENCY_CODE_REQUIRED`.
+   */
+  parentRows?: ParentRowsReader;
 }
 
 /** An organization's two localization settings the projection reads; each `undefined` when unset. */
@@ -205,6 +248,8 @@ export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmount
   const homes = new Map<string, Promise<string | undefined>>();
   const zones = new Map<string, Promise<string | undefined>>();
   const rates = new Map<string, Promise<ExchangeRateRow | undefined>>();
+  const parents = new Map<string, Promise<Record<string, unknown> | typeof PARENT_CODE_UNREAD | undefined>>();
+  const readParents = serving.parentRows;
   return {
     homeCurrency(organizationId) {
       const key = organizationId ?? '';
@@ -233,6 +278,25 @@ export function memoizeHomeAmountServing(serving: HomeAmountServing): HomeAmount
       }
       return hit;
     },
+    ...(readParents
+      ? {
+        // Each (master, fields, id) is read once; a batch asks only for the ids not asked before, in one read.
+        async parentRows(master: string, ids: readonly string[], fields: readonly string[]) {
+          const scope = `${master}\u0000${[...fields].sort().join(',')}\u0000`;
+          const missing = [...new Set(ids)].filter((id) => !parents.has(scope + id));
+          if (missing.length > 0) {
+            const read = readParents(master, missing, fields);
+            for (const id of missing) parents.set(scope + id, read.then((rows) => rows.get(id)));
+          }
+          const out = new Map<string, Record<string, unknown> | typeof PARENT_CODE_UNREAD>();
+          for (const id of ids) {
+            const row = await parents.get(scope + id);
+            if (row !== undefined) out.set(id, row);
+          }
+          return out;
+        },
+      }
+      : {}),
   };
 }
 
@@ -359,6 +423,12 @@ export async function projectHomeAmounts(
   write: HomeAmountWrite,
 ): Promise<Record<string, unknown>> {
   const out: Record<string, unknown> = {};
+  // [ADR-0144 D2, amended] An amount that follows its parent's code converts
+  // from the parent's code. A caller that read the parents for a whole batch
+  // hands the image with each code laid on it already; otherwise it is read
+  // here, through the same memoized serving.
+  const unfollowed = plan.filter((entry) => entry.path !== undefined && !Object.prototype.hasOwnProperty.call(image, entry.codeField));
+  if (unfollowed.length > 0) image = (await followParentCurrencyCodes(unfollowed, [image], serving.parentRows))(image);
   for (const entry of plan) {
     const amountValue = image[entry.amountField];
     if (isRecordCurrencyBlank(amountValue)) {

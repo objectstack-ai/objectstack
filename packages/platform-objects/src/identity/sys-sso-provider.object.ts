@@ -72,8 +72,10 @@ export const SysSsoProvider = ObjectSchema.create({
   highlightFields: ['provider_id', 'issuer', 'domain'],
 
   // All mutations go through @better-auth/sso's endpoints under
-  // /api/v1/auth/sso/* (register / delete-provider) rather than the generic
-  // data layer, so server-side config validation + secret handling run.
+  // /api/v1/auth/sso/* (register / update-provider / delete-provider), directly
+  // or through a plugin-auth `/admin/sso/*` bridge that re-dispatches to them,
+  // rather than the generic data layer, so server-side config validation +
+  // secret handling run.
   //
   // The `/admin/sso/*` bridge actions are OFFERED only to the one
   // standing their door admits (ADR-0068 D4): each bridge runs the
@@ -114,7 +116,19 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'domain', label: 'Email Domain', type: 'text', required: true, helpText: 'Users with this email domain are routed to this IdP, e.g. acme.com.' },
         { name: 'clientId', label: 'Client ID', type: 'text', required: true, helpText: 'OAuth client ID issued by the IdP for this system.' },
         { name: 'clientSecret', label: 'Client Secret', type: 'password', required: true, helpText: 'OAuth client secret (stored encrypted by better-auth).' },
-        { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'text', required: false, helpText: 'Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`.' },
+        // The two endpoints a registration can name explicitly (#32297). The bridge
+        // passes each under the same name into `oidcConfig`, and an endpoint the
+        // registration names is trusted for that registration (plugin-auth
+        // `AuthManager.ssoDiscoveryTrustedOrigins` reads the issuer, the discovery
+        // URL and the userinfo URL alike), so both help texts say so: it is the
+        // remedy the refusal of an untrusted discovery endpoint names.
+        { name: 'discoveryEndpoint', label: 'Discovery URL', type: 'url', required: false, helpText: 'Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider.' },
+        { name: 'userInfoEndpoint', label: 'Userinfo URL', type: 'url', required: false, helpText: 'Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust.' },
+        // The OIDC userinfo opt-out, stored as the provider's `skip_user_info`
+        // (plugin-auth `sso-sign-in-options.ts`): claims come from the verified
+        // ID token only. Off by default, as the column is, and labelled as the column
+        // is, so the register form and Edit Sign-In Options name it alike.
+        { name: 'skipUserInfo', label: 'Read Claims From the ID Token Only', type: 'boolean', required: false, helpText: 'Optional. Read the user’s claims from the verified ID token only and never call the userinfo endpoint. Microsoft Entra ID: turn this on to map "preferred_username", which its userinfo endpoint does not return.' },
         { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Optional. Space- or comma-separated OAuth scopes. Defaults to "openid email profile".' },
         // No "Map: User ID claim" param here on purpose. `@better-auth/sso@1.7.0-rc.2`
         // retired the capability: `oidcConfig.mapping` is a `z.strictObject` with no
@@ -126,7 +140,13 @@ export const SysSsoProvider = ObjectSchema.create({
         // it already defaults to, and anything else answers 400 (see the guard in
         // plugin-auth `register-sso-provider.ts`, which stays as belt-and-braces for
         // non-form callers). Removing it restores declared = enforced.
-        { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email".' },
+        // The Entra ID hint is static help text, as the SAML rows below carry
+        // theirs (#32297): an action param's `helpText` binds only `record`, its
+        // `visible` predicate reads `current_user` / `data` / `features`, and
+        // neither reads the dialog's own values, so a hint keyed on the issuer
+        // host the admin types has no declarable form. The claim is never set
+        // for the admin: blank still maps "email".
+        { name: 'mapEmail', label: 'Map: Email claim', type: 'text', required: false, placeholder: 'email', helpText: 'Optional. Claim mapped to email. Defaults to "email". Microsoft Entra ID (issuer on login.microsoftonline.com): users without a mailbox carry no "email" claim, so map "preferred_username" (or "upn") and turn on Read Claims From the ID Token Only.' },
         { name: 'mapName', label: 'Map: Name claim', type: 'text', required: false, placeholder: 'name', helpText: 'Optional. Claim mapped to display name. Defaults to "name".' },
         // The groups claim: stored as the provider's `mapping.extraFields.groups`,
         // the member an SSO sign-in reads the user's IdP groups from to grant
@@ -257,18 +277,44 @@ export const SysSsoProvider = ObjectSchema.create({
       // Confirm question on `description`, not `confirmText`: this action collects
       // params, and pairing the two keys opens two dialogs for one decision
       // (#7278 ruling 2026-08-10, swept by #7309).
-      description: 'Delete this SSO provider? Users from its domain will no longer be able to sign in through it.',
-      successMessage: 'SSO provider deleted',
+      //
+      // [#32085] The delete unlinks every user who signed in through the
+      // provider (the vendor deletes their accounts with it), so the
+      // confirmation names the count before anyone confirms: the preflight
+      // reads plugin-auth's `/admin/sso/delete-impact` (platform-admin gated,
+      // ADR-0068 D4) and shows how many users the delete unlinks, how many of
+      // them have no other sign-in method linked (no password, no other
+      // provider), and the group mappings and projected grants removed with it. The door counts again
+      // when it runs and names what it removed in its answer, shown by
+      // `resultDialog`.
+      description:
+        'Delete this SSO provider? Every user linked to it is unlinked, including users with no other sign-in method linked (no password, no other provider). Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.',
       refreshAfter: true,
       params: [
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
       ],
+      preflight: {
+        read: { url: '/api/v1/auth/admin/sso/delete-impact?providerId=${ctx.record.provider_id}' },
+        path: 'data',
+        fields: [
+          { path: 'summary', label: 'What this delete removes', format: 'text' },
+          { path: 'linkedUsers', label: 'Users unlinked', format: 'text' },
+          { path: 'usersWithoutOtherSignIn', label: 'Users with no other sign-in method linked', format: 'text' },
+        ],
+      },
+      resultDialog: {
+        title: 'SSO provider deleted',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'message', label: 'Removed', format: 'text' },
+        ],
+      },
       // ADR-0011 identity-actions note, bucket C: exposed, and the
       // confirmation is never relaxed.
       ai: {
         exposed: true,
         description:
-          'Delete an SSO provider (the record; param: its providerId): users from its email domain can no longer sign in through it. Ask the human to confirm before calling.',
+          'Delete an SSO provider (the record; param: its providerId). It unlinks every user who signed in through it, including users with no other sign-in method linked (no password, no other provider); its IdP group mappings and the grants they gave are removed. Ask the human to confirm before calling, naming those counts.',
         requiresConfirmation: true,
       },
     },
@@ -281,7 +327,8 @@ export const SysSsoProvider = ObjectSchema.create({
       type: 'api',
       method: 'POST',
       // The provider's two sign-in toggles (ruling record 6718355623 on the
-      // Enterprise SSO operator knobs), written through @better-auth/sso's own
+      // Enterprise SSO operator knobs) and its OIDC userinfo opt-out
+      // (`skip_user_info`), written through @better-auth/sso's own
       // /sso/update-provider, which takes them as provider additional fields
       // (plugin-auth `sso-sign-in-options.ts`). Its writers are the provider's
       // writers: the vendor's provider-access check plus plugin-auth's
@@ -296,7 +343,75 @@ export const SysSsoProvider = ObjectSchema.create({
         { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
         { name: 'allowIdpInitiated', field: 'allow_idp_initiated', defaultFromRow: true, required: false },
         { name: 'allowJit', field: 'allow_jit', defaultFromRow: true, required: false },
+        { name: 'skipUserInfo', field: 'skip_user_info', defaultFromRow: true, required: false },
       ],
+    },
+    // [#32085] Edit a registered provider instead of deleting and
+    // re-registering it (a delete unlinks every user of the provider). Both
+    // post to plugin-auth's `/admin/sso/update-provider` bridge, which writes
+    // through @better-auth/sso's own /sso/update-provider and answers only the
+    // names of the fields it changed. A blank field keeps what is stored, so
+    // the write-only client secret is never read back into the form. The
+    // stored configuration (an `internal` field the form cannot read) says
+    // which protocol a provider speaks, so both are offered on every row and
+    // the bridge refuses the wrong one naming the right one. What the vendor
+    // treats as the provider's identity (the SAML entity ID and SSO URL, the
+    // OIDC client ID) changes only while no user is linked; a certificate or a
+    // client secret changes with users linked. Platform-admin standing, as for
+    // the register actions (ADR-0068 D4). No `ai` block: it changes who can
+    // sign in, so it stays human-only (ADR-0011 bucket H's test).
+    {
+      name: 'edit_saml_provider',
+      label: 'Edit SAML Settings',
+      icon: 'pencil',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/update-provider',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'issuer', field: 'issuer', label: 'IdP Entity ID', defaultFromRow: true, required: false, helpText: 'The IdP’s SAML EntityID. Changes only while no user is linked to the provider.' },
+        { name: 'entryPoint', label: 'IdP SSO URL', type: 'text', required: false, helpText: 'The IdP’s single sign-on endpoint. Leave blank to keep the stored one. Changes only while no user is linked to the provider.' },
+        { name: 'cert', label: 'New IdP Signing Certificate', type: 'textarea', required: false, helpText: 'The IdP’s new X.509 signing certificate (PEM). Leave blank to keep the stored certificate.' },
+        { name: 'keepCurrentCert', label: 'Keep trusting the current certificate', type: 'boolean', required: false, helpText: 'While the IdP switches over, accept assertions signed by either certificate. Edit again without this to drop the old one.' },
+      ],
+      resultDialog: {
+        title: 'SAML settings saved',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'message', label: 'Changed', format: 'text' },
+        ],
+      },
+    },
+    {
+      name: 'edit_oidc_provider',
+      label: 'Edit OIDC Settings',
+      icon: 'pencil',
+      variant: 'secondary',
+      locations: ['list_item', 'record_header'],
+      type: 'api',
+      method: 'POST',
+      target: '/api/v1/auth/admin/sso/update-provider',
+      requiredPermissions: [...PLATFORM_ADMIN_SETTINGS_GATE],
+      visible: 'current_user.isPlatformAdmin == true',
+      refreshAfter: true,
+      params: [
+        { name: 'providerId', field: 'provider_id', defaultFromRow: true, required: true },
+        { name: 'clientId', label: 'Client ID', type: 'text', required: false, helpText: 'OAuth client ID issued by the IdP. Leave blank to keep the stored one. Changes only while no user is linked to the provider.' },
+        { name: 'clientSecret', label: 'New Client Secret', type: 'password', required: false, helpText: 'Leave blank to keep the stored secret. The stored secret is never shown.' },
+        { name: 'scopes', label: 'Scopes', type: 'text', required: false, placeholder: 'openid email profile', helpText: 'Space- or comma-separated OAuth scopes, replacing the stored list. Leave blank to keep it.' },
+      ],
+      resultDialog: {
+        title: 'OIDC settings saved',
+        acknowledge: 'Done',
+        fields: [
+          { path: 'message', label: 'Changed', format: 'text' },
+        ],
+      },
     },
     // The provider's groups claim, shown and changed where the register forms
     // set it: `mapping.extraFields.groups` inside the stored protocol
@@ -529,6 +644,23 @@ export const SysSsoProvider = ObjectSchema.create({
       trackHistory: true,
       description:
         'Under the invite-only audience posture, create an account for a person who signs in through this provider without an account or an invitation. Off by default: such a person is refused. Other postures provision as before. Change it with “Edit Sign-In Options”.',
+      group: 'Identity',
+    }),
+
+    // The OIDC userinfo opt-out, written as the @better-auth/sso provider
+    // additional field `skipUserInfo` (plugin-auth `sso-sign-in-options.ts`).
+    // On, the provider's claims (email, name, groups) come from the verified
+    // ID token only and its userinfo endpoint is not called: the vendor reads
+    // claims from userinfo ALONE whenever one is configured, and Microsoft
+    // Entra ID's userinfo carries no `groups`, `preferred_username` or `upn`.
+    // `trackHistory`, like the two toggles above: it changes what a sign-in
+    // reads about the person.
+    skip_user_info: Field.boolean({
+      label: 'Read Claims From the ID Token Only',
+      defaultValue: false,
+      trackHistory: true,
+      description:
+        'OIDC only. Read the email, name and groups from the identity provider’s verified ID token and do not call its userinfo endpoint. Turn it on for Microsoft Entra ID, whose userinfo answer carries no groups and no preferred_username. Off by default: a provider with a userinfo endpoint reads its claims from that answer. Change it with “Edit Sign-In Options”.',
       group: 'Identity',
     }),
 

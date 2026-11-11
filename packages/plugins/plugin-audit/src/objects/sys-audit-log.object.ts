@@ -446,6 +446,18 @@ export const SysAuditLog = ObjectSchema.create({
     // to」 by `user_id`, and a SCIM refusal names no user — an identity
     // provider's provisioning call is not a sign-in.
     //
+    // [#31908, ADR-0154 D6] `audit_signing_key_change` joins the enum
+    // WRITER-FIRST. Its writer is `audit-signing-key-audit.ts`
+    // (`writeAuditSigningKeyChange`), called by the sealer's default signer
+    // (`audit-seal/signer.ts`) when it creates the deployment's checkpoint
+    // signing key, before the key signs anything: one deployment-level row
+    // (`tenant_id` NULL, no user, actor `svc:audit-sealer`) naming the new
+    // fingerprint and the retired one (`metadata.new_fingerprint`,
+    // `metadata.retired_fingerprint`, NULL for the first key) — never key
+    // material or a handle. The row is sealed in the deployment chain like any
+    // other. Its shipped surfaces are the unfiltered `recent` and `all_events`
+    // views above.
+    //
     // Each option carries a label (#27855): the list, the detail and the System
     // Overview "Audit Events by Action" chart (whose dimension resolves through
     // these options) read it, where the bare-array shorthand made the label the
@@ -470,6 +482,7 @@ export const SysAuditLog = ObjectSchema.create({
           { label: 'Package Unmanaged Import', value: 'package_unmanaged_import' },
           { label: 'Credential Use', value: 'credential_use' },
           { label: 'SCIM Refused', value: 'scim_refused' },
+          { label: 'Audit Signing Key Change', value: 'audit_signing_key_change' },
         ],
         label: 'Action',
         required: true,

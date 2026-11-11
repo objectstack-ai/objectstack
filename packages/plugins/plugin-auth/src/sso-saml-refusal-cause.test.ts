@@ -18,6 +18,8 @@ import {
   samlSigningConfigOf,
   type SamlSigningConfig,
 } from './sso-saml-refusal-cause';
+// The package entry, loaded at module load (not inside a clocked case): it is the whole plugin.
+import * as entry from './index';
 
 const IDP = 'https://idp.acme.example/entity';
 const CERT = 'MIICcertKNOWNbodyAAAA';
@@ -60,6 +62,11 @@ describe('classifySamlRefusal: the first failing check in samlify order names th
       'saml_signing_certificate_mismatch',
       'saml_issuer_mismatch',
     ]);
+  });
+
+  it('the list is published from the package entry, beside the OIDC list', () => {
+    expect(entry.SSO_SAML_REFUSAL_CAUSES).toBe(SSO_SAML_REFUSAL_CAUSES);
+    expect(entry.SSO_SAML_UNCLASSIFIED_REFUSAL).toBe('Invalid SAML response');
   });
 
   it('a non-success status, checked before anything else (an unsigned, foreign response with it is still that)', () => {

@@ -25,9 +25,12 @@
  * scoped list's view-expansion stand-in (a package-less row the merge held
  * back, served in a package's slot) is `protocol.scoped-list-fallback.test.ts`.
  */
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { describe, expect, it } from 'vitest';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation, mergePackageAwareOverlay, withRowBinding } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const TYPE = 'dashboard';
 const NAME = 'd_bound';
@@ -73,6 +76,7 @@ function stored(
 /** The engine double: `find` / `findOne` over `sys_metadata`, and a registry holding nothing of the type. */
 function harness(rows: StoredRow[]) {
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         getArtifactItem: (_type: string, _name: string) => undefined,
         getItem: () => undefined,
         listItems: () => [],
@@ -270,6 +274,7 @@ describe('[#28673] 5. the list merge serves a stored row under its own binding',
 function hydrationHarness() {
     const registered: Array<{ type: string; item: Record<string, unknown> }> = [];
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         registerItem: (type: string, item: Record<string, unknown>) => { registered.push({ type, item }); },
         unregisterItem: () => undefined,
         getArtifactItem: (_type: string, _name: string, _pkg?: string) => undefined,

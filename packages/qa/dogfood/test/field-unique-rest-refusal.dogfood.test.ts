@@ -157,8 +157,9 @@ describe('records-forms.field-unique-enforcement — the unique refusal at the R
       options: { atomic: true },
     });
     // The per-row report: the causal row keeps its own code, the row written
-    // before it is marked rolled back, and nothing succeeded.
-    expect(res.status, res.text).toBe(200);
+    // before it is marked rolled back, and nothing succeeded. Rows failed, so
+    // the report answers 207 Multi-Status.
+    expect(res.status, res.text).toBe(207);
     expect(res.json).toMatchObject({ success: false, total: 2, succeeded: 0, failed: 2 });
     expect(res.json.results.map((r: any) => [r.id, r.success, r.errors?.[0]?.code])).toEqual([
       [c, false, 'ROLLED_BACK'],
