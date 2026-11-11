@@ -50,7 +50,10 @@ const CALL = (callee: string) => new RegExp(`\\.${callee}\\(\\s*(?:\\{|[A-Za-z_$
 function census(): Map<string, number> {
     const found = new Map<string, number>();
     for (const file of sourcesUnder(join(ROOT, 'packages'))) {
-        const source = maskComments(readFileSync(join(ROOT, file), 'utf8'));
+        const raw = readFileSync(join(ROOT, file), 'utf8');
+        // Only a file that spells a callee at all is masked and matched.
+        if (!raw.includes('saveMetaItem(') && !raw.includes('promoteDraftForPublish(')) continue;
+        const source = maskComments(raw);
         for (const callee of ['saveMetaItem', 'promoteDraftForPublish'] as const) {
             const calls = source.match(CALL(callee))?.length ?? 0;
             if (calls > 0) found.set(`${file} :: ${callee}`, calls);
@@ -59,9 +62,13 @@ function census(): Map<string, number> {
     return found;
 }
 
+// The walk reads every package source: paid here, at collection, never inside
+// a case's `testTimeout` window (a loaded CI shard measured 6.4 s for it).
+const FOUND = census();
+
 describe('which doors ask the registry against its other objects (registry-question.ts)', () => {
     it('every request-carrying `saveMetaItem` and `promoteDraftForPublish` call in a package source is recorded with its question', () => {
-        const found = census();
+        const found = FOUND;
         const recorded = new Map(REGISTRY_QUESTION_PRODUCERS.map((p) => [`${p.file} :: ${p.callee}`, p.calls]));
         expect(
             [...found].sort(),
