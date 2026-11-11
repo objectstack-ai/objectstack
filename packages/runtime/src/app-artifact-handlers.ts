@@ -708,6 +708,20 @@ export function judgeJobPull(
  * answers a REFUSAL naming every declaring body (ADR-0150 D3,
  * `ambiguous-in-environment`), never the first body in package order: the
  * binder fails that job's run with it before any call or write.
+ *
+ * [#32355] So does a job name a body declares and the residual carries too:
+ * the residual's job is met by that name as well, and it is not the body's.
+ * The residual carries a body's job name when the artifact holds MORE jobs of
+ * that name than its bodies declare — the flattened top level copies each
+ * body job once, so every job of the name beyond those copies is a top-level
+ * job of its own (`composeStacks(…, { manifest: 'preserve' })` with an input
+ * that has no `manifest`). By count, never by comparing a copy's content with
+ * its body's: a conversion replays a body under its own version window, so a
+ * genuine copy need not stay equal to the body it was copied from. Such a name
+ * answers the one holder when the body and the residual's owner are one
+ * package, and otherwise a refusal naming the declaring bodies and the
+ * residual. A job a body's own array holds still answers that body by
+ * identity, as above.
  */
 export function jobDeclaringPackages(
     bundle: unknown,
@@ -718,6 +732,8 @@ export function jobDeclaringPackages(
     }
     const byIdentity = new Map<unknown, string>();
     const byName = new Map<string, string[]>();
+    // [#32355] How many jobs of each name the bodies declare, copies counted once each.
+    const declaredCount = new Map<string, number>();
     // The residual's owner is a package only when a body carries its id.
     let residual: string | undefined;
     for (const body of resolveArtifactPackageOrder(bundle)) {
@@ -733,21 +749,64 @@ export function jobDeclaringPackages(
             const declarers = byName.get(name) ?? [];
             if (!declarers.includes(id)) declarers.push(id);
             byName.set(name, declarers);
+            declaredCount.set(name, (declaredCount.get(name) ?? 0) + 1);
         }
     }
+    // [#32355] The body job names the residual carries too: the binder's jobs
+    // hold more of the name than the bodies declare.
+    const boundCount = new Map<string, number>();
+    for (const job of collectBundleJobs(bundle)) {
+        const name = (job as { name?: unknown } | null | undefined)?.name;
+        if (typeof name === 'string' && byName.has(name)) boundCount.set(name, (boundCount.get(name) ?? 0) + 1);
+    }
+    const residualCarries = new Set([...boundCount].filter(([name, n]) => n > (declaredCount.get(name) ?? 0)).map(([name]) => name));
     return (job) => {
         const held = byIdentity.get(job);
         if (held !== undefined) return held;
         const name = (job as { name?: unknown } | null | undefined)?.name;
         const declarers = typeof name === 'string' ? byName.get(name) : undefined;
         if (declarers === undefined) return residual;
+        if (residualCarries.has(name as string)) {
+            // One holder only when the residual's owner IS the one declaring body.
+            if (declarers.length === 1 && declarers[0] === residual) return residual;
+            return jobNameRefusal(name as string, declarers, { packageId: residual });
+        }
         return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
     };
 }
 
-/** [#32071] The refusal of a job name several package bodies declare: nothing picks one of them. */
-function jobNameRefusal(name: string, packageIds: readonly string[]): PackageScopedRefusal {
-    const candidates = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
+/**
+ * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
+ * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too — as
+ * its owning package when a body carries the artifact's id (then also a candidate), else as the
+ * top level that names no package, which no holder kind spells, so the message alone names it.
+ */
+function jobNameRefusal(
+    name: string,
+    packageIds: readonly string[],
+    residual?: { readonly packageId: string | undefined },
+): PackageScopedRefusal {
+    const bodies = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
+    if (residual === undefined) {
+        return {
+            status: 'refused',
+            reason: 'ambiguous-in-environment',
+            type: 'job',
+            name,
+            callerPackageId: null,
+            candidates: bodies,
+            message: `The job "${name}" is declared by ${packageIds.length} package bodies of this artifact: `
+                + `${bodies.map(describePackageScopedHolder).join('; ')}. Nothing picks one of them, so its pull reads `
+                + 'as none of them: rename the job in all but one package so each name has one declaring package.',
+        };
+    }
+    const owner = residual.packageId;
+    const candidates = owner === undefined || packageIds.includes(owner)
+        ? bodies
+        : [...bodies, { kind: 'package' as const, packageId: owner }];
+    const residualHolder = owner === undefined
+        ? 'which names no package'
+        : `which runs as ${describePackageScopedHolder({ kind: 'package', packageId: owner })}, the body that carries the artifact's id`;
     return {
         status: 'refused',
         reason: 'ambiguous-in-environment',
@@ -755,9 +814,10 @@ function jobNameRefusal(name: string, packageIds: readonly string[]): PackageSco
         name,
         callerPackageId: null,
         candidates,
-        message: `The job "${name}" is declared by ${packageIds.length} package bodies of this artifact: `
-            + `${candidates.map(describePackageScopedHolder).join('; ')}. Nothing picks one of them, so its pull reads `
-            + 'as none of them: rename the job in all but one package so each name has one declaring package.',
+        message: `The job "${name}" is declared by ${bodies.map(describePackageScopedHolder).join('; ')} and by this `
+            + `artifact's top level outside every package body (its residual, ${residualHolder}). Nothing picks one of them, `
+            + 'so its pull reads as none of them: rename the top-level job, or the package body\'s, so each name has one '
+            + 'declaring holder.',
     };
 }
 
@@ -1237,7 +1297,7 @@ export async function scheduleAppArtifactJobs(
             }
             // Resolved again on every run, through the registry — never the
             // instance read above, so a re-registered service is the one called.
-            run = async () => {
+            run = async (jobCtx) => {
                 let service: IAutomationService | undefined;
                 try { service = ctx.getService<IAutomationService>('automation'); } catch { /* reported below */ }
                 if (typeof service?.pullConnectorSource !== 'function') {
@@ -1248,6 +1308,7 @@ export async function scheduleAppArtifactJobs(
                 }
                 // [#32071] A job name two bodies declare is attributed to neither:
                 // refused before any call or write, naming every declaring body.
+                // [#32355] So is one a body declares and the residual carries.
                 if (declarerRefusal !== undefined) throw new PackageScopedNameRefusedError(declarerRefusal);
                 // [#31823] Resolved once per run, before the pull reads or writes:
                 // a job with no organization pulls as the one its writes are
@@ -1262,6 +1323,11 @@ export async function scheduleAppArtifactJobs(
                     context: jobExecutionContext(runAs),
                     // A residual job names no package (above): the no-package read.
                     ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+                    // [ADR-0153 D7] The job run that drove the pull, for its run
+                    // record: the run id and the trigger the job service handed
+                    // this handler, each only as the contract spells it.
+                    ...(typeof jobCtx?.runId === 'string' && jobCtx.runId !== '' ? { jobRunId: jobCtx.runId } : {}),
+                    ...(jobCtx?.trigger === 'schedule' || jobCtx?.trigger === 'manual' ? { trigger: jobCtx.trigger } : {}),
                 });
                 return pullRunOutcomeOf(result);
             };

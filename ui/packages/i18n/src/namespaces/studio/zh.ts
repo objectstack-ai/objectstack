@@ -422,7 +422,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.currency.currencyFieldNone': '— 选择币种字段 —',
   'designer.field.currency.createCodeField': '创建币种字段',
   'designer.field.currency.codeFieldLabel': '币种',
-  'designer.field.currency.recordHint': '列出本对象中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，金额按该币种显示。',
+  'designer.field.currency.recordHint': '列出本对象及其主从父对象（关系.字段）中值域为 ISO 4217 币种的文本字段。每条记录在其中保存自己的币种代码，或沿用父记录的币种，金额按该币种显示。',
   'designer.field.currency.homeAmount': '本位币金额',
   'designer.field.currency.homeField': '本位币金额字段',
   'designer.field.currency.homeFieldNone': '— 不保存 —',

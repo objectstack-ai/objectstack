@@ -1062,7 +1062,9 @@ export class MetadataManager implements IMetadataService {
    *   package's item, never another package's; omitted, D3 for a caller with
    *   no package. Every other type is read by name, as before.
    * @throws {PackageScopedNameRefusedError} a read naming no package of a name
-   *   two or more packages hold, for a type stored per `(package, name)`.
+   *   two or more packages hold, for a type stored per `(package, name)`;
+   *   [#32244] for `action`, also a name two or more packages each bind to
+   *   its own object, naming each package with its object.
    */
   async get(type: string, name: string, packageId?: string | null): Promise<unknown | undefined> {
     // [#7378 row 2] Read the store `register` wrote: the canonical type.

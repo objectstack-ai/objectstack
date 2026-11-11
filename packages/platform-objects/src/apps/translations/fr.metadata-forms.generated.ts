@@ -638,7 +638,7 @@ export const frMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "currencyConfig.currencyField": {
         label: "Champ de devise",
-        helpText: "Mode record uniquement, et obligatoire dans ce mode : le champ de cet objet qui contient le code ISO 4217 de chaque enregistrement — un champ texte avec valueDomain iso_4217_currency, par convention currency_code."
+        helpText: "Mode record uniquement, et obligatoire dans ce mode : le champ de cet objet qui contient le code ISO 4217 de chaque enregistrement — un champ texte avec valueDomain iso_4217_currency, par convention currency_code. Sur un enfant master-detail, il peut à la place désigner le champ de code du parent sous la forme <champ master_detail>.<champ de code du parent> (p. ex. invoice.currency_code) : l'enregistrement suit alors la devise de son parent, et un changement du code du parent est refusé tant qu'un tel enfant existe."
       },
       "currencyConfig.defaultCurrency": {
         label: "Devise par défaut",

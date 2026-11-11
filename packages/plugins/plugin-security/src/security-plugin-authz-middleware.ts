@@ -233,6 +233,7 @@ type UserFacingDenialKey =
   | 'record_owner_assign_denied'
   | 'record_owner_remove_denied'
   | 'record_queue_change_denied'
+  | 'record_queue_assign_denied'
   | 'field_edit_denied'
   | 'field_edit_denied_opaque';
 
@@ -1662,7 +1663,8 @@ export function registerAuthzMiddleware(
           // key per situation the user is in ({@link withUserMessage}): another
           // owner given (a transfer, or a claim not admitted), an owner removed
           // (a disown, or a release with no queue to go back to), a record
-          // created for someone else, a queue set or changed.
+          // created for someone else, a record created in a queue the caller
+          // does not belong to, an existing record's queue changed.
           const denyOwnerWrite = (action: string, userKey: UserFacingDenialKey): never => {
             throw withUserMessage(
               new PermissionDeniedError(
@@ -1685,14 +1687,14 @@ export function registerAuthzMiddleware(
               userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
             );
           };
-          const denyQueueWrite = (condition: string): never => {
+          const denyQueueWrite = (condition: string, userKey: UserFacingDenialKey): never => {
             throw withUserMessage(
               new PermissionDeniedError(
                 `[Security] Access denied: 'queue' on '${opCtx.object}' is system-managed — ${condition} ` +
                   '(allowTransfer or modifyAllRecords)',
                 refusalDetails,
               ),
-              userFacingDenialMessage(ctx, 'record_queue_change_denied', opCtx.context?.locale),
+              userFacingDenialMessage(ctx, userKey, opCtx.context?.locale),
             );
           };
           // [ADR-0138 D1] The guest branch (see the step's header). Its refusal
@@ -1755,7 +1757,7 @@ export function registerAuthzMiddleware(
                 if (hasTransferGrant()) {
                   park = writesOwner(row) && (row.owner_id == null || row.owner_id === '');
                 } else if (!(userId != null && queues && (await queues.isMember(String(userId), name, organizationId)))) {
-                  denyQueueWrite(INSERT_QUEUE_REFUSAL);
+                  denyQueueWrite(INSERT_QUEUE_REFUSAL, 'record_queue_assign_denied');
                 }
               }
               if (!writesOwner(row) || row.owner_id == null || row.owner_id === '') {
@@ -1850,7 +1852,7 @@ export function registerAuthzMiddleware(
               if (queueWritten) {
                 const echo = !!pre && (row.queue == null || typeof row.queue === 'string') &&
                   queueName(row.queue) === queueName(pre.queue);
-                if (!echo) denyQueueWrite(MOVE_REFUSAL);
+                if (!echo) denyQueueWrite(MOVE_REFUSAL, 'record_queue_change_denied');
               }
               if (!ownerWritten) continue;
               const storedOwner = pre?.owner_id;
