@@ -99,6 +99,10 @@ export interface NamespacePosition {
    * Every literal segment a `ROUTE_LEDGER` row serves at this position, in
    * code-unit order. A literal is read as the literal before any namespace
    * (D5 step 1), whether it is letter-led (`trigger`) or `_`-led (`_status`).
+   * A row serves a literal here when it spells the prefix, or when a
+   * parameter of its own reads the prefix's last segment and the row has the
+   * verb and arity of the door's qualified form (`runs` under
+   * `/automation/hooks`, see {@link NAMESPACE_POSITION_LITERALS}).
    */
   readonly literals: readonly string[];
 }
@@ -115,6 +119,16 @@ export interface NamespacePosition {
  * The metadata door's namespace position is the one after `:type`; no row
  * serves a literal there (`_drafts`, `_migrate-stored` and `types` sit in the
  * type position, before it).
+ *
+ * `inboundHook` carries `runs`, which no row spells under `/automation/hooks`.
+ * `POST /automation/:name/runs/:runId/resume`, `…/cancel` and
+ * `…/restore-suspension` are, for a flow named `hooks`, the verb and arity of
+ * the qualified hook (`POST /automation/hooks/:ns/:flowName/:hookId`), and
+ * they stay the gated run doors of that flow. So `runs` in the hook's
+ * namespace position is read as their literal, never as a namespace: the
+ * anonymous allow-list row and the trigger mount read this entry
+ * (`INBOUND_HOOK_QUALIFIER_EXCLUSIONS`, `@objectstack/core`), and a package
+ * namespaced `runs` would have no qualified hook address.
  */
 export const NAMESPACE_POSITION_LITERALS: Readonly<Record<AddressDoor, NamespacePosition>> = Object.freeze({
   automation: Object.freeze({
@@ -122,7 +136,7 @@ export const NAMESPACE_POSITION_LITERALS: Readonly<Record<AddressDoor, Namespace
     literals: Object.freeze(['_status', 'actions', 'connectors', 'hooks', 'trigger']),
   }),
   automationTrigger: Object.freeze({ prefix: '/automation/trigger', literals: Object.freeze([]) }),
-  inboundHook: Object.freeze({ prefix: '/automation/hooks', literals: Object.freeze([]) }),
+  inboundHook: Object.freeze({ prefix: '/automation/hooks', literals: Object.freeze(['runs']) }),
   actions: Object.freeze({ prefix: '/actions', literals: Object.freeze(['', '_activation', 'global']) }),
   meta: Object.freeze({ prefix: '/meta/:type', literals: Object.freeze([]) }),
   connectors: Object.freeze({

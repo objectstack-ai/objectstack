@@ -18,7 +18,7 @@
  */
 
 import type { ExecutionContext, AuthGateScope } from '@objectstack/spec/kernel';
-import { AUTH_GATE_SCOPES, AuthGateCodeSchema } from '@objectstack/spec/kernel';
+import { AUTH_GATE_SCOPES, AuthGateCodeSchema, NAMESPACE_POSITION_LITERALS } from '@objectstack/spec/kernel';
 
 /**
  * The gate posture, DERIVED from its declaration on `ExecutionContextSchema`
@@ -239,11 +239,18 @@ const INBOUND_HOOK_ROUTE: ParameterisedAllowRoute = {
  * position never takes: `runs`. The same verb and arity is served there by the
  * run-lifecycle doors of a flow named `hooks`
  * (`POST /automation/hooks/runs/:runId/resume | cancel | restore-suspension`),
- * which stay gated and stay those doors. A package whose namespace is `runs`
- * has no qualified hook; its hook is reached bare. Pinned against the runtime's
- * route ledger (`route-ledger.conformance.test.ts`).
+ * which stay gated and stay those doors.
+ *
+ * It IS the address grammar's entry for the hook's namespace position
+ * (`NAMESPACE_POSITION_LITERALS.inboundHook.literals`, `@objectstack/spec/kernel`),
+ * read here and never spelled a second time: a qualifier this row excludes is
+ * one the install door refuses as a namespace (`NAMESPACE_REFUSED_LITERALS`),
+ * so no new package installs under a qualifier its hook could never be reached
+ * by. A package the boot already holds under `runs` keeps booting with no
+ * qualified hook; its hook is reached bare. The runtime's
+ * `route-ledger.conformance.test.ts` pins the entry against the route ledger.
  */
-export const INBOUND_HOOK_QUALIFIER_EXCLUSIONS: readonly string[] = Object.freeze(['runs']);
+export const INBOUND_HOOK_QUALIFIER_EXCLUSIONS: readonly string[] = NAMESPACE_POSITION_LITERALS.inboundHook.literals;
 
 /**
  * `POST /automation/hooks/:ns/:flowName/:hookId` — the inbound hook
