@@ -85,6 +85,15 @@ supplies it; every other layer is computed as the `find` the export performs, so
 the `readFilter` you get back is the real row filter the export would stream
 through.
 
+`transfer` is a conjunction too. A transfer is an update of the record's owner,
+so the `object_crud` layer grants it only where the principal may edit the
+object **and** holds the transfer grant (`allowTransfer`, or `modifyAllRecords`,
+which grants both); a record-grained answer adds the record's own write gates.
+The transfer grant without edit lets a principal create a record and
+assign it to someone else, but it transfers no existing record. The
+`allowTransfer` bit `/me/permissions` serves gives the same answer: it reads
+`true` only with edit.
+
 ## Who may ask
 
 The endpoint is **authenticated-only** (an access report is sensitive even

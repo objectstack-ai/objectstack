@@ -433,7 +433,7 @@ describe('install-local refuses an enabled job whose pull does not bind', () => 
     expect(run.exit, `${run.output}${transcript('install')}`).toBe(1);
     expect(run.output).toMatch(/Install failed \(422 VALIDATION_ERROR\)/);
     expect(run.output).toContain(NOSOURCE_JOB);
-    expect(run.output).toContain(`mapping '${mappingNameOf('pull_nosource')}' declares no connectorSource`);
+    expect(run.output).toContain(`mapping '${mappingNameOf('pull_nosource')}' declares no source`);
   });
 
   it('a refused package leaves nothing behind: not in the ledger, and its job not scheduled', () => {

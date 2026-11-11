@@ -623,6 +623,18 @@ const SHARING_OWN = { userId: 'u_own', positions: ['qa_pos'], permissions: ['qa_
  * refusal to the policy.
  */
 const AUTHORED_WRITER = { userId: 'u_authored', positions: ['qa_pos'], permissions: ['qa_line_authored'], posture: 'MEMBER' };
+/**
+ * [Ruling of record 6755714726 on #32004] The transfer principals
+ * ({@link bootSharing}'s `transfer` sets), every one at depth `org`: the
+ * transfer grant alone, read and the transfer grant, edit and the transfer
+ * grant, create and the transfer grant (an insert naming another owner), and
+ * create alone, its control. Edit alone is {@link SHARING_WRITER}.
+ */
+const TRANSFER_ONLY = { userId: 'u_transfer_only', positions: ['qa_pos'], permissions: ['qa_line_transfer_only'], posture: 'MEMBER' };
+const READ_TRANSFER = { userId: 'u_read_transfer', positions: ['qa_pos'], permissions: ['qa_line_read_transfer'], posture: 'MEMBER' };
+const EDIT_TRANSFER = { userId: 'u_edit_transfer', positions: ['qa_pos'], permissions: ['qa_line_edit_transfer'], posture: 'MEMBER' };
+const CREATE_TRANSFER = { userId: 'u_create_transfer', positions: ['qa_pos'], permissions: ['qa_line_create_transfer'], posture: 'MEMBER' };
+const CREATE_ONLY = { userId: 'u_create_only', positions: ['qa_pos'], permissions: ['qa_line_create'], posture: 'MEMBER' };
 
 /**
  * A `private`-OWD object with an `owner_id`, the real `SharingService` as the
@@ -634,7 +646,7 @@ const AUTHORED_WRITER = { userId: 'u_authored', positions: ['qa_pos'], permissio
  * someone else, admitted by the policy), `l_unnamed` (owned by someone else,
  * not admitted) and `l_mine` (owned by the writer).
  */
-async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean } = {}) {
+async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean; transfer?: boolean } = {}) {
   const LINE = `qa_parity_line_${next()}`;
   const engine = new ObjectQL();
   engine.registerDriver(
@@ -699,6 +711,21 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
           ],
         })]
       : []),
+    ...(opts.transfer
+      ? [
+          PermissionSetSchema.parse({ name: 'qa_line_transfer_only', objects: { [LINE]: { allowTransfer: true } } }),
+          PermissionSetSchema.parse({
+            name: 'qa_line_read_transfer',
+            objects: { [LINE]: { allowRead: true, allowTransfer: true, readScope: 'org', writeScope: 'org' } },
+          }),
+          PermissionSetSchema.parse({
+            name: 'qa_line_edit_transfer',
+            objects: { [LINE]: { allowRead: true, allowEdit: true, allowTransfer: true, readScope: 'org', writeScope: 'org' } },
+          }),
+          PermissionSetSchema.parse({ name: 'qa_line_create_transfer', objects: { [LINE]: { allowCreate: true, allowTransfer: true } } }),
+          PermissionSetSchema.parse({ name: 'qa_line_create', objects: { [LINE]: { allowCreate: true } } }),
+        ]
+      : []),
   ];
   let security: unknown;
   let sharing: SharingService | undefined;
@@ -740,9 +767,22 @@ async function bootSharing(opts: { faultReadFilter?: boolean; authored?: boolean
     update: (caller: object, id: string) =>
       landed(engine.update(LINE, { name: 'renamed' }, { where: { id }, context: { ...caller } } as never)),
     remove: (caller: object, id: string) => landed(engine.delete(LINE, { where: { id }, context: { ...caller } } as never)),
+    /** The object-level explanation: no record. */
+    explainObject: (caller: object, operation: 'transfer') =>
+      explained(plugin.explainAccessForCaller({ object: LINE, operation }, { ...caller })),
     /** A transfer is a by-id update of `owner_id`, gated by the transfer grant. */
     transfer: (caller: object, id: string) =>
       landed(engine.update(LINE, { owner_id: 'u_recipient' }, { where: { id }, context: { ...caller } } as never)),
+    /** An insert naming another owner: create-and-assign, gated by the transfer grant. */
+    insertForOther: (caller: object, id: string) =>
+      landed(engine.insert(LINE, { id, name: 'assigned', owner_id: 'u_recipient' }, { context: { ...caller } } as never)),
+    /** Puts `id` back with its rig owner, as the system. */
+    giveBack: async (id: string) => {
+      await engine.update(LINE, { owner_id: 'u_somebody' }, { where: { id }, context: { isSystem: true } } as never);
+    },
+    /** The owner the store holds for `id`, read as the system. */
+    ownerOf: async (id: string) =>
+      ((await engine.findOne(LINE, { where: { id }, context: { isSystem: true } } as never)) as { owner_id?: unknown } | null)?.owner_id ?? null,
     /**
      * Record sharing's tri-state update verdict, asked as the `sys_attachment`
      * and `sys_comment` parent gates ask it before anything else: the caller's
@@ -1573,4 +1613,55 @@ describe('the real comment moderation gate admits exactly what the parent by-id 
       }, 60_000);
     }
   }
+});
+
+/**
+ * [Ruling of record 6755714726 on #32004] Explain reports a transfer only
+ * where the record could be edited and its owner changed: edit (which implies
+ * read) AND the transfer grant, at the object and the record level — the
+ * answer the owner-change door, the by-id update of `owner_id`, gives. The
+ * door itself is unchanged, and so is the insert naming another owner, which
+ * the transfer grant admits without edit.
+ */
+describe('a transfer is explained as the owner-change door answers it', () => {
+  const PRINCIPALS: Array<[string, object, 'admitted' | 'refused']> = [
+    ['the transfer grant alone', TRANSFER_ONLY, 'refused'],
+    ['edit alone', SHARING_WRITER, 'refused'],
+    ['read and the transfer grant', READ_TRANSFER, 'refused'],
+    ['edit and the transfer grant', EDIT_TRANSFER, 'admitted'],
+  ];
+
+  it('object and record level: explain answers what the owner-change door answers, for each principal', async () => {
+    const rig = await bootSharing({ transfer: true });
+    try {
+      for (const [label, caller, door] of PRINCIPALS) {
+        const objectLevel = await rig.explainObject(caller, 'transfer');
+        const recordLevel = await rig.explain(caller, 'transfer', 'l_other');
+        const enforced = await rig.transfer(caller, 'l_other');
+        expect(enforced.kind, `${label}: the owner-change door`).toBe(door);
+        await expectParity(`${label} · object`, 'object.allowed', objectLevel, enforced);
+        await expectParity(`${label} · record`, 'record.visible', recordLevel, enforced, { recordId: 'l_other' });
+        // A door that admitted moved the owner: give the row back for the next principal.
+        if (enforced.kind === 'admitted') {
+          expect(await rig.ownerOf('l_other')).toBe('u_recipient');
+          await rig.giveBack('l_other');
+        }
+      }
+    } finally {
+      await rig.teardown();
+    }
+  }, 60_000);
+
+  it('CONTROL: an insert naming another owner is admitted by the transfer grant without edit', async () => {
+    const rig = await bootSharing({ transfer: true });
+    try {
+      expect(await rig.insertForOther(CREATE_TRANSFER, 'l_assigned')).toEqual({ kind: 'admitted' });
+      expect(await rig.ownerOf('l_assigned')).toBe('u_recipient');
+      // The same insert without the transfer grant is refused: the grant is what admits it.
+      const without = await rig.insertForOther(CREATE_ONLY, 'l_assigned_without');
+      expect(without.kind).toBe('refused');
+    } finally {
+      await rig.teardown();
+    }
+  }, 60_000);
 });

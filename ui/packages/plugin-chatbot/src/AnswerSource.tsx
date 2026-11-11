@@ -12,7 +12,7 @@
  * grouping, aggregations, how many records, and whose records were read), so
  * a reader can check an answer's number.
  *
- * The block receives only the lifted `AnswerSource` copies
+ * The block receives only the lifted `ObjectQuerySource` copies
  * (`detectAnswerSource`), never a tool's `result` or `args`, so nothing else
  * of a tool payload can reach this face in any visibility mode.
  */
@@ -25,7 +25,7 @@ import {
 } from '@object-ui/components';
 import { builtinAggregateLabels, useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
 import { CalculatorIcon, ChevronDownIcon } from 'lucide-react';
-import type { AnswerSource } from './mapMessages';
+import type { ObjectQuerySource } from '@objectstack/spec/ai';
 
 /** The scope value the block states in words; any other value draws nothing. */
 const SCOPE_VISIBLE_TO_YOU = 'visible_to_you';
@@ -210,7 +210,7 @@ function AnswerSourceRow({ label, children }: { label: string; children: React.R
   );
 }
 
-function AnswerSourceSection({ source }: { source: AnswerSource }) {
+function AnswerSourceSection({ source }: { source: ObjectQuerySource }) {
   const { t } = useObjectTranslation();
   const tt = useSafeTranslate();
   const aggregateWords = builtinAggregateLabels(tt) as Record<string, string>;
@@ -260,12 +260,12 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
           </code>
         )}
       </AnswerSourceRow>
-      {source.groupBy.length > 0 ? (
+      {source.groupBy?.length ? (
         <AnswerSourceRow label={t('chatbot.answerSource.groupedBy', { defaultValue: 'Grouped by' })}>
           {source.groupBy.join(', ')}
         </AnswerSourceRow>
       ) : null}
-      {source.aggregations.length > 0 ? (
+      {source.aggregations?.length ? (
         <AnswerSourceRow
           label={t('chatbot.answerSource.aggregations', { defaultValue: 'Aggregations' })}
         >
@@ -295,7 +295,7 @@ function AnswerSourceSection({ source }: { source: AnswerSource }) {
 
 export interface AnswerSourceBlockProps {
   /** The turn's lifted sources, one per tool that answered one, in call order. */
-  sources: ReadonlyArray<{ key: string; source: AnswerSource }>;
+  sources: ReadonlyArray<{ key: string; source: ObjectQuerySource }>;
   className?: string;
 }
 

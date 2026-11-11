@@ -27,6 +27,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's package store loads the metadata service lazily; pay that load at collection, never in a clocked case.
+import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { RestServer } from '@objectstack/rest';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -207,7 +209,7 @@ describe('[#23072] GET /meta/:type/:name on the dispatcher: the query decision r
         const reference = await sameRefusal('item', { memeber: 'zh-CN' }, answer);
         expect(reference.code).toBe('VALIDATION_ERROR');
         expect(reference.message).toContain('"memeber" query parameter is not supported');
-        expect(reference.message).toContain('Supported parameters: layers, locale, member, package, preview, state.');
+        expect(reference.message).toContain('Supported parameters: callerPackage, layers, locale, member, package, preview, state.');
         expect(protocol.getMetaItem).not.toHaveBeenCalled();
         expect(metadata.getItem).not.toHaveBeenCalled();
     });

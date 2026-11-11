@@ -137,6 +137,24 @@ export function needsBootstrapProbe(
 }
 
 /**
+ * Whether a login or register page probes `hasOwner` to greet the deployment's
+ * first visitor: wider than {@link needsBootstrapProbe}, because a deployment
+ * on `open` (or an older server) has no owner on its first visit either, and
+ * that visitor is the one who creates the owner account. Never for an
+ * invitation (the invitee joins an organization that exists) and never with
+ * sign-up switched off (no form to lead with). The probe's `status` still
+ * reaches {@link decideSignUpOffer}, which consults it only for a closed
+ * posture, so its answer is unchanged.
+ */
+export function needsOwnerProbe(
+  config: AuthPublicConfig | null,
+  invitationRedirect: boolean,
+): boolean {
+  if (!config || config.emailPassword?.disableSignUp === true) return false;
+  return !invitationRedirect;
+}
+
+/**
  * The decision. `config` is `null` while it has not been read (or the read
  * failed) — then nothing is known and the page behaves as it did before the
  * posture existed, leaving the server's own gate as the source of truth.

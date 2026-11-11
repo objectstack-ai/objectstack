@@ -373,3 +373,187 @@ describe('#32201 — the 409 carries `details.candidates` on every read form', (
         expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(SYS_ONE), pkg(SYS_TWO)]]);
     });
 });
+
+/**
+ * [#32244, ADR-0150 D3] The bare `GET /meta/action/:name` of an action name two
+ * packages hold on any object key — each on its own object, or both on one —
+ * answers `409 RESOURCE_CONFLICT` naming every holder (`details.candidates`)
+ * with its object (the message), on this transport too. `?package=` and a
+ * name one package holds answer as before.
+ *
+ * BASE (main 9bff554e): 200 with the first registered package's action.
+ */
+describe('#32244 — the bare read of an action name two packages hold answers 409', () => {
+    const shipAction = (packageId: string, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId.split('.').pop(), type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, codeOf(answer), answer.body?.details?.candidates];
+
+    it('two packages, two objects: 409 naming both, each with its object', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+        expect(messageOf(answer)).toContain(`package "${A}" binds it to object "account"`);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('two packages, one object: 409 naming both', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'account');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(conflictOf(answer), JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), pkg(B)]]);
+    });
+
+    it('CONTROL — `?package=` reaches the package\'s own action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const qualified = await drive(ITEM, { type: 'action', name: 'approve' }, { package: A });
+        expect(qualified.status, JSON.stringify(qualified.body)).toBe(200);
+        expect(labelOf(qualified)).toBe('alpha');
+    });
+
+    it('CONTROL — one package holding the name answers the bare read', async () => {
+        shipAction(A, 'account');
+        const single = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect(single.status, JSON.stringify(single.body)).toBe(200);
+        expect(labelOf(single)).toBe('alpha');
+    });
+
+    it('[review 6781770671 S2] the layered read `/layers` of a name the registry counts two holders of: 409 naming both with their objects', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${A}" binds it to object "account"`);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('[review 6781770671 S2] the published read `/published` of such a name: 409 too, never one package\'s action', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        const answer = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`package "${B}" binds it to object "contact"`);
+    });
+
+    it('CONTROL — `/layers` and `/published` of a name one package holds answer as before', async () => {
+        shipAction(A, 'account');
+        const layers = await drive('/api/v1/meta/:type/:name/layers', { type: 'action', name: 'approve' });
+        expect([layers.status, layers.body?.code?.label], JSON.stringify(layers.body)).toEqual([200, 'alpha']);
+        // This harness wires no metadata service, so a read the judge passes
+        // reaches the code-store fallback and answers its 501, never the 409.
+        const published = await drive('/api/v1/meta/:type/:name/published', { type: 'action', name: 'approve' });
+        expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([501, 'NOT_IMPLEMENTED']);
+    });
+});
+
+/**
+ * [#32310, ADR-0150 D3] The caller arm on this transport's `/meta` item read:
+ * `GET /meta/dataset/:name?callerPackage=P` resolves the name FROM P (its own
+ * dataset, else the unique holder in its declared closure plus `sys`, else
+ * `409` naming the candidates) and reads that holder at its exact address.
+ * Real route table, real protocol, real registry.
+ *
+ * BASE (main 351c22c9): `?callerPackage=` was outside the item read's closed
+ * set, so every such read answered `400` "not supported by this endpoint".
+ */
+describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => {
+    const P = 'com.acme.app';
+    beforeEach(() => {
+        registry.installPackage({
+            id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app',
+            dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+        } as never, 'code');
+    });
+
+    it('P\'s own dataset answers first, though a dependency holds the name too', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('dataset', 'pipeline', P);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('app dataset');
+    });
+
+    it('a dependency\'s dataset is served to P (`?package=P` refuses it)', async () => {
+        ship('dataset', 'pipeline', A);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(labelOf(answer)).toBe('alpha dataset');
+        expect(answer.body?.item?._packageId ?? answer.body?.data?.item?._packageId).toBe(A);
+        const exact = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: P });
+        expect([exact.status, codeOf(exact)]).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+
+    it('two holders in P\'s closure: 409 RESOURCE_CONFLICT naming both, with their candidates', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('dataset', 'pipeline', B);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`declared dependency closure of package "${P}"`);
+        expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+
+    it('a holder outside P\'s closure: 409 naming it', async () => {
+        ship('dataset', 'pipeline', C);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`held outside the declared dependency closure of package "${P}"`);
+        expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: C }]);
+    });
+
+    it('an uninstalled caller package answers what `?package=` naming it answers, never the bare read', async () => {
+        ship('dataset', 'pipeline', A);
+        const viaArm = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: 'com.acme.ghost' });
+        const viaQualifier = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: 'com.acme.ghost' });
+        expect([viaArm.status, codeOf(viaArm)]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(viaArm.body).toEqual(viaQualifier.body);
+    });
+
+    it('refused 400 beside `?package=`, blank, `all`, on another type (also beside a layered member), and beside a qualified path — each naming both addresses', async () => {
+        ship('dataset', 'pipeline', A);
+        ship('page', 'home', A);
+        for (const [path, params, query] of [
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P, package: A }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: '' }],
+            // `all` names no package to `?package=`; read through, it was the bare read.
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: 'all' }],
+            [ITEM, { type: 'page', name: 'home' }, { callerPackage: P }],
+            // Rule 4 is asked before rule 3 (a member on the layered view), so
+            // the arm's own refusal answers, never a resolution.
+            [ITEM, { type: 'page', name: 'home' }, { layers: 'true', member: 'm', callerPackage: P }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { layers: 'true', member: 'm', callerPackage: P, package: A }],
+            [ITEM, { type: 'dataset', name: 'pipeline' }, { layers: 'true', member: 'm', callerPackage: '' }],
+            [ITEM, { type: 'datasets', name: 'pipeline' }, { callerPackage: P, package: A }],
+            [QUALIFIED, { type: 'dataset', ns: 'alpha', name: 'pipeline' }, { callerPackage: P }],
+        ] as const) {
+            const answer = await drive(path, params as never, query as never);
+            const at = `${path} ${JSON.stringify(params)} ${JSON.stringify(query)}`;
+            expect([answer.status, codeOf(answer)], at).toEqual([400, 'VALIDATION_ERROR']);
+            expect(messageOf(answer), at).toContain('?callerPackage=');
+            // The other address: `?package=`, or the qualified path's namespace segment.
+            expect(messageOf(answer), at).toContain(path === QUALIFIED ? "namespace 'alpha'" : '?package=');
+        }
+    });
+
+    it('a protocol with no caller resolution fails closed: 503, never the bare read', async () => {
+        ship('dataset', 'pipeline', A);
+        const proto = ObjectStackProtocolImplementation.prototype as unknown as Record<string, unknown>;
+        const original = Object.getOwnPropertyDescriptor(proto, 'resolveCallerPackageAddress')!;
+        Object.defineProperty(proto, 'resolveCallerPackageAddress', { value: undefined, configurable: true });
+        try {
+            const answer = await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { callerPackage: P });
+            expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([503, 'SERVICE_UNAVAILABLE']);
+        } finally {
+            Object.defineProperty(proto, 'resolveCallerPackageAddress', original);
+        }
+    });
+
+    it('CONTROL: the bare read and `?package=` answer as before', async () => {
+        ship('dataset', 'pipeline', A);
+        expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
+        expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: A }))).toBe('alpha dataset');
+    });
+});

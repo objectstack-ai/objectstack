@@ -114,11 +114,10 @@ parent's record page by default; the flags, slots and open mode: [Record Page](.
 Conditions that belong to a field's lifecycle — `visibleWhen`, `readonlyWhen`,
 `requiredWhen` — are declared on the **DATA MODEL field**, not in the form view;
 ObjectUI forms consume them. Their semantics and server behaviour:
-**objectstack-data → Conditional Field Rules**.
+[objectstack-data → Conditional Field Rules](../objectstack-data/SKILL.md#conditional-field-rules).
 
 UI-side: inline master-detail grids evaluate these rules **row-by-row** against
-each child row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED
-in protocol 17 and is now a parse error.
+each child row.
 
 ---
 

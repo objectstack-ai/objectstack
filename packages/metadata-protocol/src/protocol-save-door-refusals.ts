@@ -61,7 +61,7 @@ import {
 } from '@objectstack/spec/api';
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
-import { isFederatedObject } from '@objectstack/core';
+import { isFederatedObject, PackageScopedNameRefusedError } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
 import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns, SeedSchema } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
@@ -566,6 +566,40 @@ export async function unknownDatasourceSaveRefusal(
 }
 
 /**
+ * [ADR-0150 D3, #32162] The objects the permission set a save edits already
+ * grants on — the set of the package the write lands in, read through the
+ * exact qualifier (`readMetaItem` naming that package): that package's own
+ * item with its bound overlay. A save naming no package reads the name as a
+ * caller with no package: the environment's own item, else the one holder.
+ *
+ * A refusal is NOTHING HELD: the package holds no item of the name while
+ * another holder does (`not-held-by-qualifier`), or a package-less save names
+ * a name two packages hold (`ambiguous-in-environment`). Either way no set is
+ * this save's own, and another holder's grants are never its to keep — so the
+ * leniency for already-held grants is skipped and every unknown object is
+ * judged (fails closed).
+ */
+async function heldGrantObjects(
+    host: Pick<SaveDoorRefusalHost, 'readMetaItem'>,
+    name: string,
+    savingPackage: string | null | undefined,
+): Promise<Set<string>> {
+    let current: { objects?: unknown } | undefined;
+    try {
+        current = (await host.readMetaItem({
+            type: 'permission', name,
+            ...(typeof savingPackage === 'string' && savingPackage !== '' ? { packageId: savingPackage } : {}),
+        }))?.item as { objects?: unknown } | undefined;
+    } catch (error) {
+        if (error instanceof PackageScopedNameRefusedError) return new Set<string>();
+        throw error;
+    }
+    return current?.objects && typeof current.objects === 'object' && !Array.isArray(current.objects)
+        ? new Set(Object.keys(current.objects))
+        : new Set<string>();
+}
+
+/**
  * The body of `ObjectStackProtocolImplementation#unknownGrantObjectSaveRefusal`;
  * the method's docblock there is its contract. [#28990] Written here beside
  * {@link unknownDatasourceSaveRefusal}, whose shape it follows: the engine's
@@ -581,6 +615,7 @@ export async function unknownGrantObjectSaveRefusal(
     writeFace?: MetadataWriteFace,
     door: 'save' | 'publish' = 'save',
     inherited?: readonly string[],
+    savingPackage?: string | null,
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'permission') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
@@ -621,10 +656,7 @@ export async function unknownGrantObjectSaveRefusal(
     // that introduced it, and an object that has gone since is not the
     // re-saving author's to answer for. (A declaration boot never runs
     // `onEnable`, so what a plugin registers there is absent from it.)
-    const current = (await this.readMetaItem({ type: 'permission', name }))?.item as { objects?: unknown } | undefined;
-    const held = current?.objects && typeof current.objects === 'object' && !Array.isArray(current.objects)
-        ? new Set(Object.keys(current.objects))
-        : new Set<string>();
+    const held = await heldGrantObjects(this, name, savingPackage);
     unknown = unknown.filter((key) => !held.has(key));
     if (unknown.length === 0) return undefined;
     // [#30255] A grant this save copies from a set that already holds it (the
