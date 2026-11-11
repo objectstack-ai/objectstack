@@ -885,7 +885,7 @@ for the full matrix. Every failing rule is reported in a single run rather than
 stopping at the first, so one pass shows the whole hole.
 
 **Options:**
-- `--strict` — Treat warnings as errors (exit code 1)
+- `--strict` — Treat warnings as errors (exit code 1); `info` findings stay advisory
 - `--json` — Output results as JSON
 
 **Warnings checked (advisory, non-blocking unless `--strict`):**
@@ -893,8 +893,18 @@ stopping at the first, so one pass shows the whole hole.
 - Missing `manifest.namespace` (required for multi-app hosting)
 - No objects defined
 - No apps or plugins defined
-- Every advisory the rule registry raised (dangling `stageField` /
-  `highlightFields` pointers, replay-unsafe seeds, ambiguous flow status, …)
+- Every `warning`-severity finding the rule registry raised (dangling
+  `stageField` / `highlightFields` pointers, replay-unsafe seeds, ambiguous
+  flow status, …)
+- ADR-0087 conversion notices (a deprecated shape converted at load)
+
+**What fails the run under `--strict`.** `--strict` makes a run with one or
+more warnings exit 1 exactly as an error does, and says why — `Strict mode:
+warnings treated as errors`. An `info`-severity finding from the rule registry
+(the same finding `os lint` grades as a `suggestion`) is printed under `ℹ` and
+stays in the `--json` payload's `warnings`, but it stays advisory either way:
+a run whose only findings are `info` exits 0 under `--strict` and prints no
+strict verdict. The `--json` face reaches the same exit status as the text face.
 
 <Callout type="tip">
 `os validate`, `os build` and `os lint` share one rule registry, so a config that
