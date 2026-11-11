@@ -673,10 +673,11 @@ is how an operator clears that residue deliberately.
 
 **A row is removed only when it is attributable to a declared encrypted settings
 specifier *and* named by no family of the complete reference union.** `sys_secret` is
-written by three producers and carries no producer column, so "unreferenced by
+written by four producers and carries no producer column, so "unreferenced by
 `sys_setting`" is not "unreferenced" — a live credential belonging to an object's
-`secret` field or to a datasource can share a settings specifier's `(namespace, key)`.
-The command therefore reads all three holder families, and **refuses to delete whenever
+`secret` field or to a datasource, or a seed or signing key of the audit ledger's
+sealer, can share a settings specifier's `(namespace, key)`.
+The command therefore reads all four holder families, and **refuses to delete whenever
 any of them could not be enumerated, naming the family**. A host that says nothing about
 its code-declared datasources leaves that family a gap; `--no-declared-datasources` is
 how you state there are none. Rows nothing attributes are never deleted, nor are rows
@@ -738,7 +739,7 @@ What a run guarantees:
 - **The scope comes from the holder, never from a guess.** A row that nothing
   references, a row whose holders belong to different producers, and every row while a
   holder family could not be read are **left as they are** and counted. Like
-  `os secret orphans`, it reads all three holder families, and a host that says nothing
+  `os secret orphans`, it reads all four holder families, and a host that says nothing
   about its code-declared datasources leaves that family a gap. `--apply` then refuses
   and names the family.
 - **Resumable.** A row already sealed under the current binding is skipped as done. A run
