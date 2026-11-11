@@ -27,7 +27,7 @@ import {
     PROMOTION_REGISTRY_QUESTION,
     REGISTRY_QUESTION_PRODUCERS,
     saveRegistryQuestion,
-} from '../../metadata-protocol/src/registry-question.js';
+} from '@objectstack/metadata-protocol';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.turbo', 'coverage', 'build', '.next']);
