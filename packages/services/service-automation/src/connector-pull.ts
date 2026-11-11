@@ -10,8 +10,11 @@
  * semantics (`mode`, `upsertKey`); `connectorSource` adds only where the rows
  * come from. So a pull is the import door with a different reader:
  *
- *   1. read the mapping through the protocol's `getMetaItem` — the read the
- *      import door's `mappingName` makes;
+ *   1. read the mapping by name (ADR-0150 D3): a pull that names its
+ *      package (`callerPackageId`) reads through the injected package-scoped
+ *      resolver (`mappingByPackage`) from that package; one that names none
+ *      reads through the protocol's `getMetaItem`, the read the import door's
+ *      `mappingName` makes;
  *   2. resolve `connectorSource.connector` to a DECLARED `rest` / `openapi`
  *      instance (`connectors[]`, materialized by this plugin), and its action;
  *   3. W1 watermark: read the highest value already written to the target
@@ -61,6 +64,7 @@ import {
     type ImportRunSummary,
     type MappingArtifactLike,
     type MappingFailure,
+    type PackageScopedResolution,
 } from '@objectstack/core';
 import type { AutomationContext, Logger } from '@objectstack/spec/contracts';
 import type { ConnectorOrigin } from '@objectstack/spec/integration';
@@ -118,6 +122,14 @@ export interface ConnectorPullDeps {
     providerOf(connector: string): string | undefined;
     logger: Logger;
     /**
+     * [ADR-0150 D3, #32071] The mapping read for a caller of a package
+     * (`mappingNameResolver`, `./connector-package-scope.ts`): own item, else
+     * the one holder in the package's closure plus `sys`, else a refusal.
+     * Absent, or answering `undefined` (no registry to ask), and the pull
+     * reads by no package through `protocol`, as a pull naming no package does.
+     */
+    mappingByPackage?: (name: string, callerPackageId: string) => PackageScopedResolution | undefined;
+    /**
      * [ADR-0153 D7] The `sys_sync_run` ledger: the run record every pull
      * writes, and the read position a datasource pull starts from. Absent, a
      * pull writes no run record and a datasource pull keeps no position, so
@@ -150,6 +162,13 @@ export interface ConnectorPullOptions {
     /** Execution context the target read and the writes run under — the caller's (a `job`'s, built from its `organization`). */
     context?: any;
     environmentId?: string;
+    /**
+     * [ADR-0150 D3, #32071] The package the caller belongs to
+     * (`ConnectorSourcePullRequest.callerPackageId`): for a job's pull, the
+     * package that declares the job. The mapping is read from it. Absent,
+     * `null` or `''`: read by no package.
+     */
+    callerPackageId?: string | null;
     /** Automation context handed to the connector action, as a flow node would hand it. */
     automation?: AutomationContext;
 }
@@ -452,25 +471,44 @@ async function pullOnce(
     const refuseWith = (failure: MappingFailure, reason: ConnectorPullRefusalReason): never =>
         refuse(failure.code, failure.status, reason, `Mapping "${mappingName}": ${failure.error}`);
 
-    // 1. The mapping, read as the import door reads a `mappingName`.
+    // 1. The mapping.
     //
-    // [ADR-0150 D3, #32071] `mapping` is addressed by `(package, name)`, and
-    // this read names no package: the pull is a caller with no package until
-    // it reads the job's package (the request carries `callerPackageId`, but
-    // the pull does not read it yet). One holder is read as before; a name
-    // two packages hold is refused by the read naming both, and the pull is refused with that refusal's own code,
-    // status and sentence — ⛔ never as "no mapping is registered", and never
-    // by pulling through whichever package's mapping came first.
+    // [ADR-0150 D3, #32071] `mapping` is addressed by `(package, name)`.
+    //
+    // - A caller of a package (`callerPackageId`, which the job binder sets to
+    //   the package that declares the job) reads from that package: its own
+    //   mapping, else the one holder in its declared closure plus `sys`. A
+    //   name held twice in that reach, or held only outside it, is refused
+    //   naming every candidate.
+    // - A caller with no package reads as the import door reads a
+    //   `mappingName`: the environment's own mapping, else the one package
+    //   holder; a name two packages hold is refused naming both.
+    //
+    // A refusal fails the pull with its own code, status and sentence — ⛔
+    // never as "no mapping is registered", and never by pulling through
+    // whichever package's mapping came first.
+    const callerPackageId = typeof opts.callerPackageId === 'string' && opts.callerPackageId !== ''
+        ? opts.callerPackageId
+        : undefined;
     let artifact: PulledMapping | undefined;
-    try {
-        const res = await protocol.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
-        artifact = res?.item as PulledMapping | undefined;
-    } catch (err) {
-        const refused = packageScopedRefusalOf(err);
-        if (refused) {
+    const byPackage = callerPackageId !== undefined ? deps.mappingByPackage?.(mappingName, callerPackageId) : undefined;
+    if (byPackage !== undefined) {
+        if (byPackage.status === 'refused') {
+            const refused = new PackageScopedNameRefusedError(byPackage);
             return refuse(refused.code, refused.status, 'mapping_name_refused', `Mapping "${mappingName}": ${refused.message}`);
         }
-        /* anything else is treated as not found below */
+        if (byPackage.status === 'resolved') artifact = byPackage.item as PulledMapping;
+    } else {
+        try {
+            const res = await protocol.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
+            artifact = res?.item as PulledMapping | undefined;
+        } catch (err) {
+            const refused = packageScopedRefusalOf(err);
+            if (refused) {
+                return refuse(refused.code, refused.status, 'mapping_name_refused', `Mapping "${mappingName}": ${refused.message}`);
+            }
+            /* anything else is treated as not found below */
+        }
     }
     if (!isPlainObject(artifact) || !Array.isArray(artifact.fieldMapping) || typeof artifact.targetObject !== 'string') {
         return refuse('MAPPING_NOT_FOUND', 404, 'mapping_not_found', `No mapping artifact named "${mappingName}" is registered`);

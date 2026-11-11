@@ -296,7 +296,7 @@ export const OrdersPullJob = defineJob({
     `full: true`, reads from `watermark.start`; a run never reads below it. The
     delete keys change nothing yet, and `os validate` says so.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
-  two packages hold a mapping under its name, the connector is degraded, the input breaks the read action's declared
+  the job's package reaches no one mapping of that name, the connector is degraded, the input breaks the read action's declared
   `inputSchema`, the upstream answered `ok: false` — rejects, so the
   run is `failed` and the `retryPolicy` applies. A pull whose rows the import
   runner refused completes as `degraded`, with the counts as its reason; retrying
@@ -308,12 +308,28 @@ export const OrdersPullJob = defineJob({
   A pull still `running` when the server stopped is closed `failed`
   (`interrupted`) at the next start. Rows are kept 30 days, except the one
   holding each mapping's read position.
-- **Which mapping a name reads.** The pull reads its mapping naming no package
-  (ADR-0150 D3): the environment's own, else the one package that holds the name.
-  When two packages hold the name the pull is refused before any call or write,
-  with `409 RESOURCE_CONFLICT` naming every holder, and the run is `failed`. It
-  never pulls through one of them. A pull cannot yet read its own package's
-  mapping in that case, so give one of the two mappings another name.
+- **Which mapping a name reads.** The pull reads its mapping from the package
+  that declares the job (ADR-0150 D3): that package's own mapping, else the one
+  package that holds the name among the packages it depends on, directly or
+  through their own dependencies, and `sys`. In an artifact of several packages
+  a job a package body declares reads from that body, not from the artifact's
+  top-level id. A top-level job that no body declares belongs to no package, so
+  it reads with no package: the environment's own mapping, else the one package
+  that holds the name. A job name that two package bodies both declare belongs
+  to neither: its run is refused with `409 RESOURCE_CONFLICT` naming both, so
+  give each package's job its own name.
+
+  When two packages in that reach hold the name, or only a package outside it
+  does, the pull is refused before any call or write, with
+  `409 RESOURCE_CONFLICT` naming every holder, and the run is `failed`. It never
+  pulls through a mapping its package cannot reach. When the holder is another
+  package, declare a dependency on it in the job's package (`dependencies`), or
+  keep the job and its mapping in one package. When the holder is the
+  artifact's top level (a mapping no body declares), no dependency can reach it:
+  move the mapping into the job's package body, or the job to the top level.
+  A disabled package's mapping is never pulled: when it is the one the job
+  would read, the pull answers `404` as if the mapping did not exist, as every
+  other read of it does.
 
 ## The organization a job runs as
 
