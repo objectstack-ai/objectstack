@@ -1,8 +1,8 @@
 ---
-'@objectstack/spec': minor
-'@objectstack/service-job': minor
-'@objectstack/runtime': minor
-'@objectstack/service-automation': minor
+'@objectstack/spec': patch
+'@objectstack/service-job': patch
+'@objectstack/runtime': patch
+'@objectstack/service-automation': patch
 ---
 
 feat(sync-in): a pull's run record names the job run that drove it, and why that run started (ADR-0153 D7)
