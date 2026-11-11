@@ -439,15 +439,64 @@ export async function resolveObjectSchemaMaskPosture(input: {
     // two outlets can disagree. Asked after the field posture on purpose: a
     // security service that cannot evaluate this caller fails there first, as
     // the D6 tier-3 fault, rather than reaching an object verdict at all.
-    if (!canRead) return fields;
-    let admitted: unknown;
-    try {
-        admitted = await canRead(objectName, context);
-    } catch (error) {
-        // D6 — an evaluation that throws is the 5xx fault, never "unknown".
-        throw new ObjectSchemaMaskEvaluationError(objectName, error);
+    let posture: ObjectSchemaMaskPosture = fields;
+    if (canRead) {
+        let admitted: unknown;
+        try {
+            admitted = await canRead(objectName, context);
+        } catch (error) {
+            // D6 — an admission that throws is the 5xx fault, never "unknown".
+            // (One that folds its own fault into `false` is answered as that
+            // `false`: the object is absent, which fails closed.)
+            throw new ObjectSchemaMaskEvaluationError(objectName, error);
+        }
+        if (admitted !== true) posture = { kind: 'hidden', fields };
+    } else if (ask) {
+        // A security service with a field posture and no object-level read
+        // admission: object visibility is not narrowed in this deployment —
+        // said once, at warn, naming the member it lacks.
+        warnNoObjectReadAdmissionOnce(security as object, telemetry);
     }
-    return admitted === true ? fields : { kind: 'hidden', fields };
+    if (fields.kind === 'undetermined') reportUndeterminedFields(objectName, posture.kind === 'hidden', telemetry);
+    return posture;
+}
+
+/** The security services {@link warnNoObjectReadAdmissionOnce} has already named. */
+const noObjectReadAdmissionWarned = new WeakSet<object>();
+
+/**
+ * [ruling record 6787890900] The once-per-service notice for a security service
+ * that answers field visibility but offers no `canReadObject`: every object
+ * the field posture admits is served, as before the amendment. Keyed on the
+ * service instance — a kernel's service lives as long as the kernel — so it is
+ * said once, not once per request.
+ */
+function warnNoObjectReadAdmissionOnce(security: object, telemetry: ObjectSchemaMaskTelemetry | undefined): void {
+    if (noObjectReadAdmissionWarned.has(security) || typeof telemetry?.warn !== 'function') return;
+    noObjectReadAdmissionWarned.add(security);
+    telemetry.warn(
+        '[ADR-0106] the security service offers no object-level read admission (`canReadObject`) — '
+        + 'object schemas are served to every caller the field mask serves; object visibility is not narrowed '
+        + 'until the service implements it',
+        { decision: 'object-visibility-not-narrowed' },
+    );
+}
+
+/**
+ * D6 tier 2's structured notice and metric, said once the object verdict is
+ * known, so the line names what the caller is actually answered: the schema
+ * unmasked, or — for an object they may not read — nothing at all.
+ */
+function reportUndeterminedFields(objectName: string, hidden: boolean, telemetry: ObjectSchemaMaskTelemetry | undefined): void {
+    telemetry?.warn?.(
+        hidden
+            ? '[ADR-0106] object-schema field visibility undetermined — the caller may not read the object, '
+                + 'so it is answered as absent and nothing of its schema is served'
+            : '[ADR-0106] object-schema field visibility undetermined — serving the UNMASKED schema; '
+                + 'response downgraded to `private, no-store` and no shared ETag is emitted',
+        { object: objectName, decision: hidden ? 'answer-absent' : 'serve-unmasked' },
+    );
+    telemetry?.counter?.(OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: objectName });
 }
 
 /** The field half of {@link resolveObjectSchemaMaskPosture}, for a caller the mask applies to. */
@@ -473,13 +522,9 @@ async function resolveFieldPosture(
         // D6 tier 2 — the field universe is unresolvable (registry hydration).
         // Fail OPEN, loudly: failing closed here bricks every render of the
         // object for every user and risks a bootstrap deadlock, because
-        // permission sets are themselves metadata.
-        telemetry?.warn?.(
-            '[ADR-0106] object-schema field visibility undetermined — serving the UNMASKED schema; '
-            + 'response downgraded to `private, no-store` and no shared ETag is emitted',
-            { object: objectName, decision: 'serve-unmasked' },
-        );
-        telemetry?.counter?.(OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: objectName });
+        // permission sets are themselves metadata. The notice and the metric
+        // are said by the caller once the object verdict is known
+        // ({@link reportUndeterminedFields}).
         return { kind: 'undetermined' };
     }
 

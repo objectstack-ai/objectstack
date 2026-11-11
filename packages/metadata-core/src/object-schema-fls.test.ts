@@ -230,9 +230,10 @@ describe('[ADR-0106 D6] three-tier failure posture', () => {
         });
 
         expect(posture).toEqual({ kind: 'undetermined' });
-        expect(warns).toHaveLength(1);
-        expect(warns[0][0]).toContain('ADR-0106');
-        expect(warns[0][1]).toMatchObject({ object: 'account' });
+        const tier2 = warns.filter(([, meta]) => (meta as { decision?: unknown }).decision === 'serve-unmasked');
+        expect(tier2).toHaveLength(1);
+        expect(tier2[0][0]).toContain('ADR-0106');
+        expect(tier2[0][1]).toMatchObject({ object: 'account' });
         expect(counters).toEqual([[OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC, { object: 'account' }]]);
     });
 
@@ -546,5 +547,47 @@ describe('[ruling record 6787890900] an object the caller may not read does not 
     it('the field half of a non-hidden posture is the posture itself', () => {
         const posture = project(['id']);
         expect(objectSchemaFieldPosture(posture)).toBe(posture);
+    });
+});
+
+describe('[ruling record 6787890900] what the object-level rule says, and when', () => {
+    const base = { objectName: 'account', context: { userId: 'u' }, enabled: true };
+
+    it('tier 2 names what the caller is answered: absent for an object they may not read, never "serving the unmasked schema"', async () => {
+        const warns: Array<[string, any]> = [];
+        const counters: string[] = [];
+        const posture = await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: () => undefined, canReadObject: () => false },
+            telemetry: { warn: (m, meta) => warns.push([m, meta]), counter: (n) => counters.push(n) },
+        });
+        expect(posture.kind).toBe('hidden');
+        expect(warns).toHaveLength(1);
+        expect(warns[0][1]).toMatchObject({ object: 'account', decision: 'answer-absent' });
+        expect(warns[0][0]).not.toMatch(/unmasked/i);
+        expect(counters).toEqual([OBJECT_SCHEMA_MASK_UNDETERMINED_METRIC]);
+    });
+
+    it('CONTROL — tier 2 for an object the caller may read still says the schema is served unmasked', async () => {
+        const warns: Array<[string, any]> = [];
+        await resolveObjectSchemaMaskPosture({
+            ...base,
+            security: { getMetadataReadableFields: () => undefined, canReadObject: () => true },
+            telemetry: { warn: (m, meta) => warns.push([m, meta]) },
+        });
+        expect(warns.map(([, meta]) => meta.decision)).toEqual(['serve-unmasked']);
+    });
+
+    it('a security service with no object-level read admission is named once, at warn, and narrows nothing', async () => {
+        const warns: Array<[string, any]> = [];
+        const telemetry = { warn: (m: string, meta: Record<string, unknown>) => warns.push([m, meta]) };
+        const security = { getMetadataReadableFields: () => ['id'] };
+        for (let i = 0; i < 3; i++) {
+            const posture = await resolveObjectSchemaMaskPosture({ ...base, security, telemetry });
+            expect(posture.kind).toBe('project');
+        }
+        const notices = warns.filter(([, meta]) => meta.decision === 'object-visibility-not-narrowed');
+        expect(notices).toHaveLength(1);
+        expect(notices[0][0]).toContain('canReadObject');
     });
 });
