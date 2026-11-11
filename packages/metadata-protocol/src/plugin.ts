@@ -282,9 +282,11 @@ export function assembleMetadataProtocol(
             // spelled as the literal because `@objectstack/objectql` depends on
             // this package; plugin-security's
             // `user-permission-set-guard-at-schema-sync.test.ts` boots both and
-            // goes red if the two ever differ). Re-ensured after every pass,
-            // since a SQLite table rebuild drops it; a refusal is reported once
-            // per boot (`createUserPermissionSetGuardAtSchemaSync`).
+            // goes red if the two ever differ). Re-checked after every pass,
+            // since a SQLite table rebuild drops it: a catalog read, and DDL
+            // only when it is missing, so a standing guard costs a re-sync no
+            // table lock. A refusal is reported once per boot
+            // (`createUserPermissionSetGuardAtSchemaSync`).
             const ensureGrantGuard = createUserPermissionSetGuardAtSchemaSync(ql, ctx.logger);
             (ctx as any)?.hook?.('objectql:schema-synced', async () => {
                 await ensureGrantGuard();

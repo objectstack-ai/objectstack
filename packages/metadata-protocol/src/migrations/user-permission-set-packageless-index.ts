@@ -60,10 +60,14 @@
  *   `OS_MIGRATE_AND_EXIT` job, or `os migrate apply`), which builds this index
  *   with them. Where the gate is on, its `kernel:ready` repair builds it too,
  *   for a database whose DDL came from somewhere that did not.
- * - Re-ensured after every pass, never latched once built: a SQLite table
- *   rebuild drops every index and recreates only the declared ones, so a later
- *   pass puts this one back (`IF NOT EXISTS`). A refusal is reported once per
- *   boot.
+ * - Re-checked after every pass, never latched once built: each pass reads the
+ *   catalog first and issues DDL only when this index is missing. A standing
+ *   index costs that read and nothing else, never a `CREATE … IF NOT EXISTS`,
+ *   which on PostgreSQL waits for the table's SHARE lock (behind every open
+ *   write, and every new write behind it) before it finds the name taken, and
+ *   which the MySQL family refuses outright. A SQLite table rebuild drops every
+ *   index and recreates only the declared ones, so the next pass finds this one
+ *   missing and puts it back. A refusal is reported once per boot.
  *
  * ## The index, per dialect
  *
@@ -86,14 +90,20 @@
  *
  * ## What it admits — nothing the old key refused (epic condition 1)
  *
- * Every key part is a plain column, as every part of the old key was
- * (ADR-0131 D1), so a grant whose organization is NULL would be exempt here
- * exactly as it was under the old key: the old key admitted two such grants on
+ * Every key part is a plain column, as every part of the plain old key is
+ * (ADR-0131 D1), so a grant whose organization is NULL is exempt here exactly
+ * as it is under that key: the plain three-column key admits two such grants on
  * every dialect (measured side by side in this file's SQLite and live
  * PostgreSQL/MySQL pins; MySQL's digest is NULL when any part is), and so does
- * this index. On a table `driver-sql` builds the case cannot arise at all — the
- * tenant column is NOT NULL there (ADR-0131 D1). Two package-less grants of one
- * name in one organization are refused, as they were.
+ * this index. An 18.0 store carries the old key in the NULL-safe form instead
+ * (ADR-0120 D3, `COALESCE(organization_id, '__global__')`), which refuses the
+ * second of them. Condition 1 holds there too, because `driver-sql`'s widening
+ * arm keeps that key on a table whose tenant column is not certified NOT NULL,
+ * and offers to retire it only once this index stands on a certified table
+ * (`tenantKeyCertified`, ADR-0131 D1), where no organization is NULL. On a table
+ * `driver-sql` builds the case cannot arise at all — the tenant column is NOT
+ * NULL there (ADR-0131 D1). Two package-less grants of one name in one
+ * organization are refused, as they were.
  *
  * ## The old key retires on the next boot (or `os migrate apply`)
  *
@@ -252,6 +262,63 @@ export function buildUserPermissionSetPresenceSql(): string {
 }
 
 /**
+ * The catalog statement that answers "does the guard already stand on the
+ * table?" with no DDL: one row when an index of its name is on the table, none
+ * when not. `undefined` for a client `read-probe.ts` has no catalog arm for, a
+ * guessed spelling being that module's fence; the build then runs as before.
+ * Each arm resolves the table the way the unqualified DDL does: SQLite's
+ * connection catalog, PostgreSQL's search path (`to_regclass`), the MySQL
+ * family's connected schema (`DATABASE()`), whose `statistics` lists the
+ * functional key and MariaDB's key over its carrier column alike.
+ */
+export function buildUserPermissionSetPackagelessIndexPresenceSql(client?: string): string | undefined {
+    const index = USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME;
+    const table = USER_PERMISSION_SET_TABLE;
+    switch (catalogFamilyOf(client)) {
+        case 'sqlite':
+            return `SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '${index}' AND tbl_name = '${table}'`;
+        case 'postgres':
+            return (
+                `SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid ` +
+                `WHERE i.indrelid = to_regclass('"${table}"') AND c.relname = '${index}'`
+            );
+        case 'mysql':
+            return (
+                `SELECT 1 FROM information_schema.statistics ` +
+                `WHERE table_schema = DATABASE() AND table_name = '${table}' AND index_name = '${index}'`
+            );
+        default:
+            return undefined;
+    }
+}
+
+/**
+ * Does the guard already stand? Read before any DDL (module doc, "When"):
+ * `CREATE UNIQUE INDEX IF NOT EXISTS` takes PostgreSQL's SHARE lock on the
+ * table before it finds the name taken, so it waits behind every open write
+ * transaction on the grant table and holds every new writer behind it
+ * meanwhile (measured on PostgreSQL 16), and the MySQL family refuses its
+ * statement outright. A pass that finds the guard issues none of it.
+ *
+ * `'unknown'` (no catalog arm for the client, a refused read, no result set)
+ * is ⛔ never read as present: the build runs as it ran before this read
+ * existed, idempotent and reporting its own failure. The read only saves a
+ * statement; it never decides that the build may be skipped.
+ */
+async function readPackagelessIndexPresence(exec: IndexExec, client?: string): Promise<'present' | 'absent' | 'unknown'> {
+    const sql = buildUserPermissionSetPackagelessIndexPresenceSql(client);
+    if (sql === undefined) return 'unknown';
+    let result: unknown;
+    try {
+        result = await exec(sql);
+    } catch {
+        return 'unknown';
+    }
+    if (!isResultSet(result)) return 'unknown';
+    return normalizeRows(result).length > 0 ? 'present' : 'absent';
+}
+
+/**
  * The grants blocking the index, grouped by its key. A grant whose key part is
  * NULL conflicts with nothing under a UNIQUE index (a platform-wide grant
  * among them), so it is no duplicate to list. One statement for every dialect.
@@ -323,10 +390,11 @@ async function nameDuplicateKeys(exec: IndexExec): Promise<string> {
 /**
  * Ensure the package-less one-grant index (module doc).
  *
- * Idempotent: an existing index is left as it is. Best-effort by design — a
- * boot never fails because the index could not be built, so every branch
- * returns a status instead of throwing, and every branch that leaves the
- * guarantee unenforced says so at `error`.
+ * Idempotent: an existing index is left as it is, found by a catalog read
+ * before any DDL (`readPackagelessIndexPresence`), and reported `created`.
+ * Best-effort by design — a boot never fails because the index could not be
+ * built, so every branch returns a status instead of throwing, and every
+ * branch that leaves the guarantee unenforced says so at `error`.
  */
 export async function ensureUserPermissionSetPackagelessIndex(
     exec: IndexExec | undefined,
@@ -352,6 +420,10 @@ export async function ensureUserPermissionSetPackagelessIndex(
         );
         return { status: 'failed', detail: presence.detail };
     }
+
+    // A guard that already stands is left as it is without a statement that
+    // locks the table or is refused (`readPackagelessIndexPresence`).
+    if ((await readPackagelessIndexPresence(exec, opts.client)) === 'present') return { status: 'created' };
 
     try {
         if (catalogFamilyOf(opts.client) === 'mysql' && (await isMariaDb(exec))) await buildOnMariaDb(exec);
@@ -405,10 +477,11 @@ const REFUSALS: ReadonlySet<EnsureUserPermissionSetPackagelessIndexStatus> = new
  *   `'held-back'`, unlatched: the one-shot CLI boot triggers the event again
  *   once its flush has performed what was held back (`os migrate apply`), and
  *   a dry run never flushes.
- * - **`created` never latches.** Every later pass re-ensures the guard, a no-op
- *   while it stands (`IF NOT EXISTS`, or the MySQL family's duplicate-key
- *   answer), because a pass can lose it: a SQLite table rebuild drops every
- *   index and recreates only the declared ones.
+ * - **`created` never latches.** Every later pass re-checks the guard, because
+ *   a pass can lose it: a SQLite table rebuild drops every index and recreates
+ *   only the declared ones. While it stands the check is one catalog read and
+ *   no DDL, so a `metadata:reloaded` re-sync neither locks the grant table nor
+ *   sends a statement the server refuses.
  * - **A refusal latches.** `conflict`, `unsupported` and `failed` were each
  *   reported at `error` once; the next boot tries again.
  * - It never throws: a boot does not fail because the guard could not be built,

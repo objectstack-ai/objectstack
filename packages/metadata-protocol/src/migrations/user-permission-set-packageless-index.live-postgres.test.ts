@@ -7,6 +7,9 @@
  * - The partial form is built; a second package-less grant of one
  *   `(user_id, permission_set, organization_id)` is refused, the same grant
  *   bound to two packages is admitted, and a second boot is a no-op.
+ * - The catalog read before any DDL: absent, then present, and a second boot
+ *   with a write open on the table sends no DDL, where `CREATE … IF NOT
+ *   EXISTS` would wait for the table's SHARE lock (a 2 s `lock_timeout` fails it).
  * - Epic condition 1, measured over real rows: nothing the old three-column key
  *   refused is admitted, with a non-null and a null organization. The old key
  *   is built as knex compiles it here (a UNIQUE constraint) in a sibling table,
@@ -26,6 +29,7 @@ import pg from 'pg';
 import {
     USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
     USER_PERMISSION_SET_TABLE,
+    buildUserPermissionSetPackagelessIndexPresenceSql,
     ensureUserPermissionSetPackagelessIndex,
 } from './user-permission-set-packageless-index.js';
 import { currentLiveMysqlDatabase } from './live-mysql-database.testkit.js';
@@ -126,6 +130,38 @@ describe.skipIf(!PG_URL)('grant package-less index on a LIVE PostgreSQL', () => 
         // A second boot is a no-op.
         expect(await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'pg' })).toEqual({ status: 'created' });
         expect(log.error).not.toHaveBeenCalled();
+    });
+
+    it('reads the catalog before any DDL: absent, then present; a second boot sends no DDL while a write holds the table', async () => {
+        const presence = buildUserPermissionSetPackagelessIndexPresenceSql('pg')!;
+        expect((await client.query(presence)).rows).toHaveLength(0);
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, quietLogger(), { client: 'pg' })).toEqual({ status: 'created' });
+        expect((await client.query(presence)).rows).toHaveLength(1);
+
+        // `CREATE UNIQUE INDEX IF NOT EXISTS` waits for the table's SHARE lock
+        // before it finds the name taken, so with an open write it would block
+        // here and fail at the timeout; the catalog read does not wait.
+        const writer = new pg.Client({ connectionString: PG_URL });
+        await writer.connect();
+        try {
+            await writer.query(`SET search_path TO "${schema}"`);
+            await writer.query('BEGIN');
+            await writer.query(
+                `INSERT INTO ${USER_PERMISSION_SET_TABLE} (id, user_id, permission_set, permission_set_package, organization_id) ` +
+                    "VALUES ('w1', 'u9', 'sales_rep', 'com.acme.crm', 'org_1')",
+            );
+            await client.query("SET lock_timeout = '2s'");
+            const seen: string[] = [];
+            const recording: IndexExec = (sql: string) => (seen.push(sql), client.query(sql));
+            const log = quietLogger();
+            expect(await ensureUserPermissionSetPackagelessIndex(recording, log, { client: 'pg' })).toEqual({ status: 'created' });
+            expect(seen.filter((sql) => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql))).toEqual([]);
+            expect(log.error).not.toHaveBeenCalled();
+        } finally {
+            await client.query('RESET lock_timeout');
+            await writer.query('ROLLBACK');
+            await writer.end();
+        }
     });
 
     it('admits nothing the old key refused, with a non-null and a null organization (epic condition 1)', async () => {

@@ -12,6 +12,7 @@ import {
     USER_PERMISSION_SET_TABLE,
     buildUserPermissionSetOldKeySql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
+    buildUserPermissionSetPackagelessIndexPresenceSql,
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessMariaDbKeySql,
     buildUserPermissionSetPackagelessMariaDbSql,
@@ -19,6 +20,18 @@ import {
     ensureUserPermissionSetPackagelessIndex,
 } from './user-permission-set-packageless-index.js';
 import type { IndexExec } from './partial-index-probe.js';
+
+/**
+ * The guard's own catalog read (`buildUserPermissionSetPackagelessIndexPresenceSql`),
+ * told apart from the table-presence read the recording fixtures below answer
+ * "present": only the guard's read names the index. Those fixtures answer it
+ * with no row, so the build they exercise still runs.
+ */
+const isGuardPresenceRead = (sql: string): boolean =>
+    /^SELECT 1 FROM /.test(sql) && sql.includes(`'${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`);
+
+/** A statement that changes the schema, as opposed to a read. */
+const isDdl = (sql: string): boolean => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql);
 
 /**
  * `sys_user_permission_set` — one grant per `(user_id, permission_set,
@@ -253,6 +266,35 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
             expect(log.warn).not.toHaveBeenCalled();
         });
 
+        it('a later pass over a table the guard stands on reads the catalog and issues no DDL (a metadata:reloaded re-sync locks nothing)', async () => {
+            const statements: string[] = [];
+            const driver = { ...sqliteDriver(), execute: (sql: string) => (statements.push(sql), exec(sql)) };
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(driver), log);
+
+            expect(await ensure()).toBe('created');
+            expect(statements.filter(isDdl)).toEqual([buildUserPermissionSetPackagelessIndexSql('better-sqlite3')]);
+
+            statements.length = 0;
+            expect(await ensure()).toBe('created');
+            expect(statements.filter(isDdl)).toEqual([]);
+            expect(statements).toContain(buildUserPermissionSetPackagelessIndexPresenceSql('better-sqlite3'));
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+            expect(log.error).not.toHaveBeenCalled();
+            expect(log.warn).not.toHaveBeenCalled();
+        });
+
+        it('a refused catalog read never skips the build: the pass builds as it did without the read', async () => {
+            const driver = {
+                ...sqliteDriver(),
+                execute: (sql: string) => (isGuardPresenceRead(sql) ? Promise.reject(new Error('no such table: sqlite_master')) : exec(sql)),
+            };
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(driver), logger());
+
+            expect(await ensure()).toBe('created');
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+        });
+
         it('a refusal latches: reported once, and a later pass in the same boot neither tries again nor says it twice', async () => {
             insert('a', null);
             insert('b', null);
@@ -282,9 +324,51 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
 
 describe('the MySQL-family arms (statement and verdict)', () => {
     const presentTable: IndexExec = async (sql: string) => {
+        if (isGuardPresenceRead(sql)) return [[], []];
         if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
         throw new Error('unexpected');
     };
+
+    it('the guard read per dialect: an index of its name on this table, in the schema the unqualified DDL resolves; no arm for an unknown client', () => {
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('better-sqlite3')).toBe(
+            `SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}' ` +
+                `AND tbl_name = '${USER_PERMISSION_SET_TABLE}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('pg')).toBe(
+            'SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid ' +
+                `WHERE i.indrelid = to_regclass('"${USER_PERMISSION_SET_TABLE}"') AND c.relname = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('mysql2')).toBe(
+            'SELECT 1 FROM information_schema.statistics ' +
+                `WHERE table_schema = DATABASE() AND table_name = '${USER_PERMISSION_SET_TABLE}' ` +
+                `AND index_name = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('oracledb')).toBeUndefined();
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql(undefined)).toBeUndefined();
+    });
+
+    it('a guard the catalog names is left alone: no version read, no CREATE, no ALTER', async () => {
+        const seen: string[] = [];
+        const exec: IndexExec = async (sql) => {
+            seen.push(sql);
+            if (isGuardPresenceRead(sql)) return [[{ 1: 1 }], []];
+            return presentTable(sql);
+        };
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'mysql2' }))
+            .toEqual({ status: 'created' });
+        expect(seen.filter(isDdl)).toEqual([]);
+        expect(seen.some((q) => /VERSION\(\)/.test(q))).toBe(false);
+    });
+
+    it('a client with no catalog arm builds as before (the read never guesses a spelling)', async () => {
+        const seen: string[] = [];
+        // The table's fallback probe answers a result set (present); every statement succeeds.
+        const exec: IndexExec = async (sql) => (seen.push(sql), []);
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'oracledb' }))
+            .toEqual({ status: 'created' });
+        expect(seen.filter(isDdl)).toEqual([buildUserPermissionSetPackagelessIndexSql('oracledb')]);
+        expect(seen.some(isGuardPresenceRead)).toBe(false);
+    });
 
     it("MySQL takes a functional key part over the driver's own digest, NULL for a packaged grant", () => {
         expect(buildUserPermissionSetPackagelessIndexSql('mysql2')).toBe(
@@ -403,6 +487,7 @@ describe('[#21418] a bound sentinel reaches no carrier this migration writes', (
         [inspect(result, { depth: 8 }), ...[...log.error.mock.calls, ...log.warn.mock.calls].map((c) => inspect(c, { depth: 8 }))].join('\n');
 
     const presentTable = async (sql: string) => {
+        if (isGuardPresenceRead(sql)) return [];
         if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
         return [];
     };
@@ -470,6 +555,7 @@ describe('the MariaDB arm (INVISIBLE generated carrier + UNIQUE key)', () => {
         const seen: string[] = [];
         const exec: IndexExec = async (sql: string) => {
             seen.push(sql);
+            if (isGuardPresenceRead(sql)) return [[], []];
             if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
             if (/^SELECT VERSION\(\)/.test(sql)) return [[{ version: '11.8.9-MariaDB-ubu2404' }]];
             return onDdl(sql);

@@ -490,6 +490,16 @@ export const OBJECTQL_DRIVERS_READY_HOOK = 'objectql:drivers-ready';
  * schema-migration lock) and each `metadata:reloaded` re-sync. Never on a
  * `skipSchemaSync` boot, which runs no DDL.
  *
+ * Only this plugin's passes trigger it. The engine's own doors,
+ * `ObjectQL.syncSchemas` and `syncObjectSchema`, run the same DDL and trigger
+ * nothing. No first-party composition creates `sys_user_permission_set`
+ * through them: a package install, a published object or extension and a
+ * datasource connect reach them after a boot's own pass has created the
+ * platform tables, and the CLI's declaration-phase composition calls
+ * `syncObjectSchema` only while DDL is held back, which its flush then
+ * announces. A door that rebuilds a SQLite table leaves that table without its
+ * runtime-managed indexes until this plugin's next pass.
+ *
  * A pass whose driver holds DDL back (the one-shot CLI boot of `os migrate
  * plan`, every dry-run mode, and `os migrate apply` before its confirmation;
  * the driver reads `schemaDdlDeferred`) triggers it too, before any of that DDL

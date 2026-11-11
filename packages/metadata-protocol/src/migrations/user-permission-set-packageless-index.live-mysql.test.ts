@@ -8,7 +8,8 @@
  *   UNIQUE key over an INVISIBLE generated column carrying it, which stays out
  *   of `SELECT *`. A second package-less grant of one `(user_id,
  *   permission_set, organization_id)` is refused, two packages are admitted,
- *   and a second boot is a no-op.
+ *   and a second boot finds the key in `information_schema.statistics` and
+ *   sends no DDL, so the server refuses nothing.
  * - Epic condition 1, over real rows: nothing the old three-column key refused
  *   is admitted, with a non-null and a null organization. The old key is built
  *   in a sibling table as `driver-sql` builds a plain UNIQUE over TEXT columns
@@ -25,7 +26,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import mysql from 'mysql2/promise';
 
-import { USER_PERMISSION_SET_TABLE, ensureUserPermissionSetPackagelessIndex } from './user-permission-set-packageless-index.js';
+import {
+    USER_PERMISSION_SET_TABLE,
+    buildUserPermissionSetPackagelessIndexPresenceSql,
+    ensureUserPermissionSetPackagelessIndex,
+} from './user-permission-set-packageless-index.js';
 import { currentLiveMysqlDatabase } from './live-mysql-database.testkit.js';
 import type { IndexExec } from './partial-index-probe.js';
 
@@ -99,7 +104,11 @@ describe.skipIf(!MYSQL_URL)('grant package-less index on a LIVE MySQL / MariaDB'
 
     it('MySQL builds the functional key part, MariaDB the INVISIBLE carrier (second package-less grant refused, two packages admitted)', async () => {
         const log = quietLogger();
+        const presence = buildUserPermissionSetPackagelessIndexPresenceSql('mysql2')!;
+        expect(await exec(presence)).toHaveLength(0);
         expect(await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' })).toEqual({ status: 'created' });
+        // `information_schema.statistics` lists the functional key and MariaDB's key over its carrier alike.
+        expect((await exec(presence) as unknown[]).length).toBeGreaterThan(0);
         if (mariadb) {
             // The carrier never reaches `SELECT *` (INVISIBLE).
             await insert('a0', null);
@@ -113,8 +122,11 @@ describe.skipIf(!MYSQL_URL)('grant package-less index on a LIVE MySQL / MariaDB'
         expect(await insert('b', null)).toBe(false);
         expect(await insert('p1', 'com.acme.crm')).toBe(true);
         expect(await insert('p2', 'com.acme.hr')).toBe(true);
-        // A second boot meets ER_DUP_KEYNAME, which is the index being in place.
-        expect(await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'mysql2' })).toEqual({ status: 'created' });
+        // A second boot finds it in the catalog and sends nothing the server would refuse: no CREATE, no ALTER.
+        const seen: string[] = [];
+        const recording: IndexExec = (sql: string) => (seen.push(sql), exec(sql));
+        expect(await ensureUserPermissionSetPackagelessIndex(recording, log, { client: 'mysql2' })).toEqual({ status: 'created' });
+        expect(seen.filter((sql) => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql))).toEqual([]);
         expect(log.error).not.toHaveBeenCalled();
     });
 
