@@ -1,7 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SEARCH_VIRTUAL_TYPES, COMPUTED_VALUE_TYPES, VIRTUAL_FIELD_AGGREGATE_REMEDY } from '@objectstack/spec/data';
+import {
+  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  COMPUTED_VALUE_TYPES,
+  FieldType,
+  SEARCH_VIRTUAL_TYPES,
+  VIRTUAL_FIELD_AGGREGATE_REMEDY,
+  isMultiValueField,
+} from '@objectstack/spec/data';
 import {
   validateSortableFields as validateSortableFieldsUnrecorded,
   checkSortDeclaration as checkSortDeclarationUnrecorded,
@@ -1091,6 +1098,8 @@ const gridTaskFields = {
   score: { type: 'formula', label: 'Score', expression: 'hours * 2', returnType: 'number' },
   labels: { type: 'tags', label: 'Labels' },
   legacy_count: { type: 'integer', label: 'Legacy count' },
+  payload: { type: 'json', label: 'Payload' },
+  watchers: { type: 'lookup', label: 'Watchers', reference: 'crm_opportunity', multiple: true },
 };
 const gridStack = (aggregations: unknown, extra: Record<string, unknown> = {}) => ({
   objects: [{ name: 'grid_task', fields: gridTaskFields }, { name: 'crm_opportunity', fields: opportunityFields }],
@@ -1152,14 +1161,72 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     ])).toEqual([]);
   });
 
-  it('`count` over any field passes; `count_distinct` / `min` / `max` are not judged by this rule', () => {
+  it('`count` over any field passes', () => {
     expect(gridFindings([
       { field: 'title', type: 'count' },
       { field: 'score', type: 'count' },
+      { field: 'payload', type: 'count' },
+      { field: 'watchers', type: 'count' },
+    ])).toEqual([]);
+  });
+
+  // [#32449] The table's other rows, on this surface: the door refuses them too.
+  it.each([
+    ['min / max over a string-class field', 'min', 'title', '`text`'],
+    ['min / max over an option field', 'max', 'stage', '`select`'],
+    ['min / max over a JSON-stored field', 'max', 'labels', '`tags`'],
+    ['count_distinct over a structured-JSON field', 'count_distinct', 'payload', '`json`'],
+    ['count_distinct over a multi-option field', 'count_distinct', 'labels', '`tags`'],
+    ['count_distinct over a multi-value declaration', 'count_distinct', 'watchers', '`lookup` with `multiple: true`'],
+  ])('[#32449] refuses %s: %s over "%s", at `error`', (_family, type, field, declared) => {
+    const findings = gridFindings([{ field: 'due_on', type: 'min' }, { field, type }]);
+    expect(findings.map((f) => [f.severity, f.path])).toEqual([
+      ['error', 'pages[0].regions[0].components[0].properties.aggregations[1]'],
+    ]);
+    expect(findings[0].message).toContain(`"${type}" over "${field}" (${declared} on "grid_task") is refused by the aggregate door`);
+  });
+
+  it('[#32449] passes the accepted controls of those rows: min / max over a date, a datetime, a number, a boolean; count_distinct over a scalar', () => {
+    expect(gridFindings([
       { field: 'due_on', type: 'min' },
       { field: 'closed_at', type: 'max' },
+      { field: 'hours', type: 'max' },
+      { field: 'done', type: 'min' },
+      { field: 'pinned', type: 'max' },
       { field: 'title', type: 'count_distinct' },
+      { field: 'stage', type: 'count_distinct' },
+      { field: 'account', type: 'count_distinct' },
     ])).toEqual([]);
+  });
+
+  it('[#32449] the remedy names where to point each row, and what the declaration accepts', () => {
+    const [onText] = gridFindings([{ field: 'title', type: 'max' }]);
+    expect(onText.hint).toBe('Point "max" at a numeric, date/time or boolean field, or aggregate "title" with one its `text` type accepts: count, count_distinct.');
+    const [onJson] = gridFindings([{ field: 'payload', type: 'count_distinct' }]);
+    expect(onJson.hint).toBe('Count distinct values of a field that stores one scalar value, or aggregate "payload" with one its `json` type accepts: count.');
+    const [onMulti] = gridFindings([{ field: 'watchers', type: 'count_distinct' }]);
+    expect(onMulti.hint).toBe('Count distinct values of a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
+  });
+
+  it('[#32449] agrees with the table and `isMultiValueField` on every function over every declared `FieldType`', () => {
+    for (const fn of Object.keys(AGGREGATE_FIELD_TYPE_COMPATIBILITY)) {
+      for (const type of FieldType.options) {
+        for (const multiple of [false, true]) {
+          const stack = {
+            objects: [{ name: 'grid_task', fields: { probe: { type, label: 'Probe', ...(multiple ? { multiple } : {}) } } }],
+            pages: [{ name: 'board', type: 'app', regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', aggregations: [{ field: 'probe', type: fn }] } }] }] }],
+          };
+          const findings = validateSortableFields(stack).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED);
+          const accepted = (AGGREGATE_FIELD_TYPE_COMPATIBILITY as Record<string, readonly string[]>)[fn].includes(type)
+            && !(fn === 'count_distinct' && isMultiValueField({ type, multiple }));
+          expect(findings.length, `${fn} over ${type}${multiple ? ' (multiple)' : ''}`).toBe(accepted ? 0 : 1);
+        }
+      }
+    }
+  });
+
+  it('[#32449] a `type` outside the table\'s vocabulary is the schema\'s refusal, not this verdict', () => {
+    expect(gridFindings([{ field: 'title', type: 'median' }, { field: 'title', type: ['sum'] }])).toEqual([]);
   });
 
   it('skips what it cannot judge: an unknown field, a dotted path, an object the stack does not define, no binding', () => {
@@ -1192,7 +1259,7 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
 
   it('`os explain` carries the reasoning the verdict leaves out', () => {
     const text = explanationOf(GRID_AGGREGATION_FIELD_TYPE_REFUSED);
-    for (const fact of ['`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'STORED']) {
+    for (const fact of ['`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'STORED', 'collation', '`multiple: true`']) {
       expect(text, fact).toContain(fact);
     }
   });
