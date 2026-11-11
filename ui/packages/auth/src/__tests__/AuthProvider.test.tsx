@@ -439,6 +439,15 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
   const AUTH_URL = 'http://localhost/api/v1/auth';
   const ALICE = { id: '1', name: 'Alice', email: 'alice@test.com' };
 
+  /**
+   * Budget for each step of the chain (mount read -> identity set; 401 -> re-check
+   * read -> identity cleared). Each step is a few awaited microtasks plus one React
+   * commit, tens of ms on an idle box; the 1000 ms `waitFor` default was measured
+   * too tight when a Test UI shard runs ~5000 tests alongside (one 1022 ms red).
+   * It bounds only a failure's wait: a passing run returns as soon as the DOM says so.
+   */
+  const CHAIN_MS = 10_000;
+
   /** What `get-session` answers next. */
   let getSessionAnswer: () => Promise<Response>;
 
@@ -462,7 +471,9 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
         <TestConsumer />
       </AuthProvider>,
     );
-    await waitFor(() => expect(screen.getByTestId('user-name').textContent).toBe('Alice'));
+    await waitFor(() => expect(screen.getByTestId('user-name').textContent).toBe('Alice'), {
+      timeout: CHAIN_MS,
+    });
     return fetchFn;
   }
 
@@ -489,7 +500,13 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     getSessionAnswer = async () => new Response('null', { status: 401 });
     await apiAnswers401();
 
-    await waitFor(() => expect(screen.getByTestId('authenticated').textContent).toBe('false'));
+    // Wait on the event first: the re-check read itself reaching the server.
+    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+      timeout: CHAIN_MS,
+    });
+    await waitFor(() => expect(screen.getByTestId('authenticated').textContent).toBe('false'), {
+      timeout: CHAIN_MS,
+    });
     expect(screen.getByTestId('user-name').textContent).toBe('none');
     expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads);
   });
@@ -500,7 +517,9 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
 
     await apiAnswers401();
 
-    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+      timeout: CHAIN_MS,
+    });
     expect(screen.getByTestId('authenticated').textContent).toBe('true');
     expect(screen.getByTestId('user-name').textContent).toBe('Alice');
   });
@@ -514,7 +533,9 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     };
     await apiAnswers401();
 
-    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+      timeout: CHAIN_MS,
+    });
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20));
     });
