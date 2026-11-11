@@ -1943,12 +1943,14 @@ describe('validateSecurityPosture · a caller-keyed update policy with no check 
     expect(noted(set({ name: 'p', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', enabled: false }))).toEqual([]);
   });
 
-  it('is info tier on every command the registry serves, so os lint --strict, which promotes only warnings, does not fail on it', () => {
-    // `os lint` reports an `info` as a suggestion and its `--strict` counts
-    // errors and warnings only (cli `lint-strict-warnings.e2e.test.ts`,
-    // "suggestions stay advisory under --strict"). So the tier is the pin:
-    // through the registry the finding reaches every command as `info`, never
-    // in the gating set and never as a warning.
+  it('is info tier on every command the registry serves, so neither os lint --strict nor os validate --strict fails on it', () => {
+    // `--strict` counts errors and warnings only, on both doors: `os lint`
+    // grades an `info` as a suggestion (cli `lint-strict-warnings.e2e.test.ts`),
+    // and `os validate` leaves every registry finding of `severity: 'info'` out
+    // of its strict count (cli `validate-json-strict-exit.e2e.test.ts`; ruling
+    // of record 6787890900). So the tier is the pin: through the registry the
+    // finding reaches every command, `validate` and `lint` named below, as
+    // `info`, never in the gating set and never as a warning.
     const stack = {
       objects: [{ name: 'deal', label: 'Deal', sharingModel: 'public_read', fields: { title: { type: 'text', label: 'Title' } } }],
       ...set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' }),
@@ -1961,6 +1963,7 @@ describe('validateSecurityPosture · a caller-keyed update policy with no check 
       expect(errors, command).toEqual([]);
       expect(advisories.filter((f) => f.severity === 'warning'), command).toEqual([]);
     }
+    expect(AUTHORING_COMMANDS).toEqual(expect.arrayContaining(['validate', 'lint']));
   });
 
   it('states the composition rule and its side effect, and the id is explained', () => {

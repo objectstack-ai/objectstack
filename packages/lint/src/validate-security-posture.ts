@@ -24,7 +24,7 @@
  * | security-controlled-by-parent-owner-policy-without-opt-in (warning) | ADR-0055 §3 amendment (ruling 6398566164): a caller-keyed update policy on a detail admits nobody the master gate refuses — unless it keys `owner_id` and the detail opted in (#26591: the opt-in is prescribed only there) |
  * | security-superuser-field-mask-inert (warning) | ADR-0066 D2 ⑧ as amended (ruling 6573563853, letter A): a set's View All / Modify All on an object votes on every field of it, so its own `readable: false` (or, under Modify All, its edit lock) on that object binds none of its holders |
  * | security-controlled-by-parent-master-reference-hidden (warning) | ADR-0055 §3: a write of a detail needs edit access to the master its stored reference names, so a set's `readable: false` on that reference hides a field that still decides its holders' writes, and a holder refused there gets a refusal that names no master |
- * | security-update-policy-no-check (info) | ADR-0058 D4 write-check composition: a USING-only `update` / `all` policy keyed on a caller column other than `created_by` lets the ownership floor admit a row's new image too; info tier, so `os lint --strict` does not fail on it |
+ * | security-update-policy-no-check (info) | ADR-0058 D4 write-check composition: a USING-only `update` / `all` policy keyed on a caller column other than `created_by` lets the ownership floor admit a row's new image too; info tier, so neither `os lint --strict` nor `os validate --strict` fails on it |
  *
  * Per ADR-0049 discipline these are NOT advisory security: every `error` rule
  * mirrors a runtime enforcement point (D1 fail-closed OWD default, D4
@@ -1138,8 +1138,9 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
   // assignee) admits a new row its creator writes as well as one its keyed
   // user writes. That is the published composition; this arm states it where
   // the policy is authored. Advisory `info`: the composition is correct as
-  // published and nothing refuses the shape; `os lint` reports an `info` as a
-  // suggestion, which `--strict` never promotes.
+  // published and nothing refuses the shape; `--strict` promotes warnings,
+  // never an `info`, on `os lint` and `os validate` alike (ruling of record
+  // 6787890900).
   //
   // Judged per policy, as declared: whether a sibling policy declares `check`
   // for a given caller depends on the sets and positions that caller holds,
