@@ -65,7 +65,8 @@ export const SCIM_IDENTITY_SOURCE_BACKFILL_PAGE = 200;
 /**
  * Mark each of `userIds` directory-managed, per the module rule: a user who
  * already reads `idp_provisioned`, holds a local password, or has no
- * `sys_user` row is left as it is. Returns how many rows were written.
+ * `sys_user` row is left as it is. Returns how many of `userIds` have a
+ * `sys_user` row (`present`) and how many rows were written (`marked`).
  *
  * Errors propagate. On the SCIM path that fails the request inside its
  * transaction, so no SCIM user is created without the mark; the backfill
@@ -74,9 +75,9 @@ export const SCIM_IDENTITY_SOURCE_BACKFILL_PAGE = 200;
 export async function markDirectoryProvisionedUsers(
   engine: ScimIdentitySourceEngine,
   userIds: readonly string[],
-): Promise<number> {
+): Promise<{ present: number; marked: number }> {
   const ids = [...new Set(userIds.filter((id) => typeof id === 'string' && id.length > 0))];
-  if (ids.length === 0) return 0;
+  if (ids.length === 0) return { present: 0, marked: 0 };
 
   const credentialRows = (await engine.find('sys_account', {
     where: { user_id: { $in: ids }, provider_id: 'credential' },
@@ -102,11 +103,11 @@ export async function markDirectoryProvisionedUsers(
     await engine.update('sys_user', { id, source: DIRECTORY_MANAGED_SOURCE }, { context: await authSystemWriteContext() });
     written += 1;
   }
-  return written;
+  return { present: users.length, marked: written };
 }
 
 export interface ScimIdentitySourceBackfillResult {
-  /** Distinct users that own a `sys_scim_subject` row. */
+  /** Distinct users that own a `sys_scim_subject` row AND have a `sys_user` row (an orphan subject is not counted). */
   directoryProvisioned: number;
   /** Rows this pass wrote — zero on every pass after the first. */
   marked: number;
@@ -122,6 +123,7 @@ export async function backfillScimProvisionedIdentitySource(
   pageSize: number = SCIM_IDENTITY_SOURCE_BACKFILL_PAGE,
 ): Promise<ScimIdentitySourceBackfillResult> {
   const seen = new Set<string>();
+  let present = 0;
   let marked = 0;
   const walk = keysetWalk<{ id?: unknown; user_id?: unknown }>(
     async (q) => {
@@ -151,7 +153,9 @@ export async function backfillScimProvisionedIdentitySource(
       seen.add(id);
       userIds.push(id);
     }
-    marked += await markDirectoryProvisionedUsers(engine, userIds);
+    const result = await markDirectoryProvisionedUsers(engine, userIds);
+    present += result.present;
+    marked += result.marked;
   }
   if (walk.truncated) {
     // Only a reader that cannot seek stops the walk early; a partial pass
@@ -161,5 +165,5 @@ export async function backfillScimProvisionedIdentitySource(
         + 'the read did not advance past its last id',
     );
   }
-  return { directoryProvisioned: seen.size, marked };
+  return { directoryProvisioned: present, marked };
 }
