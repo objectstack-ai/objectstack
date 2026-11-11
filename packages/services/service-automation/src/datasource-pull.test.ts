@@ -589,6 +589,7 @@ describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed
         const scope = { mapping: MAPPING.name, organizationId };
         await ledger.describe(id, {
             sourceKind: 'datasource', source: 'erp_order', datasource: 'erp', readPath: 'builtin', watermarkField: 'updated_at', from: START,
+            targetObject: 'order_copy',
         });
         await ledger.commit(id, scope, at(2000));
         // ...and the server stops: the row still reads running.
