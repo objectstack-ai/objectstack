@@ -382,7 +382,6 @@ async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions):
         `Mapping "${opts.mapping}": ${what} (${SYNC_RUN_OBJECT} ${id}). The windows finished before stay written, and the `
         + 'next run reads again from the last position stored. The server log has the store\'s own failure.',
     );
-    let committed = false;
     return {
         id, scope, progress,
         describe: async (d) => {
@@ -393,11 +392,10 @@ async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions):
         },
         commit: async (position) => {
             try {
-                await ledger.commit(id, scope, position, !committed);
+                await ledger.commit(id, scope, position);
             } catch {
                 throw unavailable(`the read position ${String(position)} reached at a window's end could not be stored, so the pull stopped there`);
             }
-            committed = true;
         },
     };
 }

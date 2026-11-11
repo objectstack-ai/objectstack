@@ -93,11 +93,11 @@ export interface SyncRunLedger {
     /** The position the latest committed run of `scope` stored, if any. */
     lastCommitted(scope: SyncRunScope): Promise<SyncRunPosition | undefined>;
     /**
-     * Store the position the run reached at a window's end. On the run's first
-     * commit (`first`) the row also takes the read position over from the run
-     * that held it, so retention keeps this row instead.
+     * Store the position the run reached at a window's end. The row also takes
+     * the read position over from every run of the scope that committed
+     * earlier, so retention keeps the run committed last.
      */
-    commit(runId: string, scope: SyncRunScope, position: string | number, first: boolean): Promise<void>;
+    commit(runId: string, scope: SyncRunScope, position: string | number): Promise<void>;
     /** End the run. */
     close(runId: string, end: SyncRunEnd): Promise<void>;
 }
@@ -193,17 +193,26 @@ export class ObjectStoreSyncRunLedger implements SyncRunLedger {
         return { runId: String(row.id), source: text(row.source), watermarkField: text(row.watermark_field), position };
     }
 
-    async commit(runId: string, scope: SyncRunScope, position: string | number, first: boolean): Promise<void> {
+    async commit(runId: string, scope: SyncRunScope, position: string | number): Promise<void> {
+        const committedAt = new Date().toISOString();
         await this.engine.update(SYNC_RUN_OBJECT, {
             watermark_committed: String(position),
-            committed_at: new Date().toISOString(),
-            ...(first ? { holds_position: true } : {}),
+            committed_at: committedAt,
+            holds_position: true,
         }, { where: { id: runId }, context: SYSTEM_CONTEXT });
-        if (!first) return;
-        // This row holds the position first, then the one before lets it go:
-        // between the two writes both are kept, never neither.
+        // This row holds the position first, then every run committed EARLIER
+        // lets it go: between the two writes both are kept, never neither. Only
+        // earlier ones: two runs of one mapping interleaving their commits each
+        // clear the other only when it is older, so the run committed last
+        // keeps the flag whatever order the four writes land in.
         await this.engine.update(SYNC_RUN_OBJECT, { holds_position: false }, {
-            where: { mapping: scope.mapping, ...organizationWhere(scope.organizationId), holds_position: true, id: { $ne: runId } },
+            where: {
+                mapping: scope.mapping,
+                ...organizationWhere(scope.organizationId),
+                holds_position: true,
+                id: { $ne: runId },
+                committed_at: { $lt: committedAt },
+            },
             multi: true,
             context: SYSTEM_CONTEXT,
         });

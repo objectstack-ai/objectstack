@@ -584,7 +584,7 @@ describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed
         await ledger.describe(id, {
             sourceKind: 'datasource', source: 'erp_order', datasource: 'erp', readPath: 'builtin', watermarkField: 'updated_at', from: START,
         });
-        await ledger.commit(id, scope, at(2000), true);
+        await ledger.commit(id, scope, at(2000));
         // ...and the server stops: the row still reads running.
         const info: string[] = [];
         const logger = { debug() {}, info: (m: string) => { info.push(m); }, warn() {}, error() {} };
@@ -599,6 +599,27 @@ describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed
         expect(next.pulled).toBe(2);
         // The next boot finds nothing left running.
         expect(await closeInterruptedSyncRuns(h.ql as never, logger as never)).toBe(0);
+    });
+
+    it('two runs of one mapping committing in turn: the run committed last holds the position, and the next pull starts there', async () => {
+        const h = await harness(THREE, { runs: true });
+        const ledger = h.deps.runs!;
+        const a = await ledger.open({ mapping: MAPPING.name }, new Date());
+        const b = await ledger.open({ mapping: MAPPING.name }, new Date());
+        const scope = { mapping: MAPPING.name, organizationId: a.organizationId };
+        const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
+        for (const id of [a.id, b.id]) {
+            await ledger.describe(id, { sourceKind: 'datasource', source: 'erp_order', watermarkField: 'updated_at', from: START });
+        }
+        await ledger.commit(a.id, scope, at(1000));
+        await tick();
+        await ledger.commit(b.id, scope, at(1500));
+        await tick();
+        // A finishes another window after B's: A is now the run committed last.
+        await ledger.commit(a.id, scope, at(2000));
+        const held = (await runRows(h.ql)).filter((r) => Boolean(r.holds_position)).map((r) => r.id);
+        expect(held).toEqual([a.id]);
+        expect((await ledger.lastCommitted(scope))?.position).toBe(at(2000));
     });
 
     it('full: true reads from watermark.start on every run, whatever position is stored', async () => {
