@@ -320,9 +320,10 @@ describe('dispatchAction answers what the REST /actions door answers', () => {
  * not place is served from the host kernel. Each kernel's script handler
  * answers its own name, so `data.ran` says which kernel ran the action.
  *
- * The REST door is the real `dispatch()` on a scoped path, its caller
- * admitted by the environment kernel's `auth` session; the host door is
- * `dispatchAction` on the HOST kernel, naming the environment.
+ * The REST door is the real `dispatch()` as the scoped mount calls it (the
+ * unscoped route path, the environment on `request.params`), or on the
+ * catch-all's scoped path; its caller is admitted by the environment kernel's
+ * `auth` session. The host door is `dispatchAction` on the HOST kernel.
  */
 describe('dispatchAction on a multi-kernel host runs on the environment\'s own kernel, as the REST door does', () => {
     const plain = { name: 'plain_ping', label: 'Plain', type: 'script', target: 'plain_ping', ai: EXPOSED };
@@ -331,11 +332,13 @@ describe('dispatchAction on a multi-kernel host runs on the environment\'s own k
 
     function twoKernelHost(resolve: (ctx: any, envKernel: unknown) => unknown) {
         const env = makeRig([plain], { ranOn: ENV_A, services: { auth } });
-        const seen: Array<{ door: string; routePath: unknown; urlEnvironmentId: unknown }> = [];
+        const seen: Array<{ door: string; routePath: unknown; urlEnvironmentId: unknown; environmentId: unknown; placed: boolean }> = [];
         let door = '';
         const resolveKernel = vi.fn(async (ctx: any) => {
-            seen.push({ door, routePath: ctx.routePath, urlEnvironmentId: ctx.urlEnvironmentId });
-            return resolve(ctx, env.kernel);
+            const asked = { door, routePath: ctx.routePath, urlEnvironmentId: ctx.urlEnvironmentId, environmentId: ctx.environmentId };
+            const kernel = resolve(ctx, env.kernel);
+            seen.push({ ...asked, placed: kernel !== undefined });
+            return kernel;
         });
         const host = makeRig([plain], { ranOn: 'host', services: { auth, 'kernel-resolver': { resolveKernel } } });
         const viaScopedRest = (environmentId: string) => {
@@ -344,13 +347,18 @@ describe('dispatchAction on a multi-kernel host runs on the environment\'s own k
                 'POST', `/environments/${environmentId}/actions/${OBJECT}/${plain.name}`, {}, {}, { request: { headers: {} } } as any,
             );
         };
-        const viaHost = (environmentId: string) => {
-            door = 'host';
-            return dispatchAction(host.kernel, {
-                executionContext: MEMBER_EC as any, environmentId, objectName: OBJECT, actionName: plain.name,
-            });
+        const viaMountedRest = (environmentId: string) => {
+            door = 'rest';
+            return new HttpDispatcher(host.kernel).dispatch(
+                'POST', `/actions/${OBJECT}/${plain.name}`, {}, {}, { request: { headers: {}, params: { environmentId } } } as any,
+            );
         };
-        return { env, host, seen, viaScopedRest, viaHost };
+        const viaHostCall = (call: Partial<ActionDispatchRequest>) => {
+            door = 'host';
+            return dispatchAction(host.kernel, { executionContext: MEMBER_EC as any, actionName: plain.name, ...call });
+        };
+        const viaHost = (environmentId: string) => viaHostCall({ environmentId, objectName: OBJECT });
+        return { env, host, seen, viaScopedRest, viaMountedRest, viaHostCall, viaHost };
     }
 
     /** The contract's resolver: the scoped-URL hint names the environment. */
@@ -363,20 +371,46 @@ describe('dispatchAction on a multi-kernel host runs on the environment\'s own k
     it('a call naming environment A runs on A\'s kernel through both doors, and the resolver is asked the same question', async () => {
         const h = twoKernelHost(placesByHint);
 
-        const rest: any = (await h.viaScopedRest(ENV_A)).response;
+        const rest: any = (await h.viaMountedRest(ENV_A)).response;
         const host = await h.viaHost(ENV_A);
+        const scoped: any = (await h.viaScopedRest(ENV_A)).response;
 
         expect({ status: rest.status, data: rest.body.data }).toEqual({ status: 200, data: { ran: ENV_A } });
         expect({ status: host.status, data: host.body.data }).toEqual({ status: rest.status, data: rest.body.data });
+        expect({ status: scoped.status, data: scoped.body.data }).toEqual({ status: rest.status, data: rest.body.data });
         expect(h.host.ran()).toBe(0);
-        expect(h.env.ran()).toBe(2);
-        // The first question each door puts to the resolver is the same one.
+        expect(h.env.ran()).toBe(3);
+        // The first question each door puts to the resolver is the same one:
+        // the route path, the scoped-URL hint, and no environment written
+        // before the resolver writes it.
         const first = (door: string) => {
             const { door: _d, ...hints } = h.seen.find((s) => s.door === door)!;
             return hints;
         };
         expect(first('host')).toEqual(first('rest'));
-        expect(first('rest')).toEqual({ routePath: `/environments/${ENV_A}/actions/${OBJECT}/${plain.name}`, urlEnvironmentId: ENV_A });
+        expect(first('rest')).toEqual({ routePath: `/actions/${OBJECT}/${plain.name}`, urlEnvironmentId: ENV_A, environmentId: undefined, placed: true });
+    });
+
+    // The route path the host door builds cannot be steered by an object or
+    // namespace name: with `environmentId` omitted, no environment hint
+    // reaches the resolver whatever the names are, and the host kernel is
+    // chosen exactly as for a plain name.
+    it.each([
+        ['an object named `environments`', { objectName: 'environments', actionName: ENV_A }],
+        ['a namespace named `environments`', { namespace: 'environments', objectName: ENV_A }],
+        ['an object name containing `/`', { objectName: `x/environments/${ENV_A}` }],
+    ])('the route path the host door builds cannot be steered by %s', async (_label, call: Partial<ActionDispatchRequest>) => {
+        const h = twoKernelHost(placesByHint);
+
+        await h.viaHostCall({ objectName: OBJECT });
+        const plainName = h.seen.splice(0);
+        await h.viaHostCall(call);
+        const named = h.seen.splice(0);
+
+        const question = (asked: typeof plainName) => asked.map(({ urlEnvironmentId, environmentId, placed }) => ({ urlEnvironmentId, environmentId, placed }));
+        expect(question(plainName)[0]).toEqual({ urlEnvironmentId: undefined, environmentId: undefined, placed: false });
+        expect(question(named)).toEqual(question(plainName));
+        expect(h.env.ran()).toBe(0);
     });
 
     it('an environment the resolver does not place is served from the host kernel at both doors', async () => {

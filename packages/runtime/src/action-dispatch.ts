@@ -857,23 +857,30 @@ export interface ActionDispatchAnswer {
 }
 
 /**
- * The dispatcher's environment-and-kernel step (`HttpDispatcher`'s
- * `resolveRequestKernel`, the first half of `resolveRequestScope`): it writes
- * the resolver hints for `routePath`, `context.kernel`, and whatever the
- * host's resolver writes (`environmentId`, `dataDriver`). A resolver's throw
- * leaves through it.
+ * The dispatcher's placement step for the host door (`HttpDispatcher`'s
+ * `placeHostActionRequest`): it writes the two resolver hints from the
+ * values it is handed — `routePath`, and `urlEnvironmentId` from
+ * `environmentId` alone — then runs the placement `resolveRequestScope`
+ * runs, writing `context.kernel` and whatever the host's resolver writes
+ * (`environmentId`, `dataDriver`). A resolver's throw leaves through it.
  */
-export type PlaceRequestInEnvironment = (context: HttpProtocolContext, routePath: string) => Promise<void>;
+export type PlaceRequestInEnvironment = (
+    context: HttpProtocolContext,
+    hints: { routePath: string; environmentId?: string },
+) => Promise<void>;
 
 /**
- * The REST path the same call takes through the scoped door — what the
- * dispatcher's resolver hints are read from (`routePath`, and
- * `urlEnvironmentId` from its `/environments/:id` prefix). The record id
- * travels in the body, a spelling the REST door also takes.
+ * The REST route of the same call, as the scoped mount hands it to
+ * `dispatch()` (the environment travels beside it, never inside it). Every
+ * segment is encoded, so a name containing `/` stays one segment. It is
+ * informational only: no environment hint is derived from it, so the route
+ * path the host door builds cannot be steered by an object, namespace or
+ * action name. The record id travels in the body, a spelling the REST door
+ * also takes.
  */
-function scopedActionRoutePath(environmentId: string | undefined, namespace: string | undefined, objectName: string, actionName: string): string {
-    const scope = environmentId ? `/environments/${environmentId}` : '';
-    return `${scope}/actions${namespace !== undefined ? `/${namespace}` : ''}/${objectName}/${actionName}`;
+function actionRoutePath(namespace: string | undefined, objectName: string, actionName: string): string {
+    const segment = encodeURIComponent;
+    return `/actions${namespace !== undefined ? `/${segment(namespace)}` : ''}/${segment(objectName)}/${segment(actionName)}`;
 }
 
 /**
@@ -917,21 +924,23 @@ export async function dispatchActionRequest(
         if (typeof value === 'string') headers[name.toLowerCase()] = value;
     }
     const namedEnvironment = typeof request.environmentId === 'string' && request.environmentId !== '' ? request.environmentId : undefined;
-    const context: HttpProtocolContext = {
-        request: { headers },
-        executionContext: ec,
-        ...(namedEnvironment ? { environmentId: namedEnvironment } : {}),
-    };
+    // `environmentId` is the RESOLVER's to write, as at the REST door: the
+    // named environment reaches it as the scoped-URL hint, never pre-written
+    // onto the context.
+    const context: HttpProtocolContext = { request: { headers }, executionContext: ec };
     const objectName = typeof request.objectName === 'string' && request.objectName !== ''
         ? request.objectName
         : actionExec.GLOBAL_ACTION_OBJECT_KEY;
     // [ADR-0006 Phase 5] PLACEMENT — the step `dispatch()` runs before the
-    // REST door, asked the scoped path of this same call: on a multi-kernel
+    // REST door, asked what the scoped REST request asks: on a multi-kernel
     // host the resolver answers the environment's own kernel (and writes its
     // `environmentId` / `dataDriver`), and a resolver that fails refuses the
     // call instead of letting it run on the host kernel.
     try {
-        await place(context, scopedActionRoutePath(namedEnvironment, request.namespace, objectName, actionName));
+        await place(context, {
+            routePath: actionRoutePath(request.namespace, objectName, actionName),
+            ...(namedEnvironment ? { environmentId: namedEnvironment } : {}),
+        });
     } catch (err) {
         return deps.errorFromThrown(err, 500);
     }

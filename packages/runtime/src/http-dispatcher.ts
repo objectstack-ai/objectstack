@@ -755,16 +755,9 @@ export class HttpDispatcher {
 
     /**
      * The ENVIRONMENT and KERNEL half of {@link resolveRequestScope}: the
-     * resolver hints, the host's {@link KernelResolver} (or `defaultKernel`),
-     * and the scope touch, written onto `context` exactly as `dispatch()`
-     * writes them. A resolver that throws throws out of here, as it throws
-     * out of `dispatch()`.
-     *
-     * Split out for the one caller that brings its own identity: the host
-     * action door ({@link dispatchHostAction}, the published `dispatchAction`),
-     * whose caller the host already authenticated. It places the call with
-     * this same step, never a lookalike, so on a multi-kernel host the call
-     * runs on the kernel the REST door's scoped path is served from.
+     * resolver hints parsed from the route path, then the placement
+     * ({@link placeRequestOnKernel}). A resolver that throws throws out of
+     * here, as it throws out of `dispatch()`.
      */
     private async resolveRequestKernel(context: HttpProtocolContext, cleanPath: string): Promise<void> {
         // ── Environment Resolution + Multi-Kernel Routing (ADR-0006 Phase 5) ──
@@ -776,6 +769,22 @@ export class HttpDispatcher {
         // resolver registered → single-environment: every request serves from
         // `defaultKernel` with no environment context.
         this.prepareResolverHints(context, cleanPath);
+        await this.placeRequestOnKernel(context);
+    }
+
+    /**
+     * The placement both doors share, once the resolver hints are on
+     * `context`: the host's {@link KernelResolver} (or `defaultKernel`) and
+     * the scope touch, written onto `context` exactly as `dispatch()` writes
+     * them. A resolver that throws throws out of here.
+     *
+     * Its second caller is the host action door ({@link dispatchHostAction},
+     * the published `dispatchAction`), whose caller the host already
+     * authenticated and whose request has no URL: it writes the same two
+     * hints from the call's VALUES ({@link placeHostActionRequest}) and is
+     * placed by this same step, never a lookalike.
+     */
+    private async placeRequestOnKernel(context: HttpProtocolContext): Promise<void> {
         // [#5155] The resolved kernel is written on the REQUEST, not on the
         // dispatcher. Two requests interleaving across the awaits below (and
         // across every await their handlers make afterwards) each keep their
@@ -2895,7 +2904,25 @@ export class HttpDispatcher {
      * (`./action-dispatch.ts#dispatchAction`, the published entry).
      */
     async dispatchHostAction(request: ActionDispatchRequest): Promise<ActionDispatchAnswer> {
-        return dispatchActionRequest(this.domainDeps, request, (context, routePath) => this.resolveRequestKernel(context, routePath));
+        return dispatchActionRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
+    }
+
+    /**
+     * The host action door's resolver hints, written from the call's values
+     * rather than parsed from a path: `routePath` is the REST route of the
+     * same call (informational, for a resolver's path policy) and
+     * `urlEnvironmentId` is the environment the host named, or nothing. No
+     * environment hint is ever derived from `routePath`, so the object,
+     * namespace or action name a call carries cannot change which
+     * environment the resolver reads. Then the shared placement.
+     */
+    private async placeHostActionRequest(
+        context: HttpProtocolContext,
+        hints: { routePath: string; environmentId?: string },
+    ): Promise<void> {
+        context.routePath = hints.routePath;
+        if (hints.environmentId) context.urlEnvironmentId = hints.environmentId;
+        await this.placeRequestOnKernel(context);
     }
 
     /** Thin delegate — body extracted to `./domains/ai.ts` (D11③ PR-7). */
