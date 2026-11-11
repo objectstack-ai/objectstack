@@ -25,12 +25,17 @@
  *  2. One email domain, one provider: register (both doors) and a domain edit
  *     onto a served domain are refused `409 RESOURCE_CONFLICT` on `domain`,
  *     naming the holder to a platform administrator; a subdomain beside its
- *     parent is accepted.
+ *     parent is accepted. [#32308] So is refused a subdomain inside a list
+ *     beside its parent, either way round, and an entry spelled another way
+ *     (Unicode or punycode, a trailing dot); a list with no subdomain of the
+ *     parent, and a look-alike name, stay accepted.
  *  3. The edit door: a SAML signing certificate rotates with users linked (and
  *     may overlap the current one), an identity change with users linked is
  *     refused with that reason, an OIDC client secret is replaced without ever
  *     being answered, and a field of the other protocol is refused naming the
- *     right action.
+ *     right action. [#32308] An OIDC provider with userinfo opted out keeps
+ *     its stored endpoint through an edit (the parked member survives the
+ *     vendor's merge).
  */
 
 import { describe, it, expect, afterEach, vi, beforeAll } from 'vitest';
@@ -553,6 +558,86 @@ describe('an email domain another provider serves is refused on register and on 
     expect(own.status, await own.clone().text()).toBe(200);
   }, 30_000);
 
+  /** Register `domain` for a new OIDC provider on the direct door; the parsed answer and status. */
+  const register = async (s: Stage, providerId: string, domain: string) => {
+    const res = await postJson(s, '/sso/register', oidcRegister(providerId, domain));
+    return { status: res.status, body: (await res.json()) as any };
+  };
+
+  /** Register `domain` for a new SAML provider through the console's register bridge (no IdP discovery to reach). */
+  const registerSaml = (s: Stage, providerId: string, domain: string) =>
+    bridge(s, 'POST', '/admin/sso/register-saml', {
+      providerId,
+      issuer: `https://saml.${providerId}.example/entity`,
+      domain,
+      entryPoint: `https://saml.${providerId}.example/sso`,
+      cert: certificate(),
+    });
+
+  it('a subdomain inside a multi-entry list beside its parent is refused, either way round; nothing written', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    // The list's 'eng.acme.example' does not win the exact step, so the parent's list matches it too.
+    for (const domain of ['eng.acme.example, foo.example', 'https://eng.acme.example', 'Eng.Acme.example']) {
+      const { status, body } = await register(s, 'eng-list', domain);
+      expect(status, `${domain}: ${JSON.stringify(body)}`).toBe(409);
+      expect(body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
+      expect(body.message).toContain("through its entry 'acme.example'");
+    }
+
+    // The other way round: a parent added beside a provider that lists the subdomain.
+    await storeProvider(s, { providerId: OTHER, domain: 'eng.globex.example, globex.io' });
+    const parent = await register(s, 'globex-parent', 'globex.example');
+    expect(parent.status, JSON.stringify(parent.body)).toBe(409);
+    expect(parent.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: OTHER });
+    expect(parent.body.message).toContain("The email domain 'eng.globex.example' is served by SSO provider");
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, OTHER]);
+  }, 30_000);
+
+  it('a domain edit that lists a subdomain beside its parent is refused; the stored domain stays', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const res = await postJson(s, '/sso/update-provider', { providerId: OTHER, domain: 'globex.example, eng.acme.example' });
+    const body = (await res.json()) as any;
+    expect(res.status, JSON.stringify(body)).toBe(409);
+    expect(body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
+    expect((await rows(s, 'sys_sso_provider', { provider_id: OTHER }))[0].domain).toBe('globex.example');
+  }, 30_000);
+
+  it('control: a list beside a parent is registered when no entry is a subdomain of it', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    // 'xacme.example' ends with 'acme.example' but is not a subdomain of it.
+    const res = await registerSaml(s, 'list-ok', 'xacme.example, foo.example');
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual(['list-ok', PROVIDER]);
+  }, 30_000);
+
+  it('an internationalised domain is one domain in Unicode and in punycode, either way round', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'bücher.example' });
+    const ascii = await register(s, 'ascii', 'xn--bcher-kva.example');
+    expect(ascii.status, JSON.stringify(ascii.body)).toBe(409);
+    expect(ascii.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
+    expect(ascii.body.message).toContain("'xn--bcher-kva.example' (bücher.example)");
+
+    await storeProvider(s, { providerId: OTHER, domain: 'xn--mnchen-3ya.example' });
+    const unicode = await register(s, 'unicode', 'MÜNCHEN.example');
+    expect(unicode.status, JSON.stringify(unicode.body)).toBe(409);
+    expect(unicode.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: OTHER });
+
+    // A trailing root dot is the same domain too.
+    const dotted = await register(s, 'dotted', 'xn--mnchen-3ya.example.');
+    expect(dotted.status, JSON.stringify(dotted.body)).toBe(409);
+    expect(dotted.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: OTHER });
+
+    // Control: a different name that only looks alike is registered.
+    const other = await registerSaml(s, 'bucher', 'bucher.example');
+    expect(other.status, await other.clone().text()).toBe(200);
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, 'bucher', OTHER]);
+  }, 30_000);
+
   it('a caller who is not a platform administrator is told the domain is served, not by which provider', async () => {
     const s = await stage();
     await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
@@ -763,6 +848,49 @@ describe('a registered provider is edited in place, without unlinking anyone', (
     const saml = await bridge(s, 'POST', '/admin/sso/update-provider', { providerId: OIDC, entryPoint: 'https://x.example/sso' });
     expect(saml.status).toBe(400);
     expect(((await saml.json()) as any).error.message).toContain('Use "Edit OIDC Settings"');
+  }, 30_000);
+
+  it('an OIDC provider with userinfo opted out keeps its stored userinfo endpoint through an edit', async () => {
+    const s = await stage();
+    const OIDC = 'acme-oidc-idtoken';
+    const USERINFO = `https://${OIDC}.idp.example/userinfo`;
+    await storeProvider(s, {
+      providerId: OIDC,
+      domain: 'acme.example',
+      oidcConfig: {
+        issuer: `https://${OIDC}.idp.example`,
+        clientId: 'acme-client',
+        clientSecret: 'client-secret-32308',
+        authorizationEndpoint: `https://${OIDC}.idp.example/authorize`,
+        tokenEndpoint: `https://${OIDC}.idp.example/token`,
+        userInfoEndpoint: USERINFO,
+        jwksEndpoint: `https://${OIDC}.idp.example/jwks`,
+        pkce: true,
+        scopes: ['openid', 'email'],
+      },
+    });
+    const auth: any = await s.manager.getAuthInstance();
+    const ctx = await auth.$context;
+    await ctx.adapter.update({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }], update: { skipUserInfo: true } });
+    const stored = async () => {
+      const [row] = await rows(s, 'sys_sso_provider', { provider_id: OIDC });
+      return { row, oidc: JSON.parse(String(row.oidc_config)) as Record<string, unknown> };
+    };
+    // The vendor is handed the config with the endpoint parked, so its callback reads the ID token.
+    const handed = await ctx.adapter.findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }] });
+    expect(JSON.parse(handed.oidcConfig).userInfoEndpoint).toBeUndefined();
+
+    // The edit door sends the scopes alone; the vendor merges them into the config it read, member by member.
+    const res = await bridge(s, 'POST', '/admin/sso/update-provider', { providerId: OIDC, scopes: 'openid email profile' });
+    expect(res.status, await res.clone().text()).toBe(200);
+
+    const after = await stored();
+    expect(after.oidc.scopes).toEqual(['openid', 'email', 'profile']);
+    expect(after.oidc.userInfoEndpoint).toBe(USERINFO);
+    expect(after.oidc).not.toHaveProperty('osParkedUserInfoEndpoint');
+    expect(Boolean(after.row.skip_user_info)).toBe(true);
+    const again = await ctx.adapter.findOne({ model: 'ssoProvider', where: [{ field: 'providerId', value: OIDC }] });
+    expect(JSON.parse(again.oidcConfig).userInfoEndpoint).toBeUndefined();
   }, 30_000);
 
   it('the two edit actions post the fields the bridge reads, and neither reads a secret back into its form', () => {

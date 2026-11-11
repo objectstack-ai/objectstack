@@ -39,20 +39,55 @@
  *
  * ## One domain, one provider
  *
- * Sign-in routes an email address to a provider by its domain
- * (`/sign-in/sso`: the provider whose `domain` equals the address's domain,
- * else the first whose comma-separated list matches it), so a second provider
- * registered for a domain entry another already serves would not be reached
- * by address. (An IdP-initiated SAML sign-in reaches a provider through its
- * own ACS URL, without address routing; the refusal is about the address
- * route.) {@link findSsoDomainClaim} finds the provider already serving any
- * of the requested domains, and the before-hook refuses the register (and a
- * domain edit on `/sso/update-provider`) with `409 RESOURCE_CONFLICT` naming
- * it. Only an exact domain entry collides: a provider for `eng.acme.com` beside
- * one for `acme.com` is a working configuration (the exact match wins for
- * `eng.acme.com`, the parent serves every other subdomain), so it is accepted.
+ * Sign-in routes an email address to a provider by its domain. Measured on
+ * `@better-auth/sso` 1.7.12 (`/sign-in/sso`), in two steps:
+ *
+ *   1. the provider whose whole stored `domain` value equals the address's
+ *      domain (a plain equality read, so `eng.acme.com` alone, not
+ *      `eng.acme.com, foo.com` and not `https://eng.acme.com`);
+ *   2. else the first provider of an unordered `findMany` whose
+ *      comma-separated list holds the domain or a parent of it
+ *      (`domainMatches`: equal, or ends with `.` + entry). No sort is asked,
+ *      so "first" is the store's row order, which no contract fixes.
+ *
+ * So a second provider would not be reached by address in two shapes, and
+ * the before-hook refuses both on `/sso/register` (and on a domain edit on
+ * `/sso/update-provider`) with `409 RESOURCE_CONFLICT` naming the holder
+ * ({@link findSsoDomainClaim}). (An IdP-initiated SAML sign-in reaches a
+ * provider through its own ACS URL, without address routing; the refusal is
+ * about the address route.)
+ *
+ *   - **exact:** both list the same domain entry;
+ *   - **parent:** one lists a subdomain (`eng.acme.com`) and the other its
+ *     parent (`acme.com`), and the subdomain's provider does not win step 1,
+ *     because its `domain` is a list or another spelling of the entry. Step 2
+ *     then matches both, and the row order picks. This is judged in both
+ *     registration orders: a parent added beside a listed subdomain is
+ *     refused too, since the order the store answers in is not the order of
+ *     registration.
+ *
+ * Accepted: a provider whose whole `domain` is exactly `eng.acme.com` beside
+ * one for `acme.com`, either way round. Step 1 sends `eng.acme.com` to the
+ * subdomain's provider, and the parent serves its other subdomains. (A deeper
+ * name such as `x.eng.acme.com` matches both lists at step 2; that is the
+ * ruled-accepted configuration, left as it is.)
+ *
+ * Every entry is compared as one spelling: the bare lower-case ASCII host,
+ * with an internationalised name in its punycode form (`bücher.de` and
+ * `xn--bcher-kva.de` are one domain) and a trailing root dot dropped
+ * (`acme.com.` is `acme.com`, as the vendor's own parse reads it). Every
+ * provider row is read and parsed the same way; no raw substring of the
+ * stored value narrows the read, since the stored spelling is whatever the
+ * author typed.
+ *
+ * Not closed here: the check is a read before the vendor's insert, not one
+ * atomic act with it, so two registers racing for one domain can both pass.
+ * The store offers no constraint that holds the rule (a unique `domain`
+ * column sees whole values, not entries, parents or spellings), and the
+ * vendor's register runs in no transaction this adapter opens.
  */
 
+import { domainToUnicode } from 'node:url';
 import type { IDataEngine } from '@objectstack/core';
 import { withSystemContext } from './objectql-adapter.js';
 import {
@@ -82,55 +117,102 @@ function registered(engine: IDataEngine, object: string): boolean {
 
 // ── Domains ─────────────────────────────────────────────────────────────────
 
-/** One domain entry as a bare lower-case host: `https://Acme.com/x` and `acme.com:443` are both `acme.com`. */
+/**
+ * One domain entry as a bare lower-case ASCII host: `https://Acme.com/x`,
+ * `acme.com:443` and `acme.com.` are all `acme.com`, and `bücher.de` is
+ * `xn--bcher-kva.de` (the URL parser's punycode form).
+ */
 function bareDomain(entry: string): string {
   const trimmed = entry.trim();
   if (!trimmed) return '';
+  let host: string;
   try {
-    return new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
+    host = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`).hostname.toLowerCase();
   } catch {
-    return trimmed.toLowerCase();
+    host = trimmed.toLowerCase();
   }
+  return host.replace(/\.+$/, '');
 }
 
 /**
  * The email domains a provider's `domain` value serves: its comma-separated
- * entries, each as a bare lower-case host, blanks dropped, each once.
+ * entries, each as a bare lower-case ASCII host, blanks dropped, each once.
  */
 export function providerDomains(domain: unknown): string[] {
   if (typeof domain !== 'string') return [];
   return [...new Set(domain.split(',').map(bareDomain).filter(Boolean))];
 }
 
-/** A domain another provider already serves: the provider and the domain. */
-export interface SsoDomainClaim {
-  providerId: string;
-  domain: string;
+/**
+ * Whether a provider whose stored `domain` is `value` wins the vendor's exact
+ * step for `entry` (step 1 in the module comment): only when the whole value
+ * is that entry, spelled as the bare lower-case ASCII host.
+ */
+function winsExactStep(value: unknown, entry: string): boolean {
+  return typeof value === 'string' && value.trim() === entry;
+}
+
+/** `child` is a proper subdomain of `parent`: the vendor's "ends with `.` + entry". */
+function isSubdomainOf(child: string, parent: string): boolean {
+  return child.endsWith(`.${parent}`);
 }
 
 /**
- * The first provider other than `exceptProviderId` that already serves one of
- * `domains`, or `undefined`. One read per domain, narrowed in the store by a
- * case-insensitive substring and decided here on the parsed entries, so a
- * provider for `eng.acme.com` does not claim `acme.com`.
+ * A domain another provider already serves.
+ *
+ *   - `exact`: the holder lists `domain` itself.
+ *   - `parent`: the request lists `domain` but does not win the exact step
+ *     for it, and the holder lists its parent `entry`.
+ *   - `child`: the holder lists `domain` but does not win the exact step for
+ *     it, and the request lists its parent `entry`.
+ */
+export interface SsoDomainClaim {
+  providerId: string;
+  domain: string;
+  kind: 'exact' | 'parent' | 'child';
+  /** The parent entry that matches `domain` as well (`parent`, `child`). */
+  entry?: string;
+}
+
+/**
+ * The first provider other than `exceptProviderId` whose `domain` collides
+ * with the requested `domain` value, or `undefined`; an exact collision is
+ * found before a parent one. Every provider row is read and compared on its
+ * parsed entries ({@link providerDomains}). A raw substring of the stored
+ * value cannot narrow the read: the stored spelling (Unicode or punycode, a
+ * URL, a parent) need not contain the requested one.
  */
 export async function findSsoDomainClaim(
   engine: IDataEngine,
-  domains: readonly string[],
+  domain: unknown,
   exceptProviderId?: string,
 ): Promise<SsoDomainClaim | undefined> {
+  const requested = providerDomains(domain);
+  if (requested.length === 0) return undefined;
   const reader: IDataEngine = withSystemContext(engine);
-  for (const domain of domains) {
-    const rows = rowsOf(
-      await reader.find(SSO_PROVIDER_OBJECT, { where: { domain: { $icontains: domain } }, fields: ['provider_id', 'domain'] } as never),
-    );
-    for (const row of rows) {
-      const providerId = text(row.provider_id);
-      if (!providerId || providerId === exceptProviderId) continue;
-      if (providerDomains(row.domain).includes(domain)) return { providerId, domain };
+  const others = rowsOf(await reader.find(SSO_PROVIDER_OBJECT, { fields: ['provider_id', 'domain'] } as never))
+    .map((row) => ({ providerId: text(row.provider_id), value: row.domain, entries: providerDomains(row.domain) }))
+    .filter((row) => row.providerId && row.providerId !== exceptProviderId);
+
+  for (const wanted of requested) {
+    const holder = others.find((row) => row.entries.includes(wanted));
+    if (holder) return { providerId: holder.providerId, domain: wanted, kind: 'exact' };
+  }
+  for (const wanted of requested) {
+    for (const row of others) {
+      const parent = winsExactStep(domain, wanted) ? undefined : row.entries.find((held) => isSubdomainOf(wanted, held));
+      if (parent) return { providerId: row.providerId, domain: wanted, kind: 'parent', entry: parent };
+      const child = row.entries.find((held) => isSubdomainOf(held, wanted) && !winsExactStep(row.value, held));
+      if (child) return { providerId: row.providerId, domain: child, kind: 'child', entry: wanted };
     }
   }
   return undefined;
+}
+
+/** `'xn--bcher-kva.de' (bücher.de)`: the compared ASCII form, and the Unicode one when it differs. */
+function spelled(domain: string): string {
+  const unicode = domainToUnicode(domain);
+  return unicode && unicode !== domain ? `'${domain}' (${unicode})` : `'${domain}'`;
 }
 
 /** The refusal of a register or a domain edit onto a domain another provider serves; thrown as better-auth's `APIError`. */
@@ -141,6 +223,28 @@ export interface SsoDomainClaimedRefusal {
   field: 'domain';
   /** The provider that serves the domain; named only to a caller who may read every provider. */
   heldBy?: string;
+}
+
+/** The sentence that says why `claim` collides, and what to do instead. */
+function claimSentence(claim: SsoDomainClaim, holder: string): string {
+  const domain = spelled(claim.domain);
+  if (claim.kind === 'parent') {
+    return `The email domain ${domain} is already served by ${holder} through its entry '${claim.entry}'. `
+      + `Sign-in sends ${domain} to its own provider first only when that provider's whole domain is exactly ${domain}; `
+      + 'as one entry of a list, or in another spelling, both providers match it and the store row order picks one, '
+      + `so this provider would not be reliably reached by address. Register ${domain} as a provider's only domain `
+      + `entry, or edit '${claim.entry}' off the provider that serves it.`;
+  }
+  if (claim.kind === 'child') {
+    return `The email domain ${domain} is served by ${holder} as one entry of a list. Adding its parent '${claim.entry}' `
+      + `here would leave both providers matching ${domain}, with the store row order picking one, so ${domain} `
+      + `would not be reliably reached by address. Give ${domain} a provider whose only domain entry it is, or leave `
+      + `'${claim.entry}' off this provider.`;
+  }
+  return `The email domain ${domain} is already served by ${holder}. Sign-in routes an address to one provider `
+    + `by its domain, so a second provider for ${domain} would not be reached by address. `
+    + `Register it under its own domain entry (a subdomain such as 'sso.${claim.domain}' is accepted as a provider's only entry), `
+    + `edit ${domain} off the provider that serves it, or delete that provider first.`;
 }
 
 /**
@@ -154,11 +258,7 @@ export function ssoDomainClaimedRefusal(claim: SsoDomainClaim, nameHolder: boole
     status: 'CONFLICT',
     code: 'RESOURCE_CONFLICT',
     field: 'domain',
-    message:
-      `The email domain '${claim.domain}' is already served by ${holder}. Sign-in routes an address to one provider `
-      + `by its domain, so a second provider for '${claim.domain}' would not be reached by address. `
-      + `Register it under its own domain entry (a subdomain such as 'sso.${claim.domain}' is accepted), `
-      + `edit '${claim.domain}' off the provider that serves it, or delete that provider first.`,
+    message: claimSentence(claim, holder),
     ...(nameHolder ? { heldBy: claim.providerId } : {}),
   };
 }

@@ -5744,8 +5744,9 @@ export class AuthManager {
    *
    * [#32085] A delete the floor admits is then counted before the vendor's
    * first write (`sso-provider-lifecycle.ts` `stageSsoProviderDeleteImpact`):
-   * the users it unlinks, those it locks out, the group mappings and projected
-   * grants it leaves behind. {@link settleSsoProviderDelete} removes those and
+   * the users it unlinks and, of those,
+   * users with no other sign-in method linked; the group mappings and
+   * projected grants it leaves behind. {@link settleSsoProviderDelete} removes those and
    * names the counts in the answer. A count that cannot be read refuses the
    * delete `503 SERVICE_UNAVAILABLE`, because an unlink cannot be taken back.
    */
@@ -5793,7 +5794,9 @@ export class AuthManager {
    * already serves (`409 RESOURCE_CONFLICT`, `field: 'domain'`), before the
    * vendor writes. Sign-in routes an address to a provider by its domain, so
    * the second provider would not be reached by address
-   * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`).
+   * (`sso-provider-lifecycle.ts` `findSsoDomainClaim`): the same entry, or a
+   * subdomain and its parent where the subdomain's provider does not hold it
+   * as its whole domain, each entry compared as one ASCII spelling.
    *
    * Asked only of an authenticated caller whose body carries a domain: what
    * the vendor itself answers (no session, a malformed body) falls through to
@@ -5816,7 +5819,7 @@ export class AuthManager {
     const { APIError } = await import('better-auth/api');
     let claim;
     try {
-      claim = await findSsoDomainClaim(engine, domains, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
+      claim = await findSsoDomainClaim(engine, ctx.body.domain, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
     } catch {
       throw new APIError('SERVICE_UNAVAILABLE', {
         code: 'SERVICE_UNAVAILABLE',
