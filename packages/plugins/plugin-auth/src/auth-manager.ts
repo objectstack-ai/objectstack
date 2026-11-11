@@ -4528,9 +4528,11 @@ export class AuthManager {
    * mutation it belongs to.
    *
    * [ADR-0135 D4] This callback also writes the directory-managed mark
-   * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`), first,
-   * on every call: the vendor invokes it for every SCIM create, re-link and
-   * reprovision, and it is the one host seam all of them share. `source` is not
+   * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
+   * call — fail-closed and first on an active state, best-effort and after the
+   * deprovision write on an inactive one (the body says why): the vendor
+   * invokes it for every SCIM create, re-link and reprovision, and it is the
+   * one host seam all of them share. `source` is not
    * a vendor field, so the adapter would drop it; the mark is written through
    * the data engine instead, which joins the same transaction as its ambient
    * one. A user holding a local password keeps `env_native` (D4's rule).
@@ -4557,15 +4559,25 @@ export class AuthManager {
     // [ADR-0135 D4] The directory-managed mark, on the one seam every SCIM
     // create, re-link and reprovision passes through (`scim-identity-source.ts`
     // says why it is this callback). The engine joins the vendor's transaction,
-    // so the mark commits with the SCIM write or not at all; a mark that cannot
-    // be written fails the SCIM request, which the IdP retries.
+    // so the mark commits with the SCIM write or not at all.
+    //
+    // Its failure posture depends on the state, and the ORDER is the contract:
+    //  - active: the mark is written FIRST and fails closed — a mark that
+    //    cannot be written fails the SCIM request, the vendor rolls the create
+    //    back, and the IdP retries; no SCIM user is created unmarked.
+    //  - inactive (a deactivation, a DELETE, a create with `active: false`):
+    //    the deprovision write goes FIRST and the mark after it is best-effort,
+    //    so a refused mark can never leave a deprovisioned account enabled. A
+    //    refusal is logged and swallowed; the boot backfill and the next active
+    //    write re-run the mark. (A failure that aborts the driver transaction
+    //    itself fails the deprovision write too — that is the database, not
+    //    the mark.)
     const engine = this.getDataEngine();
     if (!engine) {
       throw new Error(
         `[auth] SCIM identity reconciliation: no data engine to write the identity-source mark for user '${state.userId}'`,
       );
     }
-    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
     const writer = {
       updateUser: (id: string, data: Record<string, unknown>) =>
         db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
@@ -4582,18 +4594,45 @@ export class AuthManager {
         if (user.banExpires !== null && user.banExpires !== undefined) {
           await writer.updateUser(state.userId, { banExpires: null, updatedAt: new Date() });
         }
-        return;
+      } else {
+        await applyUserBan(writer, state.userId, {
+          banReason: SCIM_DEACTIVATION_BAN_REASON,
+          banExpires: null,
+        });
       }
-      await applyUserBan(writer, state.userId, {
-        banReason: SCIM_DEACTIVATION_BAN_REASON,
-        banExpires: null,
-      });
+      try {
+        await markDirectoryProvisionedUsers(engine as never, [state.userId]);
+      } catch (e) {
+        this.logScimMarkDegradation(state.userId, e);
+      }
       return;
     }
+    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
     if (!banned) return;
     // An administrator's ban is not the IdP's to lift.
     if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
     await applyUserUnban(writer, state.userId);
+  }
+
+  /**
+   * [ADR-0135 D4] The one notice for a directory-managed mark that could not
+   * be written on a SCIM deprovision, where the deprovision write has already
+   * landed and the mark is best-effort (`reconcileScimUserLifecycle`). Logged at
+   * `error`: the account is disabled, so nothing looks wrong, but the row keeps
+   * its previous `source` until the mark lands.
+   */
+  private logScimMarkDegradation(userId: string, error: unknown): void {
+    const message =
+      `[auth] the SCIM identity-source mark was NOT written for user '${userId}' on a deprovision — the account `
+      + 'was disabled and the SCIM request succeeds, so nothing looks wrong, but the user keeps their previous '
+      + '`source`, and a directory-provisioned user still reading `env_native` is offered the password / '
+      + 'identity-edit actions that hide for a managed identity (ADR-0135 D4). Remedy: make the sys_user update '
+      + 'land (write permission on `source`, driver connectivity); the boot backfill and the next active SCIM '
+      + 'write for this user re-run the mark.';
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    const meta = { object: 'sys_user', field: 'source', error: error instanceof Error ? error.message : String(error) };
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
   }
 
   /**
