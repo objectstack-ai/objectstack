@@ -100,8 +100,11 @@ function runCli(dir: string, args: string[]): Run {
     // workers and the child would inherit it: at `warn` the registry's
     // `console.log` — the writer a logger-level fix cannot reach — never speaks,
     // and the pin would hold over one writer instead of the three an operator's
-    // run has.
-    env: childEnv({ NO_COLOR: '1', OS_REGISTRY_LOG: 'info' }),
+    // run has. `OS_LOG_LEVEL: 'info'` restates the kernel writer the same way
+    // (#32154): `bootStack` boots at `warn` unless told otherwise, and at `warn`
+    // a clean stack's kernel logger has next to nothing to route. What this file
+    // pins is where each writer's lines GO, not how many there are by default.
+    env: childEnv({ NO_COLOR: '1', OS_REGISTRY_LOG: 'info', OS_LOG_LEVEL: 'info' }),
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
