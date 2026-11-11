@@ -584,7 +584,24 @@ export const CEILINGS = new Map([
   // bytes -> ceil(26746 / 4) = 6687; the ceiling moves +119, the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(26746 / 4)
-  ['skills/objectstack-automation/SKILL.md', 6687],
+  // 6687 -> 6852 (2026-11-11, card #32264, the ADR-0150 D3 skills follow-up of
+  // #32073): silently-wrong item 3 teaches how a `script` node's
+  // `config.function` resolves from the calling flow's package (as `subflow`'s
+  // `flowName` does), the platform's owner-less function in every flow's reach,
+  // a `.custom` override read package-less, the two-package `normalize_phone`
+  // example (the boot still warns), the guard refusal (`400 FLOW_FAILED`,
+  // `details.innerRefusal.code: 'RESOURCE_CONFLICT'`, `$error.code`) and the two
+  // fixes. Raise path the standing ruling 「A:先削重复,余额按实测提高」 (ruling
+  // record 6513306068, letter B; seat amendment 6782965220). PAID DOWN FIRST —
+  // one restatement cut: item 3's `defineStack({ functions: { my_fn: (ctx) => … } })`
+  // example, whose surviving home is the same item's
+  // `defineStack({ functions: { 'helpdesk.aiTriageStub': … } })` block.
+  // Arithmetic in priced bytes (stamp line excluded), against `main`'s 26746
+  // (headroom 2): the paragraph adds 678, the cut removes 18, so the LANDED
+  // priced text is 27406 bytes -> ceil(27406 / 4) = 6852; the ceiling moves
+  // +165, the measured remainder only. Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-automation/SKILL.md) - 20) / 4) == ceil(27406 / 4)
+  ['skills/objectstack-automation/SKILL.md', 6852],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:

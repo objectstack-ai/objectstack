@@ -252,7 +252,17 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
 
 3. **`script` nodes call a registered function — nothing else.** `config.function`
    (**required**: an empty node refuses at execute, an unregistered name fails
-   loudly) names one registered via `defineStack({ functions: { my_fn: (ctx) => … } })`.
+   loudly) names one registered in `defineStack({ functions })` (below).
+
+   **The name resolves from the flow's package, as `subflow`'s `flowName`
+   does**, the platform's function (registered under no package) in every
+   flow's reach; a `.custom` override reads as a package-less flow. `acme.crm`
+   and `acme.sales` both shipping `normalize_phone` each run their own (the boot
+   warns `Bare-name conflict at boot`). Holding none itself, two holders in
+   reach (the platform's counts) or one only outside its `dependencies` closure
+   fail the step as a guard (no `fault` edge): `400 FLOW_FAILED`,
+   `details.innerRefusal.code: 'RESOURCE_CONFLICT'` naming each holder,
+   `$error.code` in a `try_catch`. Fix: declare the dependency, or rename.
 
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
