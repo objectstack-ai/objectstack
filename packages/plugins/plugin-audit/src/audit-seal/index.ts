@@ -59,6 +59,7 @@ export {
   chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
+  checkpointLeafHashesFromRow,
   checkpointRow,
   DEPLOYMENT_CHAIN_KEY,
   signedBodyBytes,
