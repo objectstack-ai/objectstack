@@ -102,6 +102,11 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+// The source under test reaches `@objectstack/lint` through a dynamic
+// `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 
 interface Row {
     id: string;
