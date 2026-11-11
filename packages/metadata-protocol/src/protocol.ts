@@ -9673,6 +9673,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
+        /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
+        judgeOnly?: boolean;
     }): Promise<{
         singularType: string;
         /**
@@ -9687,7 +9689,10 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
+        promotedDraft?: { body: unknown; hash: string };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
