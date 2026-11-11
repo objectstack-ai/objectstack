@@ -169,7 +169,7 @@
           "status": "live",
           "verifiedAt": "2026-11-10",
           "note": "LIVE since the run-record slice (ADR-0153 D7): `full: true` makes every run read from `watermark.start`; omitted, a run reads on from the position the last committed run of the mapping stored on `sys_sync_run`. Delete marking by absence (D3), which only a full pull can do, lands with D3's own rows.",
-          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (`full: true` skips the read of the last committed position; otherwise the run starts from it, read through packages/services/service-automation/src/sync-run-ledger.ts#ObjectStoreSyncRunLedger)"
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (`full: true` skips the read of the last committed position, so the run starts at `watermark.start`; otherwise the run starts from that position, read from `sys_sync_run`)"
         },
         "deletePolicy": {
           "status": "planned",
