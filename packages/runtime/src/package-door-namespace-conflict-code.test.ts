@@ -66,6 +66,9 @@ import {
 } from '@objectstack/spec/api';
 import { NAMESPACE_REFUSED_LITERALS, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { SchemaRegistry } from '@objectstack/objectql';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// dispatcher chain this file reaches loads it dynamically.
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 /**
