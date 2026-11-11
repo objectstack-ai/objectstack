@@ -17,7 +17,7 @@
  * writer fills from the job's, not a filter the context adds.
  */
 
-import type { Logger } from '@objectstack/spec/contracts';
+import type { JobRunTrigger, Logger } from '@objectstack/spec/contracts';
 
 export const SYNC_RUN_OBJECT = 'sys_sync_run';
 
@@ -88,6 +88,16 @@ export interface SyncRunScope {
     organizationId?: string;
 }
 
+/**
+ * The job run that drove a pull, as the job service told the job's handler
+ * (`JobHandler`'s `runId` and `trigger`). Both absent for a pull no job drove.
+ */
+export interface SyncRunOrigin {
+    /** The job service's run-history row, on the shipped adapters a `sys_job_run` id. */
+    jobRunId?: string;
+    trigger?: JobRunTrigger;
+}
+
 /** A run as {@link SyncRunLedger.open} wrote it. */
 export interface SyncRunOpened {
     id: string;
@@ -102,8 +112,11 @@ export interface SyncRunOpened {
 
 /** The run record's store. {@link ObjectStoreSyncRunLedger} is the one implementation. */
 export interface SyncRunLedger {
-    /** Write a `running` row; answer its id and the organization it was stored with. */
-    open(scope: SyncRunScope, startedAt: Date): Promise<SyncRunOpened>;
+    /**
+     * Write a `running` row, with the job run that drove it when one did;
+     * answer its id and the organization it was stored with.
+     */
+    open(scope: SyncRunScope, startedAt: Date, origin?: SyncRunOrigin): Promise<SyncRunOpened>;
     /** Say what the run reads, once the mapping's source is known. */
     describe(runId: string, description: SyncRunDescription): Promise<void>;
     /** The position the latest committed run of `scope` stored, if any. */
@@ -170,12 +183,14 @@ const text = (v: unknown): string | undefined => (typeof v === 'string' && v.len
 export class ObjectStoreSyncRunLedger implements SyncRunLedger {
     constructor(private readonly engine: SyncRunLedgerEngine) {}
 
-    async open(scope: SyncRunScope, startedAt: Date): Promise<SyncRunOpened> {
+    async open(scope: SyncRunScope, startedAt: Date, origin?: SyncRunOrigin): Promise<SyncRunOpened> {
         const id = nextSyncRunId();
         await this.engine.insert(SYNC_RUN_OBJECT, {
             id,
             organization_id: scope.organizationId ?? null,
             mapping: scope.mapping,
+            job_run_id: origin?.jobRunId ?? null,
+            trigger: origin?.trigger ?? null,
             status: 'running',
             started_at: startedAt.toISOString(),
             read_count: 0,

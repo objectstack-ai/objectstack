@@ -19,6 +19,7 @@ import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor, ConnectorState } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
+import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal } from '../api/automation-api.zod';
 
@@ -1096,6 +1097,20 @@ export interface ConnectorSourcePullRequest {
      * reads by no package whatever the caller sends.
      */
     callerPackageId?: string | null;
+    /**
+     * The job run that drove this pull (ADR-0153 D7): the `runId` the job
+     * service handed the job's handler (`JobHandler`), on the shipped adapters
+     * the `sys_job_run` id of this attempt. The pull's run record keeps it, as
+     * text, so a job-run retention sweep never reaches the pull's history.
+     * Absent for a pull no job drove, or a job service that wrote no run row.
+     */
+    jobRunId?: string;
+    /**
+     * Why the job run that drove this pull started (ADR-0153 D7): `schedule`
+     * or `manual`, as the job service handed it to the handler. Absent for a
+     * pull no job drove, or a job service that sends none.
+     */
+    trigger?: JobRunTrigger;
 }
 
 /**

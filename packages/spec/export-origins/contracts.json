@@ -217,6 +217,7 @@
     "JobReplayOptions": "src/contracts/job-service.ts#JobReplayOptions (interface)",
     "JobRetryPolicy": "src/contracts/job-service.ts#JobRetryPolicy (interface)",
     "JobRunOutcome": "src/contracts/job-service.ts#JobRunOutcome (interface)",
+    "JobRunTrigger": "src/contracts/job-service.ts#JobRunTrigger (type)",
     "JobSchedule": "src/contracts/job-service.ts#JobSchedule (interface)",
     "JobScheduleOptions": "src/contracts/job-service.ts#JobScheduleOptions (interface)",
     "KNOWLEDGE_SERVICE": "src/contracts/knowledge-service.ts#KNOWLEDGE_SERVICE (const)",

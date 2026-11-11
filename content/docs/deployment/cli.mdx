@@ -2391,15 +2391,25 @@ config loads before anything is written:
   the views of the object `os g object customer` writes, prefix included. The
   container carries no `name` or `label` of its own (the server registers it
   under its object), and its list shows every field the object declares, under
-  a `list.label` that `os lint` requires.
+  a `list.label` that `os lint` requires. With `--object`, the name is the
+  view's own: `os g view open_customers --object customer` writes a list view
+  named `open_customers` (under the container's `listViews`) for Customer. A
+  stack holds one views container per object, so for an object that already
+  has one the command refuses and prints the `listViews` entry to add to that
+  container instead.
 - A **flow**, **action** or **app** binds the object you name with
   `--object` — as declared (`my_app_customer`) or without the namespace prefix
   (`customer`). Without `--object`, it binds the stack's only object.
 - An **action** runs the flow you name with `--flow`, or the stack's only flow.
+  In a stack that declares no flow it is a declarative update instead:
+  `operation: 'update'` with a `params` entry naming one field of the object,
+  so the button opens a dialog for that value and writes it to the record as
+  the signed-in user — no handler and no flow to write.
 
-When the stack declares none, or several and you named none, or the one you
-named is not declared, the command refuses, lists what the stack does declare,
-and writes nothing: which object a scaffold acts on is yours to say. Outside a
+When the stack declares none (except an action's flow, above), or several and
+you named none, or the one you named is not declared, the command refuses,
+lists what the stack does declare, and writes nothing: which object a scaffold
+acts on is yours to say. Outside a
 project (no config) a scaffold that binds is refused too, because there is no
 stack to check it against. `--object` and `--flow` on a type that takes neither
 are refused rather than ignored.
@@ -2431,14 +2441,24 @@ After writing, `os g` loads the config again and says which of these holds:
   `os g flow`.
 
 `os g` never edits `objectstack.config.ts`: the config is yours, and the
-command only loads it.
+command only loads it. Nor does it edit an app: a dashboard reaches people
+through an app's navigation, so `os g dashboard` prints the navigation entry
+that lists it, and the app to add it to, and writes the same line into the
+dashboard file's header.
+
+`os g object` writes the authoring style the `npm create objectstack` starter
+uses: each field through a `Field.*` builder (`Field.text({ … })`), placed in a
+declared `fieldGroups` section, and the object exported by name
+(`export const customer = ObjectSchema.create({ … })`), which is the name its
+barrel line re-exports.
 
 ```bash
 os g object customer                          # Generate a Customer object
 os g view customer                            # Generate the Customer list view
+os g view open_customers --object customer    # Generate a named list view of Customer
 os g flow customer_changed --object customer  # Generate a flow that runs when a Customer changes
-os g action approve --object customer         # Generate an action on Customer records that runs the flow
-os g dashboard sales                          # Generate a dashboard
+os g action approve --object customer         # Generate an action on Customer records that runs the flow (a declarative update when there is no flow)
+os g dashboard sales                          # Generate a dashboard, and print the app navigation entry that lists it
 os g app sales --object customer              # Generate an app whose navigation opens Customer
 os g skill lead_qual                          # Generate an AI skill
 os g picklist industry                        # Generate a shared option list select fields name
