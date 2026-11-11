@@ -517,6 +517,44 @@ describe('[ADR-0153 D7] every pull leaves one sys_sync_run row, and says how it 
     });
 });
 
+describe('[ADR-0153 D7] the run record keeps the job run that drove the pull', () => {
+    /** Each run's job run id and trigger, in the order the job runs were numbered. */
+    const origins = async (ql: ObjectQL) => (await runRows(ql))
+        .map((r) => [r.job_run_id ?? null, r.trigger ?? null])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+
+    it('a pull a job drove: the job run id and the trigger, as the request carries them', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_1', trigger: 'schedule' });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_2', trigger: 'manual' });
+
+        expect(await origins(h.ql)).toEqual([['run_job_1', 'schedule'], ['run_job_2', 'manual']]);
+    });
+
+    it('a pull refused before the mapping is read keeps them too: they are written when the run opens', async () => {
+        const { datasourceSource: _drop, ...bare } = MAPPING;
+        const h = await harness([], { mapping: bare, runs: true });
+        await refusalOf(pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, jobRunId: 'run_job_3', trigger: 'manual' }));
+
+        const [r] = await runRows(h.ql);
+        expect([r.status, r.job_run_id, r.trigger]).toEqual(['failed', 'run_job_3', 'manual']);
+    });
+
+    it('a trigger with no job run id (a job service that keeps no run history) is kept alone', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB, trigger: 'schedule' });
+
+        expect(await origins(h.ql)).toEqual([[null, 'schedule']]);
+    });
+
+    it('CONTROL: a direct pull, with no job context, leaves both empty', async () => {
+        const h = await harness(THREE, { runs: true });
+        await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: JOB });
+
+        expect(await origins(h.ql)).toEqual([[null, null]]);
+    });
+});
+
 describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed run stored', () => {
     it('a second run after a committed first run reads only from the committed position on', async () => {
         const h = await harness(THREE, { runs: true });

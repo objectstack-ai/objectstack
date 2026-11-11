@@ -5057,6 +5057,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/app-artifact-handlers.job-pull-run.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/app-plugin.seed-landed.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5598,6 +5603,11 @@
     },
     {
       "file": "packages/services/service-job/src/db-job-adapter.timeout.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-job/src/job-run-context.test.ts",
       "verb": "update",
       "pinned": 1
     },
