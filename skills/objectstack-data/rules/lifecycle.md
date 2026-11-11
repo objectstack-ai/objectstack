@@ -128,7 +128,7 @@ lifecycle: {
 ## Sealing (`seal`)
 
 `seal` makes an `audit` ledger tamper-evident (ADR-0154): an edit, insert or
-delete outside the platform shows. Ten minutes after each `created_at`
+delete outside the platform breaks its signed checkpoints. Ten minutes after each `created_at`
 hour, `@objectstack/plugin-audit` signs its rows into a chained checkpoint
 per organization (`tenant_id`; rows with none share a deployment chain); late
 rows get a `late` checkpoint. Columns enter in clear, `valueFields` as salted
@@ -161,8 +161,9 @@ beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
 `storage`. Not sealed, reported at `error` hourly: no declared `id` or
 `tenant_id` (the injected tenant column is `organization_id`); a `password`,
 `secret`, `formula`, `summary`, `image`, `file`, `avatar`, `video` or `audio`
-column; no `cryptoProvider` on `AuditPlugin`. Until expiry ships (ADR-0154
-P4), the sweeper still deletes sealed rows, which then read as missing.
+column; no `cryptoProvider` on `AuditPlugin`. Not built yet (ADR-0154): a
+verifier, so a break is recorded but not reported; expiry (P4), so the sweeper
+still deletes sealed rows, which then read as missing.
 
 ## Operations
 
