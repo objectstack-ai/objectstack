@@ -26,6 +26,10 @@
 // measures behaviour, never loading.
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
+// The two packages `bootStack` imports dynamically, loaded at module top so the
+// first boot pays their transform during collection, not inside its hook.
+import '@objectstack/service-automation';
+import '@objectstack/service-datasource';
 // `.js` extension deliberate: this package resolves NodeNext.
 import { bootStack, harnessAuthSecret, type VerifyStack } from './harness.js';
 
