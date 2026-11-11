@@ -1,0 +1,32 @@
+{
+  "number": 32354,
+  "kind": "issue",
+  "title": "metadata-protocol: a name held only by stored rows of two packages, one disabled, answers by save order, and /layers takes the first composite when the environment holds its own item (ADR-0150 D3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T21:16:34Z",
+  "updated_at": "2026-11-10T23:02:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32354",
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried out of #32183 (contract reviews of PR #32327, round 2: the dev's stated gap and the \"unmoved from main\" note). ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n**Lane:** `domain:server` (metadata-protocol). **Reader:** the server seat that claims it. **Serial:** after #32183.\n\n### Two cases #32183 leaves as on main\n1. **Stored rows only.** No registry holder; two packages each have a stored row of the name, one package disabled. The answer depends on save order (404, or the enabled row), and `/layers` refuses 409 naming the disabled package. No disabled body is served, but the answer is a guess by order.\n2. **The environment holds its own item** of a name an enabled and a disabled package also ship. `servedHolderAddressOf` steps aside, and the bare `/layers` code layer is the first composite in registration order, which can be the disabled holder's.\n\n### Do\n1. Case 1: the row layer judges holders over the served set, as #32183 does for the registry; the disabled package is never named.\n2. Case 2: the code layer under an environment item is the served holder's, or none.\n3. Pins in both registration and save orders, both transports.\n\n**Clause-②:** the claimer declares it. **Dedupe** (`disabled package stored row save order`): #32183, #32292 (different limbs).\n**Business reason:** disabling a package must hide it everywhere, independent of the order things were saved.\nclass: d · type: Bug\nGrade: p2 (first-party reach 0)."
+}

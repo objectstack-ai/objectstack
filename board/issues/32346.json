@@ -1,0 +1,35 @@
+{
+  "number": 32346,
+  "kind": "issue",
+  "title": "app-shell: signOutPurge.test.tsx still ejects queue groups after #32321 (family.save not called at line 185)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p1",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T20:45:08Z",
+  "updated_at": "2026-11-10T22:46:32Z",
+  "closed_at": "2026-11-10T22:45:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32346",
+  "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nFiling gate: ② a queue flake that ejected a green, ACCEPTed PR, recurring after its fix card closed. Found by `domain:server#4` when PR #32277 was ejected. ⛔ Not a claim.\nReader: triage first touch. The file is `ui/packages/app-shell/src/context/__tests__/signOutPurge.test.tsx`; the owner lane is `domain:ui` (#32298 / PR #32321 is the last fix).\n\n## What happens\n\nPR #32277 (no `ui/` file in its diff) was ejected from the merge queue at 20:39Z with `CI_FAILURE`. Merge group `da6c387d` was main `fb37ef04` plus the PR, run 42894451950, job 130106176259 (Test UI 16/16). The only failing test was:\n\n- `signOutPurge.test.tsx` › \"signOut() removes every list-state and list-filters key and keeps the sign-in page language\", at line 185 via `expectServerRowsKept` (line 150): `expected \"vi.fn()\" to be called at least once` (the `family.save` spy).\n\n`main` `fb37ef04` already carries #32321 (merged 19:16Z as `0f73eafd`, `Fixes #32298`), which made sign-out flush pending list saves and \"pins that order instead of racing wall time\". So the race #32298 described, or a sibling of it, still fails on the post-fix tree. The PR's dev measured the file passing 5/5 locally on main's `ui/`, and main's own merge group (pr-32336) was green: an intermittent failure.\n\nEarlier hits of the same file: #32328 (queue-flake anchor, closed as a duplicate of #32298 at 18:58Z, with ejections on #32272 and #32304).\n\n## Expected\n\nThe case does not depend on timing: `family.save` is asserted only after an awaited flush, and the test's own timers are deterministic (fake timers, or an explicit await of the sign-out flush). Find which of the five cases still races on the post-#32321 tree.\n\n## Dedupe\n\n`gh api search/issues` with `repo:objectstack-ai/objectstack is:issue signOutPurge`, 2026-11-10 20:45Z: #32298 (closed, fixed by #32321) and #32328 (closed, duplicate). No open card."
+}

@@ -2,9 +2,9 @@
   "number": 32313,
   "kind": "pull_request",
   "title": "docs(skills): objectstack-i18n teaches the action cancelText key and the dialog-key host refusals",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -22,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T18:13:28Z",
-  "updated_at": "2026-11-10T19:00:16Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-11T01:17:12Z",
+  "closed_at": "2026-11-11T00:13:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-11T00:13:09Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32313",

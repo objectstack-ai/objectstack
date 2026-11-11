@@ -1,0 +1,31 @@
+{
+  "number": 32359,
+  "kind": "issue",
+  "title": "Document the stamp-superseded audit value in the strictReadonlyWrites contract jsdoc",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T21:46:32Z",
+  "updated_at": "2026-11-10T22:01:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32359",
+  "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nOrigin: nit 2 of the delta contract review on PR #32338 (card #32278).\n\n`WriteObservabilityOptions.strictReadonlyWrites` in `packages/spec/src/contracts/data-engine.ts` documents the equal-value exemption for `stored_expression`. It says nothing about the audit-provenance value the stamp supersedes on a create (`created_by`, `created_at`, `updated_by`, `updated_at`): that it is reported under `readonly`, refused under strict, and admitted when equal to the stamp. Today only `content/docs/kernel/contracts/data-engine.mdx` and the #32338 changeset say so. The coverage sentence already governs, so the contract is not false, just incomplete.\n\nPremise re-check: `git grep -n \"stored_expression\" -- packages/spec/src/contracts/data-engine.ts` lists the exemption sentence, and `git grep -n \"created_by\\|AUDIT_PROVENANCE\" -- packages/spec/src/contracts/data-engine.ts` finds no audit sentence.\n\nWanted: one jsdoc paragraph beside the `stored_expression` one. Comment only, no type change.\n\nClause-②: no"
+}

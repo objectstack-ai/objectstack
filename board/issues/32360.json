@@ -1,0 +1,33 @@
+{
+  "number": 32360,
+  "kind": "pull_request",
+  "title": "test(app-shell): signOutPurge patches through a render that holds the attached preference family",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T22:01:08Z",
+  "updated_at": "2026-11-10T22:45:34Z",
+  "closed_at": "2026-11-10T22:45:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-10T22:45:33Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32360",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-support-ai\"} -->\n_Requested by **Yibo Wang** · [project thread](https://claude.ai/code/project/chan_01BVUyyPie8gHwoPM18iABwB?thread=cmsg_01BVUyyPie8gHwoPM18iABwB7QKW2SoBTqFr5fFcTpE76m)_\n\nFixes #32346\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `signOutPurge.test.tsx` 的测试搭建。探针改为每次提交写一份快照（会话与列表状态同出一次渲染），登录辅助函数等「同一份快照里既是 Alice 的会话、又报告她的状态已读」后，经这份快照写入；五个用例都走这个辅助函数。产品代码不动。\n- 为什么改：探针的引用在 passive effect 里写，落后于屏幕。负载下「ready」的等待可能在未登录的渲染上通过（没有用户就无需等待），随后的写入走的是 Alice 的第一次渲染，那时服务端偏好族还没挂上：改动只写进本浏览器，从未排队保存，于是用例 1–3 在保存断言处红（`family.save` 未调用，或事件序列只有 `session ended`）。\n- 风险与回滚：仅测试文件，`@object-ui/app-shell` 为私有包，无 changeset；回滚即 revert 本 PR。\n- 先看：测试文件里的 `signIn` 辅助函数与 `Committed` 快照。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/context/__tests__/signOutPurge.test.tsx`，预期 5 passed；负载复现方法见下文 Verification。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`ui/packages/app-shell/src/context/__tests__/signOutPurge.test.tsx` only:\n\n- The probe writes one `Committed` snapshot per commit (`{ auth, prefs }`), replacing the two refs `authRef` and `prefsRef`, so the session and the list state it reads always come from the same render.\n- A new `signIn(client, family)` helper renders the console and waits for ONE snapshot that holds Alice's session and reports `ready`, then returns that snapshot's list-state handle. The patch goes through that handle.\n- `signInAndFilter` (cases 1, 3, 4, 5) and the inline sign-in of case 2 both use `signIn`. Assertions are unchanged.\n\nNo product file changes.\n\n## Why\n\nThe failing link is the first of the seat's two suspects: the patch lands before the server family is attached, so the write is local-only and nothing is queued to send. It is the test's setup, not the product.\n\nThe probe wrote its refs in a passive effect, which runs after commit, so the refs trailed the screen:\n\n1. The first wait (`getByTestId('user')` reads \"Alice\") can pass while the refs still hold the signed-out render. Measured: the snapshot read right after that wait was the signed-out one in 2 of 160 runs.\n2. A signed-out render reports `ready: true` (`ListPreferencesProvider` has no user to wait for), so the second wait passed on it.\n3. RTL's `waitFor` drains a macrotask before it resolves. During that drain the pending effects ran, and the refs moved to Alice's FIRST render. In that render the bridge has not attached the family yet (`FamilyBridge` attaches it in that commit's effects), so `update` closes over `family === null`.\n4. `patchView` through that handle wrote Alice's local key (so `userState` read correctly) and returned before queueing a save. No debounce timer, no sign-out flush, no family-detach flush had anything to send, and `family.save` was never called.\n\nMeasured with temporary logging in `ListPreferencesProvider.update` (reverted, not in this diff): 2 of 300 patches ran with `family === null` while the user was Alice, in each of two loaded runs. The same render log showed Alice's first render with `family=false` immediately before each such patch. The no-family wait timer never fired.\n\nA real user cannot reach this: a list opens only once `ready` is true, and in Alice's first render `ready` is false. Only the test's after-commit refs could hand out that render's closure.\n\nCases 4 and 5 assert no save, so they stayed green while silently patching through the same stale handle. They now use the same helper.\n\n## Verification\n\nLoad reproduction: N copies of the file run in one vitest invocation from `ui/` with `--sequence.shuffle` and vitest's default thread pool on a 4-core box, with 8 busy-loop processes saturating the CPU. Each copy is the file under a new name beside it (`zzreproN.signOutPurge.test.tsx`), all passed to one `pnpm exec vitest run --sequence.shuffle …` call; the copies were deleted after each run and are not in this diff.\n\n| Tree | Load | Copies | Tests red |\n|:--|:--|--:|--:|\n| `main` 898c2f46 | 4 burners | 60 | 0 / 300 |\n| `main` 898c2f46 | 8 burners | 100 | 2 / 500 (case 2, events held only `session ended`) |\n| `main` + test logging | 8 burners | 40 | 1 / 200 (case 1, `family.save` not called, the CI failure) |\n| `main` + provider logging | 8 burners | 60 + 60 | 1 / 300 (case 3), 2 / 300 |\n| this branch | 8 burners | 100 | **0 / 500** |\n| this branch + provider logging | 8 burners | 100 | **0 / 500**, and 500 of 500 patches ran with the family attached |\n\nThe failure rate on `main` is about 1 to 2 file runs in 100 under saturation, too low for a green run alone to prove much. The logged run is the stronger evidence: the mechanism (a patch with no family) occurred 2 times in 300 before and 0 times in 500 after.\n\nGates on `8770a19f`, run under `scripts/pm/os-verify-lock.sh`:\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/context/__tests__/signOutPurge.test.tsx`: 5 passed.\n- `pnpm --filter @object-ui/app-shell run type-check` (covers `src/**/*.test.tsx` through `tsconfig.test.json`): exit 0.\n- `npx eslint src/context/__tests__/signOutPurge.test.tsx` from the package: exit 0.\n- `dispatch-gates.mjs --commands`: 26 derived families, all exit 0. `dispatch-gates --ran`: \"26 derived famil(ies) accounted for — 26 run, 0 NOT-MEASURED\".\n- No changeset: `@object-ui/app-shell` is private and the diff publishes nothing (`skip-changeset`).\n"
+}

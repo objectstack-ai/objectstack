@@ -1,0 +1,38 @@
+{
+  "number": 32381,
+  "kind": "pull_request",
+  "title": "refactor(core, plugin-security): the external organization-scope reading moves to core's security module, so service-automation no longer loads plugin-security at run time",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "dependencies",
+    "documentation",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-justin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T01:17:59Z",
+  "updated_at": "2026-11-11T02:11:21Z",
+  "closed_at": "2026-11-11T02:11:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-11T02:11:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32381",
+  "body": "Fixes #32358\n\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：把\"外部对象声明了哪种组织范围\"这一判断（`externalOrganizationScopeOf`、它的 Layer 0 投影、它依赖的幻影锚点判断，以及统一的补救文案 `EXTERNAL_SCOPE_REMEDY`）从 `plugin-security` 原样搬到 `@objectstack/core` 的 security 模块；`plugin-security` 在原模块路径和包入口继续导出同名绑定（转出口），同步拉取改从 core 引入。\n- 为什么改：sync-in 拉取只为调用一个纯函数、读一句文案，就让 `@objectstack/service-automation` 在运行时依赖整个安全插件包；这个判断用到的东西本来都在插件之下（契约评审 N1）。\n- 风险与回滚：代码逐字节搬运，行为不变，只有一份实现；风险在于 core 的公开导出面多了六个名字（因此声明 `Clause-②: yes (widening)`）。回滚即还原本 PR。\n- 先看：`packages/core/src/security/external-organization-scope.ts`（搬过来的实现）、`packages/plugins/plugin-security/src/external-organization-scope.ts`（改为转出口）、`packages/services/service-automation/package.json`（`plugin-security` 回到 devDependencies）。\n- 两分钟验证：`pnpm --filter @objectstack/core exec vitest run --maxWorkers=2 src/security/external-organization-scope.test.ts`，预期 13 个用例全绿（与原插件里的同一组用例逐字一致）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`@objectstack/core`** gains `packages/core/src/security/external-organization-scope.ts`, exported from the security module (so from the package entry): `externalOrganizationScopeOf`, `externalOrganizationScopeIsUndeclared`, `declaredForeignTenantField`, `hasPhantomTenantAnchor`, the `ExternalOrganizationScope` type and `EXTERNAL_SCOPE_REMEDY`. Every definition is the plugin's text, byte for byte (compared function by function against the merge base `326453eb9`). It composes only what core already depends on: `isFederatedObject` (core), `isTenancyDisabled` (`@objectstack/spec/data`) and `TENANT_SCOPE_FIELD_DEF` (`@objectstack/metadata-core`, already a run-time dependency of core; metadata-core depends on spec and zod only, so no cycle).\n- **`@objectstack/plugin-security`**: `external-organization-scope.ts` re-exports those bindings from core and keeps everything that is the plugin's own (the boot refusal, its error class, the write-wall refusal, the post-boot warning). `federated-phantom-anchors.ts` keeps its module docblock and re-exports `hasPhantomTenantAnchor` and `isFederatedObject` from core. `security-plugin.ts` imports the two bindings it reads for the Layer 0 input from core. The package entry exports the same names as before.\n- **`@objectstack/service-automation`**: `datasource-pull.ts` imports the reading from `@objectstack/core` (the import line only, so it merges cleanly with the in-flight sync-in slice 3 branch, which edits the docblock and code around it). `@objectstack/plugin-security` moves back to `devDependencies`, where it sat before the sync-in slice 2 PR (the test suites still boot `SecurityPlugin`); the manifest blob is the pre-slice-2 one again. Lockfile updated to match.\n- Why `hasPhantomTenantAnchor` moved too: the reading calls it (an external object's own `organization_id` is `walled` only when it is not the platform's injected anchor), and it is the only path by which the reading reads `TENANT_SCOPE_FIELD_DEF`. Leaving it in the plugin would have meant a second copy in core.\n\n## Tests\n\n- The reading's thirteen cases moved verbatim to `packages/core/src/security/external-organization-scope.test.ts` (the `describe` block is byte-identical to the one removed from the plugin).\n- The plugin's `external-organization-scope.test.ts` gains a re-export pin: the module path, `federated-phantom-anchors.ts` and the package entry serve core's bindings by identity, plus one case reading an undeclared external object through the plugin's module path. The boot door, Layer 0 door and write-wall cases are unchanged.\n- No ablation: a pure move changes no tested behaviour.\n\n## Acceptance notes\n\n- `datasource-pull.ts` still says, in its module docblock, that the scope \"is read by plugin-security's `externalOrganizationScopeOf`\". Left untouched on purpose: the sync-in slice 3 branch rewrites the neighbouring docblock lines, and the dispatch held this edit to the import line. The sentence's carrier is that slice.\n- No ADR anchor was added for the new core file; the existing anchor on the plugin file (ADR-0015, ADR-0095) still holds, and the core file names both ADRs in its header.\n- The branch is 13 commits behind `main`; `git merge-tree` against `main` at `d7c3d44ecd` is clean. The only overlap is `packages/core/src/security/index.ts`, where `main` added one export in a different block.\n\n## Verification\n\nAll readings on head `11d3bf57a5`.\n\n<details><summary>Tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/core test`: Test Files 145 passed (145), Tests 3311 passed (3311), exit 0.\n- `pnpm --filter @objectstack/plugin-security test`: Test Files 259 passed (259), Tests 6249 passed, 45 skipped (6294), exit 0.\n- `pnpm --filter @objectstack/service-automation test`: Test Files 275 passed (275), Tests 3699 passed (3699), exit 0.\n- `pnpm --filter @objectstack/core --filter @objectstack/plugin-security --filter @objectstack/service-automation run typecheck`: lock VERDICT command-exit 0; each package's `check:test-typecheck` OK.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `pnpm lint`: lock VERDICT command-exit 0, no output from eslint.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 89 commands derived; all 89 run, each exit recorded; `--ran` reconciliation: \"89 derived famil(ies) accounted for — 89 run, 0 NOT-MEASURED (a DERIVED zero)\". Three of them (`check:dual-build-cjs-loads`, `check:i18n`, `check:published-readme-exports`) first answered exit 3 (no full build in the tree) and were re-run after `check:type-check-debt` built the closure: all three exit 0.\n- `node scripts/check-platform-checklist.mjs --changed-from origin/main`: exit 0, \"4 anchor(s) judged, 0 lost\".\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QSeKYm8sWjp2Pk76warN7w)_\n"
+}

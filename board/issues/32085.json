@@ -2,8 +2,8 @@
   "number": 32085,
   "kind": "issue",
   "title": "SSO provider lifecycle: no way to edit a provider (SAML certificate rotation means delete + re-register), and deleting a provider unlinks every user's SSO account and leaves its group mappings and grants behind",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,21 +14,22 @@
     "bug",
     "domain:server",
     "pm:blocking",
-    "pm:dispatched",
     "priority:p1",
     "security"
   ],
-  "assignees": [
-    "os-support-ai"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T07:12:57Z",
-  "updated_at": "2026-11-10T17:53:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-10T22:13:40Z",
+  "closed_at": "2026-11-10T22:08:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32085",
   "body": "## Edition / version\nObjectOS Enterprise, image built from cloud `main` `de8d979` (framework pin `e24136c2`), `OS_SSO_ENABLED=true`. Found in the live Okta run for objectstack-ai/cloud#3666 (real Okta developer org; SAML and OIDC apps; console driven in a browser).\n\n## What happened\n1. **No edit path for a provider.** Setup → SSO Providers → a SAML provider offers Request/Verify Domain, Delete, Edit Sign-In Options, Show/Edit Groups Claim. Nothing changes the IdP signing certificate, the IdP SSO URL, the entity id, or an OIDC client secret. `POST /sso/update-provider` exists but has no console door.\n2. **Routine certificate rotation is therefore delete + re-register.** In Okta, a new signing key was generated and the SAML app switched to it. The next sign-in was refused `saml_error / Invalid SAML response`, as expected while the SP still holds the old certificate. The only console remedy was Delete SSO Provider, then Register SAML Provider with the **same provider id** and the new certificate, then re-enabling the sign-in options.\n3. **Deleting a provider deletes every `sys_account` row of that provider.** After the re-register, the user who had signed in through it (`objectos-test3@example.com`, JIT-created by that provider) was refused `account_not_linked`. `sys_account` has no row for any of the three SSO users any more; the `sys_user` rows and their permission-set grants remain. A user with no local password is now locked out. Measured with `OS_SSO_DOMAIN_VERIFICATION=false`. Setting `sys_sso_provider.domain_verified = true` on the re-registered row (simulating a re-verified domain) did **not** re-link: the next sign-in was again `account_not_linked`. Behaviour with verification on and a real verified domain was not measured.\n4. **Deletion leaves the provider's group mappings and projected grants.** After deleting `okta-oidc`, `sys_idp_group_mapping` still holds its row (`source_id okta-oidc`), and `sys_user_permission_set` still holds `viewer_readonly` grants with reason `sso-group-projection: provider 'okta-oidc'` for users who can no longer sign in through it.\n5. **SSO group mappings have no console door.** Setup → IdP Group Mappings is a read-only \"System-managed\" list (\"Entries appear automatically when their source action runs\"). The only writer is `POST /api/v1/auth/admin/scim/set-group-mapping` (route ledger: \"no SDK method builds this URL — an operator script posts it\"). The mapping itself works: a JIT sign-in got `viewer_readonly` from the Okta group, for both OIDC and SAML.\n6. **One email domain on two providers, silently.** `okta-saml` was registered for `example.com` while `okta-oidc` already held it. No warning was shown, and \"Sign in with SSO\" always routed to the first provider, with no way to reach the second.\n\n## Expected\n- An edit action per provider: SAML certificate (ideally two, for overlap), SSO URL, entity id; OIDC client id/secret, issuer, scopes; plus email/name attribute mapping (see the interop card).\n- Deleting a provider either refuses while accounts are linked to it, or says how many users it unlinks and that they will be locked out. A re-registration with the same id should restore the links.\n- Deleting a provider removes its mapping rows and the grants they projected (the projection marker makes this exact).\n- A Setup form to add or remove a group → permission-set mapping for a provider.\n- Registering a domain that another provider already serves is refused or warned.\n\n## Steps\nRegister SAML provider `okta-saml` (Okta app) → JIT sign-in with a user → rotate the Okta app's signing key → sign-in is refused → Delete provider → Register again with the same id and new certificate → enable JIT and IdP-initiated → sign in as the same user → `account_not_linked`."

@@ -1,0 +1,37 @@
+{
+  "number": 32376,
+  "kind": "pull_request",
+  "title": "fix(plugin-form): take the inline grid's line-position field from the spec helper",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T00:37:07Z",
+  "updated_at": "2026-11-11T01:31:59Z",
+  "closed_at": "2026-11-11T01:31:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-11T01:31:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32376",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xWfytqkQmEdCGXYLMHPN41D)_\nFixes #32283\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:主从表单内联网格的「行序字段」(拖拽排序时写入、读取明细行时按它排序)改由 spec 的 `deriveInlineGridSortField` 判定,渲染器里那份自己抄的字段名单删掉了。\n- 为什么改:两份名单此前靠人工保持一致,没有任何东西钉住它们相等;今后 spec 改名单,网格自动跟上,lint 规则 `field-no-consumers` 认的字段与网格读的字段也是同一个。\n- 风险与回滚:行为不变(两份名单在 `main` 上同为六个名字、同序);首屏体积不增(`vendor-objectstack` +0 B)。回滚即还原 `deriveMasterDetail.ts` 一个文件。\n- 先看:`ui/packages/plugin-form/src/deriveMasterDetail.ts`(`deriveDetail` 里 `sortField` 那一行),再看两份测试新增的 describe。\n- 两分钟验证:`pnpm --dir ui exec vitest run packages/plugin-form/src/deriveMasterDetail.test.ts packages/plugin-form/src/MasterDetailForm.storedLineOrder-12286.test.tsx`,预期全绿。\n- 需要你做的:无,等席位评审后由席位落地。\n\n## What changes\n\n`deriveDetail` (`ui/packages/plugin-form/src/deriveMasterDetail.ts`) now takes the inline grid's line-position field from `deriveInlineGridSortField` in `@objectstack/spec/data` (published by #32276), and the local `SORT_FIELD_NAMES` literal is deleted. The helper reads `def.fields`; `deriveDetail` already holds the child as `childSchema: { fields? } | undefined`, so it is passed as is (the helper answers `undefined` for a missing definition or field map, as the local code did). `MasterDetailForm.tsx` is untouched: it still hands `sortField` to the grid on the authored-columns and derived branches and builds the lines read's `$orderby` from it.\n\n## Why\n\nThe spec's private `INLINE_GRID_SORT_FIELDS` and the renderer's copy were equal only by hand. The lint rule `field-no-consumers` credits the line-position field through the helper, so a drift between the two would have credited one field while the grid read another.\n\nPremise on `origin/main` `ac9622e3` (read before editing): the helper is exported from `@objectstack/spec/data`; the spec list is `position`, `sort_order`, `sequence`, `line_no`, `line_number`, `sort`, and the renderer list was the same six names in the same order, with the same first-match-in-field-order rule. So the change keeps behaviour.\n\n## Tests\n\n- `deriveMasterDetail.test.ts`, new describe \"deriveDetail takes the line-position field from the spec\": for each of the six names, a child whose only sort-named field is that name (behind five number decoys `order`, `seq`, `rank`, `line`, `sort_index`) gets it as `sortField`, the same answer as `deriveInlineGridSortField`; a child with only the decoys gets no `sortField` from either; the first sort-named field in field order wins.\n- `MasterDetailForm.storedLineOrder-12286.test.tsx`, new describe in the existing harness (its `renderForm` now takes the child schema, defaulting to the old one): a child whose sort-named field is `line_no` opens its lines in stored order and the lines read carries `$orderby` `line_no` asc then `id` asc; a child with no sort-named field (decoys `order`, `seq`) draws the server's order and no read of its lines carries `$orderby`.\n\nAblation (committed fix first, mutation through `scripts/ablation-replace.mjs`, each leg restored to `git diff HEAD` empty):\n- local list without `line_number`: 1 failed (the `line_number` row), 54 passed.\n- local list with `order` added: 8 failed (all six name rows, since the decoy `order` now wins; the decoys row; the form-level no-sort pin, whose read now orders by `order`), 47 passed.\n\n## Acceptance notes\n\n- `check:eager-closure`: console built twice under the verify lock (branch, then the same tree with `deriveMasterDetail.ts` restored from `ac9622e3`), `eager-closure.json` compared by chunk name. `vendor-objectstack` 627,144 → 627,144 gz bytes (+0): the file already imported runtime values from `@objectstack/spec/data`, and the helper lives in the module already in that chunk. `plugin-form` 43,770 → 43,728 (−42); ten other eager chunks moved +1 to +8 bytes (hashed chunk names they reference); eager closure total −11 bytes gz. The gate passes on the branch build.\n- Sibling #31912 may also edit `deriveMasterDetail.ts`; this diff touches only the import line, the deleted constant and the `sortField` line.\n\n## Verification\n\nReadings at head `f395ffc4`, branch merged with `origin/main` `326453eb`:\n\n- Focused files before the merge, at `cfad6ef2` (`deriveMasterDetail.test.ts`, `MasterDetailForm.storedLineOrder-12286.test.tsx`, `MasterDetailForm.inlineColumnsSortAmount-11144.test.tsx`): 3 files, 58 tests passed. The package run below covers them again on the merged head.\n- `pnpm --dir ui exec vitest run packages/plugin-form/`: 227 files passed, 2491 tests passed, 1 skipped.\n- `pnpm --filter @object-ui/plugin-form run type-check`: exit 0.\n- Derived gates (`dispatch-gates --commands`, 36 commands, which include `check-sdui-manifest` and `check:type-check-debt`) plus `pnpm --dir ui run check:spec-symbols` and `check:new-line-citations`: every command exit 0; `dispatch-gates --ran` reconciles 36 of 36 with exit codes. Gates file: `card-32283/gates-f395ffc4.txt` in the project files.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAoVP2rgc7FjY2L8jYt)_\n"
+}

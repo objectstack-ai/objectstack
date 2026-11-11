@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:35:18Z",
-  "updated_at": "2026-11-10T11:20:47Z",
+  "updated_at": "2026-11-10T23:53:05Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32153",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · new-user flow (create-objectstack 18.3.0) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nMeasured with `@objectstack/cli` 18.3.0 in a fresh scaffold:\n- `os g object ticket` writes a raw `{ type: 'text', … }` field, a default export and no `fieldGroups`; the scaffold's `note.object.ts` uses `Field.text(…)`, a named export and `fieldGroups`; the getting-started docs say field types are `Field.*` builders, \"not raw strings\".\n- `os g view open_tickets` is refused because the name is read as the object name; there is no way to name a view separately.\n- `os g action resolve --object ticket` is refused until a flow exists (\"an action runs a flow\"); the docs' tutorial action is a declarative `update`.\n- `os g dashboard overview` writes a dashboard with `widgets: []` that is not added to any app's navigation; opened by URL it renders a blank page with only \"Refresh All\".\n- `os --help` lists topics with one subcommand's description (`data  Create a new record`, `meta  Delete a metadata item`, `db  Reclaim SQLite free space…`).\n- After adding a `description` field the validator warns it is `inert` (\"nothing displays or reads it\"), while the default create form and the record page's \"More details\" both show it.\n\n## Proposed change\n\n- Make every generator emit the scaffold's style (`Field.*`, named export, field groups).\n- `os g view` takes `--object` plus its own name; `os g action` defaults to a declarative update action when no flow exists.\n- `os g dashboard` adds a nav entry to the app (or prints the line to add) and the empty dashboard shows an empty state.\n- Topic descriptions in `--help` describe the topic.\n- Align `field-no-consumers` with what the default layouts actually draw, or say in the warning that the default form is not counted.\n\n## Business reason\n\nWho: new users and the coding agents that follow the CLI's output. Scenario: the first ten minutes of building. Cost: the agent learns two dialects and copies whichever it saw last; a newcomer meets refusals and a blank page on the documented path.\n\n## Reader\n\nTriage first touch; lands in `packages/cli` (generate, help topics) and the lint rule `field-no-consumers`.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack generate object Field builder raw type` (216, open and closed); #22161 and #21370 (closed) are about the warning's length and the starter's latent warning, not this."

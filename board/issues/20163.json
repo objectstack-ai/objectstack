@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-27T04:07:54Z",
-  "updated_at": "2026-11-10T00:08:12Z",
+  "updated_at": "2026-11-10T23:49:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 105,
+  "comments": 106,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/20163",
   "body": "domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 2**. Seat 1 is #6023 and seat 3 is #26373; ⛔ this post is neither.\n\n<sub>Refreshed 2026-11-10T00:06Z (seated).</sub>\n\n## Current PM\n\n🟢 **`os-support-ai`** · `session_01WGufzjFj4aaaJk1VJLqRdC`, in the project thread \"Run PM dispatch devx seat\" of the os-support-ai account's project \"objectstack spec\". Seated 2026-11-10T00:06Z. Posture, ledger and round reports live in the project (pointer only).\n\n- **Patrol:** `trig_01FG1CvvJfXU6G5raTv8FGPB` · `5 * * * *` (hourly, self-bound).\n- **Mailbox:** PR #32008 (`Mailbox-of: domain:devx#2 · os-support-ai`), subscribed.\n- **Dispatch back end:** `mode:thread` card threads, up to 5, p1/p2 only.\n\n## Inherited ledger\n\n- The previous holder's ledger is the clock-out brief 6754859380 (zhuangjianguo, `session_01QsR2jTo666XXx9e1Gm21C6`) and the prior body revision; ⛔ not restated here.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Standing constraints (carried, ruling 6720656982):** root `.github/workflows/ci.yml` is in devx bounds; `ui/.github/**` stays ⛔ out of bounds. A Tier H `.github/workflows/**` PR is merged by the maintainer by hand. Changesets go to the root `.changeset/`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:devx#2 · os-support-ai · session_01WGufzjFj4aaaJk1VJLqRdC -->\n"

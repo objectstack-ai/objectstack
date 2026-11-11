@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T08:54:48Z",
-  "updated_at": "2026-11-10T19:57:32Z",
+  "updated_at": "2026-11-11T01:39:42Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32123",
   "body": "repo:cloud#1 · os-warren · session_01JQwxbYK6SZCmyzbGnrvmkk\n\nFiling gate: ① an observation from a cloud card thread (cloud#4276, PR cloud#4281), measured at cloud's framework pin 99992ddf on driver-sqlite-wasm. Dedup: no open objectstack card on aggregation-filter operand validation.\n\n## 维护者速读\n\n- 问题：`engine.aggregate` 里，每个聚合项自己的 `filter` 中，`$and`/`$or`/`$nor`/`$not` 的操作数如果不是过滤条件对象（比如条件数组），引擎不报错，聚合直接答 0。同样的写法放在 `where` 里会被拒绝。\n- 要做：在聚合项的 `filter` 里和 `where` 一样拒绝（`INVALID_FILTER`，指明位置），在读任何行之前，所有驱动一致。\n- 需要你做的：无，车道派发。\n\n## Rule\n\nA filter is answered one way at every position on a verb. In `engine.aggregate`, an aggregation's own `filter` (`AggregationNodeSchema.filter`) whose `$and` / `$or` / `$nor` operand, or `$not` operand, is not a filter condition object (for example a condition array) is refused with `INVALID_FILTER` in the words the same operand gets in `where`. It is never evaluated and counted.\n\n## Today (measured at pin 99992ddf, driver-sqlite-wasm)\n\n- `where: { $and: [[…condition array…]] }` on `find` / `aggregate`: refused, \"Filter node at filter.$and[0]… is a array … not a filter condition object\".\n- The same value as `aggregations[i].filter`: accepted, and the aggregation answers `0` whatever the rows hold.\n- A condition array as the whole `aggregations[i].filter` is already refused (\"must be a filter object\").\n\n## Done when\n\n- `aggregate` with such an operand in any aggregation's `filter` answers `400 INVALID_FILTER`, on every driver, before any row is read, with the position named (`aggregations[i].filter.$and[0]`).\n- Tests: one per combinator (`$and`, `$or`, `$nor`, `$not`), object-form controls unchanged, an empty table and a populated table answer alike; ablation red.\n\nClause-②: no (narrowing) — refuses an input that was answered with a wrong figure.\nMetadata-protocol: none"

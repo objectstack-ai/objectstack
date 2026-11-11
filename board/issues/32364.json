@@ -1,0 +1,32 @@
+{
+  "number": 32364,
+  "kind": "issue",
+  "title": "skills: teach `lifecycle.seal` (audit hash-chain sealing) in objectstack-data lifecycle rules",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "huangyiirene"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T23:04:21Z",
+  "updated_at": "2026-11-11T01:27:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32364",
+  "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nSkills-docs follow-up owed by PR #32348 (card #31908, slice P1b-2). That PR's body reads `Metadata-protocol: added`: `lifecycle.seal` joins the ADR-0057 lifecycle block. Its `Skills-docs:` line names the file below. A `domain:server` PR does not edit `skills/**`, so the teaching is owed here.\n\n**File:** `skills/objectstack-data/rules/lifecycle.md`. Today it teaches the lifecycle classes, `retention`, `ttl` and `archive`, and says nothing of `seal`.\n\n**What to teach** (read the published spec once #32348 merges; `packages/spec/src/data/object.zod.ts`, the `seal` key and its refinements, is the authority):\n- `lifecycle.seal` opts an `audit`-class object into hash-chain sealing. Each closed window's rows are folded into a signed checkpoint per chain, and per-row value fields feed the leaf hash.\n- The authoring refusals an AI is likely to trip:\n  - `ttl.onlyWhen` beside `seal`;\n  - `valueFields` naming `id` or `created_at` (they already order the leaves);\n  - `valueFields` naming an undeclared field.\n- The run-time requirement: the object needs its own `tenant_id` field, or the sealer reports the plan as an error.\n- The honest limit until expiry ships (P4 of #31908): the sweeper still deletes sealed rows, which later read as missing.\n- One ✅ and one ❌ example in the page's `os:check` style, and the matching eval case(s) the skill's evals harness takes.\n\n**Serial:** after #32348 merges. Later slices of #31908 (P2–P4) may extend `seal`; teach what is on main when this card is picked up.\n\n**Lane:** `domain:skills` (`skills/**`)."
+}

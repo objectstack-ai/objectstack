@@ -2,8 +2,8 @@
   "number": 32185,
   "kind": "issue",
   "title": "Console: edit an SSO provider and manage its IdP group mappings from Setup (console halves of #32085)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:blocked",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T11:41:13Z",
-  "updated_at": "2026-11-10T16:33:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T00:29:39Z",
+  "closed_at": "2026-11-11T00:28:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32185",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nParent: #32085 (SSO provider lifecycle, p1). Its triage (6762077967) splits the work: the server halves stay on #32085 (seat `domain:server#2`, claim 6766299848), and the console halves come here, filed by that seat at claim.\n\n## What is missing in the console\n\nFound in the live Okta run for objectstack-ai/cloud#3666 (see #32085 for the full measurement):\n\n1. **No edit form for a provider.** Setup → SSO Providers offers no way to change a SAML provider's IdP signing certificate, SSO URL or entity id, or an OIDC provider's client id/secret, issuer or scopes. #32085 adds the server door, as declared actions on `sys_sso_provider` that post `/api/v1/auth/sso/update-provider`. If the declared action's generic form renders these fields well (a write-only secret, a multi-line certificate), this card is only a live check of that form. If it does not, this card owns a purpose-built edit form.\n2. **No form for IdP group mappings.** Setup → IdP Group Mappings is a read-only \"System-managed\" list. The only writer is `POST /api/v1/auth/admin/scim/set-group-mapping`, which no SDK method builds. Expected: a Setup form that adds or removes a group → permission-set mapping for a provider.\n\n## Dependency\n\nItem 1 waits on the edit door from #32085 (its second PR). Item 2 can start now. Card #32121 (seat 2, running) adds a \"matches no current group\" reading to `sys_idp_group_mapping` that this form can show.\n\n## Reader\n\nUI triage first touch: `apps/console` / objectui Setup surfaces."

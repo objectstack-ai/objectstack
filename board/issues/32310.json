@@ -2,8 +2,8 @@
   "number": 32310,
   "kind": "issue",
   "title": "analytics + metadata-protocol: the dataset query door and the dataset by-name read take the caller's package and resolve by D3 from it, so a package's dashboard reads its dependency's dataset (ADR-0150 D3; after #32077)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T18:01:29Z",
-  "updated_at": "2026-11-10T20:16:27Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T00:06:08Z",
+  "closed_at": "2026-11-10T23:12:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32310",
   "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiled by the ui#2 seat from the epic seat's draft (epic red-line review 6775085574 on #32309).\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (rest analytics, metadata-protocol). **Reader:** the server seat that claims it.\n**Found by** #32309 (#32077) open question 0 (ui#2 seat).\n\n### Only the exact qualifier exists, so a package's own caller cannot say who it is\n\n**Today**, after #32098 and #32309:\n- The dataset query door (`POST /api/v1/analytics/dataset/query`) reads `?package=P` as the exact qualifier (D5). It serves P's own dataset, or refuses.\n- #32309 makes the dashboard, report and list-view chart callers send `?package=<the item's own package>`. So a dashboard in P whose dataset only a dependency of P holds is refused (`409 not-held-by-qualifier`). The bare read serves that dataset today (first-party count: 0).\n- This is the D3 case ADR-0150 supports: a caller in P resolves P's own item, then the unique holder in P's declared closure plus `sys`.\n\n**Do:**\n1. Add a caller arm to the query door and to `GET /meta/dataset/:name`. The caller's package is named in a field distinct from `?package=`, for example `?callerPackage=P` or the request's package context. It resolves by D3 from P:\n   - P's own dataset;\n   - else the unique holder in P's closure plus `sys`;\n   - else `409` naming the candidates, or `outside-closure`.\n   - Admission works as the single door judges it after #32098.\n2. Sending both arms in one request is refused with `400`.\n3. Pins:\n   - P's own dataset;\n   - a dependency's dataset;\n   - two holders in the closure give `409`;\n   - outside the closure gives `409`;\n   - both arms give `400`;\n   - CONTROL: the bare read and `?package=` are unchanged.\n4. The batch door (#32200) takes the same arm for each query, when both have landed.\n\n**Clause-②:** the seat declares the widening.\n**Business reason:** without this, a package's dashboard that charts its dependency's dataset stops rendering once its caller names its own package.\n**Epic red-line review before landing.**"

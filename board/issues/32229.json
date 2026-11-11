@@ -2,8 +2,8 @@
   "number": 32229,
   "kind": "issue",
   "title": "skills(objectstack-i18n): the `_actions` key row omits `cancelText`, and the refusal paragraph omits the `submitText` / `cancelText` host refusals `checkActionEntry` raises",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:33:47Z",
-  "updated_at": "2026-11-10T18:59:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T01:14:58Z",
+  "closed_at": "2026-11-11T00:13:11Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32229",
   "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\nFiling gate: ① a defect in published skill text, found by the contract review of PR #32189 (record 6768657549, nit N2) and measured by the seat on `origin/main`. It predates that PR, which neither introduces nor worsens it. ⛔ Not a claim.\nBusiness reason: an AI agent writing a translation bundle reads this skill to learn which action keys exist and which ones `os validate` refuses. With `cancelText` missing from the key row, it never translates a confirm or param dialog's dismiss button. With the two host refusals missing, it puts `submitText` or `cancelText` under an action that opens no such dialog, and the run fails with `translation-target-unknown`.\nReader who acts: the `domain:skills` lane (`skills/objectstack-i18n/SKILL.md`, a governed surface).\nBlocked-by: #31925\n\n## Readings (`origin/main`)\n\n- `skills/objectstack-i18n/SKILL.md` L164, the `_actions.{action_name}` row, lists `label`, `description`, `confirmText`, `submitText`, `successMessage`, `disabledReason`, `params…`, `outcomeMessages…` and `resultDialog…`. There is no `cancelText`.\n- `skills/objectstack-i18n/SKILL.md` L225–L228: \"Three more shapes under an action entry are the error\" names an undeclared outcome, an undeclared `resultDialog.fields` path, and `resultDialog` leaves without a `resultDialog`.\n- `packages/lint/src/validate-translation-references.ts` L2632–L2633 (the host table), L2674–L2685 and L2699–L2712 raise `translation-target-unknown` for:\n  - `submitText` under an action with no non-empty `params`;\n  - `cancelText` under an action that declares neither `confirmText` nor `params`.\n\n## Ask\n\n- Add `cancelText` to the key row, with its host in the row's own style (the dismiss button of the confirm or param dialog, only under an action that declares `confirmText` or `params`).\n- Add the two host refusals to the refusal paragraph, beside the shapes it already names.\n- Sweep `skills/objectstack-i18n/**`, its evals included, for the same lists.\n\nPR #32189 (card #31925) edits both the key row and that paragraph to add `preflight.fields`, so this waits for it to land and teaches from the merged text.\n\nDedupe (open and closed): `cancelText skills` and `\"translation-target-unknown\" submitText` return only the closed feature cards #28519, #28879 and #27944, none of which covers the skill text. **New.**\n\nClause-②: no · changeset: `'@objectstack/skills': patch`\nSuggested grade: p2"

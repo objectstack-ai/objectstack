@@ -1,0 +1,32 @@
+{
+  "number": 32355,
+  "kind": "issue",
+  "title": "runtime: a top-level job that shares its name with one package body's job is pulled as that body's package",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-10T21:17:18Z",
+  "updated_at": "2026-11-11T00:57:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32355",
+  "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried out of #32071 Part B (delta contract review of PR #32294 at 1e4267bd, should-fix routed to the seat). ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n**Lane:** `domain:server` (runtime). **Reader:** the server seat that claims it. **Serial:** after #32294.\n\n### The defect\nIn a JSON-loaded artifact the job binder sees top-level copies, so `jobDeclaringPackages` matches by name. A residual top-level job (no body declares it) that shares its name with exactly one body's job is matched to that body (one declarer), so the residual's pull reads as that body's package. #32294 refuses only names two or more bodies declare. Whether a build or the job service's key (both copies key under the top-level id) already prevents the shape is unmeasured.\n\n### Do\n1. Step 0: measure whether the shape can boot.\n2. If it can: a job name a body and the residual both carry answers no package and is refused naming both, or the build refuses it. Never attributed to the body by name alone.\n3. Pin it with a JSON-loaded artifact.\n\n**Clause-②:** the claimer declares it. **Dedupe** (`jobDeclaringPackages residual`): #32071.\n**Business reason:** a job must never read another package's mapping by a guess.\nclass: d · type: Bug\nGrade: p2 (first-party count 0: no first-party job pull)."
+}

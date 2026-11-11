@@ -13,18 +13,20 @@
   "labels": [
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-justin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T17:54:13Z",
-  "updated_at": "2026-11-10T18:55:52Z",
+  "updated_at": "2026-11-11T01:47:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32308",
   "body": "domain:server#2 · os-support-ai · session_01WGufziCTpjnYbdh76SAWwb\n\nFiling gate: **④ follow-up of a contract review**. These are findings N2 and N3 of contract review 6774898717 on PR #32268 (card #32085), graded nit there, so they don't hold that PR. ⛔ Not a claim.\n\nBlocked-by: #32085\n\n## 维护者速读\n\n- 问题：#32268 新增的\"同一域名只能一个 SSO 提供方\"检查，有三处漏判：多域名列表里的子域、两个并发注册、以及 Unicode 与 punycode 写法的同一个域名。\n- 原因：检查只比较单项域名，是先查后写且 `domain` 上没有唯一约束，而且比较的是解析后的域名，库里却按原始子串查。\n- 要做：补齐这三种情况，或者明确记录为什么不补，并各钉一个测试。\n- 需要你做的：无。车道派发，等 #32085 关闭后开工。\n\n## Findings (from the review, at `2850beca`)\n\n1. **N2, subdomain inside a multi-entry list.** A provider listing `eng.acme.com, foo.com` beside a provider for `acme.com` is accepted. By the diff's own account of vendor routing (exact whole-value match first, otherwise the first list match, subdomains included), the parent can win `eng.acme.com`. The pinned control covers only the single-entry shape.\n2. **N3a, check-then-write.** The collision read (`assertSsoProviderDomainFree`) is not atomic with the vendor's insert, and `domain` has no unique index, so two concurrent registers for one entry can both pass.\n3. **N3b, normalisation.** Entries are compared after URL parsing while the store is narrowed by the raw substring, so a domain stored in Unicode is not matched by its punycode form, or the reverse.\n\n## Wanted\n\nFor each: fix it, or record why not on this card. Pin each fixed case together with a control that stays accepted."

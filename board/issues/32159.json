@@ -2,8 +2,8 @@
   "number": 32159,
   "kind": "issue",
   "title": "Console accessibility: unnamed icon buttons, a notification bell named only by its count, and no nav landmark on the sidebar",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:38:41Z",
-  "updated_at": "2026-11-10T18:09:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T00:50:41Z",
+  "closed_at": "2026-11-11T00:49:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32159",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect, reproduced on a public entry (reach below).\n\nQA-source: #32135 · browser walk (runner C), accessibility · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\nReach: the console shell on every page (framework ff04ad81), checked with role-based queries:\n- Eight icon buttons on the task list page (nav-group collapse toggles) have no accessible name; the mobile sidebar toggle has none either.\n- The notification bell's accessible name is just the count (\"3\").\n- The sidebar is not a `<nav>` landmark (`nav` count 0).\nGood already: skip link, `html lang` follows locale, one `h1`, no unlabeled inputs, visible focus.\n\n## Proposed change\n\nGive every icon-only button an `aria-label`; name the bell \"Notifications, 3 unread\"; wrap the sidebar in `<nav aria-label=…>`.\n\n## Business reason\n\nWho: screen-reader and keyboard users, and any customer with an accessibility requirement in procurement. Cost: the shell cannot be navigated by landmark and its controls are announced as \"button\".\n\n## Reader\n\nTriage first touch; lands in `ui/` (app-shell).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack accessible name icon button nav landmark` (3 hits, none relevant): no card."
