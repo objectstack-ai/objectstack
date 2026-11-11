@@ -909,6 +909,32 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     });
   }
 
+  for (const stamp of ['sys_metadata', '']) {
+    it(`a package-less row hydrated into the registry (stamped ${JSON.stringify(stamp)}) is refused at both holders' exact addresses; with one holder it is served (contract review R2-A)`, async () => {
+      registry.registerItem('agent', { name: 'dup', label: 'hydrated agent', _packageId: stamp, _provenance: 'org' }, 'name' as never);
+      ship('agent', 'dup', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: A } as never)), 'one holder').toBe('hydrated agent');
+      ship('agent', 'dup', B);
+      for (const at of [A, B]) {
+        const err = await refusalOf(() => protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: at } as never));
+        expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+        expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      }
+    });
+  }
+
+  it('a member the holder itself ships, beside a package-less row of a name two packages hold: the exact read and the holder\'s list both serve the holder\'s own shipped member, never the row (R2-B)', async () => {
+    tpl('en-US', A);
+    tpl('en-US', B);
+    envRow('en-US');
+    for (const [at, own] of [[A, 'alpha en-US'], [B, 'beta en-US']] as const) {
+      const answer = await read(at, 'en-US');
+      expect(labelOf(answer), at).toBe(own);
+      expect((answer as { item?: { _packageId?: string } }).item?._packageId, at).toBe(at);
+      expect(await listed(at), at).toEqual([own]);
+    }
+  });
+
   it('CONTROL — the `_env` address is untouched: it serves the environment\'s own item, and a package-less row of a held name is not that (D4), as on main', async () => {
     envItem('agent', 'local');
     expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'local' })).not.toThrow();

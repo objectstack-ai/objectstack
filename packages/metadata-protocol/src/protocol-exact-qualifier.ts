@@ -335,7 +335,9 @@ export function exactQualifierItem(
     const registry = exactQualifierRegistry(host);
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
-    if (typeof served !== 'string') {
+    // A row hydrated into the registry carries `''` or the provenance sentinel
+    // `sys_metadata` where a stored row carries no package: both are no package.
+    if (typeof served !== 'string' || served === '' || served === 'sys_metadata') {
         // [epic ruling 6761802819 on #31699] A package-less row of a name two
         // or more packages hold is no package's own (D4: it is the
         // customization of one holder and cannot say which), so no holder's
