@@ -153,6 +153,27 @@ export type { SuspendedRunStoreEngine, ObjectStoreSuspendedRunStoreOptions } fro
 // AutomationServicePlugin and exported for hosts wiring a custom store.
 export { SysAutomationRun } from './sys-automation-run.object.js';
 
+// [ADR-0153 D7] A pull's run record and read position — registered by
+// AutomationServicePlugin beside sys_automation_run; the ledger is the one
+// writer (`ConnectorPullDeps.runs`).
+export { SysSyncRun } from './sys-sync-run.object.js';
+export {
+    ObjectStoreSyncRunLedger,
+    SYNC_RUN_OBJECT,
+    SYNC_RUN_INTERRUPTED,
+    closeInterruptedSyncRuns,
+} from './sync-run-ledger.js';
+export type {
+    SyncRunCounts,
+    SyncRunDescription,
+    SyncRunEnd,
+    SyncRunLedger,
+    SyncRunLedgerEngine,
+    SyncRunPosition,
+    SyncRunScope,
+    SyncRunStatus,
+} from './sync-run-ledger.js';
+
 // Trigger dispatch idempotency (#10220). The persisted claim ledger behind
 // `AutomationEngine.claim(key)` — the in-memory store is for tests / explicit
 // memory-only hosts; the ObjectQL-backed store makes dedup survive rebuilds.
