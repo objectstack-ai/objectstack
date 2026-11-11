@@ -2461,6 +2461,8 @@ const en = {
       description: 'What to set up before your colleagues start. Every item can be changed later in Setup.',
       progress: '{{done}} of {{total}} done',
       dismiss: 'Hide checklist',
+      showDone: 'Show completed ({{done}})',
+      hideDone: 'Hide completed',
       set: 'Set',
       change: 'Change',
       view: 'View',

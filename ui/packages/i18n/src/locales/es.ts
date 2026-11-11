@@ -2351,6 +2351,8 @@ const es = {
       description: "Lo que conviene configurar antes de que empiecen sus compañeros. Cada elemento se puede cambiar más tarde en Setup.",
       progress: "{{done}} de {{total}} completados",
       dismiss: "Ocultar lista",
+      showDone: "Mostrar completados ({{done}})",
+      hideDone: "Ocultar completados",
       set: "Configurar",
       change: "Cambiar",
       view: "Ver",

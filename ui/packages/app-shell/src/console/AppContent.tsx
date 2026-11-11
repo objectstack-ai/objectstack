@@ -1238,12 +1238,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // The way home itself is shared with the app-missing screen below
   // (objectui#13122): that screen returns above `ConsoleLayout` too, so a Retry
   // alone left a stale bookmark or an uninstalled app's link a full-screen dead
-  // end. One button, one copy key, one navigation for every screen that owes it.
-  const renderBackHomeButton = (testId: string) => (
-    <Button onClick={() => navigate(homePath)} data-testid={testId}>
-      {t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}
-    </Button>
-  );
+  // end. One button, one copy key, one navigation for every screen that owes it:
+  // `<BackToHomeButton>`, the way home of the shared `NotFoundState` as well.
 
   // One screen for both branches that draw a `denied` verdict below.
   const renderAppAccessDenied = () => (
@@ -1258,7 +1254,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               'This app exists, but your account is not authorized to open it. Ask an administrator to grant you access.',
           })}
         </EmptyDescription>
-        <div className="mt-4">{renderBackHomeButton('app-access-denied-home')}</div>
+        <div className="mt-4"><BackToHomeButton testId="app-access-denied-home" variant="default" /></div>
       </Empty>
     </div>
   );
@@ -1335,7 +1331,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             <Button onClick={() => setMissingRecheckRun(null)} data-testid={`${verdictScreen.testId}-retry`}>
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
-            <BackToHomeButton testId={`${verdictScreen.testId}-home`} />
+            <BackToHomeButton testId={`${verdictScreen.testId}-home`} variant="default" />
           </>
         }
       />

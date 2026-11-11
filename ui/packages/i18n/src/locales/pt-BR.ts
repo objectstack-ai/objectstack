@@ -2346,6 +2346,8 @@ const pt = {
       description: "O que configurar antes de seus colegas começarem. Cada item pode ser alterado depois em Setup.",
       progress: "{{done}} de {{total}} concluídos",
       dismiss: "Ocultar lista",
+      showDone: "Mostrar concluídos ({{done}})",
+      hideDone: "Ocultar concluídos",
       set: "Definir",
       change: "Alterar",
       view: "Ver",

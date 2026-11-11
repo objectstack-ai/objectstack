@@ -2287,6 +2287,8 @@ const ja = {
       description: "同僚が使い始める前に設定しておく項目です。どの項目も後から Setup で変更できます。",
       progress: "{{total}} 件中 {{done}} 件完了",
       dismiss: "チェックリストを非表示",
+      showDone: "完了した項目を表示（{{done}}）",
+      hideDone: "完了した項目を折りたたむ",
       set: "設定",
       change: "変更",
       view: "表示",

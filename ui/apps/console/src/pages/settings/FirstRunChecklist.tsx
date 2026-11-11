@@ -61,6 +61,12 @@
  * Once every row shown is done the checklist draws nothing; it comes back on
  * its own if a setting is unset again.
  *
+ * Rows that are done are folded away: the list draws the rows still to do, and
+ * one control under them names how many are done and shows them (in their
+ * place in the list) or folds them again, so the card keeps the first screen
+ * for the work left (objectstack#32157). Unfolding is this mount's own state:
+ * a fresh visit starts folded.
+ *
  * ## Hiding it
  *
  * The close button hides it for this administrator in this workspace on this
@@ -84,7 +90,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { CheckCircle2, Circle, Loader2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Circle, Loader2, X } from 'lucide-react';
 import { Button, cn } from '@object-ui/components';
 import {
   connectAssistantPath,
@@ -396,6 +402,8 @@ export function FirstRunChecklist() {
   const aiLabels = useSettingsLabel(AI_NAMESPACE);
 
   const [editing, setEditing] = useState<ChecklistSettingsRow['id'] | null>(null);
+  // Whether the rows that are done are drawn; folded on every visit.
+  const [showDone, setShowDone] = useState(false);
   // The browser's answers are read once per mount: what the rows offer does not
   // change under the administrator while they look at it.
   const [browser] = useState(readBrowserAnswers);
@@ -706,7 +714,30 @@ export function FirstRunChecklist() {
             </button>
           </div>
         </div>
-        <ol className="mt-2 divide-y divide-border">{rows.map((row) => row.node)}</ol>
+        <ol className="mt-2 divide-y divide-border" id="first-run-checklist-rows">
+          {rows.filter((row) => showDone || !row.done).map((row) => row.node)}
+        </ol>
+        {doneCount > 0 ? (
+          <div className="border-t border-border py-2">
+            <button
+              type="button"
+              onClick={() => setShowDone((shown) => !shown)}
+              aria-expanded={showDone}
+              aria-controls="first-run-checklist-rows"
+              className="inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              data-testid="first-run-checklist-toggle-done"
+            >
+              {showDone ? (
+                <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+              )}
+              {showDone
+                ? t('console.firstRunChecklist.hideDone')
+                : t('console.firstRunChecklist.showDone', { done: doneCount })}
+            </button>
+          </div>
+        ) : null}
       </section>
     </div>
   );

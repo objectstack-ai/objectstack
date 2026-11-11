@@ -223,6 +223,11 @@ async function settle() {
 
 const row = (id: string) => screen.getByTestId(`first-run-checklist-row-${id}`);
 
+/** Unfolds the rows that are done, which the checklist folds away (objectstack#32157). */
+async function showDone() {
+  fireEvent.click(await screen.findByTestId('first-run-checklist-toggle-done'));
+}
+
 let browserZone = 'Asia/Shanghai';
 let browserLanguages = ['zh-CN'];
 const realResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
@@ -307,6 +312,7 @@ describe('each row is read from the real setting', () => {
     };
     renderChecklist(ADMIN);
     await screen.findByTestId('first-run-checklist-row-invite');
+    await showDone();
     for (const id of ['language_country', 'timezone', 'currency']) expect(row(id).getAttribute('data-done')).toBe('true');
     expect(row('organization_name').getAttribute('data-done')).toBe('false');
     expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
@@ -333,6 +339,7 @@ describe('the browser pre-fills; only Confirm writes (objectui#11693 B2, objects
     expect(puts()).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId('first-run-checklist-confirm-currency'));
+    await showDone();
     await waitFor(() => expect(row('currency').getAttribute('data-done')).toBe('true'));
     expect(puts()).toHaveLength(1);
     expect(JSON.parse(String((puts()[0][1] as RequestInit).body))).toEqual({ currency: 'CNY' });
@@ -488,6 +495,7 @@ describe('Connect an AI assistant: done from a real record, never from a click',
   it('an authorized assistant makes it done', async () => {
     granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
     expect(r.getAttribute('data-done')).toBe('true');
     expect(within(r).getByText('An AI assistant or API key of yours is connected.')).toBeTruthy();
@@ -496,6 +504,7 @@ describe('Connect an AI assistant: done from a real record, never from a click',
   it('an API key that still works makes it done', async () => {
     keys = [{ id: 'k_live', name: 'doubao key', revoked: false, expires_at: null }];
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
     expect(r.getAttribute('data-done')).toBe('true');
   });
@@ -600,6 +609,7 @@ describe('one Home card per item (objectstack#32021 item 3)', () => {
       granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
       render(<Claimed item="connect_assistant" />);
       renderChecklist(ADMIN);
+      await showDone();
       const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
       expect(r.getAttribute('data-done')).toBe('true');
       await settle();
@@ -679,6 +689,7 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
   it('set in Setup: done, naming the provider by its option and saying where it came from', async () => {
     serveAi({ value: 'openai', source: 'settings' }, 'openai');
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
     expect(r.getAttribute('data-done')).toBe('true');
     expect(within(r).getByText('OpenAI, set in Setup.')).toBeTruthy();
@@ -688,6 +699,7 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
   it('detected from the boot environment with nothing saved: done, and says so', async () => {
     serveAi({ value: 'deepseek', source: 'environment' }, null);
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
     expect(r.getAttribute('data-done')).toBe('true');
     expect(within(r).getByText('DeepSeek (OpenAI-compatible), detected from the server environment.')).toBeTruthy();
@@ -744,6 +756,7 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
       serveAi({ value: 'openai', source: 'settings' }, 'openai');
       render(<Claimed item="connect_assistant" />);
       renderChecklist(ADMIN);
+      await showDone();
       const builtIn = await screen.findByTestId('first-run-checklist-row-ai_provider');
       const external = await screen.findByTestId('first-run-checklist-row-connect_assistant');
       expect(builtIn.getAttribute('data-done')).toBe('true');
@@ -754,5 +767,67 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
       // The built-in row being done does not release the external row's Home claim.
       await waitFor(() => expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('true'));
     });
+  });
+});
+
+describe('rows that are done are folded away, so the card keeps the screen for the work left (objectstack#32157)', () => {
+  function setThreeRows() {
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+  }
+  const drawnRows = () =>
+    within(screen.getByTestId('first-run-checklist'))
+      .getAllByRole('listitem')
+      .map((li) => li.getAttribute('data-testid')?.replace('first-run-checklist-row-', ''));
+
+  it('done rows are not drawn; one control says how many and unfolds them in their place', async () => {
+    setThreeRows();
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(drawnRows()).toEqual(['organization_name', 'mail', 'invite']);
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
+    const toggle = screen.getByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('Show completed (3)');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(screen.getByRole('list').id);
+
+    fireEvent.click(toggle);
+    expect(drawnRows()).toEqual(['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite']);
+    expect(toggle.textContent).toBe('Hide completed');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(toggle);
+    expect(drawnRows()).toEqual(['organization_name', 'mail', 'invite']);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a row confirmed in place folds away once the server has it, and the count follows', async () => {
+    renderChecklist(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-set-currency'));
+    fireEvent.click(screen.getByTestId('first-run-checklist-confirm-currency'));
+    const toggle = await screen.findByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('Show completed (1)');
+    expect(screen.queryByTestId('first-run-checklist-row-currency')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('1 of 6 done');
+  });
+
+  it('CONTROL: with nothing done every row is drawn and there is nothing to unfold', async () => {
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(drawnRows()).toEqual(['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite']);
+    expect(screen.queryByTestId('first-run-checklist-toggle-done')).toBeNull();
+  });
+
+  it('zh: the control reads in the reader language', async () => {
+    setThreeRows();
+    renderChecklist(ADMIN, 'zh');
+    const toggle = await screen.findByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('显示已完成的项（3）');
+    fireEvent.click(toggle);
+    expect(toggle.textContent).toBe('收起已完成的项');
   });
 });

@@ -2285,6 +2285,8 @@ const ko = {
       description: "동료가 사용을 시작하기 전에 설정해 둘 항목입니다. 모든 항목은 나중에 Setup에서 변경할 수 있습니다.",
       progress: "{{total}}개 중 {{done}}개 완료",
       dismiss: "체크리스트 숨기기",
+      showDone: "완료된 항목 보기({{done}})",
+      hideDone: "완료된 항목 접기",
       set: "설정",
       change: "변경",
       view: "보기",

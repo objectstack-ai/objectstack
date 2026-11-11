@@ -2041,6 +2041,8 @@ const zh = {
       description: '同事开始使用之前，先设置好这几项。每一项之后都可以在 Setup 中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隐藏清单',
+      showDone: '显示已完成的项（{{done}}）',
+      hideDone: '收起已完成的项',
       set: '设置',
       change: '修改',
       view: '查看',

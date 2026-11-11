@@ -2285,6 +2285,8 @@ const de = {
       description: "Was Sie einrichten sollten, bevor Ihre Kollegen loslegen. Jeder Punkt lässt sich später in Setup ändern.",
       progress: "{{done}} von {{total}} erledigt",
       dismiss: "Checkliste ausblenden",
+      showDone: "Erledigte anzeigen ({{done}})",
+      hideDone: "Erledigte ausblenden",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",

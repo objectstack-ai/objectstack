@@ -2041,6 +2041,8 @@ const zhHant = {
       description: '同事開始使用之前，先設定好這幾項。每一項之後都可以在 Setup 中修改。',
       progress: '已完成 {{done}}/{{total}}',
       dismiss: '隱藏清單',
+      showDone: '顯示已完成的項（{{done}}）',
+      hideDone: '收起已完成的項',
       set: '設定',
       change: '修改',
       view: '檢視',

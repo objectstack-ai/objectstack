@@ -2347,6 +2347,8 @@ const fr = {
       description: "Ce qu’il faut configurer avant que vos collègues commencent. Chaque élément peut être modifié plus tard dans Setup.",
       progress: "{{done}} sur {{total}} terminés",
       dismiss: "Masquer la liste",
+      showDone: "Afficher les étapes terminées ({{done}})",
+      hideDone: "Masquer les étapes terminées",
       set: "Définir",
       change: "Modifier",
       view: "Voir",
