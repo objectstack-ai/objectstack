@@ -86,11 +86,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "この受領記録が状態を記録している通知です。"
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "この受領記録が属する配信記録です。現在は入力されません。"
       },
       user_id: {
         label: "Recipient User"
@@ -131,7 +131,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "この配信が送信する通知です。"
       },
       recipient_id: {
         label: "Recipient",

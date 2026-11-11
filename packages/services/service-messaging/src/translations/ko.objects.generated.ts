@@ -86,11 +86,11 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "알림 이벤트",
-        help: "외래 키 → sys_notification(L2 이벤트)"
+        help: "이 수신 기록이 상태를 기록하는 알림입니다."
       },
       delivery_id: {
         label: "전송",
-        help: "외래 키 → sys_notification_delivery(발신함 행). P1 전까지 null"
+        help: "이 수신 기록이 속한 전달 기록입니다. 현재는 채워지지 않습니다."
       },
       user_id: {
         label: "수신 사용자"
@@ -131,7 +131,7 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "알림 이벤트",
-        help: "외래 키 → sys_notification(L2 이벤트)"
+        help: "이 전달이 보내는 알림입니다."
       },
       recipient_id: {
         label: "수신자",

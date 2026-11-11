@@ -86,11 +86,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "La notificación cuyo estado registra este acuse."
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "El registro de entrega al que pertenece este acuse. Actualmente no se rellena."
       },
       user_id: {
         label: "Recipient User"
@@ -131,7 +131,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "La notificación que envía esta entrega."
       },
       recipient_id: {
         label: "Recipient",

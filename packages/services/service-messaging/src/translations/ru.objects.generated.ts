@@ -86,11 +86,11 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Событие уведомления",
-        help: "Внешний ключ → sys_notification (событие L2)"
+        help: "Уведомление, состояние которого фиксирует эта квитанция."
       },
       delivery_id: {
         label: "Доставка",
-        help: "Внешний ключ → sys_notification_delivery (строка исходящей очереди); null до P1"
+        help: "Запись о доставке, к которой относится эта квитанция. Сейчас не заполняется."
       },
       user_id: {
         label: "Пользователь-получатель"
@@ -131,7 +131,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Событие уведомления",
-        help: "Внешний ключ → sys_notification (событие L2)"
+        help: "Уведомление, которое отправляет эта доставка."
       },
       recipient_id: {
         label: "Получатель",

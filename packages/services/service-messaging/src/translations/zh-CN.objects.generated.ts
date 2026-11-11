@@ -86,11 +86,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "通知事件",
-        help: "外键 → sys_notification(L2 事件)"
+        help: "本回执记录其状态的通知。"
       },
       delivery_id: {
         label: "投递记录",
-        help: "外键 → sys_notification_delivery(发件箱行);P1 之前为空"
+        help: "本回执所属的投递记录。目前不填写。"
       },
       user_id: {
         label: "接收用户"
@@ -131,7 +131,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "通知事件",
-        help: "外键 → sys_notification(L2 事件)"
+        help: "本投递所发送的通知。"
       },
       recipient_id: {
         label: "接收方",

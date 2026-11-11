@@ -86,11 +86,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "The notification whose state this receipt records."
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "The delivery record this receipt belongs to. Not currently filled in."
       },
       user_id: {
         label: "Recipient User"
@@ -131,7 +131,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "The notification this delivery sends."
       },
       recipient_id: {
         label: "Recipient",

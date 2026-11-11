@@ -86,11 +86,11 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Événement de notification",
-        help: "Clé étrangère → sys_notification (événement L2)"
+        help: "La notification dont cet accusé enregistre l’état."
       },
       delivery_id: {
         label: "Livraison",
-        help: "Clé étrangère → sys_notification_delivery (ligne de la boîte d’envoi) ; null jusqu’à P1"
+        help: "L’enregistrement de livraison auquel appartient cet accusé. Non renseigné actuellement."
       },
       user_id: {
         label: "Utilisateur destinataire"
@@ -131,7 +131,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Événement de notification",
-        help: "Clé étrangère → sys_notification (événement L2)"
+        help: "La notification que cette livraison envoie."
       },
       recipient_id: {
         label: "Destinataire",

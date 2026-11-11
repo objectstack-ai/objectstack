@@ -86,11 +86,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificação",
-        help: "Chave estrangeira → sys_notification (evento L2)"
+        help: "A notificação cujo estado este recibo registra."
       },
       delivery_id: {
         label: "Entrega",
-        help: "Chave estrangeira → sys_notification_delivery (linha da caixa de saída); null até a P1"
+        help: "O registro de entrega ao qual este recibo pertence. Atualmente não é preenchido."
       },
       user_id: {
         label: "Usuário destinatário"
@@ -131,7 +131,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificação",
-        help: "Chave estrangeira → sys_notification (evento L2)"
+        help: "A notificação que esta entrega envia."
       },
       recipient_id: {
         label: "Destinatário",

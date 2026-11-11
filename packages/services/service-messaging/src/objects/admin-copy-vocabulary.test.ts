@@ -127,7 +127,7 @@ describe('messaging objects: admin-facing copy carries no design-record vocabula
     expect(vocabularyIn('The Kernel API is additive.')).toEqual(['a runtime internal']);
     expect(vocabularyIn('Foreign key to sys_user.id')).toEqual(['a foreign-key note']);
     expect(vocabularyIn('Enforced at resolution time via isGrantActive.')).toEqual(['a function name']);
-    expect(vocabularyIn('Batch cadence (P3 digest middleware).')).toEqual(['an internal component']);
+    expect(vocabularyIn('Batch cadence (P3 digest middleware).')).toEqual(['an internal component', 'a rollout-phase note']);
     expect(vocabularyIn('NULL only on a grant written before the column existed.')).toEqual(['a column-history note']);
     expect(vocabularyIn('Inert today: nothing reads it.')).toEqual(['an inert-column notice']);
     expect(vocabularyIn('FK → sys_notification (the L2 event this row materializes)')).toEqual(['an object-reference arrow']);

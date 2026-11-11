@@ -86,11 +86,11 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Benachrichtigungsereignis",
-        help: "Fremdschlüssel → sys_notification (L2-Ereignis)"
+        help: "Die Benachrichtigung, deren Status diese Bestätigung erfasst."
       },
       delivery_id: {
         label: "Zustellung",
-        help: "Fremdschlüssel → sys_notification_delivery (Postausgangszeile); null bis P1"
+        help: "Der Zustelldatensatz, zu dem diese Bestätigung gehört. Derzeit nicht ausgefüllt."
       },
       user_id: {
         label: "Empfangender Benutzer"
@@ -131,7 +131,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Benachrichtigungsereignis",
-        help: "Fremdschlüssel → sys_notification (L2-Ereignis)"
+        help: "Die Benachrichtigung, die diese Zustellung sendet."
       },
       recipient_id: {
         label: "Empfänger",

@@ -86,11 +86,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "حدث الإشعار",
-        help: "مفتاح خارجي → sys_notification (حدث L2)"
+        help: "الإشعار الذي يسجّل هذا الإيصال حالته."
       },
       delivery_id: {
         label: "التسليم",
-        help: "مفتاح خارجي → sys_notification_delivery (صف صندوق الصادر)؛ null حتى P1"
+        help: "سجل التسليم الذي ينتمي إليه هذا الإيصال. لا يُملأ حاليًا."
       },
       user_id: {
         label: "المستخدم المستلِم"
@@ -131,7 +131,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "حدث الإشعار",
-        help: "مفتاح خارجي → sys_notification (حدث L2)"
+        help: "الإشعار الذي يرسله هذا التسليم."
       },
       recipient_id: {
         label: "المستلِم",
