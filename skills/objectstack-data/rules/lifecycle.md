@@ -128,8 +128,8 @@ lifecycle: {
 ## Sealing (`seal`)
 
 `seal` makes an `audit` ledger tamper-evident (ADR-0154): an edit, insert or
-delete made outside the platform shows. Ten minutes after each `created_at`
-hour, `@objectstack/plugin-audit` signs its rows into one chained checkpoint
+delete outside the platform shows. Ten minutes after each `created_at`
+hour, `@objectstack/plugin-audit` signs its rows into a chained checkpoint
 per organization (`tenant_id`; rows with none share a deployment chain); late
 rows get a `late` checkpoint. Columns enter in clear, `valueFields` as salted
 commitments.
@@ -138,13 +138,14 @@ commitments.
 ```typescript
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-// ✅ The sealer needs a declared `id` and `tenant_id`
+// ✅ The sealer needs declared `id` and `tenant_id`
 export const PolicyChangeLog = ObjectSchema.create({
   name: 'policy_change_log',
+  sharingModel: 'private',
   lifecycle: { class: 'audit', retention: { maxAge: '1y' }, seal: { valueFields: ['new_value'] } },
   fields: {
-    id: Field.text({ required: true }),
-    tenant_id: Field.lookup('sys_organization', {}),  // stamped on insert
+    id: Field.text({}),
+    tenant_id: Field.lookup('sys_organization', {}), // stamped on insert
     new_value: Field.textarea({}),
   },
 });
@@ -155,7 +156,7 @@ export const PolicyChangeLog = ObjectSchema.create({
 seal: { valueFields: ['created_at'] }
 ```
 
-Also refused: `seal` off class `audit`, a `valueFields` name not declared, and
+Also refused: `seal` off class `audit`, an undeclared `valueFields` name, and
 beside `seal` any `onlyWhen`, a `ttl` not on `created_at`, or rotation
 `storage`. Not sealed, reported at `error` hourly: no declared `id` or
 `tenant_id` (the injected tenant column is `organization_id`); a `password`,
