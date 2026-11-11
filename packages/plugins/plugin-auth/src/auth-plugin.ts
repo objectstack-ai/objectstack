@@ -1947,7 +1947,8 @@ export class AuthPlugin implements Plugin {
           } catch (e) {
             // Provenance must never break account creation — the sys_account
             // insert still stands. [#12981] It must not be SILENT either: this
-            // hook is the only stamp on the SCIM path, so nothing re-runs it.
+            // hook is the only stamp on the adapter-level account-create path,
+            // so nothing re-runs it.
             ctx.logger.error(
               '[auth] the adapter-level identity-source stamp was NOT written — the sys_account row '
                 + 'was created and the caller saw success, so nothing looks wrong. The user keeps '
@@ -1968,8 +1969,9 @@ export class AuthPlugin implements Plugin {
       } catch (e) {
         // [#12981] Was: "Engine not available — skip". That is one of the two
         // things this catch actually sees, and the quiet one; `registerHook`
-        // refusing is the other, and it silently un-arms the SCIM stamp for the
-        // whole process while the boot goes on looking healthy.
+        // refusing is the other, and it silently un-arms the adapter-level
+        // account stamp for the whole process while the boot goes on looking
+        // healthy. (SCIM is marked on its own reconcile callback, not here.)
         ctx.logger.error(
           '[auth] the adapter-level identity-source stamp was NOT registered — boot continues and '
             + 'every other auth surface works, so nothing looks wrong. For the rest of this process '
