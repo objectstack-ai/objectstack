@@ -136,6 +136,7 @@ import {
   providerDomains,
   settleSsoProviderDelete as settleDeletedSsoProvider,
   ssoDomainClaimedRefusal,
+  ssoDomainTooLong,
   stageSsoProviderDeleteImpact,
 } from './sso-provider-lifecycle.js';
 import {
@@ -5800,26 +5801,40 @@ export class AuthManager {
    *
    * Asked only of an authenticated caller whose body carries a domain: what
    * the vendor itself answers (no session, a malformed body) falls through to
-   * it. The holding provider is named to a platform administrator, who may
-   * read every provider; any other caller (an organization administrator on
-   * `/sso/update-provider`) is told only that the domain is served, which
-   * `/sign-in/sso` already answers anyone. A provider-table read that fails
+   * it, and nothing of the domain is parsed for a caller without a session.
+   * A value longer than a provider row holds, or with an entry longer than a
+   * host name, is refused `400 VALIDATION_FAILED` on `domain` before it is
+   * parsed (`ssoDomainTooLong`).
+   *
+   * The holding provider is named to a platform administrator, who may read
+   * every provider; any other caller (an organization administrator on
+   * `/sso/update-provider`) is told only that a domain its request names, or
+   * a subdomain of it, is served, which `/sign-in/sso` already answers anyone
+   * for a name they supply: never the row, nor the subdomain another
+   * provider lists. A provider-table read that fails
    * refuses `503`: a guard that could not be evaluated does not pass.
    */
   private async assertSsoProviderDomainFree(ctx: any): Promise<void> {
     const path = ctx?.path;
     if (path !== SSO_PROVIDER_REGISTER_PATH && path !== SSO_PROVIDER_UPDATE_PATH) return;
-    const domains = providerDomains(ctx?.body?.domain);
-    if (domains.length === 0) return;
+    const requested: unknown = ctx?.body?.domain;
+    if (typeof requested !== 'string' || !requested.trim()) return;
     const engine = this.getDataEngine();
     if (!engine) return;
     const actor = await this.resolveActor(ctx);
     if (!actor?.userId) return;
-    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
     const { APIError } = await import('better-auth/api');
+    // Lengths before any parse: the value is request-controlled.
+    const tooLong = ssoDomainTooLong(requested);
+    if (tooLong) {
+      throw new APIError(tooLong.status, { code: tooLong.code, message: tooLong.message, field: tooLong.field, fields: tooLong.fields });
+    }
+    const domains = providerDomains(requested);
+    if (domains.length === 0) return;
+    const providerId = typeof ctx?.body?.providerId === 'string' ? ctx.body.providerId : '';
     let claim;
     try {
-      claim = await findSsoDomainClaim(engine, ctx.body.domain, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
+      claim = await findSsoDomainClaim(engine, requested, path === SSO_PROVIDER_UPDATE_PATH ? providerId : undefined);
     } catch {
       throw new APIError('SERVICE_UNAVAILABLE', {
         code: 'SERVICE_UNAVAILABLE',

@@ -131,7 +131,78 @@ function bareDomain(entry: string): string {
   } catch {
     host = trimmed.toLowerCase();
   }
-  return host.replace(/\.+$/, '');
+  return withoutTrailingDots(host);
+}
+
+/**
+ * `host` without its trailing dots, found by one backward index scan and cut
+ * by one `slice`. The value is request-controlled, so no pattern runs on it:
+ * a trailing-run pattern such as `/\.+$/` backtracks from every start position
+ * of a dot run that does not end the string (quadratic, `js/polynomial-redos`;
+ * `register-sso-provider.ts` `bareHostname` is regex-free for the same input).
+ */
+function withoutTrailingDots(host: string): string {
+  let end = host.length;
+  while (end > 0 && host.charCodeAt(end - 1) === 0x2e) end -= 1;
+  return end === host.length ? host : host.slice(0, end);
+}
+
+/**
+ * The longest `domain` value a provider row holds: `sys_sso_provider.domain`
+ * declares `maxLength: 255`, and the write seam refuses a longer value. A
+ * request over it could never be saved, so it is refused before anything
+ * parses it.
+ */
+export const SSO_DOMAIN_VALUE_MAX = 255;
+
+/**
+ * The longest one entry may be: a host name is at most 253 characters
+ * (RFC 1035's 255-octet wire form, less its leading length octet and the root
+ * label's), not counting one trailing root dot. An entry is measured as typed,
+ * trimmed, so a scheme or a path around a host counts toward it.
+ */
+export const SSO_DOMAIN_ENTRY_MAX = 253;
+
+/** The refusal of a `domain` too long to be a list of hosts; thrown as better-auth's `APIError`. */
+export interface SsoDomainTooLongRefusal {
+  status: 'BAD_REQUEST';
+  code: 'VALIDATION_FAILED';
+  message: string;
+  field: 'domain';
+  /** The `VALIDATION_FAILED` per-field detail plugin-auth's other length refusals carry. */
+  fields: [{ field: 'domain'; code: 'max_length'; message: string }];
+}
+
+function tooLong(message: string): SsoDomainTooLongRefusal {
+  return { status: 'BAD_REQUEST', code: 'VALIDATION_FAILED', field: 'domain', message, fields: [{ field: 'domain', code: 'max_length', message }] };
+}
+
+/**
+ * The refusal for a requested `domain` value longer than a provider row holds
+ * ({@link SSO_DOMAIN_VALUE_MAX}) or with an entry longer than a host name
+ * ({@link SSO_DOMAIN_ENTRY_MAX}), or `undefined`. It reads lengths only: the
+ * whole value's first, so no entry is cut out of a value over the bound, and
+ * nothing is parsed as a host. Asked before {@link providerDomains}.
+ */
+export function ssoDomainTooLong(domain: unknown): SsoDomainTooLongRefusal | undefined {
+  if (typeof domain !== 'string') return undefined;
+  if (domain.length > SSO_DOMAIN_VALUE_MAX) {
+    return tooLong(
+      `The SSO provider domain is ${domain.length} characters long; a provider's domain holds at most `
+        + `${SSO_DOMAIN_VALUE_MAX} (its comma-separated email domains together). Nothing was saved.`,
+    );
+  }
+  for (const entry of domain.split(',')) {
+    const trimmed = entry.trim();
+    const length = trimmed.endsWith('.') ? trimmed.length - 1 : trimmed.length;
+    if (length > SSO_DOMAIN_ENTRY_MAX) {
+      return tooLong(
+        `An SSO provider domain entry is ${length} characters long; an email domain is a host name of at most `
+          + `${SSO_DOMAIN_ENTRY_MAX} characters. Nothing was saved.`,
+      );
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -146,10 +217,12 @@ export function providerDomains(domain: unknown): string[] {
 /**
  * Whether a provider whose stored `domain` is `value` wins the vendor's exact
  * step for `entry` (step 1 in the module comment): only when the whole value
- * is that entry, spelled as the bare lower-case ASCII host.
+ * is that entry, spelled as the bare lower-case ASCII host. Compared as the
+ * vendor's step 1 compares, by plain equality on the value as stored: the
+ * vendor stores `domain` as typed, so `' eng.acme.com '` does not win it.
  */
 function winsExactStep(value: unknown, entry: string): boolean {
-  return typeof value === 'string' && value.trim() === entry;
+  return typeof value === 'string' && value === entry;
 }
 
 /** `child` is a proper subdomain of `parent`: the vendor's "ends with `.` + entry". */
@@ -225,9 +298,22 @@ export interface SsoDomainClaimedRefusal {
   heldBy?: string;
 }
 
-/** The sentence that says why `claim` collides, and what to do instead. */
-function claimSentence(claim: SsoDomainClaim, holder: string): string {
+/**
+ * The sentence that says why `claim` collides, and what to do instead. Without
+ * `nameHolder` it names only what the request itself holds: the requested
+ * entry, or (`parent`) a parent of it, which the caller's own domain spells.
+ * A `child` claim's domain is the other provider's listed subdomain, which the
+ * request does not hold, so it is not named then.
+ */
+function claimSentence(claim: SsoDomainClaim, holder: string, nameHolder: boolean): string {
   const domain = spelled(claim.domain);
+  if (claim.kind === 'child' && !nameHolder) {
+    const parent = spelled(claim.entry ?? '');
+    return `A subdomain of the email domain ${parent} is served by ${holder} as one entry of a list, or in another spelling than its whole domain. Adding ${parent} `
+      + 'here would leave both providers matching that subdomain, with the store row order picking one, so it would '
+      + `not be reliably reached by address. Leave ${parent} off this provider, or ask a platform administrator to give `
+      + 'that subdomain a provider whose only domain entry it is.';
+  }
   if (claim.kind === 'parent') {
     return `The email domain ${domain} is already served by ${holder} through its entry '${claim.entry}'. `
       + `Sign-in sends ${domain} to its own provider first only when that provider's whole domain is exactly ${domain}; `
@@ -236,7 +322,7 @@ function claimSentence(claim: SsoDomainClaim, holder: string): string {
       + `entry, or edit '${claim.entry}' off the provider that serves it.`;
   }
   if (claim.kind === 'child') {
-    return `The email domain ${domain} is served by ${holder} as one entry of a list. Adding its parent '${claim.entry}' `
+    return `The email domain ${domain} is served by ${holder} as one entry of a list, or in another spelling than its whole domain. Adding its parent '${claim.entry}' `
       + `here would leave both providers matching ${domain}, with the store row order picking one, so ${domain} `
       + `would not be reliably reached by address. Give ${domain} a provider whose only domain entry it is, or leave `
       + `'${claim.entry}' off this provider.`;
@@ -249,8 +335,10 @@ function claimSentence(claim: SsoDomainClaim, holder: string): string {
 
 /**
  * The located `409` for `claim`. `nameHolder` is false for a caller who is not
- * a platform administrator: such a caller learns only that the domain is
- * served, which `/sign-in/sso` already answers anyone, and not by which row.
+ * a platform administrator: such a caller learns only that a domain the
+ * request names (or a subdomain of it) is served, which `/sign-in/sso` already
+ * answers anyone for a name they supply, and not by which row, nor which
+ * subdomain another provider lists.
  */
 export function ssoDomainClaimedRefusal(claim: SsoDomainClaim, nameHolder: boolean): SsoDomainClaimedRefusal {
   const holder = nameHolder ? `SSO provider '${claim.providerId}'` : 'another SSO provider';
@@ -258,7 +346,7 @@ export function ssoDomainClaimedRefusal(claim: SsoDomainClaim, nameHolder: boole
     status: 'CONFLICT',
     code: 'RESOURCE_CONFLICT',
     field: 'domain',
-    message: claimSentence(claim, holder),
+    message: claimSentence(claim, holder, nameHolder),
     ...(nameHolder ? { heldBy: claim.providerId } : {}),
   };
 }

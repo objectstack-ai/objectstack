@@ -58,6 +58,7 @@ import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 import { ssoGroupProjectionReason } from './scim-group-projection.js';
 import { createEngineSsoProviderConfigReader } from './register-sso-provider.js';
+import { providerDomains } from './sso-provider-lifecycle.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -651,6 +652,111 @@ describe('an email domain another provider serves is refused on register and on 
     expect(body.message).toContain('another SSO provider');
     expect(body.message).not.toContain(PROVIDER);
   }, 30_000);
+
+  it('a parent beside a listed subdomain names that subdomain and its provider to a platform administrator only', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'eng.acme.example, acme.io' });
+    const memberCookie = await s.signUp('owner@globex.example');
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example', userId: await s.userIdOf('owner@globex.example') });
+
+    // The organization administrator who owns OTHER: told only about the parent the request names.
+    const member = await postJson(s, '/sso/update-provider', { providerId: OTHER, domain: 'acme.example' }, memberCookie);
+    const memberBody = (await member.json()) as any;
+    expect(member.status, JSON.stringify(memberBody)).toBe(409);
+    expect(memberBody).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain' });
+    expect(memberBody.heldBy).toBeUndefined();
+    expect(memberBody.message).toContain("A subdomain of the email domain 'acme.example' is served by another SSO provider");
+    expect(memberBody.message).not.toContain('eng.acme.example');
+    expect(memberBody.message).not.toContain(PROVIDER);
+
+    // A platform administrator, on the same request: the subdomain and the provider that lists it.
+    const admin = await postJson(s, '/sso/update-provider', { providerId: OTHER, domain: 'acme.example' });
+    const adminBody = (await admin.json()) as any;
+    expect(admin.status, JSON.stringify(adminBody)).toBe(409);
+    expect(adminBody).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
+    expect(adminBody.message).toContain(`The email domain 'eng.acme.example' is served by SSO provider '${PROVIDER}'`);
+    expect((await rows(s, 'sys_sso_provider', { provider_id: OTHER }))[0].domain).toBe('globex.example');
+  }, 30_000);
+
+  it('a single entry stored with surrounding whitespace does not win the exact step, so its parent is refused', async () => {
+    const s = await stage();
+    // The vendor stores `domain` as typed and its exact step is a plain equality, so ' eng.acme.example '
+    // never equals an address's domain: only the list step reaches it, beside any parent.
+    await storeProvider(s, { providerId: PROVIDER, domain: ' eng.acme.example ' });
+    const parent = await register(s, 'acme-parent', 'acme.example');
+    expect(parent.status, JSON.stringify(parent.body)).toBe(409);
+    expect(parent.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: PROVIDER });
+    expect(parent.body.message).toContain("The email domain 'eng.acme.example' is served by SSO provider");
+
+    // The other way round: a padded subdomain requested beside a stored parent.
+    await storeProvider(s, { providerId: OTHER, domain: 'globex.example' });
+    const padded = await register(s, 'globex-eng', ' eng.globex.example ');
+    expect(padded.status, JSON.stringify(padded.body)).toBe(409);
+    expect(padded.body).toMatchObject({ code: 'RESOURCE_CONFLICT', field: 'domain', heldBy: OTHER });
+    expect(padded.body.message).toContain("through its entry 'globex.example'");
+    expect((await rows(s, 'sys_sso_provider')).map((r) => r.provider_id).sort()).toEqual([PROVIDER, OTHER]);
+  }, 30_000);
+});
+
+describe('a domain longer than a provider holds, or than a host name, is refused before it is parsed', () => {
+  /** A host name of exactly `SSO_DOMAIN_ENTRY_MAX` (253) characters, in labels of at most 63. */
+  const host253 = `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(61)}.example`.slice(-253);
+  const oidcRegister = (providerId: string, domain: string) => ({
+    providerId,
+    issuer: `https://${providerId}.idp.example`,
+    domain,
+    oidcConfig: { clientId: 'cid', clientSecret: 'csecret', mapping: { email: 'email', name: 'name' } },
+  });
+
+  it('a long dot run over the bound is refused 400 VALIDATION_FAILED on domain at both doors; nothing written', async () => {
+    const s = await stage();
+    await storeProvider(s, { providerId: PROVIDER, domain: 'acme.example' });
+    const dots = `a${'.'.repeat(300_000)}x`;
+    const registered = await postJson(s, '/sso/register', oidcRegister('dots', dots));
+    const body = (await registered.json()) as any;
+    expect(registered.status, JSON.stringify(body).slice(0, 400)).toBe(400);
+    expect(body).toMatchObject({ code: 'VALIDATION_FAILED', field: 'domain', fields: [{ field: 'domain', code: 'max_length' }] });
+    expect(body.message).toContain('at most 255');
+
+    const edited = await postJson(s, '/sso/update-provider', { providerId: PROVIDER, domain: dots });
+    expect(edited.status).toBe(400);
+    expect(await edited.json()).toMatchObject({ code: 'VALIDATION_FAILED', field: 'domain' });
+    expect((await rows(s, 'sys_sso_provider')).map((r) => [r.provider_id, r.domain])).toEqual([[PROVIDER, 'acme.example']]);
+
+    // Without a session the value is not read at all: the vendor answers as it does for any sessionless caller.
+    const sessionless = await postJson(s, '/sso/register', oidcRegister('dots', dots), '');
+    expect(sessionless.status).toBe(401);
+  }, 30_000);
+
+  it('an entry longer than a host name is refused; one of 253 characters, with or without a root dot, is registered', async () => {
+    const s = await stage();
+    expect(host253).toHaveLength(253);
+    const over = await postJson(s, '/sso/register', oidcRegister('over', `e${host253}`));
+    const overBody = (await over.json()) as any;
+    expect(over.status, JSON.stringify(overBody)).toBe(400);
+    expect(overBody).toMatchObject({ code: 'VALIDATION_FAILED', field: 'domain', fields: [{ field: 'domain', code: 'max_length' }] });
+    expect(overBody.message).toContain('at most 253');
+
+    // A SAML provider through the console's register bridge: no IdP discovery to reach.
+    const exact = await bridge(s, 'POST', '/admin/sso/register-saml', {
+      providerId: 'exact',
+      issuer: 'https://saml.exact.example/entity',
+      domain: host253,
+      entryPoint: 'https://saml.exact.example/sso',
+      cert: certificate(),
+    });
+    expect(exact.status, await exact.clone().text()).toBe(200);
+    const rooted = await postJson(s, '/sso/update-provider', { providerId: 'exact', domain: `${host253}.` });
+    expect(rooted.status, await rooted.clone().text()).toBe(200);
+  }, 30_000);
+
+  it('a trailing dot run is dropped by a linear scan: a 200 000-dot entry parses at once', () => {
+    // A trailing-run pattern backtracks quadratically here (measured: 80 000 dots, about 5 s);
+    // this case's own 5 s timeout is the bound, two orders of magnitude above the linear scan.
+    const entries = providerDomains(`a${'.'.repeat(200_000)}x, acme.example${'.'.repeat(200_000)}`);
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toBe('acme.example');
+  }, 5_000);
 });
 
 // ── 3. The edit door ────────────────────────────────────────────────────────
