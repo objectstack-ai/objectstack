@@ -56,6 +56,7 @@
 
 import {
     PackageScopedNameRefusedError,
+    RUNTIME_COMPATIBILITY_PACKAGE_ID,
     applyMappingToRows,
     buildFieldMetaMap,
     refuseUnknownMappingTargets,
@@ -64,9 +65,11 @@ import {
     type ImportRunSummary,
     type MappingArtifactLike,
     type MappingFailure,
+    type PackageScopedHolder,
     type PackageScopedResolution,
 } from '@objectstack/core';
 import type { AutomationContext, Logger } from '@objectstack/spec/contracts';
+import { SystemObjectName } from '@objectstack/spec/system';
 import type { ConnectorOrigin } from '@objectstack/spec/integration';
 import type { ConnectorActionHandler } from './engine.js';
 import {
@@ -138,6 +141,13 @@ export interface ConnectorPullDeps {
     runs?: SyncRunLedger;
 }
 
+/** [ADR-0153 D7, ADR-0150 D3] What a pull resolved its mapping to: the key, beside the name, its read position is kept by. */
+export interface SyncRunMappingIdentity {
+    /** The package that holds the mapping: the holder, not the caller. Absent for the environment's own mapping. */
+    mappingPackage?: string;
+    targetObject: string;
+}
+
 /**
  * [ADR-0153 D7] The run record of one pull, as the two executors see it. With
  * no ledger, every method answers nothing and stores nothing.
@@ -145,10 +155,19 @@ export interface ConnectorPullDeps {
 export interface SyncRunHandle {
     /** The `sys_sync_run` id, when a ledger keeps the run. */
     readonly id: string | undefined;
+    /** The run's key: the mapping name and organization, and once identified the holder package. */
     readonly scope: SyncRunScope;
+    /** The mapping's `targetObject`, once identified. */
+    readonly targetObject: string | undefined;
+    /**
+     * Record what the pull resolved the mapping to (ADR-0150 D3): the package
+     * that holds it, and its target. Writes nothing; every later read and
+     * write of the run is scoped by it, and {@link describe} stores it.
+     */
+    identify(identity: SyncRunMappingIdentity): void;
     /** Say what the run reads, once the mapping's source is known. */
     describe(description: SyncRunDescription): Promise<void>;
-    /** The position the latest committed run of this mapping in this organization stored. */
+    /** The position the latest committed run of this mapping (its package and name) in this organization stored. */
     lastCommitted(): Promise<SyncRunPosition | undefined>;
     /** Store the position the run reached at a window's end (ADR-0153 D2, invariant 8). */
     commit(position: string | number): Promise<void>;
@@ -362,6 +381,27 @@ function organizationOf(context: unknown): string | undefined {
     return typeof tenantId === 'string' && tenantId.length > 0 ? tenantId : undefined;
 }
 
+/** [ADR-0153 D7] The package a package-scoped read resolved the mapping to, or none (the environment's own, or the platform's). */
+function packageOfHolder(holder: PackageScopedHolder): string | undefined {
+    return holder.kind === 'package' ? holder.packageId : undefined;
+}
+
+/**
+ * [ADR-0153 D7] The package a no-package mapping read served the item from:
+ * the answer's `packageId` (the resolved item's `_packageId`), when it names a
+ * package. A row rehydrated from `sys_metadata` carries that table's name
+ * there, and an item the compatibility API registered carries
+ * {@link RUNTIME_COMPATIBILITY_PACKAGE_ID}: neither is a package, as core's
+ * package-scoped resolution reads them, so neither keys a read position.
+ */
+function servedHolderPackage(answer: Record<string, unknown> | undefined): string | undefined {
+    const id = answer?.packageId;
+    if (typeof id !== 'string' || id === '' || id === SystemObjectName.METADATA || id === RUNTIME_COMPATIBILITY_PACKAGE_ID) {
+        return undefined;
+    }
+    return id;
+}
+
 /**
  * Open the pull's run (ADR-0153 D7). A ledger that cannot write the row
  * refuses the pull here, before anything is read.
@@ -370,9 +410,15 @@ async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions):
     const requested: SyncRunScope = { mapping: opts.mapping, organizationId: organizationOf(opts.context) };
     const progress: SyncRunCounts = { read: 0, created: 0, updated: 0, refused: 0 };
     const ledger = deps.runs;
+    let targetObject: string | undefined;
     if (!ledger) {
         return {
             id: undefined, scope: requested, progress,
+            get targetObject() { return targetObject; },
+            identify: (identity) => {
+                if (identity.mappingPackage) requested.mappingPackage = identity.mappingPackage;
+                targetObject = identity.targetObject;
+            },
             describe: async () => {},
             lastCommitted: async () => undefined,
             commit: async () => {},
@@ -395,25 +441,45 @@ async function openSyncRun(deps: ConnectorPullDeps, opts: ConnectorPullOptions):
         );
     }
     // Every later ledger call that fails stops the pull with the same reason,
-    // never with the store's own message.
-    const unavailable = (what: string): ConnectorPullError => new ConnectorPullError(
+    // never with the store's own message; the sentence says what was read.
+    const unavailable = (what: string, after: string): ConnectorPullError => new ConnectorPullError(
         { code: 'SERVICE_UNAVAILABLE', status: 503, reason: 'run_record_unavailable', mapping: opts.mapping },
-        `Mapping "${opts.mapping}": ${what} (${SYNC_RUN_OBJECT} ${id}). The windows finished before stay written, and the `
-        + 'next run reads again from the last position stored. The server log has the store\'s own failure.',
+        `Mapping "${opts.mapping}": ${what} (${SYNC_RUN_OBJECT} ${id}). ${after} The server log has the store's own failure.`,
     );
+    const nothingRead = 'Nothing was read.';
     return {
         id, scope, progress,
+        get targetObject() { return targetObject; },
+        identify: (identity) => {
+            if (identity.mappingPackage) scope.mappingPackage = identity.mappingPackage;
+            targetObject = identity.targetObject;
+        },
         describe: async (d) => {
-            try { await ledger.describe(id, d); } catch { throw unavailable('the run record could not say what the pull reads'); }
+            try {
+                await ledger.describe(id, {
+                    ...d,
+                    ...(scope.mappingPackage ? { mappingPackage: scope.mappingPackage } : {}),
+                    ...(targetObject !== undefined ? { targetObject } : {}),
+                });
+            } catch {
+                throw unavailable('the run record could not say what the pull reads, so the pull did not start', nothingRead);
+            }
         },
         lastCommitted: async () => {
-            try { return await ledger.lastCommitted(scope); } catch { throw unavailable('the read position the last run committed could not be read, so the pull did not start'); }
+            try {
+                return await ledger.lastCommitted(scope);
+            } catch {
+                throw unavailable('the read position the last run committed could not be read, so the pull did not start', nothingRead);
+            }
         },
         commit: async (position) => {
             try {
                 await ledger.commit(id, scope, position);
             } catch {
-                throw unavailable(`the read position ${String(position)} reached at a window's end could not be stored, so the pull stopped there`);
+                throw unavailable(
+                    `the read position ${String(position)} reached at a window's end could not be stored, so the pull stopped there`,
+                    'The windows finished before stay written, and the next run reads again from the last position stored.',
+                );
             }
         },
     };
@@ -491,17 +557,24 @@ async function pullOnce(
         ? opts.callerPackageId
         : undefined;
     let artifact: PulledMapping | undefined;
+    // [ADR-0153 D7] The package that holds the mapping, as this read resolved
+    // it: the run's read position is kept per holder, beside the name.
+    let holderPackage: string | undefined;
     const byPackage = callerPackageId !== undefined ? deps.mappingByPackage?.(mappingName, callerPackageId) : undefined;
     if (byPackage !== undefined) {
         if (byPackage.status === 'refused') {
             const refused = new PackageScopedNameRefusedError(byPackage);
             return refuse(refused.code, refused.status, 'mapping_name_refused', `Mapping "${mappingName}": ${refused.message}`);
         }
-        if (byPackage.status === 'resolved') artifact = byPackage.item as PulledMapping;
+        if (byPackage.status === 'resolved') {
+            artifact = byPackage.item as PulledMapping;
+            holderPackage = packageOfHolder(byPackage.holder);
+        }
     } else {
         try {
             const res = await protocol.getMetaItem({ type: 'mapping', name: mappingName }) as Record<string, unknown> | undefined;
             artifact = res?.item as PulledMapping | undefined;
+            holderPackage = servedHolderPackage(res);
         } catch (err) {
             const refused = packageScopedRefusalOf(err);
             if (refused) {
@@ -513,6 +586,7 @@ async function pullOnce(
     if (!isPlainObject(artifact) || !Array.isArray(artifact.fieldMapping) || typeof artifact.targetObject !== 'string') {
         return refuse('MAPPING_NOT_FOUND', 404, 'mapping_not_found', `No mapping artifact named "${mappingName}" is registered`);
     }
+    run.identify({ ...(holderPackage ? { mappingPackage: holderPackage } : {}), targetObject: artifact.targetObject });
     // [ADR-0153 D1] A datasource source is the other way in: a federated
     // object read in windows (`./datasource-pull.ts`). The mapping's schema
     // refuses carrying both sources, so whichever it carries is the one read.

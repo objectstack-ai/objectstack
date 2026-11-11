@@ -288,13 +288,16 @@ export const OrdersPullJob = defineJob({
     and refuses a source that states no organization scope.
   - **A `datasourceSource` run reads on from where the last one stopped.** At the
     end of each window it stores the read position it reached (on the run's
-    `sys_sync_run` row), and the next run of the mapping in the same
+    `sys_sync_run` row), and the next run of the same mapping in the same
     organization starts there, so it reads only rows written since, plus those
-    sharing that last position, which the upsert writes again harmlessly. A
-    run that is refused or stopped part-way keeps the position of its last
-    finished window. The first run, and every run of a mapping that declares
-    `full: true`, reads from `watermark.start`; a run never reads below it. The
-    delete keys change nothing yet, and `os validate` says so.
+    sharing that last position, which the upsert writes again harmlessly. The
+    same mapping means the same package's mapping of that name: two packages'
+    mappings of one name keep two positions. A run that is refused or stopped
+    part-way keeps the position of its last finished window. The first run,
+    every run of a mapping that declares `full: true`, and a run whose mapping
+    now reads another source object or field, or writes another target, read
+    from `watermark.start`; a run never reads below it. The delete keys change
+    nothing yet, and `os validate` says so.
 - **How a run is recorded.** A pull the platform refuses — the mapping is gone,
   the job's package reaches no one mapping of that name, the connector is degraded, the input breaks the read action's declared
   `inputSchema`, the upstream answered `ok: false` — rejects, so the

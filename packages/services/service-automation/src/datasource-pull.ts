@@ -41,10 +41,12 @@
  * ## Where a run starts, and what it commits (ADR-0153 D2, D7)
  *
  * The read position is kept on `sys_sync_run` (`./sync-run-ledger.ts`), per
- * mapping and organization. A run starts from the position the latest
- * committed run stored, when that run read the same source object on the same
- * `watermark.field`, and never below `watermark.start`; otherwise, and on
- * every run of a mapping that declares `full: true`, from `watermark.start`.
+ * mapping (the package that holds it and its name, ADR-0150 D3) and
+ * organization. A run starts from the position the latest committed run
+ * stored, when that run read the same source object on the same
+ * `watermark.field` into the same target object, and never below
+ * `watermark.start`; otherwise, and on every run of a mapping that declares
+ * `full: true`, from `watermark.start`.
  * It stores the position it reached at each window's end (invariant 8), so a
  * run that stops part-way keeps its last finished window's position and the
  * next run reads on from there, re-reading only rows that share that canon
@@ -290,14 +292,16 @@ export async function pullDatasourceSource(
         mapping, object: sourceObject, datasource, field: wmName, kind, key: 'id', ...(scope ? { scope } : {}),
     };
     // [D7] Where the run starts: the position the latest committed run of this
-    // mapping in this organization stored, when it read this source object on
-    // this field, and never below `watermark.start`. `full: true`, a first run,
-    // or a position from another source or field starts at `watermark.start`.
+    // mapping (its holder package and name) in this organization stored, when
+    // it read this source object on this field into this target, and never
+    // below `watermark.start`. `full: true`, a first run, or a position from
+    // another source, field or target starts at `watermark.start`.
     const start = canonOfStart(windowSource, wm.start);
     const previous = ds.full === true ? undefined : await run.lastCommitted();
     let from = start;
     let resumed: string | undefined;
-    if (previous && previous.source === sourceObject && previous.watermarkField === wmName) {
+    const sameRead = previous !== undefined && previous.source === sourceObject && previous.watermarkField === wmName;
+    if (previous && sameRead && previous.targetObject === targetObject) {
         const reading = canonOf(kind, previous.position);
         if (reading.ok) {
             from = Math.max(reading.canon, start);

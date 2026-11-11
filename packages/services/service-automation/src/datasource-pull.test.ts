@@ -24,6 +24,7 @@ import { ConnectorPullError } from './pull-refusal.js';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import { SysSyncRun } from './sys-sync-run.object.js';
 import { ObjectStoreSyncRunLedger, SYNC_RUN_OBJECT, closeInterruptedSyncRuns } from './sync-run-ledger.js';
+import { mappingNameResolver } from './connector-package-scope.js';
 import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 type Rec = Record<string, unknown>;
@@ -114,7 +115,7 @@ function protocolOver(ql: ObjectQL, meta: Harness['meta']): ConnectorPullProtoco
 /** A managed SQLite target and an external SQLite datasource `erp` holding `ERP_ORDERS`. */
 async function harness(
     rows: Array<{ no: string; at: string | null; amount?: number; org?: string }>,
-    over: { source?: Rec; target?: Rec; mapping?: Rec; runs?: boolean; logger?: Rec } = {},
+    over: { source?: Rec; target?: Rec; mapping?: Rec; runs?: boolean; logger?: Rec; objects?: Rec[] } = {},
     setup?: (ql: ObjectQL) => void,
 ): Promise<Harness> {
     const ql = new ObjectQL();
@@ -136,12 +137,17 @@ async function harness(
     const target = over.target ?? TARGET;
     ql.registry.registerObject(target as any);
     ql.registry.registerObject(source as any);
+    // A second target or source, for the cases that need one.
+    for (const extra of over.objects ?? []) ql.registry.registerObject(extra as any);
     // [ADR-0153 D7] The run record, as the automation plugin registers it.
     if (over.runs) ql.registry.registerObject(SysSyncRun as any);
     await ql.syncSchemas();
     await installDefaultOrganization(ql);
     const meta = {
-        object: new Map<string, Rec>([[String(target.name), target as Rec], [String(source.name), source as Rec]]),
+        object: new Map<string, Rec>([
+            [String(target.name), target as Rec], [String(source.name), source as Rec],
+            ...(over.objects ?? []).map((o): [string, Rec] => [String(o.name), o]),
+        ]),
         mapping: new Map<string, Rec>([[MAPPING.name, (over.mapping ?? MAPPING) as Rec]]),
         datasource: new Map<string, Rec>([['erp', ERP_DEF]]),
     };
@@ -638,6 +644,102 @@ describe('[ADR-0153 D2, D7] a pull reads on from the position the last committed
         const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
         expect(second.source === 'datasource' && second.watermark.from).toBe(START);
         expect(second.pulled).toBe(3);
+    });
+});
+
+/**
+ * [ADR-0153 D7, contract review S1] A mapping is addressed by `(package, name)`
+ * (ADR-0150 D3), so the read position is kept per holder package, name and
+ * organization, and a stored position is used only by a run that writes the
+ * same target. The package cases resolve through the real
+ * `mappingNameResolver` over the harness engine's own registry, as a job's
+ * pull does when its job names the package that declares it.
+ */
+describe('[ADR-0153 D7] the read position belongs to one mapping (its package and name) and one target', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const CALLER = 'com.acme.caller';
+    const TARGET_B = { ...TARGET, name: 'order_copy_b', label: 'Order B (synced)' };
+    const SOURCE_B = { ...SOURCE, name: 'erp_order_b', label: 'ERP order B' };
+
+    /** Each package installs its own mapping of one name; the pull resolves by the caller's package. */
+    function packaged(h: Harness, byPackage: Record<string, Rec>, deps: Record<string, string[]> = {}): void {
+        const registry = h.ql.registry as any;
+        for (const id of new Set([...Object.keys(byPackage), ...Object.keys(deps)])) {
+            const needs = deps[id] ?? [];
+            registry.installPackage({
+                id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+                ...(needs.length > 0 ? { dependencies: Object.fromEntries(needs.map((d) => [d, '^1.0.0'])) } : {}),
+            }, 'code');
+        }
+        // A copy each: the registry stamps the item it holds.
+        for (const [id, mapping] of Object.entries(byPackage)) registry.registerItem('mapping', { ...mapping }, 'name', id);
+        h.deps.mappingByPackage = mappingNameResolver({ getService: <T>() => ({ registry }) as T });
+    }
+    const pullAs = (h: Harness, callerPackageId: string) =>
+        pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM, callerPackageId });
+    const fromOf = (r: Awaited<ReturnType<typeof pullConnectorSource>>) => (r.source === 'datasource' ? r.watermark.from : undefined);
+
+    it('two packages\' mappings of one name in one organization keep two positions, each held by its own run', async () => {
+        const h = await harness(THREE, { runs: true, objects: [SOURCE_B] });
+        packaged(h, {
+            [ALPHA]: MAPPING,
+            [BETA]: { ...MAPPING, datasourceSource: { ...MAPPING.datasourceSource, object: 'erp_order_b' } },
+        });
+        expect(fromOf(await pullAs(h, ALPHA))).toBe(START);
+        expect(fromOf(await pullAs(h, BETA))).toBe(START);
+        // Beta's run committed last; Alpha's next run still starts at Alpha's own position.
+        expect(fromOf(await pullAs(h, ALPHA))).toBe(at(3000));
+        expect(fromOf(await pullAs(h, BETA))).toBe(at(3000));
+        const held = (await runRows(h.ql)).filter((r) => Boolean(r.holds_position)).map((r) => r.mapping_package).sort();
+        expect(held).toEqual([ALPHA, BETA]);
+    });
+
+    it('a caller reading another package\'s mapping records the holder, not itself, and shares the holder\'s position', async () => {
+        const h = await harness(THREE, { runs: true });
+        packaged(h, { [BETA]: MAPPING }, { [CALLER]: [BETA] });
+        await pullAs(h, BETA);
+        const viaCaller = await pullAs(h, CALLER);
+        expect(fromOf(viaCaller)).toBe(at(3000));
+        const rows = await runRows(h.ql);
+        expect(rows.map((r) => r.mapping_package)).toEqual([BETA, BETA]);
+    });
+
+    it('two packages\' mappings of one name read one source into two targets: the second target receives the whole history', async () => {
+        const h = await harness(THREE, { runs: true, objects: [TARGET_B] });
+        packaged(h, { [ALPHA]: MAPPING, [BETA]: { ...MAPPING, targetObject: 'order_copy_b' } });
+        await pullAs(h, ALPHA);
+        const second = await pullAs(h, BETA);
+        expect(fromOf(second)).toBe(START);
+        expect(second.pulled).toBe(3);
+        const copiedB = await h.ql.find('order_copy_b', { context: SYSTEM as never });
+        expect(copiedB).toHaveLength(3);
+    });
+
+    it('a mapping whose targetObject was changed starts its new target from watermark.start', async () => {
+        const h = await harness(THREE, { runs: true, objects: [TARGET_B] });
+        const first = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(first.source === 'datasource' && first.watermark.committed).toBe(at(3000));
+        h.meta.mapping.set(MAPPING.name, { ...MAPPING, targetObject: 'order_copy_b' });
+        const second = await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+        expect(fromOf(second)).toBe(START);
+        expect(second.pulled).toBe(3);
+        expect(await h.ql.find('order_copy_b', { context: SYSTEM as never })).toHaveLength(3);
+        expect((await runRows(h.ql)).map((r) => r.target_object)).toEqual(['order_copy', 'order_copy_b']);
+    });
+
+    it('a pull naming no package records the package the protocol served the mapping from, never a stored-row marker', async () => {
+        for (const [served, recorded] of [['com.acme.gamma', 'com.acme.gamma'], ['sys_metadata', null], ['__runtime__', null]] as const) {
+            const h = await harness(THREE, { runs: true });
+            const read = h.deps.protocol.getMetaItem.bind(h.deps.protocol);
+            h.deps.protocol.getMetaItem = (async (request: { type: string; name: string }) => {
+                const answer = await read(request) as Rec | undefined;
+                return request.type === 'mapping' && answer ? { ...answer, packageId: served } : answer;
+            }) as never;
+            await pullConnectorSource(h.deps, { mapping: MAPPING.name, context: SYSTEM });
+            const [r] = await runRows(h.ql);
+            expect(r.mapping_package ?? null, served).toBe(recorded);
+        }
     });
 });
 

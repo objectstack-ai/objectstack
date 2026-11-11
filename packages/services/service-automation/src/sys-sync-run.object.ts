@@ -22,15 +22,19 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * - **The read position.** A datasource pull commits the canon-step position it
  *   reached at each window's end (ADR-0153 D2, invariants 8 and 9) into
- *   `watermark_committed`, and the next pull of the mapping in the same
- *   organization starts there (`full: true` excepted). A run that stops part-way
- *   (a refusal, or a server that stopped) keeps the position of its last
+ *   `watermark_committed`, and the next pull of the same mapping in the same
+ *   organization starts there (`full: true` excepted). A mapping is addressed
+ *   by `(package, name)` (ADR-0150 D3), so the position is kept per holder
+ *   package (`mapping_package`), mapping name and organization, and it is
+ *   used only by a run that reads the same source object on the same field
+ *   into the same target (`target_object`). A run that stops part-way (a
+ *   refusal, or a server that stopped) keeps the position of its last
  *   finished window, so the next run reads that window's successors again and
  *   nothing past it is skipped.
  * - **Retention never removes the latest committed run of a mapping.** The
- *   writer keeps `holds_position` true on that one row per mapping and
- *   organization, and the retention below exempts it, with every `running`
- *   row. That is how the sweep keeps the read position (the open point ADR-0153
+ *   writer keeps `holds_position` true on that one row per holder package,
+ *   mapping name and organization, and the retention below exempts it, with
+ *   every `running` row. That is how the sweep keeps the read position (the open point ADR-0153
  *   D7 leaves to the engine card): a declared row filter the one platform
  *   sweep applies, not a second sweeper. The window is the job ledger's, 30
  *   days, never shorter (D7).
@@ -60,8 +64,9 @@ export const SysSyncRun = ObjectSchema.create({
   // ADR-0057: run history is telemetry, aged out after the job ledger's 30
   // days (ADR-0153 D7: never shorter than `sys_job_run`'s). `onlyWhen` keeps
   // two kinds of row regardless of age: a run still `running` (never matched by
-  // the status list), and the one row per mapping and organization that holds
-  // the read position the next pull starts from (`holds_position: true`).
+  // the status list), and the one row per holder package, mapping name and
+  // organization that holds the read position the next pull starts from
+  // (`holds_position: true`).
   lifecycle: {
     class: 'telemetry',
     retention: {
@@ -78,8 +83,11 @@ export const SysSyncRun = ObjectSchema.create({
     id: Field.text({ label: 'Run ID', required: true, readonly: true, group: 'System' }),
 
     // [ADR-0153 D7, ADR-0131] The organization the pull ran in: the job's
-    // (`context.tenantId`). Empty for a pull in no organization (a `single`
-    // posture job that declares and derives none).
+    // (`context.tenantId`). A pull in no organization is written with none,
+    // and under `single` the engine stamps the Default Organization on that
+    // row (ADR-0131 D10): that is why the ledger reads the stored value back
+    // when it opens a run and scopes the run by it. Empty only where nothing
+    // stamps an organization.
     organization_id: Field.lookup('sys_organization', {
       label: 'Organization',
       required: false,
@@ -96,6 +104,33 @@ export const SysSyncRun = ObjectSchema.create({
       searchable: true,
       group: 'Identity',
       description: 'The mapping whose source was pulled.',
+    }),
+
+    // [ADR-0153 D7, ADR-0150 D3] The package that holds the mapping `mapping`
+    // names, as the pull resolved it: the holder, not the caller (a job's
+    // package reading a dependency's mapping records the dependency). Beside
+    // the name, it is the key the read position is kept by. Empty for a
+    // mapping the environment authored, or one no package holds. Width: the
+    // package-id class.
+    mapping_package: Field.text({
+      label: 'Mapping Package',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      group: 'Identity',
+      description: 'The app the mapping comes from. Filled in by the platform; empty for mappings created here.',
+    }),
+
+    // [ADR-0153 D7] The mapping's `targetObject` on this run: a stored
+    // position is used only by a run that writes the same target, so a
+    // mapping whose target was changed starts its new target from the start.
+    target_object: Field.text({
+      label: 'Target Object',
+      required: false,
+      readonly: true,
+      maxLength: 255,
+      group: 'Identity',
+      description: 'The object the pulled rows were written to. Empty when the pull was refused before the mapping was read.',
     }),
 
     source_kind: Field.select(['connector', 'datasource'], {
@@ -191,7 +226,7 @@ export const SysSyncRun = ObjectSchema.create({
       maxLength: 64,
       group: 'Position',
       // [ADR-0153 D2, invariants 8 and 9] Committed only at a window's end.
-      description: "The read position this run committed at its last finished window: the next pull of the mapping in this organization starts there. Empty when the run wrote no row, and on a connector source, which keeps no position of its own here.",
+      description: "The read position this run committed at its last finished window: the next pull of the same mapping in this organization starts there, when it reads the same source object and field into the same target. Empty when the run wrote no row, and on a connector source, which keeps no position of its own here.",
     }),
 
     committed_at: Field.datetime({
@@ -208,7 +243,7 @@ export const SysSyncRun = ObjectSchema.create({
       readonly: true,
       defaultValue: false,
       group: 'Position',
-      description: "True on the one run per mapping and organization whose committed position the next pull starts from. Retention never removes that row.",
+      description: "True on the one run per mapping (its package and name) and organization whose committed position the next pull starts from. Retention never removes that row.",
     }),
 
     failure_reason: Field.text({
@@ -240,8 +275,9 @@ export const SysSyncRun = ObjectSchema.create({
   },
 
   indexes: [
-    // The next pull's read: the latest committed run of a mapping in an organization.
-    { fields: ['mapping', 'organization_id', 'committed_at'] },
+    // The next pull's read: the latest committed run of a mapping (package and
+    // name) in an organization.
+    { fields: ['mapping', 'mapping_package', 'organization_id', 'committed_at'] },
     // Run history: the newest runs of a mapping.
     { fields: ['mapping', 'started_at'] },
     // The boot close (`status = 'running'`) and the retention sweep.

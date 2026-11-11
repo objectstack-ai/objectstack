@@ -39,6 +39,10 @@ export interface SyncRunDescription {
     watermarkField?: string;
     /** Where the read started, in the field's storage form. */
     from?: string | number;
+    /** The package that holds the mapping, as the pull resolved it (ADR-0150 D3); absent for the environment's own. */
+    mappingPackage?: string;
+    /** The mapping's `targetObject`. */
+    targetObject?: string;
 }
 
 export interface SyncRunCounts {
@@ -61,13 +65,25 @@ export interface SyncRunPosition {
     /** The source the position was read from (the federated object). */
     source?: string;
     watermarkField?: string;
+    /** The target the run that committed it wrote. */
+    targetObject?: string;
     /** The position in the field's storage form, as stored (text). */
     position: string;
 }
 
-/** Which mapping, in which organization, a run belongs to. */
+/**
+ * Which mapping, in which organization, a run belongs to. A mapping is
+ * addressed by `(package, name)` (ADR-0150 D3), so two packages' mappings of
+ * one name keep two read positions.
+ */
 export interface SyncRunScope {
     mapping: string;
+    /**
+     * The package that holds the mapping, once the pull has resolved it: the
+     * holder, not the caller. Absent for a mapping the environment authored or
+     * no package holds, and before the mapping is read.
+     */
+    mappingPackage?: string;
     /** The job's organization; absent for a pull in no organization. */
     organizationId?: string;
 }
@@ -135,6 +151,15 @@ function organizationWhere(organizationId: string | undefined): Record<string, u
     return organizationId ? { organization_id: organizationId } : { organization_id: { $null: true } };
 }
 
+/** The runs of one mapping in one organization: its holder package, its name, the organization. */
+function scopeWhere(scope: SyncRunScope): Record<string, unknown> {
+    return {
+        mapping: scope.mapping,
+        mapping_package: scope.mappingPackage ? scope.mappingPackage : { $null: true },
+        ...organizationWhere(scope.organizationId),
+    };
+}
+
 const text = (v: unknown): string | undefined => (typeof v === 'string' && v.length > 0 ? v : undefined);
 
 /**
@@ -176,21 +201,29 @@ export class ObjectStoreSyncRunLedger implements SyncRunLedger {
             read_path: d.readPath ?? null,
             watermark_field: d.watermarkField ?? null,
             watermark_from: d.from === undefined ? null : String(d.from),
+            mapping_package: d.mappingPackage ?? null,
+            target_object: d.targetObject ?? null,
         }, { where: { id: runId }, context: SYSTEM_CONTEXT });
     }
 
     async lastCommitted(scope: SyncRunScope): Promise<SyncRunPosition | undefined> {
         const found = await this.engine.find(SYNC_RUN_OBJECT, {
-            where: { mapping: scope.mapping, ...organizationWhere(scope.organizationId), watermark_committed: { $null: false } },
+            where: { ...scopeWhere(scope), watermark_committed: { $null: false } },
             orderBy: [{ field: 'committed_at', order: 'desc' }],
             limit: 1,
-            fields: ['id', 'source', 'watermark_field', 'watermark_committed'],
+            fields: ['id', 'source', 'watermark_field', 'target_object', 'watermark_committed'],
             context: SYSTEM_CONTEXT,
         });
         const row = rowsOf(found)[0];
         const position = text(row?.watermark_committed);
         if (!row || position === undefined) return undefined;
-        return { runId: String(row.id), source: text(row.source), watermarkField: text(row.watermark_field), position };
+        return {
+            runId: String(row.id),
+            source: text(row.source),
+            watermarkField: text(row.watermark_field),
+            targetObject: text(row.target_object),
+            position,
+        };
     }
 
     async commit(runId: string, scope: SyncRunScope, position: string | number): Promise<void> {
@@ -207,8 +240,7 @@ export class ObjectStoreSyncRunLedger implements SyncRunLedger {
         // keeps the flag whatever order the four writes land in.
         await this.engine.update(SYNC_RUN_OBJECT, { holds_position: false }, {
             where: {
-                mapping: scope.mapping,
-                ...organizationWhere(scope.organizationId),
+                ...scopeWhere(scope),
                 holds_position: true,
                 id: { $ne: runId },
                 committed_at: { $lt: committedAt },
