@@ -18,7 +18,7 @@ import {
   assertReadScopePlaceholdersResolvable,
 } from './read-scope-sql.js';
 import { readScopeUnresolvedError } from './read-scope-refusal.js';
-import { readAdmissionUnresolvedError } from './read-admission.js';
+import { composeNarrowedReadAdmission, readAdmissionUnresolvedError } from './read-admission.js';
 // [#16206] The narrowing from a driver's FOUR-name `dialectName` to the THREE
 // this package's config hook declares — see the bridge below.
 import { asAcceptedSqlDialect, type AcceptedSqlDialect } from './text-match-sql.js';
@@ -230,6 +230,26 @@ export interface AnalyticsServicePluginOptions {
    * `explain({ object, operation: 'read' }, context).allowed`.
    */
   admitObjectRead?: (
+    objectName: string,
+    context?: ExecutionContext,
+  ) => boolean | Promise<boolean>;
+  /**
+   * A host's NARROWING of the object-level read admission — composed with the
+   * provider this plugin wires ({@link AnalyticsServicePluginOptions.admitObjectRead}
+   * when supplied, otherwise the `security` bridge), never a replacement for it.
+   *
+   * Asked only for an object that provider ADMITS, and the read is admitted
+   * only when this answers exactly `true`; so it can refuse a read the
+   * plugin's own provider admits and can never admit one it refuses. A host
+   * that must narrow per actor scope composes here instead of replacing the
+   * provider, and keeps the security verdict underneath its own.
+   *
+   * Refusals keep the gate's existing envelopes: `false` — or any answer that
+   * is not `true` — refuses with `PERMISSION_DENIED` / 403, and a THROW
+   * refuses, fail-closed, with `SERVICE_UNAVAILABLE` / 503, because no
+   * verdict was reached. When omitted, the plugin's provider is wired as is.
+   */
+  narrowObjectReadAdmission?: (
     objectName: string,
     context?: ExecutionContext,
   ) => boolean | Promise<boolean>;
@@ -845,6 +865,12 @@ export class AnalyticsServicePlugin implements Plugin {
         return decision?.allowed === true;
       };
       autoBridgedReadAdmission = true;
+    }
+    // The host's narrowing composes over whichever provider was wired above,
+    // so a host scoping reads per actor keeps the security verdict underneath
+    // its own instead of replacing it (`narrowObjectReadAdmission`).
+    if (this.options.narrowObjectReadAdmission) {
+      admitObjectRead = composeNarrowedReadAdmission(admitObjectRead, this.options.narrowObjectReadAdmission);
     }
 
     // [#20917] The FIELD-LEVEL half of the same read

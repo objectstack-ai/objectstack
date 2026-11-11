@@ -187,6 +187,28 @@ export type ObjectReadAdmissionProvider = (
 ) => boolean | Promise<boolean>;
 
 /**
+ * Compose a host's NARROWING over the provider the plugin wired
+ * (`AnalyticsServicePluginOptions.narrowObjectReadAdmission`).
+ *
+ * The composition can only refuse more, never admit more: the narrowing is
+ * asked only once `base` has admitted — by the same truthiness test
+ * {@link assertObjectsReadable} applies to any provider — and it admits only
+ * on exactly `true`, so a malformed answer refuses, as the `explain` bridge's
+ * `allowed === true` does. A throw from either side is left to propagate, so
+ * the gate answers it as it answers any throwing provider: fail-closed,
+ * {@link readAdmissionUnresolvedError}.
+ */
+export function composeNarrowedReadAdmission(
+  base: ObjectReadAdmissionProvider,
+  narrowing: ObjectReadAdmissionProvider,
+): ObjectReadAdmissionProvider {
+  return async (objectName, context) => {
+    if (!(await base(objectName, context))) return false;
+    return (await narrowing(objectName, context)) === true;
+  };
+}
+
+/**
  * Log sink — the subset of `Logger` this module uses.
  *
  * `error` is OPTIONAL because hosts legitimately inject reduced sinks, and
