@@ -173,14 +173,17 @@ function runCli(args: string[], cwd: string): Promise<Run> {
 
 /**
  * The text face's warning set, read off the rendered output — its production
- * source. Every non-blocking warning `os validate` prints goes through the one
- * `⚠` line shape.
+ * source. Every non-blocking advisory `os validate` prints goes through one of
+ * two line shapes: `⚠` for a warning, `ℹ` for an `info` finding (advisory
+ * under `--strict` too, and carried in the payload's `warnings` all the same).
  */
+const ADVISORY_GLYPH = /[⚠ℹ]/u;
 function textWarnings(stdout: string): string[] {
   return stdout
     .split('\n')
-    .filter((l) => l.includes('⚠'))
-    .map((l) => l.slice(l.indexOf('⚠') + 1).trim())
+    .map((l) => ADVISORY_GLYPH.exec(l))
+    .filter((m): m is RegExpExecArray => m !== null)
+    .map((m) => m.input.slice(m.index + m[0].length).trim())
     .filter((l) => l.length > 0);
 }
 
