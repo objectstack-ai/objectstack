@@ -81,6 +81,7 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { saveRegistryQuestion } from './registry-question.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -1186,6 +1187,11 @@ export class ProtocolSaveFacet {
         // entry this overlay will shadow supplies the missing identity fields
         // (#2555 — a console personalization PUT sends only the raw config).
         // See {@link normalizeViewMetadata}.
+        // [#32162] The package a `permission` save lands in, read below for
+        // the name-collision refusal and again for the held-grants read of
+        // {@link unknownGrantObjectSaveRefusal} (ADR-0150 D3: the set this
+        // save edits is that package's, never another holder's of the name).
+        let permissionLandsIn: string | null = null;
         {
             // [#21412, #21470] FIRST, before the stamp below can keep an
             // authored `name`: a body of ANY type whose own `name` disagrees
@@ -1279,6 +1285,7 @@ export class ProtocolSaveFacet {
                     }
                     landsIn = address.into;
                 }
+                permissionLandsIn = landsIn;
                 const nameCollision = await host.permissionSetNameCollisionRefusal(
                     singularType, request.name, landsIn, 'save',
                 );
@@ -1475,8 +1482,23 @@ export class ProtocolSaveFacet {
                 // The body is the one this save stores: the read's injected
                 // columns already came off it above. See
                 // {@link objectRegistrationRefusal}.
+                //
+                // [ADR-0144 D2 and D6, amended] A published save through the
+                // `/meta` doors (`meta-envelope`, `meta-dispatch`) is one object
+                // made live at once, so it also asks the doors that read the
+                // registry's other objects (the record-currency roll-up and
+                // follow doors), on a sealed registry: refused there, the row
+                // was stored, answered `200` and left unregistered. A draft is
+                // judged when it is published (the per-item publish asks the
+                // same), and the batch faces (duplicate, imports, migration
+                // passes) save in an order a later sibling can still complete,
+                // so they keep the body-only question (#29673's reason). The
+                // faces and producers are enumerated in `registry-question.ts`.
                 if (objectRegistrationLayer) {
-                    const registration = host.objectRegistrationRefusal(request.item, objectRegistrationLayer);
+                    const registration = host.objectRegistrationRefusal(
+                        request.item, objectRegistrationLayer,
+                        { againstRegistry: saveRegistryQuestion({ mode, writeFace: request.writeFace }) === 'against-registry' },
+                    );
                     if (registration) throw registration;
                 }
                 if (singularType === 'view') {
@@ -1618,7 +1640,7 @@ export class ProtocolSaveFacet {
         if (writeSource !== 'migrate-stored') {
             const grantRefusal = await host.unknownGrantObjectSaveRefusal(
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
-                undefined, request.inheritedGrantObjects,
+                undefined, request.inheritedGrantObjects, permissionLandsIn,
             );
             if (grantRefusal) throw grantRefusal;
         }

@@ -20,7 +20,9 @@
  * picklist-family backstop #31700 needs) and `dataset` (#32072, a reader
  * #31700 needs before it narrows: `POST /analytics/dataset/query` reads its
  * `datasetName` through the protocol's by-name read, which is this resolver's
- * for the types listed here). A later child adds its own types to the list in
+ * for the types listed here), and `permission` (#32162), whose in-memory store
+ * `@objectstack/metadata` now keeps per `(package, name)` too, so a package's
+ * qualified read serves its own grants. A later child adds its own types to the list in
  * its own change; until then a type's by-name read stays
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
  *
@@ -77,8 +79,8 @@ import {
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
  * nine (#31680), as the registry spells them, then `api` (#32069), the
- * picklist (#32070), `mapping` (#32071) and `dataset` (#32072). Each later
- * child of epic #31527 appends its own.
+ * picklist (#32070), `mapping` (#32071), `dataset` (#32072) and `permission`
+ * (#32162). Each later child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -98,6 +100,9 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'mapping',
   // #32072: the analytics dataset query door and the dataset AI tools.
   'dataset',
+  // #32162: the bare `/meta/permission/NAME` read and the save door's
+  // held-grants read; `guest_portal` keeps one holder (platform-requested).
+  'permission',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

@@ -39,6 +39,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { MetadataManager } from '@objectstack/metadata';
 import { AppPlugin } from './app-plugin.js';
 
 /** The substring every line this file is about carries. */
@@ -198,5 +199,80 @@ describe('#18034 — the manifest-stage `permissions` grant reaching the ADR-009
         expect(lines).toHaveLength(1);
         // One member lost, not two — the count is measured, not the array length.
         expect(lines[0]).toContain('1 of 2');
+    });
+});
+
+/**
+ * [#32162, ADR-0150 D3/D4] The registrar stamps each permission set with the
+ * stack's own package (`_packageId`, the id `registerApp` installs it under),
+ * the shape the artifact door stamps. The metadata service stores `permission`
+ * per `(package, name)`, and an item fills its package's slot only when it
+ * carries its package — unstamped, two packages' sets of one name shared the
+ * bare slot, and a read naming either package was served the one registered
+ * last (the #31698 step-0 F3 reading: `?package=alpha` served beta's grants).
+ *
+ * Driven on the real `MetadataManager`, two `new AppPlugin(stack)` packages
+ * each declaring `shared_set`, the composition `os serve` / `os dev` run.
+ */
+describe('#32162 — the registrar stamps each permission set with its package', () => {
+    const stack = (id: string, objects: string[]) => ({
+        manifest: { id, name: id, type: 'app', version: '1.0.0' },
+        objects: [],
+        permissions: [{
+            name: 'shared_set',
+            label: `${id.split('.').pop()} set`,
+            objects: Object.fromEntries(objects.map((o) => [o, { allowRead: true }])),
+        }],
+        positions: [{ name: `${id.split('.').pop()}_position`, label: 'Position' }],
+    });
+    const startOn = async (metadata: MetadataManager, bundle: unknown) => {
+        const sink = { warns: [] as string[], infos: [] as string[] };
+        await new AppPlugin(bundle).start!(fakeCtx(metadata, sink));
+    };
+
+    it('each package\'s read is served its own set (BASE: both served the set registered last)', async () => {
+        const metadata = new MetadataManager({});
+        await startOn(metadata, stack('com.acme.alpha', ['alpha_item']));
+        await startOn(metadata, stack('com.acme.beta', ['beta_item']));
+        const alpha = await metadata.get('permission', 'shared_set', 'com.acme.alpha') as any;
+        const beta = await metadata.get('permission', 'shared_set', 'com.acme.beta') as any;
+        expect([alpha?.label, alpha?._packageId, Object.keys(alpha?.objects ?? {})]).toEqual(['alpha set', 'com.acme.alpha', ['alpha_item']]);
+        expect([beta?.label, beta?._packageId, Object.keys(beta?.objects ?? {})]).toEqual(['beta set', 'com.acme.beta', ['beta_item']]);
+    });
+
+    it('a read naming no package of the two-holder name is refused naming both, never a pick', async () => {
+        const metadata = new MetadataManager({});
+        await startOn(metadata, stack('com.acme.alpha', ['alpha_item']));
+        await startOn(metadata, stack('com.acme.beta', ['beta_item']));
+        const thrown = await Promise.resolve(metadata.get('permission', 'shared_set')).then(() => undefined, (e: unknown) => e) as any;
+        expect([thrown?.code, thrown?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+        expect(thrown?.refusal?.candidates).toEqual([
+            { kind: 'package', packageId: 'com.acme.alpha' },
+            { kind: 'package', packageId: 'com.acme.beta' },
+        ]);
+    });
+
+    it('CONTROL one package: its bare read answers its set, now carrying its package', async () => {
+        const metadata = new MetadataManager({});
+        await startOn(metadata, stack('com.acme.alpha', ['alpha_item']));
+        const solo = await metadata.get('permission', 'shared_set') as any;
+        expect([solo?.label, solo?._packageId]).toEqual(['alpha set', 'com.acme.alpha']);
+    });
+
+    it('a set wearing another package\'s stamp is filed in the stack\'s own slot, never that package\'s; the other collections keep their bytes (BASE r1: the foreign stamp was kept)', async () => {
+        const metadata = new MetadataManager({});
+        const alpha = stack('com.acme.alpha', ['alpha_item']);
+        (alpha.permissions[0] as Record<string, unknown>)._packageId = 'com.acme.beta';
+        await startOn(metadata, alpha);
+        expect(await metadata.get('permission', 'shared_set', 'com.acme.beta'), 'beta holds no set: alpha\'s body is never served there').toBeUndefined();
+        const own = await metadata.get('permission', 'shared_set', 'com.acme.alpha') as any;
+        expect([own?.label, own?._packageId]).toEqual(['alpha set', 'com.acme.alpha']);
+
+        const registrations: Registration[] = [];
+        const sink = { warns: [] as string[], infos: [] as string[] };
+        await new AppPlugin(stack('com.acme.alpha', ['alpha_item'])).start!(fakeCtx({
+            registerInMemory: (type: string, name: string, item: unknown) => { registrations.push({ type, name, item }); },
+        }, sink));
+        expect(registrations.find((r) => r.type === 'position')?.item).not.toHaveProperty('_packageId');
     });
 });

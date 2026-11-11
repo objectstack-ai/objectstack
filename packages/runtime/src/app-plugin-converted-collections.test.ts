@@ -286,9 +286,16 @@ describe('#22994: one conversion per boot, and every registrar takes its result'
         expect(payload.permissions[0].objects.crm_ticket).toEqual({ allowRead: true });
 
         // ONE conversion: a second pass would hand the registrar a second,
-        // equal-looking copy. Identity is what tells the two apart.
+        // equal-looking copy. Identity is what tells the two apart. [#32162]
+        // The registrar stamps a permission set with its package
+        // (`_packageId`) on a shallow copy, so identity is read one level
+        // down: the converted `objects` map is the very one the manifest
+        // service holds, and the copy adds nothing but the stamp.
         const permission = registrations.find((r) => r.type === 'permission' && r.name === 'support_agent');
-        expect(permission?.item).toBe(payload.permissions[0]);
+        const { _packageId, ...registered } = permission?.item ?? {};
+        expect(_packageId).toBe(APP_ID);
+        expect(registered).toEqual(payload.permissions[0]);
+        expect(registered.objects).toBe(payload.permissions[0].objects);
     });
 
     it('a current bundle is handed over unchanged: the authored collections, the same references', async () => {
