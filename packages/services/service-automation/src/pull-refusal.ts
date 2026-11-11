@@ -12,8 +12,11 @@
 export type ConnectorPullRefusalReason =
     | 'mapping_not_found'
     /**
-     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item: more
-     * than one package holds it. The message names every candidate.
+     * [ADR-0150 D3, #32071] The mapping's name resolves to no one item for the
+     * caller: two packages hold it in the caller's reach (for a caller with no
+     * package, the whole environment), only a package outside the caller's
+     * closure holds it, or, for a package caller, only the environment holds
+     * it (D3 (a)). The message names every candidate.
      */
     | 'mapping_name_refused'
     | 'no_connector_source'

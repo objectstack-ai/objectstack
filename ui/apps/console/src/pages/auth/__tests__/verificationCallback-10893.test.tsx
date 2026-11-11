@@ -35,6 +35,11 @@ import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import { AuthProvider, createAuthClient } from '@object-ui/auth';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 vi.mock('sonner', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();

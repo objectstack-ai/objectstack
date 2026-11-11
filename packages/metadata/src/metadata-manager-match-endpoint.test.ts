@@ -587,7 +587,11 @@ describe('the in-memory store keeps one slot per (package, name) for every names
  * A minimal `IDataDriver` over in-memory tables, for a `DatabaseLoader` the
  * removal pins read rows back from. Only what the loader calls.
  */
-function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Record<string, unknown>> } {
+function rowDriver(): {
+  driver: IDataDriver;
+  rows: (type: string) => Array<Record<string, unknown>>;
+  history: (type: string) => Array<Record<string, unknown>>;
+} {
   const tables = new Map<string, Map<string, Record<string, unknown>>>();
   const table = (name: string) => {
     if (!tables.has(name)) tables.set(name, new Map());
@@ -605,6 +609,18 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
       }
       return row[key] === value;
     });
+  // `orderBy` by plain field comparison, applied before `limit`.
+  const ordered = (rows: Array<Record<string, unknown>>, orderBy: unknown) => {
+    if (orderBy === undefined) return rows;
+    const keys = orderBy as Array<{ field: string; order?: 'asc' | 'desc' }>;
+    return [...rows].sort((a, b) => {
+      for (const { field, order } of keys) {
+        const [x, y] = [a[field] as any, b[field] as any];
+        if (x !== y) return (x < y ? -1 : 1) * (order === 'desc' ? -1 : 1);
+      }
+      return 0;
+    });
+  };
   const driver = {
     name: 'rows',
     version: '1.0.0',
@@ -615,15 +631,21 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
     execute: async () => undefined,
     syncSchema: async () => undefined,
     find: async (name: string, query: any) => {
-      const rows = [...table(name).values()].filter((r) => matches(r, query?.where));
+      const rows = ordered([...table(name).values()].filter((r) => matches(r, query?.where)), query?.orderBy);
       const page = typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
       return page.map((r) => ({ ...r }));
     },
     findOne: async (name: string, query: any) => {
-      for (const row of table(name).values()) if (matches(row, query?.where)) return { ...row };
-      return null;
+      const row = ordered([...table(name).values()].filter((r) => matches(r, query?.where)), query?.orderBy)[0];
+      return row ? { ...row } : null;
     },
     create: async (name: string, data: Record<string, unknown>) => {
+      // `sys_metadata_history` is unique on `(type, name, version)`, as the
+      // real table's index is: a colliding history row is refused.
+      if (name === 'sys_metadata_history' && [...table(name).values()].some((row) =>
+        row.type === data.type && row.name === data.name && row.version === data.version)) {
+        throw new Error('rowDriver: UNIQUE constraint failed: sys_metadata_history.type, name, version');
+      }
       table(name).set(data.id as string, { ...data });
       return { ...data };
     },
@@ -638,6 +660,7 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
   return {
     driver,
     rows: (type) => [...table('sys_metadata').values()].filter((row) => row.type === type),
+    history: (type) => [...table('sys_metadata_history').values()].filter((row) => row.type === type),
   };
 }
 
@@ -651,8 +674,8 @@ function rowDriver(): { driver: IDataDriver; rows: (type: string) => Array<Recor
  * item carrying only the `_packageId` stamp (`applyProtection`), and the
  * door's loader is registered afterwards. One `DatabaseLoader` is the writable
  * `datasource:` loader `register` persists into and `unregister` deletes from.
- * It keys its rows by `(type, name)` and writes no `package_id`, so a name two
- * packages hold has ONE row, holding the body registered last (beta's here).
+ * Since #32246 both loaders hold such a type per `(package, name)`: a name two
+ * packages hold has a row and a door entry per package.
  *
  * BASE (main 0eca80a7): `unregisterPackage` matched `packageId` / `package`
  * only, so it removed nothing of these items; a removal of one package's
@@ -673,7 +696,7 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
   });
 
   async function boot(type: string, holders: readonly string[] = [A, B]) {
-    const { driver, rows } = rowDriver();
+    const { driver, rows, history } = rowDriver();
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
     manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
     const published: RealtimeEventPayload[] = [];
@@ -695,7 +718,7 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     published.length = 0;
     const labels = async () => ((await manager.list(type)) as any[]).map((item) => item.label);
     const rowBodies = () => rows(type).map((row) => JSON.parse(row.metadata as string).label);
-    return { manager, published, watched, labels, rowBodies, name: nameOf(type) };
+    return { manager, published, watched, labels, rowBodies, name: nameOf(type), driver, door, rows, history };
   }
 
   const hasRealtimeDeleted = (type: string) =>
@@ -721,15 +744,15 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     expect(((await second.manager.get(type, second.name, A)) as any)?.label).toBe(`alpha ${type}`);
   });
 
-  it.each(SLOTTED)('%s: the storage half deletes only the removed package\'s row — removing alpha keeps the row holding beta\'s body, removing beta deletes it (BASE: removing alpha deleted beta\'s row)', async (type) => {
+  it.each(SLOTTED)('%s: the storage half deletes only the removed package\'s row — removing alpha keeps beta\'s row, removing beta keeps alpha\'s (BASE: removing alpha deleted beta\'s row)', async (type) => {
     const first = await boot(type);
-    expect(first.rowBodies(), 'one row per name: the body registered last').toEqual([`beta ${type}`]);
+    expect(first.rowBodies(), 'a row per package (#32246)').toEqual([`alpha ${type}`, `beta ${type}`]);
     await first.manager.unregisterPackage(A);
     expect(first.rowBodies()).toEqual([`beta ${type}`]);
 
     const second = await boot(type);
     await second.manager.unregisterPackage(B);
-    expect(second.rowBodies()).toEqual([]);
+    expect(second.rowBodies()).toEqual([`alpha ${type}`]);
   });
 
   it.each(SLOTTED)('%s: the realtime `deleted` event names the removed package, where the type has a realtime event; the watcher event names the item only (BASE: no package on either)', async (type) => {
@@ -756,7 +779,7 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
       { kind: 'package', packageId: B },
     ]);
     expect(await ctx.labels()).toEqual([`alpha ${type}`, `beta ${type}`]);
-    expect(ctx.rowBodies()).toEqual([`beta ${type}`]);
+    expect(ctx.rowBodies()).toEqual([`alpha ${type}`, `beta ${type}`]);
     expect(ctx.published).toEqual([]);
     expect(ctx.watched).toEqual([]);
   });
@@ -766,13 +789,13 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     await ctx.manager.unregister(type, ctx.name, { packageId: A });
     expect(await ctx.labels()).toEqual([`beta ${type}`]);
     expect(await ctx.manager.get(type, ctx.name, A)).toBeUndefined();
-    expect(ctx.rowBodies(), 'the row holds beta\'s body: kept').toEqual([`beta ${type}`]);
+    expect(ctx.rowBodies(), 'beta\'s row: kept').toEqual([`beta ${type}`]);
     if (hasRealtimeDeleted(type)) {
       expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([A]);
     }
     await ctx.manager.unregister(type, ctx.name, { packageId: B });
-    expect(ctx.rowBodies(), 'the row holds beta\'s body: deleted with beta').toEqual([]);
-    // No slot of the name is left; what reads are served now is the residue pin's below (#32246).
+    expect(ctx.rowBodies(), 'beta\'s row: deleted with beta').toEqual([]);
+    // No slot of the name is left; the residue pin below reads what is served now (#32246).
   });
 
   describe.each(SLOTTED)('CONTROL — %s, one holder: a removal naming no package is unchanged', (type) => {
@@ -788,21 +811,24 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
   });
 
   /**
-   * Today's state, pinned so the carry stays visible. The artifact door's
-   * `MemoryLoader` is a `memory:` loader, so no removal deletes from it, and it
-   * keeps one item per name: the body registered last. Once every slot of a
-   * name is removed, every read falls through to it and is answered that body
-   * — the read naming the removed package included. #32246 flips this pin.
+   * [#32246] The residue #32198 pinned, flipped. The artifact door's
+   * `MemoryLoader` is a `memory:` loader, which no removal used to delete
+   * from, and it kept one item per name: the body registered last. Once every
+   * slot of a name was removed, every read fell through to it and was
+   * answered that body — the read naming the removed package included. A
+   * removal of a by-package type now deletes from the door's store too, by
+   * the same `(package, name)` key.
    */
-  it.each(SLOTTED)('%s: once every slot of the name is removed, the door\'s in-memory loader still serves the body registered last, to every read (today\'s state; #32246 flips it)', async (type) => {
+  it.each(SLOTTED)('%s: once every slot of the name is removed, nothing answers any read: the door\'s in-memory loader was deleted from too (BASE: it served the body registered last)', async (type) => {
     const ctx = await boot(type);
     await ctx.manager.unregisterPackage(A);
     await ctx.manager.unregisterPackage(B);
     expect(ctx.rowBodies()).toEqual([]);
-    expect(await ctx.labels()).toEqual([`beta ${type}`]);
-    expect(((await ctx.manager.get(type, ctx.name)) as any)?.label).toBe(`beta ${type}`);
-    expect(((await ctx.manager.get(type, ctx.name, A)) as any)?.label).toBe(`beta ${type}`);
-    expect(await ctx.manager.exists(type, ctx.name)).toBe(true);
+    expect(await ctx.door.loadSlots(type, ctx.name)).toEqual([]);
+    expect(await ctx.labels()).toEqual([]);
+    expect(await ctx.manager.get(type, ctx.name)).toBeUndefined();
+    expect(await ctx.manager.get(type, ctx.name, A)).toBeUndefined();
+    expect(await ctx.manager.exists(type, ctx.name)).toBe(false);
   });
 
   describe('CONTROL — a type outside the set keeps one item per name, and removal by name', () => {
@@ -823,6 +849,434 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
       await ctx.manager.unregisterPackage(A);
       expect(ctx.rowBodies()).toEqual([]);
       expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+    });
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, #32246] Per-package loader storage, pinned for EVERY member
+ * of the live `PACKAGE_SLOTTED_STORE_TYPES` at this head.
+ *
+ * Same boot as the removal pins: the artifact door saves each item into its
+ * `MemoryLoader` and registers it with `{ notify: false }` (the item carries
+ * only `_packageId`), and one `DatabaseLoader` is the writable `datasource:`
+ * loader. A second manager over the same rows and the same door store, with
+ * an empty registry, is the state a read reaches the loaders in: a restart
+ * over stored rows, or a cluster peer after its replay dropped the slots.
+ *
+ * BASE (main 60b99f8f): both loaders kept one entry per name — the body saved
+ * last, with `package_id` empty — so alpha's stored item was gone at beta's
+ * save; the manager's loader fallback named no package, so a read naming alpha
+ * was served beta's body and a bare read the last writer instead of `409`;
+ * `list` admitted loader items one per name; both rows' history was numbered
+ * `1`, so the second history row was refused.
+ */
+describe('per-package loader storage for every type stored per package (ADR-0150 D3/D4, #32246)', () => {
+  const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const nameOf = (type: string) => `shared_${type}`;
+  const label = (type: string, packageId: string) => `${packageId === A ? 'alpha' : 'beta'} ${type}`;
+  const doorItem = (type: string, packageId: string) => ({
+    name: nameOf(type),
+    label: label(type, packageId),
+    _packageId: packageId,
+    _provenance: 'package',
+  });
+  const labelsOf = (items: unknown[]) => (items as any[]).map((item) => item.label).sort();
+
+  async function boot(type: string, holders: readonly string[] = [A, B]) {
+    const { driver, rows, history } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    const published: RealtimeEventPayload[] = [];
+    manager.setRealtimeService({
+      publish: async (event: RealtimeEventPayload) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    });
+    const door = new MemoryLoader();
+    for (const packageId of holders) {
+      const item = doorItem(type, packageId);
+      await door.save(type, nameOf(type), item);
+      await manager.register(type, nameOf(type), item, { notify: false });
+    }
+    manager.registerLoader(door);
+    /** A manager with an empty registry over the given loaders of this boot. */
+    const peer = (loaders: ReadonlyArray<'database' | 'door'>) => {
+      const fresh = new MetadataManager({ formats: ['json'], loaders: [] });
+      for (const which of loaders) {
+        fresh.registerLoader(which === 'door' ? door : new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+      }
+      return fresh;
+    };
+    return { manager, published, door, peer, rows: () => rows(type), history: () => history(type), name: nameOf(type) };
+  }
+
+  const refusalOf = (read: Promise<unknown>) =>
+    read.then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+
+  it('the live set is the one these pins iterate, and it is not empty', () => {
+    expect(SLOTTED.length).toBeGreaterThan(0);
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+  });
+
+  it.each(SLOTTED)('%s: each package\'s item has its own row with `package_id` filled, and its own entry in the door\'s store (BASE: one row and one entry, the body saved last)', async (type) => {
+    const ctx = await boot(type);
+    expect(ctx.rows().map((row) => [row.package_id, JSON.parse(row.metadata as string).label])).toEqual([
+      [A, label(type, A)],
+      [B, label(type, B)],
+    ]);
+    expect((await ctx.door.loadSlots(type, ctx.name)).map((slot) => [slot.packageId, (slot.data as any).label])).toEqual([
+      [A, label(type, A)],
+      [B, label(type, B)],
+    ]);
+  });
+
+  it.each(SLOTTED)('%s: both packages\' history rows are written, numbered per name across the packages (BASE: both numbered 1, the second refused)', async (type) => {
+    const ctx = await boot(type);
+    expect(ctx.history().map((row) => [row.version, JSON.parse(row.metadata as string).label])).toEqual([
+      [1, label(type, A)],
+      [2, label(type, B)],
+    ]);
+    expect(ctx.rows().map((row) => row.version)).toEqual([1, 2]);
+  });
+
+  it.each(SLOTTED)('%s: with history not tracked, versions are still numbered per name across the packages\' rows, so the row saved last is the highest (BASE: each row numbered on its own)', async (type) => {
+    const { driver, rows } = rowDriver();
+    const loader = new DatabaseLoader({ driver, tableName: 'sys_metadata', trackHistory: false });
+    await loader.save(type, nameOf(type), doorItem(type, A));
+    await loader.save(type, nameOf(type), doorItem(type, B));
+    await loader.save(type, nameOf(type), { ...doorItem(type, A), label: 'alpha again' });
+    expect(rows(type).map((row) => [row.package_id, row.version])).toEqual([[A, 3], [B, 2]]);
+    expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label)).toEqual(['alpha again']);
+  });
+
+  describe.each([
+    ['the stored rows', ['database']],
+    ['the door\'s store', ['door']],
+    ['both, door first', ['door', 'database']],
+  ] as const)('a read that reaches the loaders (empty registry) over %s', (_, loaders) => {
+    it.each(SLOTTED)('%s: a read naming a package is that package\'s item (BASE: the body saved last, for either package)', async (type) => {
+      const peer = (await boot(type)).peer(loaders);
+      expect(((await peer.get(type, nameOf(type), A)) as any)?.label).toBe(label(type, A));
+      expect(((await peer.get(type, nameOf(type), B)) as any)?.label).toBe(label(type, B));
+      expect(((await peer.getDiagnosed(type, nameOf(type), A)).data as any)?.label).toBe(label(type, A));
+    });
+
+    it.each(SLOTTED)('%s: a read naming a package that holds nothing is not found (BASE: another package\'s body)', async (type) => {
+      const peer = (await boot(type)).peer(loaders);
+      expect(await peer.get(type, nameOf(type), 'com.acme.gamma')).toBeUndefined();
+      expect(await peer.getDiagnosed(type, nameOf(type), 'com.acme.gamma')).toEqual({ data: undefined, degraded: false, errors: [] });
+    });
+
+    it.each(SLOTTED)('%s: a read naming no package is refused naming both holders, as the registry refuses it (BASE: the body saved last)', async (type) => {
+      const peer = (await boot(type)).peer(loaders);
+      for (const read of [peer.get(type, nameOf(type)), peer.getDiagnosed(type, nameOf(type))]) {
+        const err = await refusalOf(read);
+        expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+        expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+        expect(err!.refusal.candidates).toEqual([
+          { kind: 'package', packageId: A },
+          { kind: 'package', packageId: B },
+        ]);
+      }
+    });
+
+    it.each(SLOTTED)('%s: `list` serves both packages\' items (BASE: one, the body saved last)', async (type) => {
+      const peer = (await boot(type)).peer(loaders);
+      expect(labelsOf(await peer.list(type))).toEqual([label(type, A), label(type, B)]);
+    });
+  });
+
+  /**
+   * The loaders' own unscoped reads — what `MetadataManager.load`,
+   * `loadDiagnosed`, `loadMany` and `loadManyKeyed` read, and what the action
+   * router's third rung and objectql's action audit call — still answer one
+   * item per name, the one saved last, as when each loader kept one entry.
+   */
+  it.each(SLOTTED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+    const ctx = await boot(type);
+    for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
+      expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
+      expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
+      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, B)]);
+      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
+    }
+  });
+
+  it.each(SLOTTED)('%s: with one package\'s slot in the registry, `list` adds the other package\'s stored item, and no second copy of the first (BASE: the registry\'s item only)', async (type) => {
+    const ctx = await boot(type);
+    const peer = ctx.peer(['database', 'door']);
+    await peer.register(type, nameOf(type), doorItem(type, A), { notify: false });
+    expect(labelsOf(await peer.list(type))).toEqual([label(type, A), label(type, B)]);
+  });
+
+  /**
+   * An action bound to an object is slotted by its object and name (#31697),
+   * so the loaders' items are keyed the same way: the door's store keeps one
+   * package's two same-named actions of two objects, and the registry's copy
+   * of each shadows the door's.
+   */
+  it.runIf(PACKAGE_SLOTTED_STORE_TYPES.has('action'))('action: one package\'s two same-named actions bound to two objects are both listed from the door\'s store, and each once beside the registry', async () => {
+    const ctx = await boot('action', []);
+    const bound = (objectName: string) => ({ name: 'approve', objectName, label: `approve ${objectName}`, _packageId: A });
+    for (const objectName of ['account', 'contact']) {
+      await ctx.door.save('action', 'approve', bound(objectName));
+      await ctx.manager.register('action', 'approve', bound(objectName), { notify: false });
+    }
+    expect(labelsOf(await ctx.manager.list('action'))).toEqual(['approve account', 'approve contact']);
+    expect(labelsOf(await ctx.peer(['door']).list('action'))).toEqual(['approve account', 'approve contact']);
+
+    await ctx.manager.unregisterPackage(A);
+    expect(await ctx.door.loadSlots('action', 'approve'), 'the door\'s copies go with the package').toEqual([]);
+    expect(await ctx.manager.list('action')).toEqual([]);
+    expect(await ctx.manager.get('action', 'approve', A)).toBeUndefined();
+  });
+
+  it.each(SLOTTED)('%s: a package-less write of a name one package holds is that package\'s customization in storage too: it goes in the holder\'s row and binds it (D4)', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'customized' }, { notify: false });
+    expect(ctx.rows().map((row) => [row.package_id, JSON.parse(row.metadata as string).label])).toEqual([[A, 'customized']]);
+    expect(((await ctx.peer(['database']).get(type, ctx.name, A)) as any)?.label).toBe('customized');
+  });
+
+  it.each(SLOTTED)('%s: a package\'s first item takes over the name\'s package-less row when no package holds the name, as the store takes over its slot', async (type) => {
+    const ctx = await boot(type, []);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'env' }, { notify: false });
+    await ctx.manager.register(type, ctx.name, doorItem(type, A), { notify: false });
+    expect(ctx.rows().map((row) => [row.package_id, JSON.parse(row.metadata as string).label])).toEqual([[A, label(type, A)]]);
+  });
+
+  /**
+   * [#32246 item 3] A package-less write of a name P holds lands in P's slot
+   * (D4); `unregisterPackage(P)` judged items by their body alone and left it,
+   * still served to a read naming P and to the bare read.
+   */
+  it.each(SLOTTED)('%s: `unregisterPackage` also removes a package-less customization in the package\'s slot, and its row (BASE: left, and still served)', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'customized' }, { notify: false });
+    await ctx.manager.unregisterPackage(A);
+    expect(await ctx.manager.get(type, ctx.name, A)).toBeUndefined();
+    expect(await ctx.manager.get(type, ctx.name)).toBeUndefined();
+    expect(ctx.rows()).toEqual([]);
+  });
+
+  /** [#32246 item 2] The realtime arrival names the package a `_packageId`-only item carries. */
+  it.each(SLOTTED)('%s: the realtime `created`/`updated` event names the package of an item that carries only `_packageId`, where the type has a realtime event (BASE: no package)', async (type) => {
+    const ctx = await boot(type, []);
+    await ctx.manager.register(type, ctx.name, doorItem(type, A), { notify: false });
+    await ctx.manager.register(type, ctx.name, { ...doorItem(type, A), label: 'again' }, { notify: false });
+    const arrivals = ctx.published.map((event) => event.payload as any);
+    if ((MetadataEventType.options as readonly string[]).includes(`metadata.${type}.created`)) {
+      expect(arrivals.map((event) => [event.type, event.packageId])).toEqual([
+        [`metadata.${type}.created`, A],
+        [`metadata.${type}.updated`, A],
+      ]);
+    } else {
+      expect(ctx.published).toEqual([]);
+    }
+  });
+
+  /**
+   * [#32246 item 6, recorded] A package-less item beside two package slots
+   * keeps its own package-less row; a removal naming no package is refused
+   * while the packages hold the name, and takes the package-less item and row
+   * once they are gone.
+   */
+  it.each(SLOTTED)('%s: a package-less item beside two package slots has its own row, removable by name once both packages are gone', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'env' }, { notify: false });
+    expect(ctx.rows().map((row) => row.package_id ?? null)).toEqual([A, B, null]);
+    expect(await refusalOf(ctx.manager.unregister(type, ctx.name))).toBeInstanceOf(PackageScopedNameRefusedError);
+    await ctx.manager.unregisterPackage(A);
+    await ctx.manager.unregisterPackage(B);
+    expect(ctx.rows().map((row) => row.package_id ?? null)).toEqual([null]);
+    await ctx.manager.unregister(type, ctx.name);
+    expect(ctx.rows()).toEqual([]);
+    expect(await ctx.manager.exists(type, ctx.name)).toBe(false);
+  });
+
+  /** The realtime events and watcher events `manager` announces for `type`. */
+  const observe = (manager: MetadataManager, type: string) => {
+    const published: RealtimeEventPayload[] = [];
+    manager.setRealtimeService({
+      publish: async (event: RealtimeEventPayload) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    });
+    const watched: MetadataWatchEvent[] = [];
+    manager.subscribe(type, (event) => { watched.push(event); });
+    return { published, watched };
+  };
+
+  /**
+   * [#32246 review M1] A removal naming no package is judged over the same
+   * holders a read is: the registry's slots and the loaders' stored items. A
+   * peer (empty registry over the stored rows and the door's store) holds the
+   * name only in its loaders.
+   */
+  describe.each([
+    ['the stored rows', ['database']],
+    ['the door\'s store', ['door']],
+    ['both, door first', ['door', 'database']],
+  ] as const)('a removal naming no package on a peer over %s', (_, loaders) => {
+    it.each(SLOTTED)('%s: of a name two packages hold only in the loaders, it is refused naming both before anything is deleted or announced (BASE: it resolved, deleted nothing and announced `deleted`)', async (type) => {
+      const ctx = await boot(type);
+      const peer = ctx.peer(loaders);
+      const seen = observe(peer, type);
+      const err = await refusalOf(peer.unregister(type, ctx.name));
+      expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+      expect(err!.refusal.candidates).toEqual([
+        { kind: 'package', packageId: A },
+        { kind: 'package', packageId: B },
+      ]);
+      expect(ctx.rows().map((row) => row.package_id), 'every row kept').toEqual([A, B]);
+      expect((await ctx.door.loadSlots(type, ctx.name)).map((slot) => slot.packageId), 'every door entry kept').toEqual([A, B]);
+      expect([seen.published, seen.watched]).toEqual([[], []]);
+
+      const bulk = await peer.bulkUnregister([{ type, name: ctx.name }]);
+      expect([bulk.succeeded, bulk.failed, bulk.errors?.map((entry) => entry.name)]).toEqual([0, 1, [ctx.name]]);
+      expect(ctx.rows()).toHaveLength(2);
+    });
+
+    it.each(SLOTTED)('%s: CONTROL — of a name one package holds only in the loaders, it removes the stored item and announces it', async (type) => {
+      const ctx = await boot(type, [A]);
+      const peer = ctx.peer(loaders);
+      const seen = observe(peer, type);
+      await peer.unregister(type, ctx.name);
+      const holds = (which: 'database' | 'door') => (loaders as ReadonlyArray<string>).includes(which);
+      if (holds('database')) expect(ctx.rows()).toEqual([]);
+      if (holds('door')) expect(await ctx.door.loadSlots(type, ctx.name)).toEqual([]);
+      expect(seen.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+    });
+  });
+
+  it.each(SLOTTED)('%s: a removal naming no package is judged over the registry and the loaders together: one package\'s registry slot beside the other package\'s stored item is refused (BASE: the registry\'s slot and the other package\'s stored item both went)', async (type) => {
+    const ctx = await boot(type, [B]);
+    const peer = ctx.peer(['door']);
+    await peer.register(type, ctx.name, doorItem(type, A), { notify: false });
+    const seen = observe(peer, type);
+    const err = await refusalOf(peer.unregister(type, ctx.name));
+    expect([err?.code, err?.status, err?.refusal.candidates]).toEqual(['RESOURCE_CONFLICT', 409, [
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]]);
+    expect(((await peer.get(type, ctx.name, A)) as any)?.label, 'the registry\'s slot kept').toBe(label(type, A));
+    expect((await ctx.door.loadSlots(type, ctx.name)).map((slot) => slot.packageId), 'the stored item kept').toEqual([B]);
+    expect([seen.published, seen.watched]).toEqual([[], []]);
+  });
+
+  /**
+   * [#32246 review S2] A read naming a package the registry holds no slot for
+   * is read over the registry's slots and the loaders' stored items together,
+   * as `list` already lists them: the package's stored item answers beside
+   * another package's registry slot, and ⛔ never another package's item.
+   */
+  it.each(SLOTTED)('%s: a read naming a package whose item only a loader stores answers it, beside another package\'s registry slot (BASE: not found)', async (type) => {
+    const ctx = await boot(type);
+    for (const loaders of [['database'], ['door']] as const) {
+      const peer = ctx.peer(loaders);
+      await peer.register(type, ctx.name, doorItem(type, A), { notify: false });
+      expect(((await peer.get(type, ctx.name, B)) as any)?.label).toBe(label(type, B));
+      expect(((await peer.getDiagnosed(type, ctx.name, B)).data as any)?.label).toBe(label(type, B));
+      expect(((await peer.get(type, ctx.name, A)) as any)?.label, 'the registry\'s slot').toBe(label(type, A));
+      expect(await peer.get(type, ctx.name, 'com.acme.gamma'), 'never another package\'s item').toBeUndefined();
+    }
+  });
+
+  /**
+   * [#32246 review S3] `sys_metadata_history` is unique on `(type, name,
+   * version)` and keeps a removed package's rows: the next version is one past
+   * the highest the name has had there too, not over the live rows alone.
+   */
+  it.each(SLOTTED)('%s: a package removed and saved again takes the name\'s next version over its history, and its history row is written (BASE over live rows: it reused version 2 and its history row was refused)', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregister(type, ctx.name, { packageId: B });
+    expect(ctx.rows().map((row) => [row.package_id, row.version])).toEqual([[A, 1]]);
+    await ctx.manager.register(type, ctx.name, { ...doorItem(type, B), label: 'beta again' }, { notify: false });
+    expect(ctx.rows().map((row) => [row.package_id, row.version])).toEqual([[A, 1], [B, 3]]);
+    expect(ctx.history().map((row) => [row.version, JSON.parse(row.metadata as string).label])).toEqual([
+      [1, label(type, A)],
+      [2, label(type, B)],
+      [3, 'beta again'],
+    ]);
+  });
+
+  /**
+   * [#32246 red-line R1] A rollback by name of a name two packages' rows hold
+   * cannot tell whose row it restores: it used to overwrite the first row the
+   * driver returned, with a body that could be the other package's. It is
+   * refused naming both, before any write or history row. Rollback by package
+   * is a follow-up card.
+   */
+  it.each(SLOTTED)('%s: a rollback of a name two packages\' rows hold is refused naming both, every row byte-unchanged and no history row written (BASE: the first row the driver returned was overwritten)', async (type) => {
+    const ctx = await boot(type);
+    const rowsBefore = JSON.stringify(ctx.rows());
+    const historyBefore = ctx.history().length;
+    const err = await refusalOf(ctx.manager.rollback(type, ctx.name, 2));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(JSON.stringify(ctx.rows())).toBe(rowsBefore);
+    expect(ctx.history()).toHaveLength(historyBefore);
+    expect(((await ctx.manager.get(type, ctx.name, A)) as any)?.label, 'the registry untouched').toBe(label(type, A));
+  });
+
+  /**
+   * [#32246 red-line R1b] One package's row beside the name's package-less row
+   * is two row slots too: a rollback by name would overwrite whichever the
+   * driver returned first. Reach: A and B save, a package-less save lands on
+   * the bare row (item 6), B is removed. Refused naming A and the environment,
+   * before any write or history row.
+   */
+  it.each(SLOTTED)('%s: a rollback of a name whose rows are one package\'s and the package-less row is refused naming both, both rows byte-unchanged and no history row written (BASE: the first row the driver returned was overwritten)', async (type) => {
+    const ctx = await boot(type);
+    await ctx.manager.register(type, ctx.name, { name: ctx.name, label: 'env' }, { notify: false });
+    await ctx.manager.unregisterPackage(B);
+    expect(ctx.rows().map((row) => row.package_id ?? null)).toEqual([A, null]);
+    const rowsBefore = JSON.stringify(ctx.rows());
+    const historyBefore = ctx.history().length;
+    const err = await refusalOf(ctx.manager.rollback(type, ctx.name, 1));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'environment' }]);
+    expect(JSON.stringify(ctx.rows())).toBe(rowsBefore);
+    expect(ctx.history()).toHaveLength(historyBefore);
+  });
+
+  it.each(SLOTTED)('%s: CONTROL — a rollback of a name one package holds still restores that version into its row', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.register(type, ctx.name, { ...doorItem(type, A), label: 'alpha edited' }, { notify: false });
+    await ctx.manager.rollback(type, ctx.name, 1);
+    expect(ctx.rows().map((row) => [row.package_id, row.version, JSON.parse(row.metadata as string).label])).toEqual([[A, 3, label(type, A)]]);
+    expect(ctx.history().map((row) => [row.version, row.operation_type])).toEqual([[1, 'create'], [2, 'update'], [3, 'revert']]);
+  });
+
+  describe('CONTROL — a type outside the set keeps one row and one door entry per name, the body saved last', () => {
+    const CONTROL_TYPE = ['view', 'object'].find((type) => !PACKAGE_SLOTTED_STORE_TYPES.has(type))!;
+
+    it('two packages\' items of one name: one row with no `package_id`, one door entry, and every read on an empty registry answers the body saved last', async () => {
+      const ctx = await boot(CONTROL_TYPE);
+      expect(ctx.rows().map((row) => [row.package_id, JSON.parse(row.metadata as string).label])).toEqual([[undefined, label(CONTROL_TYPE, B)]]);
+      expect((await ctx.door.loadManyKeyed(CONTROL_TYPE)).map((entry) => [entry.name, entry.packageId, (entry.data as any).label])).toEqual([
+        [ctx.name, undefined, label(CONTROL_TYPE, B)],
+      ]);
+      const peer = ctx.peer(['database']);
+      expect(((await peer.get(CONTROL_TYPE, ctx.name, A)) as any)?.label).toBe(label(CONTROL_TYPE, B));
+      expect(((await peer.get(CONTROL_TYPE, ctx.name)) as any)?.label).toBe(label(CONTROL_TYPE, B));
+      expect(labelsOf(await peer.list(CONTROL_TYPE))).toEqual([label(CONTROL_TYPE, B)]);
+    });
+
+    it('a removal still never deletes from the door\'s store: its copy keeps answering (a separate card)', async () => {
+      const ctx = await boot(CONTROL_TYPE, [A]);
+      await ctx.manager.unregisterPackage(A);
+      expect(ctx.rows()).toEqual([]);
+      expect(((await ctx.manager.get(CONTROL_TYPE, ctx.name)) as any)?.label).toBe(label(CONTROL_TYPE, A));
     });
   });
 });

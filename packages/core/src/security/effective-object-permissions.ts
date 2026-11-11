@@ -6,10 +6,24 @@
  * consumers:
  *
  *  - `/auth/me/permissions` (`@objectstack/plugin-hono-server`) serves it as the
- *    `objects` slot of its response;
+ *    `objects` slot of its response, through {@link servedObjectPermissions};
  *  - `ISecurityService.getEffectiveObjectPermissions` (`@objectstack/plugin-security`)
  *    returns it, and the engine hands it to `current_user.can(object, verb)` as
  *    `EvalContext.permissions` (#18783).
+ *
+ * ## The one derivation the served slot adds (ruling of record 6755714726 on #32004)
+ *
+ * The ruling aligns three carriers with the owner-change door — `security.explain`'s
+ * `transfer`, the client permission hint this endpoint serves, and ADR-0142's
+ * mapping text — and leaves enforcement unchanged. The expression predicate
+ * evaluated on the server (`current_user.can(object, 'transfer')` in an
+ * option's `visibleWhen`, a CEL `defaultValue`, a `formula`) is NOT a carrier:
+ * it keeps the evaluator cell's answer, the transfer grant alone. A predicate
+ * the Console evaluates reads the served slot, so it follows the hint. So the map is computed
+ * ONCE ({@link buildEffectiveObjectPermissions}), handed to the predicate as
+ * it is, and the served slot is DERIVED from it by one clamp and nothing else
+ * ({@link servedObjectPermissions}: `allowTransfer` follows edit). The two
+ * answers are byte-for-byte equal everywhere except that one bit.
  *
  * ## Why here, and why ONE function
  *
@@ -647,6 +661,58 @@ function clampExternalReadOnlyWrites(objects: Record<string, any>, forbidden: Re
 }
 
 /**
+ * [Ruling of record 6755714726 on #32004] In the SERVED slot, an entry grants
+ * `transfer` only where it also grants edit — on EVERY object, the `'*'`
+ * entry included, never only on the guarded managed objects
+ * {@link clampManagedObjectWrites} clamps.
+ *
+ * The served `transfer` answers whether the record could be edited and its
+ * owner changed: the owner-change door is the by-id update of `owner_id`,
+ * admitted by the update grant (edit, which implies read) and then by the
+ * ownership gate's transfer grant. `security.explain`'s `transfer` answers the
+ * same question, so the client hint and the explanation give one answer. The
+ * transfer grant alone stays what that gate reads — it also lets an insert
+ * name another owner (ADR-0142's create-and-assign) — and what
+ * `current_user.can()` reads (the module docblock: not a carrier).
+ *
+ * Edit is read through the spec's `objectPermissionGrants`, so
+ * `modifyAllRecords` (which grants edit) keeps transfer; it runs on a finished
+ * map, after every clamp that can take edit away. Only a `true` bit is
+ * lowered: an entry that carries no `allowTransfer` gains no key.
+ */
+function clampTransferToEdit(objects: Record<string, any>): void {
+  for (const acc of Object.values(objects) as any[]) {
+    if (!acc || acc.allowTransfer !== true) continue;
+    if (!objectPermissionGrants(acc as EffectiveObjectPermission, 'allowEdit')) acc.allowTransfer = false;
+  }
+}
+
+/**
+ * [Ruling of record 6755714726 on #32004] The `objects` slot `/auth/me/permissions`
+ * SERVES, derived from a map {@link buildEffectiveObjectPermissions} built: a
+ * fresh copy of every entry (the input is never mutated, so the one map the
+ * request computed can still be handed to `current_user.can()` as it is), with
+ * {@link clampTransferToEdit} applied — and nothing else. Every other bit, key
+ * and `apiOperations` list is the input's, byte for byte.
+ */
+export function servedObjectPermissions(
+  effective: Readonly<Record<string, EffectiveObjectPermission>>,
+): Record<string, EffectiveObjectPermission> {
+  const served: Record<string, any> = {};
+  for (const [name, entry] of Object.entries(effective) as Array<[string, any]>) {
+    if (!entry || typeof entry !== 'object') {
+      served[name] = entry;
+      continue;
+    }
+    const copy: Record<string, unknown> = { ...entry };
+    if (Array.isArray(entry.apiOperations)) copy.apiOperations = [...entry.apiOperations];
+    served[name] = copy;
+  }
+  clampTransferToEdit(served);
+  return served as Record<string, EffectiveObjectPermission>;
+}
+
+/**
  * [#30370] The {@link EffectiveObjectPermissionsSchemaSource.isExternalWriteForbidden}
  * accessor over an engine: its `isExternalWriteForbidden`, the verdict objectql's
  * own write gate (`assertWriteAllowed`) reads before it refuses a write
@@ -777,6 +843,9 @@ export interface EffectiveObjectPermissionsInputSet {
  *  8. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
  *     package is disabled is left out, as the data plane refuses it; guarded
  *     like (2).
+ *
+ * This is the map `current_user.can()` reads. The slot `/auth/me/permissions`
+ * serves is {@link servedObjectPermissions} of it (ruling of record 6755714726).
  *
  * Every entry is a FRESH object: nothing in the returned map aliases a
  * permission set, so a caller may freeze or serialise it freely.
