@@ -153,6 +153,13 @@
  */
 
 import type { PluginContext, SystemWriteOrganizationDecision } from '@objectstack/core';
+import {
+    PackageScopedNameRefusedError,
+    artifactPackageId,
+    describePackageScopedHolder,
+    resolveArtifactPackageOrder,
+    type PackageScopedRefusal,
+} from '@objectstack/core';
 import type {
     ConnectorSourcePullResult,
     IAutomationService,
@@ -192,7 +199,6 @@ import {
     collectBundleJobs,
 } from './app-plugin.js';
 import { resolveArtifactCollections } from './artifact-collections.js';
-import { artifactPackageId, resolveArtifactPackageOrder } from '@objectstack/core';
 import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import { toBoundaryJobSchedule } from './job-schedule.js';
 import type { JobHandlerContext } from './job-handler-context.js';
@@ -678,6 +684,84 @@ export function judgeJobPull(
 }
 
 /**
+ * [ADR-0150 D3, #32071] The package that declares each job of `bundle` — what
+ * a `pull` job hands the automation service as `callerPackageId`, so the pull
+ * reads its mapping from that package (its own, else the one holder in its
+ * declared closure plus `sys`, else a refusal).
+ *
+ * The binder's jobs are the artifact's resolved `jobs`, flattened across
+ * `packages[]` (ADR-0130 D4), and carry no package; the job service keys them
+ * all under the top-level `appId`. That id is not the declaring package of a
+ * body's job — each body's items register under the body's own id — so the
+ * body is found the way `AppPlugin` finds a datasource's owner: walking
+ * `resolveArtifactPackageOrder`. A body's job object answers that body (by
+ * identity, else, for a top-level copy of it, by name in body order).
+ *
+ * A top-level job no body declares is the residual: the job service runs it
+ * under `appId`, but that id is no package (`ObjectQL#recordResidualOwner`:
+ * "the residual is not a package") unless a body carries it, so such a job
+ * answers `undefined` and its pull names no package — the no-package read,
+ * as before. An artifact without `packages[]` declares every job from `appId`.
+ *
+ * A job name more than one body declares, met by name (a JSON-loaded
+ * artifact binds the flattened top-level copies, so this is the usual path),
+ * answers a REFUSAL naming every declaring body (ADR-0150 D3,
+ * `ambiguous-in-environment`), never the first body in package order: the
+ * binder fails that job's run with it before any call or write.
+ */
+export function jobDeclaringPackages(
+    bundle: unknown,
+    appId: string,
+): (job: unknown) => string | undefined | PackageScopedRefusal {
+    if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
+        return () => appId;
+    }
+    const byIdentity = new Map<unknown, string>();
+    const byName = new Map<string, string[]>();
+    // The residual's owner is a package only when a body carries its id.
+    let residual: string | undefined;
+    for (const body of resolveArtifactPackageOrder(bundle)) {
+        const id = artifactPackageId(body);
+        if (id === appId) residual = appId;
+        const jobs = (body as { jobs?: unknown } | null | undefined)?.jobs;
+        if (!id || !Array.isArray(jobs)) continue;
+        for (const job of jobs) {
+            if (!job || typeof job !== 'object') continue;
+            byIdentity.set(job, id);
+            const name = (job as { name?: unknown }).name;
+            if (typeof name !== 'string') continue;
+            const declarers = byName.get(name) ?? [];
+            if (!declarers.includes(id)) declarers.push(id);
+            byName.set(name, declarers);
+        }
+    }
+    return (job) => {
+        const held = byIdentity.get(job);
+        if (held !== undefined) return held;
+        const name = (job as { name?: unknown } | null | undefined)?.name;
+        const declarers = typeof name === 'string' ? byName.get(name) : undefined;
+        if (declarers === undefined) return residual;
+        return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
+    };
+}
+
+/** [#32071] The refusal of a job name several package bodies declare: nothing picks one of them. */
+function jobNameRefusal(name: string, packageIds: readonly string[]): PackageScopedRefusal {
+    const candidates = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
+    return {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'job',
+        name,
+        callerPackageId: null,
+        candidates,
+        message: `The job "${name}" is declared by ${packageIds.length} package bodies of this artifact: `
+            + `${candidates.map(describePackageScopedHolder).join('; ')}. Nothing picks one of them, so its pull reads `
+            + 'as none of them: rename the job in all but one package so each name has one declaring package.',
+    };
+}
+
+/**
  * The organization a job declares (`JobSchema.organization`), or `undefined`.
  * A present-but-unusable value (an empty string, a number) answers `undefined`
  * — the value shape is the scheduled flow's (`ScheduleOrganizationSchema`), and
@@ -922,7 +1006,10 @@ export interface AppArtifactJobScheduling {
  *   - a `pull` → the mapping pull, when {@link judgeJobPull} binds it and the
  *     `automation` service serves `pullConnectorSource`; each run calls that
  *     contract method through the service registry under the job's execution
- *     context, and maps the result with {@link pullRunOutcomeOf}. A pull that
+ *     context and as the package that declares the job
+ *     ({@link jobDeclaringPackages}, its `callerPackageId`; a residual
+ *     top-level job names none), and maps the
+ *     result with {@link pullRunOutcomeOf}. A pull that
  *     does not bind schedules nothing (warn) — install-local refuses that
  *     shape up front ({@link collectJobsWithoutBody}), so on that door this
  *     fires only on the rehydrate of an entry an earlier build installed;
@@ -1081,6 +1168,9 @@ export async function scheduleAppArtifactJobs(
     // writes need one (`group`): legal, and refused at their first
     // tenant-scoped write — said once below, with the remedy.
     const armedWithoutOrganization: string[] = [];
+    // [ADR-0150 D3, #32071] Which package declares each job: a pull reads its
+    // mapping from it.
+    const declaringPackageOf = jobDeclaringPackages(bundle, appId);
 
     for (const job of jobs) {
         const jobName: string = job?.name;
@@ -1130,6 +1220,9 @@ export async function scheduleAppArtifactJobs(
                 continue;
             }
             const mapping = judged.mapping;
+            const declarer = declaringPackageOf(job);
+            const callerPackageId = typeof declarer === 'string' ? declarer : undefined;
+            const declarerRefusal = typeof declarer === 'object' ? declarer : undefined;
             let automation: IAutomationService | undefined;
             try { automation = ctx.getService<IAutomationService>('automation'); } catch { /* not installed */ }
             if (typeof automation?.pullConnectorSource !== 'function') {
@@ -1153,6 +1246,9 @@ export async function scheduleAppArtifactJobs(
                         + '`pullConnectorSource` — nothing was pulled',
                     );
                 }
+                // [#32071] A job name two bodies declare is attributed to neither:
+                // refused before any call or write, naming every declaring body.
+                if (declarerRefusal !== undefined) throw new PackageScopedNameRefusedError(declarerRefusal);
                 // [#31823] Resolved once per run, before the pull reads or writes:
                 // a job with no organization pulls as the one its writes are
                 // stamped with, where the engine derives one.
@@ -1161,7 +1257,12 @@ export async function scheduleAppArtifactJobs(
                     + 'stamped with could not be resolved — the pull runs with none, and its match lookup reads by the key alone',
                     { appId, job: jobName, mapping, error: err instanceof Error ? err.message : String(err) },
                 ));
-                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(runAs) });
+                const result = await service.pullConnectorSource({
+                    mapping,
+                    context: jobExecutionContext(runAs),
+                    // A residual job names no package (above): the no-package read.
+                    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+                });
                 return pullRunOutcomeOf(result);
             };
             form = 'pull';

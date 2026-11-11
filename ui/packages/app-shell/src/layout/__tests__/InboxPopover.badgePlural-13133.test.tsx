@@ -99,3 +99,40 @@ describe('InboxPopover — badge breakdown agrees in number (objectui#13133)', (
     expect(screen.getByText('1 pending approval', { selector: 'div' })).toBeInTheDocument();
   });
 });
+
+/**
+ * The bell's accessible name carries its count. The badge is content inside a
+ * button that has an `aria-label`, so it is never part of the name a screen
+ * reader announces; the name spells out each non-zero addend instead, in the
+ * same plural forms as the breakdown above.
+ */
+describe('InboxPopover — the bell is named "Notifications" with its count', () => {
+  // This harness draws the popover body unconditionally, and its tabs are
+  // plain buttons here, so a "Notifications" tab shares the bell's bare name;
+  // the bell is the one carrying the "Inbox" tooltip.
+  const bell = (name: string) => {
+    const [match, ...rest] = screen.getAllByRole('button', { name }).filter((b) => b.title === 'Inbox');
+    expect(rest).toHaveLength(0);
+    return match;
+  };
+
+  it('names three unread topics in the plural', () => {
+    renderPopover(3, 0);
+    expect(bell('Notifications, 3 unread topics')).toBeInTheDocument();
+  });
+
+  it('names one unread topic in the singular', () => {
+    renderPopover(1, 0);
+    expect(bell('Notifications, 1 unread topic')).toBeInTheDocument();
+  });
+
+  it('names pending approvals beside the unread topics', () => {
+    renderPopover(3, 1);
+    expect(bell('Notifications, 3 unread topics, 1 pending approval')).toBeInTheDocument();
+  });
+
+  it('PRESERVATION: with nothing waiting the bell is named "Notifications" alone', () => {
+    renderPopover(0, 0);
+    expect(bell('Notifications')).toBeInTheDocument();
+  });
+});

@@ -18,6 +18,7 @@
 import {
   DEFAULT_MAX_INLINE_GRID_COLUMNS,
   deriveInlineGridColumns,
+  deriveInlineGridSortField,
   deriveInlineRowFormFields,
 } from '@objectstack/spec/data';
 import type { BooleanValueLabel, GridColumn } from '@object-ui/fields';
@@ -47,12 +48,6 @@ export interface ChildObjectSchemaLike {
   name?: string;
   fields?: Record<string, any>;
 }
-
-/** Field names that hold a line's sort position — the names `deriveDetail`
- *  picks the line's sort field from (the grid stamps it on drag-reorder). The
- *  grid columns and the row form leave these names out by the spec's own rule
- *  (`deriveInlineGridColumns`, `deriveInlineRowFormFields`). */
-const SORT_FIELD_NAMES = new Set(['position', 'sort_order', 'sequence', 'line_no', 'line_number', 'sort']);
 
 /** Map an ObjectQL field type to a LineItems grid column type. */
 export function fieldTypeToColumnType(type: string | undefined): GridColumn['type'] {
@@ -532,6 +527,8 @@ export function deriveDetail(
   // `inlineEdit` value, else the smart default from the child's shape.
   const inlineEdit = override.inlineEdit ?? (childSchema?.fields as any)?.[relationshipField]?.inlineEdit;
   const mode = resolveInlineMode(childSchema, inlineEdit, { relationshipField });
-  const sortField = Object.keys(childSchema?.fields ?? {}).find((n) => SORT_FIELD_NAMES.has(n));
+  // The line-position field is the spec's to name (the names stay private to
+  // it), so the grid columns, the row form and this field share one list.
+  const sortField = deriveInlineGridSortField(childSchema);
   return { childObject, relationshipField, columns, formFields, mode, amountField, sortField };
 }
