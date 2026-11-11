@@ -212,8 +212,11 @@ describe('ADR-0150 D5 — a namespace that spells an address literal is refused 
         return registry;
     }
 
-    it('the refused set is the seven literals, so the cases below are not vacuous', () => {
-        expect([...NAMESPACE_REFUSED_LITERALS]).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'runs', 'trigger']);
+    // Anti-vacuity for the cases below. The set itself is pinned where it is
+    // declared (`spec/kernel/address-grammar.test.ts`), not listed again here.
+    it('the refused set is not empty and holds `runs`, the literal no route spells', () => {
+        expect(NAMESPACE_REFUSED_LITERALS.length).toBeGreaterThan(0);
+        expect(NAMESPACE_REFUSED_LITERALS).toContain('runs');
     });
 
     it.each(NAMESPACE_REFUSED_LITERALS.map((literal) => [literal]))(
