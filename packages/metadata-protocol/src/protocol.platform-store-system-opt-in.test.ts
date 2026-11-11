@@ -27,6 +27,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// The protocol loads `@objectstack/lint` through a function-body
+// `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
+// case's `testTimeout` window pays that first load
+// (`scripts/check-test-source-alias.mjs`, "The source reach").
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
@@ -360,7 +365,7 @@ describe('[#21908] the deny round — the platform-store calls still reaching th
             await protocol.publishMetaItem({ type: 'view', name: 'proj_task_grid' });
         });
         await expectSystemOptIn(calls, 'promoteDraftForPublish', () =>
-            protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid' }).catch(() => undefined));
+            protocol.promoteDraftForPublish({ type: 'view', name: 'proj_task_grid', registryQuestion: 'body-only' }).catch(() => undefined));
     });
 
     it('the readers behind the history, audit, diff and commit doors', async () => {

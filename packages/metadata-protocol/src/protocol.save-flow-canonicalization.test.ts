@@ -43,14 +43,24 @@ import { ObjectStackDefinitionSchema, applyConversionsToFlow, normalizeStackInpu
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
+/**
+ * [#32289] The given nodes, then a start node wired to each of them: the live
+ * save gate refuses a flow with no start node (`flow-start-node-missing`) and a
+ * node no edge from it reaches (`flow-node-unreachable`). The start node goes
+ * LAST so every `nodes[i]` index and path below still names the node it did.
+ */
+const wiredFromStart = <N extends { id: string }>(nodes: N[]) => ({
+    nodes: [...nodes, { id: 'start', type: 'start', label: 'Start' }],
+    edges: nodes.map((n) => ({ id: `e_${n.id}`, source: 'start', target: n.id })),
+});
+
 /** A flow body that passes `saveMetaItem`'s schema gate. */
 const flowBody = (config: Record<string, unknown>) => ({
     name: 'purge_flow',
     label: 'Purge Stale Leads',
     type: 'autolaunched',
     status: 'active',
-    nodes: [{ id: 'n1', type: 'delete_record', label: 'Purge', config }],
-    edges: [],
+    ...wiredFromStart([{ id: 'n1', type: 'delete_record', label: 'Purge', config }]),
 });
 
 /**
@@ -73,7 +83,7 @@ const canonicalizeStoredFlow = (_name: string, body: any, options: { includeReti
     }
     const { filters, ...rest } = node.config;
     return {
-        storable: { ...body, nodes: [{ ...node, config: { ...rest, filter: filters } }] },
+        storable: { ...body, nodes: [{ ...node, config: { ...rest, filter: filters } }, ...body.nodes.slice(1)] },
         notices: [{
             conversionId: 'flow-node-crud-filter-alias',
             surface: 'flow.node.config.filter',
@@ -432,7 +442,7 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
     describe('[#21982] the fallback gate judges the D2-converted body, and stores the raw one', () => {
         const scriptBody = (config: Record<string, unknown>) => ({
             ...flowBody({}),
-            nodes: [{ id: 'n1', type: 'script', label: 'Triage', config }],
+            ...wiredFromStart([{ id: 'n1', type: 'script', label: 'Triage', config }]),
         });
         const issuesOf = async (promise: Promise<unknown>) => {
             try {
@@ -694,8 +704,8 @@ describe('[#23903] a re-save that newly introduces a retired spelling is judged 
         waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
         config: { duration: 'PT9M' },
     });
-    const flowOf = (nodes: unknown[], label = 'Purge Stale Leads') =>
-        ({ name: 'purge_flow', label, type: 'autolaunched', status: 'active', nodes, edges: [] });
+    const flowOf = (nodes: Array<{ id: string }>, label = 'Purge Stale Leads') =>
+        ({ name: 'purge_flow', label, type: 'autolaunched', status: 'active', ...wiredFromStart(nodes) });
     const legacyNode = (id: string) => purge(id, { objectName: 'lead', filters: { status: 'stale' } });
     const canonicalNode = (id: string) => purge(id, { objectName: 'lead', filter: { status: 'stale' } });
 
@@ -801,7 +811,7 @@ describe('[#23903] a re-save that newly introduces a retired spelling is judged 
             const result = await save(protocol, flowOf([canonicalNode('n0'), legacyNode('n1')]));
 
             expect(result.success).toBe(true);
-            expect(storedFlow(rows)!.body.nodes.map((n: { id: string }) => n.id)).toEqual(['n0', 'n1']);
+            expect(storedFlow(rows)!.body.nodes.map((n: { id: string }) => n.id)).toEqual(['n0', 'n1', 'start']);
         });
 
         it(`${host}: Studio's draft autosaves of a legacy flow keep saving after the first one healed the draft row — the active row still carries the spelling — and an added node is still refused`, async () => {

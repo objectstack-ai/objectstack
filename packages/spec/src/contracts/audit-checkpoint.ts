@@ -85,16 +85,24 @@ export interface AuditCheckpointSinkEntry {
    * The signed body exactly as signed — the object whose RFC 8785 (JCS)
    * serialization the signature covers.
    *
-   * What a sink receives in it: commitments, Merkle roots, digests and
-   * `sys_secret` handle ids; and beside them the sealed object's name, the
-   * organization id the chain is about (`tenant_id`, `null` for the
-   * deployment chain), the id of every sealed row (a checkpoint's `row_ids`,
-   * an amendment's `row_id`), the window's instants, the names of the sealed
-   * columns, sequence numbers, and on an amendment the retention policy with
-   * its value or the name of the migration that rewrote a value. None of
-   * these is a value of a sealed column, a salt, a seed or key material
-   * (ADR-0154 D2), but the organization id and the row ids identify an
-   * organization and its records, and a sink classifies the body accordingly.
+   * What a sink receives in it, member by member. A checkpoint's body:
+   * `sealed_object`; `tenant_id`, the organization the chain is about
+   * (`null` for the deployment chain); `sequence`; `kind` (`window` or
+   * `late`); `window_start`, `window_end` and `sealed_through`, instants;
+   * `leaf_count`; `row_ids`, the id of every sealed row; `root`, a Merkle
+   * root; `previous_digest`; `columns`, the names of the sealed columns;
+   * `canon_version`; `seed_handle`, a `sys_secret` handle id;
+   * `fencing_token`; `sealed_at`; and `signing_key_id`. An amendment's body:
+   * `sealed_object`, `tenant_id`, `kind` (`redaction` or `expiry`),
+   * `amended_at` and `signing_key_id`; on a redaction `checkpoint_sequence`,
+   * `row_id`, `column_name`, `sealed_commitment`, `rewritten_commitment`
+   * (two commitments) and `rewritten_by`, the name of the migration that
+   * rewrote the value; on an expiry `first_sequence`, `last_sequence`,
+   * `covered_from`, `covered_to`, `last_removed_digest`, and `policy` with
+   * its `policy_value`. None of these is a value of a sealed column, a salt,
+   * a seed or key material (ADR-0154 D2), but the organization id and the
+   * row ids identify an organization and its records, and a sink classifies
+   * the body accordingly.
    */
   readonly body: Readonly<Record<string, unknown>>;
   /** The key that signed it. */

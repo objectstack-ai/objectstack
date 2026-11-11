@@ -63,10 +63,15 @@ export function flowSlotRunStore(inner: SuspendedRunStore, coordinates: FlowSlot
                 .filter((run) => wanted.has(run.flowName));
         },
         recordTerminal: (store) => (record: RunRecord) => store.recordTerminal!(toStored(record, coordinates)),
-        listHistory: (store) => async (key: string, limit: number) =>
-            (await store.listHistory!(nameOf(key), limit))
-                .map((record) => fromStored(record, coordinates))
-                .filter((record) => record.flowName === key),
+        // [N2] The store's window is by name and the slot filter runs after it: widen the window until the
+        // slot's `limit` rows are in it or the store has no more, so another slot's newer rows hide none.
+        listHistory: (store) => async (key: string, limit: number) => {
+            for (let window = limit; ; window *= 2) {
+                const rows = await store.listHistory!(nameOf(key), window);
+                const mine = rows.map((record) => fromStored(record, coordinates)).filter((record) => record.flowName === key);
+                if (mine.length >= limit || rows.length < window || !(window > 0)) return mine.slice(0, limit);
+            }
+        },
         loadTerminal: (store) => async (runId: string) => read(await store.loadTerminal!(runId)),
     };
     return new Proxy(inner, {

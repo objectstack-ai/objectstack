@@ -276,18 +276,21 @@ describe('#6504 — list() and listDiagnosed() are one read seen at two widths',
  *
  * `list()` reads a loader through `loadManyKeyed()` when the loader has one — a
  * loader-held item's identity is the key its store holds it under, not
- * `body.name` — and falls back to `loadMany()` when it does not. The invariant
+ * `body.name` — and falls back to `loadMany()` when it does not. A type stored
+ * per package (`PACKAGE_SLOTTED_STORE_TYPES`, `permission` among them since
+ * #32162) is read through `loadManySlots()` instead (#32246). The invariant
  * these cases pin is "the manager walked this loader once", which is the SUM of
- * the two. Spying only `loadMany` counted 0 walks after the read moved, which
+ * the three. Spying only `loadMany` counted 0 walks after the read moved, which
  * reads exactly like a cache hit: green for the wrong reason in one direction,
  * red for the wrong reason in the other.
  */
 function loaderWalks(loader: MemoryLoader): { readonly count: number } {
     const many = vi.spyOn(loader, 'loadMany');
     const keyed = vi.spyOn(loader, 'loadManyKeyed');
+    const slots = vi.spyOn(loader, 'loadManySlots');
     return {
         get count() {
-            return many.mock.calls.length + keyed.mock.calls.length;
+            return many.mock.calls.length + keyed.mock.calls.length + slots.mock.calls.length;
         },
     };
 }

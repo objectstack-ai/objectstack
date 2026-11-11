@@ -389,6 +389,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
             // packages hold — the door hands it the type the request named.
             'packagelessLayeredReadRefusal',
             'publishMetaItem',
+            // [ADR-0150 D3, #32310] The caller arm's resolution — the dataset
+            // doors hand it the type the request named.
+            'resolveCallerPackageAddress',
             // [ADR-0150 D5, #31691 G1] The qualified path's address reading.
             'resolveMetaItemAddress',
             'rollbackMetaItem',

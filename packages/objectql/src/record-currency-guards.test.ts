@@ -27,6 +27,7 @@
 // one included) follows it.
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { defineStack } from '@objectstack/spec';
 import { RECYCLE_BIN_ENTRY_FIELDS, RECYCLE_BIN_OBJECT, type EngineAggregateOptions, type EngineUpdateOptions } from '@objectstack/spec/data';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
@@ -329,6 +330,21 @@ describe('a summary roll-up over a record-mode amount is refused at registration
     expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any)).toBeNull();
     const err = await refusalOf(() => engine.registry.registerObject(parentWith('sum') as any));
     expect(err?.name).toBe('RecordCurrencySummaryRefusedError');
+    expect(engine.registry.getObject('fx_parent')).toBeUndefined();
+  });
+
+  it('[ADR-0144 D2 and D6, amended] a single save naming `againstRegistry` is asked this door too, once the cold boot has sealed the registry', async () => {
+    const { engine } = await bootEngine();
+    engine.registry.registerObject(LINE as any);
+    // Cold boot (unsealed): the option changes nothing.
+    expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any, undefined, 'own', { againstRegistry: true })).toBeNull();
+    engine.registry.sealBareNameHolders();
+    // Sealed, a batch's question (no option) still leaves it to the registration…
+    expect(engine.registry.objectRegistrationRefusal(parentWith('sum') as any)).toBeNull();
+    // …and a single save's question answers what the registration throws, registering nothing.
+    const asked = engine.registry.objectRegistrationRefusal(parentWith('sum') as any, undefined, 'own', { againstRegistry: true }) as any;
+    expect(envelopeOf(asked)).toEqual(INVALID_METADATA);
+    expect(asked?.name).toBe('RecordCurrencySummaryRefusedError');
     expect(engine.registry.getObject('fx_parent')).toBeUndefined();
   });
 
@@ -868,5 +884,209 @@ describe('the roll-up channel rides one concrete parent id (F3)', () => {
       expect(envelopeOf(err), JSON.stringify(parentId)).toEqual(INVALID_FIELD);
       expect(err?.field).toBe('amount');
     }
+  });
+});
+
+// ── [ADR-0144 D2 and D6, amended] The follow door: what `defineStack` judges across two objects, at a single-object save ──
+
+describe('a single-object save is refused when the currency it follows is not there (ADR-0144 D2 and D6, amended: the follow door)', () => {
+  /** A registry past its cold boot: the seal the engine plugin sets at `kernel:bootstrapped`. */
+  async function bootSealed() {
+    const booted = await bootEngine();
+    booted.engine.registry.sealBareNameHolders();
+    return booted;
+  }
+  const lineFollowing = (pointer: string) => ({
+    ...PP_LINE,
+    fields: { ...PP_LINE.fields, amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: pointer } } },
+  });
+  const invoiceWithout = (field: string) => {
+    const fields: Record<string, unknown> = { ...PP_INVOICE.fields };
+    delete fields[field];
+    return { ...PP_INVOICE, fields };
+  };
+  /** The same pair through `defineStack`: its one cross-reference finding. */
+  const stackFinding = (objects: unknown[]): string => {
+    try {
+      defineStack({ manifest: { id: 'com.example.followdoor', name: 'follow-door', version: '1.0.0', type: 'app' }, objects } as Parameters<typeof defineStack>[0]);
+    } catch (e) {
+      const issues = (e as { issues?: unknown[] }).issues ?? [];
+      expect(issues).toHaveLength(1);
+      return String(issues[0]);
+    }
+    throw new Error('defineStack accepted the pair');
+  };
+  const FOLLOW_REFUSED = 'RecordCurrencyFollowRefusedError';
+  /**
+   * A single save or publish through the metadata protocol: it asks the
+   * registry with `againstRegistry` before anything is stored, and registers
+   * (the write-through) only when that question passes.
+   */
+  const save = (engine: ObjectQL, def: unknown, packageId?: string, ownership: 'own' | 'extend' = 'own') => {
+    const refusal = engine.registry.objectRegistrationRefusal(def as any, packageId, ownership, { againstRegistry: true });
+    if (refusal) throw refusal;
+    return engine.registry.registerObject(def as any, packageId, undefined, ownership);
+  };
+
+  it('a child whose path names no field of the registered parent is refused 422 at its save, in defineStack\'s words', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(PP_INVOICE as any);
+    const child = lineFollowing('invoice.currency');
+    const err = await refusalOf(() => save(engine, child));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.objectName).toBe('pp_line');
+    expect(err?.fieldName).toBe('amount');
+    expect(err?.message).toBe(stackFinding([PP_INVOICE, child]));
+    expect(err?.message).toContain("'pp_invoice' declares no field 'currency'");
+    expect(engine.registry.getObject('pp_line')).toBeUndefined();
+  });
+
+  it('a child whose path names a field that holds no ISO 4217 code is refused 422 at its save, in defineStack\'s words', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(PP_INVOICE as any);
+    const child = lineFollowing('invoice.title');
+    const err = await refusalOf(() => save(engine, child));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.name).toBe(FOLLOW_REFUSED);
+    expect(err?.message).toBe(stackFinding([PP_INVOICE, child]));
+    expect(err?.message).toContain("follows 'pp_invoice.title', a 'text' field that does not hold an ISO 4217 code");
+    expect(engine.registry.getObject('pp_line')).toBeUndefined();
+  });
+
+  it('the parent registering, or re-registering, without the code field a registered child follows is refused at its save', async () => {
+    // Child first: no parent yet, so no verdict at the child.
+    const first = await bootSealed();
+    first.engine.registry.registerObject(PP_LINE as any);
+    expect(first.engine.registry.getObject('pp_line')).toBeDefined();
+    const late = await refusalOf(() => save(first.engine, invoiceWithout('currency_code')));
+    expect(envelopeOf(late)).toEqual(INVALID_METADATA);
+    expect(late?.name).toBe(FOLLOW_REFUSED);
+    expect(late?.objectName).toBe('pp_line');
+    expect(late?.message).toContain("'pp_invoice' does not hold the code a registered amount follows.");
+    expect(late?.message).toContain("'pp_invoice' declares no field 'currency_code'");
+    expect(first.engine.registry.getObject('pp_invoice')).toBeUndefined();
+
+    // Re-registration: the registered parent stays as it was.
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(PP_INVOICE as any);
+    engine.registry.registerObject(PP_LINE as any);
+    const demoted = { ...PP_INVOICE, fields: { ...PP_INVOICE.fields, currency_code: { type: 'text' } } };
+    const err = await refusalOf(() => save(engine, demoted));
+    expect(envelopeOf(err)).toEqual(INVALID_METADATA);
+    expect(err?.message).toContain("a 'text' field that does not hold an ISO 4217 code");
+    expect((engine.registry.getObject('pp_invoice')?.fields as any)?.currency_code?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('a `record` roll-up over a child amount that follows nothing is refused, whichever end registers second', async () => {
+    const cases = [
+      { label: 'fixed', amount: { type: 'currency', currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'EUR' } }, says: 'is fixed to EUR' },
+      { label: 'no currency', amount: { type: 'number' }, says: 'declares no currency that follows this record' },
+    ];
+    for (const { label, amount, says } of cases) {
+      const child = { ...PP_LINE, fields: { ...PP_LINE.fields, amount } };
+      for (const order of [[child, PP_INVOICE], [PP_INVOICE, child]]) {
+        const { engine } = await bootSealed();
+        engine.registry.registerObject(order[0] as any);
+        const err = await refusalOf(() => save(engine, order[1]));
+        const at = `${label}, ${(order[1] as { name: string }).name} second`;
+        expect(envelopeOf(err), at).toEqual(INVALID_METADATA);
+        expect(err?.name, at).toBe(FOLLOW_REFUSED);
+        expect(err?.objectName, at).toBe('pp_invoice');
+        expect(err?.fieldName, at).toBe('subtotal');
+        expect(err?.message, at).toBe(stackFinding([PP_INVOICE, child]));
+        expect(err?.message, at).toContain(says);
+        expect(engine.registry.getObject((order[1] as { name: string }).name), at).toBeUndefined();
+      }
+    }
+  });
+
+  it('a `record` roll-up over a child amount in its own record currency was already refused by D6 (pinned, not re-judged)', async () => {
+    const child = { ...PP_LINE, fields: { ...PP_LINE.fields, currency_code: CODE_FIELD, amount: { type: 'currency', currencyConfig: RECORD } } };
+    for (const sealed of [false, true]) {
+      const { engine } = sealed ? await bootSealed() : await bootEngine();
+      engine.registry.registerObject(child as any);
+      for (const ask of [() => engine.registry.registerObject(PP_INVOICE as any), () => save(engine, PP_INVOICE)]) {
+        const err = await refusalOf(ask);
+        expect(envelopeOf(err), String(sealed)).toEqual(INVALID_METADATA);
+        expect(err?.name, String(sealed)).toBe('RecordCurrencySummaryRefusedError');
+      }
+    }
+  });
+
+  it('CONTROL: a path to a code field, and the roll-up through that master_detail, register in either order', async () => {
+    for (const order of [[PP_INVOICE, PP_LINE], [PP_LINE, PP_INVOICE]]) {
+      const { engine } = await bootSealed();
+      for (const o of order) save(engine, o);
+      expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+      expect(engine.registry.getObject('pp_line')).toBeDefined();
+    }
+    // A summary declaring no currency over a fixed amount is not judged here.
+    const { engine } = await bootSealed();
+    engine.registry.registerObject({ ...PP_LINE, fields: { ...PP_LINE.fields, amount: { type: 'number' } } } as any);
+    const plain = { ...PP_INVOICE, fields: { ...PP_INVOICE.fields, subtotal: { ...PP_INVOICE.fields.subtotal, currencyConfig: undefined } } };
+    save(engine, plain);
+    expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+  });
+
+  it('CONTROL: a code field the parent gets from a registered extension counts, and an extension body is judged only on its own roll-ups', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(invoiceWithout('currency_code') as any, 'pkg_owner');
+    engine.registry.registerObject({ name: 'pp_invoice', fields: { currency_code: CODE_FIELD } } as any, 'pkg_ext', undefined, 'extend');
+    save(engine, PP_LINE);
+    expect(engine.registry.getObject('pp_line')).toBeDefined();
+    // The owner re-saving keeps the extension's code field under it.
+    save(engine, invoiceWithout('currency_code'), 'pkg_owner');
+    expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+  });
+
+  it('a disabled package\'s extension supplies no code field, at either end: both read the parent the served fold reads', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(invoiceWithout('currency_code') as any, 'pkg_owner');
+    engine.registerApp({ id: 'com.test.ext_code', name: 'ext-code', objectExtensions: [{ extend: 'pp_invoice', fields: { currency_code: CODE_FIELD } }] } as any);
+    engine.registry.registerObject(PP_LINE as any);
+    engine.registry.disablePackage('com.test.ext_code');
+    // The child end reads the served parent, which holds no code field now…
+    const child = await refusalOf(() => save(engine, { ...PP_LINE, label: 'Line' }));
+    expect(child?.name).toBe(FOLLOW_REFUSED);
+    // …and so does the parent end: the withheld extension's field does not count.
+    const parent = await refusalOf(() => save(engine, invoiceWithout('currency_code'), 'pkg_owner'));
+    expect(parent?.name).toBe(FOLLOW_REFUSED);
+    expect(parent?.message).toContain("'pp_invoice' declares no field 'currency_code'");
+    engine.registry.enablePackage('com.test.ext_code');
+    expect(() => save(engine, invoiceWithout('currency_code'), 'pkg_owner')).not.toThrow();
+  });
+
+  it('`registerObject` never asks the follow door: a caller without the option (hydration, install, a batch writer) registers the pair as before', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(PP_INVOICE as any);
+    engine.registry.registerObject(lineFollowing('invoice.title') as any);
+    expect(engine.registry.getObject('pp_line')).toBeDefined();
+    engine.registry.registerObject(invoiceWithout('currency_code') as any);
+    expect(engine.registry.getObject('pp_invoice')).toBeDefined();
+    // The body-only pre-flight (a draft, a batch face) does not ask it either.
+    expect(engine.registry.objectRegistrationRefusal(lineFollowing('invoice.currency') as any)).toBeNull();
+  });
+
+  it('CONTROL: a post-seal `registerApp` whose own `objectExtensions` supplies the parent\'s code field installs, as before', async () => {
+    const { engine } = await bootSealed();
+    engine.registry.registerObject(invoiceWithout('currency_code') as any, 'pkg_owner');
+    // The package's object registers (step 2) before its extension (step 2b).
+    engine.registerApp({
+      id: 'com.test.follow_pkg', name: 'follow-pkg',
+      objects: [PP_LINE],
+      objectExtensions: [{ extend: 'pp_invoice', fields: { currency_code: CODE_FIELD } }],
+    } as any);
+    expect(engine.registry.getObject('pp_line')).toBeDefined();
+    expect((engine.registry.getObject('pp_invoice')?.fields as any)?.currency_code?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('during the cold boot nothing is judged, even a single save naming the option: the boot registers what it registered before the seal', async () => {
+    const { engine } = await bootEngine();
+    save(engine, PP_INVOICE);
+    save(engine, lineFollowing('invoice.title'));
+    expect(engine.registry.getObject('pp_line')).toBeDefined();
+    save(engine, invoiceWithout('currency_code'));
+    expect(engine.registry.getObject('pp_invoice')).toBeDefined();
   });
 });

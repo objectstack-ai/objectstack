@@ -2160,7 +2160,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de descoberta",
-            helpText: "Opcional. URL do documento de descoberta OIDC. Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`."
+            helpText: "Opcional. URL do documento de descoberta OIDC (https). Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`. Um endpoint informado aqui é considerado confiável para este provedor."
+          },
+          userInfoEndpoint: {
+            label: "URL de userinfo",
+            helpText: "Opcional. URL do endpoint userinfo do OIDC (https), usada no lugar da indicada pelo documento de descoberta. Um endpoint informado aqui é considerado confiável para este provedor: informe-o quando o registro for recusado porque o documento de descoberta indica um host de userinfo em que o servidor não confia."
+          },
+          skipUserInfo: {
+            label: "Ler declarações apenas do token de ID",
+            helpText: "Opcional. Ler as declarações do usuário apenas do token de ID verificado e nunca chamar o endpoint userinfo. Microsoft Entra ID: ative para mapear \"preferred_username\", que o endpoint userinfo dele não retorna."
           },
           scopes: {
             label: "Escopos",
@@ -2169,7 +2177,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mapear: declaração de e-mail",
-            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\".",
+            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\". Microsoft Entra ID (emissor em login.microsoftonline.com): usuários sem caixa de correio não trazem a declaração \"email\"; mapeie \"preferred_username\" (ou \"upn\") e ative \"Ler declarações apenas do token de ID\".",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Excluir provedor de SSO",
-        description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
-        successMessage: "Provedor de SSO excluído"
+        description: "Excluir este provedor de SSO? Todo usuário vinculado a ele é desvinculado, inclusive usuários sem outro método de entrada vinculado (sem senha, sem outro provedor). Os mapeamentos de grupos do IdP e os conjuntos de permissões concedidos por eles são removidos junto. Esta ação não pode ser desfeita.",
+        resultDialog: {
+          title: "Provedor de SSO excluído",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Removido"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "O que esta exclusão remove",
+            linkedUsers: "Usuários desvinculados",
+            usersWithoutOtherSignIn: "Usuários sem outro método de entrada vinculado"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Editar opções de login",
         successMessage: "Opções de login salvas"
+      },
+      edit_saml_provider: {
+        label: "Editar configurações SAML",
+        params: {
+          issuer: {
+            label: "Entity ID do IdP",
+            helpText: "O EntityID SAML do IdP. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          entryPoint: {
+            label: "URL de SSO do IdP",
+            helpText: "O endpoint de logon único do IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          cert: {
+            label: "Novo certificado de assinatura do IdP",
+            helpText: "O novo certificado de assinatura X.509 do IdP (PEM). Deixe em branco para manter o certificado armazenado."
+          },
+          keepCurrentCert: {
+            label: "Continuar confiando no certificado atual",
+            helpText: "Enquanto o IdP faz a troca, aceitar asserções assinadas por qualquer um dos certificados. Edite novamente sem esta opção para remover o antigo."
+          }
+        },
+        resultDialog: {
+          title: "Configurações SAML salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Editar configurações OIDC",
+        params: {
+          clientId: {
+            label: "ID do cliente",
+            helpText: "ID do cliente OAuth emitido pelo IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          clientSecret: {
+            label: "Novo segredo do cliente",
+            helpText: "Deixe em branco para manter o segredo armazenado. O segredo armazenado nunca é exibido."
+          },
+          scopes: {
+            label: "Escopos",
+            helpText: "Escopos OAuth separados por espaços ou vírgulas, substituindo a lista armazenada. Deixe em branco para mantê-la.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "Configurações OIDC salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Mostrar declaração de grupos",

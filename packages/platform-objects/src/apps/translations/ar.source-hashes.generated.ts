@@ -52,6 +52,7 @@ export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_oauth_application.fields.jwks_uri.label": "2a4339df734ab269",
   "objects.sys_platform_setting_audit.fields.source.options.api": "4baeeff968e192d1",
   "objects.sys_setting_audit.fields.source.options.api": "4baeeff968e192d1",
+  "objects.sys_sso_provider._actions.edit_oidc_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.email.placeholder": "66309c7adf5c9436",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.firstName.placeholder": "27291cee7a635764",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.lastName.placeholder": "32ce377ac4d7e610",

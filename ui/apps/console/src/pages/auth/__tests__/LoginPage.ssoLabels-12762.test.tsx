@@ -36,6 +36,11 @@ import { builtInLocales } from '@object-ui/i18n/locales';
 import { AuthProvider } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 afterEach(cleanup);
 beforeEach(() => {

@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions } from '@objectstack/spec/contracts';
+import type { IJobService, JobSchedule, JobHandler, JobExecution, JobScheduleOptions, JobRunTrigger } from '@objectstack/spec/contracts';
 import { runWithPolicy, JobTimeoutError } from './run-with-policy.js';
 import { skippedTickMessage, type ScheduledFire } from './scheduled-fire.js';
 
@@ -160,7 +160,7 @@ export class IntervalJobAdapter implements IJobService {
     if (!record) {
       throw new Error(`Job "${name}" not found`);
     }
-    await this.executeJob(record, data);
+    await this.executeJob(record, 'manual', data);
   }
 
   async getExecutions(name: string, limit?: number): Promise<JobExecution[]> {
@@ -202,13 +202,13 @@ export class IntervalJobAdapter implements IJobService {
     const fire: ScheduledFire = { startedAt: new Date().toISOString() };
     this.scheduledInFlight.set(record.name, fire);
     try {
-      await this.executeJob(record);
+      await this.executeJob(record, 'schedule');
     } finally {
       if (this.scheduledInFlight.get(record.name) === fire) this.scheduledInFlight.delete(record.name);
     }
   }
 
-  private async executeJob(record: JobRecord, data?: unknown): Promise<void> {
+  private async executeJob(record: JobRecord, trigger: JobRunTrigger, data?: unknown): Promise<void> {
     const execution: JobExecution = {
       jobId: record.name,
       status: 'running',
@@ -217,7 +217,8 @@ export class IntervalJobAdapter implements IJobService {
 
     const startMs = Date.now();
     try {
-      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data }), record.options);
+      // [ADR-0153 D7] The handler is told why this run started.
+      const outcome = await runWithPolicy(record.name, () => record.handler({ jobId: record.name, data, trigger }), record.options);
       // #5548 — a handler that resolves `{ outcome: 'degraded' }` ran to
       // completion without doing its work. Recording that as `success` here
       // would put the in-memory execution history (what `getExecutions()`

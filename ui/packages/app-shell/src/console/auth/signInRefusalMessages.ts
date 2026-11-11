@@ -17,14 +17,34 @@ import type { TranslateFn } from '@object-ui/i18n';
  * the sign-in twin of `signUpRefusalMessages`. The console page's extra
  * handling of `EMAIL_NOT_VERIFIED` (a redirect to its own verify-email route,
  * run from `onError`) is page behaviour, not text, so it stays on that page.
+ *
+ * `emailDelivery` is the public auth config's `features.emailDelivery`: on an
+ * explicit `false` no reset mail leaves this deployment, so the wrong-password
+ * copy sends the person to an administrator instead of promising a reset that
+ * cannot arrive. Absent (an older server, or a config not read yet) keeps the
+ * reset promise, as the forgot-password form does.
  */
-export function signInRefusalMessages(t: TranslateFn): Record<string, string> {
+export interface SignInRefusalContext {
+  emailDelivery?: boolean;
+}
+
+export function signInRefusalMessages(
+  t: TranslateFn,
+  context: SignInRefusalContext = {},
+): Record<string, string> {
   return {
     // ADR-0069 D2: by default the server refuses a locked account with this
     // same code, so the copy names the pause and the way out of it.
-    INVALID_EMAIL_OR_PASSWORD: t('auth.login.errors.invalidCredentials', {
-      defaultValue: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
-    }),
+    INVALID_EMAIL_OR_PASSWORD:
+      context.emailDelivery === false
+        ? t('auth.login.errors.invalidCredentialsNoMail', {
+            defaultValue:
+              'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Ask your administrator to reset it.',
+          })
+        : t('auth.login.errors.invalidCredentials', {
+            defaultValue:
+              'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Reset it to sign in right away.',
+          }),
     EMAIL_NOT_VERIFIED: t('auth.login.errors.emailNotVerified', {
       defaultValue: 'Please verify your email address before signing in.',
     }),

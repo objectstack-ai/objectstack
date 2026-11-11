@@ -48,20 +48,20 @@ const SERVER_REFUSAL = {
 type RefusalCode = keyof typeof SERVER_REFUSAL;
 
 /** A signed-out visitor; `/sign-in/email` answers with `{ code, message }`. */
-function refusingServer(status: number, code: string, message: string): typeof fetch {
+function refusingServer(status: number, code: string, message: string, config: unknown = {}): typeof fetch {
   const json = (s: number, body: unknown) =>
     new Response(JSON.stringify(body), { status: s, headers: { 'Content-Type': 'application/json' } });
   return (async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     if (url.includes('/sign-in/email')) return json(status, { code, message });
-    if (url.endsWith('/config')) return json(200, {});
+    if (url.endsWith('/config')) return json(200, config);
     return json(200, null);
   }) as typeof fetch;
 }
 
 /** Submit the zh form against a server that refuses with `code`; return the banner text. */
-async function submitRefused(status: number, code: string, message: string): Promise<string> {
-  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn: refusingServer(status, code, message) });
+async function submitRefused(status: number, code: string, message: string, config?: unknown): Promise<string> {
+  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn: refusingServer(status, code, message, config) });
   render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
       <AuthProvider authUrl={AUTH_URL} client={client}>
@@ -119,5 +119,29 @@ describe('DefaultLoginPage — sign-in refusals under zh-CN (objectui#11058)', (
     const raw = 'The server refused this sign-in for a reason the page has no text for.';
     const text = await submitRefused(400, 'UNMAPPED_REFUSAL_FOR_TEST', raw);
     expect(text).toBe(raw);
+  });
+});
+
+describe('DefaultLoginPage — with no mail service, a wrong password points to the administrator (objectstack#32021)', () => {
+  const { status, message } = SERVER_REFUSAL.INVALID_EMAIL_OR_PASSWORD;
+  const noMail = { success: true, data: { features: { emailDelivery: false } } };
+
+  it('the zh pack translates the no-mail text', () => {
+    expect(zhErrors.invalidCredentialsNoMail).not.toBe(enErrors.invalidCredentialsNoMail);
+    expect(zhErrors.invalidCredentialsNoMail).not.toBe(zhErrors.invalidCredentials);
+  });
+
+  it('features.emailDelivery: false — the refusal asks the administrator, in the session language', async () => {
+    // The config read lands before the visitor finishes typing.
+    const text = await submitRefused(status, 'INVALID_EMAIL_OR_PASSWORD', message, noMail);
+    expect(text).toBe(zhErrors.invalidCredentialsNoMail);
+  });
+
+  it('CONTROL: features.emailDelivery: true keeps the reset hint', async () => {
+    const text = await submitRefused(status, 'INVALID_EMAIL_OR_PASSWORD', message, {
+      success: true,
+      data: { features: { emailDelivery: true } },
+    });
+    expect(text).toBe(zhErrors.invalidCredentials);
   });
 });
