@@ -284,10 +284,16 @@ sign-up reconciler and the backfill below without a restart. An unrecognized
 value is rejected rather than coerced: the deployment keeps its current policy
 and the reconciler refuses to auto-bind under it.
 
-<Callout type="info" title="Membership is not access control in the single posture">
-With no wall to enforce, membership does not gate data access — RBAC permission
-sets do. Membership drives the Members list, the active organization a session
-resolves, and invitations.
+<Callout type="info" title="Membership gates data access in every posture, single included">
+Under every tenancy posture, a person's data access requires a current
+membership in the organization, judged on each request (ADR-0093 D8.1, as
+amended). A person who holds no current membership — someone removed from the
+Members list, or a user an `invite-only` deployment has not yet added — reads
+none of the organization's data and their writes get `403 PERMISSION_DENIED`,
+the same answers the walled postures give. Inside the organization, RBAC
+permission sets decide what a member may do. Membership also drives the Members
+list, the active organization a session resolves, and invitations. System
+contexts and platform operators keep their own rules.
 </Callout>
 
 ### Backfill for pre-existing users
@@ -297,7 +303,9 @@ memberships for any pre-existing member-less users (e.g. accounts created before
 the reconciler existed), binding them to the default organization. It is bounded,
 idempotent, and self-guards: it no-ops under `invite-only`, and under any walled
 request `defaultOrgId()` is `null` so there is nothing to bind to. Opt out with
-`OS_SKIP_MEMBERSHIP_BACKFILL=1`.
+`OS_SKIP_MEMBERSHIP_BACKFILL=1`. A deployment that opts out gives each person who
+should reach the data a membership itself, since membership gates data access in
+every posture.
 
 <Callout type="warn" title="There is a second, unrelated boot-time backfill">
 The platform also runs a **seed tenancy repair** at `kernel:ready` — a different

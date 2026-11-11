@@ -260,6 +260,14 @@ async function bootFederation(
       }
       // The key's owner exists: an API key authenticates only as an owner who exists.
       if (object === 'sys_user') return query?.where?.id === 'u_federation' ? [{ id: 'u_federation' }] : [];
+      // ...and is a current member of `o1`, the organization both credentials
+      // act in (ADR-0093 D8.1, as amended).
+      if (object === 'sys_member') {
+        const where = query?.where ?? {};
+        return (where.user_id === undefined || where.user_id === 'u_federation') && (where.organization_id === undefined || where.organization_id === 'o1')
+          ? [{ id: 'mem_federation', user_id: 'u_federation', organization_id: 'o1', role: 'member' }]
+          : [];
+      }
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === 'u_federation' && grants.length > 0
           ? [{ id: 'ups_1', user_id: 'u_federation', permission_set_id: GRANT_SET_ID, permission_set: 'federation_caller', organization_id: 'o1' }]

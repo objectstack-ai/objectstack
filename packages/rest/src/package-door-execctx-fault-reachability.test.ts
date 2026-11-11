@@ -257,10 +257,12 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  * A permission store that actually grants the package capabilities, through
  * the SHIPPED aggregation (`sys_user_permission_set` → `sys_permission_set`
  * → `system_permissions`) rather than by handing the door a ready-made context.
- * The grant is owned by `o1`, the session's active organization.
+ * The grant is owned by `o1`, the session's active organization, where the
+ * caller is a current member (ADR-0093 D8.1, as amended).
  */
 const qlHealthy = () => bindTestSecurityCatalog({
   find: async (object: string) => {
+    if (object === 'sys_member') return [{ id: 'mem_admin', user_id: 'u_admin', organization_id: 'o1', role: 'member' }];
     if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'o1' }];
     if (object === 'sys_permission_set') return [{ id: 'ps_pkg', name: 'pkg_admin' }];
     return [];

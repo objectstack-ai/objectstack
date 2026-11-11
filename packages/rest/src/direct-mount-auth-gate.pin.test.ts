@@ -144,6 +144,14 @@ async function bootDirectMounts() {
 
   const engine = {
     find: async (object: string, query: any) => {
+      // The caller is a current member of the organization its session names
+      // (ADR-0093 D8.1, as amended).
+      if (object === 'sys_member') {
+        const where = query?.where ?? {};
+        return (where.user_id === undefined || where.user_id === USER) && (where.organization_id === undefined || where.organization_id === ORG)
+          ? [{ id: 'mem_1', user_id: USER, organization_id: ORG, role: 'member' }]
+          : [];
+      }
       if (object === 'sys_user_permission_set') {
         return query?.where?.user_id === USER
           ? [{ id: 'ups_1', user_id: USER, permission_set_id: SET, permission_set: 'gate_pin_caller', organization_id: ORG }]

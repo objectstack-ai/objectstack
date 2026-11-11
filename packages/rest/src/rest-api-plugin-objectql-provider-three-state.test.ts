@@ -257,10 +257,12 @@ const AUTH_OK = async () => ({ api: { getSession: async () => ({ user: { id: 'u_
  * aggregation (`sys_user_permission_set` → `sys_permission_set` →
  * `system_permissions`) — the healthy fixture
  * `package-door-execctx-fault-reachability.test.ts` established. The grant is
- * owned by `o1`, the session's active organization.
+ * owned by `o1`, the session's active organization, where the caller is a
+ * current member (ADR-0093 D8.1, as amended).
  */
 const engineGranting = () => bindTestSecurityCatalog({
     find: async (object: string) => {
+        if (object === 'sys_member') return [{ id: 'mem_admin', user_id: 'u_admin', organization_id: 'o1', role: 'member' }];
         if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg', permission_set: 'pkg_admin', organization_id: 'o1' }];
         if (object === 'sys_permission_set') {
             return [{ id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] }];
