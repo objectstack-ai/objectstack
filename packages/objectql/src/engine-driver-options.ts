@@ -69,6 +69,8 @@ import {
   // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
+  // [ADR-0093 D8.1, as amended] The membership fact the same predicate reads.
+  isOutsideEveryOrganization,
 } from '@objectstack/core';
 import { resolveTenantFieldName } from './tenancy/system-write-organization.js';
 import { resolveTenancyPosture } from '@objectstack/types';
@@ -456,6 +458,9 @@ export function engineLayer0Verdict(
     tenancyPosture: this.resolveEnginePosture(),
     organizationId: activeOrganization,
     accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+    // [ADR-0093 D8.1, as amended] Read off the context exactly as Layer 0
+    // reads it, so the engine's verdict is the wall's.
+    outsideEveryOrganization: isOutsideEveryOrganization(execCtx),
     // Left to the driver, which resolves the tenant column from the
     // table it actually built (`resolveTenantField`): an object with no
     // such column is unscoped there whatever this says. `undefined` is

@@ -75,6 +75,7 @@ import type { SecurityPlugin } from './security-plugin.js';
 import { isTenantWallDenial } from './security-plugin.js';
 import type { PermissionSet, TenancyPosture } from '@objectstack/spec/security';
 import { postureUsesUnionScope } from '@objectstack/spec/security';
+import { isOutsideEveryOrganization } from '@objectstack/core';
 import { matchesFilterCondition } from '@objectstack/formula';
 import { PermissionDeniedError } from './errors.js';
 import { undeclaredExternalScopeWriteRefusal } from './external-organization-scope.js';
@@ -247,7 +248,10 @@ export async function composeWriteTenantWall(
   // one place — a `tenancy.enabled:false` platform-global object, an object
   // with no `organization_id` column, a federated phantom anchor (#7835), a
   // true PLATFORM_ADMIN on a posture-permitting object (ADR-0095 D3), and
-  // the whole `single` posture all yield `null` here and are untouched.
+  // the whole `single` posture all yield `null` here and are untouched —
+  // [ADR-0093 D8.1, as amended] save, under `single`, a person outside every
+  // organization, whose tenant-scoped write has no organization to land in
+  // under any posture and is refused with this same answer.
   // System / boot writes never reach this line at all (`isSystem`
   // short-circuits the middleware). Under `group`, "no organization scope"
   // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
@@ -559,13 +563,22 @@ export async function organizationWallRefusal(
   delegatorSets: PermissionSet[] | null,
   delegatorContext: any,
 ): Promise<'caller' | 'delegator' | null> {
-  if (!this.orgScopingEnabled || callerHasOrganizationScope(context, this.tenancyPosture)) return null;
+  // [ADR-0093 D8.1, as amended] Under `single` there is no wall BETWEEN
+  // organizations, so the pre-test passes every caller the organization's own
+  // wall admits — everyone but a person outside every organization, whose
+  // write has no organization to land in under any posture. The walled
+  // postures ask the scope question as before.
+  const lacksOrganizationScope = (ctx: any): boolean =>
+    this.orgScopingEnabled
+      ? !callerHasOrganizationScope(ctx, this.tenancyPosture)
+      : isOutsideEveryOrganization(ctx);
+  if (!lacksOrganizationScope(context)) return null;
   const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
   // [ADR-0090 D10] The delegator is walled on its own context, exactly as
   // the forge guard walls it — an on-behalf-of write may not land a row
   // the delegator itself could not place.
   const delegatorWall =
-    delegatorSets && !callerHasOrganizationScope(delegatorContext, this.tenancyPosture)
+    delegatorSets && lacksOrganizationScope(delegatorContext)
       ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
       : null;
   return isTenantWallDenial(callerWall)
