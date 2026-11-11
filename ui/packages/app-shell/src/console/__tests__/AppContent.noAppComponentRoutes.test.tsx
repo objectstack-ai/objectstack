@@ -93,6 +93,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The console layout's draft lint loads this lazily; paid here, at collection, not inside a test's window.
+import '@objectstack/lint';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';

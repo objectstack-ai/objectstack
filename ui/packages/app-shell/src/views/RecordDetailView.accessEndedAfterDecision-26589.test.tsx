@@ -49,7 +49,9 @@ const authFetchSpy = vi.fn(async (url: string) => {
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useAuth: () => ({ user: { id: 'u_qcdir', name: 'QC Director', image: null }, activeOrganization: null }),
-  createAuthenticatedFetch: () => authFetchSpy,
+  // Read at call time: a module that builds its fetch while this file is still
+  // importing (the metadata client factory) must not reach the spy before it exists.
+  createAuthenticatedFetch: () => (...args: Parameters<typeof authFetchSpy>) => authFetchSpy(...args),
 }));
 
 vi.mock('@object-ui/collaboration', async (importOriginal) => ({
