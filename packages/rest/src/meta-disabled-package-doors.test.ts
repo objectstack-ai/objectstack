@@ -186,6 +186,8 @@ function setup(objectQLProvider?: () => Promise<unknown>, caller: Record<string,
         published: (type: string, name: string) => get('/:type/:name/published', `/${type}/${name}/published`, { type, name }),
         state: (name: string) => get('/object/:name/state/:field', `/object/${name}/state/status`, { name, field: 'status' }, { from: 'open' }),
         plain: (type: string, name: string) => get('/:type/:name', `/${type}/${name}`, { type, name }),
+        plainWith: (type: string, name: string, query: Record<string, string>) =>
+            get('/:type/:name', `/${type}/${name}`, { type, name }, query),
         // [#24210] The layered view's two spellings, with every header each answer carries.
         layers: (type: string, name: string, query: Record<string, string> = {}) =>
             call('/:type/:name/layers', `/${type}/${name}/layers`, { type, name }, query),
@@ -431,10 +433,14 @@ describe('[#24210] RestServer: the layered view of a disabled package\'s item, b
  * refusal of a disabled package's object among them) reaches the caller.
  */
 describe('[ruling record 6787890900] RestServer: an object the caller may not read is answered as a missing name before any store read', () => {
-    /** A security service that admits every object but `demo_gadget`. */
+    /**
+     * A security service that admits `healthy_gadget` alone — as the real one
+     * answers: an object the caller holds no read grant on, and a name with no
+     * object behind it, are both not admitted.
+     */
     const hidingDemo = () => ({
         getMetadataReadableFields: async () => ['name'],
-        canReadObject: async (object: string) => object !== 'demo_gadget',
+        canReadObject: async (object: string) => object === 'healthy_gadget',
     });
     /** The answer, with the requested name written out of it (a `Link` header echoes the path it was asked on). */
     const answerOf = (r: { status: number; body: unknown; headers?: Record<string, string> }, name: string) =>
@@ -447,8 +453,12 @@ describe('[ruling record 6787890900] RestServer: an object the caller may not re
             (host.rest as any).securityServiceProvider = async () => hidingDemo();
             if (disabledPackage) host.registry.disablePackage(PKG);
             const layered = vi.spyOn(host.protocol as any, 'getMetaItemLayered');
+            const byName = vi.spyOn(host.protocol as any, 'getMetaItem');
+            const cached = vi.spyOn(host.protocol as any, 'getMetaItemCached');
             const doors = {
                 plain: (name: string) => host.plain('object', name),
+                // A NAMED member: decided before the store, exactly as without one.
+                plainMember: (name: string) => host.plainWith('object', name, { member: 'en' }),
                 layers: (name: string) => host.layers('object', name),
                 layersFlag: (name: string) => host.layersFlag('object', name),
                 state: (name: string) => host.state(name),
@@ -457,9 +467,13 @@ describe('[ruling record 6787890900] RestServer: an object the caller may not re
                 const missing = await read('no_such_gadget');
                 expect(missing.status, door).toBe(404);
                 layered.mockClear();
+                byName.mockClear();
+                cached.mockClear();
                 expect(answerOf(await read('demo_gadget'), 'demo_gadget'), door).toBe(answerOf(missing, 'no_such_gadget'));
-                // Decided before the store: the layered read is never asked about it.
+                expect(cached.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+                // Decided before the store: neither read is ever asked about it.
                 expect(layered.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+                expect(byName.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
             }
             // Control: the readable object, same caller and service, is served on every door.
             expect((await doors.plain('healthy_gadget')).status).toBe(200);

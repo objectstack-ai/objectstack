@@ -347,13 +347,19 @@ describe('#24210 — the layered view of a disabled package\'s non-object item, 
  * disabled package's object never reaches that caller.
  */
 describe('[ruling record 6787890900] the dispatcher: an object the caller may not read is answered as a missing name before any store read', () => {
-    /** Admits every object but {@link DISABLED}. */
+    /**
+     * Admits {@link HEALTHY} alone — as the real service answers: an object the
+     * caller holds no read grant on, and a name with no object behind it, are
+     * both not admitted.
+     */
     const hiding = () => ({
         getMetadataReadableFields: async () => ['status'],
-        canReadObject: async (object: string) => object !== DISABLED,
+        canReadObject: async (object: string) => object === HEALTHY,
     });
     const DOORS: Record<string, (stack: ReturnType<typeof boot>, name: string) => Promise<any>> = {
         plain: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}`, {}, {}, SESSION()),
+        // A NAMED member: decided before the store, exactly as without one.
+        plainMember: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}`, {}, { member: 'en' }, SESSION()),
         layers: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}/layers`, {}, {}, SESSION()),
         layersFlag: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}`, {}, { layers: 'true' }, SESSION()),
         state: (stack, name) => stack.dispatcher.dispatch('GET', `/meta/object/${name}/state/status`, {}, { from: 'open' }, SESSION()),

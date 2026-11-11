@@ -447,6 +447,23 @@ export async function resolveObjectMasker(
 }
 
 /**
+ * A masker that asks its posture once per object name for the life of one
+ * request — for a door that reads the posture before its store read and
+ * again to project what it serves, so the posture (and its D6 notices) is
+ * resolved once. A rejection is kept too: the same request, the same answer.
+ */
+function onePosturePerName(
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+): (objectName: string) => Promise<ObjectSchemaMaskPosture> {
+    const asked = new Map<string, Promise<ObjectSchemaMaskPosture>>();
+    return (objectName) => {
+        let posture = asked.get(objectName);
+        if (!posture) asked.set(objectName, (posture = masker(objectName)));
+        return posture;
+    };
+}
+
+/**
  * Project one served object schema, or report the D6 tier-3 fault.
  *
  * `'fault'` covers both the throw tier and the empty-projection case — see
@@ -1477,7 +1494,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // serving must be answered as itself — never fall through to the
         // snapshot as though no overlay existed.
         const publishedType = pluralToSingular(type);
-        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context, publishedType) : undefined;
+        // Asked once per name for the whole request: the early verdict below and
+        // the projection in `servePublished` read the same posture.
+        const publishedMasker = publishedType === 'object'
+            ? onePosturePerName(await resolveObjectMasker(deps, _context, publishedType))
+            : undefined;
         const servePublished = async (document: any): Promise<HttpDispatcherResult> => {
             const gated = await gateMetaItemDocument(deps, _context, protocol, publishedType, name, document);
             if (!gated.ok) return { handled: true, response: gated.response };
@@ -2101,9 +2122,10 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 // [ruling record 6787890900] An object the caller may not read
                 // is this branch's answer for a name with nothing behind it,
                 // BEFORE any store is read, so no store answer about it (a
-                // disabled package's refusal among them) reaches the caller. A
-                // NAMED member is the protocol's to refuse, for every name alike.
-                if (maskPosture.kind === 'hidden' && !memberNamed) {
+                // disabled package's refusal among them) reaches the caller —
+                // whether or not a member is named, as `RestServer`'s plain read
+                // answers it.
+                if (maskPosture.kind === 'hidden') {
                     return { handled: true, response: deps.error('Not found', 404) };
                 }
                 // Check whether the kernel is project-scoped. When it is,
@@ -2607,7 +2629,8 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // [ruling record 6787890900] An object the caller may not read is
             // this exit's answer for a name that names nothing (below), BEFORE
             // the registry is asked about it.
-            const legacyMasker = await resolveObjectMasker(deps, _context, 'object');
+            // Asked once for the whole request: the projection below reads it too.
+            const legacyMasker = onePosturePerName(await resolveObjectMasker(deps, _context, 'object'));
             let legacyPosture: ObjectSchemaMaskPosture;
             try {
                 legacyPosture = await legacyMasker(typeOrName);
@@ -2636,7 +2659,7 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 );
                 if (!gated.ok) return { handled: true, response: gated.response };
                 const masked = await maskObjectSchema(
-                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, gated.document,
+                    legacyMasker, typeOrName, gated.document,
                 );
                 // [ruling record 6787890900] An object the caller may not read
                 // is the answer below for a name that names nothing.
