@@ -95,9 +95,10 @@ export interface FlowDispatchClaimSurface {
      * segment, `null` for the bare shape; `claimBare` says whether the bare-
      * shape key is claimed first (one package holds the flow) or not at all
      * (two or more packages hold it). Optional: a surface without it keys by
-     * the bare shape, as before.
+     * the bare shape, as before. [#31696] `name` is the flow's name where
+     * `flowName` is a slot key (`PACKAGE/NAME`): the key spells the name.
      */
-    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean };
+    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean; name?: string };
 }
 
 /**
@@ -678,8 +679,8 @@ export class TimeRelativeTrigger implements FlowTrigger {
                 // #10220 — dispatch key: the MATCHED WINDOW's identity + the
                 // record. A row without an id can't be keyed; it is dispatched
                 // unconditionally, exactly as it was never dedupable before.
-                const claimKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id), holder.packageId) : null;
-                const bareKey = id != null ? timeRelativeDispatchKey(flowName, scope, String(id)) : null;
+                const claimKey = id != null ? timeRelativeDispatchKey(holder.name ?? flowName, scope, String(id), holder.packageId) : null;
+                const bareKey = id != null ? timeRelativeDispatchKey(holder.name ?? flowName, scope, String(id)) : null;
                 // [ADR-0150 D8 row R10] The collision guard: no bare claim when two or more packages hold the flow.
                 const legacyKey = holder.claimBare && bareKey !== claimKey ? bareKey : null;
                 matched.push({ record: row, claimKey, legacyKey });
@@ -867,7 +868,7 @@ export class TimeRelativeTrigger implements FlowTrigger {
      * cannot say, or whose answer throws, keys by the bare shape, as before
      * the package segment existed.
      */
-    private dispatchHolder(flowName: string): { packageId: string | null; claimBare: boolean } {
+    private dispatchHolder(flowName: string): { packageId: string | null; claimBare: boolean; name?: string } {
         const bare = { packageId: null, claimBare: true };
         const surface = this.getClaimSurface();
         if (!surface || typeof surface.flowDispatchHolder !== 'function') return bare;

@@ -194,7 +194,7 @@ const CLASSES: Array<{
     opCtx: (l) => insert({ name: 'A', queue: 'billing' }, l),
     row: null,
     message: queueSentence(INSERT_QUEUE_REFUSAL),
-    key: 'record_queue_change_denied',
+    key: 'record_queue_assign_denied',
   },
 ];
 
@@ -296,5 +296,72 @@ describe('the userMessage reaches the REST data door body (mapDataError, POST / 
     const answer = mapDataError(await refuse(update({ grade: 'A' }, 'en')), 'case');
     expect(answer.status).toBe(403);
     expect('userMessage' in answer.body).toBe(false);
+  });
+});
+
+/**
+ * The queue refusal splits its user sentence by verb: a create into a queue the
+ * caller does not belong to renders `record_queue_assign_denied`, a change of an
+ * existing record's queue keeps `record_queue_change_denied`. Only `userMessage`
+ * differs between them; everything else on the wire is the refusal it was
+ * before the split, read here off the REST data door's body.
+ */
+describe('the queue 403 on the wire: a sentence per verb, nothing else moves', () => {
+  const PATHS = [
+    {
+      name: 'POST, creating into a queue the caller is not in',
+      opCtx: (l: string) => insert({ name: 'A', queue: 'billing' }, l),
+      row: null,
+      operation: 'insert',
+      message: queueSentence(INSERT_QUEUE_REFUSAL),
+      key: 'record_queue_assign_denied',
+    },
+    {
+      name: 'PATCH, moving a record to another queue',
+      opCtx: (l: string) => update({ queue: 'billing' }, l),
+      row: SITTING,
+      operation: 'update',
+      message: queueSentence(MOVE_REFUSAL),
+      key: 'record_queue_change_denied',
+    },
+  ] as const;
+
+  for (const p of PATHS) {
+    for (const locale of Object.keys(BUILTIN_OPERATION_MESSAGES)) {
+      it(`${p.name} — ${locale}`, async () => {
+        const refuse = await boot({ sets: [memberSet], row: p.row });
+        const refusal = await refuse(p.opCtx(locale));
+        // The thrown refusal: code, status, message and details as before.
+        expect({
+          code: refusal.code,
+          status: refusal.status,
+          message: refusal.message,
+          details: refusal.details,
+        }).toEqual({
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          message: p.message,
+          details: { operation: p.operation, object: 'case', positions: [], permissionSets: [] },
+        });
+        // The wire body: every member but `userMessage` as before.
+        const answer = mapDataError(refusal, 'case');
+        const { userMessage, ...rest } = answer.body;
+        expect({ status: answer.status, body: rest }).toEqual({
+          status: 403,
+          body: { code: 'PERMISSION_DENIED', error: p.message, object: 'case' },
+        });
+        expect(userMessage).toBe(BUILTIN_OPERATION_MESSAGES[locale][p.key]);
+      });
+    }
+  }
+
+  it('the two verbs render different sentences in every locale', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const locale of locales) {
+      const create = BUILTIN_OPERATION_MESSAGES[locale].record_queue_assign_denied;
+      expect(create, `${locale} defines record_queue_assign_denied`).toBeTypeOf('string');
+      expect(create, locale).not.toBe(BUILTIN_OPERATION_MESSAGES[locale].record_queue_change_denied);
+    }
   });
 });

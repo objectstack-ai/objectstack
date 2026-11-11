@@ -69,8 +69,10 @@
  * identity: two packages on the object-less name, or on one object and name.
  * A by-name read that cannot see the object, of a name bound to more than one
  * owner, answers the item written last under the name — what the bare-name
- * map answered — and refuses only if one identity among them is itself a
- * two-holder name ({@link readStoreEntry}).
+ * map answered — when one package holds every one of them; it refuses when
+ * one identity among them is itself a two-holder name, and [#32244] when the
+ * name's owners belong to two or more packages, naming each package with its
+ * object ({@link readStoreEntry}).
  *
  * `permission` (#32162): two packages of two namespaces may each ship a
  * permission set of one name once its one-holder rule narrows (#31698), and
@@ -82,6 +84,7 @@
 
 import {
   PackageScopedNameRefusedError,
+  packageScopedActionOwnersSentence,
   packageScopedHolderSource,
   packageScopedRefusalMessage,
   resolvePackageScopedHolders,
@@ -407,10 +410,13 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
  * and the object-less key) the read cannot see the object: it answers the slot
  * written last among those it may read (a read naming a package: that
  * package's slots; one naming none: every identity's D3 answer), as the
- * bare-name map did.
+ * bare-name map did. [#32244] A read naming none whose answers belong to two
+ * or more packages is refused instead ({@link refuseAcrossOwners}): it would
+ * pick one package's action over another's.
  *
  * @throws {PackageScopedNameRefusedError} a read naming no package of a name
- *   two or more packages hold on one identity (D3, `ambiguous-in-environment`).
+ *   two or more packages hold on one identity, or each on its own object
+ *   (D3, `ambiguous-in-environment`).
  */
 export function readStoreEntry(
   store: ReadonlyMap<string, unknown> | undefined,
@@ -429,7 +435,47 @@ export function readStoreEntry(
   if (found.length === 0) {
     return { found: false, settled: answers.some((answer) => answer === 'settled') };
   }
+  if (!isPackageCaller(packageId)) refuseAcrossOwners(store, type, name, found.map((answer) => answer.key));
   return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
+}
+
+/**
+ * [ADR-0150 D3, #32244] A read naming no package of an action name that two
+ * or more packages each hold on its own object (or one on an object and one
+ * object-less): every identity has one holder, so no identity refuses, yet the
+ * read cannot see the object and answered the one written last, which is a
+ * pick between two packages' actions. Refused here, naming each package with
+ * the object it binds the name to (`ambiguous-in-environment`, `409`).
+ *
+ * One package binding the name to two objects is one holder: the read answers
+ * the one written last, as before. A package-less item beside one package's
+ * is not two packages, and answers as before too.
+ *
+ * @throws {PackageScopedNameRefusedError} when `keys` span two or more packages.
+ */
+function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type) || keys.length < 2) return;
+  const objectsOf = new Map<string, Array<string | undefined>>();
+  for (const key of keys) {
+    const packageId = slotPackageOf(key);
+    if (packageId === undefined) continue;
+    const objects = objectsOf.get(packageId) ?? [];
+    objects.push(boundObjectOf(store.get(key)));
+    objectsOf.set(packageId, objects);
+  }
+  if (objectsOf.size < 2) return;
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'ambiguous-in-environment',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: null,
+    candidates: [...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
+  };
+  throw new PackageScopedNameRefusedError({
+    ...base,
+    message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsOf)}`,
+  });
 }
 
 /**
