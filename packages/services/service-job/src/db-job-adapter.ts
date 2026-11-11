@@ -599,7 +599,9 @@ export class DbJobAdapter implements IJobService {
         await this.bumpJob(name, status, error);
       };
 
-      return await runWithPolicy<void | JobRunOutcome>(name, () => handler(ctx), options, {
+      // [ADR-0153 D7] The handler is told this attempt's `sys_job_run` row:
+      // `current` is set by `onAttemptStart`, which runs before each attempt.
+      return await runWithPolicy<void | JobRunOutcome>(name, () => handler(current?.id ? { ...ctx, runId: current.id } : ctx), options, {
         onAttemptStart: async (attempt) => {
           current = { id: this.recordRuns ? await this.startRun(name, defaultTrigger, attempt) : undefined, settled: false };
         },

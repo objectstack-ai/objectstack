@@ -1237,7 +1237,7 @@ export async function scheduleAppArtifactJobs(
             }
             // Resolved again on every run, through the registry — never the
             // instance read above, so a re-registered service is the one called.
-            run = async () => {
+            run = async (jobCtx) => {
                 let service: IAutomationService | undefined;
                 try { service = ctx.getService<IAutomationService>('automation'); } catch { /* reported below */ }
                 if (typeof service?.pullConnectorSource !== 'function') {
@@ -1262,6 +1262,11 @@ export async function scheduleAppArtifactJobs(
                     context: jobExecutionContext(runAs),
                     // A residual job names no package (above): the no-package read.
                     ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+                    // [ADR-0153 D7] The job run that drove the pull, for its run
+                    // record: the run id and the trigger the job service handed
+                    // this handler, each only as the contract spells it.
+                    ...(typeof jobCtx?.runId === 'string' && jobCtx.runId !== '' ? { jobRunId: jobCtx.runId } : {}),
+                    ...(jobCtx?.trigger === 'schedule' || jobCtx?.trigger === 'manual' ? { trigger: jobCtx.trigger } : {}),
                 });
                 return pullRunOutcomeOf(result);
             };
