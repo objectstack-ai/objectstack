@@ -5,6 +5,7 @@ import { FILE_REFERENCE_TYPES, isFileIdToken, RAW_FILE_VALUES_CONTEXT_KEY } from
 import type { IStorageService } from '@objectstack/spec/contracts';
 import { keysetWalk } from '@objectstack/types';
 import { createWallOrganizationResolver } from './backfill-sys-file-organizations.js';
+import { buildKey } from './storage-key.js';
 
 /**
  * Legacy file-value backfill (ADR-0104 D3 wave 2).
@@ -188,8 +189,7 @@ async function materializeDataUri(
       : '';
   const newId = randomUUID();
   const name = legacyName || `${newId}`;
-  const ext = name.includes('.') ? '.' + name.split('.').pop() : '';
-  const key = `user/${newId}${ext}`;
+  const key = buildKey('user', newId, name);
 
   await storage.upload(key, bytes, { contentType: mime } as any);
   const now = new Date().toISOString();

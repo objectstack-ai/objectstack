@@ -1354,6 +1354,80 @@
           "ref": "#31499"
         }
       ]
+    },
+    {
+      "id": "dashboards.report-measure-drill-scope",
+      "title": "A report drill lists exactly the records its measure counted: the dataset answer names each measure's drill scope, a derived measure gets none, and the drawer and its Open in list carry the scope with the bucket",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0), signed in as the seeded admin; the console bundle built from this tree",
+          "showcase_task_metrics (examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts) declares task_count (count), est_hours (sum of estimate_hours), done_count (count with filter { status: 'done' }) and done_rate (derived ratio); the summary report showcase_hours_by_status groups est_hours by status with drilldown on (examples/app-showcase/src/ui/reports/index.ts)",
+          "at least one seeded task with estimate_hours empty in some status, or one made by this run (POST /api/v1/data/showcase_task with no estimate_hours), so the scope narrows something"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/analytics/dataset/query { datasetName: 'showcase_task_metrics', selection: { dimensions: ['status'], measures: ['task_count', 'est_hours', 'done_count', 'done_rate'] } }; read the answer's drillScopes",
+        "open the report Hours by Status (Summary) in the console; click the row of a status S that holds a task with no estimate",
+        "read the drawer's record request and count; then GET /api/v1/data/showcase_task with filter status = S, and again with estimate_hours not null",
+        "click the drawer's Open in list; read the URL and the list's count"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dataset answer names each measure's scope, and a derived measure has none",
+          "oracle": "api",
+          "verify": "drillScopes reads task_count: {}, est_hours: { estimate_hours: { $null: false } }, done_count: { status: 'done' }, and has no done_rate key (packages/services/service-analytics/src/drill-scope.ts#measureDrillScopes; the field, packages/spec/src/api/analytics.zod.ts)",
+          "evidence": "the answer body"
+        },
+        {
+          "clause": "the drawer lists the bucket AND the measure scope, so its count matches the number clicked",
+          "oracle": "network",
+          "verify": "the drawer's record request filters status = S and estimate_hours $null false; its count equals the second read (status S with an estimate set), which is lower than the status-only read (ui/packages/plugin-report/src/measureDrillScope.ts#scopeDrillFilter, ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer)",
+          "evidence": "the drawer request, its count and the two reads"
+        },
+        {
+          "clause": "Open in list carries the same scope, because the list route can write it exactly",
+          "oracle": "dom",
+          "verify": "the list URL is /apps/<app>/showcase_task/data with filter[status]=S and filter[estimate_hours][null]=false, and the list shows the drawer's count (ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter)",
+          "evidence": "the URL and the list count"
+        }
+      ],
+      "negative": [
+        "a drawer or list that shows every task of status S, the estimate-less one included, is a FAIL: it lists a superset of what the measure summed",
+        "a drill offered on a derived measure is a FAIL: no single record set is behind its number"
+      ],
+      "traps": [
+        "seed-data-thin",
+        "single-datapoint",
+        "stale-console-bundle"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "the service-analytics drill-scope tests and the ui plugin-report and plugin-dashboard measure-drill tests (#30651); no live spec drills a report"
+      },
+      "source": [
+        "packages/services/service-analytics/src/drill-scope.ts#measureDrillScopes",
+        "ui/packages/plugin-report/src/measureDrillScope.ts#measureDrillScope, #sharedMeasureDrillScope and #scopeDrillFilter",
+        "ui/packages/plugin-report/src/DatasetReportRenderer.tsx#DatasetReportRenderer",
+        "ui/packages/app-shell/src/views/useOpenRecordList.ts#drillRecordListFilter (Open in list only when the list can write the filter exactly)",
+        "#30651 (drills list the records a filtered measure counted), #30735 (Open in list only when the list matches the drawer)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the per-measure drill scope on report drills and Open in list (#30651, #30735). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
     }
   ]
 }

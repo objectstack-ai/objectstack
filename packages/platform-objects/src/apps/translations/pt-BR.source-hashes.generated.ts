@@ -123,6 +123,7 @@ export const ptBRGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_setting_audit.fields.id.label": "00b0385c9c152888",
   "objects.sys_setting_audit.fields.namespace.label": "eca03ee21fc17d64",
   "objects.sys_setting_audit.fields.source.options.api": "4baeeff968e192d1",
+  "objects.sys_sso_provider._actions.edit_oidc_provider.params.scopes.placeholder": "58ac90cde28c764d",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.email.placeholder": "66309c7adf5c9436",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.firstName.placeholder": "27291cee7a635764",
   "objects.sys_sso_provider._actions.edit_sso_attribute_mapping.params.lastName.placeholder": "32ce377ac4d7e610",

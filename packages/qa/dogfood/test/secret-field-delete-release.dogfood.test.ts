@@ -133,7 +133,7 @@ describe('[#27581] secret field: deleting a record releases its sys_secret row â
 
     // The second id names no record, so the batch rolls the first delete back.
     const res = await call('POST', `/data/${VAULT}/deleteMany`, { ids: [id, 'sfd-no-such-record'], options: { atomic: true } });
-    expect(res.status, res.text).toBe(200);
+    expect(res.status, res.text).toBe(207);
     expect(res.json).toMatchObject({ success: false, succeeded: 0 });
     expect(res.json.results.map((r: any) => [r.id, r.success, r.errors?.[0]?.code])).toEqual([
       [id, false, 'ROLLED_BACK'],

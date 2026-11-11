@@ -8,13 +8,20 @@ import {
   type TenancyServiceResolver,
 } from '@objectstack/core';
 import type {
+  IAuditCheckpointSigner,
+  IAuditCheckpointSink,
   IAuthService,
+  IClusterService,
+  ICryptoProvider,
   IDataEngine,
   IHttpServer,
   II18nService,
   ISecurityService,
   ISharingService,
 } from '@objectstack/spec/contracts';
+import { AUDIT_CHECKPOINT_SIGNER_SERVICE, AUDIT_CHECKPOINT_SINK_SERVICE } from '@objectstack/spec/contracts';
+import { AuditSealer, type AuditSealerEngine } from './audit-seal/sealer.js';
+import { LocalCheckpointSigner } from './audit-seal/signer.js';
 import {
   SysAuditLog,
   SysActivity,
@@ -120,6 +127,17 @@ export interface AuditPluginOptions {
    * the English literal.
    */
   getLocale?: (tenantId?: string, userId?: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * [ADR-0154 D2, D6] The crypto provider the audit sealer seals each
+   * checkpoint's seed under, and the default checkpoint signer seals its
+   * private key under (scope `audit_seal`). The host composes it here.
+   *
+   * Absent, nothing is sealed: an object that declares `lifecycle.seal` is
+   * reported once, at `error`, naming the consequence and this option as the
+   * fix. A host that registers its own `audit.checkpointSigner` still needs
+   * it, for the seeds.
+   */
+  cryptoProvider?: ICryptoProvider;
 }
 
 /**
@@ -275,6 +293,8 @@ export class AuditPlugin implements Plugin {
    * succeeded.
    */
   private readAuditWriter: ReadAuditWriterHandle | null = null;
+  /** [ADR-0154 D3] The sealer, started at `kernel:ready` and stopped by `destroy()`. */
+  private sealer: AuditSealer | null = null;
 
   /**
    * [#31796] The credential-use writer, built in `init()` (the `audit` slot
@@ -697,7 +717,44 @@ export class AuditPlugin implements Plugin {
             'serve every parent field value it carries)',
         );
       }
+
+      // [ADR-0154 D3] The sealer starts last, once the tables it reads and
+      // writes are provisioned. It seals only objects that declare
+      // `lifecycle.seal`, re-read on every pass.
+      this.startSealer(engine, ctx);
     });
+  }
+
+  /**
+   * Start the audit sealer (ADR-0154 D3) over the engine's storage. The
+   * signer and the sink are resolved per pass from the `audit.checkpointSigner`
+   * and `audit.checkpointSink` slots (D11), the signer falling back to the
+   * default local key of D6; the `cluster` service, when registered, holds the
+   * `audit.sealer` lock. An engine without the storage surface the sealer
+   * reads (a test double) starts no sealer.
+   */
+  private startSealer(engine: IDataEngine, ctx: PluginContext): void {
+    const storage = engine as unknown as Partial<AuditSealerEngine>;
+    if (typeof storage.getDriverForObject !== 'function' || typeof storage.registry?.getAllObjects !== 'function') return;
+    const sealEngine = storage as AuditSealerEngine;
+    const crypto = this.options.cryptoProvider;
+    const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
+    const optional = <T>(name: string): T | undefined => {
+      try {
+        return ctx.getService<T>(name) ?? undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    this.sealer = new AuditSealer({
+      engine: sealEngine,
+      ...(crypto ? { crypto } : {}),
+      signer: () => optional<IAuditCheckpointSigner>(AUDIT_CHECKPOINT_SIGNER_SERVICE) ?? localSigner,
+      sink: () => optional<IAuditCheckpointSink>(AUDIT_CHECKPOINT_SINK_SERVICE),
+      cluster: () => optional<IClusterService>('cluster'),
+      logger: ctx.logger,
+    });
+    this.sealer.start();
   }
 
   /**
@@ -908,6 +965,11 @@ export class AuditPlugin implements Plugin {
    * clean shutdown into a failed one.
    */
   async destroy(): Promise<void> {
+    // [ADR-0154 D3] The sealer first: a pass in flight finishes or fails
+    // before the process lets go, and never starts again.
+    const sealer = this.sealer;
+    this.sealer = null;
+    await sealer?.stop();
     const writer = this.readAuditWriter;
     this.readAuditWriter = null;
     if (writer) await writer.stop();

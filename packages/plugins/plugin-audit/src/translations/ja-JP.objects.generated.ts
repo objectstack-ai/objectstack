@@ -43,7 +43,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           package_uninstall: "パッケージのアンインストール",
           package_unmanaged_import: "Package Unmanaged Import",
           credential_use: "Credential Use",
-          scim_refused: "SCIM Refused"
+          scim_refused: "SCIM Refused",
+          audit_signing_key_change: "Audit Signing Key Change"
         }
       },
       user_id: {

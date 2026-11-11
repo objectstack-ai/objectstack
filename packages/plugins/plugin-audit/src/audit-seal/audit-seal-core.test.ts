@@ -74,7 +74,11 @@ describe('RFC 8785 canonical JSON', () => {
 });
 
 describe('canonical form of a sealed row (D1)', () => {
-  const types = { created_at: { type: 'datetime' }, flag: { type: 'boolean' }, day: { type: 'date' } };
+  // Every column a leaf reads is typed: a column with no rule has no canonical form.
+  const types = {
+    id: { type: 'text' }, created_at: { type: 'datetime' }, flag: { type: 'boolean' }, day: { type: 'date' },
+    body: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
+  };
 
   it('spells one instant one way, whatever the driver handed back', () => {
     const expected = '2026-11-10T05:06:07.089Z';
@@ -365,7 +369,7 @@ describe('a refusal never echoes the value it refused (D2: value columns stay on
     try { fn(); } catch (err) { return (err as Error).message; }
     throw new Error('expected a refusal');
   };
-  const types = { created_at: { type: 'datetime' }, flag: { type: 'boolean' }, when: { type: 'datetime' } };
+  const types = { id: { type: 'text' }, created_at: { type: 'datetime' }, flag: { type: 'boolean' }, when: { type: 'datetime' } };
   const cols = (committed: string[]) => ({ clear: ['created_at', 'id'], committed });
   const row = (extra: Record<string, unknown>) => ({ id: 'r', created_at: '2026-01-01T00:00:00.000Z', ...extra });
   const salt = () => Buffer.alloc(32);

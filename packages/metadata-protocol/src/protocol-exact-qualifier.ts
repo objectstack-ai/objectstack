@@ -12,9 +12,14 @@
  * composite of any package), so `?package=X` for a name X does not hold
  * served whichever package registered it first.
  *
- * Scope: the types whose by-name readers consult `(package, name)`
- * (`registry.readsByPackage`, E8's nine). Every other type keeps the
- * prefer-local read, as the packageless arm E8 wired does.
+ * Scope: every type ADR-0150 addresses by `(package, name)` — core's static
+ * `PACKAGE_SCOPED_TYPES`, never a list the registry supplies (epic #31527,
+ * the fail-closed obligation of #32076). G1 judged only the types whose
+ * by-name readers consult `(package, name)` (`registry.readsByPackage`, E8's
+ * nine); a covered type the registry still reads through `getItem` (a flow, a
+ * queue, …) kept the prefer-local read for a qualified address, which
+ * served the first package that registered the name. Every type outside the
+ * covered set keeps the prefer-local read.
  *
  * What X holds (the census of ui carry-in 1, comment 6727995849 on #31691):
  *  - X's own item: a registry holder of the name (its composite, or a bare-slot
@@ -27,10 +32,21 @@
  *    member, an item authored into X.
  */
 
-import { pairsOf } from '@objectstack/metadata-core';
 import {
+    appOf,
+    isPairOf,
+    packageResolutionClosure,
+    pairOf,
+    pairsOf,
+    type InstalledManifestLookup,
+    type PackageClosureRegistry,
+} from '@objectstack/metadata-core';
+import {
+    isNamespaceScopedBareNameType,
+    isPackageScopedType,
     PackageScopedNameRefusedError,
     packageScopedRefusalMessage,
+    resolvePackageScopedHolders,
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
@@ -40,13 +56,34 @@ import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import type { ProtocolHost } from './protocol-host.js';
 
-/** The registry reads the exact qualifier asks. */
+/**
+ * The registry reads the exact qualifier judges a qualified read with: who
+ * holds the name, the environment's own item, and one package's item. They do
+ * not depend on whether the registry's by-name readers consult `(package,
+ * name)` for the type (`SchemaRegistry`'s answer for every type).
+ */
 interface ExactQualifierRegistry {
-    readsByPackage(type: string): boolean;
-    packageScopedHoldersOf(type: string, name: string): string[];
+    /**
+     * [#32310] `callerPackageId` counts the caller's own holding for the caller
+     * arm's step 1 ({@link resolveCallerPackageAddress}), as objectql's
+     * resolver reads it; the exact qualifier passes none.
+     */
+    packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[];
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
+}
+
+/**
+ * The registry reads a by-name read naming no package is judged with: how the
+ * registry reads the type, and the package-scoped resolver it answers a caller
+ * with no package through when it reads the type by package.
+ */
+interface PackagelessReadRegistry {
+    readsByPackage(type: string): boolean;
+    resolveItem(type: string, name: string, callerPackageId?: string | null, member?: string): unknown;
+    /** [ADR-0150 child B, #31697] The bare `action` read's own holder judge, which `readMetaItem` asks. */
+    refuseAmbiguousObjectLessAction?(name: string, readStoredRows?: () => Promise<readonly unknown[]>): Promise<void>;
 }
 
 /** A read the exact qualifier admitted: the package named, and the registry holder its item is. */
@@ -61,15 +98,129 @@ export interface ExactQualifierAddress {
     readonly registryHolders: readonly string[];
 }
 
+/** The engine's registry, as the reads below probe it. */
+function registryOf(host: Pick<ProtocolHost, 'engine'>): Partial<ExactQualifierRegistry & PackagelessReadRegistry> | undefined {
+    return (host.engine as { registry?: Partial<ExactQualifierRegistry & PackagelessReadRegistry> } | undefined)?.registry;
+}
+
+/**
+ * The engine registry's exact-qualifier reads ({@link ExactQualifierRegistry}).
+ * `undefined` when the registry lacks any of them.
+ */
 function exactQualifierRegistry(host: Pick<ProtocolHost, 'engine'>): ExactQualifierRegistry | undefined {
-    const registry = (host.engine as { registry?: Partial<ExactQualifierRegistry> } | undefined)?.registry;
-    if (typeof registry?.readsByPackage !== 'function'
-        || typeof registry.packageScopedHoldersOf !== 'function'
+    const registry = registryOf(host);
+    if (typeof registry?.packageScopedHoldersOf !== 'function'
         || typeof registry.getEnvironmentScopedItem !== 'function'
         || typeof registry.getPackageScopedItem !== 'function') {
         return undefined;
     }
     return registry as ExactQualifierRegistry;
+}
+
+/** Whose read a `501` refusal of a read the registry cannot judge names ({@link unjudgeableRefusal}). */
+export type UnjudgeableReadAddress =
+    /** `?package=X`, or the qualified path the doors translate to it. */
+    | { readonly kind: 'package'; readonly packageId: string }
+    /** `/meta/:type/_env/:name`. */
+    | { readonly kind: 'environment' }
+    /** A read that names no package. */
+    | { readonly kind: 'none' };
+
+/**
+ * Why the engine's registry cannot judge a read of `type` answered as a
+ * caller with no package (a read naming no package, and `_env` once the
+ * environment qualifier admits it) — `undefined` when it can, or when the type
+ * is not one ADR-0150 addresses by `(package, name)` (core's static
+ * `PACKAGE_SCOPED_TYPES`, never a list the registry would have to supply).
+ * A read naming a package is the exact qualifier's ({@link admitExactQualifier}),
+ * which refuses itself when the registry lacks the reads it needs. For a
+ * covered type:
+ *  - on a registry with no `readsByPackage`: `no-resolver`, since the registry
+ *    cannot say how it reads the type;
+ *  - on a registry that reads the type by package, it is answered through the
+ *    package-scoped resolver (`resolveItem`); missing it: `no-resolver`;
+ *  - on a registry that answers `false` (it reads the type through `getItem`,
+ *    as `SchemaRegistry` reads a type no child of epic #31527 has wired), it
+ *    keeps `getItem`'s read, as on `main` (seat ruling (a)): each such type
+ *    narrows in its own reader card. A type whose names are scoped to the
+ *    namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) can have two package
+ *    holders of a name: `narrowed`, refused like a missing resolver (seat
+ *    ruling (b)), unless the registry judges that read itself. `action` is
+ *    such a type: `SchemaRegistry` counts an object-less action's holders
+ *    for the bare read (`refuseAmbiguousObjectLessAction`, asked by
+ *    `readMetaItem`, #31697), and an action bound to an object reads through
+ *    `getItem`, as on `main`.
+ */
+function unjudgeableCause(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+): 'no-resolver' | 'narrowed' | undefined {
+    if (!isPackageScopedType(type)) return undefined;
+    const registry = registryOf(host);
+    if (typeof registry?.readsByPackage !== 'function') return 'no-resolver';
+    if (registry.readsByPackage(type)) return typeof registry.resolveItem === 'function' ? undefined : 'no-resolver';
+    if (!isNamespaceScopedBareNameType(type)) return undefined;
+    return type === 'action' && typeof registry.refuseAmbiguousObjectLessAction === 'function' ? undefined : 'narrowed';
+}
+
+/** The `501 NOT_IMPLEMENTED` refusal of a read {@link unjudgeableCause} names a cause for. */
+function unjudgeableRefusal(
+    request: { type: string; name: string },
+    address: UnjudgeableReadAddress,
+    cause: 'no-resolver' | 'narrowed',
+): Error {
+    const naming = address.kind === 'package'
+        ? `naming package '${address.packageId}'`
+        : address.kind === 'environment' ? 'naming the environment' : 'naming no package';
+    const why = cause === 'narrowed'
+        ? `this composition's metadata engine has no package-scoped resolver for '${request.type}' items `
+            + '(its registry reads them through getItem), and their names are scoped to the namespace, so two '
+            + 'packages may hold the name and the read could only be served by first match (ADR-0150 D2/D3)'
+        : 'this composition\'s metadata engine has no package-scoped resolver, so the read could only be '
+            + `served by first match, ${address.kind === 'package'
+                ? 'which may be another package\'s item (ADR-0150 D5)'
+                : 'and two packages may hold the name (ADR-0150 D3)'}`;
+    const err = new Error(
+        `A by-name read of the '${request.type}' item '${request.name}' ${naming} cannot be answered here: `
+        + `${why}. Mount the metadata protocol on an ObjectQL engine, whose registry resolves package-scoped names.`,
+    ) as Error & { status: number; code: string; refusal: boolean };
+    err.status = 501;
+    err.code = 'NOT_IMPLEMENTED';
+    // A declared refusal, not a fault: the transport keeps the sentence above.
+    err.refusal = true;
+    return err;
+}
+
+/**
+ * [ADR-0150 D3/D5, epic #31527] A by-name read the composition cannot judge
+ * fails closed. A type ADR-0150 addresses by `(package, name)` is read by
+ * package only through the registry's package-scoped reads
+ * ({@link unjudgeableCause}). On an engine whose registry lacks them, the
+ * only read left is `getItem`'s first match, which may be another package's
+ * item; so such a read is refused here, before any layer is read, with
+ * `501 NOT_IMPLEMENTED` naming the cause. Never a first match (red line 1),
+ * never a guess (red line 2).
+ *
+ * For a read answered as a caller with no package: a read naming no package
+ * (`address` `none`), and `_env` once {@link admitEnvironmentQualifier} admits
+ * it (`environment`). A read naming a package is refused by
+ * {@link admitExactQualifier} itself.
+ *
+ * Every production composition carries the reads (`ObjectQL`'s
+ * `SchemaRegistry`); only an engine without them, such as a test double or an
+ * embedder's own engine, reaches the refusal. A type outside the set is
+ * unchanged.
+ *
+ * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`, so the 5xx keeps
+ *   its sentence at the transport) when the read cannot be judged.
+ */
+export function refuseUnjudgeableByNameRead(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string },
+    address: Exclude<UnjudgeableReadAddress, { kind: 'package' }>,
+): void {
+    const cause = unjudgeableCause(host, request.type);
+    if (cause !== undefined) throw unjudgeableRefusal(request, address, cause);
 }
 
 function refusal(
@@ -94,20 +245,22 @@ function refusal(
  * Judge a by-name read that names package `packageId` as its exact qualifier.
  *
  * @returns `undefined` when the rule does not apply (no package named, a type
- *   whose readers do not consult `(package, name)`, a registry that cannot
- *   say), else the admitted address.
+ *   ADR-0150 does not address by `(package, name)`), else the admitted address.
  * @throws {PackageScopedNameRefusedError} `not-held-by-qualifier`, naming
  *   every holder, when the package holds no item of the name and another
  *   holder does — the package holders, and the environment's own item.
+ * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`) when the registry
+ *   lacks the reads the judgment needs (`packageScopedHoldersOf`,
+ *   `getEnvironmentScopedItem`, `getPackageScopedItem`).
  */
 export async function admitExactQualifier(
     host: Pick<ProtocolHost, 'engine' | 'findServedOverlayRow'>,
     request: { type: string; name: string; packageId?: string; member?: string },
 ): Promise<ExactQualifierAddress | undefined> {
     const packageId = request.packageId;
-    if (!packageId) return undefined;
+    if (!packageId || !isPackageScopedType(request.type)) return undefined;
     const registry = exactQualifierRegistry(host);
-    if (!registry || !registry.readsByPackage(request.type)) return undefined;
+    if (!registry) throw unjudgeableRefusal(request, { kind: 'package', packageId }, 'no-resolver');
 
     const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
     if (holders.includes(packageId)) return { packageId, registryHolders: [packageId] };
@@ -139,7 +292,19 @@ export async function admitExactQualifier(
  * The item an admitted exact read serves, when a layer below answered another
  * package's item: the registry's own item of the holder the address admitted.
  * Another package's item is never served for the address; two bases the
- * package is a pair of, both holding the name, are refused naming both.
+ * package is a pair of, both holding the name, are refused naming both. A
+ * customization pair's item is its base's: the base's address serves the
+ * pair's override and its added bundle member (ADR-0146 D2, #28802), so it is
+ * kept, never replaced by the base's own member.
+ *
+ * A pair's row that two or more holders of the name could own is no one
+ * package's (two packages of one App share the App's pair, ADR-0146 D3, and
+ * the row declares no `overrides` naming one of them). It is refused on each
+ * such holder's address, naming every one ({@link pairMemberOwners}, epic
+ * ruling on #31699 F2). A row with one owner is kept on that owner's address
+ * only, and a row that declares the base it customizes on that base's address
+ * only. The App's own address keeps #28390 ruling A for a row that declares
+ * nothing or declares the App.
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -155,14 +320,157 @@ export function exactQualifierItem(
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
     if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
-    // A provenance sentinel or a package this registry does not hold is not another package's item.
-    if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) return item;
+    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
+    // when the row is that base's: one owner among the name's holders (epic ruling on #31699 F2).
+    const installed = installedManifestsOfEngine(host.engine);
+    const bases = [address.packageId, ...address.registryHolders];
+    if (bases.some((base) => isPairOf(served, base, installed))) {
+        const declared = declaredOverrideBase(item);
+        // The App's own pair on the App's address, unless the row declares another base (#28390 ruling A).
+        if (isAppPairOf(served, address.packageId, installed) && (declared === undefined || declared === address.packageId)) return item;
+        const owners = pairMemberOwners(served, registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed, item);
+        if (owners.length > 1) {
+            throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+                owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
+        }
+        // One owner: kept only when it is the address's package or a base it admitted. No owner: kept
+        // unless the row declares a base the address does not name.
+        if (owners.length === 1 ? bases.includes(owners[0]) : (declared === undefined || bases.includes(declared))) return item;
+        // Another holder's row: not this address's item, so the admitted holder's is served below.
+    } else if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) {
+        // A provenance sentinel or a package this registry does not hold is not another package's item.
+        return item;
+    }
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
     }
     const [holder] = address.registryHolders;
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+}
+
+/**
+ * Where a caller-arm read is read: the holder the caller resolves to, read at
+ * its exact address (`?package=<holder>`), or the environment's own item for
+ * a name the platform requests by spelling (ADR-0150 D3's exception), which
+ * every caller reads environment-wide.
+ */
+export type CallerPackageAddress =
+    | { readonly kind: 'package'; readonly packageId: string }
+    | { readonly kind: 'environment' };
+
+/** The registry reads the caller arm asks: the exact qualifier's, and the closure walk's. */
+type CallerPackageRegistry = ExactQualifierRegistry & PackageClosureRegistry;
+
+/**
+ * [ADR-0150 D3, #32310] Resolve a by-name read made FROM package
+ * `callerPackageId` (`?callerPackage=`): a dashboard, report or chart of
+ * package P naming a dataset. Unlike `?package=`, the exact qualifier (D5),
+ * this is the caller's resolution, by the ONE rule (`resolvePackageScopedHolders`,
+ * `@objectstack/core`) over the holders the bare read resolves over
+ * (`packageScopedHoldersOf`, as objectql's `resolvePackageScopedName` reads
+ * them), with P's closure from the one walk (`packageResolutionClosure`):
+ *
+ *  1. P's own item;
+ *  2. else the unique holder in P's declared dependency closure plus `sys`;
+ *  3. else a refusal naming the candidates: `ambiguous-in-closure` for two
+ *     holders in the closure, `outside-closure` for holders P cannot reach
+ *     (`409 RESOURCE_CONFLICT`, thrown). ⛔ Never an environment-wide guess.
+ *
+ * The answer is an ADDRESS, not an item: the door reads the resolved holder
+ * at its exact qualifier (`?package=<holder>`), so the holder's bound overlay,
+ * drafts, lock, version and every read gate after it — admission included —
+ * answer exactly as they answer that address. A name nothing holds is read at
+ * P's own address, which answers its own miss (or a stored row bound to P).
+ *
+ * A caller package that is not installed is read at its own address too, so
+ * it answers exactly what `?package=` naming it answers (`409` naming the
+ * holders, or the read's miss) — ⛔ never the bare read.
+ *
+ * @throws {PackageScopedNameRefusedError} when the rule refuses.
+ * @throws an error with `code: 'SERVICE_UNAVAILABLE'` (`503`) when the type
+ *   is not one ADR-0150 addresses by package (core's `isPackageScopedType`),
+ *   or the registry lacks the exact qualifier's reads: the arm fails closed.
+ */
+export function resolveCallerPackageAddress(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; callerPackageId: string; member?: string },
+): CallerPackageAddress {
+    request = canonicalizeMetaRequestType(request);
+    const { type, name, callerPackageId, member } = request;
+    // [#32277] Whether a type is addressed by package is core's static
+    // `PACKAGE_SCOPED_TYPES` (`isPackageScopedType`), the one rule the exact
+    // qualifier reads, never a list the registry supplies; and a registry
+    // without the exact qualifier's reads cannot judge the name. Either way
+    // the arm fails closed, never a first match.
+    const registry = isPackageScopedType(type)
+        ? exactQualifierRegistry(host) as CallerPackageRegistry | undefined
+        : undefined;
+    if (!registry) {
+        throw Object.assign(
+            new Error(`The ${type} "${name}" could not be resolved from package "${callerPackageId}": this deployment's `
+                + `metadata registry does not resolve ${type} names by package. This is a server-side fault.`),
+            { code: 'SERVICE_UNAVAILABLE', status: 503 },
+        );
+    }
+    const installed = typeof registry.getPackage === 'function' && registry.getPackage(callerPackageId) !== undefined;
+    if (!installed && registry.residualOwnerDependenciesOf?.(callerPackageId) === undefined) {
+        return { kind: 'package', packageId: callerPackageId };
+    }
+    const resolution = resolvePackageScopedHolders(
+        { type: type as PackageScopedResolvableType, name, callerPackageId },
+        {
+            // The caller's own holding counts for its step 1 even as a bundle addition.
+            packageHolders: registry.packageScopedHoldersOf(type, name, callerPackageId) ?? [],
+            packageItem: (packageId) => registry.getPackageScopedItem(type, name, packageId, member),
+            environmentItem: () => registry.getEnvironmentScopedItem(type, name, member),
+        },
+        (caller) => packageResolutionClosure(registry, caller),
+    );
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+    if (resolution.status === 'not-found') return { kind: 'package', packageId: callerPackageId };
+    return resolution.holder.kind === 'package'
+        ? { kind: 'package', packageId: resolution.holder.packageId }
+        : { kind: 'environment' };
+}
+
+
+/** The base a pair's row declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
+function declaredOverrideBase(item: unknown): string | undefined {
+    const declaration = (item as { overrides?: unknown } | null | undefined)?.overrides;
+    if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
+    const base = (declaration as { package?: unknown }).package;
+    return typeof base === 'string' && base !== '' ? base : undefined;
+}
+
+/**
+ * [#28390 ruling A] Whether `pairId` is the pair of the App `base` itself (not
+ * the pair `base` shares as a member of an App): a row there is the App's own.
+ */
+function isAppPairOf(pairId: string, base: string, installed: InstalledManifestLookup): boolean {
+    if (appOf(base, installed) !== base) return false;
+    const pair = pairOf(base, installed);
+    return pair.ok && pair.value === pairId;
+}
+
+/**
+ * [ADR-0150 D3, epic ruling on #31699 F2] The holders of a name that a row
+ * stored in the customization package `pairId` could belong to: every holder
+ * `pairId` is a pair of (ADR-0146 D3: the App's pair is shared by every package
+ * of the App), narrowed to the one the row declares it customizes
+ * (`overrides.package`) when it declares one. Two or more mean the row cannot
+ * say whose it is, and each such holder's exact read refuses it naming every
+ * one. ⛔ Never a pick between two.
+ */
+function pairMemberOwners(
+    pairId: string,
+    holders: readonly string[],
+    installed: InstalledManifestLookup,
+    row?: unknown,
+): string[] {
+    const owners = holders.filter((holder) => isPairOf(pairId, holder, installed));
+    const declared = declaredOverrideBase(row);
+    return declared === undefined ? owners : owners.filter((holder) => holder === declared);
 }
 
 
@@ -252,25 +560,39 @@ export function resolveMetaItemAddress(
 /**
  * [ADR-0150 D5, child G1] Judge a read addressed to the environment
  * (`/meta/:type/_env/:name`): the environment's own item, or a refusal naming
- * every holder. For a type whose readers consult `(package, name)`, a name the
+ * every holder. For a type ADR-0150 addresses by `(package, name)`, a name the
  * environment does not hold and a package does is refused
  * (`not-held-by-qualifier`, `callerPackageId: null`); otherwise the read is a
  * caller with no package, which E8's resolver answers environment-first.
- * Types outside the nine keep the bare read, as `?package=` does for them.
+ * Types outside the covered set keep the bare read, as `?package=` does for
+ * them.
  *
  * @throws {PackageScopedNameRefusedError} when packages hold the name and the
  *   environment does not.
+ * @throws a `501 NOT_IMPLEMENTED` refusal (`refusal: true`) when the registry
+ *   lacks the reads the judgment needs (`packageScopedHoldersOf`,
+ *   `getEnvironmentScopedItem`, `getPackageScopedItem`), or, for the read it
+ *   admits as a caller with no package, the reads that read needs
+ *   ({@link refuseUnjudgeableByNameRead}, naming the environment).
  */
 export function admitEnvironmentQualifier(
     host: Pick<ProtocolHost, 'engine'>,
     request: { type: string; name: string; member?: string },
 ): void {
     request = canonicalizeMetaRequestType(request);
+    if (!isPackageScopedType(request.type)) return;
     const registry = exactQualifierRegistry(host);
-    if (!registry || !registry.readsByPackage(request.type)) return;
-    if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) return;
+    if (!registry) throw unjudgeableRefusal(request, { kind: 'environment' }, 'no-resolver');
+    // [#32076] Admitted, `_env` is read as a caller with no package: its refusal names the environment.
+    if (registry.getEnvironmentScopedItem(request.type, request.name, request.member) !== undefined) {
+        refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
+        return;
+    }
     const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
-    if (holders.length === 0) return;
+    if (holders.length === 0) {
+        refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
+        return;
+    }
     const candidates: PackageScopedHolder[] = holders.map((holder) => ({ kind: 'package' as const, packageId: holder }));
     const base = {
         status: 'refused' as const,

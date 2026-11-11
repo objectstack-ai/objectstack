@@ -779,10 +779,12 @@ export class ObjectQL implements IObjectQLEngine {
    * registered one under that name, with its own entry, and an owner-less
    * registration as the platform's item (`platformItem`: code a plugin or
    * the host registers, in every caller's reach like `sys`) — the holder set
-   * `resolvePackageScopedFunction` resolves a flow's or an action's function
-   * over, in the referrer's package. A snapshot, taken at the call.
-   * `resolveFunction` and `resolveFunctionEntry` keep answering the one
-   * last-registered entry per name.
+   * `resolvePackageScopedFunction` resolves a flow `script` node's function
+   * over, in the calling flow's package. A snapshot, taken at the call. The flow
+   * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
+   * a hook's own package's entry from it. `resolveFunction` and
+   * `resolveFunctionEntry` keep answering the one last-registered entry per
+   * name.
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
