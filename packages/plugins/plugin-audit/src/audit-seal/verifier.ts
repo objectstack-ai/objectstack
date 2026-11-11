@@ -5,7 +5,7 @@ import { parseLifecycleDuration } from '@objectstack/objectql';
 import type { IAuditCheckpointSigner, ICryptoProvider } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
 import { canonicalDatetime, canonicalValue, commitValue, leafHash, leafInput, rowIdOf, type ColumnSaltOf, type SealedFieldTypes } from './canonical.js';
-import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
+import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, AUDIT_SIGNING_KEY_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
 import { AUDIT_SEAL_WINDOW_MS } from './sealer.js';
 import {
   amendmentBodyFromRow,
@@ -19,6 +19,9 @@ import {
   type RedactionAmendmentBody,
 } from './signed-body.js';
 import { readAuditSealSecret, trustedSigningKey, type SealStorageDriver, type SealStorageReader } from './signer.js';
+
+/** Where a seed's and a signing key's wrapped handles are stored (`readAuditSealSecret`). */
+const SECRET_OBJECT = 'sys_secret';
 
 /**
  * ADR-0154 D9 — the live check of `os audit verify`: every chain of every
@@ -355,8 +358,11 @@ class LedgerCheck {
         ? await this.options.trust.trustedPublicKey(keyId)
         : await trustedSigningKey(this.options.engine, this.options.crypto, keyId);
     } catch (err) {
-      // No key table is no key; any other read fault stops the run rather than reading as tampering.
-      if (!isMissingTableError(err)) throw err;
+      // The two objects a key is trusted through: its row, and the
+      // `sys_secret` row of its wrapped private half. Either table absent is
+      // no key; any other read fault stops the run rather than reading as
+      // tampering.
+      if (!isMissingTableError(err, AUDIT_SIGNING_KEY_OBJECT) && !isMissingTableError(err, SECRET_OBJECT)) throw err;
       publicKey = null;
     }
     let key: KeyObject | null = null;
@@ -838,7 +844,7 @@ class ObjectCheck {
     try {
       handle = await readAuditSealSecret(this.check.engine, body.seed_handle);
     } catch (err) {
-      if (!isMissingTableError(err)) throw err;
+      if (!isMissingTableError(err, SECRET_OBJECT)) throw err;
       handle = null;
     }
     if (!handle) return `'${body.seed_handle}' is missing`;
