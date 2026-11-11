@@ -37,8 +37,9 @@ import {
     type ObjectSchemaMaskExit,
     type ObjectSchemaMaskOutcome,
 } from '@objectstack/metadata-core/testing';
-import { isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
+import { isObjectSchemaMaskExempt, type ObjectSchemaMaskPosture } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
+import { projectMetaActionForCaller } from './meta-item-read-gate';
 // Paid at collection, not inside a case's clock: the routes' reach loads it lazily.
 import '@objectstack/objectql';
 
@@ -515,16 +516,19 @@ describe('[ruling record 6787890900] an object the caller may not read shares no
         expect(nonReader.etag).not.toBe(reader.etag);
     });
 
-    it('an action reading a field of an object the caller may not read is withheld, and the validator says so', async () => {
-        const all = async () => ['id', 'name', 'salary_grade', 'bonus_formula'];
-        const readsContact = { getMetadataReadableFields: all, getReadableFields: all, canReadObject: async () => true };
-        const contactHidden = { ...readsContact, canReadObject: async (object: string) => object !== 'contact' };
-        const reader = await read(READER, 'account', {}, readsContact);
-        const nonReader = await read(READER, 'account', {}, contactHidden);
-        expect(reader.body.item.actions.map((a: any) => a.name)).toEqual(['regrade', 'rename', 'invite', 'escalate']);
-        expect(nonReader.body.item.actions.map((a: any) => a.name)).toEqual(['regrade', 'rename']);
-        expect(nonReader.etag).not.toBe(reader.etag);
-        // …and the reader's validator is never a 304 for the other caller.
-        expect((await read(READER, 'account', { 'if-none-match': reader.etag! }, contactHidden)).status).toBe(200);
+    it('an action is judged on its object\'s field projection whether or not the object is served — the schema doors move, not the action verdict', async () => {
+        const fieldsOnly: ObjectSchemaMaskPosture = { kind: 'project', readable: new Set(['id', 'name']) };
+        const hidden: ObjectSchemaMaskPosture = { kind: 'hidden', fields: fieldsOnly };
+        const verdict = async (posture: ObjectSchemaMaskPosture, name: string) => projectMetaActionForCaller(
+            { masker: async () => posture, readObject: async () => account() },
+            (account().actions as any[]).find((a) => a.name === name), 'account',
+        );
+        for (const name of ['rename', 'regrade']) {
+            const asField = await verdict(fieldsOnly, name);
+            const asHidden = await verdict(hidden, name);
+            expect(asHidden.kind, name).toBe(asField.kind);
+        }
+        expect((await verdict(hidden, 'rename')).kind).toBe('serve');
+        expect((await verdict(hidden, 'regrade')).kind).toBe('withhold');
     });
 });

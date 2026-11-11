@@ -75,6 +75,7 @@ import {
     actionObjectOverrideTargets,
     actionServedWithoutOwnObject,
     applyObjectSchemaMask,
+    objectSchemaFieldPosture,
     isObjectSchemaMaskExempt,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
@@ -3985,15 +3986,16 @@ export async function projectMetaActionForCaller(
         let posture: ObjectSchemaMaskPosture | undefined;
         let evaluationError: ObjectSchemaMaskEvaluationError | undefined;
         try {
-            posture = await sources.masker(ownerName);
+            // [ruling record 6787890900] The field half only: an action is
+            // judged on its object's field projection, whether or not the
+            // object itself is served to this caller (the rule moves the
+            // schema doors, not this verdict).
+            posture = objectSchemaFieldPosture(await sources.masker(ownerName));
         } catch (error) {
             if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
             evaluationError = error;
         }
         if (posture?.kind === 'passthrough') return { kind: 'serve' };
-        // [ruling record 6787890900] The object door serves nothing of an object
-        // the caller may not read, so none of its actions either.
-        if (posture?.kind === 'hidden') return { kind: 'withhold' };
         const definition = await sources.readObject(ownerName);
         if (projectableObject(definition)) {
             if (evaluationError || !posture) return { kind: 'fault', object: ownerName };
@@ -4013,7 +4015,7 @@ export async function projectMetaActionForCaller(
     for (const target of targets) {
         let posture: ObjectSchemaMaskPosture | undefined;
         try {
-            posture = await sources.masker(target);
+            posture = objectSchemaFieldPosture(await sources.masker(target)); // [ruling record 6787890900] as above
         } catch (error) {
             if (!(error instanceof ObjectSchemaMaskEvaluationError)) throw error;
         }

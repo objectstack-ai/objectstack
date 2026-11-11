@@ -185,10 +185,10 @@ export type ObjectSchemaRuntimeFieldPosture =
     | { kind: 'undetermined' };
 
 /**
- * The decision {@link resolveObjectSchemaMaskPosture} reaches for one caller ×
- * one object, BEFORE the document is fetched.
+ * The FIELD half of {@link ObjectSchemaMaskPosture}: how one object's schema is
+ * projected for a caller, the object-level verdict aside.
  */
-export type ObjectSchemaMaskPosture =
+export type ObjectSchemaFieldPosture =
     | {
         kind: 'passthrough';
         reason: ObjectSchemaMaskPassthroughReason;
@@ -229,15 +229,33 @@ export type ObjectSchemaMaskPosture =
          * nothing.
          */
         relate?: (objectName: string) => Promise<ReadonlySet<string> | undefined>;
-    }
-    /**
-     * [ADR-0106, amended by ruling record 6787890900] The caller may not read
-     * the object at all. Every schema-serving outlet leaves it out of its lists
-     * and answers a read of it exactly as it answers a name that names no
-     * object; an action the `/meta` object door would serve inside it is
-     * withheld with it.
-     */
-    | { kind: 'hidden' };
+    };
+
+/**
+ * The decision {@link resolveObjectSchemaMaskPosture} reaches for one caller ×
+ * one object, BEFORE the document is fetched.
+ *
+ * [ADR-0106, amended by ruling record 6787890900] `hidden` — the caller may
+ * not read the object at all. Every schema-serving outlet leaves it out of its
+ * lists and answers a read of it exactly as it answers a name that names no
+ * object. `fields` is the field posture the same caller has on it, for the
+ * doors that judge an ACTION against its object's projection
+ * ({@link objectSchemaFieldPosture}) — ⛔ never for a door that serves the
+ * object's schema.
+ */
+export type ObjectSchemaMaskPosture =
+    | ObjectSchemaFieldPosture
+    | { kind: 'hidden'; fields: ObjectSchemaFieldPosture };
+
+/**
+ * The field half of a posture: the posture itself, or the field posture a
+ * `hidden` one carries. Asked by the doors that judge an action against its
+ * object's projection, whose verdicts the object-level rule does not move;
+ * ⛔ never by a door that serves the object's schema.
+ */
+export function objectSchemaFieldPosture(posture: ObjectSchemaMaskPosture): ObjectSchemaFieldPosture {
+    return posture.kind === 'hidden' ? posture.fields : posture;
+}
 
 /** A posture that serves the document unchanged and needs no fingerprint. */
 export const OBJECT_SCHEMA_MASK_NOT_APPLICABLE: ObjectSchemaMaskPosture =
@@ -414,7 +432,7 @@ export async function resolveObjectSchemaMaskPosture(input: {
     const canRead = typeof security?.canReadObject === 'function'
         ? security.canReadObject.bind(security)
         : undefined;
-    const fields = await resolveFieldPosture(objectName, context, ask, canRead, telemetry);
+    const fields = await resolveFieldPosture(objectName, context, ask, telemetry);
 
     // [ruling record 6787890900] An object the caller may not read does not
     // exist for them on any schema-serving outlet. Decided HERE, once, so no
@@ -429,20 +447,16 @@ export async function resolveObjectSchemaMaskPosture(input: {
         // D6 — an evaluation that throws is the 5xx fault, never "unknown".
         throw new ObjectSchemaMaskEvaluationError(objectName, error);
     }
-    return admitted === true ? fields : { kind: 'hidden' };
+    return admitted === true ? fields : { kind: 'hidden', fields };
 }
-
-/** The object-read admission the posture asks, bound to its service. */
-type ObjectReadAsker = (object: string, context?: unknown) => Promise<boolean> | boolean;
 
 /** The field half of {@link resolveObjectSchemaMaskPosture}, for a caller the mask applies to. */
 async function resolveFieldPosture(
     objectName: string,
     context: unknown,
     ask: ((object: string, context?: unknown) => Promise<string[] | undefined> | string[] | undefined) | undefined,
-    canRead: ObjectReadAsker | undefined,
     telemetry: ObjectSchemaMaskTelemetry | undefined,
-): Promise<ObjectSchemaMaskPosture> {
+): Promise<ObjectSchemaFieldPosture> {
     // D6 tier 1 — no FLS posture in this deployment at all. The data plane does
     // not mask either, so tightening the metadata plane alone would be theater.
     if (!ask) return { kind: 'passthrough', reason: 'no-service' };
@@ -479,9 +493,6 @@ async function resolveFieldPosture(
         let answer: string[] | undefined;
         try {
             answer = await ask(related, context);
-            // [ruling record 6787890900] An object the caller may not read has
-            // no field they read: the actions whose params read it are withheld.
-            if (canRead && Array.isArray(answer) && (await canRead(related, context)) !== true) return new Set<string>();
         } catch (error) {
             telemetry?.warn?.(
                 '[ADR-0106] field visibility on a related object could not be evaluated — '

@@ -16,7 +16,7 @@ import {
     isObjectSchemaMaskingEnabled,
     normalizeIfNoneMatch,
     objectFieldVisibilityFingerprint,
-    relateObjectSchemaMaskPosture,
+    objectSchemaFieldPosture,
     resolveObjectSchemaMaskPosture,
     resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_DISABLE_ENV,
@@ -469,8 +469,11 @@ describe('[ruling record 6787890900] an object the caller may not read does not 
             ...base,
             security: { getMetadataReadableFields: fields, canReadObject: (object) => { asked.push(object); return false; } },
         });
-        expect(posture).toEqual({ kind: 'hidden' });
+        expect(posture.kind).toBe('hidden');
         expect(asked).toEqual(['account']);
+        // The field half rides along for the action doors, and only for them.
+        expect(objectSchemaFieldPosture(posture)).toMatchObject({ kind: 'project' });
+        expect([...(objectSchemaFieldPosture(posture) as { readable: Set<string> }).readable]).toEqual(['id', 'salary_grade']);
     });
 
     it('admits only `true` — any other answer is hidden', async () => {
@@ -494,7 +497,7 @@ describe('[ruling record 6787890900] an object the caller may not read does not 
         const posture = await resolveObjectSchemaMaskPosture({
             ...base, security: { getMetadataReadableFields: () => undefined, canReadObject: () => false },
         });
-        expect(posture).toEqual({ kind: 'hidden' });
+        expect(posture).toEqual({ kind: 'hidden', fields: { kind: 'undetermined' } });
     });
 
     it('an object read that throws is the D6 fault, never `hidden`', async () => {
@@ -533,32 +536,15 @@ describe('[ruling record 6787890900] an object the caller may not read does not 
     });
 
     it('an outlet that projects a hidden posture serves none of the schema and is told why', () => {
-        const masked = applyObjectSchemaMask(OBJECT, { kind: 'hidden' });
+        const masked = applyObjectSchemaMask(OBJECT, { kind: 'hidden', fields: { kind: 'passthrough', reason: 'no-service' } });
         expect(masked.hidden).toBe(true);
         expect(masked.emptied).toBe(true);
         expect(JSON.stringify(masked.document)).not.toContain('salary_grade');
         expect(applyObjectSchemaMask(OBJECT, project(['id'])).hidden).toBe(false);
     });
 
-    it('an action reading a field of an object the caller may not read is withheld, and the fingerprint says so', async () => {
-        const document = {
-            ...OBJECT,
-            actions: [
-                { name: 'invite', type: 'script', params: [{ field: 'id', objectOverride: 'contact' }] },
-                { name: 'keep', type: 'script' },
-            ],
-        };
-        const relatedFor = async (canReadContact: boolean) => {
-            const posture = await resolveObjectSchemaMaskPosture({
-                ...base,
-                security: { getMetadataReadableFields: fields, canReadObject: (object) => object !== 'contact' || canReadContact },
-            });
-            return applyObjectSchemaMask(document, await relateObjectSchemaMaskPosture(posture, document));
-        };
-        const reader = await relatedFor(true);
-        const nonReader = await relatedFor(false);
-        expect((reader.document as any).actions.map((a: any) => a.name)).toEqual(['invite', 'keep']);
-        expect((nonReader.document as any).actions.map((a: any) => a.name)).toEqual(['keep']);
-        expect(nonReader.fingerprint).not.toBe(reader.fingerprint);
+    it('the field half of a non-hidden posture is the posture itself', () => {
+        const posture = project(['id']);
+        expect(objectSchemaFieldPosture(posture)).toBe(posture);
     });
 });
