@@ -572,7 +572,8 @@ function isPlainObjectValue(value: unknown): value is Record<string, unknown> {
   );
 }
 
-import { resolveFieldCurrency } from './currency.js';
+import { resolveFieldCurrency, summaryDeclaresCurrency } from './currency.js';
+export { withFollowedParentObject, FOLLOWED_PARENT_OBJECT_KEY } from './currency.js';
 import { HomeAmountHint } from './widgets/CurrencyField.js';
 export { resolveFieldCurrency };
 
@@ -2868,7 +2869,13 @@ export function FormulaCellRenderer({ value, field, dependentValues }: CellRende
   // re-parsing the expression", so a formula over two currency fields that
   // declares `number` (or nothing) renders as a number here, not as money.
   const returnType = field && 'returnType' in field ? field.returnType : undefined;
-  const valueType = returnType ?? (typeof value === 'number' ? 'number' : 'text');
+  // A roll-up that declares its currency is money (ADR-0144 D6 as amended):
+  // the currency cell draws it, with the parent row as its record, so a
+  // `record` roll-up reads the parent's code as its children's amounts do.
+  const declaresMoney = (field as { type?: unknown } | undefined)?.type === 'summary' && summaryDeclaresCurrency(field);
+  const valueType = declaresMoney && typeof value === 'number'
+    ? 'currency'
+    : returnType ?? (typeof value === 'number' ? 'number' : 'text');
   if (valueType === 'number') {
     return <NumberCellRenderer value={value} field={field} />;
   }
@@ -5359,6 +5366,7 @@ export * from './widgets/UserField.js';
 export * from './widgets/ObjectField.js';
 export * from './widgets/VectorField.js';
 export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField } from './widgets/GridField.js';
+export type { ColumnCurrencies } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
 // New widgets according to @objectstack/spec

@@ -28,12 +28,13 @@ import {
 } from '@object-ui/components';
 import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type GridColumn } from '@object-ui/fields';
 import type { GridFieldMetadata } from '@object-ui/types';
-import { createSafeTranslation } from '@object-ui/i18n';
+import { createSafeTranslation, useLocalization } from '@object-ui/i18n';
 import { useSchemaContext, useRecordContext, useFilterScope, useResolvedFilter, useDataInvalidation, usePrintPage, NonGridRowCeilingNote } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { buildMasterDetailEditBatch, sumRows } from './masterDetailTx';
 import { applyColumnPermissions } from './fieldWriteGate';
 import { hydrateColumns } from './deriveMasterDetail';
+import { parentCurrencyFieldsOf, followedColumnCurrencies } from './parentCurrencyColumns';
 import {
   runBatchTransaction,
   mergeFilterNodes,
@@ -745,6 +746,21 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
     [childSchema, schema.childObject, perms],
   );
 
+  // [ADR-0144 D2 as amended] The line columns whose amount follows the parent's
+  // currency through this panel's relationship, in the code of the record
+  // page's own record, when that record is the parent these lines hang under.
+  const { currency: tenantCurrency } = useLocalization();
+  const parentRow = record?.recordId != null && String(record.recordId) === String(parentId)
+    ? (record.data as Record<string, unknown> | undefined)
+    : undefined;
+  const lineColumnCurrencies = useMemo(
+    () => followedColumnCurrencies(
+      parentCurrencyFieldsOf(childSchema?.fields as Record<string, unknown> | undefined, schema.relationshipField),
+      parentRow,
+      tenantCurrency,
+    ),
+    [childSchema, schema.relationshipField, parentRow, tenantCurrency],
+  );
   const lineLookupAutofill = useMemo(
     () => lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
     [childSchema],
@@ -895,6 +911,7 @@ export const LineItemsPanel: React.FC<{ schema: LineItemsPanelSchema }> = ({ sch
               // child schema loaded above: a lookup cell's pick fills their
               // targets in the row. Empty until that schema arrives.
               lookupAutofill={lineLookupAutofill}
+              columnCurrencies={lineColumnCurrencies}
               readonly={schema.readonly}
               // No input while the save is in flight (objectui#10631): `save`
               // reloads the rows once the batch lands, so a line edited in the

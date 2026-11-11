@@ -4722,6 +4722,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5415,6 +5425,11 @@
       "file": "packages/services/service-automation/src/connector-connections.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/services/service-automation/src/datasource-pull.test.ts",
+      "verb": "delete",
+      "pinned": 1
     },
     {
       "file": "packages/services/service-automation/src/flow-activation-ledger.test.ts",

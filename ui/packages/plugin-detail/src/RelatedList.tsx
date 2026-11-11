@@ -88,7 +88,7 @@ import {
 } from '@object-ui/core';
 import { useSafeFieldLabel, useRecordContext } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
-import { useDisplayLocale, useLocalization, resolveFieldCurrency } from '@object-ui/i18n';
+import { useDisplayLocale, useLocalization, resolveFieldCurrency, recordCurrencyField, withFollowedParent } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { isMaskedDetailFieldType } from './fieldEnrichment';
 import {
@@ -766,7 +766,9 @@ const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefin
   // The tenant default currency (ADR-0053) a `dynamic` amount displays in.
   const { currency: tenantCurrency } = useLocalization();
   // The record page's own object: the parent whose roll-ups name this child.
-  const parentSchema = useRecordContext()?.objectSchema as { fields?: unknown } | undefined;
+  const recordContext = useRecordContext();
+  const parentSchema = recordContext?.objectSchema as { fields?: unknown } | undefined;
+  const parentRecord = recordContext?.data as Record<string, unknown> | undefined;
   const rolledUp = rolledUpSumFields(parentSchema?.fields, childObject);
   const fields: Record<string, any> = (objectSchema?.fields as any) ?? {};
   const totals: Array<{ key: string; label: string; text: string }> = [];
@@ -787,7 +789,9 @@ const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefin
     if (counted.length === 0) continue;
     let text: string;
     if (isCurrency) {
-      const currency = agreedRowCurrency(def, counted, tenantCurrency);
+      // Each row as its cell reads it: a row that follows its parent's
+      // currency carries the record this list hangs under (ADR-0144 D2).
+      const currency = agreedRowCurrency(def, counted.map((row) => withFollowedParent(row, def, parentRecord)), tenantCurrency);
       if (!currency) continue;
       text = formatCurrency(sum, currency, displayLocale);
     } else {
@@ -939,6 +943,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // The host predicate scope a child row's declared deadline is judged in
   // (objectui#11815) — the scope the grid's cells read.
   const predicateScope = usePredicateScope();
+  // The record this list hangs under (ADR-0144 D2 as amended): a child amount
+  // that follows its parent's currency reads the code off it, since this list
+  // never expands its own foreign key (`filterFK`).
+  const parentRecord = useRecordContext()?.data as Record<string, unknown> | undefined;
   // The compact card's date chip formats in the reader's display locale.
   const displayLocale = useDisplayLocale();
   const [collapsed, setCollapsed] = React.useState(defaultCollapsed);
@@ -2271,6 +2279,10 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           // `date` reads in one absolute face down the column, its relative
           // phrase the tooltip. A declared `format` still wins.
           inGridColumn: true,
+          // A record-mode amount reads its currency off the ROW (ADR-0144 D2):
+          // its sibling code field, or, when it follows the parent, the record
+          // this list hangs under, laid on the row by `withFollowedParent`.
+          ...(recordCurrencyField(def) !== undefined && { dependentValues: withFollowedParent(row, def, parentRecord) ?? undefined }),
         });
       };
     };
@@ -2492,7 +2504,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
 
     const pruned = pruneEmpty(generated);
     return pruned.slice(0, Math.max(1, maxColumns));
-  }, [columns, objectSchema, objectName, api, resolveFieldLabel, referenceField, relatedData, maxColumns, lookupLabels, perms, redactedFields, predicateScope]);
+  }, [columns, objectSchema, objectName, api, resolveFieldLabel, referenceField, relatedData, maxColumns, lookupLabels, perms, redactedFields, predicateScope, parentRecord]);
 
   /**
    * [#6108] The SERVED per-column sortability projection for this object —
