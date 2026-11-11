@@ -2160,7 +2160,15 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de découverte",
-            helpText: "Facultatif. URL du document de découverte OIDC. Laissez vide pour utiliser `<issuer>/.well-known/openid-configuration`."
+            helpText: "Facultatif. URL du document de découverte OIDC (https). Laissez vide pour utiliser `<issuer>/.well-known/openid-configuration`. Un point de terminaison indiqué ici est approuvé pour ce fournisseur."
+          },
+          userInfoEndpoint: {
+            label: "URL userinfo",
+            helpText: "Facultatif. URL du point de terminaison userinfo OIDC (https), utilisée à la place de celle indiquée par le document de découverte. Un point de terminaison indiqué ici est approuvé pour ce fournisseur : renseignez-le lorsque l’enregistrement est refusé parce que le document de découverte indique un hôte userinfo auquel le serveur ne fait pas confiance."
+          },
+          skipUserInfo: {
+            label: "Lire les revendications uniquement depuis le jeton d’ID",
+            helpText: "Facultatif. Lire les revendications de l’utilisateur uniquement depuis le jeton d’ID vérifié, sans jamais appeler le point de terminaison userinfo. Microsoft Entra ID : activez cette option pour mapper « preferred_username », que son point de terminaison userinfo ne renvoie pas."
           },
           scopes: {
             label: "Portées",
@@ -2169,7 +2177,7 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mappage : revendication e-mail",
-            helpText: "Facultatif. Revendication associée à l’e-mail. Par défaut : « email ».",
+            helpText: "Facultatif. Revendication associée à l’e-mail. Par défaut : « email ». Microsoft Entra ID (émetteur sur login.microsoftonline.com) : les utilisateurs sans boîte aux lettres n’ont pas de revendication « email » ; mappez donc « preferred_username » (ou « upn ») et activez « Lire les revendications uniquement depuis le jeton d’ID ».",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Supprimer le fournisseur SSO",
-        description: "Supprimer ce fournisseur SSO ? Les utilisateurs de son domaine ne pourront plus se connecter par son intermédiaire.",
-        successMessage: "Fournisseur SSO supprimé"
+        description: "Supprimer ce fournisseur SSO ? Chaque utilisateur qui y est lié est dissocié, y compris les utilisateurs sans autre méthode de connexion liée (ni mot de passe, ni autre fournisseur). Ses mappages de groupes IdP et les ensembles d’autorisations qu’ils ont accordés sont supprimés avec lui. Cette action est irréversible.",
+        resultDialog: {
+          title: "Fournisseur SSO supprimé",
+          acknowledge: "Terminé",
+          fields: {
+            message: "Supprimé"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "Ce que cette suppression retire",
+            linkedUsers: "Utilisateurs dissociés",
+            usersWithoutOtherSignIn: "Utilisateurs sans autre méthode de connexion liée"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Modifier les options de connexion",
         successMessage: "Options de connexion enregistrées"
+      },
+      edit_saml_provider: {
+        label: "Modifier les paramètres SAML",
+        params: {
+          issuer: {
+            label: "ID d’entité de l’IdP",
+            helpText: "L’EntityID SAML de l’IdP. Modifiable uniquement tant qu’aucun utilisateur n’est lié au fournisseur."
+          },
+          entryPoint: {
+            label: "URL SSO de l’IdP",
+            helpText: "Le point de terminaison d’authentification unique de l’IdP. Laissez vide pour conserver la valeur enregistrée. Modifiable uniquement tant qu’aucun utilisateur n’est lié au fournisseur."
+          },
+          cert: {
+            label: "Nouveau certificat de signature de l’IdP",
+            helpText: "Le nouveau certificat de signature X.509 de l’IdP (PEM). Laissez vide pour conserver le certificat enregistré."
+          },
+          keepCurrentCert: {
+            label: "Continuer à faire confiance au certificat actuel",
+            helpText: "Pendant la bascule de l’IdP, accepter les assertions signées par l’un ou l’autre certificat. Modifiez à nouveau sans cette option pour retirer l’ancien."
+          }
+        },
+        resultDialog: {
+          title: "Paramètres SAML enregistrés",
+          acknowledge: "Terminé",
+          fields: {
+            message: "Modifié"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Modifier les paramètres OIDC",
+        params: {
+          clientId: {
+            label: "ID client",
+            helpText: "ID client OAuth émis par l’IdP. Laissez vide pour conserver la valeur enregistrée. Modifiable uniquement tant qu’aucun utilisateur n’est lié au fournisseur."
+          },
+          clientSecret: {
+            label: "Nouveau secret client",
+            helpText: "Laissez vide pour conserver le secret enregistré. Le secret enregistré n’est jamais affiché."
+          },
+          scopes: {
+            label: "Portées",
+            helpText: "Portées OAuth séparées par des espaces ou des virgules, qui remplacent la liste enregistrée. Laissez vide pour la conserver.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "Paramètres OIDC enregistrés",
+          acknowledge: "Terminé",
+          fields: {
+            message: "Modifié"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Afficher la revendication des groupes",

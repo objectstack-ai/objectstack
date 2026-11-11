@@ -160,7 +160,8 @@ the endpoint and the registration member that names it explicitly, for example
 `"userInfoEndpoint": "https://profile.example.com/userinfo"`. A host is never
 trusted only because a discovery document names it. Pass the endpoint as
 `oidcConfig.userInfoEndpoint` (or as `userInfoEndpoint` on the Register SSO Provider
-bridge, `POST /api/v1/auth/admin/sso/register`), and the
+bridge, `POST /api/v1/auth/admin/sso/register`, which the **Userinfo URL** field of
+**Setup → SSO Providers → Register SSO Provider** fills), and the
 registration trusts it.
 
 **Claims.** Microsoft Graph's userinfo answer carries `sub`, `name`, `email` and
@@ -470,6 +471,8 @@ assertion content, and the answer does not depend on whether the account exists.
 | `saml_issuer_mismatch` | The response is signed with the configured certificate but comes from another IdP entity ID. Check the provider's IdP Entity ID against the IdP's issuer. |
 | `Invalid SAML response` | Any other refusal of the response (for example an expired assertion or a broken signature). The server log carries the vendor's line. |
 
+The list is exported as `SSO_SAML_REFUSAL_CAUSES` from `@objectstack/plugin-auth`.
+
 ---
 
 ## Per-provider sign-in options
@@ -487,7 +490,7 @@ default. The first two apply to OIDC and SAML, the third to OIDC only.
 provider row. It posts to `POST /api/v1/auth/sso/update-provider` with
 `{ providerId, allowIdpInitiated, allowJit, skipUserInfo }`, and
 `POST /api/v1/auth/sso/register` takes the same members, as does the Register SSO
-Provider bridge (`POST /api/v1/auth/admin/sso/register`) for `skipUserInfo`. The people who can change a provider today are the
+Provider bridge (`POST /api/v1/auth/admin/sso/register`) for `skipUserInfo`, which the register form offers as **Read Claims From the ID Token Only**. The people who can change a provider today are the
 only ones who can change these options. A value that is not a boolean is refused
 **400 `VALIDATION_ERROR`**, and nothing is written. Every option keeps a history,
 so every change writes a row to the audit ledger (`sys_audit_log`) and a
@@ -501,10 +504,12 @@ is signed in:
 - **SAML.** A Response with no `InResponseTo` redirects to the error page with
   `error=unsolicited_response`.
 - **OIDC.** A callback that carries a `code` and no `state` redirects with
-  `error=state_not_found`.
+  `error=state_not_found`, and so does a request from an IdP app tile that
+  carries an `iss` and no `code` (below).
 
 With it on, `@better-auth/sso` accepts that sign-in, and the platform adds no
-mechanism of its own. A SAML Response with no `InResponseTo` is validated like
+sign-in mechanism of its own (the app-tile entry below only starts the
+vendor's own sign-in). A SAML Response with no `InResponseTo` is validated like
 any other and signs the user in. An OIDC callback with no `state` restarts the
 flow at the IdP's authorization endpoint with a fresh `state`, and the sign-in
 completes from there. A sign-in this platform starts is unchanged either way.
@@ -513,6 +518,46 @@ The option belongs to one provider: turning it on for one SAML provider does not
 accept unsolicited Responses for another. For OIDC, the column is the only
 place it is set. An `allowIdpInitiated` member written into the stored OIDC
 configuration is not read, and it is removed on the next write.
+
+#### From an IdP app tile (OIDC third-party-initiated login)
+
+An Okta or Entra ID app tile starts an OIDC sign-in by sending the browser to
+the app's *initiate login URI* with an `iss` parameter and no `code` (OIDC Core
+1.0 §4, "Initiating Login from a Third Party"). Point that URI at the
+provider's callback:
+
+```text
+https://<your-host>/api/v1/auth/sso/callback/<providerId>
+```
+
+In Okta that is the OIDC app's **Initiate login URI**, with **Login initiated
+by** set to *Either Okta or App* and the login flow *Redirect to app to
+initiate login (OIDC Compliant)*. A portal that opens a fixed URL (Entra ID's
+My Apps opens the app's home page URL) can carry the parameter in that URL:
+`…/sso/callback/<providerId>?iss=<the registered issuer, URL-encoded>`.
+
+A request there that carries `iss` and no `code`, `state` or `error` starts
+the platform's own sign-in at the IdP, with a fresh `state` (and PKCE when
+the provider uses it), as **Sign in with SSO** does, only when all four hold:
+
+1. the provider is a registered OIDC provider;
+2. its `allowIdpInitiated` option is on;
+3. `iss` is the provider's registered issuer, byte for byte (no case or
+   trailing-slash folding);
+4. `target_link_uri`, when present, is on this deployment's origin or a
+   trusted origin, sent once and not empty. The sign-in then lands there;
+   without it, it lands on the deployment's base URL.
+
+A request of this shape that misses any of the four redirects with
+`error=state_not_found`, as before, and writes
+one `warn` line naming the first condition that failed
+(`provider_not_registered`, `provider_not_oidc`, `idp_initiated_off`,
+`issuer_mismatch`, `target_link_uri_untrusted`, or `start_refused` when the
+start itself is refused, for example by domain verification). The request
+signs nobody in and sets no session cookie: the session is created only when
+the IdP comes back with a `code` for that `state`, the code exchange succeeds
+and the ID token verifies, all by `@better-auth/sso`. `login_hint` is passed
+on to the IdP.
 
 ### Accounts for people who were not invited
 

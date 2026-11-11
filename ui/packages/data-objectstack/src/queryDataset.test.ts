@@ -18,6 +18,7 @@ import type { PercentScale as SpecPercentScale } from '@objectstack/spec/data';
 // sidecar's only consumer, imported rather than reproduced so the assertions
 // below are about the SAME code the dashboard widget and report renderer run.
 import { buildDatasetDrillFilter, type DatasetDrillRange } from '@object-ui/core';
+import { DATASET_QUERY_BATCH_MAX_QUERIES } from '@objectstack/spec/api';
 import {
   ObjectStackAdapter,
   clearSharedDiscoveryCache,
@@ -940,5 +941,239 @@ describe('queryDataset names the referencing item\'s package as ?package= (ADR-0
     expect(thrown?.message).toContain('com.acme.beta');
     expect(isAnalyticsNotInstalledError(thrown)).toBe(false);
     expect(datasetCalls(calls)).toHaveLength(1);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* objectstack#32165 — `queryDatasetBatch`: several queries, one request each   */
+/* package, each query answered exactly as the single door answers it.          */
+/* -------------------------------------------------------------------------- */
+
+type WireAnswer = { status: number; body: unknown };
+
+/**
+ * A fetch mock serving discovery, the single door and the batch door. `batch`
+ * answers one batch request from the queries it carries and its URL.
+ */
+function makeBatchFetch({ batch, single }: {
+  batch?: (queries: Array<Record<string, unknown>>, url: URL) => WireAnswer;
+  single?: (body: Record<string, unknown>, url: URL) => WireAnswer;
+}) {
+  const calls: Array<{ url: string; body?: any }> = [];
+  const answer = ({ status, body }: WireAnswer, statusText = '') => ({
+    ok: status >= 200 && status < 300, status, statusText, json: async () => body,
+  });
+  const fetchImpl = vi.fn(async (input: any, init?: any) => {
+    const url = new URL(String(input));
+    if (url.pathname.endsWith('/api/v1/discovery')) {
+      return answer({ status: 200, body: { success: true, data: { version: 'v1', routes: {} } } }, 'OK');
+    }
+    const body = init?.body ? JSON.parse(init.body) : undefined;
+    calls.push({ url: url.toString(), body });
+    if (url.pathname.endsWith('/analytics/dataset/query/batch')) {
+      return answer(batch ? batch(body.queries, url) : { status: 404, body: { success: false, error: { code: 'ROUTE_NOT_FOUND', message: 'Route not found' } } });
+    }
+    if (url.pathname.endsWith('/analytics/dataset/query')) {
+      return answer(single ? single(body, url) : { status: 200, body: { rows: [{ asked: body.datasetName }], fields: [] } });
+    }
+    return answer({ status: 200, body: {} }, 'OK');
+  });
+  return { fetchImpl, calls };
+}
+
+const batchAdapter = (fetchImpl: unknown) =>
+  new ObjectStackAdapter({ baseUrl: 'http://localhost:3000', token: 'tok_b', autoReconnect: false, fetch: fetchImpl as any });
+const batchCalls = (calls: Array<{ url: string; body?: any }>) => calls.filter((c) => c.url.includes('/dataset/query/batch'));
+const singleCalls = (calls: Array<{ url: string; body?: any }>) => calls.filter((c) => /\/dataset\/query(\?|$)/.test(c.url));
+/** Every query answered: `{ data }` carrying the dataset name it asked for. */
+const answerAll = (queries: Array<Record<string, unknown>>): WireAnswer => ({
+  status: 200,
+  body: { success: true, data: { results: queries.map((q) => ({ data: { rows: [{ asked: q.datasetName }], fields: [{ name: 'asked', type: 'string' }], object: 'deal' } })) } },
+});
+
+describe('queryDatasetBatch sends several queries as one batch request (objectstack#32165)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  it('one POST carrying every query, in order, answered per query as the single door answers it', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch([
+      { dataset: 'sales', selection },
+      { dataset: 'pipeline', selection: { dimensions: [], measures: ['revenue'] } },
+      { dataset: 'sales', selection },
+    ]);
+
+    expect(batchCalls(calls)).toHaveLength(1);
+    expect(singleCalls(calls)).toHaveLength(0);
+    const [sent] = batchCalls(calls);
+    expect(sent.url).toBe('http://localhost:3000/api/v1/analytics/dataset/query/batch');
+    expect(sent.body).toEqual({ queries: [
+      { datasetName: 'sales', selection },
+      { datasetName: 'pipeline', selection: { dimensions: [], measures: ['revenue'] } },
+      { datasetName: 'sales', selection },
+    ] });
+    expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled']);
+    expect(outcomes.map((o) => (o.status === 'fulfilled' ? o.value.rows[0].asked : null))).toEqual(['sales', 'pipeline', 'sales']);
+    // The entry's `data` is read exactly as the single door reads its 200 body.
+    expect(outcomes[0].status === 'fulfilled' && outcomes[0].value).toEqual({
+      rows: [{ asked: 'sales' }], fields: [{ name: 'asked', type: 'string' }], object: 'deal',
+      dimensionFields: undefined, drillRawRows: undefined, drillRanges: undefined, drillScopes: undefined, totals: undefined,
+    });
+  });
+
+  it('a query alone goes through the single door, unchanged', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    const [only] = await batchAdapter(fetchImpl).queryDatasetBatch([{ dataset: 'sales', selection }], { packageId: 'crm' });
+    expect(batchCalls(calls)).toHaveLength(0);
+    expect(singleCalls(calls).map((c) => c.url)).toEqual(['http://localhost:3000/api/v1/analytics/dataset/query?package=crm']);
+    expect(only.status).toBe('fulfilled');
+  });
+
+  it('one request carries one package: named queries go with it, an inline draft goes without', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch([
+      { dataset: 'sales', selection },
+      { dataset: inlineDataset as any, selection },
+      { dataset: 'pipeline', selection },
+      { dataset: { ...inlineDataset, name: 'other' } as any, selection },
+    ], { packageId: 'com.acme.alpha' });
+
+    const sent = batchCalls(calls).map((c) => ({ package: new URL(c.url).searchParams.getAll('package'), queries: c.body.queries.length }));
+    expect(sent).toEqual([{ package: ['com.acme.alpha'], queries: 2 }, { package: [], queries: 2 }]);
+    expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+  });
+
+  it('asks the draft world in every query when the caller does', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    await batchAdapter(fetchImpl).queryDatasetBatch([{ dataset: 'a', selection }, { dataset: 'b', selection }], { previewDrafts: true });
+    expect(batchCalls(calls)[0].body.queries.map((q: any) => q.previewDrafts)).toEqual([true, true]);
+  });
+
+  it('more queries than DATASET_QUERY_BATCH_MAX_QUERIES go in several requests, answered in the order given', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    const queries = Array.from({ length: DATASET_QUERY_BATCH_MAX_QUERIES * 2 + 2 }, (_, i) => ({ dataset: `ds_${i}`, selection }));
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(queries);
+    expect(batchCalls(calls).map((c) => c.body.queries.length)).toEqual([DATASET_QUERY_BATCH_MAX_QUERIES, DATASET_QUERY_BATCH_MAX_QUERIES, 2]);
+    expect(outcomes.map((o) => (o.status === 'fulfilled' ? o.value.rows[0].asked : null))).toEqual(queries.map((q) => q.dataset));
+  });
+});
+
+describe('queryDatasetBatch: a refused query is refused alone, as the single door refuses it (objectstack#32165)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  /**
+   * Each refusal as the single door answers it, beside the batch entry the
+   * batch door writes for it (`DatasetQueryBatchEntrySchema`: a 4xx code
+   * outside the vocabulary moves to `declaredCode`; a 5xx arm writes both).
+   */
+  const REFUSALS: Array<{ name: string; door: WireAnswer; entry: { status: number; error: Record<string, unknown> } }> = [
+    { name: 'dataset unknown (404 NOT_FOUND)',
+      door: { status: 404, body: { code: 'NOT_FOUND', message: 'Dataset "sales" not found.' } },
+      entry: { status: 404, error: { code: 'NOT_FOUND', message: 'Dataset "sales" not found.' } } },
+    { name: 'read refused (403 PERMISSION_DENIED)',
+      door: { status: 403, body: { code: 'PERMISSION_DENIED', message: 'You may not read deal.' } },
+      entry: { status: 403, error: { code: 'PERMISSION_DENIED', message: 'You may not read deal.' } } },
+    { name: 'a compile refusal (400 DATASET_INVALID)',
+      door: { status: 400, body: { code: 'DATASET_INVALID', message: 'relationship not declared in include' } },
+      entry: { status: 400, error: { code: 'DATASET_INVALID', message: 'relationship not declared in include' } } },
+    { name: 'a 4xx code outside the vocabulary, demoted by the batch door',
+      door: { status: 403, body: { code: 'ACME_POLICY_DENIED', message: 'The Acme policy refuses this read.' } },
+      entry: { status: 403, error: { code: 'PERMISSION_DENIED', declaredCode: 'ACME_POLICY_DENIED', message: 'The Acme policy refuses this read.' } } },
+    { name: 'a declared 501 the door demoted itself',
+      door: { status: 501, body: { code: 'NOT_IMPLEMENTED', declaredCode: 'ACME_ENGINE_OFF', error: 'The engine is off.' } },
+      entry: { status: 501, error: { code: 'NOT_IMPLEMENTED', declaredCode: 'ACME_ENGINE_OFF', message: 'The engine is off.' } } },
+    { name: 'a 409 RESOURCE_CONFLICT naming the holders',
+      door: { status: 409, body: { code: 'RESOURCE_CONFLICT', message: 'dataset "sales" is held by 2 packages: com.acme.alpha, com.acme.beta.' } },
+      entry: { status: 409, error: { code: 'RESOURCE_CONFLICT', message: 'dataset "sales" is held by 2 packages: com.acme.alpha, com.acme.beta.' } } },
+  ];
+
+  for (const refusal of REFUSALS) {
+    it(`${refusal.name}: the same error as the single door, and the sibling is answered`, async () => {
+      const viaSingle = makeBatchFetch({ single: () => refusal.door });
+      const singleError = await batchAdapter(viaSingle.fetchImpl).queryDataset('sales', selection).then(() => null, (e: unknown) => e as Error);
+
+      const viaBatch = makeBatchFetch({
+        batch: (queries) => ({ status: 200, body: { success: true, data: { results: [
+          refusal.entry,
+          { data: { rows: [{ asked: queries[1].datasetName }], fields: [] } },
+        ] } } }),
+      });
+      const [refused, sibling] = await batchAdapter(viaBatch.fetchImpl).queryDatasetBatch([
+        { dataset: 'sales', selection },
+        { dataset: 'pipeline', selection },
+      ]);
+
+      expect(singleError).toBeInstanceOf(Error);
+      expect(refused.status).toBe('rejected');
+      const batchError = refused.status === 'rejected' ? (refused.reason as Error) : null;
+      expect(batchError?.constructor).toBe(singleError?.constructor);
+      expect(batchError?.message).toBe(singleError?.message);
+      expect((batchError as { code?: unknown })?.code).toBe((singleError as { code?: unknown })?.code);
+      expect(sibling.status === 'fulfilled' && sibling.value.rows).toEqual([{ asked: 'pipeline' }]);
+    });
+  }
+});
+
+describe('queryDatasetBatch: a batch refused whole (objectstack#32165)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+  const two = [{ dataset: 'sales', selection }, { dataset: 'pipeline', selection }];
+
+  it('a server without the batch door: each query goes through the single door, and later calls skip the batch', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({});
+    const adapter = batchAdapter(fetchImpl);
+    const outcomes = await adapter.queryDatasetBatch(two);
+    expect(batchCalls(calls)).toHaveLength(1);
+    expect(singleCalls(calls)).toHaveLength(2);
+    expect(outcomes.map((o) => (o.status === 'fulfilled' ? o.value.rows[0].asked : null))).toEqual(['sales', 'pipeline']);
+
+    await adapter.queryDatasetBatch(two);
+    expect(batchCalls(calls)).toHaveLength(1);
+    expect(singleCalls(calls)).toHaveLength(4);
+  });
+
+  it('a bare 404 no ObjectStack route wrote reads as the batch door absent too', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: () => ({ status: 404, body: { error: 'Not found' } }) });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(two);
+    expect(singleCalls(calls)).toHaveLength(2);
+    expect(outcomes.every((o) => o.status === 'fulfilled')).toBe(true);
+  });
+
+  it('no analytics service (501 NOT_IMPLEMENTED): every query is refused as the single door refuses it, with no fallback request', async () => {
+    const body = { success: false, error: { code: 'NOT_IMPLEMENTED', message: 'Analytics dataset query is not available on this deployment (no analytics service with queryDataset).' } };
+    const { fetchImpl, calls } = makeBatchFetch({ batch: () => ({ status: 501, body }) });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(two);
+    expect(singleCalls(calls)).toHaveLength(0);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe('rejected');
+      expect(isAnalyticsNotInstalledError(outcome.status === 'rejected' ? outcome.reason : null)).toBe(true);
+    }
+  });
+
+  it('not signed in (401 UNAUTHENTICATED): every query carries the single door\'s unauthenticated error', async () => {
+    const body = { success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication required.' } };
+    const viaSingle = makeBatchFetch({ single: () => ({ status: 401, body }) });
+    const singleError = await batchAdapter(viaSingle.fetchImpl).queryDataset('sales', selection).then(() => null, (e: unknown) => e as Error);
+    const { fetchImpl } = makeBatchFetch({ batch: () => ({ status: 401, body }) });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(two);
+    for (const outcome of outcomes) {
+      const reason = outcome.status === 'rejected' ? (outcome.reason as Error) : null;
+      expect(reason?.constructor).toBe(singleError?.constructor);
+      expect(reason?.message).toBe(singleError?.message);
+    }
+  });
+
+  it('an answer that does not carry one result per query refuses every query loudly', async () => {
+    const { fetchImpl } = makeBatchFetch({ batch: () => ({ status: 200, body: { success: true, data: { results: [] } } }) });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(two);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe('rejected');
+      expect(String(outcome.status === 'rejected' && (outcome.reason as Error).message)).toMatch(/0 results for 2 queries/);
+    }
+  });
+
+  it('a request that fails in transit refuses every query it carried with that failure', async () => {
+    const failure = new TypeError('Failed to fetch');
+    const { fetchImpl } = makeBatchFetch({ batch: () => { throw failure; } });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(two);
+    expect(outcomes).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }]);
   });
 });

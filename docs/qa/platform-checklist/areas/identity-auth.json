@@ -3157,6 +3157,165 @@
           "ref": "#32019"
         }
       ]
+    },
+    {
+      "id": "identity-auth.console-two-factor-prompt-phone-doors",
+      "title": "The Console's phone doors on a two-factor account ask for the code: phone + password and the phone code each move to the two-factor step instead of an error, and a code completes the sign-in",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "a user of this run with an email, a phone number, a known password and a verified TOTP enrollment: every step"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase development boot (dogfood §0) with OS_AUTH_TWO_FACTOR=true and OS_AUTH_PHONE_NUMBER_ENABLED=true on the os dev command (the switches identity-auth.two-factor-verify-to-activate fixtures.requires[0] and identity-auth.phone-signin-surfaces fixtures.requires[2] name); GET /api/v1/auth/config answers data.features.twoFactor and data.features.phoneNumber true. The console bundle built from this tree",
+          "the user: created with a phone number and a known password as identity-auth.auth-method-matrix creates its phone user, then enrolled and VERIFIED in TOTP by the walk identity-auth.two-factor-verify-to-activate drives (signed in by email: POST /api/v1/auth/two-factor/enable { password }, one correct code). Keep the TOTP secret; codes come from the copied RFC 6238 helper",
+          "the phone-code legs only: data.features.phoneNumberOtp true on this boot. On a development boot the SMS log transport prints the code in the server log (identity-auth.auth-method-matrix, the phone OTP step)"
+        ],
+        "knownGaps": [
+          "the verify-email half of #32287 (ui/apps/console/src/pages/auth/VerifyEmailPage.tsx#VerifyEmailPage reads a two-factor challenge from the verification link as 'Email verified' and sends the person to sign in) needs a verification mail for an enrolled account, which this fixture does not send; it is held by ui/apps/console/src/pages/auth/__tests__/VerifyEmailPage-11633.test.tsx and not driven here"
+        ]
+      },
+      "steps": [
+        "signed out, open /login; enter the user's phone number and password in the sign-in form and submit; read the page and the network log",
+        "enter a current TOTP code and verify; read where the Console lands",
+        "sign out; on /login choose the phone-code way in, request a code for the same number, read the code from the server log and submit it; read the page",
+        "enter a current TOTP code and verify",
+        "control: sign out and sign in with the phone number and a wrong password"
+      ],
+      "acceptance": [
+        {
+          "clause": "phone + password on a two-factor account moves to the two-factor step, never to a credentials error",
+          "oracle": "dom",
+          "verify": "POST /api/v1/auth/sign-in/phone-number answers 200 with twoFactorRedirect: true and no token; the form shows the two-factor step ('Two-factor authentication', 'Enter the 6-digit code from your authenticator app.') and not 'Invalid phone number or password.' (ui/packages/auth/src/createAuthClient.ts#createAuthClient: signInWithPhonePassword reads the challenge through readTwoFactorChallenge; ui/packages/auth/src/LoginForm.tsx#LoginForm)",
+          "evidence": "the sign-in answer in the network log and a screenshot of the step"
+        },
+        {
+          "clause": "a TOTP code at that step completes the sign-in as this user",
+          "oracle": "network",
+          "verify": "POST /api/v1/auth/two-factor/verify-totp answers 200; the Console leaves /login for the home page, and GET /api/v1/auth/get-session names this user",
+          "evidence": "the verify answer and the session read"
+        },
+        {
+          "clause": "the phone code on a two-factor account moves to the same step, never to 'no account for this number'",
+          "oracle": "dom",
+          "verify": "POST /api/v1/auth/phone-number/verify answers twoFactorRedirect: true and no session; the form shows the two-factor step and not 'No account is registered for this phone number.' (createAuthClient's signInWithPhoneOtp); a TOTP code then completes the sign-in as in acceptance[1]",
+          "evidence": "the verify answer and a screenshot of the step"
+        },
+        {
+          "clause": "control: a wrong password still reads as a credentials error and asks for no code",
+          "oracle": "dom",
+          "verify": "the form shows 'Invalid phone number or password.' and no two-factor step",
+          "evidence": "a screenshot of the error"
+        }
+      ],
+      "negative": [
+        "landing signed in after the phone password or phone code alone, with no second factor asked, is a FAIL: the enrolled factor was skipped"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "auth-state-leak",
+        "automation-input"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/auth/src/__tests__/twoFactorSignIn-29105.test.tsx, ui/packages/auth/src/__tests__/twoFactorSignIn-client-29105.test.ts and ui/apps/console/src/pages/auth/__tests__/VerifyEmailPage-11633.test.tsx; no live spec signs a two-factor account in by phone"
+      },
+      "source": [
+        "ui/packages/auth/src/createAuthClient.ts#createAuthClient (readTwoFactorChallenge, signInWithPhonePassword, signInWithPhoneOtp)",
+        "ui/packages/auth/src/LoginForm.tsx#LoginForm (both phone branches enter the two-factor step)",
+        "ui/packages/auth/src/AuthProvider.tsx#AuthProvider",
+        "ui/apps/console/src/pages/auth/VerifyEmailPage.tsx#VerifyEmailPage",
+        "#32195 (phone + password), #32287 (phone code and the verify-email page)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the Console's phone doors continue to the two-factor step (#32195, #32287). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.console-sign-out-and-ended-session",
+      "title": "Sign-out leaves none of the signed-out user's browser state and no return link, while a session that ended on the server sends the next in-app navigation to sign-in with its return link",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "browser",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123): the signed-out user and the revoked session",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user, password changed so the session is not held: the next person to sign in"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot on its own port and file DB (dogfood §0); the console bundle built from this tree (pnpm console:build); one browser profile for the tab legs",
+          "a second client for the revocation: curl or a second browser context signed in as the admin, which calls POST /api/v1/auth/revoke-other-sessions (better-auth's session revocation, packages/plugins/plugin-auth/src/auth-route-ledger.ts)"
+        ]
+      },
+      "steps": [
+        "sign in as the admin; open a showcase list and one record; in the page's devtools write localStorage 'qa-probe-<run>' and sessionStorage 'qa-probe-<run>'; list both stores' keys",
+        "sign out from the user menu; on the login page list both stores' keys again and read the URL",
+        "sign in as the org member; read where the Console lands",
+        "sign out; sign in as the admin in the tab and open a showcase record; from the second client, signed in as the admin, POST /api/v1/auth/revoke-other-sessions",
+        "in the tab, click another app navigation entry (no reload); read the network log and the URL"
+      ],
+      "acceptance": [
+        {
+          "clause": "sign-out sweeps both stores down to the device keys before the sign-in page shows",
+          "oracle": "dom",
+          "verify": "after sign-out both stores hold only keys from the kept set: auth-session-token, auth-session-user-id, vite-ui-theme, objectui-locale and objectui-locale-seed; qa-probe-<run> and every objectui:metadata:* key are gone from both (ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState, run by ui/packages/auth/src/AuthProvider.tsx#AuthProvider on every sign-out path)",
+          "evidence": "the two key lists before and after"
+        },
+        {
+          "clause": "an explicit sign-out carries no return link, so the next person lands on their own home",
+          "oracle": "dom",
+          "verify": "the login URL after sign-out carries no ?redirect=; the member's sign-in lands on /home, not on the admin's record (ui/apps/console/src/components/ProtectedRoute.tsx#LoginRedirect, sessionEndedBySignOut)",
+          "evidence": "the two URLs"
+        },
+        {
+          "clause": "a session ended on the server is noticed on the next in-app navigation, and the tab goes to sign-in keeping where it was going",
+          "oracle": "network",
+          "verify": "after the revocation the navigation's API request answers 401, the Console sends one GET /api/v1/auth/get-session, which answers no session, and the tab moves to /login?redirect=<the path it navigated to>, with no uf_* list params in it (ui/packages/auth/src/createAuthenticatedFetch.ts#createAuthenticatedFetch reports the 401 to ui/packages/auth/src/session-end-events.ts#sessionEndEvents; AuthProvider re-checks; LoginRedirect keeps the path)",
+          "evidence": "the 401, the session read and the URL"
+        }
+      ],
+      "negative": [
+        "a 401 taken as the verdict, signing the tab out while get-session still answers the session, is a FAIL: one endpoint may refuse for its own reasons (session-end-events.ts); this item cannot provoke such a 401 on stock, so score it from the pins",
+        "after sign-out, any key the signed-out user's session wrote that survives outside the kept set is a FAIL, named by key"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "auth-state-leak",
+        "shared-browser-tab"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/auth/src/__tests__/signOut-client-cache-purge-5198.test.tsx, ui/packages/auth/src/__tests__/sessionUserChangePurge-5664.test.tsx, ui/packages/auth/src/__tests__/AuthProvider.test.tsx, ui/packages/auth/src/__tests__/createAuthenticatedFetch.test.tsx and ui/apps/console/src/components/ProtectedRoute.signOutListState-29174.test.tsx; no live spec signs out and revokes"
+      },
+      "source": [
+        "ui/packages/auth/src/ActiveOrganizationStorage.ts#purgeSignedOutUserClientState",
+        "ui/packages/auth/src/AuthProvider.tsx#AuthProvider (the sign-out purge, the session-end re-check)",
+        "ui/packages/auth/src/session-end-events.ts#sessionEndEvents and ui/packages/auth/src/createAuthenticatedFetch.ts#createAuthenticatedFetch",
+        "ui/apps/console/src/components/ProtectedRoute.tsx#LoginRedirect",
+        "ui/packages/auth/src/beforeSignOut.ts#runBeforeSignOut (steps that run under the ending session)",
+        "#30490 (no return link after sign-out), #32048 (every sign-out clears the user's browser storage), #32207 (a session ended on the server returns to sign-in)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — sign-out clears the signed-out user's browser state and drops the return link, and a server-ended session returns to sign-in (#30490, #32048, #32207). Scoped sweep #32270 (epic #32022 M4, the zero-citation close-out), read from source at 60b99f8f; no live run made",
+          "ref": "#32270"
+        }
+      ]
     }
   ]
 }

@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 294 |
-| Object name statically decidable | 204 |
-| Object name chosen at run time | 90 |
-| Against a tenancy-enabled object | 197 |
+| Write call sites | 296 |
+| Object name statically decidable | 205 |
+| Object name chosen at run time | 91 |
+| Against a tenancy-enabled object | 198 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 226 |
-| Provably carrying none | 11 |
+| Threading a tenant context | 227 |
+| Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 57 |
 | …and decidably tenancy-enabled | 30 |
-| Threading a decidably elevated context | 162 |
+| Threading a decidably elevated context | 163 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 121 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-10 at `c6e96d157`.
+Measured on 2026-11-10 at `2850beca7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1112 |
+| tracked non-test sources scanned | 1118 |
 | engine-shaped types recognised | 128 |
 | declared objects in the registry | 136 |
-| same-named calls subtracted as non-engine | 261 |
+| same-named calls subtracted as non-engine | 276 |
 
 ## Every site
 
@@ -191,6 +191,8 @@ Measured on 2026-11-10 at `c6e96d157`.
 | `packages/plugins/plugin-auth/src/service-account-owner-leaves.ts` | `update` | `sys_user` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-auth/src/session-tombstone.ts` | `update` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/sso-client-secret.ts` | `update` | `sys_sso_provider` | disabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `IDP_GROUP_MAPPING_OBJECT` | undecidable | PROVABLY NONE | 1 |
+| `packages/plugins/plugin-auth/src/sso-provider-lifecycle.ts` | `delete` | `sys_user_permission_set` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/sys-session-revoke.ts` | `update` | `SystemObjectName.SESSION` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/attachment-reclaim.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-email/src/email-plugin.ts` | `insert` | `object` | undecidable | elevated | 1 |

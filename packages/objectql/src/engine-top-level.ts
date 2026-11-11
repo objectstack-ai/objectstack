@@ -2455,6 +2455,22 @@ function withholdInsertReadonlyFromHooks(
  * exists to prevent. Every key handed back is dropped from the returned record
  * for the same reason.
  *
+ * An AUDIT PROVENANCE key (`AUDIT_PROVENANCE_FIELDS`) not handed back is one
+ * whose caller value the row will not store: the audit binder stamped it from
+ * the session or the clock (`created_by` is the measured case) or a hook
+ * removed it. The static strip never sees that value, so it cannot report it,
+ * and the caller was told nothing — while the update path reports the same
+ * forgery. Each such key whose stored value differs from the caller's is
+ * pushed onto `superseded`, and the insert reports it under `droppedFields`
+ * reason `readonly` and refuses it under `strictReadonlyWrites`, like every
+ * reported drop. A caller value equal to what is stored was not lost, so it
+ * is not pushed: the console toasts every reported field, and strict does not
+ * refuse a value it would have stored anyway.
+ *
+ * Only the audit provenance keys. Any other read-only key an app's hook
+ * assigns stays the hook's write and is not reported (#14259): the hook owns
+ * the value it derives, where the audit columns are the platform's own.
+ *
  * @returns the row's `hookWrittenKeys`, narrowed by every key handed back
  *   (`undefined` stays `undefined`).
  */
@@ -2463,6 +2479,7 @@ function handBackWithheldInsertReadonly(
   withheld: Readonly<Record<string, unknown>>,
   shown: ReadonlyMap<string, unknown>,
   hookWrittenKeys: ReadonlySet<string> | undefined,
+  superseded?: string[],
 ): ReadonlySet<string> | undefined {
   let narrowed: Set<string> | undefined;
   for (const [key, callerValue] of Object.entries(withheld)) {
@@ -2478,7 +2495,13 @@ function handBackWithheldInsertReadonly(
     } else {
       handBack = shown.has(key) && Object.is(target[key], shown.get(key));
     }
-    if (!handBack) continue;
+    if (!handBack) {
+      if (
+        (AUDIT_PROVENANCE_FIELDS as readonly string[]).includes(key) &&
+        (!present || !Object.is(target[key], callerValue))
+      ) superseded?.push(key);
+      continue;
+    }
     target[key] = callerValue;
     if (hookWrittenKeys?.has(key)) {
       narrowed ??= new Set(hookWrittenKeys);

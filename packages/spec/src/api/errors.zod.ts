@@ -325,6 +325,14 @@ export const FieldErrorSchema = lazySchema(() => z.object({
    * users for a field declared `label: '处罚金额'`.
    */
   label: z.string().optional().describe('Field display label in the caller’s locale'),
+  /**
+   * [#32279] The full prescription behind a one-line `message`: the rule, why
+   * it holds and the fix, for a refusal whose account does not fit a line (a
+   * retired query key or aggregation, a refused filter comparand). `message`
+   * is then the line a client shows as it is, and `hint` is what an author or
+   * an AI client reads to fix the request. Absent when `message` says it all.
+   */
+  hint: z.string().optional().describe('The full prescription behind a one-line message, when there is more to say'),
   value: z.unknown().optional().describe('The invalid value that was provided'),
   /**
    * The violated constraint's discrete values, so a client can format its own
