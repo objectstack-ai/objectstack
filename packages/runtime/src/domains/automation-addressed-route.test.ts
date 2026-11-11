@@ -64,7 +64,10 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
         getRun: vi.fn(async (runId: string) => ({ id: runId, flowName: 'trigger' })),
     };
     const ql = { registry: registryWith(h) };
-    const services: Record<string, unknown> = { automation, objectql: ql };
+    // `auth` signs in the caller `dispatch()` resolves for itself (the catch-all
+    // seam below); `handleAutomation` is handed its execution context directly.
+    const auth = { api: { getSession: async () => ({ user: { id: 'u1' } }) } };
+    const services: Record<string, unknown> = { automation, objectql: ql, auth };
     const resolve = (name: string) => services[name];
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
@@ -77,7 +80,13 @@ function dispatcherWith(h: Holdings, flowNames: string[] = ['send_digest', 'ping
             body: answered.response?.body as any,
         };
     };
-    return { call, automation };
+    // What a catch-all host (`createHonoApp`) does with any `/api/v1/*` path:
+    // hand it to `dispatch()` and answer what comes back.
+    const dispatch = async (path: string, method: string) => {
+        const answered = await dispatcher.dispatch(method, path, {}, {}, { request: new Request(`http://host/api/v1${path}`, { method }) } as any, '/api/v1');
+        return { handled: answered.handled, status: answered.response?.status, body: answered.response?.body as any };
+    };
+    return { call, dispatch, automation };
 }
 
 const ONE_HOLDER: Holdings = { packages: { 'flow:send_digest': [CRM] }, environment: ['flow:ping', 'flow:crm'] };
@@ -249,7 +258,7 @@ describe('the door\'s own literals are never an addressed name, and never the ba
     });
 });
 
-describe('the legacy trigger is two segments bare, three addressed, and nothing else at three', () => {
+describe('the legacy trigger is two segments bare, three addressed, and nothing else at any depth', () => {
     it('`trigger/:x/:y` whose `:x` is no address is declined — the flow `:x` never runs', async () => {
         const { call, automation } = dispatcherWith(ONE_HOLDER);
         expect((await call('/trigger/nope/send_digest', 'POST')).handled).toBe(false);
@@ -257,11 +266,65 @@ describe('the legacy trigger is two segments bare, three addressed, and nothing 
         expect(automation.execute).not.toHaveBeenCalled();
     });
 
+    it('a bare call past the bound is declined at every depth — the flow `:x` never runs (before the bound it RAN, tail ignored)', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER, ['send_digest', 'runs']);
+        for (const path of [
+            '/trigger/send_digest/a/b',
+            '/trigger/send_digest/a/b/c',
+            // The deep `POST` shapes a mounted host routes here by its parameters:
+            // the run doors of a flow named `trigger` read as `trigger/runs/…`.
+            '/trigger/runs/r1/cancel',
+            '/trigger/runs/r1/resume',
+            '/trigger/runs/r1/restore-suspension',
+        ]) {
+            expect([path, (await call(path, 'POST')).handled]).toEqual([path, false]);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('an addressed call past the bound is declined — neither the namespace nor the name runs as a flow', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER);
+        for (const path of ['/trigger/crm/send_digest/extra', '/trigger/_env/ping/extra', '/trigger/crm/runs/r1/resume']) {
+            expect([path, (await call(path, 'POST')).handled]).toEqual([path, false]);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('on a catch-all host it is declined at `dispatch()` — the seam `createHonoApp` hands every path — nothing run', async () => {
+        // `createHonoApp` answers a declined dispatch with its own 404, as for
+        // `/actions` past its arity; the mounted host's `ROUTE_NOT_FOUND` is
+        // pinned over a socket in `automation-every-verb.hono.integration.test.ts`.
+        const { dispatch, automation } = dispatcherWith(ONE_HOLDER);
+        for (const path of ['/automation/trigger/send_digest/a/b', '/automation/trigger/crm/send_digest/extra']) {
+            expect([path, (await dispatch(path, 'POST')).handled]).toEqual([path, false]);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — the same catch-all seam serves the bare and the addressed legacy trigger', async () => {
+        const { dispatch, automation } = dispatcherWith(ONE_HOLDER);
+        for (const path of ['/automation/trigger/send_digest', '/automation/trigger/crm/send_digest']) {
+            const answer = await dispatch(path, 'POST');
+            expect([path, answer.handled, answer.status ?? 200], JSON.stringify(answer.body)).toEqual([path, true, 200]);
+        }
+        expect(automation.execute.mock.calls.map((c: any[]) => c[0])).toEqual(['send_digest', 'send_digest']);
+    });
+
     it('CONTROL — another verb at three segments is the flow `trigger`\'s: its run read answers', async () => {
         const { call, automation } = dispatcherWith(ONE_HOLDER, ['trigger']);
         const answer = await call('/trigger/runs/r1', 'GET');
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(automation.getRun).toHaveBeenCalledWith('r1');
+    });
+
+    it('CONTROL — another verb at four segments is the flow `trigger`\'s too: a run door\'s shape answers its 405, never declined', async () => {
+        const { call, automation } = dispatcherWith(ONE_HOLDER, ['trigger']);
+        for (const [path, method] of [['/trigger/runs/r1/resume', 'PUT'], ['/trigger/runs/r1/cancel', 'GET']] as const) {
+            const answer = await call(path, method);
+            expect([path, method, answer.status, answer.headers?.Allow, codeOf(answer)])
+                .toEqual([path, method, 405, 'POST', 'METHOD_NOT_ALLOWED']);
+        }
+        expect(automation.execute).not.toHaveBeenCalled();
     });
 
     it('CONTROL — the addressed and the bare legacy trigger run their flow', async () => {
