@@ -1225,6 +1225,15 @@ describe('with SSO domain verification on, an OIDC provider creates an account o
     expect(written(rp).users).toEqual(['bob@acme.com']);
   });
 
+  it("the IdP's email_verified claim does not mark the account it creates verified", async () => {
+    const rp = await verifiedRp();
+    // `idToken` always asserts `email_verified: true`.
+    expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.com' })));
+    const bob = rp.engine.tables.get('sys_user')!.find((u: any) => u.email === 'bob@acme.com');
+    expect(bob).toBeDefined();
+    expect(bob.email_verified === true || bob.email_verified === 1).toBe(false);
+  });
+
   it('admits an address exactly at the second entry of a multi-entry list', async () => {
     const rp = await verifiedRp('acme.com, acme.co.uk');
     expectAdmitted(await signInThroughIdp(rp, await idToken({ email: 'bob@acme.co.uk' })));
