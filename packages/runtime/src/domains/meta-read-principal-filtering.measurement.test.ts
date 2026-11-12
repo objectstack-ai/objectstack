@@ -82,6 +82,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+// Paid at collection: the dispatcher reaches it through a dynamic import.
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /** The header the auth double reads to decide which principal a request is. */
