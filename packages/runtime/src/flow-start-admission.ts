@@ -200,6 +200,26 @@ export interface FlowDeclaredRecordRead {
     many: boolean;
 }
 
+/**
+ * [ADR-0150 D3/D4, #31696] How {@link flowDeclaredRecordReads} reads the flows
+ * a walk reaches, the way the engine's run reads them: the started flow, and
+ * each `subflow` / `map` callee resolved from the CALLING flow's package (the
+ * engine's `resolveFlowKey`), never from the bare name alone. A flow name two
+ * namespaces hold is refused by the bare `getFlow`, while the engine runs the
+ * caller package's own flow of that name; the walk reads that one.
+ * `flow-slot-view.ts` builds it ({@link FlowWalkReads}, `flowWalkReads`).
+ */
+export interface FlowWalkReads {
+    /** The package whose flow the started flow `flowName` is, `null` for none. */
+    rootPackage(flowName: string): Promise<string | null>;
+    /**
+     * The flow a call by `name` from a flow of package `callerPackageId`
+     * reaches, and the package holding it (`null` for none). Throws the
+     * refusal the engine's call would answer (`409`, every candidate named).
+     */
+    callee(name: string, callerPackageId: string | null): Promise<{ flow: unknown; packageId: string | null }>;
+}
+
 /** How deep {@link flowDeclaredRecordReads} follows `subflow` and `map` inputs into callee flows. */
 const DECLARED_READ_CALLEE_DEPTH = 8;
 
@@ -273,26 +293,57 @@ function recordOf(value: unknown): Record<string, unknown> | undefined {
  * Read through the automation service's own `getFlow`, the probe
  * {@link flowStartRefusal} reads; a service that cannot be asked, or a flow it
  * does not serve, declares nothing.
+ *
+ * [ADR-0150 D3/D4, #31696] A callee is read the way the run reads it: from
+ * the calling flow's package, through `walk` ({@link FlowWalkReads}), so P's
+ * flow calling a subflow name another namespace also holds reads P's own
+ * subflow, as the engine runs it. Without `walk`, every callee is the bare
+ * `getFlow` read, which refuses a shared name (fail closed).
  */
 export async function flowDeclaredRecordReads(
     automation: unknown,
     flowName: string,
+    walk?: FlowWalkReads,
 ): Promise<ReadonlyMap<string, readonly FlowDeclaredRecordRead[]>> {
     const svc = automation as { getFlow?: (name: string) => Promise<unknown> } | null | undefined;
     if (typeof svc?.getFlow !== 'function') return new Map();
-    const getFlow = (name: string): Promise<unknown> => svc.getFlow!(name);
-    return declaredReadsOf(getFlow, flowName, new Set(), 0);
+    const root: FlowRead = {
+        flow: () => svc.getFlow!(flowName),
+        packageId: async () => (walk ? walk.rootPackage(flowName) : null),
+    };
+    const callee = async (name: string, callerPackageId: string | null): Promise<FlowRead> => {
+        if (!walk) return { flow: () => svc.getFlow!(name), packageId: async () => null };
+        const read = await walk.callee(name, callerPackageId);
+        return { flow: async () => read.flow, packageId: async () => read.packageId };
+    };
+    return declaredReadsOf(root, callee, flowName, new Set(), 0);
 }
 
+/** One flow a walk reads: its definition, and the package holding it (its place on the walk's path). */
+interface FlowRead {
+    flow(): Promise<unknown>;
+    packageId(): Promise<string | null>;
+}
+
+/**
+ * A flow on the walk's path: its package and its name, so a callee of one
+ * name held by another namespace is another flow, never a re-entry. A walk
+ * with no {@link FlowWalkReads} reads every package as `null`: the name alone.
+ */
+const pathKeyOf = (packageId: string | null, name: string): string => `${packageId ?? ''}\u0000${name}`;
+
 async function declaredReadsOf(
-    getFlow: (name: string) => Promise<unknown>,
+    self: FlowRead,
+    callee: (name: string, callerPackageId: string | null) => Promise<FlowRead>,
     flowName: string,
     onPath: Set<string>,
     depth: number,
 ): Promise<Map<string, FlowDeclaredRecordRead[]>> {
     const reads = new Map<string, FlowDeclaredRecordRead[]>();
-    if (onPath.has(flowName) || depth > DECLARED_READ_CALLEE_DEPTH) return reads;
-    const flow = (await getFlow(flowName)) as FlowParsed | null | undefined;
+    if (depth > DECLARED_READ_CALLEE_DEPTH) return reads;
+    const selfKey = pathKeyOf(await self.packageId(), flowName);
+    if (onPath.has(selfKey)) return reads;
+    const flow = (await self.flow()) as FlowParsed | null | undefined;
     if (!flow || typeof flow !== 'object') return reads;
     const inputs = new Set<string>();
     const add = (input: string, read: FlowDeclaredRecordRead): void => {
@@ -332,7 +383,7 @@ async function declaredReadsOf(
         const name = handedOnVariable(slot);
         return name !== undefined && inputs.has(name) ? name : undefined;
     };
-    onPath.add(flowName);
+    onPath.add(selfKey);
     try {
         for (const graph of graphs) {
             for (const node of graph.nodes) {
@@ -355,9 +406,9 @@ async function declaredReadsOf(
                     const input = inputOf(config.recordId);
                     if (object !== undefined && input !== undefined) add(input, { object, many: false });
                 } else if (type === 'subflow' || type === 'map') {
-                    const callee = literalString(config, 'flowName');
+                    const calleeName = literalString(config, 'flowName');
                     const handed = recordOf(config.input);
-                    if (callee === undefined || handed === undefined) continue;
+                    if (calleeName === undefined || handed === undefined) continue;
                     // What each callee input carries: one of this flow's inputs
                     // as it is, or (a `map`) one item of an input it iterates.
                     const iterated = type === 'map' ? inputOf(config.collection) : undefined;
@@ -369,7 +420,10 @@ async function declaredReadsOf(
                         else if (iterated !== undefined && handedOnVariable(slot) === iterator) carried.push([calleeInput, iterated, true]);
                     }
                     if (carried.length === 0) continue;
-                    const calleeReads = await declaredReadsOf(getFlow, callee, onPath, depth + 1);
+                    // [#31696] From this flow's package, as the run resolves it.
+                    const calleeReads = depth + 1 > DECLARED_READ_CALLEE_DEPTH
+                        ? new Map<string, FlowDeclaredRecordRead[]>()
+                        : await declaredReadsOf(await callee(calleeName, await self.packageId()), callee, calleeName, onPath, depth + 1);
                     for (const [calleeInput, input, perItem] of carried) {
                         for (const read of calleeReads.get(calleeInput) ?? []) {
                             // One id read per item makes the input a list of ids;
@@ -382,7 +436,7 @@ async function declaredReadsOf(
             }
         }
     } finally {
-        onPath.delete(flowName);
+        onPath.delete(selfKey);
     }
     return reads;
 }

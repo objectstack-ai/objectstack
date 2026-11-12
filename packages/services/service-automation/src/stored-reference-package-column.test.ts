@@ -192,7 +192,7 @@ describe('R10 — the dispatch key\'s coordinates (flowDispatchHolder): the bare
     });
 });
 
-describe('R8 — a paused run gains the package that holds its flow', () => {
+describe('R8 — a run, paused or terminal, gains the package that holds its flow', () => {
     async function seed(engine: ObjectQL): Promise<void> {
         for (const row of [
             run('r1', ONE_HOLDER, 'paused'),
@@ -201,10 +201,13 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
             run('r4', TWO_HOLDERS, 'paused'),
             run('r5', ENV_FLOW, 'paused'),
             run('r6', NOBODY, 'paused'),
-            // Terminal and running rows are not asked (seat ruling Q4).
+            // [#31696 R3, ruling 6816878345] Terminal and running rows are asked
+            // too; a terminal row of a shared or environment name stays null.
             run('r7', ONE_HOLDER, 'completed'),
             run('r8', ONE_HOLDER, 'failed'),
             run('r9', ONE_HOLDER, 'running'),
+            run('r11', TWO_HOLDERS, 'completed'),
+            run('r12', ENV_FLOW, 'failed'),
             // Already names a package: never a candidate, never moved.
             run('r10', ONE_HOLDER, 'paused', { flow_package: 'com.acme.elsewhere' }),
         ]) {
@@ -212,7 +215,7 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
         }
     }
 
-    it('binds a paused run of a flow one package holds; leaves every other row naming no package', async () => {
+    it('binds every run of a flow one package holds, terminal history included; leaves a shared, environment or unheld name\'s rows naming no package (CONTROL)', async () => {
         const engine = await boot();
         await seed(engine);
 
@@ -222,17 +225,18 @@ describe('R8 — a paused run gains the package that holds its flow', () => {
             r1: A, r2: A,
             r3: P,
             r4: null, r5: null, r6: null,
-            r7: null, r8: null, r9: null,
+            r7: A, r8: A, r9: A,
             r10: 'com.acme.elsewhere',
+            r11: null, r12: null,
         });
         expect(report.bound).toEqual([
-            { name: ONE_HOLDER, rows: 2, packageId: A },
+            { name: ONE_HOLDER, rows: 5, packageId: A },
             { name: OVERRIDDEN, rows: 1, packageId: P },
         ]);
         expect(report.ambiguous).toEqual([
-            { name: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+            { name: TWO_HOLDERS, rows: 2, candidates: [`package "${A}"`, `package "${B}"`] },
         ]);
-        expect(report.unpackaged).toEqual([{ name: ENV_FLOW, rows: 1, holder: 'environment' }]);
+        expect(report.unpackaged).toEqual([{ name: ENV_FLOW, rows: 2, holder: 'environment' }]);
         expect(report.unheld).toEqual([{ name: NOBODY, rows: 1 }]);
     });
 

@@ -426,20 +426,21 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
 
   it('a type outside the slotted set keeps one item per name: the later write replaces the earlier', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    manager.registerInMemory('flow', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
+    // A webhook: `flow` joined the slotted set (#31696).
+    manager.registerInMemory('webhook', 'f', { name: 'f', _packageId: 'com.acme.alpha' });
     const later = { name: 'f', _packageId: 'com.acme.beta' };
-    manager.registerInMemory('flow', 'f', later);
-    expect(await manager.get('flow', 'f')).toBe(later);
-    expect(await manager.list('flow')).toEqual([later]);
+    manager.registerInMemory('webhook', 'f', later);
+    expect(await manager.get('webhook', 'f')).toBe(later);
+    expect(await manager.list('webhook')).toEqual([later]);
   });
 });
 
 /**
  * [ADR-0150 D3/D4, #32151] The in-memory store keeps one slot per
  * `(package, name)` for every type whose one-holder rule has narrowed to the
- * namespace — today `agent` and `skill` (objectql's
+ * namespace — `agent` and `skill` (objectql's
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`, #31701; objectql pins that set a subset
- * of `PACKAGE_SLOTTED_STORE_TYPES`). Two packages of two namespaces may each
+ * of `PACKAGE_SLOTTED_STORE_TYPES`), and `flow` (#31696). Two packages of two namespaces may each
  * install such a name, and the artifact door registers every package body's
  * items here through `register(…, { notify: false })`, stamped by
  * `applyProtection` (`_packageId`). On main 45f0f81f the store was keyed by
@@ -448,7 +449,7 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
  * answered the survivor.
  */
 describe('the in-memory store keeps one slot per (package, name) for every namespace-scoped type (ADR-0150 D4, #32151)', () => {
-  const NAMESPACE_SCOPED = ['agent', 'skill'] as const;
+  const NAMESPACE_SCOPED = ['agent', 'skill', 'flow'] as const;
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const shipped = (type: string, packageId: string, tag: string, envelope = false) => ({
