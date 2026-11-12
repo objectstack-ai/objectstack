@@ -79,8 +79,7 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -321,7 +320,7 @@ import {
     judgeExtensionFieldSuffix,
 } from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
-import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+import { applySeedBodiesOnHost, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
@@ -9693,6 +9692,8 @@ export class ObjectStackProtocolImplementation implements
         result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
+        /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
+        judged?: { body: unknown; packageId: string | null };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
@@ -9731,16 +9732,8 @@ export class ObjectStackProtocolImplementation implements
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
         landed?: SeedAppliedLandedParsed[];
     }> {
-        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof applySeedBodies> = {
-            get engine() { return readEngine(); },
-            getMetaItem: (...a) => this.getMetaItem(...a),
-            // [#25779] The `field-files` service, so a published seed's files
-            // are stored as the boot seed's are.
-            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
-        };
-        return applySeedBodies.call(host, bodies);
+        // [#30020 codemod] The body moved to `protocol-publish-batch.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return applySeedBodiesOnHost.call(protocolHost(this), bodies);
     }
 
     /**

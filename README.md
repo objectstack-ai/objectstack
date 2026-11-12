@@ -43,7 +43,6 @@ here instead of keeping its own copy.
 | Run the platform with no project yet | `npm i -g @objectstack/cli && os start` | Open `http://localhost:3000/_console/`. With no artifact to load, `os start` boots an empty kernel and you install apps from the Console marketplace ([`os start`](https://objectstack.ai/docs/deployment/cli#os-start)). |
 | Run a compiled app in the official image | `docker run -p 8080:8080 -v "$PWD/dist/objectstack.json:/srv/app/objectstack.json:ro" -e OS_DATABASE_URL -e OS_AUTH_SECRET -e OS_SECRET_KEY ghcr.io/objectstack-ai/objectstack:latest` | Export the three variables first. `latest` is for trying it; pin an exact `X.Y.Z` tag in production ([image README](./docker/README.md)). |
 | Ship a scaffolded app with Postgres | `docker build -t my-app . && docker compose up -d` | Run it inside the scaffolded project ([Ship it](#ship-it)). |
-| Look first, install nothing | [Open the CRM example on StackBlitz](https://stackblitz.com/github/objectstack-ai/hotcrm) | It runs in the browser. |
 | Work on the framework itself | `git clone https://github.com/objectstack-ai/objectstack.git` | Then follow [Hack on the framework](#hack-on-the-framework). |
 
 ## Try it in five minutes

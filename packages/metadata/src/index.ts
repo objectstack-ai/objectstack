@@ -8,7 +8,7 @@
  */
 
 // Main Manager
-export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataUnregisterOptions } from './metadata-manager.js';
+export { MetadataManager, type WatchCallback, type MetadataManagerOptions, type MetadataRegisterOptions, type MetadataUnregisterOptions } from './metadata-manager.js';
 
 // Plugin
 export {
