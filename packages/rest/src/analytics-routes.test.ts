@@ -672,7 +672,10 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
 //    registered ahead of the modules, already 409;
 //  - `?package=A.custom`, the other holder disabled and registered first: 404;
 //  - `?package=` the App pair, one module disabled and registered first: 404;
-//  - `?callerPackage=` the App pair with the pair installed: already 409.
+//  - `?callerPackage=` the App pair with the pair installed: already 409;
+//  - the publish probes' read for a publish of a pair the registry does not
+//    hold: the first registered module's dataset, and with a disabled holder
+//    registered first, nothing.
 describe('#32501 — the dataset doors at an exact pair address read the package it names', () => {
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
@@ -770,12 +773,15 @@ describe('#32501 — the dataset doors at an exact pair address read the package
     registry.disablePackage(B);
     ran(await both({ package: `${A}.custom` }), 'alpha sales', '?package=A.custom');
     ran(await both({ callerPackage: `${A}.custom` }), 'alpha sales', '?callerPackage=A.custom, not installed');
+    // …and the publish probes' read for a publish of A's pair the registry does not hold (BASE, disabled first: nothing found).
+    expect(await publishedItemReader(protocol as never, `${A}.custom`)('dataset', 'sales')).toMatchObject({ label: 'alpha sales' });
   });
 
   it.each([['disabled first', [M2, M1]], ['disabled second (order control)', [M1, M2]]] as const)('one module of the App disabled (%s): the App pair runs the enabled module\'s dataset (BASE, disabled first: 404)', async (_order, order) => {
     boot(order);
     registry.disablePackage(M2);
     ran(await both({ package: `${P}.custom` }), 'one sales', '?package= the App pair');
+    expect(await publishedItemReader(protocol as never, `${P}.custom`)('dataset', 'sales')).toMatchObject({ label: 'one sales' });
   });
 
   it.each([['one first', [M1, M2]], ['two first', [M2, M1]]] as const)('the publish probes\' dataset read (%s): a publish of the App pair the registry does not hold is refused naming both modules (BASE: the first registered module\'s dataset); registered, it was already refused', async (_order, order) => {
