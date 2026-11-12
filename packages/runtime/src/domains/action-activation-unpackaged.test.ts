@@ -120,7 +120,7 @@ interface Harness {
  * engine carries the REAL action activation projection over the REAL durable
  * store, and that store writes into {@link makeLedgerTable}.
  */
-function boot(opts: { writeError?: Error } = {}): Harness {
+function boot(opts: { writeError?: Error; metadata?: unknown } = {}): Harness {
     const { rows, engine: ledger } = makeLedgerTable(opts.writeError);
     let executed = 0;
     const objectDef = {
@@ -145,7 +145,7 @@ function boot(opts: { writeError?: Error } = {}): Harness {
     };
     projection.attach(new ObjectStoreActionActivationStore(ql));
 
-    const metadata: any = {
+    const metadata: any = opts.metadata ?? {
         load: async () => null,
         loadDiagnosed: async () => ({ data: null, degraded: false, errors: [] }),
         loadMany: async (type: string) => (type === 'action' ? STANDALONE : []),
@@ -291,5 +291,89 @@ describe('#22817 — a refused ledger write keeps ADR-0112\'s code and status to
         expect(statusOf(res)).toBe(503);
         expect(codeOf(res)).toBe('SERVICE_UNAVAILABLE');
         expect(h.rows).toEqual([]);
+    });
+});
+
+/**
+ * [#32517 location 2, ADR-0126 §4, ADR-0150] A host whose `protocol` serves no
+ * merged listing reads declarations from the metadata service's
+ * `loadMany('action')`: the bare-route holder rule and the activation door's
+ * ambiguity refusal both do. Two packages may each ship a standalone action of
+ * one name. The artifact door's `MemoryLoader` keeps both, but the unscoped
+ * `loadMany` folded them into the one saved last, so this host saw one holder
+ * and the flip of the name (one ledger row) switched both packages' actions.
+ * The real `MetadataManager` over the real `MemoryLoader` is the metadata
+ * service here.
+ *
+ * A stack whose `protocol` serves the merged listing (the composed artifact
+ * on `MetadataPlugin` + `ObjectQLPlugin` + `AppPlugin`) already saw both and
+ * answers the same before and after: 409 for the pair on two objects, 404 for
+ * the object-less pair. This host now answers what that stack answers.
+ *
+ * BASE (main `874166b60`'s `@objectstack/metadata` built): 200 and one row
+ * (`package_id` = the package saved last) in both cases.
+ */
+describe('[#32517] two packages\' same-named actions: the metadata-service-only host answers the flip as the merged-listing stack does', () => {
+    const OTHER = 'crm_contact';
+    const shipped = (packageId: string, objectName: string | undefined) => ({
+        name: 'shared_ping', label: `ping ${packageId}`, type: 'script',
+        ...(objectName === undefined ? {} : { objectName }),
+        _packageId: packageId, _provenance: 'package',
+    });
+
+    async function bootWithDoor(objectsOf: readonly [string | undefined, string | undefined]): Promise<Harness> {
+        const { MetadataManager, MemoryLoader } = await import('@objectstack/metadata');
+        const door = new MemoryLoader();
+        await door.save('action', 'shared_ping', shipped('com.acme.alpha', objectsOf[0]));
+        await door.save('action', 'shared_ping', shipped('com.acme.beta', objectsOf[1]));
+        const manager = new MetadataManager({ formats: ['json'], loaders: [door] });
+        const objects = [
+            { name: OBJECT, _packageId: PACKAGE, _provenance: 'package', actions: [] },
+            { name: OTHER, _packageId: PACKAGE, _provenance: 'package', actions: [] },
+        ];
+        const metadata: any = {
+            load: (type: string, name: string) => manager.load(type, name),
+            loadDiagnosed: (type: string, name: string) => manager.loadDiagnosed(type, name),
+            loadMany: (type: string) => manager.loadMany(type),
+            listObjects: async () => objects,
+            getObject: async (name: string) => objects.find((o) => o.name === name),
+        };
+        return boot({ metadata });
+    }
+
+    it('NARROWING — bound to two objects: 409 RESOURCE_CONFLICT naming both objects, and no row (BASE: 200 and one row)', async () => {
+        const h = await bootWithDoor([OBJECT, OTHER]);
+        const res = await flip(h, OTHER, 'shared_ping', false);
+        expect(statusOf(res), bodyOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        expect(bodyOf(res)).toContain(`'${OBJECT}'`);
+        expect(bodyOf(res)).toContain(`'${OTHER}'`);
+        expect(h.rows).toEqual([]);
+    });
+
+    it('NARROWING — both object-less: 404, no row, as the merged-listing stack answers (BASE: 200 and one row)', async () => {
+        const h = await bootWithDoor([undefined, undefined]);
+        const res = await flip(h, 'global', 'shared_ping', false);
+        expect(statusOf(res), bodyOf(res)).toBe(404);
+        expect(codeOf(res)).toBe('RESOURCE_NOT_FOUND');
+        expect(h.rows).toEqual([]);
+    });
+
+    it('CONTROL — one package\'s action on one object: the flip writes its row (unchanged)', async () => {
+        const { MetadataManager, MemoryLoader } = await import('@objectstack/metadata');
+        const door = new MemoryLoader();
+        await door.save('action', 'shared_ping', shipped('com.acme.alpha', OTHER));
+        const manager = new MetadataManager({ formats: ['json'], loaders: [door] });
+        const objects = [{ name: OTHER, _packageId: PACKAGE, _provenance: 'package', actions: [] }];
+        const h = boot({ metadata: {
+            load: (type: string, name: string) => manager.load(type, name),
+            loadDiagnosed: (type: string, name: string) => manager.loadDiagnosed(type, name),
+            loadMany: (type: string) => manager.loadMany(type),
+            listObjects: async () => objects,
+            getObject: async (name: string) => objects.find((o) => o.name === name),
+        } });
+        const res = await flip(h, OTHER, 'shared_ping', false);
+        expect(statusOf(res), bodyOf(res)).toBe(200);
+        expect(h.rows.map((r) => [r.name, r.package_id, r.active])).toEqual([['shared_ping', 'com.acme.alpha', false]]);
     });
 });
