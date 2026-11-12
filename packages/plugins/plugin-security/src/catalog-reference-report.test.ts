@@ -641,3 +641,74 @@ describe('[ADR-0131 D3/D4] SecurityPlugin runs the report at kernel:bootstrapped
     })))).toEqual([[{ organizationId: ORG, positions: { ghost_lead: 1 }, assignments: { items: ['up_ghost'] } }]]);
   });
 });
+
+/**
+ * [ADR-0150 D8] A grant whose package no longer serves its set, read onto a
+ * holder another grant of the same user, set and organization is bound to,
+ * confers nothing (`staleGrantBesideBoundGrant`, the rule the authorization
+ * resolver applies). The report lists exactly those rows, per organization.
+ */
+describe('[ADR-0150 D8] the report lists each stale-column grant beside a grant bound to the holder it reads', () => {
+  const Q = 'com.acme.q';
+  const GONE = 'com.acme.gone';
+  /** `solo` held by Q alone. */
+  const solo = { name: 'solo', _packageId: Q, systemPermissions: ['cap_solo'] };
+  const catalog = createSecurityCatalogReader({
+    registry: {
+      getItem: (type: string, name: string) => (type === 'permission' && name === 'solo' ? solo : undefined),
+      listItems: (type: string) => (type === 'permission' ? [solo] : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'solo' ? [Q] : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && name === 'solo' && packageId === Q ? solo : undefined,
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: () => undefined,
+      getPackage: (id: string) => ({ manifest: { id } }),
+      getAllPackages: () => [],
+    } as any,
+    metadata: { get: () => undefined, list: () => [] },
+  });
+  const grant = (id: string, user: string, column: string, organization = ORG) =>
+    ({ id, user_id: user, permission_set: 'solo', permission_set_package: column, organization_id: organization });
+  const rows = [
+    grant('g_bound', 'usr_a', Q),
+    grant('g_stale', 'usr_a', GONE),
+    // CONTROL: the same stale column with no bound grant beside it reads the one holder, as before.
+    grant('g_alone', 'usr_b', GONE),
+    // CONTROL: bound in another organization only.
+    grant('g_bound_elsewhere', 'usr_c', Q, OTHER_ORG),
+    grant('g_stale_here', 'usr_c', GONE),
+  ];
+  const engine: CatalogReferenceReportEngine = {
+    getObject: () => ({}),
+    find: async (object, options: any) =>
+      object === 'sys_user_permission_set' ? rows.slice(options.offset ?? 0, (options.offset ?? 0) + options.limit) : [],
+  };
+
+  it('lists the stale grant under its organization, with its package and the bound holder, and nothing else', async () => {
+    const report = await collectCatalogReferences(engine, { catalog });
+    expect(report.organizations.map((o) => ({ organizationId: o.organizationId, withheld: o.staleGrantsBesideBound })))
+      .toEqual([{
+        organizationId: ORG,
+        withheld: [{ id: 'g_stale', userId: 'usr_a', name: 'solo', packageId: GONE, holder: Q }],
+      }]);
+    expect(report.organizations.flatMap((o) => o.permissionSetGrants)).toEqual([]);
+  });
+
+  it('logs one error line for the category, with every listed grant in its meta', async () => {
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(engine, { catalog, logger });
+    const lines = logger.error.mock.calls.filter(([line]: any[]) => String(line).includes('no longer serves their permission set'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0][2]).toEqual({
+      count: 1,
+      organizations: {
+        items: [{
+          organizationId: ORG,
+          count: 1,
+          grants: { items: [{ id: 'g_stale', userId: 'usr_a', permissionSet: 'solo', packageId: GONE, holder: Q }] },
+        }],
+      },
+    });
+  });
+});

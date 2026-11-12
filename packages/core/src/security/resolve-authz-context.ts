@@ -85,6 +85,7 @@ import {
   type OrganizationReach,
 } from './organization-reach.js';
 import { derivePosture } from './posture-ladder.js';
+import { boundGrantPackages, staleGrantBesideBoundGrant } from './stale-grant-beside-bound.js';
 import {
   permissionSetHolderIsPlatform,
   resolveCatalogReference,
@@ -1491,6 +1492,28 @@ export function permissionSetSwitchedOff(
 /** [ADR-0150 D8 R4] Each ambiguous ledger row is said once per process, not once per request. */
 const ambiguousLedgerRowsSaid = new Set<string>();
 
+/** [ADR-0150 D8] Each grant withheld beside a bound one is said once per process, not once per request. */
+const staleGrantsBesideBoundSaid = new Set<string>();
+
+/**
+ * [ADR-0150 D8] Say, once per process, that the stored grant `grant` confers
+ * nothing: its package no longer serves its set, and another grant of the
+ * same user, set and organization is bound to the holder `body` it reads.
+ */
+function sayStaleGrantBesideBound(userId: string, grant: unknown, body: CatalogSetBody): void {
+  const column = String((grant as Record<string, unknown>).permission_set_package ?? '').trim();
+  const organizationId = grantOrganizationOf(grant);
+  const said = `${userId}\u0000${column}\u0000${body.name}\u0000${organizationId ?? ''}`;
+  if (staleGrantsBesideBoundSaid.has(said)) return;
+  staleGrantsBesideBoundSaid.add(said);
+  console.warn(
+    `[security] a sys_user_permission_set grant of user "${userId}" in organization "${organizationId ?? ''}" names permission set `
+    + `"${body.name}" of package "${column}", which no longer serves it; the set now reads package "${body.packageId}"'s, and `
+    + 'another grant of the same user, set and organization is bound to that package. This grant confers nothing: the bound '
+    + 'grant, with its validity window, grants the set. Remove this grant; the boot report lists every such grant.',
+  );
+}
+
 /**
  * [ADR-0150 D8 R4] The holders one switched-off `permission` row of the
  * ledger disables, read the way every other stored reference to a set is: the
@@ -2657,6 +2680,9 @@ export async function resolveUserAuthzGrants(
     takenHolders.add(key);
     psRowsAll.push({ ...body, active });
   };
+  // [ADR-0150 D8] The holders the user's stored grants are bound to — every
+  // row, its validity window open or not (`staleGrantBesideBoundGrant`).
+  const boundHolders = boundGrantPackages(upsRowsAll);
   for (const grant of applyingGrants) {
     const name = grantSetNameOf(grant);
     if (!name) continue;
@@ -2666,6 +2692,13 @@ export async function resolveUserAuthzGrants(
     // picked (`storedPermissionSetScope`).
     const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
+    // [ADR-0150 D8] A stale column read onto a holder another grant of this
+    // user, set and organization is bound to confers nothing: that bound
+    // grant, and its validity window, grant the holder's set.
+    if (staleGrantBesideBoundGrant(grant, body.packageId, boundHolders)) {
+      sayStaleGrantBesideBound(userId, grant, body);
+      continue;
+    }
     // [ADR-0150 D3] Platform standing is the PLATFORM's `admin_full_access`:
     // another package's set of that name is granted as any set is, where its
     // grant applies, and never anchors standing — nor carries its grant across

@@ -519,6 +519,11 @@ export {
   type SecurityCatalogResolution,
 } from './security-catalog.js';
 
+// ADR-0150 D8 — a grant whose package no longer serves its set confers nothing
+// beside a grant of the same user, set and organization bound to the holder it
+// reads: the authorization resolver and the boot report ask the one rule.
+export { boundGrantPackages, staleGrantBesideBoundGrant } from './stale-grant-beside-bound.js';
+
 // ADR-0131 D3/D4/D10 — the junction rows turned into the `permissionSets` each
 // position definition carries. Applied by the upgrade ceremony (`os migrate`),
 // never at boot.

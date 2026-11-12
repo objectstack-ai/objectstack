@@ -26,7 +26,14 @@
 
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ObjectKernel, PERMISSION_SET_SHARED_NAMESPACES, permissionSetHoldersMeet } from '@objectstack/core';
+import {
+    bindSecurityCatalogReader,
+    createSecurityCatalogReader,
+    ObjectKernel,
+    PERMISSION_SET_SHARED_NAMESPACES,
+    permissionSetHoldersMeet,
+    resolveUserAuthzGrants,
+} from '@objectstack/core';
 import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
@@ -245,8 +252,11 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
     const manifest = (id: string, namespace: string | undefined, sets: string[] = []) =>
         ({ id, name: id, version: '1.0.0', ...(namespace ? { namespace } : {}), ...(sets.length ? { permissions: sets.map(permissionSet) } : {}) }) as any;
 
-    /** Each door's answer for the incoming package: `admitted`, or `refused` with the rule's own error. */
-    async function doors(holderNs: string | undefined, incomingNs: string | undefined, name: string) {
+    /**
+     * Each door's answer for the incoming package: `admitted`, or `refused` with the rule's own error.
+     * `disableHolder` disables the holding package before the incoming one arrives.
+     */
+    async function doors(holderNs: string | undefined, incomingNs: string | undefined, name: string, opts: { disableHolder?: boolean } = {}) {
         const answer = async (run: () => unknown, refusedBy: (e: any) => boolean) => {
             try { await run(); return 'admitted'; } catch (error) {
                 if (refusedBy(error)) return 'refused';
@@ -257,15 +267,18 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         // The install gate: the holder's claim, then the incoming manifest declaring the name.
         const install = await bootBare();
         install.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) install.engine.registry.disablePackage(HOLDING);
         const installGate = await answer(() => install.engine.registry.installPackage(manifest(INCOMING, incomingNs, [name]), 'authored'), conflict);
         // The item seam: the incoming package installed with no claim, then registering the set's item.
         const seam = await bootBare();
         seam.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) seam.engine.registry.disablePackage(HOLDING);
         seam.engine.registry.installPackage(manifest(INCOMING, incomingNs), 'authored');
         const itemSeam = await answer(() => seam.engine.registry.registerItem('permission', permissionSet(name), 'name', INCOMING), conflict);
         // The save door: the incoming package (holding no item of the name) saves a set of it.
         const save = await bootBare();
         save.engine.registry.installPackage(manifest(HOLDING, holderNs, [name]), 'authored');
+        if (opts.disableHolder) save.engine.registry.disablePackage(HOLDING);
         save.engine.registry.installPackage(manifest(INCOMING, incomingNs), 'authored');
         const saveDoor = await answer(
             () => save.protocol.saveMetaItem({ type: 'permission', name, item: permissionSet(name), packageId: INCOMING }),
@@ -324,5 +337,45 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         expect(holders()).toEqual([HOLDING]);
         // …and a third package that meets the holder (no namespace) is still refused beside it.
         expect(() => engine.registry.installPackage(manifest('com.qa.third', undefined, ['qa_reader']), 'authored')).toThrow(SecurityCatalogNameConflictError);
+    });
+
+    /**
+     * [#31698, 6816011109 row 9] Two holders of one name, one of them disabled.
+     * `holdsPlatformPermissionSet` reads a name held with no address over the
+     * registry's holders; its "platform holder enabled, other holder disabled"
+     * row needs a second holder of a set a platform (`sys`) package holds,
+     * which the doors refuse, while that holder is disabled too. The column-less
+     * grant of a name two namespaces hold, one disabled, is the reachable half:
+     * its pinned answer is `main`'s at this change's merge.
+     */
+    it('row 9: a second holder of a platform (sys) set is refused at every door, also while the holder is disabled', async () => {
+        expect(await doors('sys', 'crm', 'qa_reader', { disableHolder: true })).toEqual(refusedEverywhere);
+    });
+
+    it('row 9: a column-less grant of a name crm and hr hold, hr disabled, confers what main answers (the bound grants as CONTROLs)', async () => {
+        const { engine } = await bootBare();
+        const set = (cap: string) => ({ ...permissionSet('qa_reader'), systemPermissions: [cap] });
+        engine.registry.installPackage(manifest(HOLDING, 'crm'), 'authored');
+        engine.registry.installPackage(manifest(INCOMING, 'hr'), 'authored');
+        engine.registry.registerItem('permission', set('cap_crm') as any, 'name', HOLDING);
+        engine.registry.registerItem('permission', set('cap_hr') as any, 'name', INCOMING);
+        const catalog = createSecurityCatalogReader({ registry: engine.registry as any, metadata: { get: () => undefined, list: () => [] } as any });
+        /** What one grant of `qa_reader` with this column confers, read by the authorization resolver. */
+        const confers = async (column: string | null) => {
+            const rows: Record<string, unknown[]> = {
+                sys_user: [{ id: 'u1', email: 'u1@example.com' }],
+                sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
+                sys_user_permission_set: [{ user_id: 'u1', permission_set: 'qa_reader', permission_set_package: column, organization_id: 'org_a' }],
+            };
+            const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string) => rows[object]?.[0], count: async () => 0 };
+            bindSecurityCatalogReader(ql, catalog);
+            return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
+        };
+        const read = async () => ({ columnLess: await confers(null), crm: await confers(HOLDING), hr: await confers(INCOMING) });
+        expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: ['cap_hr'] });
+        engine.registry.disablePackage(INCOMING);
+        // main's answer at the merge: the column-less grant stays refused, and the
+        // disabled holder's grant is never re-targeted to the enabled holder's set.
+        expect(await read()).toEqual({ columnLess: [], crm: ['cap_crm'], hr: [] });
     });
 });

@@ -23,7 +23,7 @@
  *   junction rows are not read at all.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveUserAuthzGrants } from './resolve-authz-context.js';
@@ -343,5 +343,87 @@ describe('[ADR-0150 D8 R1] a grant names its set\'s package beside its name', ()
     const unbound = await resolveScoped([{ permission_set: 'solo' }]);
     expect(bound.systemPermissions).toEqual(['cap_solo']);
     expect(JSON.stringify(bound)).toBe(JSON.stringify(unbound));
+  });
+});
+
+/**
+ * [ADR-0150 D8] A grant whose `permission_set_package` names a package that no
+ * longer serves its set is read by the resolution rule. Where that reading
+ * lands on a package another stored grant of the same user, set and
+ * organization is BOUND to, the stale grant confers nothing: the bound grant,
+ * with its validity window, grants that holder's set. Beside no bound grant
+ * it reads as before (D8 R1, the CONTROLs).
+ */
+describe('[ADR-0150 D8] a stale-column grant beside a grant bound to the holder it reads confers nothing', () => {
+  const Q = 'com.acme.q';
+  const GONE = 'com.acme.gone';
+  const NOW = Date.parse('2026-06-01T00:00:00Z');
+  const CLOSED = { valid_until: '2026-05-01T00:00:00Z' };
+  const NOT_YET = { valid_from: '2026-07-01T00:00:00Z' };
+  /** `solo` held by Q alone. */
+  const solo = { name: 'solo', _packageId: Q, systemPermissions: ['cap_solo'] };
+  const catalogOverQ = () =>
+    createSecurityCatalogReader({
+      registry: {
+        getItem: (type: string, name: string) => (type === 'permission' && name === 'solo' ? solo : undefined),
+        listItems: (type: string) => (type === 'permission' ? [solo] : []),
+        isPackageDisabled: () => false,
+        packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === 'solo' ? [Q] : []),
+        getPackageScopedItem: (type: string, name: string, packageId: string) =>
+          type === 'permission' && name === 'solo' && packageId === Q ? solo : undefined,
+        getEnvironmentScopedItem: () => undefined,
+        getArtifactItem: () => undefined,
+        getPackage: (id: string) => ({ manifest: { id } }),
+        getAllPackages: () => [],
+      },
+      metadata: { get: () => undefined, list: () => [] },
+    });
+  async function resolveOverQ(grants: Array<Record<string, unknown>>, tenantId = ORG_A) {
+    const ql = makeRecordingQl(tables(grants.map((g) => ({ organization_id: ORG_A, ...g }))));
+    bindSecurityCatalogReader(ql, catalogOverQ());
+    return resolveUserAuthzGrants(ql, 'u1', { tenantId, nowMs: NOW });
+  }
+  const stale = { permission_set: 'solo', permission_set_package: GONE };
+  const bound = { permission_set: 'solo', permission_set_package: Q };
+
+  it('⛔ the bound grant\'s window is closed, or not yet open: the stale grant does not grant the set in its place', async () => {
+    for (const [label, window] of [['closed', CLOSED], ['not yet open', NOT_YET]] as const) {
+      const out = await resolveOverQ([{ ...bound, ...window }, stale]);
+      expect(out.permissions, label).toEqual([]);
+      expect(out.systemPermissions, label).toEqual([]);
+    }
+  });
+
+  it('both grants open: the set is granted once, exactly as by the bound grant alone', async () => {
+    const both = await resolveOverQ([stale, bound]);
+    expect(both.systemPermissions).toEqual(['cap_solo']);
+    expect(JSON.stringify(both)).toBe(JSON.stringify(await resolveOverQ([bound])));
+  });
+
+  it('CONTROL — beside no bound grant the stale grant reads as before: the one holder\'s set', async () => {
+    const out = await resolveOverQ([stale]);
+    expect(out.systemPermissions).toEqual(['cap_solo']);
+  });
+
+  it('CONTROL — a bound grant of another organization leaves the stale grant of this one reading as before', async () => {
+    const out = await resolveOverQ([{ ...bound, ...CLOSED, organization_id: ORG_B }, stale]);
+    expect(out.systemPermissions).toEqual(['cap_solo']);
+  });
+
+  it('the withheld grant is said once per process, naming the set, the stale package and the bound holder', async () => {
+    // A stale package no other pin names: the process-wide memo has not said it yet.
+    const left = { ...stale, permission_set_package: 'com.acme.left' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await resolveOverQ([{ ...bound, ...CLOSED }, left]);
+      await resolveOverQ([{ ...bound, ...CLOSED }, left]);
+      const lines = warn.mock.calls.map(([line]) => String(line)).filter((line) => line.includes('confers nothing: the bound grant'));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('"solo"');
+      expect(lines[0]).toContain('"com.acme.left"');
+      expect(lines[0]).toContain(`"${Q}"`);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
