@@ -439,7 +439,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
 
     it('a draft takes the upload; after approval a link minted before is refused 403 with the reason, attaching and keeping nothing', async () => {
       const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
-      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Lyon', status: 'draft', created_by: users[0]!.id }, SYS);
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Lyon', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
       const claimId = String(created?.id ?? created?.record?.id ?? created);
 
       const draft = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
@@ -447,6 +447,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       const firstBody: any = await first.json();
       expect(first.status, JSON.stringify(firstBody)).toBe(200);
       expect(await invoicesOf(claimId)).toEqual([firstBody.data.fileId]);
+      expect((await stack.apiAs(memberToken, 'GET', `/data/${UPLOAD_CLAIM}/${claimId}`)).status, 'the member owns the claim').toBe(200);
 
       const late = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
       await ql.update(UPLOAD_CLAIM, { status: 'approved' }, { where: { id: claimId }, ...SYS });
