@@ -427,6 +427,90 @@ export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
   driver?: IDataDriver;
+  /**
+   * [#32154] Set by a host that will hand this manager its own logger later,
+   * through {@link MetadataManager.useHostLogger}. Until it does, the manager's
+   * `debug` / `info` lines are HELD and then replayed through the host's
+   * logger, so they follow the host's level (a boot at `warn` prints none of
+   * them, `OS_LOG_LEVEL=info` prints them all); `warn` and above print at
+   * once, as they always have. `MetadataPlugin` sets it and hands over the
+   * kernel's logger in `init()`. Without it, the manager logs through its own
+   * `info` logger exactly as before.
+   */
+  awaitHostLogger?: boolean;
+}
+
+/** [#32154] How many `debug` / `info` lines a manager holds while it waits for its host's logger. */
+const HELD_CHATTER_CAP = 200;
+
+/**
+ * [#32154] The manager's logger: ONE object for the manager's lifetime, so the
+ * loaders and the endpoint matcher it is handed to at construction follow the
+ * host's logger too once {@link HostFollowingLogger.adopt} switches the target.
+ *
+ * Why it exists: `MetadataPlugin` builds its manager in its own constructor,
+ * before any kernel exists, and `NodeMetadataManager` registers its
+ * filesystem loader in ITS constructor, so `Registered metadata loader: …`
+ * was written by a logger fixed at `info` before any host level could reach
+ * it, and printed into every quiet (`warn`) boot. The host's logger first
+ * reaches the manager in `MetadataPlugin.init()`.
+ *
+ * ⛔ `warn`, `error` and `fatal` are never held: a line that matters prints
+ * when it happens, even if no host ever arrives. Only chatter waits, bounded
+ * by {@link HELD_CHATTER_CAP}; what overflowed is counted on the replay.
+ */
+class HostFollowingLogger implements Logger {
+  private target: Logger;
+  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined;
+  private overflowed = 0;
+
+  constructor(initial: Logger, holdChatter: boolean) {
+    this.target = initial;
+    this.held = holdChatter ? [] : undefined;
+  }
+
+  /** Send every later line to `host`, after replaying the held chatter through it. */
+  adopt(host: Logger): void {
+    this.target = host;
+    const held = this.held ?? [];
+    this.held = undefined;
+    for (const line of held) host[line.level](line.message, line.meta);
+    if (this.overflowed > 0) {
+      host.debug(`MetadataManager: ${this.overflowed} earlier debug/info line(s) were not kept while waiting for the host logger`);
+      this.overflowed = 0;
+    }
+  }
+
+  debug(message: string, meta?: Record<string, any>): void {
+    this.chatter('debug', message, meta);
+  }
+
+  info(message: string, meta?: Record<string, any>): void {
+    this.chatter('info', message, meta);
+  }
+
+  warn(message: string, meta?: Record<string, any>): void {
+    this.target.warn(message, meta);
+  }
+
+  error(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.target.error(message, error, meta);
+  }
+
+  fatal(message: string, error?: Error, meta?: Record<string, any>): void {
+    if (this.target.fatal) this.target.fatal(message, error, meta);
+    else this.target.error(message, error, meta);
+  }
+
+  private chatter(level: 'debug' | 'info', message: string, meta?: Record<string, any>): void {
+    if (this.held === undefined) {
+      this.target[level](message, meta);
+    } else if (this.held.length < HELD_CHATTER_CAP) {
+      this.held.push({ level, message, meta });
+    } else {
+      this.overflowed++;
+    }
+  }
 }
 
 /**
@@ -472,6 +556,8 @@ export class MetadataManager implements IMetadataService {
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
+  /** [#32154] The object {@link logger} is built as; {@link useHostLogger} switches its target. */
+  private readonly hostFollowingLogger: HostFollowingLogger;
   protected watchCallbacks = new Map<string, Set<WatchCallback>>();
   protected config: MetadataManagerOptions;
 
@@ -696,7 +782,13 @@ export class MetadataManager implements IMetadataService {
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
-    this.logger = createLogger({ level: 'info', format: 'pretty' });
+    // [#32154] Its own `info` logger until a host hands it one (see
+    // `HostFollowingLogger`, `useHostLogger`).
+    this.hostFollowingLogger = new HostFollowingLogger(
+      createLogger({ level: 'info', format: 'pretty' }),
+      config.awaitHostLogger === true,
+    );
+    this.logger = this.hostFollowingLogger;
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
     // covering overlapping but non-identical event sets — both are kept:
@@ -900,6 +992,18 @@ export class MetadataManager implements IMetadataService {
     assertWritableLoaderContract(loader);
     this.loaders.set(loader.contract.name, loader);
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
+  }
+
+  /**
+   * [#32154] Log through the host's logger from now on, so every line of this
+   * manager (and of the loaders and matcher it handed its logger to) follows
+   * the host's level. The `debug` / `info` lines held since construction
+   * under {@link MetadataManagerOptions.awaitHostLogger} are replayed through
+   * it first, in order. `MetadataPlugin.init()` calls it with the kernel's
+   * logger.
+   */
+  useHostLogger(logger: Logger): void {
+    this.hostFollowingLogger.adopt(logger);
   }
 
   // ==========================================

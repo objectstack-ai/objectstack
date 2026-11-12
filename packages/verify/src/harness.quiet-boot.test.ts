@@ -11,8 +11,9 @@
 // warnings per boot about the harness's own fixed secret. What this file pins:
 //
 //   1. at the default level (`OS_LOG_LEVEL` unset, `OS_REGISTRY_LOG` unset) a
-//      passing boot writes no `[Registry]` line, no INFO record of the
-//      kernel's, no `DATABASE_ERROR` and no stack frame;
+//      passing boot writes no `[Registry]` line, no INFO record (the metadata
+//      manager's `Registered metadata loader` included), no `DATABASE_ERROR`
+//      and no stack frame;
 //   1a. an expected refusal (the starter's: a memo with no title) writes
 //      exactly ONE `warn` line, with no stack, naming the object, the
 //      operation, the field and the reason, and the caller is still told
@@ -126,17 +127,15 @@ async function withLevelEnv<T>(env: { OS_LOG_LEVEL?: string }, fn: () => Promise
 
 const KERNEL_RECORD = (level: string) => new RegExp(`^\\S+Z ${level} `);
 const isRegistryLine = (line: string) => line.startsWith('[Registry]');
+/** An INFO record of the kernel's logger (or of a logger that follows it). */
+const isKernelInfoRecord = (line: string) => KERNEL_RECORD('INFO').test(line);
 /**
- * An INFO record of the kernel's logger. `MetadataManager` builds its own
- * logger at a fixed `info` before any host can hand it a level, so its
- * `Registered metadata loader: …` line still prints at the default level; that
- * logger is still outside this change (reported on #32154: the host's logger
- * first reaches the manager in `MetadataPlugin.init()`, after the line), so
- * the line is left out here by its exact text, and this case stays true once
- * it is fixed.
+ * `MetadataManager`'s loader registration. The manager is built before the
+ * kernel and used to log it through its own logger fixed at `info`; it now
+ * holds the line and replays it through the kernel's logger, so it follows
+ * the boot's level.
  */
-const isKernelInfoRecord = (line: string) =>
-  KERNEL_RECORD('INFO').test(line) && !/^\S+Z INFO Registered metadata loader: /.test(line);
+const isLoaderRegistrationRecord = (line: string) => /^\S+Z INFO Registered metadata loader: /.test(line);
 
 const isDatabaseError = (line: string) => line.includes('DATABASE_ERROR');
 /** A stack frame, printed raw or escaped inside a JSON context. */
@@ -259,6 +258,10 @@ describe('[#32154] a passing bootStack run reads as a passing run', () => {
       expect(quietBoot.lines.filter(isKernelInfoRecord)).toEqual([]);
     });
 
+    it('writes no `INFO Registered metadata loader` line: the metadata manager follows the boot level', () => {
+      expect(quietBoot.lines.filter(isLoaderRegistrationRecord)).toEqual([]);
+    });
+
     it('writes no DATABASE_ERROR for a sequences table that is simply not there yet, and no stack', () => {
       expect(quietBoot.lines.filter(isDatabaseError)).toEqual([]);
       expect(quietBoot.lines.filter(isStackFrame)).toEqual([]);
@@ -288,6 +291,10 @@ describe('[#32154] a passing bootStack run reads as a passing run', () => {
     it('writes the INFO records and the [Registry] lines the default boot leaves out', () => {
       expect(infoBoot.lines.filter(isKernelInfoRecord).length).toBeGreaterThan(0);
       expect(infoBoot.lines.filter(isRegistryLine).length).toBeGreaterThan(0);
+    });
+
+    it('writes the `INFO Registered metadata loader` line the default boot leaves out', () => {
+      expect(infoBoot.lines.filter(isLoaderRegistrationRecord).length).toBeGreaterThan(0);
     });
 
     it('still writes no DATABASE_ERROR: the table probe asks the catalog, at any level', () => {
