@@ -360,26 +360,26 @@ export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
  *
  * Each issue lands where the blueprint carries the value: an option's own
  * `kind` at `['fields', <index>, 'options', <i>, 'kind']`, the pointer at
- * `['stageField']`. A field name declared twice is judged by its first entry
- * (the applier keys fields by name, so the second is not a second field).
+ * `['stageField']`. EVERY entry that carries the stage field's name is judged,
+ * each at its own index: which of two same-named entries an applier keeps is
+ * the applier's choice, so a kind-less duplicate is refused wherever it sits.
  * The strict mirror cannot state this cross-key rule (per-leaf only); its
  * describes teach it, and this parse, the one `apply_blueprint` runs, refuses it.
  */
 function refuseBlueprintStageFieldWithoutKinds(object: unknown, ctx: z.RefinementCtx): void {
   if (typeof object !== 'object' || object === null) return;
   const { name, stageField, fields } = object as Record<string, unknown>;
-  if (!Array.isArray(fields)) return;
-  const indexOf = new Map<string, number>();
+  if (typeof stageField !== 'string' || !Array.isArray(fields)) return;
   fields.forEach((field: unknown, index: number) => {
-    const fieldName = (field as { name?: unknown } | null)?.name;
-    if (typeof fieldName === 'string' && !indexOf.has(fieldName)) indexOf.set(fieldName, index);
-  });
-  // `Object.fromEntries` defines own data properties, so a field named
-  // `__proto__` (legal snake_case) is a key here, never the map's prototype.
-  const fieldMap = Object.fromEntries([...indexOf].map(([fieldName, index]) => [fieldName, fields[index]]));
-  refuseStageFieldWithoutKinds(name, stageField, fieldMap, ctx, {
-    fieldKey: (fieldName) => indexOf.get(fieldName) ?? fieldName,
-    noLifecycle: 'Or omit `stageField` if this object has no linear lifecycle.',
+    if ((field as { name?: unknown } | null)?.name !== stageField) return;
+    // The function reads only the entry `stageField` names, so a one-entry map
+    // per carrier is the whole input it judges. `Object.fromEntries` defines an
+    // own data property, so a field named `__proto__` (legal snake_case) is a
+    // key here, never the map's prototype.
+    refuseStageFieldWithoutKinds(name, stageField, Object.fromEntries([[stageField, field]]), ctx, {
+      fieldKey: () => index,
+      noLifecycle: 'Or omit `stageField` if this object has no linear lifecycle.',
+    });
   });
 }
 
@@ -585,9 +585,10 @@ export type BlueprintDashboard = z.input<typeof BlueprintDashboardSchema>;
  * the model's behaviour was reasonable and the schema was the defect.
  *
  * Deliberately NOT `.regex(SNAKE_CASE)`, unlike `target`. A view is identified
- * downstream in two interchangeable spellings — the bare key a blueprint's
- * `views[].name` carries (`ticket_status_board`) and the qualified
- * `<object>.<key>` a staged view record's `name` carries — and the applier
+ * downstream in two interchangeable spellings — the bare key
+ * (`ticket_status_board`) and the qualified `<object>.<key>` a staged view
+ * record's `name` carries, both of which a blueprint's `views[].name` may
+ * carry — and the applier
  * normalizes between them. Constraining this leaf to snake_case would make the
  * qualified spelling legal to GENERATE (a strict mirror is per-leaf) and
  * illegal to APPLY, which is the cloud#1967 failure mode: a blueprint the user

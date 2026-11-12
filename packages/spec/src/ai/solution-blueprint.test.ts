@@ -500,6 +500,25 @@ describe('SolutionBlueprintSchema', () => {
         expect(issues(object)).toEqual([{ path: ['objects', 0, 'fields', 0, 'options', 0, 'kind'], code: 'custom' }]);
       });
 
+      it('judges EVERY entry carrying the stage field\'s name: a kind-less duplicate after a clean one is refused at its own index', () => {
+        // Which of two same-named entries an applier keeps is the applier's
+        // choice, so the parse judges both rather than betting on one.
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const object = {
+          name: 'loan',
+          fields: [
+            { name: 'title', type: 'text' as const },
+            { name: 'status', type: 'select' as const, options: LOAN_STAGES },
+            { name: 'status', type: 'select' as const, options: noKinds.slice(0, 1) },
+          ],
+          stageField: 'status',
+        };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'fields', 2, 'options', 0, 'kind'], code: 'custom' }]);
+        // …and the reverse order: the kind-less one first, the clean one after.
+        const reversed = { ...object, fields: [object.fields[0], object.fields[2], object.fields[1]] };
+        expect(issues(reversed)).toEqual([{ path: ['objects', 0, 'fields', 1, 'options', 0, 'kind'], code: 'custom' }]);
+      });
+
       it('refuses a stage field that holds no single option code, at stageField', () => {
         const object = loanObject(LOAN_STAGES.map(({ label, value }) => ({ label, value })));
         object.fields[1] = { ...object.fields[1], type: 'multiselect' as never };
