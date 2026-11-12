@@ -2005,4 +2005,42 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     expect(driver.create).toHaveBeenCalledTimes(1);
     expect(await loader.loadMany('agent')).toEqual([{ name: 'helper', label: 'Helper' }]);
   });
+
+  // [#32488 item 3, R8-A; contract record 6811135944] The bind takes the loader's own rows only.
+  it('[#32488 item 3] another writer\'s row (source other than database, empty column, copied stamp): never bound (BEFORE: bound to the copied package)', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'api',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', _packageId: ALPHA }),
+    });
+    const before = await agentRow();
+    await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * [#32488 R7-C; epic ruling 6809488921] A file item and the row it seeded
+   * under the host's package: the boot after a file edit registers the file's
+   * body. BEFORE (measured at 27abd458, same fixture): the second boot's
+   * registry held `v1` while the row held `v2` (version 2); the third held `v2`.
+   */
+  it('[#32488 R7-C] a file edited from v1 to v2: the next boot registers v2, and the row it seeded holds v2 (BEFORE: v1 registered)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'r7c-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      const file = join(rootDir, 'email_template', 'welcome.email-template.json');
+      const write = (subject: string) => writeFileSync(file, JSON.stringify({ name: 'welcome', locale: 'en-US', subject, bodyHtml: '<p/>' }));
+      write('v1');
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      write('v2');
+      const manager = await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      expect(registered(manager, 'email_template').map((item) => item.subject)).toEqual(['v2']);
+      expect(((await manager.get('email_template', 'welcome')) as { subject?: string }).subject).toBe('v2');
+      expect(await stored()).toEqual([[ALPHA, null, 'v2']]);
+      const row = (await driver.findOne('sys_metadata', { where: { type: 'email_template' } } as never)) as Record<string, any>;
+      expect(row.version).toBe(2);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
 });
