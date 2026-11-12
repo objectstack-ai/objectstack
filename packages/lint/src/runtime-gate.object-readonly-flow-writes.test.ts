@@ -61,7 +61,7 @@ const submitFlow = (overrides: AnyRec = {}): AnyRec => ({
 const objectWrite = (item: AnyRec, context: { objects: AnyRec[]; flows?: AnyRec[] }) =>
   runRuntimeAuthoringRules({ type: 'object', item, context });
 
-const readonlyFindings = (fs: readonly { rule: string }[]) =>
+const readonlyFindings = <F extends { rule: string }>(fs: readonly F[]): F[] =>
   fs.filter((f) => f.rule.startsWith('flow-update-readonly'));
 
 describe('[#32666] an object write re-judges the package\'s live flows for readonly writes', () => {
