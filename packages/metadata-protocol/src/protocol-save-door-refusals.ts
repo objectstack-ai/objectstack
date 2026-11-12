@@ -356,7 +356,10 @@ function registryPackageHoldersOf(registry: unknown, name: string): readonly str
  * `permissionSetHoldersMeet` (`@objectstack/core`). A write that would make a
  * set of a name ACTIVE under an owner other than a holder it meets is refused
  * here, with nothing written — a package never writes into a record another
- * owns (ADR-0086 D4). The environment meets every holder, as before.
+ * owns (ADR-0086 D4). The environment meets every holder, as before. A set
+ * another package STORES meets every writer too: the registry keeps one entry
+ * per stored set of a name, so two stored sets of one name are not yet kept
+ * apart there (#31698), and a second one stays refused.
  *
  * ## The owner
  *
@@ -441,14 +444,19 @@ export async function permissionSetNameCollisionRefusal(
     // holder the writing package does not meet under the ONE predicate the
     // install gate asks ({@link permissionSetHoldersMeet}) holds its own set of
     // the name, not this one. The environment, on either side, still meets
-    // every holder.
+    // every holder. ⛔ A STORED row of another package still holds the name
+    // whatever its namespace: the registry keeps one entry per stored set of a
+    // name, so a second stored set would take the first one's place there. Two
+    // namespaces' sets of one name are admitted where the first is shipped (an
+    // installed package's own), never beside another package's stored set.
     const namespaceOf = (packageId: string): string | undefined => {
         const namespace = (this.engine?.registry as { getPackage?: (id: string) => { manifest?: { namespace?: unknown } } | undefined } | undefined)
             ?.getPackage?.(packageId)?.manifest?.namespace;
         return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const meets = (holder: string | null): boolean =>
-        holder === null || written === null || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
+        holder === null || written === null || storedPackages.has(holder)
+        || permissionSetHoldersMeet(namespaceOf(written), namespaceOf(holder), name);
     const foreign = [...holders]
         .filter((holder) => holder !== written && meets(holder))
         // Packages by id, the environment last, so the sentence is the same on every driver.
@@ -469,7 +477,7 @@ export async function permissionSetNameCollisionRefusal(
         + `${foreign.map(holderPhrase).join(' and ')}. Nothing was ${verb === 'publish' ? 'published' : 'written'}. ${remedy} `
         + 'A permission set holds one name per namespace: two packages of one namespace, a platform package '
         + '(`base`, `system`, `sys`), a package with no namespace, the environment, or a name the platform requests '
-        + 'by spelling share one set of it. See ADR-0150 D2.',
+        + 'by spelling share one set of it, and a set another package stores holds its name. See ADR-0150 D2.',
     ) as Error & { code: 'NAMESPACE_CONFLICT'; status: 422 };
     err.code = 'NAMESPACE_CONFLICT';
     err.status = 422;

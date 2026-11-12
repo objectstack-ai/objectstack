@@ -751,10 +751,12 @@ describe('[ADR-0150 D2/D8, #31698] the report lists each stale-column grant whos
     ({ id, user_id: user, permission_set: set, permission_set_package: column, organization_id: organization });
   const rows = [
     grant('g_other', 'usr_a', 'solo', OTHER),
-    grant('g_unknown', 'usr_a', 'solo', 'com.acme.gone'),
     grant('g_env', 'usr_b', 'env_only', SAME, OTHER_ORG),
     // CONTROL: a stale column of the holder's namespace reads the holder, as before.
     grant('g_same', 'usr_c', 'solo', SAME),
+    // CONTROL: a column of a package the registry does not know has no
+    // namespace to bound the read, and reads the holder, as before.
+    grant('g_unknown', 'usr_c', 'solo', 'com.acme.gone'),
     // CONTROL: a set nothing holds is the other line.
     grant('g_ghost', 'usr_c', 'ghost', OTHER),
   ];
@@ -776,7 +778,6 @@ describe('[ADR-0150 D2/D8, #31698] the report lists each stale-column grant whos
         organizationId: ORG,
         outside: [
           { id: 'g_other', userId: 'usr_a', name: 'solo', packageId: OTHER, holder: Q },
-          { id: 'g_unknown', userId: 'usr_a', name: 'solo', packageId: 'com.acme.gone', holder: Q },
         ],
         unresolved: ['g_ghost'],
         withheld: [],
@@ -798,15 +799,14 @@ describe('[ADR-0150 D2/D8, #31698] the report lists each stale-column grant whos
     expect(String(lines[0][0])).toContain('so each confers nothing');
     expect(String(lines[0][0])).toContain('grant it again naming its package; then remove each listed grant');
     expect(lines[0][2]).toEqual({
-      count: 3,
+      count: 2,
       organizations: {
         items: [
           {
             organizationId: ORG,
-            count: 2,
+            count: 1,
             grants: { items: [
               { id: 'g_other', userId: 'usr_a', permissionSet: 'solo', packageId: OTHER, holder: Q },
-              { id: 'g_unknown', userId: 'usr_a', permissionSet: 'solo', packageId: 'com.acme.gone', holder: Q },
             ] },
           },
           {

@@ -504,10 +504,6 @@ describe('security catalog read — permission sets by (package, name) through t
       expect(await refusedFor('q_only', storedPermissionSetScope(R))).toEqual({
         reason: 'not-held-by-qualifier', holders: [{ kind: 'package', packageId: Q }],
       });
-      // A package the registry does not know declares no namespace.
-      expect(await refusedFor('q_only', storedPermissionSetScope('com.acme.gone'))).toEqual({
-        reason: 'not-held-by-qualifier', holders: [{ kind: 'package', packageId: Q }],
-      });
       // The environment's own set, in the registry or only in the metadata service.
       expect(await refusedFor('env_set', storedPermissionSetScope(Q_OLD))).toEqual({
         reason: 'not-held-by-qualifier', holders: [{ kind: 'environment' }],
@@ -521,9 +517,17 @@ describe('security catalog read — permission sets by (package, name) through t
       });
       // CONTROL: a column naming the holder reads it.
       expect((await reader.resolve('permission', 'q_only', storedPermissionSetScope(Q)))?.packageId).toBe(Q);
+      // CONTROL: a column of a package the registry does not know has no
+      // namespace to bound the read, and reads the one holder, as before.
+      expect((await reader.resolve('permission', 'q_only', storedPermissionSetScope('com.acme.gone')))?.packageId).toBe(Q);
+      // ⛔ …and where two packages hold the name, that unbound reading is refused, naming both: never one picked.
+      const two = await resolveCatalogReference(reader, 'permission', 'shared', storedPermissionSetScope('com.acme.gone'));
+      expect(two).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      if (two.status === 'refused') expect(two.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+      expect(await reader.resolve('permission', 'shared', storedPermissionSetScope('com.acme.gone'))).toBeUndefined();
       await refusedFor('q_only', storedPermissionSetScope(R));
       expect(warn.mock.calls.map(([, meta]) => `${meta.packageId}:${meta.name}`)).toEqual([
-        `${R}:q_only`, 'com.acme.gone:q_only', `${Q_OLD}:env_set`, `${Q_OLD}:meta_only`,
+        `${R}:q_only`, `${Q_OLD}:env_set`, `${Q_OLD}:meta_only`, 'com.acme.gone:q_only', 'com.acme.gone:shared',
       ]);
       expect(warn.mock.calls[0][0]).toContain('it confers nothing');
       expect(warn.mock.calls[0][0]).toContain(`package "${Q}"`);

@@ -295,6 +295,22 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
         expect(await doors('crm', 'hr', 'qa_reader')).toEqual({ installGate: 'admitted', itemSeam: 'admitted', saveDoor: 'admitted' });
     });
 
+    it('⛔ crm + hr where crm STORES its set (no shipped one): the save door still refuses hr\'s, and crm\'s set stays served at its package', async () => {
+        const { engine, protocol } = await bootBare();
+        engine.registry.installPackage(manifest(HOLDING, 'crm'), 'authored');
+        engine.registry.installPackage(manifest(INCOMING, 'hr'), 'authored');
+        await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: HOLDING });
+        expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
+        const error = await protocol.saveMetaItem({ type: 'permission', name: 'qa_reader', item: permissionSet('qa_reader'), packageId: INCOMING })
+            .then(() => undefined, (e: any) => e);
+        expect([error?.code, error?.status]).toEqual(['NAMESPACE_CONFLICT', 422]);
+        expect(String(error?.message)).toContain(`package "${HOLDING}"`);
+        expect(String(error?.message)).toContain('a set another package stores holds its name');
+        // Nothing moved: crm's stored set is the one the registry serves at crm.
+        expect(engine.registry.packageScopedHoldersOf('permission', 'qa_reader', null)).toEqual([HOLDING]);
+        expect(engine.registry.getPackageScopedItem('permission', 'qa_reader', HOLDING)).toBeDefined();
+    });
+
     it.each([
         ['sys + crm', 'sys', 'crm', 'qa_reader'],
         ['crm + sys', 'crm', 'sys', 'qa_reader'],

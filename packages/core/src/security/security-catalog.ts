@@ -72,7 +72,8 @@
  *    {@link SecurityCatalogReferenceScope.packageId}: that package's set. A
  *    stale column (that package no longer serves the set) reads as a null
  *    one inside that package's namespace, said once: a holder outside it is
- *    refused, never read in its place. One whose column is null resolves by D3 from the package that
+ *    refused, never read in its place (a package with no namespace the
+ *    registry knows has none to bound it). One whose column is null resolves by D3 from the package that
  *    wrote it ({@link SecurityCatalogReferenceScope.callerPackageId}, R3's
  *    `package_id`), or as a caller with no package (a grant, R1, and every
  *    other by-name read with no position) — so two holders are refused,
@@ -295,8 +296,10 @@ export interface SecurityCatalogReferenceScope {
    * reading stays inside the namespace of the package the column names: a
    * holder it answers outside it (another namespace's package, a package with
    * no namespace, the environment's own set) is refused
-   * (`not-held-by-qualifier`, naming the holder), and confers nothing. Read
-   * for a permission set only.
+   * (`not-held-by-qualifier`, naming the holder), and confers nothing. A
+   * column of a package with no namespace the registry knows (none declared,
+   * not installed, or authored at runtime) has none to bound the reading.
+   * Read for a permission set only.
    */
   readonly packageId?: string;
   /**
@@ -610,13 +613,16 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
   };
 
   /**
-   * [ADR-0150 D2/D8, #31698] Does the holder `holderPackageId` share the
-   * namespace of the package `columnPackageId` a stored column names? Both must
-   * be installed packages that declare one namespace, the same one; the
-   * environment's own set, a package with no namespace and a package the
-   * registry does not know share none.
+   * [ADR-0150 D2/D8, #31698] Is the holder `holderPackageId` outside the
+   * namespace of the package `columnPackageId` a stored column names? Only a
+   * column whose package the registry knows, with a namespace, bounds the
+   * read: a holder outside that namespace (another namespace's package, a
+   * package with no namespace, the environment's own set) is outside it. A
+   * column of a package that declares no namespace, or that the registry does
+   * not know (not installed, or authored at runtime), has no namespace to
+   * bound the read, and reads as an unbound row, as before (D8 R1).
    */
-  const sharesColumnNamespace = (
+  const holderOutsideColumnNamespace = (
     scope: SecurityCatalogPackageScopedRegistry,
     columnPackageId: string,
     holderPackageId: string | undefined,
@@ -633,7 +639,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
     };
     const column = namespaceOf(columnPackageId);
-    return column !== undefined && column === namespaceOf(holderPackageId);
+    return column !== undefined && column !== namespaceOf(holderPackageId);
   };
 
   /**
@@ -710,10 +716,11 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       // (another namespace's package, a package with no namespace, the
       // environment's own set) is never read in that package's place. The
       // column is refused, naming that holder (`not-held-by-qualifier`, as the
-      // write seam refuses the same column), and confers nothing.
+      // write seam refuses the same column), and confers nothing. A column of
+      // a package with no namespace the registry knows has none to bound it.
       const { packageId: _stale, ...unbound } = reference as SecurityCatalogReferenceScope;
       const read = await resolvePermissionScoped(scope, name, unbound);
-      const answer = read.status === 'resolved' && !sharesColumnNamespace(scope, exact, read.entry.packageId)
+      const answer = read.status === 'resolved' && holderOutsideColumnNamespace(scope, exact, read.entry.packageId)
         ? columnOutsideNamespaceRefusal(name, exact, read.entry)
         : read;
       warnStale(exact, name, answer);

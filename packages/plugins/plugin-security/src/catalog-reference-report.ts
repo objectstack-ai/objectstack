@@ -35,7 +35,9 @@
  *    package that no longer serves the set, while the holder the name now
  *    reads is another namespace's package, a package with no namespace, or
  *    the environment's own set. The catalog never reads a column onto a
- *    holder outside its package's namespace, so each confers nothing; the fix
+ *    holder outside its package's namespace (a column of a package with no
+ *    namespace the registry knows has none, and reads as before), so each
+ *    confers nothing; the fix
  *    is to remove it, and to grant the holder's set again, naming its
  *    package, where that set is the one meant.
  *

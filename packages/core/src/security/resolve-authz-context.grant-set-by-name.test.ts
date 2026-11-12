@@ -337,15 +337,14 @@ describe('[ADR-0150 D8 R1] a grant names its set\'s package beside its name', ()
   });
 
   it('⛔ [#31698] a stale column whose set\'s one holder is outside its package\'s namespace confers nothing', async () => {
-    // Another namespace's package, and a package the registry does not know.
-    for (const column of [R, 'com.acme.gone']) {
-      const out = await resolveScoped([{ permission_set: 'solo', permission_set_package: column }]);
-      expect(out.permissions, column).toEqual([]);
-      expect(out.systemPermissions, column).toEqual([]);
-      expect(out.permissionSetAddresses ?? [], column).toEqual([]);
-    }
-    // CONTROL: the column naming the holder, and no column, confer its set.
-    for (const column of [Q, null]) {
+    // Another namespace's package.
+    const out = await resolveScoped([{ permission_set: 'solo', permission_set_package: R }]);
+    expect(out.permissions).toEqual([]);
+    expect(out.systemPermissions).toEqual([]);
+    expect(out.permissionSetAddresses ?? []).toEqual([]);
+    // CONTROL: the column naming the holder, no column, and a column of a
+    // package the registry does not know (no namespace bounds it) confer its set.
+    for (const column of [Q, null, 'com.acme.gone']) {
       expect((await resolveScoped([{ permission_set: 'solo', permission_set_package: column }])).systemPermissions, String(column)).toEqual(['cap_solo']);
     }
   });
