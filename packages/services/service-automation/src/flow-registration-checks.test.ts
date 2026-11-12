@@ -159,7 +159,8 @@ describe('registration: an inline outbound call retried in an after-save flow is
         id: 'post_slack', type: 'connector_action', label: 'Post',
         connectorConfig: { connectorId: 'slack', actionId: 'post_message', input: {} },
     });
-    const guarded = (inner: unknown, maxRetries = 3, catchNodes: unknown[] = []) => ({
+    const flag = { id: 'flag', type: 'assignment', label: 'Flag', config: { failed: true } };
+    const guarded = (inner: unknown, maxRetries = 3, catchNodes: unknown[] = [flag]) => ({
         id: 'guarded_push', type: 'try_catch', label: 'Push with retry',
         config: {
             retry: { maxRetries, backoffMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 },
@@ -236,7 +237,7 @@ describe('registration: an inline outbound call retried in an after-save flow is
     it('control: an inline call that is not retried registers (`maxRetries: 0`, no retry, or in the catch region)', async () => {
         expect(await registers(flowOf(afterUpdate, http()))).toBe(true);
         expect(await registers(flowOf(afterUpdate, guarded(http(), 0)))).toBe(true);
-        expect(await registers(flowOf(afterUpdate, guarded({ id: 'noop', type: 'end', label: 'Noop' }, 3, [http()])))).toBe(true);
+        expect(await registers(flowOf(afterUpdate, guarded(flag, 3, [http()])))).toBe(true);
     });
 
     it('control: a before-trigger, a scheduled and a manual flow with the inline retried node register', async () => {
