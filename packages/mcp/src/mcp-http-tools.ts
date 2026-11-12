@@ -46,7 +46,9 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
-import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
+// [#32757] `ErrorCode` is also read as a value: the ledger's spelling of
+// `FLOW_FAILED`, the arm whose run artefacts carry the relay sentence.
+import { ErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -683,7 +685,60 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // `details` rides only on a refusal, as `/actions` serves no producer
   // context on a fault.
   const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
-  return codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  const result = codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
+  const relay = answer.code === ErrorCode.enum.FLOW_FAILED ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
+  return relay === undefined
+    ? result
+    : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
+}
+
+/**
+ * [#32757] The lead of the plain sentence a failed flow run's tool error
+ * carries beside its envelope. Exported for the pin; not on the package entry.
+ */
+export const FLOW_FAILURE_RELAY_LEAD =
+  'Tell the user this reason, not the flow and node chain in the error message: ';
+
+/**
+ * [#32757] What a failed flow run tells its END USER, chosen by the console's
+ * own read order (`flowFailureMessage` in `ui/packages/app-shell/src/utils/
+ * flowResponse.ts`): the flow author's `errorMessage`, then the producer-marked
+ * `userMessage`, then the message of the refusal the run's write node met
+ * (`innerRefusal`, served without the node and operation prefixes). The run's
+ * own `message` is the console's last rung and is not repeated: a failure that
+ * carries none of the three gets no sentence, so this never invents one.
+ *
+ * ## Why a second content block, and not a promoted code
+ *
+ * Measured on the HTTP `/mcp` face: a flow action whose `update_record` met a
+ * `requiredWhen` refusal answered `FLOW_FAILED` with the message
+ * `Flow 'F' failed: Node 'N' failed: update_record(OBJECT) failed: …`, and an
+ * agent relayed that chain to the employee while the console's toast read the
+ * field's own sentence. The wire may not lead with the inner refusal instead:
+ * `FlowInnerRefusalSchema` (`@objectstack/spec/api`, ruling B′) keeps it a
+ * NESTED member, never promoted over `code` or `message`, and this tool answers
+ * what `/api/v1/actions` answers ({@link errorResultFromThrown}). So the
+ * envelope in `content[0]` stays byte for byte the door's, and the sentence
+ * rides as `content[1]`, plain text, read by the same order as the console —
+ * the maintainer's ruling on the card (options B and D together; the tool
+ * descriptions teach the same order).
+ *
+ * The details are read as the spec declares them (`FlowFailureDetailsSchema`):
+ * strings only, and an `innerRefusal` only when its `code` is a string, as the
+ * console reads it. ⛔ The permission and delegated-scope rungs the console
+ * substitutes are its own localized lines; here the refusal's sentence stands,
+ * and its language is the caller's locale's, decided upstream.
+ */
+function flowFailureRelaySentence(details: unknown, userMessage: string | undefined): string | undefined {
+  const run = details && typeof details === 'object' && !Array.isArray(details)
+    ? (details as { errorMessage?: unknown; innerRefusal?: unknown })
+    : {};
+  const usable = (text: unknown): string | undefined =>
+    typeof text === 'string' && text.trim() !== '' ? text : undefined;
+  const inner = run.innerRefusal as { code?: unknown; message?: unknown } | null | undefined;
+  return usable(run.errorMessage)
+    ?? usable(userMessage)
+    ?? (inner && typeof inner === 'object' && typeof inner.code === 'string' ? usable(inner.message) : undefined);
 }
 
 /**
@@ -2918,7 +2973,12 @@ export function registerActionTools(
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
         'An action the author gated (list_actions reports requiresConfirmation) is REFUSED unless you also ' +
-        'send confirm: true — ask the human first, then retry; nothing runs on a refused call.' +
+        'send confirm: true — ask the human first, then retry; nothing runs on a refused call. ' +
+        // [#32757] The read order `flowFailureRelaySentence` applies, taught
+        // to the reader as well, as the console reads it.
+        'A flow action that fails answers error.code FLOW_FAILED with a message naming the flow and node, ' +
+        'which is for diagnosis: tell the user the reason in the second text block, which is the flow\'s ' +
+        'details.errorMessage, else userMessage, else details.innerRefusal.message — never the flow and node chain.' +
         // [#15705] Named only where `resume_run` is actually registered below,
         // so this description never points an agent at a tool it cannot call.
         (canResume
@@ -3089,7 +3149,8 @@ export function registerActionTools(
           '(author AI opt-in, your capabilities, your read access to the record). The rest of the flow runs ' +
           'the app\'s business logic and can mutate data. When list_actions reports requiresConfirmation for ' +
           'the action that started the run, send confirm: true (ask the human first); without it the call ' +
-          'is refused and the run stays paused.',
+          'is refused and the run stays paused. A run that fails answers as run_action does: tell the user ' +
+          'the reason in the second text block, never the flow and node chain in the error message.',
         inputSchema: strictToolInput(
           {
             surface: 'this resume_run call',
