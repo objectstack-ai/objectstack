@@ -4485,6 +4485,12 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // Their keys are String methods, never metadata keys; the predicate is
       // read off the tabled `fieldGroup` receiver.
       'loweredSource', 'loweredTail',
+      // [#32529] The stored-expression input member: its module path
+      // (`./stored-expression-inputs.js`), this object's field-by-name index
+      // (a Map, whose one "key" is `Map.prototype.get`) and the member's own
+      // finding (`{ rule, message, severity }`) — never metadata keys; the
+      // field it judges is handed over whole from the tabled `f` receiver.
+      'inputs', 'fieldDefs', 'finding',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
