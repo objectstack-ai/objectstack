@@ -3429,6 +3429,7 @@ const zhHant = {
     pageNotFoundDescription: '未找到頁面 “{{name}}”，可能已被刪除或重新命名。',
     recordPagePlacesNoComponent: '此記錄頁沒有可顯示的內容',
     recordPagePlacesNoComponentDescription: '記錄頁 “{{name}}” 的區域中沒有放置任何元件，因此對任何記錄都不顯示內容。管理員可以在 Studio 中修復：向某個區域新增元件、將頁面設為 slotted 以顯示預設記錄頁，或刪除該頁面以顯示預設記錄頁。',
+    recordPagePlacesNoComponentDescriptionUnnamed: '該記錄頁的區域中沒有放置任何元件，因此對任何記錄都不顯示內容。管理員可以在 Studio 中修復：向某個區域新增元件、將頁面設為 slotted 以顯示預設記錄頁，或刪除該頁面以顯示預設記錄頁。',
     dashboardNotFound: '未找到儀表盤',
     dashboardNotFoundDescription: '未找到儀表盤 “{{name}}”，可能已被刪除或重新命名。',
     reportNotFound: '未找到報表',

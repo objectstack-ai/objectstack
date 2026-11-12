@@ -3410,6 +3410,7 @@ const fr = {
     pageNotFoundDescription: "La page \"{{name}}\" est introuvable. Elle a peut-être été supprimée ou renommée.",
     recordPagePlacesNoComponent: "Cette page d’enregistrement n’a rien à afficher",
     recordPagePlacesNoComponentDescription: "La page d’enregistrement \"{{name}}\" ne place aucun composant dans ses régions, elle n’affiche donc rien pour aucun enregistrement. Un administrateur peut la corriger dans Studio : ajouter des composants à une région, rendre la page slotted pour afficher la page d’enregistrement par défaut, ou supprimer la page pour que la page d’enregistrement par défaut s’affiche.",
+    recordPagePlacesNoComponentDescriptionUnnamed: "Cette page d’enregistrement ne place aucun composant dans ses régions, elle n’affiche donc rien pour aucun enregistrement. Un administrateur peut la corriger dans Studio : ajouter des composants à une région, rendre la page slotted pour afficher la page d’enregistrement par défaut, ou supprimer la page pour que la page d’enregistrement par défaut s’affiche.",
     dashboardNotFound: "Tableau de bord introuvable",
     dashboardNotFoundDescription: "Le tableau de bord \"{{name}}\" est introuvable. Il a peut-être été supprimé ou renommé.",
     reportNotFound: "Rapport introuvable",

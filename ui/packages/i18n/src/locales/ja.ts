@@ -3342,6 +3342,7 @@ const ja = {
     pageNotFoundDescription: "ページ「{{name}}」が見つかりません。削除または名前変更された可能性があります。",
     recordPagePlacesNoComponent: "このレコードページには表示する内容がありません",
     recordPagePlacesNoComponentDescription: "レコードページ「{{name}}」はリージョンにコンポーネントを配置していないため、どのレコードにも何も表示されません。管理者は Studio で修正できます。リージョンにコンポーネントを追加するか、ページを slotted にして既定のレコードページを表示するか、ページを削除して既定のレコードページを表示させてください。",
+    recordPagePlacesNoComponentDescriptionUnnamed: "このレコードページはリージョンにコンポーネントを配置していないため、どのレコードにも何も表示されません。管理者は Studio で修正できます。リージョンにコンポーネントを追加するか、ページを slotted にして既定のレコードページを表示するか、ページを削除して既定のレコードページを表示させてください。",
     dashboardNotFound: "ダッシュボードが見つかりません",
     dashboardNotFoundDescription: "ダッシュボード「{{name}}」が見つかりません。削除または名前変更された可能性があります。",
     reportNotFound: "レポートが見つかりません",

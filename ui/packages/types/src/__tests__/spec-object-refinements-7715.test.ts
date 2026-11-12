@@ -334,8 +334,12 @@ describe('objectstack#32478 — the Page record-places-component refusal reaches
     expect(r.success).toBe(false);
     expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
       .toContainEqual({ code: 'custom', path: 'regions', message: specIssue.message });
-    // The spec's page declares no `children`, so the same document never reaches its check.
-    expect(SpecPageSchema.safeParse(specPage({ ...extra, children: [] })).success).toBe(false);
+    // The spec's page declares no `children`: a page that places a component (and so passes
+    // the spec without it) is refused for `children` alone, never at `regions`.
+    const withChildren = SpecPageSchema.safeParse(specPage({ ...extra, regions: places, children: [] }));
+    expect(withChildren.success).toBe(false);
+    expect(withChildren.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), keys: (i as { keys?: string[] }).keys })))
+      .toEqual([{ code: 'unrecognized_keys', path: '', keys: ['children'] }]);
   });
 
   it('controls: a `record` kind node that places a component, a `slotted` one, and a `home` one without regions pass the spec and the kind node; the `page` node does not judge it', () => {

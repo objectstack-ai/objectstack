@@ -3339,6 +3339,7 @@ const ko = {
     pageNotFoundDescription: "\"{{name}}\" 페이지를 찾을 수 없습니다. 삭제되거나 이름이 변경되었을 수 있습니다.",
     recordPagePlacesNoComponent: "이 레코드 페이지에는 표시할 내용이 없습니다",
     recordPagePlacesNoComponentDescription: "레코드 페이지 \"{{name}}\"은(는) 영역에 구성 요소를 배치하지 않아 어떤 레코드에도 아무것도 표시하지 않습니다. 관리자는 Studio에서 수정할 수 있습니다. 영역에 구성 요소를 추가하거나, 페이지를 slotted로 바꿔 기본 레코드 페이지를 표시하거나, 페이지를 삭제해 기본 레코드 페이지가 표시되게 하세요.",
+    recordPagePlacesNoComponentDescriptionUnnamed: "이 레코드 페이지는 영역에 구성 요소를 배치하지 않아 어떤 레코드에도 아무것도 표시하지 않습니다. 관리자는 Studio에서 수정할 수 있습니다. 영역에 구성 요소를 추가하거나, 페이지를 slotted로 바꿔 기본 레코드 페이지를 표시하거나, 페이지를 삭제해 기본 레코드 페이지가 표시되게 하세요.",
     dashboardNotFound: "대시보드를 찾을 수 없습니다",
     dashboardNotFoundDescription: "\"{{name}}\" 대시보드를 찾을 수 없습니다. 삭제되거나 이름이 변경되었을 수 있습니다.",
     reportNotFound: "보고서를 찾을 수 없습니다",

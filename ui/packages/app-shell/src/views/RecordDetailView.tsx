@@ -4545,11 +4545,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             {t('empty.recordPagePlacesNoComponent', { defaultValue: 'This record page has nothing to show' })}
           </EmptyTitle>
           <EmptyDescription>
-            {t('empty.recordPagePlacesNoComponentDescription', {
-              name: resolvedPage?.name ?? '',
-              defaultValue:
-                'The record page "{{name}}" places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
-            })}
+            {/* A page row with no name gets the sentence that names none. */}
+            {resolvedPage?.name
+              ? t('empty.recordPagePlacesNoComponentDescription', {
+                  name: resolvedPage.name,
+                  defaultValue:
+                    'The record page "{{name}}" places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
+                })
+              : t('empty.recordPagePlacesNoComponentDescriptionUnnamed', {
+                  defaultValue:
+                    'This record page places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
+                })}
           </EmptyDescription>
         </Empty>
       </div>

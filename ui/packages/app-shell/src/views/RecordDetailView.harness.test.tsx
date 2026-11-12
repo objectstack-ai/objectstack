@@ -2675,6 +2675,29 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
     expect(container.querySelector('[data-page-type]')).toBeNull();
   });
 
+  it('a `full` page that carries `children` and places no region component: the spec refuses it, and the record view explains it instead of drawing the children', async () => {
+    // Off-spec twice: the spec's strict page declares no `children`, and its
+    // regions place nothing. The page layout would draw `children` when a page
+    // has no regions; the record view explains the page instead.
+    const page = invoicePage({ children: [{ type: 'text', properties: { content: 'CHILD BODY' } }] });
+    const spec = SpecPageSchema.safeParse(page);
+    expect(spec.success).toBe(false);
+    expect(spec.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.') }))).toContainEqual({ code: 'custom', path: 'regions' });
+
+    const { container } = await mount([page]);
+    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
+    expect(screen.queryByText('CHILD BODY')).toBeNull();
+    expect(container.querySelector('[data-page-type]')).toBeNull();
+  });
+
+  it('a page row with no `name`: the explanation does not quote an empty name', async () => {
+    const { name: _name, ...nameless } = PLACES_NOTHING;
+    await mount([nameless]);
+    const panel = await screen.findByTestId('record-page-places-no-component');
+    expect(panel.textContent).not.toContain('""');
+    expect(panel.textContent).not.toContain('"{{name}}"');
+  });
+
   it('the record drawer explains it the same way', async () => {
     const { container } = await mount([PLACES_NOTHING], true);
     expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);

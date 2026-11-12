@@ -3409,6 +3409,7 @@ const pt = {
     pageNotFoundDescription: "A página \"{{name}}\" não foi encontrada. Ela pode ter sido removida ou renomeada.",
     recordPagePlacesNoComponent: "Esta página de registro não tem nada para mostrar",
     recordPagePlacesNoComponentDescription: "A página de registro \"{{name}}\" não posiciona nenhum componente em suas regiões, então não mostra nada para nenhum registro. Um administrador pode corrigir isso no Studio: adicionar componentes a uma região, tornar a página slotted para mostrar a página de registro padrão ou excluir a página para que a página de registro padrão seja exibida.",
+    recordPagePlacesNoComponentDescriptionUnnamed: "Esta página de registro não posiciona nenhum componente em suas regiões, então não mostra nada para nenhum registro. Um administrador pode corrigir isso no Studio: adicionar componentes a uma região, tornar a página slotted para mostrar a página de registro padrão ou excluir a página para que a página de registro padrão seja exibida.",
     dashboardNotFound: "Painel não encontrado",
     dashboardNotFoundDescription: "O painel \"{{name}}\" não foi encontrado. Ele pode ter sido removido ou renomeado.",
     reportNotFound: "Relatório não encontrado",

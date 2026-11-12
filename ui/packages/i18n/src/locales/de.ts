@@ -3340,6 +3340,7 @@ const de = {
     pageNotFoundDescription: "Die Seite „{{name}}“ wurde nicht gefunden. Sie wurde möglicherweise entfernt oder umbenannt.",
     recordPagePlacesNoComponent: "Diese Datensatzseite zeigt nichts an",
     recordPagePlacesNoComponentDescription: "Die Datensatzseite „{{name}}“ platziert keine Komponente in ihren Bereichen und zeigt daher für keinen Datensatz etwas an. Ein Administrator kann das in Studio beheben: Komponenten zu einem Bereich hinzufügen, die Seite auf slotted umstellen, um die Standard-Datensatzseite anzuzeigen, oder die Seite löschen, damit die Standard-Datensatzseite angezeigt wird.",
+    recordPagePlacesNoComponentDescriptionUnnamed: "Diese Datensatzseite platziert keine Komponente in ihren Bereichen und zeigt daher für keinen Datensatz etwas an. Ein Administrator kann das in Studio beheben: Komponenten zu einem Bereich hinzufügen, die Seite auf slotted umstellen, um die Standard-Datensatzseite anzuzeigen, oder die Seite löschen, damit die Standard-Datensatzseite angezeigt wird.",
     dashboardNotFound: "Dashboard nicht gefunden",
     dashboardNotFoundDescription: "Das Dashboard „{{name}}“ wurde nicht gefunden. Es wurde möglicherweise entfernt oder umbenannt.",
     reportNotFound: "Bericht nicht gefunden",
