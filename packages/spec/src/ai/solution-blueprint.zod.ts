@@ -3,7 +3,6 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { FieldType, SelectOptionSchema } from '../data/field.zod';
-import { VIRTUAL_FIELD_AGGREGATE_REMEDY } from '../data/aggregate-field-type-compatibility';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
@@ -227,9 +226,12 @@ const booleanFlagRule = (unsetRequired: string) =>
  * thing. `expression` on `FieldSchema` is the contract: on a `formula` it is
  * computed on read with no column; on any other (stored) field the engine
  * computes it on every write and stores it. The formula half carries the ONE
- * remedy sentence the aggregate refusals print
- * ({@link VIRTUAL_FIELD_AGGREGATE_REMEDY}), interpolated rather than retyped,
- * so the refusal and the blueprint cannot drift into two prescriptions.
+ * remedy sentence the aggregate refusals print, `VIRTUAL_FIELD_AGGREGATE_REMEDY`
+ * in `data/aggregate-field-type-compatibility.ts`, verbatim, so the refusal and
+ * the blueprint say the same sentence; the blueprint test pins it by importing
+ * that constant. It is spelled out rather than imported because an import
+ * would pull that module's query types into the published `objectstack-ai`
+ * skill's reference index (`gen:skill-refs`), for a describe string.
  *
  * The stored half states the inputs it may read: this record's own fields. A
  * stored expression reading another record is refused at authoring, and one
@@ -239,7 +241,8 @@ const booleanFlagRule = (unsetRequired: string) =>
 const FORMULA_STORAGE_RULE =
   'A "formula" is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it, search '
   + 'does not scan it, and a `sum` / `avg` over it is refused with the one remedy every such refusal prints: '
-  + `"${VIRTUAL_FIELD_AGGREGATE_REMEDY}"`;
+  + '"Computed on read, the field stores no value: make it a field of its return type with the same `expression` '
+  + '(computed and stored on write) and aggregate that. Counting records is a different question."';
 const STORED_EXPRESSION_RULE =
   'Second, the stored computed value that remedy names: the same `expression` on a field of the value\'s own return '
   + 'type, never a "formula" (`number` / `currency` / `percent` for a quantity or an amount, `date` for a date). '
