@@ -71,7 +71,8 @@
  *    R1; a suggestion's, R3) names the exact holder, passed as
  *    {@link SecurityCatalogReferenceScope.packageId}: that package's set. A
  *    stale column (that package no longer serves the set) reads as a null
- *    one, said once. One whose column is null resolves by D3 from the package that
+ *    one inside that package's namespace, said once: a holder outside it is
+ *    refused, never read in its place. One whose column is null resolves by D3 from the package that
  *    wrote it ({@link SecurityCatalogReferenceScope.callerPackageId}, R3's
  *    `package_id`), or as a caller with no package (a grant, R1, and every
  *    other by-name read with no position) — so two holders are refused,
@@ -290,8 +291,12 @@ export interface SecurityCatalogReferenceScope {
    * taken by another), the column is stale and the reference is read as one
    * with no package: by D3, from {@link callerPackageId} or with no caller —
    * one holder grants, two are refused naming every candidate — and the stale
-   * column is said once (`SecurityCatalogSources.logger`). Read for a
-   * permission set only.
+   * column is said once (`SecurityCatalogSources.logger`). [#31698] That
+   * reading stays inside the namespace of the package the column names: a
+   * holder it answers outside it (another namespace's package, a package with
+   * no namespace, the environment's own set) is refused
+   * (`not-held-by-qualifier`, naming the holder), and confers nothing. Read
+   * for a permission set only.
    */
   readonly packageId?: string;
   /**
@@ -483,15 +488,15 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     if (!sources.logger || staleSaid.has(key)) return;
     staleSaid.add(key);
     const read = answer.status === 'resolved'
-      ? `it now reads ${answer.entry.packageId ? `package "${answer.entry.packageId}"'s set` : 'the environment\'s set'}`
+      ? `it now reads ${answer.entry.packageId ? `package "${answer.entry.packageId}"'s set, of the same namespace` : 'the environment\'s set'}`
       : answer.status === 'refused'
-        ? `it is refused: ${answer.message}`
+        ? `${answer.reason === 'not-held-by-qualifier' ? 'it confers nothing' : 'it is refused'}: ${answer.message}`
         : 'nothing serves it';
     try {
       sources.logger.warn(
         `[security] a stored reference names permission set "${name}" of package "${packageId}", which no longer serves it; `
-          + `it is read by the resolution rule instead, as a reference with no package is, and ${read}. `
-          + 'Review it with `os migrate stored-references` and bind it again.',
+          + `it is read by the resolution rule instead, as a reference with no package is, within that package's namespace, and ${read}. `
+          + 'Review it, and write it again naming the package that holds the set if that set is the one meant.',
         { type: 'permission', name, packageId, answer: answer.status },
       );
     } catch { /* a sink that throws says nothing; the read goes on */ }
@@ -605,6 +610,66 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
   };
 
   /**
+   * [ADR-0150 D2/D8, #31698] Does the holder `holderPackageId` share the
+   * namespace of the package `columnPackageId` a stored column names? Both must
+   * be installed packages that declare one namespace, the same one; the
+   * environment's own set, a package with no namespace and a package the
+   * registry does not know share none.
+   */
+  const sharesColumnNamespace = (
+    scope: SecurityCatalogPackageScopedRegistry,
+    columnPackageId: string,
+    holderPackageId: string | undefined,
+  ): boolean => {
+    const namespaceOf = (packageId: string | undefined): string | undefined => {
+      if (typeof packageId !== 'string' || packageId === '' || packageId === OVERLAY_PROVENANCE_SENTINEL) return undefined;
+      let row: { manifest?: unknown } | undefined;
+      try {
+        row = scope.getPackage?.(packageId);
+      } catch {
+        return undefined;
+      }
+      const namespace = (row?.manifest as { namespace?: unknown } | undefined)?.namespace;
+      return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+    };
+    const column = namespaceOf(columnPackageId);
+    return column !== undefined && column === namespaceOf(holderPackageId);
+  };
+
+  /**
+   * [ADR-0150 D8, #31698] The refusal of a stored column whose package no
+   * longer serves the set, where the holder the name now reads is outside that
+   * package's namespace: the column names its package exactly, and that
+   * package holds no set of the name (`not-held-by-qualifier`, naming the
+   * holder). It confers nothing.
+   */
+  const columnOutsideNamespaceRefusal = (
+    name: string,
+    columnPackageId: string,
+    held: SecurityCatalogEntry,
+  ): SecurityCatalogResolution => {
+    const owner = held.packageId;
+    const holder: PackageScopedHolder = owner !== undefined && owner !== OVERLAY_PROVENANCE_SENTINEL
+      ? { kind: 'package', packageId: owner }
+      : { kind: 'environment' };
+    const refusal = {
+      status: 'refused' as const,
+      reason: 'not-held-by-qualifier' as const,
+      type: 'permission' as const,
+      name,
+      callerPackageId: columnPackageId,
+      candidates: [holder],
+    };
+    return {
+      status: 'refused',
+      reason: refusal.reason,
+      candidates: refusal.candidates.map(describePackageScopedHolder),
+      message: packageScopedRefusalMessage(refusal),
+      holders: refusal.candidates,
+    };
+  };
+
+  /**
    * A permission set by ADR-0150 D3 (module doc): the one rule over the
    * registry's holders of the name and the one closure walk — the holder set
    * `resolvePackageScopedName` (`@objectstack/objectql`) hands the same rule.
@@ -635,13 +700,22 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
         throw error;
       });
       if (stored && ownerOf(stored) === exact) return { status: 'resolved', entry: entry('permission', stored, 'metadata') };
-      // A stale column — the set moved to another package on an upgrade, or
-      // was renamed and its name taken by another — is read as an unbound
-      // row: the rule below grants the one holder and refuses two, naming
-      // every candidate. Never not-found on its own say: a grant would be
-      // dropped silently where a column-less one is honoured.
+      // A stale column — the set moved to another package of the column's
+      // namespace on an upgrade, or was renamed and its name taken there — is
+      // read as an unbound row: the rule below grants the one holder and
+      // refuses two, naming every candidate. Never not-found on its own say:
+      // a grant would be dropped silently where a column-less one is honoured.
+      // [ADR-0150 D2/D8, #31698] The reading stays inside the namespace of the
+      // package the column names: a holder the rule answers anywhere else
+      // (another namespace's package, a package with no namespace, the
+      // environment's own set) is never read in that package's place. The
+      // column is refused, naming that holder (`not-held-by-qualifier`, as the
+      // write seam refuses the same column), and confers nothing.
       const { packageId: _stale, ...unbound } = reference as SecurityCatalogReferenceScope;
-      const answer = await resolvePermissionScoped(scope, name, unbound);
+      const read = await resolvePermissionScoped(scope, name, unbound);
+      const answer = read.status === 'resolved' && !sharesColumnNamespace(scope, exact, read.entry.packageId)
+        ? columnOutsideNamespaceRefusal(name, exact, read.entry)
+        : read;
       warnStale(exact, name, answer);
       return answer;
     }

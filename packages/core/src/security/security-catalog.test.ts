@@ -442,11 +442,13 @@ describe('security catalog read — permission sets by (package, name) through t
   // [ADR-0150 D8 R1/R3] A stored reference read by its package column.
   describe('a stored reference read by its package column', () => {
     const R = 'com.acme.r';
+    /** A package of Q's namespace (`q`) that holds no set. */
+    const Q_OLD = 'com.acme.q-old';
     /** `shared` held by Q and R (a pre-phase-1 clash); `q_only` by Q alone; `env_set` by the environment. */
     const stored = () => scopedRegistry(
       { permission: [{ name: 'shared', _packageId: Q }, { name: 'q_only', _packageId: Q }] },
       {
-        packages: { [P]: { deps: [Q] }, [Q]: {}, [R]: {} },
+        packages: { [P]: { deps: [Q] }, [Q]: {}, [R]: {}, [Q_OLD]: { namespace: 'q' } },
         holders: {
           shared: [{ packageId: Q, item: { name: 'shared', _packageId: Q, label: 'Q' } }, { packageId: R, item: { name: 'shared', _packageId: R, label: 'R' } }],
           q_only: [{ packageId: Q, item: { name: 'q_only', _packageId: Q } }],
@@ -462,32 +464,69 @@ describe('security catalog read — permission sets by (package, name) through t
       expect(await resolveCatalogReference(reader, 'permission', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
     });
 
-    it('a stale column (its package no longer serves the set) reads as a null one: one holder grants, two are refused naming both — said once', async () => {
+    it('a stale column (its package no longer serves the set) reads as a null one inside its package\'s namespace: one holder there grants, two are refused naming both — said once', async () => {
       const warn = vi.fn();
       const reader = createSecurityCatalogReader({
         registry: stored(),
         metadata: metadata({ permission: [{ name: 'meta_only' }] }),
         logger: { warn },
       });
-      const gone = storedPermissionSetScope('com.acme.gone');
-      // The set moved to Q on an upgrade: the grant follows it, as an unbound one does.
-      expect((await reader.resolve('permission', 'q_only', gone))?.packageId).toBe(Q);
-      expect((await reader.resolve('permission', 'env_set', gone))?.definition).toEqual({ name: 'env_set' });
-      expect((await reader.resolve('permission', 'meta_only', gone))?.definition).toEqual({ name: 'meta_only' });
+      // Q_OLD shares Q's namespace and no longer serves `q_only`.
+      const moved = storedPermissionSetScope(Q_OLD);
+      // The set moved to Q, of the same namespace, on an upgrade: the grant follows it, as an unbound one does.
+      expect((await reader.resolve('permission', 'q_only', moved))?.packageId).toBe(Q);
       // ⛔ Two holders: refused, naming both — never the first registered.
-      const answer = await resolveCatalogReference(reader, 'permission', 'shared', gone);
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared', moved);
       expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
       if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
       // R3: a stale column is read from the writer, as its null column is.
-      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope('com.acme.gone', P)))?.definition.label).toBe('Q');
+      expect((await reader.resolve('permission', 'shared', storedPermissionSetScope(Q_OLD, P)))?.definition.label).toBe('Q');
       // Said once per (package, name), however often it is read.
-      await reader.resolve('permission', 'q_only', gone);
+      await reader.resolve('permission', 'q_only', moved);
+      expect(warn.mock.calls.map(([, meta]) => `${meta.packageId}:${meta.name}`)).toEqual([`${Q_OLD}:q_only`, `${Q_OLD}:shared`]);
+      expect(warn.mock.calls[0][0]).toContain(`package "${Q}"'s set, of the same namespace`);
+      expect(warn.mock.calls[1][0]).toContain('it is refused');
+    });
+
+    it('[#31698] a stale column whose name\'s holder is outside its package\'s namespace confers nothing: refused, naming that holder, said once', async () => {
+      const warn = vi.fn();
+      const reader = createSecurityCatalogReader({
+        registry: stored(),
+        metadata: metadata({ permission: [{ name: 'meta_only' }] }),
+        logger: { warn },
+      });
+      const refusedFor = async (name: string, scope: ReturnType<typeof storedPermissionSetScope>) => {
+        const answer = await resolveCatalogReference(reader, 'permission', name, scope);
+        expect(await reader.resolve('permission', name, scope)).toBeUndefined();
+        return answer.status === 'refused' ? { reason: answer.reason, holders: answer.holders } : answer.status;
+      };
+      // Another namespace's package (R holds no `q_only`; Q, its holder, is of namespace q).
+      expect(await refusedFor('q_only', storedPermissionSetScope(R))).toEqual({
+        reason: 'not-held-by-qualifier', holders: [{ kind: 'package', packageId: Q }],
+      });
+      // A package the registry does not know declares no namespace.
+      expect(await refusedFor('q_only', storedPermissionSetScope('com.acme.gone'))).toEqual({
+        reason: 'not-held-by-qualifier', holders: [{ kind: 'package', packageId: Q }],
+      });
+      // The environment's own set, in the registry or only in the metadata service.
+      expect(await refusedFor('env_set', storedPermissionSetScope(Q_OLD))).toEqual({
+        reason: 'not-held-by-qualifier', holders: [{ kind: 'environment' }],
+      });
+      expect(await refusedFor('meta_only', storedPermissionSetScope(Q_OLD))).toEqual({
+        reason: 'not-held-by-qualifier', holders: [{ kind: 'environment' }],
+      });
+      // R3: read from the writer's closure, the holder there is still outside the column's namespace.
+      expect(await refusedFor('q_only', storedPermissionSetScope(R, P))).toEqual({
+        reason: 'not-held-by-qualifier', holders: [{ kind: 'package', packageId: Q }],
+      });
+      // CONTROL: a column naming the holder reads it.
+      expect((await reader.resolve('permission', 'q_only', storedPermissionSetScope(Q)))?.packageId).toBe(Q);
+      await refusedFor('q_only', storedPermissionSetScope(R));
       expect(warn.mock.calls.map(([, meta]) => `${meta.packageId}:${meta.name}`)).toEqual([
-        'com.acme.gone:q_only', 'com.acme.gone:env_set', 'com.acme.gone:meta_only', 'com.acme.gone:shared',
+        `${R}:q_only`, 'com.acme.gone:q_only', `${Q_OLD}:env_set`, `${Q_OLD}:meta_only`,
       ]);
-      expect(warn.mock.calls[0][0]).toContain('os migrate stored-references');
-      expect(warn.mock.calls[0][0]).toContain(`package "${Q}"'s set`);
-      expect(warn.mock.calls[3][0]).toContain('it is refused');
+      expect(warn.mock.calls[0][0]).toContain('it confers nothing');
+      expect(warn.mock.calls[0][0]).toContain(`package "${Q}"`);
     });
 
     it('a null column with two or more holders is refused, naming every candidate — never the first registered', async () => {

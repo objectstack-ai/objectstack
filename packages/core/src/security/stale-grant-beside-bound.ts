@@ -7,7 +7,9 @@
  * A `sys_user_permission_set` row names its set's holder in
  * `permission_set_package`. A column whose package no longer serves the set is
  * stale, and is read as a null one: the resolution rule picks the holder (D8
- * R1, `storedPermissionSetScope`). Where that reading lands on a package that
+ * R1, `storedPermissionSetScope`) inside the namespace of the package the
+ * column names, and a holder outside it is refused (the catalog's stored-column
+ * arm, #31698), so only a holder of that namespace is judged here. Where that reading lands on a package that
  * another stored grant of the same user, set and organization is BOUND to, the
  * stale grant confers nothing. The bound grant is the one that grants that
  * holder's set, and its validity window is the one that applies: a second row

@@ -1535,6 +1535,12 @@ async function ledgerRowHolders(
   const answer = await resolveCatalogReference(catalog, 'permission', name, scope);
   if (answer.status === 'resolved') return [catalogEntryAddress(answer.entry).packageId];
   if (answer.status === 'not-found') return [named];
+  // [#31698] A stale column the catalog refuses because the holder the rule
+  // answers is outside its package's namespace (it confers nothing there)
+  // still switches that holder off: a switch-off is never read as none.
+  if (answer.reason === 'not-held-by-qualifier' && answer.holders && answer.holders.length > 0) {
+    return answer.holders.map((holder) => (holder.kind === 'package' ? holder.packageId : null));
+  }
   const holders = (await catalog.list('permission'))
     .filter((entry) => entry.name === name)
     .map((entry) => catalogEntryAddress(entry).packageId);
@@ -2689,7 +2695,8 @@ export async function resolveUserAuthzGrants(
     // [ADR-0150 D8 R1] A grant whose `permission_set_package` names its
     // holder reads that package's set and no other; a null column resolves
     // with no caller (D3), so two holders confer nothing and nothing is
-    // picked (`storedPermissionSetScope`).
+    // picked (`storedPermissionSetScope`). A stale column reads inside its
+    // package's namespace only (the catalog's stored-column arm, #31698).
     const body = await catalogSetBody(catalog, name, undefined, storedPermissionSetScope((grant as Record<string, unknown>).permission_set_package));
     if (!body) continue;
     // [ADR-0150 D8] A stale column read onto a holder another grant of this
