@@ -875,13 +875,65 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   hook: (t, count) => t('preview.changes.typeCount.hook', { count, defaultValue: '{{count}} hooks' }),
   translation: (t, count) =>
     t('preview.changes.typeCount.translation', { count, defaultValue: '{{count}} translations' }),
+  // Every other type the platform lets a runtime author draft
+  // (`allowRuntimeCreate` in the spec's metadata type registry), so a publish
+  // can carry it; without a row each read as its raw type name. The rows are
+  // held to that registry by `DraftChangesPanel.typeCount.test.tsx`.
+  mapping: (t, count) => t('preview.changes.typeCount.mapping', { count, defaultValue: '{{count}} field mappings' }),
+  seed: (t, count) => t('preview.changes.typeCount.seed', { count, defaultValue: '{{count}} seed data sets' }),
+  external_catalog: (t, count) =>
+    t('preview.changes.typeCount.external_catalog', { count, defaultValue: '{{count}} external catalogs' }),
+  doc: (t, count) => t('preview.changes.typeCount.doc', { count, defaultValue: '{{count}} documentation pages' }),
+  book: (t, count) => t('preview.changes.typeCount.book', { count, defaultValue: '{{count}} documentation books' }),
+  position: (t, count) => t('preview.changes.typeCount.position', { count, defaultValue: '{{count}} positions' }),
+  tool: (t, count) => t('preview.changes.typeCount.tool', { count, defaultValue: '{{count}} AI tools' }),
+  skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
 };
+
+/** The types {@link TYPE_COUNT} names, for the test that holds it to the spec's registry. */
+// eslint-disable-next-line react-refresh/only-export-components -- a constant read by this file's test
+export const COUNTED_DRAFT_TYPES: readonly string[] = Object.keys(TYPE_COUNT);
 
 function summaryTypeSegment(t: Translate, type: string, count: number): string {
   const counted = Object.prototype.hasOwnProperty.call(TYPE_COUNT, type) ? TYPE_COUNT[type] : undefined;
   return counted
     ? counted(t, count)
     : t('preview.changes.summaryType', { n: count, type, defaultValue: '{{n}} {{type}}' });
+}
+
+/**
+ * The verdict a pre-publish security finding reads as, in the console's
+ * language, keyed by the finding's rule id. Only the rules that can fire on
+ * the object drafts this sheet lints (`lintDraftSecurityPosture`, errors
+ * only) have a row; another rule reads as the rule's own text. The rule's own
+ * text stays on the row's tooltip: it names the exact value and remedy.
+ */
+const SECURITY_RULE_TEXT: Readonly<Record<string, (t: Translate) => string>> = {
+  'security-owd-unset': (t) =>
+    t('preview.changes.securityRule.owdUnset', {
+      defaultValue:
+        'No record-sharing baseline (sharingModel) is declared. The runtime falls back to private, but the baseline must be an authored decision.',
+    }),
+  'security-owd-alias': (t) =>
+    t('preview.changes.securityRule.owdAlias', {
+      defaultValue:
+        'The record-sharing baseline (sharingModel) is not a canonical value, so the runtime treats the object as private.',
+    }),
+  'security-controlled-by-parent-no-relation': (t) =>
+    t('preview.changes.securityRule.cbpNoRelation', {
+      defaultValue:
+        'Access is controlled by the parent, but no required master-detail field names a parent, so every read is denied and every write refused.',
+    }),
+  'security-controlled-by-parent-ambiguous-relation': (t) =>
+    t('preview.changes.securityRule.cbpAmbiguousRelation', {
+      defaultValue:
+        'Access is controlled by the parent, but several required master-detail fields name a parent, so none is derived: every read is denied and every write refused.',
+    }),
+};
+
+function securityProblemText(t: Translate, p: DraftSecurityProblem): string {
+  const known = Object.prototype.hasOwnProperty.call(SECURITY_RULE_TEXT, p.rule) ? SECURITY_RULE_TEXT[p.rule] : undefined;
+  return known ? known(t) : p.hint || p.message;
 }
 
 /** A backfill choice's identity: object and field, as a JSON tuple so no spelling collides. */
@@ -1870,7 +1922,11 @@ export function DraftChangesPanel({
             </p>
             <ul className="mt-1.5 flex flex-col gap-1.5">
               {problems.map((p) => (
-                <li key={`${p.type}:${p.name}:${p.rule}`} className="text-[11px] leading-5 text-amber-900 dark:text-amber-200">
+                <li
+                  key={`${p.type}:${p.name}:${p.rule}`}
+                  title={[p.message, p.hint].filter(Boolean).join(' ')}
+                  className="text-[11px] leading-5 text-amber-900 dark:text-amber-200"
+                >
                   {/* `type/name`, the way the server's own publish refusal names
                       the item (`object/crmext_visit: …`) — and, unlike a bare
                       name, text that cannot collide with the same draft's row in
@@ -1896,7 +1952,7 @@ export function DraftChangesPanel({
                       {p.type}/{p.name}
                     </span>
                   )}{' '}
-                  — {p.hint || p.message}
+                  — {securityProblemText(t, p)}
                 </li>
               ))}
             </ul>
