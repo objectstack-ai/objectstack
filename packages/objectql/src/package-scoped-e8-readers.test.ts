@@ -357,9 +357,9 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
 });
 
 describe('the types E8 does not wire keep the legacy read', () => {
-  it('a view (bucket 1) and a webhook (child B, not yet wired) are read by getItem, untouched', async () => {
-    ship('webhook', 'onboard', A);
-    expect(labelOf(await facade.get('webhook', 'onboard', P))).toBe('alpha webhook');
+  it('a view (bucket 1) and a connector (not wired; the flow and the webhook are, #31696 and #31699 PR 2) are read by getItem, untouched', async () => {
+    ship('connector', 'onboard', A);
+    expect(labelOf(await facade.get('connector', 'onboard', P))).toBe('alpha connector');
   });
 });
 

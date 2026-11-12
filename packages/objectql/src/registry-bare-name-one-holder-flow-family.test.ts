@@ -329,9 +329,10 @@ describe('the narrowing — a flow holds one name per namespace (ADR-0150 D2/D9,
   const type = 'flow' as const;
   const name = 'shared_flow';
 
-  it('the switch holds flow, and neither the webhook nor the connector', () => {
+  it('the switch holds flow (and the webhook, #31699 PR 2), and not the connector', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('flow');
-    for (const other of ['webhook', 'connector'] as const) expect(narrowed(other), other).toBe(false);
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
+    expect(narrowed('connector'), 'connector').toBe(false);
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own flow', async () => {
@@ -406,7 +407,7 @@ describe('the narrowing — a flow holds one name per namespace (ADR-0150 D2/D9,
     }
   });
 
-  it.each(['webhook', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+  it.each(['connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
     expectRefusal(
