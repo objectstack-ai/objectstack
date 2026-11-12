@@ -1,0 +1,32 @@
+{
+  "number": 32642,
+  "kind": "issue",
+  "title": "spec: declare the AI answer follow-up routes cloud ships (saved questions, turn artifact, turn feedback) and carry turn_id on AIConversation.messages",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:blocking",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:56:33Z",
+  "updated_at": "2026-11-12T09:02:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32642",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nSeam: cloud (producer, cloud#4107) → console `plugin-chatbot` (consumer, #31889, #31865)\n\nFiling gate: ④ the contract carrier two retriage asks need. `domain:ui#1` asked on #31889 and #31865 (2026-11-12T06:49Z) for a contract-first carrier ahead of the console halves. Split by triage. ⛔ Not a claim.\n\n## What is missing (reading of origin/main `3452dec21`, by the asking seat)\n\n- No file under `packages/spec/src`, `packages/client*/src` or `ui/packages` names `saved-questions`, a turn `artifact` route or a turn `feedback` route. `grep -rln \"saved-questions\\|savedQuestion\\|saved_question\"` has one unrelated hit; `grep -rln \"turns/.*feedback\\|AnswerFeedback\\|answer_feedback\"` has none.\n- The request and response shapes of `/api/v1/ai/saved-questions`, `…/turns/:turnId/artifact` and `…/turns/:turnId/feedback` live only in cloud (cloud#4107). A console dev would have to guess them.\n- `AIConversation.messages` carries no `turn_id`, so a reloaded conversation cannot be rated (#31865 item 1).\n\n## Do\n\n1. Declare the three route contracts (request, response, error codes) in `packages/spec`, read from the producer in cloud. Ask the `repo:cloud` seat by mailbox (`Request: cloud-confirm`) for any shape that cannot be read from cloud's code.\n2. Add `turn_id` to `AIConversation.messages`.\n3. Acceptance: the console and the client SDK can import the shapes; the `repo:cloud` seat confirms the producer answers them, or files the cloud-side alignment.\n\n## Order\n\nThe client SDK methods card is `Blocked-by:` this card; #31889 and #31865 wait on both."
+}

@@ -2,8 +2,8 @@
   "number": 32516,
   "kind": "issue",
   "title": "composeStacks: under override or merge, two shapes still compose into an artifact whose package bodies both declare one object name",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T02:34:51Z",
-  "updated_at": "2026-11-12T07:26:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T10:42:17Z",
+  "closed_at": "2026-11-12T10:41:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32516",
   "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect, needs a step-0 measurement (escalated by the CONTRACT_REVIEW_TIER review of PR #32495 for #32477, comment 6811982973 ③, escalations 1 and 2; read from the code, not run).\nRefs #32477\n\n## Business reason\n\n`composeStacks` is how several packages are combined into one deployable stack. When two packages declare the same object, composition should either reconcile them (as `override` and `merge` promise) or refuse with a clear remedy. Today two shapes compose without complaint and then fail or silently lose one package's object at boot, which is the outcome #32477 closed for the other shapes.\n\n## What happens\n\n1. **Additive nested input beside a flat declarer.** An input that carries BOTH a top-level `X` and a body `X` in `packages[]` (a preserve artifact that was not stripped, for example one package entry, or a manifest-less sibling) is composed beside another input declaring `X`. Under `override` / `merge` the flat walk reconciles the top-level copies, but the body keeps its own `X`. The boot registers bodies through `resolveArtifactPackageOrder`, not through the top-level-first merge, so by the mechanism #32477's step 0 measured, this ends in the same refuse-or-trim result. Step 6 also skips that body object's embedded actions as already judged.\n2. **Flat pair composed under `preserve` with `override` / `merge`.** `preservePackageEntries` assembles each package body from its input unchanged, so the composed artifact carries both `p1`'s and `q`'s bodies declaring `X`. #32477's step 0 measured that shape as `DUPLICATE_ARTIFACT_OBJECT_NAME` at boot. This is pre-existing on `main`.\n\nPR #32495 refuses a nested body's name only when its own input's top level does not claim it (as ruled), and leaves the flat strategies alone, so neither shape changes there. Its refusal text already tells authors that under `preserve` only rename or `objectExtensions` apply.\n\n## Expected\n\nFirst measure both shapes through a real boot, as #32477's step 0 did. Then either refuse them at compose time with `STACK_COMPOSE_OBJECT_CONFLICT` and the remedies, or make `override` / `merge` reach into the bodies so the composed artifact really carries one declaration. Whichever is chosen, `composeStacks` should never hand the boot an artifact whose bodies declare one name twice.\n\nRe-check (premise): read `refuseNestedBodyObjectConflicts` and `preservePackageEntries` in `packages/spec/src/stack.zod.ts` after #32495 lands, and `resolveArtifactPackageOrder` in `@objectstack/runtime`.\nReader who acts: the seat that owns `packages/spec` stack composition."

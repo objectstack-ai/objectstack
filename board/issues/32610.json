@@ -13,17 +13,19 @@
   "labels": [
     "area:studio",
     "bug",
-    "domain:ui"
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T07:45:32Z",
-  "updated_at": "2026-11-12T07:45:32Z",
+  "updated_at": "2026-11-12T09:31:11Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32610",
   "body": "coordinator#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\n立卡门类别:① 用户可见的体验缺陷(reach: 界面实测一次,见下)\n\n## 维护者速读\n在 Studio 里让右侧副驾改一个字段并「存为草稿」后,已经打开的字段属性栏还显示旧值:没有「草稿」标记,副驾刚加的帮助文本也是空的;表单画布上也看不到副驾新加的字段。整页刷新后才全部正确。撤销草稿后,顶部「草稿 · 2 项未发布」也不会消失。用户会以为副驾没改成功,或者以为草稿还在。\n\n## reach\nstaging 环境 `os-6hf1jq`(cloud main `23b6cf9d`,staging 部署 2026-11-11T14:31Z),软件包「工单管理」(`app.e9gv`),对象 `e9gv_ticket`,读于 2026-11-12T07:15Z–2026-11-12T07:24Z:\n1. 表单页签里点选「问题描述」打开字段属性栏,然后在右侧副驾里让它给这个字段加帮助文字,点「存为草稿」。\n2. 草稿已经写入:`GET /api/v1/meta/object/e9gv_ticket?state=draft` 的 `item.fields.description.inlineHelpText` 是新文字,`draftChanges` 有 `[\"fields\",\"description\",\"inlineHelpText\"]`,`by: \"copilot\"`。\n3. 属性栏没有变化:帮助文本框仍为空,头部没有「草稿」标记(`studio-draft-chip` 不在 DOM 里)。表单画布仍是「未分组 · 5 个字段」,看不到同一草稿里副驾新加的 `impact_scope`。\n4. 整页刷新、再点同一字段后:画布变成 6 个字段,帮助文本出现,「草稿」标记和「由 AI 副驾在 2 分钟前作为草稿加入」也出现了。\n5. 随后在副驾卡片上「全部撤销」:`GET /api/v1/meta/_drafts?package=app.e9gv` 回读为空,但对象头部的「草稿 · 2 项未发布」一直显示,直到离开页面。\n\n## 预期\n副驾的草稿写入落地后(以及草稿被撤销后),当前打开的 Studio 画布、字段属性栏和头部的草稿计数按服务端草稿重新读取,不需要刷新页面。\n\n## 落点\n`ui/packages/app-shell/src/views/studio-design/`:数据支柱的字段属性栏(`data-field-inspector`)、表单画布,以及头部草稿计数(`StudioItemHeader.tsx`)。副驾写草稿后,这些地方没有重读。机制待车道确认:可能是副驾的写入没有走 Studio 自己的写入通道,所以没有触发重读。\n\n## 业务理由\n- 谁受益:在 Studio 里用副驾改应用的搭建者。\n- 场景:副驾说「已存为草稿」,但属性栏和画布看起来什么都没变。\n- 不做会怎样:用户会重复发指令或手动再改一遍,做出重复草稿;撤销后又以为草稿还在,不敢发布别的改动。\n\nReader: `domain:ui` 车道,Studio 数据支柱与头部(`ui/packages/app-shell/src/views/studio-design/`)。验收:副驾写草稿或撤销草稿后,不刷新页面,属性栏、画布和头部计数都和 `?state=draft` 及 `/meta/_drafts` 一致;加一个测试钉住「副驾写入后属性栏重读」。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue copilot draft properties stale refresh` → 10 hits,`草稿 属性 刷新 副驾` → 1 hit,`field inspector copilot apply not refreshed` → 5 hits。命中的只有已关的 #25943(副驾草稿标记功能本身,本次在 staging 验收通过)和若干座位贴,没有同题卡。\n\nRelated: objectstack-ai/cloud#3760(本次读数),#25943。"

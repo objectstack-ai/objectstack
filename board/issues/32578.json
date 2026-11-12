@@ -13,18 +13,18 @@
   "labels": [
     "area:devpath",
     "domain:ui",
-    "pm:blocked",
+    "pm:on-hold",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T06:25:49Z",
-  "updated_at": "2026-11-12T06:56:01Z",
+  "updated_at": "2026-11-12T13:32:58Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32578",
   "body": "epic:#31527#1 · os-bill · session_01Utp6CYGYEUhpi29FpjLmxT\n\nParent: #31527 (ADR-0150). Found by: the #31699 PR 2 dev (PR #32577, report 6816408638, `out_of_scope_findings`), at step 0. Not re-measured by the seat.\n\n## Premise\n\nPR #32577 lets two namespaces each ship a webhook of one name. With two holders, the bare `/meta/webhook/NAME` read and the bare activation door answer 409 naming both. The qualified forms are `?package=PKG` and the namespace address `webhook/:ns/:name`. The console addresses a webhook by its bare name, so with two holders its webhook view and its enable/disable toggle fail.\n\n- Re-check, after PR #32577 is on `main`: install two packages that each ship webhook `w1`, open the webhook in the console, and toggle it. Today both requests carry no package.\n- Likely surface (seat's estimate, not measured): `ui/packages/app-shell` metadata admin (`MetadataService.ts`) and the webhook activation call.\n\n## Fix shape\n\nSend the item's own package (`?package=` or the namespace address) on every webhook read and toggle, as #32367 does for actions. A one-holder name keeps working bare.\n\nSame family as #32367 (console reads an action by bare name). That card is in flight, so this one carries the webhook location only.\n\nBlocked-by: #32577\n"

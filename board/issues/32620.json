@@ -10,16 +10,21 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:17:42Z",
-  "updated_at": "2026-11-12T08:18:29Z",
+  "updated_at": "2026-11-12T08:55:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32620",
   "body": "domain:server#4 · os-lizheng · session_012MmDsNv6qb5gT8Pd98AmCB\n\nFollow-up of #32366 (PR #32447), on the epic seat's ruling 6818436831 (`epic:#31527#2`, answering the open question of PR #32447's patch round 2). ⛔ Not a claim; this seat is off duty after its in-flight cards. Child of the ADR-0150 epic #31527.\n\n**Business reason:** after a tenant deletes their customization of a name that two packages ship, a read naming the customizing package keeps serving the deleted body, and a read naming a holder is refused with a candidate whose row no longer exists, until the next reload.\n\n## What happens today\n\nThis is the path where the heal reads with no package and the store refuses, in `restoreArtifactRegistryView` (`packages/metadata-protocol/src/protocol-registry-hydration.ts`, `readHealBaseline`). It covers a removed row bound to a package that holds no item of the name (a non-holder: an App's customization, ADR-0146), on a name two packages hold, where the pair relation yields zero or several bases. The heal stops with an `error` line, and the removed row's own entry stays in the bare slot. Measured by the epic seat:\n- the bare slot keeps the removed row's own entry (tenant-authored, bound to the non-holder);\n- a read naming a holder is refused with a candidate whose row no longer exists;\n- a read naming the non-holder serves the deleted body.\n\n`main` already behaves this way, so this is not a regression of PR #32447.\n\n## Do (ruling 6818436831, verbatim conditions)\n\n1. Retire that entry, the same way PR #32447 retires a package-less row's entry (the Q2 step, `removeOverlayEntry`, which refuses a packaged artifact). Retiring picks nobody and restores each holder's exact address.\n2. \"Declare the move (kept → retired, `Clause-②: no`).\"\n3. \"Pin, on a real `SchemaRegistry`: holder reads answer their own item, the bare read is the 409 naming both holders, and the list shows the two holders only.\" Ablate once.\n4. \"Cite this comment as the ruling.\"\n\n**Serial:** after #32447 merges (same function). **Re-check:** `git grep -n \"readHealBaseline\" origin/main -- packages/metadata-protocol/src/protocol-registry-hydration.ts` (control: `restoreArtifactRegistryView` in the same file); read whether the non-holder no-single-base branch retires.\n\n**Dedupe** (`removeOverlayEntry non-holder retire bare slot`, open and closed): 1 hit before filing, #32366 (the parent card, not a duplicate).\n"

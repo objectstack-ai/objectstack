@@ -1,0 +1,32 @@
+{
+  "number": 32725,
+  "kind": "issue",
+  "title": "docs(kernel): the auth-service contract page says what a host that forwards to auth.handleRequest gets — the whole plugin surface, the mount-layer checks, and the optional transport argument",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:auth",
+    "documentation",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:27:16Z",
+  "updated_at": "2026-11-12T13:45:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32725",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ② the `Skills-docs: follow-up owed` line of PR #32707 (objectstack#32637, S1), which the seat files before ACCEPT. Reach: every host that forwards auth requests to `AuthManager.handleRequest` (the `@objectstack/hono` embed, the runtime dispatcher's `/auth` domain, and cloud's hosted plane). The contract review at PR #32707 comment 6823508864 confirmed the page still shows the one-argument call.\n\n## 维护者速读\n\nS1 合入后，宿主把登录请求转给 `handleRequest` 就能拿到插件的全部登录接口，并且会开始执行 IP 白名单等挂载层检查。合同文档还写着旧的单参数调用。这张卡只改文档，把这三件事写清楚，免得接入方漏传客户端地址后被 403。\n\n## Work\n\nIn `content/docs/kernel/contracts/auth-service.mdx`, the `handleRequest` section, state:\n1. A forwarding host is answered from the plugin's whole auth surface (the framework-mounted routes plus better-auth), not better-auth alone.\n2. The mount-layer checks run on that path: the IP allow-list (`allowed_ip_ranges`), the one-account-per-request rule, the organization IP list, and the platform-admin wrappers.\n3. The optional second argument `{ remoteAddress }`, and `server.trustProxy` behind a proxy. Without either, an allow-listed deployment answers `403 IP_NOT_ALLOWED`.\n\nTake the wording from the merged changeset `.changeset/auth-handlerequest-whole-surface.md` and the `packages/spec/src/contracts/auth-service.ts` docblock. Never restate anything beyond them.\n\n## Acceptance\n\nThe page shows the two-argument form and names the three points. `skills/**` stays untouched, since no skill teaches these names (measured at PR #32707).\n\nBlocked-by: #32707\n\nDedupe: `repo:objectstack-ai/objectstack auth-service.mdx handleRequest is:issue is:open` → 0."
+}

@@ -1,0 +1,28 @@
+{
+  "number": 32686,
+  "kind": "issue",
+  "title": "[Decision] How should an MCP agent create a record whose required file field must be filled (e.g. an expense line with a required e-invoice)?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "needs-user-decision"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:08:06Z",
+  "updated_at": "2026-11-12T10:08:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32686",
+  "body": "Filing category: ② a decision only the maintainer can make.\n\n## 维护者速读\n\n- 现象：报销明细的「电子发票」是必填文件字段。MCP 的 `create_record` 没法带文件，被拒（「电子发票 is required」）；`create_upload_link` 只能给**已存在**的记录生成上传链接。先有鸡还是先有蛋：agent 无法通过 MCP 新增任何带必填文件字段的记录。附件通道（`attachments: true`）对普通成员也被拒（无 `sys_attachment` 创建权）。\n- 要你裁：给 MCP 一条「先传文件、再建记录」的路，还是接受这类对象只能在界面里建。\n- 推荐：A：`create_upload_link` 支持「为将要创建的记录」上传：返回一个文件令牌，`create_record` 用这个令牌填文件字段（与界面上传后再提交表单是同一个顺序）。\n\n## One-sentence problem\n\n\"Help me file this taxi receipt\" works in the console (pick the PDF, save) but cannot be done by an agent, because the agent can only ask for an upload after the record exists, and the record cannot exist without the upload.\n\n## Evidence (reach)\n\nHosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), member's MCP OAuth token (`data:write`):\n- `create_record k7en_claim_line { …, invoice_no, amount }` (no file) → `电子发票 is required`.\n- `create_upload_link { objectName: 'k7en_claim', recordId, attachments: true }` → `403 … your permissions do not allow creating attachments (sys_attachment)`.\n- `create_upload_link { objectName: 'k7en_claim_line', recordId: <existing line>, field: 'invoice_file' }` → link; opened in the member's browser, upload replaced the file (\"Done. The file was attached\"). So the link path works for an existing record only.\n- `read_file` on the line returned the PDF's text (invoice number, amount) — the read half is fine.\n\n## Governing text\n\n- objectstack#30892 (closed): \"MCP cannot read or attach files\" — `read_file` / `create_upload_link` were its answer; the create-with-required-file case was not covered.\n- `docs/NORTH-STAR.md` — \"files\" is on the road; \"Every step of the road must hold for both kinds of user\".\n\n## Options\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | `create_upload_link` without `recordId` (object + field) → the user uploads; the answer gives a short-lived file token the same user's `create_record` / `update_record` may put in that field | Agent: \"open this link and pick the invoice\", then it files the line | storage + mcp seats · 1–2 PRs · precedent: the console's own upload-then-save |\n| B | Let agents create the record with the file field empty when the caller will attach next (a \"pending file\" state) | Records exist briefly without their required file | data + mcp seats · 2 PRs · loosens `required` |\n| C | Keep as is; document that objects with a required file are filed in the console | Agents cannot file expenses with invoices | none |\n\nBusiness reading: A = the agent works like the form (file first, then save); B = the rule bends for agents; C = invoices are a human-only step.\n\n## Recommendation\n\nA. It keeps `required` meaning required, mirrors how the console already orders upload and save, and keeps the token bound to the uploading user. Confidence gap: token lifetime and reuse across records — single-use, same user, same object/field, recommended; untested.\nSelf-check: only ① picks A; ②③④ do not flip it.\n\n## After the ruling\n\nA: storage issues an unbound upload for (object, field, user); `create_record` accepts the token in that field; e2e: an agent files an expense line with a required invoice in two calls plus one browser upload.\n\nos-decision-facets\n① 项目长远合理性: A 复用「先上传、再保存」这一个顺序，不放宽 `required`，特例最小。\n② 实际业务拉动: 报销、合同、证照等「必须附文件」的对象都卡在这一步（本次实测：报销明细）。\n③ 防 AI 犯错: A 下文件与字段强绑定、单次、同一用户；B 让 agent 建出缺文件的记录，静默违反必填。\n④ 创业阶段不扩散: A 给现有工具加一个模式；C 零成本但留下 North Star 缺口。\nPrior rulings read: \"create_upload_link required file field\" → 2 hits (#30892, #31486); thread: none\n\nReader who acts: the storage seat and the `packages/mcp` seat, after the ruling.\nDedupe: `repo:objectstack-ai/objectstack is:issue create_upload_link required file field` → 2 hits (#30892 closed — the origin of the tool; #31486 QA run)."
+}

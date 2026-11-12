@@ -1,0 +1,38 @@
+{
+  "number": 32699,
+  "kind": "pull_request",
+  "title": "fix(spec): the blueprint field's `expression` describe teaches the stored computed value (#32614)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:27:21Z",
+  "updated_at": "2026-11-12T11:30:38Z",
+  "closed_at": "2026-11-12T11:30:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T11:30:36Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32699",
+  "body": "Fixes #32614\ndomain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz (dev branch `claude/issue-32614-blueprint-expression-describe`)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:AI 方案蓝图里字段 `expression` 的两段说明(宽松 schema 与设计模型实际读的 strict 镜像)改为同一套话,讲清两种用法:`formula` 读时计算、不可合计;同一个 `expression` 放在返回值类型的字段(`number` / `currency` / `percent` / `date`)上,就是写入时计算并落库的值,可以 `sum` / `avg`。\n- 为什么改:旧说明告诉设计模型\"非 formula 字段一律 null\",所以 AI 搭建器把「销售额 = 销量 × 单价」建成 formula,之后所有合计都被拒。按 #32443 裁决 B,要合计的值应是带同一 `expression` 的落库字段。\n- 风险与回滚:只改说明文字,schema 形状不变(两个 schema 原本就接受非 formula 字段带 `expression`)。回滚即 revert 本 PR。\n- 先看:`packages/spec/src/ai/solution-blueprint.zod.ts` 新增的 `FORMULA_STORAGE_RULE` / `STORED_EXPRESSION_RULE` 两个常量(两段 describe 共用,保证同步);`packages/spec/src/ai/solution-blueprint.test.ts` 末尾新 describe 块。\n- 两分钟验证:`pnpm --filter @objectstack/spec exec vitest run src/ai/solution-blueprint.test.ts`,预期 103 个测试全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `BlueprintFieldSchema.expression` and `StrictField.expression` (the strict mirror the design model generates against) now end on the same two shared rules, so they cannot drift:\n  - `FORMULA_STORAGE_RULE`: a `formula` is computed on read and stored nowhere; a list cannot sort by it, search does not scan it, and a `sum` / `avg` over it is refused with the remedy sentence. The sentence is `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`packages/spec/src/data/aggregate-field-type-compatibility.ts`, PR #32545), carried verbatim.\n  - `STORED_EXPRESSION_RULE`: the same `expression` on a field of the value's own return type (`number` / `currency` / `percent`, `date`, never `formula`) is a stored computed value, computed on every write and kept in a column, so `sum` / `avg` and sort work. Name the return type: a date expression on a `number` field is refused at every write. Per ruling 6816315099 on #32443, a stored expression reads only the record's own fields. A related-record value stays a `formula` or comes through a `summary` or a flow, and an input that changes over time is frozen at the write. Neither describe gives a stored example that reads through a lookup or reads the clock.\n  - The closing line \"null for every other field type\" becomes: null (strict) / omit (lenient) on a field that is neither a formula nor a stored computed value.\n- The existing formula text stays: one-hop lookup read, runtime-dead without the key, the `nameField` note, and the composed-title example the lint pin reads.\n- No shape change, so the accept-set is unchanged.\n- Why the remedy sentence is spelled out and not imported: importing `aggregate-field-type-compatibility.ts` into the blueprint module pulls `data/query.zod.ts` into the published `objectstack-ai` skill's reference index (`gen:skill-refs` rewrote `skills/objectstack-ai/references/_index.md`). That is a governed `skills/**` path, and the only reason would have been a describe string. The new test imports the constant and pins that both describes contain it verbatim.\n- Regenerated: `content/docs/references/ai/solution-blueprint.mdx` (`gen:docs`). Nothing else went stale: `check:generated` reports 14/14 up to date.\n\n## Tests\n\n`packages/spec/src/ai/solution-blueprint.test.ts`, new top-level describe `blueprint field \\`expression\\` — the stored computed value`:\n\n- the card's pin: `{ type: 'number', expression: 'record.quantity * record.unit_price' }` parses under `SolutionBlueprintSchema` and under `SolutionBlueprintStrictSchema`, and keeps its `expression` in both;\n- `FieldSchema` admits the same field as built (a field legal to propose is legal to stage);\n- both describes contain `VIRTUAL_FIELD_AGGREGATE_REMEDY` verbatim and no longer say \"null for every other field type\". The shared tail, from the remedy to the closing absence sentence, is byte-equal across the two (the lockstep pin);\n- the stored half of neither describe reads a related record (`record.X.Y`), and neither describe contains a `today()` / `now()` call.\n\nReverse verification, one-off, not kept. With the describe file restored to `origin/main` (`1216abf1`) and the tests committed, the lockstep / remedy pin went red (`1 failed | 102 passed`). The parse pins stayed green, as expected: the shape already admitted the field. The restore was proven by an empty `git diff HEAD` and a matching HEAD blob hash.\n\n## Acceptance notes\n\n- `#32598` (cloud) waits on this merge sha. Posting it is the seat's job.\n- Whether cloud's `apply_blueprint` carries `expression` onto a non-formula field was not measured here. #32598 asks the cloud seat to measure it.\n- The published skills (#32635, landed during this PR) say the same remedy in paraphrase, and they also recommend `readonly` on the stored field. The blueprint field has no `readonly` key, so this PR does not teach it.\n\n## Verification\n\nHead before merging main: `9daa9e66f`. Head after: `ceda9b313`. The merge brought no `packages/spec` change.\n\nLocal subset only. Every family CI runs is read from this PR's check-runs, not re-run here.\n\n<details><summary>Tests (spec, at ceda9b313; spec source is unchanged by the merge)</summary>\n\n- `pnpm --filter @objectstack/spec test` (under the verify lock): `Test Files 836 passed (836)`, `Tests 26716 passed | 1 todo`, VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0. `check:test-typecheck: OK` (52 files / 240 errors / 131 pinned signatures held).\n- `pnpm --filter @objectstack/lint exec vitest run src/validate-expressions.formula-one-hop.test.ts`, which reads both describes from the built spec: `13 passed`.\n- `pnpm --filter @objectstack/spec check:generated`: `All 14 generated artifacts are up to date`.\n</details>\n\n<details><summary>Derived gate families: dispatch-gates --ran on ceda9b313</summary>\n\n`106 derived famil(ies) accounted for — 102 run, 4 NOT-MEASURED (4 DERIVED from a recorded exit 3)`. Every one of the 102 exited 0. The four NOT MEASURED, each for a prerequisite outside this diff:\n\n- NOT MEASURED: `check:dual-build-cjs-loads`. Reason: needs a whole-repo `pnpm build`.\n- NOT MEASURED: `check:lean-entry-closure`. Reason: needs `@objectstack/objectql` and its closure built.\n- NOT MEASURED: `check:skill-examples`. Reason: needs `@objectstack/client-react` built.\n- NOT MEASURED: `check:type-check-debt`. Reason: the closure re-measure lost the verify-lock queue to a dogfood run (exit 99 inside the gate).\n\nCI's `Lint & Repo Gates` and `TypeScript Type Check` run all four.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSbLCxEmyHf9upz3pz)_\n"
+}

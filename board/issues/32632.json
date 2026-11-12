@@ -1,0 +1,38 @@
+{
+  "number": 32632,
+  "kind": "pull_request",
+  "title": "fix(plugin-security, spec): the field-write 403's label list takes its quote and separator rules from the operation-message catalog",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:39:12Z",
+  "updated_at": "2026-11-12T12:15:33Z",
+  "closed_at": "2026-11-12T12:15:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T12:15:31Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32632",
+  "body": "Fixes #32342\nClause-②: yes\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:字段写拒绝提示里「字段标签列表」的引号与分隔符,从 plugin-security 内部的前缀表搬进 spec 的操作消息目录(每个语言两条目录项)。\n- 为什么改:以前新增一个目录语言时必须同时改 plugin-security,漏改不会有任何测试失败;现在漏掉这两条目录项,目录已有的\"每个语言都定义 en 的全部键\"测试直接变红。\n- 风险与回滚:四个已有语言及未注册语言的提示文本逐字节不变(改动前先钉住);回滚即还原本 PR,无数据或元数据迁移。\n- 先看:`packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts` 的 `labelList`;`packages/spec/src/system/operation-message.ts` 的四组新增目录项;`owner-queue-field-write-user-message.test.ts` 的逐字节钉子。\n- 两分钟验证:`pnpm --filter @objectstack/plugin-security exec vitest run src/owner-queue-field-write-user-message.test.ts`,预期 39 项全部通过。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/spec/src/system/operation-message.ts`: two catalog entries in every locale of `BUILTIN_OPERATION_MESSAGES`: `field_label_quoted` (one label, `{{label}}` its only placeholder) and `field_label_list_separator`. These are catalog data only: no new export, type or schema shape, and `check:api-surface` stays green (triage 6797470974).\n- `packages/plugins/plugin-security/src/security-plugin-authz-middleware.ts`: `labelList` no longer has its own locale-prefix table. It renders each label through `field_label_quoted` and joins them with `field_label_list_separator`, both through `renderOperationMessage`. So it resolves locales the way the catalog does (`resolveBundleLocale`), and a deployment's `errors.field_label_quoted` / `errors.field_label_list_separator` override applies, as one already did for the sentence.\n- Guard: the existing test \"every locale defines every key en defines\" now refuses a catalog locale that lacks either rule (ablation below).\n- Behaviour: the `field_edit_denied` text is byte-identical for en, zh-CN, ja-JP and es-ES, and for locales the catalog does not register (`zh-TW` reaches zh-CN, `fr` falls back to en). The one change is a locale whose tag merely starts with `ja`/`zh`/`es` without matching a catalog locale (e.g. `jam`). It used to get Japanese brackets inside the English fallback sentence; it now gets English quotes with the English sentence.\n- `.changeset/32342-denial-label-list-catalog.md`: patch for `@objectstack/spec` and `@objectstack/plugin-security`.\n\n## Tests\n\n- Pins first (commit 68bd09b84, before the refactor): a new top-level describe in `owner-queue-field-write-user-message.test.ts` pins the literal two-label sentence for en, zh-CN, ja-JP, es-ES, zh-TW and fr. It passed against the unrefactored `labelList` (38/38 in the file) and still passes after the refactor.\n- New: a deployment `errors.` override of both rules reaches the field-write sentence (plugin-security), and a shape test for the two entries in every locale plus an override test (spec).\n- Results on head b8c15397e0: spec `operation-message.test.ts` 39/39. plugin-security full suite in three shards: 87 files / 1764 passed; 87 files / 2025 passed, 28 skipped; 87 files / 2636 passed, 17 skipped. `pnpm --filter @objectstack/plugin-security typecheck` and `pnpm --filter @objectstack/spec typecheck` exit 0.\n\n## Acceptance notes\n\n- Zone 1 ruling kept: no `Intl.ListFormat`. In this container's Node it adds no quote marks, and its separators differ from today's (en conjunction long \"A, B, and C\"; es \"A, B y C\"; zh-CN \"A、B和C\").\n- `check:slot-lookup` and `check:type-check-debt` (repo-wide eslint / tsc ratchets) and `check:i18n` / `check:dual-build-cjs-loads` (which need a full build: PREREQUISITE NOT MET, exit 3) were not measured locally. They are declared for CI.\n\n## Verification\n\n<details><summary>Ablation: one locale drops a list rule, the parity test turns red</summary>\n\n`node scripts/ablation-replace.mjs` replaced the es-ES `field_label_list_separator` line with a comment (anchor 1 -> 0, blob f00823948ca1 -> b0602aaaf612), then ran `vitest run src/system/operation-message.test.ts -t 'every locale defines every key en defines'`:\n\n```\nFAIL  src/system/operation-message.test.ts > operation message catalog > every locale defines every key en defines\nAssertionError: expected { locale: 'es-ES', keys: [ …(17) ] } to deeply equal { locale: 'es-ES', keys: [ …(18) ] }\n-     \"field_label_list_separator\",\nTests  1 failed | 38 skipped (39)\n```\n\nRestored: blob == HEAD (f00823948ca1), `git diff HEAD` empty. The restored tree is the one the green 39/39 run above measured.\n</details>\n\n<details><summary>Derived gates (dispatch-gates.mjs --commands, 91 families)</summary>\n\nHead b8c15397e0. Of 91 derived families, 86 exit 0, including `check:api-surface` (\"public API surface + factory signatures unchanged\"), `check:authorable-surface`, `check:docs`, `check:liveness`, `check:nul-bytes`, `check:type-check-coverage` and the changeset gates.\n\n- `check:dts-closure`: exit 1. It names packages new on main (`service-mailbox`, `service-print`, ...) that have no `dist/` in this worktree, which built only the plugin-security closure. That is a statement about unbuilt siblings, not this diff, so NOT MEASURED here; CI runs it after the full build.\n- NOT MEASURED, declared for CI: `check:i18n` and `check:dual-build-cjs-loads` (PREREQUISITE NOT MET, exit 3: they need the full build) and `check:slot-lookup` and `check:type-check-debt` (repo-wide eslint/tsc ratchets past this shared box's foreground limit). `dispatch-gates --ran`: 91 derived, 87 run, 4 UNRUN, exactly those four.\n- `eslint --no-inline-config` on the four changed source files: exit 0.\n</details>\n\nhttps://claude.ai/code/session_012MmDsNv6qb5gT8Pd98AmCB\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsNv6qb5gT8Pd98AmCB)_\n"
+}

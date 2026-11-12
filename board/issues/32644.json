@@ -1,0 +1,32 @@
+{
+  "number": 32644,
+  "kind": "issue",
+  "title": "client: SDK methods for AI saved questions, turn artifact and turn feedback, on the spec contract",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:blocked",
+    "pm:blocking",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:56:59Z",
+  "updated_at": "2026-11-12T09:04:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32644",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ④ the SDK half two retriage asks need (#31889, #31865, `domain:ui#1`). Split by triage. ⛔ Not a claim.\n\n## Do\n\nAdd the client SDK methods for the three routes the spec card declares: saved questions (`/api/v1/ai/saved-questions`), the turn artifact (`…/turns/:turnId/artifact`) and turn feedback (`…/turns/:turnId/feedback`). Type them from the spec shapes only; ⛔ no hand-written shapes.\n\n## Order\n\n#31889 and #31865 (console, `plugin-chatbot`) wait on this card.\n\n_Edge added by triage 2026-11-12T09:01Z._\n\nBlocked-by: #32642\n"
+}

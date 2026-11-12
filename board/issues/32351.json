@@ -2,8 +2,8 @@
   "number": 32351,
   "kind": "issue",
   "title": "metadata: history and rollback for a slotted type are keyed by (type, name), so rolling back one package's version can overwrite the other package's row (ADR-0150 D4)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,23 @@
     "area:devpath",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
-    "os-bill"
+    "os-sales"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T21:14:58Z",
-  "updated_at": "2026-11-12T05:43:04Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T13:21:08Z",
+  "closed_at": "2026-11-12T13:14:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 8,
+  "comments": 14,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32351",
   "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried out of #32246 (contract review of PR #32347, finding S1; step-0 readings 6775070064). ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527.\n**Lane:** `domain:server` (metadata). **Reader:** the server seat that claims it. **Serial:** after #32246 lands (per-package rows).\n\n### The defect\n`sys_metadata_history` has no package column and a unique `(type, name, version)`. Once #32246 stores one row per `(package, name)` for a slotted type and numbers versions per name, `registerRollback`, `getHistoryRecord` and `queryHistory` still key by `(type, name)`. `registerRollback` updates the first row of the name, so rolling back to P1's version can write P1's body into P2's bound row.\n\n### Do\n1. History rows carry the package of the row they snapshot (column or body attribution; the claimer measures which).\n2. Rollback, `getHistoryRecord` and `queryHistory` take a package for a slotted type; with none on a two-holder name they refuse with the D3 409.\n3. Pins iterate the live `PACKAGE_SLOTTED_STORE_TYPES`. Non-slotted types unchanged (CONTROL).\n\n**Clause-②:** the claimer declares it. First-party reach: production `DatabaseLoader` wiring is 0 today.\n**Dedupe** (`history rollback package`, `registerRollback slotted`): none.\n**Business reason:** an administrator rolling back one package's customization must not overwrite another package's item.\nclass: d · type: Bug\nGrade: p2 (reach 0 today)."

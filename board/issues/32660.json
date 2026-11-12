@@ -1,0 +1,35 @@
+{
+  "number": 32660,
+  "kind": "pull_request",
+  "title": "fix(pm): fleet-write read-back line lists the labels a pr_create sent",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:30:55Z",
+  "updated_at": "2026-11-12T10:15:04Z",
+  "closed_at": "2026-11-12T10:15:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T10:15:02Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32660",
+  "body": "Fixes #32542\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:中继 `pr_create` 的回读行在指派人分句之后追加标签分句:列出 PR 上实际挂着的标签,并写明\"送出的标签全在\"或用 ⚠️ 点名缺了哪个。\n- 为什么改:os-dev 规则要求\"答案须列出每个送出的标签\",而回读行此前从不打印标签,dev 只能另走 REST 去读或报偏差。\n- 风险与回滚:只改 `scripts/pm/fleet-write/dispatch.mjs` 的本地打印与 `--json` 字段(只增不改),执行器与工作流未动;回滚即 revert 本 PR。\n- 先看:`scripts/pm/fleet-write/dispatch.mjs` 的 `labelsText`(措辞与三种情形)、`labelsReading`(大小写不敏感匹配)、`readBackStroke` 里两处行构造。\n- 两分钟验证:`node scripts/pm/fleet-write/dispatch.mjs --self-test`,预期末行 `391 cases pass across 31 batteries`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `labelsReading(target, stored)`: reads the labels off the object the read-back already fetched. For a `pr_create` that is the pull from `GET /repos/{repo}/pulls?head=...`, whose list answer carries `labels`. So `execute.mjs` is untouched. The row gains `labels` (as the platform lists them), `labelsSent` and `labelsMissing`. Names are matched case-insensitively, the way GitHub matches them and the way the executor's `labelled` check does.\n- `labelsText(row)`: appended to the landed and not-stored lines, after `assigneesText(row)`. The byte-count segment and the assignees segment are unchanged. Three shapes:\n  - all sent present: `Labels as the pull lists them: skip-changeset, size/S. Every label sent is among them: skip-changeset.`\n  - one missing: `Labels as the pull lists them: size/S. ⚠️ sent skip-changeset not among them — the labels leg landed inside the run, so a later write removed it: read the pull's timeline.`\n  - none sent: `Labels as the pull lists them: none. None sent.`\n- Why compare as well as list: the os-dev rule asks the reader to judge \"every label sent is listed\". Printing only the pull's set, as the assignees clause does, would make the reader bring the sent set from their own actions file. The line now names the sent set (all present) or each missing name, so it can be judged from the line alone. It stays a reading, not a verdict: the pr_create labels leg is already judged inside the run against its answer (`labelled`, `execute.mjs`). A name missing at read-back time was removed by a later write, for example a whole-set label PUT.\n- `issue_create`: the same helper is applied when the action sent `labels`. Its labels ride the create body and no run judges them, so the missing wording says the create may have dropped the label. An issue row whose action sent no labels carries no clause, and its line is byte-identical to before.\n- `--json` `read_back` rows gain `labels`, `labels_sent` and `labels_missing` (null where not applicable).\n- `readBackTargets` copies an action's `labels`, the same way it copies `assignees`.\n- The header bullet that describes the assignees reading gains a sibling bullet for labels.\n\n## Tests\n\nSelf-test run on head `73c71392`: `node scripts/pm/fleet-write/dispatch.mjs --self-test` gives `391 cases pass across 31 batteries`, up from 382 on base `1216abf1`. There are 9 new cases in the read-back end-to-end battery:\n- `readBackTargets` carries the labels;\n- the row is right when all sent labels are present;\n- the exact line suffix, with the assignees clause pinned byte-equal;\n- a stripped label is named, the verdict is still `landed` and the state still `success`;\n- matching is case-insensitive;\n- a not-stored line carries the clause;\n- a pr_create that sent no labels prints `None sent.`;\n- an issue_create that sent labels gets the clause with the issue wording;\n- an issue row with no labels sent has no clause.\n\n<details><summary>Ablation (one-shot, through scripts/ablation-replace.mjs, restored, git diff HEAD empty after each leg)</summary>\n\n- Leg 1, `labelsText` returns empty: 5 of 391 failed (the line cases).\n- Leg 2, `labelsMissing` is always empty: 2 of 391 failed (the stripped-pull case and the issue_create missing case).\n- Leg 3, `readBackTargets` drops `labels`: 5 of 391 failed.\n\nAfter each leg the tool reported: blob restored == HEAD `be3177572131`, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- `labels_add` has no relay read-back row. It carries no body, so it is not in `readBackTargets`. Its door, `scripts/pm/label-write.mjs`, runs its own step-four read-back of the card's labels against the target. It does not share this gap and is left alone.\n- The executor's per-request result row already prints the pull's labels (`N label(s) now on the pull · labels ...`). That row lives in the run summary, which a cloud seat cannot read, so the transcript line is the reader's only copy.\n\n## Verification\n\n<details><summary>Derived gate families, local, head 73c71392</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 39 commands. All 39 exited 0, including `check:pm-fleet-write-dispatch`, `check:pm-fleet-write-execute` (366 cases / 28 batteries), `check:pm-fleet-write-validate` (417 / 21), `check:pm-label-write`, `check:pm-issue-create`, `check:pm-dispatch-gates` and `check:nul-bytes`.\n\n`--ran` with each exit recorded reported: `39 derived famil(ies) accounted for — 39 run, 0 NOT-MEASURED (a DERIVED zero — all 39 recorded an exit code and none of them is 3)`.\n\n`eslint --no-inline-config scripts/pm/fleet-write/dispatch.mjs` exited 0. Repo-wide lint is left to CI.\n\n</details>\n\nNo changeset: `scripts/pm/**` publishes nothing (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcTAJajXtiVBRiECvT6)_\n"
+}

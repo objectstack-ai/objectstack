@@ -1,0 +1,32 @@
+{
+  "number": 32724,
+  "kind": "pull_request",
+  "title": "fix(studio): a deleted package leaves Studio's recently viewed row, and no copilot opens beside a package that is not there",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:19:47Z",
+  "updated_at": "2026-11-12T13:27:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32724",
+  "body": "Fixes #32615\n\nClause-②: yes (widening) — `useRecentItems()` from `@object-ui/app-shell` gains `removeRecentItem(id)`; no `@object-ui/i18n` pack key is added.\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:Studio 首页「最近访问」只列出服务端软件包清单里仍存在的包;在 Studio 里删除软件包时同步从最近访问存储中移除;打开不存在的软件包地址时,「未找到包」页面旁不再挂副驾。\n- 为什么改:删掉的包仍留在「最近访问」里、只显示 id,点进去像一个空的可编辑应用,副驾还提示「编辑此应用」,容易在已删除的包 id 下继续写草稿。\n- 风险与回滚:只改前端 Studio 三处判断与一个新的 `removeRecentItem`;不改接口、不改元数据。回滚即 revert 本 PR,最近访问恢复为只按类型过滤。\n- 先看:`BuilderLanding.tsx`(recentPackages 的过滤)、`PackageSwitcher.tsx`(onManageChanged 判定删除后移除存储项)、`StudioDesignSurface.tsx`(slotHost 与 aiSlot 在 pkgMissing 时不渲染)。\n- 两分钟验证:在 Studio 打开一个包,删除它,回到 Studio 首页:「最近访问」里不再有它;再直接打开它的地址:只看到「未找到包」和返回 Studio 首页的按钮,右侧没有副驾。\n- 需要你做的:无,席位落地。\n\n## What changes\n- **Studio landing, \"Recently viewed\"** (`BuilderLanding.tsx`): a recent `package` entry is listed only while the package list the landing already loads still names it. The read is `GET /api/v1/packages`, the same request `fetchPackages()` sends; `fetchListedPackageIds()` shares it and also names the kernel packages the cards hide, so a kernel package someone opened keeps its entry. A deleted package used to keep its card, labelled by its id. The stored entry is not dropped here: the list is the active organization's, the recent store is the user's.\n- **Delete from Studio** (`PackageSwitcher.tsx`, `onManageChanged`): when the refreshed list comes back without the managed package (the existing deletion signal, the same one that navigates away), `removeRecentItem('package:ID')` drops it from the store. A failed refresh drops nothing, as it navigates nothing.\n- **Store** (`RecentItemsProvider.tsx`): new `removeRecentItem(id)`; an id the list does not hold writes nothing. The no-provider fallback gets a no-op.\n- **Workbench for a missing package** (`StudioDesignSurface.tsx`): the \"Package not found\" state with its way back to the Studio landing already existed on `main` (the `StudioDesignSurface.notFound-26708` pins); this PR reuses it and adds no new widget. What was left: the right slot's copilot stayed mounted beside it and offered to edit the app. `slotHost` and the injected `aiSlot` aside are now off while `pkgMissing` is set.\n\n## Tests\nAdded and replaced cases in the existing harness files, each as a top-level `describe`:\n- `BuilderLanding.recentPackages-11863.test.tsx`: a package the list no longer has is not listed (CONTROL: a live one beside it is); a gone entry does not take a row slot; only gone packages means no section; CONTROL: a kernel package the cards hide stays listed; the stored entry is kept by the render filter. The old case \"a package the list no longer has draws its machine name\" pinned the defect and is replaced.\n- `StudioDesignSurface.packageDeletionInference.test.tsx`: a real deletion drops the package's entry from the real `RecentItemsProvider` store and from localStorage, and the sibling stays; CONTROL: a failed refresh and a still-listed package keep the entry.\n- `StudioDesignSurface.notFound-26708.test.tsx`: no built-in copilot and no injected `aiSlot` copilot on the not-found state; CONTROL: a listed package keeps both.\n\n<details><summary>Local readings, head f7624414f</summary>\n\n- The three test files: NOT MEASURED locally. The shared verify lock was not acquired in five tries (each a `VERDICT queue-timeout (exit 99)`). One run that did get the lock failed to collect on a missing `@objectstack/spec` dist (`Failed to resolve import \"@objectstack/spec/system\"`), before any test ran. That is a build-state reading, not a verdict. CI `Test UI` carries them.\n- `@object-ui/app-shell` `type-check`: NOT MEASURED locally, for the same lock reason. CI `Type Check UI` carries it.\n- Ablation of each pin: NOT MEASURED. It is owed once the suite runs.\n- Derived gates (`dispatch-gates.mjs --commands`), run lock-free on the pre-fix head: every listed `node scripts/…` gate exited 0, `check-sdui-manifest.mjs` included. Of the `pnpm check:*` families, the following exited 0: changeset-gate-self-tests, closed-ceremony-text, cross-package-test-inputs, dispatcher-error-vocabulary, driver-memory-census, engine-double-contract, gitlink-declared, nul-bytes, published-files, query-options-erasure, refd-timer-probe, registry-log-declared, rest-log-spy-declared, skill-identifier-liveness, tier-file-adoption and type-check-coverage. `check:test-source-alias` went red on the three edited test files, which reached the lint module's dynamic import. It is fixed in f7624414f by a module-top import, and the re-run exits 0 (\"check-test-source-alias OK\"). Still NOT MEASURED locally: `type-check-debt`, `undeclared-dep-imports`, `watch-hint-literal`, `where-matcher`, the two `@objectstack/spec` families and `pnpm --dir ui exec vitest run scripts/`.\n</details>\n\n## Acceptance notes\n- The card's not-found sentence: the existing `engine.studio.notFound.package` copy, \"Package not found. No package with the id ... is installed here\", and its zh translation carry the meaning. No new key and no copy change.\n- Staging opened an editable workbench where `main` draws the not-found state. The likely cause is a console build older than the not-found state, or a host-mounted surface. That cannot be confirmed from this tree. While the list read is in flight, the builder is drawn as before (the fail direction is unchanged).\n\n## Verification\nSee the details block above. CI check-runs are the authority for every family left NOT MEASURED.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSf5S4Kkc7aL9t5DSd)_\n"
+}

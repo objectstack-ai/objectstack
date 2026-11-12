@@ -13,19 +13,19 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T02:19:53Z",
-  "updated_at": "2026-11-10T05:48:02Z",
+  "updated_at": "2026-11-12T09:21:48Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32043",
-  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ② a seat finding from the review of PR #32042 (#31988; os-dev-report 6757084543, out-of-scope finding, carrier: seat). ⛔ Not a claim.\n\n## 维护者速读\n\n- **问题：** Developer Edition 组织最多 5 个成员。邀请第 6 个人时，cloud 返回 `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`（403）。可是控制台的邀请对话框不认识这个错误码，只显示通用的「邀请失败」，不告诉用户已经到了成员上限。\n- **要做：** 在邀请对话框的错误码映射里加这一条。文案说明已达 Developer Edition 的成员上限，上限数字用 `{{count}}` 插值。\n- **需要你做的：** 无。\n\n## Reading (origin/main `60996d4a`)\n\n- `ui/packages/app-shell/src/console/organizations/manage/InviteMemberDialog.tsx:129-137`: a refusal goes through `resolveOrgErrorMessage(err, t, { key: 'organization.invitations.inviteFailed' })`, which maps better-auth's machine `code` (objectui#4474). `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED` has no row, so it draws the generic \"Failed to invite member\".\n- **The code and its meaning are cloud's.** cloud#1 answered on #31988 (6754499855, cloud `c24d713`): the code is a 403, raised on adding the sixth member or invitation. The cap is `quotaForPlan('developer').memberLimit` (ADR-0117), and cloud never spells the number out.\n\n## Expected\n\n1. Add one mapping row for `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`. Its sentence says the organization has reached its Developer Edition member limit, in every pack. The number is interpolated as `{{count}}`, with the same constant #31988 uses (`DEVELOPER_EDITION_MEMBER_LIMIT`, 5). Share that constant rather than writing a second literal.\n2. Add a test: the code draws the new sentence, and another code still draws the generic one.\n\n## Acceptance\n\n- A pinned test with an ablation.\n- No new server route.\n- Clause-②: expected yes (widening), for the i18n keys.\n\nSuggested grade: p3. Serial: after PR #32042 (#31988), which adds the constant.\n\n## Dedupe\n\nSearched open issues on 2026-11-10 for `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED` and \"developer organization member limit invite\". The only hit is #31988, which does not cover this. **New.**\n"
+  "body": "domain:ui#3 · zhuangjianguo · session_01QsR2jVEjiYrK7onirxUGyo\n\nFiling gate: ② a seat finding from the review of PR #32042 (#31988; os-dev-report 6757084543, out-of-scope finding, carrier: seat). ⛔ Not a claim.\n\n## 维护者速读\n\n- **问题：** Developer Edition 组织最多 5 个成员。邀请第 6 个人时，cloud 返回 `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`（403）。可是控制台的邀请对话框不认识这个错误码，只显示通用的「邀请失败」，不告诉用户已经到了成员上限。\n- **要做：** 在邀请对话框的错误码映射里加这一条。文案说明已达 Developer Edition 的成员上限，上限数字用 `{{count}}` 插值。\n- **需要你做的：** 无。\n\n## Reading (origin/main `60996d4a`)\n\n- `ui/packages/app-shell/src/console/organizations/manage/InviteMemberDialog.tsx:129-137`: a refusal goes through `resolveOrgErrorMessage(err, t, { key: 'organization.invitations.inviteFailed' })`, which maps better-auth's machine `code` (objectui#4474). `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED` has no row, so it draws the generic \"Failed to invite member\".\n- **The code and its meaning are cloud's.** cloud#1 answered on #31988 (6754499855, cloud `c24d713`): the code is a 403, raised on adding the sixth member or invitation. The cap is `quotaForPlan('developer').memberLimit` (ADR-0117), and cloud never spells the number out.\n\n## Expected\n\n1. Add one mapping row for `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`. Its sentence says the organization has reached its Developer Edition member limit, in every pack. The number is interpolated as `{{count}}`, with the same constant #31988 uses (`DEVELOPER_EDITION_MEMBER_LIMIT`, 5). Share that constant rather than writing a second literal.\n2. Add a test: the code draws the new sentence, and another code still draws the generic one.\n\n## Acceptance\n\n- A pinned test with an ablation.\n- No new server route.\n- Clause-②: expected yes (widening), for the i18n keys.\n\nSuggested grade: p3. Serial: after PR #32042 (#31988), which adds the constant.\n\n## Dedupe\n\nSearched open issues on 2026-11-10 for `DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED` and \"developer organization member limit invite\". The only hit is #31988, which does not cover this. **New.**\n\n\nBlocked-by: #32654\n"
 }

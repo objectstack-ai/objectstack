@@ -1,0 +1,32 @@
+{
+  "number": 32624,
+  "kind": "issue",
+  "title": "rest: GET /meta/:type/:name/layers of a name held by two registered packages answers 200 with the first holder instead of the 409 the plain read and the dispatcher /layers give (ADR-0150 D3, red line 2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:on-hold",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:25:53Z",
+  "updated_at": "2026-11-12T13:34:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32624",
+  "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect with a named location, reproduced (found while measuring #32622 from the #32250 build; real RestServer, HttpDispatcher, protocol and SchemaRegistry using #32201's harness, two packages registering the dashboard `sales`; tree `claude/project-thread-2g3ujl` @ `100259e0`, which is the PR #32306 head plus #32250; probe output `/mnt/project-files/server-seat3-p2/card-32250/probe-32622-layers.txt`).\nPart of #31527 (ADR-0150) · Refs #32622 · Refs #32201\n\n## 维护者速读\n\n- 改什么：REST 的分层读（`GET /meta/:type/:name/layers`）在两个包都注册同名项时，应和普通读、调度器的分层读一样答 409 并点名两个包，而不是静默返回第一个包的条目。\n- 为什么：同一名字三扇门答法不一：普通读 409、调度器 /layers 409、REST /layers 200 给 alpha。按注册顺序悄悄选一个，违反专题红线\"歧义要报告、不许猜\"。\n- 风险：第一方 0 处；REST /layers 200 → 409（收窄，Clause-② yes）。\n- 先看：rest 包里 `/meta/:type/:name/layers` 的路由如何取条目，对照调度器路径的 `PackageScopedNameRefusedError`。\n- 验证：两个包注册 dashboard `sales`，REST `GET /meta/dashboard/sales/layers` 应 409 且带 `details.candidates`。\n- 需要你做的：无，归专题席派发。\n\n## What happens (measured)\n\n| door | answer |\n|---|---|\n| plain `GET /meta/dashboard/sales` (both transports) | 409 RESOURCE_CONFLICT with candidates |\n| dispatcher `GET /meta/dashboard/sales/layers` | 409 RESOURCE_CONFLICT (candidates once #32250 lands) |\n| REST `GET /meta/dashboard/sales/layers` | **200, alpha's item** |\n\n## Do\n\nThe REST layered read resolves the name as the plain read does. Two served holders refuse 409 with `details.candidates` and never pick by order. Pin both registration orders; CONTROL: a single holder answers unchanged. Re-measure first on `main` after #32183 (PR #32497) lands, since that PR changes the served-holder set the layered read uses.\n\nReader who acts: the server seat the epic seat routes it to. Grade: p2 (first-party reach 0)."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 32675,
+  "kind": "issue",
+  "title": "plugin-security: pin the invalid duplicate permission-set grant (400 → 409) and the activation 409 sentence's condition (follow-up of #32164 P2)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:45:45Z",
+  "updated_at": "2026-11-12T11:05:18Z",
+  "closed_at": "2026-11-12T11:05:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32675",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32164 P2（PR #32306）专题红线 delta 读 6819720516 的 F1 与可选项，以及契约复审 r3 的两条 nit。按 Bill「简单的问题后续单独立卡」从 PR 中拆出。Part of #31527 (ADR-0150)。Blocked-by #32306.\n\n## What\n\nPR #32306's changeset (lines 18 and 68) declares a moved answer that no test pins: a second grant of a permission set whose row would ALSO fail record validation moves from `400 VALIDATION_FAILED` to `409 DUPLICATE_RECORD`. The epic seat measured it as real (a 600-character `reason` answers 409 for system and non-system writers).\n\n## Do\n\n1. In `grant-permission-set-package.test.ts`, `[E2]` block (around :206): pin the invalid duplicate grant → 409, red against a 400 BASE, with a CONTROL where the invalid row alone (no duplicate) still answers 400. Ablate once.\n2. Pin the condition of the corrected 409 sentence at `catalog-activation.ts` (~:562): an environment beside a package, a row naming no package and an inactive sentinel row. Today restoring `holders.length > 1` keeps every door test green, so the condition is unpinned.\n3. Changeset/doc wording: the one-grant check at hook priority 50 answers before default-priority (100) app-authored hooks on the grant table; the module doc says so, the changeset does not. Add one sentence (a follow-up `.changeset/` note, or an edit of #32306's changeset before release).\n\n## Acceptance\n\n- Pins 1 and 2 red under ablation, CONTROLs green.\n- `Clause-②: no` (tests and wording only); no behaviour change.\n\n## 业务理由\n\n谁受益：维护权限集授予门的开发者。场景：有人改动校验顺序，第二次无效授予悄悄退回 400，或 409 句的条件被放宽，没有测试会红。不做：已声明的答案和条件可被无声回退。\n\n## 读者\n\nserver 车道，PR #32306 合并后；起点上列两个文件与 #32306 的 changeset。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue DUPLICATE_RECORD permission set grant VALIDATION_FAILED` → #32164 only. No duplicate.\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"
+}

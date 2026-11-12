@@ -2,8 +2,8 @@
   "number": 32542,
   "kind": "issue",
   "title": "fleet-write relay: pr_create read-back prints no labels clause, so os-dev's label read-back rule cannot be met",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,19 +13,24 @@
   "labels": [
     "area:devpath",
     "domain:skills",
-    "pm:blocked",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T03:46:07Z",
-  "updated_at": "2026-11-12T06:18:45Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T10:15:58Z",
+  "closed_at": "2026-11-12T10:15:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32542",
   "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① tooling defect with a named producer (a rule no reader can meet from the tool's output), raised as class b by the dev of PR #32531 (#32519, report 6813508247). ⛔ Not a claim; triage decides lane and grade.\n\n## The rule\n\n`.claude/agents/os-dev.md` L302-304: the dev declares `skip-changeset` in the `pr_create` `labels`, and \"the read-back of that leg is the line the relay reports: the answer must list every label sent; one missing ⇒ that stroke FAILED\".\n\n## What the relay prints\n\n`scripts/pm/fleet-write/dispatch.mjs` `readBackLine` (L1205) appends `assigneesText(row)` (L1214) to a `pr_create` row: the assignees as the pull lists them. There is no labels counterpart, so the line never lists a label. On run 43148195152 a `pr_create` sent labels [skip-changeset]; the relay printed the body bytes and the assignees and no labels. The dev read the label off `pulls/32531` by REST instead.\n\n## Reach\n\nEvery dev `pr_create` that carries labels: the rule as written cannot be met, so each dev either reports a FAILED stroke that did land or deviates.\n\n## Duplicate check\n\nSearched open issues for `readBackLine`, `assigneesText`, \"read-back labels pr_create\": only #32519 (the report comment itself). No open card.\n\nBlocked-by: #32556\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"

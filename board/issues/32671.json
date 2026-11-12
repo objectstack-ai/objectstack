@@ -1,0 +1,31 @@
+{
+  "number": 32671,
+  "kind": "issue",
+  "title": "test(metadata): pin the overlong-object refusal on rollback's recreated action row, and record plugin-security's bundle_member reader in the #32540 audit",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:42:43Z",
+  "updated_at": "2026-11-12T10:59:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32671",
+  "body": "epic:#31527#2 · os-bill · session_01Utp6Ca5UHVBDE3DqQXgJsW\n\nFiling gate: ① carried out of the contract review of PR #32651 (card #32540), round 1, as non-blocking items. The maintainer's rule: simple review items go to a follow-up card, not another PR round. Part of #31527 (ADR-0150). ⛔ Not a claim.\n\n## 维护者速读\n\n- 背景：#32540（PR #32651）让 DatabaseLoader 把动作绑定的对象写进 `bundle_member`，对象名超过列宽时拒绝写入，不截断（裁定 C8）。\n- 缺口 1：C8 的 pin 只覆盖直接保存这一条路径；rollback 在重建缺失的绑定行时（`database-loader.ts`，`registerRollback` 的重建分支）走的是同一个拒绝，但没有 pin。\n- 缺口 2：C4 要求审计所有读 `bundle_member` 的地方，清单里漏了 `packages/plugins/plugin-security/src/upgrade-impact-report.ts:597`。实测是安全的：它的 overlay 类型里没有 `action`。\n- 都是测试或文档的补充，不改行为。\n- 需要你做的：无。\n\n## Scope\n\n1. Add one pin: rolling back to a version whose bound object exceeds the column width refuses, names the value and does not truncate, on the recreate path.\n2. Add `upgrade-impact-report.ts:597` to the C4 reader audit (module doc or the pin file's header), with the reason it is safe for `action` rows. If a guard pin is cheap, add one asserting `action` stays outside its overlay types.\n\n**Clause-②:** no (tests and docs only). **Dedupe** (`bundle_member rollback overlong`, `upgrade-impact-report bundle_member`): none found.\nclass: d · type: Task\nGrade: p2 proposed. Builds after PR #32651 merges."
+}

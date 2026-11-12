@@ -1,0 +1,31 @@
+{
+  "number": 32689,
+  "kind": "issue",
+  "title": "runtime: the action activation door drops the declaration's ambiguity refusal, so two packages' same-named global action answers 404 'has no declaration' instead of 409 naming the holders (ADR-0150)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:14:02Z",
+  "updated_at": "2026-11-12T10:14:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32689",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\nFiling category: ① product defect with a named location (out-of-scope finding, class a, of #32517's os-dev report 6820789989, measured on `main` and on PR #32687's head `cf96064ea`). Part of #31527 (ADR-0150) · Refs #32517\n\n## 维护者速读\n\n- 改什么：两个包各声明一个同名、不挂对象的 action 时，激活门 `POST /actions/_activation/global/:action` 应像执行门一样答 409 并点名两个持有者，而不是 404「has no declaration」。\n- 为什么：声明解析其实给出了拒绝（歧义），激活门却丢掉 `declaration.refusal`，只看 `declaration.action` 为空就答「没有声明」；把歧义报成不存在，违反专题红线「歧义要报告、不许猜」。\n- 风险：第一方 0 处（两个包同名全局 action）；404 → 409，需声明 FROM → TO（收窄类）。\n- 先看：`packages/runtime/src/domains/actions.ts` 第 3 步（约 :218-244）：`resolveRouteActionDeclaration` 之后只判 `degraded` 与 `!declaration.action`。\n- 验证：两包各带一个 object-less action `a1`，在组合栈上 `POST /actions/_activation/global/a1` 应答 409 点名两包；单持有者照旧。\n- 需要你做的：无，归专题席派发。\n\n## What happens\n\nOn the composed stack (main too), two packages' object-less action of one name: the bare execution door answers `409` naming the holders, but the activation door answers `404 \"has no declaration — there is nothing to switch\"`. `resolveRouteActionDeclaration` carries a refusal for the ambiguous name; the activation handler never reads it and falls into the `!declaration.action` branch.\n\n## Do\n\n1. When the declaration reading carries a refusal, the activation door answers it (status and holders as the execution door does) before the \"no declaration\" branch. Both `enabled: true` and `false`.\n2. Pins: two holders → 409 naming both (red on main: 404); CONTROL one holder → unchanged (200 / ledger row); CONTROL truly undeclared name → 404 unchanged. Ablate once.\n3. Declare the FROM → TO (`404 has no declaration` → `409` naming holders). Metadata-protocol per the #32649 gate.\n\nReader who acts: the server seat the epic seat routes it to. Epic red-line read before landing. Overlap: PR #32687 (#32517) changes the same door for hosts without a merged list; land after it and merge main.\nBlocked-by: #32517\nGrade: p2 (first-party reach 0).\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"
+}

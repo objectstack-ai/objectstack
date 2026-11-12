@@ -1,0 +1,31 @@
+{
+  "number": 32636,
+  "kind": "issue",
+  "title": "metadata: history retention keeps the latest N per (type, name), so one package's saves evict another package's versions",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:43:54Z",
+  "updated_at": "2026-11-12T08:43:54Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32636",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32351（PR #32569）专题红线复读 6818909551 点名的余项。Part of #31527 (ADR-0150), nested under #32351 (the epic is at the sub-issue cap). Blocked-by #32569.\n\n## What\n\n`packages/metadata/src/utils/history-cleanup.ts` enforces `maxVersions` per `(type, name)` (the retention walk near :134 and the count walk near :281 on `main`). After PR #32569, two packages (and the environment) each keep their own history for one name of a by-package type, in the same `(type, name, version)` sequence. Retention by `(type, name)` therefore counts both packages' versions together, so one package's saves evict the other package's versions: package B loses rollback targets because package A was saved often.\n\n## Acceptance\n\n- For a by-package type, retention keeps the latest N versions per `(type, name, package_id)`, with the environment marker as its own bucket and unattributed legacy rows (NULL) as their own bucket.\n- Non-slotted types and a one-holder name keep exactly today's retention (CONTROL).\n- Pins per type in the live `PACKAGE_SLOTTED_STORE_TYPES`: A saved N+k times, B saved twice: B keeps both versions.\n- `Clause-②:` measured (an internal retention change; expected `no`).\n\n## 业务理由\n\n谁受益：在多包环境里按包回滚定制的管理员。场景：A 包的同名元数据频繁保存。不做：B 包的历史版本被 A 包的保存挤掉，B 想回滚时已无版本可选。\n\n## 读者\n\n`domain:server` 席位（专题 #31527 派），#32569 合并后；起点 `history-cleanup.ts` 的两处 `uniqueKeys` 分组。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue history-cleanup package evict versions` → 0 hits. No duplicate.\n"
+}

@@ -2,8 +2,8 @@
   "number": 32612,
   "kind": "issue",
   "title": "plugin-auth, evaluation: can AuthPlugin serve its own objectstack-mount routes through the auth handler a per-environment kernel exposes, so a multi-tenant host forwards them with its /api/v1/auth/* wildcard instead of re-mounting each by hand?",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,21 +12,22 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2",
     "security"
   ],
-  "assignees": [
-    "hotlong"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T07:54:52Z",
-  "updated_at": "2026-11-12T08:17:38Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T08:46:35Z",
+  "closed_at": "2026-11-12T08:46:35Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32612",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ a task the maintainer assigned in session (2026-11-12), verbatim: 「同意，立平台评估卡，#4328 先挂起」, then 「然后现在就派发评估卡」.\n\n## 维护者速读\n\n托管环境（`*.objectos.app`）一个进程服务很多客户环境，每个环境的登录插件住在自己的内核里，够不到共用的服务器。better-auth 自带的登录接口靠 cloud 代理的一条通配规则整体转发，新增也自动跟上；但框架自己额外挂的 39 条登录类接口（`objectstack-mount` 一族），cloud 只能逐条手写。框架每新增一条，托管上就可能 404：cloud#4326（p0）、#4300、#4314。这张卡**只评估**：框架能不能把这 39 条也交给同一个可转发的处理器，让通配规则自动覆盖。能做，cloud 就不必新增门禁（cloud#4328 挂起等本卡）。\n\n## Business reason\n\nThree hosted 404s in a week on customer-facing flows: MCP OAuth consent (p0, cloud#4326), console calls (cloud#4300), SSO group mapping (cloud#4314). All share one cause. The hosted host keeps a hand-written copy of the framework's `objectstack-mount` routes, and a pin bump that adds one ships a 404. Fixing it in the platform removes the copy, so cloud needs no new gate (AGENTS.md 「平台缺陷在平台修」; new gates default to no).\n\n## Readings to start from (verify them)\n\n- cloud `packages/objectos-runtime/src/auth-proxy-plugin.ts` (cloud main): its header says AuthPlugin on a per-project kernel \"has no access to the host's HTTP server, so its `kernel:ready` route registration is a no-op\". The host forwards `/api/v1/auth/*` to the kernel's `auth` service (the better-auth handler). It hand-mounts `config` / `bootstrap-status` (~L345), `set-initial-password` (~L841) and `oauth-consent/request` (~L979, cloud#4326).\n- objectstack `packages/plugins/plugin-auth/src/auth-route-ledger.ts` at cloud's pin `c5758b0d`: 39 rows `family: 'objectstack-mount'`, beside better-auth's families (core-auth 18, organization 26, oauth-provider 7, two-factor 5, one-time-token 3).\n- objectstack#32401 (closed): plugin-auth exported `runOAuthConsentRequestRead` / `oauthConsentRequestDepsFor` so the hosted host could mount `oauth-consent/request`. That is today's per-route pattern this card evaluates replacing.\n\n## Questions the evaluation answers (evidence, not opinion)\n\n1. For each of the 39 `objectstack-mount` routes: where it is mounted today, and whether it could be served by a handler reachable through the kernel's `auth` service (or one sibling service) that a host forwards to without route knowledge.\n2. Which routes need **hosted-specific** behaviour, so the host must keep an explicit override (e.g. `bootstrap-status` answered differently on hosted; `set-initial-password` as a first-run self-host flow). The list, each with the reason.\n3. The shape: what AuthPlugin would expose (one handler / dispatcher), how self-hosted keeps working unchanged, how ADR-0130/route-ledger checks stay true, and whether any route would become reachable on hosted that is NOT reachable on self-hosted (it must not).\n4. Size: the PRs and repos (objectstack plugin-auth; then a cloud PR that drops hand-mounts and keeps the override list), and the risks.\n5. A recommendation, on the four axes, between (a) this platform route, (b) keep hand-mounts and add the cloud gate (cloud#4328), (c) both, with what decides it.\n\n## Output\n\nOne comment on this card, with the measured table for item 1, the lists for items 2–4 and the recommendation for item 5. No code, no PR (measure-first card).\n\nReader: `domain:server` lane (plugin-auth), dispatched by `repo:cloud#5` on the maintainer's direct order.\n\nDedupe: `repo:objectstack-ai/objectstack objectstack-mount auth proxy hosted is:issue` → 11, none an evaluation of this kind. The nearest is #32401 (closed, the per-route export)."

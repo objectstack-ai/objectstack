@@ -2,8 +2,8 @@
   "number": 32367,
   "kind": "issue",
   "title": "Console: nav action dispatch reads an action by bare name, so a name two packages hold toasts \"Could not load action\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,20 +12,21 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-lizheng"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T23:09:56Z",
-  "updated_at": "2026-11-11T13:15:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T11:58:33Z",
+  "closed_at": "2026-11-12T11:57:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32367",
   "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nCarrier filed from contract review 6781770671 on PR #32361 (card #32244, ③, not flagged by the dev). For the ui lane. Child of the ADR-0150 epic #31527.\n\n`ui/packages/app-shell/src/hooks/useNavActionDispatch.ts:68` calls `getItem('action', actionName)` with no package. Once #32361 merges, a bare read of an action name two enabled packages hold answers 409 `RESOURCE_CONFLICT`. In both packages' apps, the nav action then toasts \"Could not load action\".\n\n**Governing text:** ADR-0150 D5 has the Console pass the package it holds, and row E2 resolves an `ActionNavItem` by D3 from its package. The server address exists (`?package=` and the qualified path); the consumer does not use it.\n\n**Fix:** pass the nav item's owning package on the read. Pin a two-package name where each app opens its own action.\n\n**Reach:** first-party count is 0 today (no shipped app pair shares an action name). Any two installed packages that do share one hit it.\n\n**Re-check:** `grep -n \"getItem('action'\" ui/packages/app-shell/src/hooks/useNavActionDispatch.ts`.\n\n**Serial:** after #32361 (#32244) merges."

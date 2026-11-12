@@ -1,0 +1,31 @@
+{
+  "number": 32674,
+  "kind": "issue",
+  "title": "ADR-0087: the disposition section says `no-migration-prescription` is refused only by a body carrying a prescription; since PR #32649 it is also refused on a changeset declaring `Metadata-protocol: narrowed`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:44:26Z",
+  "updated_at": "2026-11-12T10:50:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32674",
+  "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ① a governed text that no longer matches the gate it documents, owed by a landed PR (the `carrier:` line of the ACCEPT on PR #32649, comment 6819769601). ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:skills` (`docs/adr/0087-metadata-protocol-upgrade-contract.md`, a governed surface; Tier H).\nDedupe: `is:issue ADR-0087 no-migration-prescription narrowed` → none (#32601 is the gate card, closed by PR #32649).\nreach: `docs/adr/0087-metadata-protocol-upgrade-contract.md` on `origin/main` after `a8c761fb`: the disposition paragraph (\"`no-migration-prescription` is refused by a body that carries a migration prescription\", around line 764) and the category table row (around line 867: \"refused — the body carries a FROM/TO block\") name one refusal; the gate since #32649 (merge commit `a8c761fbe5ec06978f5e3582a35cf8be0c0503ae`) refuses the category a second way: on any changeset whose `breakingDeclaration` carries signal (5), a declared `Metadata-protocol: narrowed`. An author or agent reading the ADR to pick a disposition for a narrowing reads that the catch-all is open to it.\n\n## Business reason\n\nThe ADR is the text an author reads to choose a changeset marker; the gate is what refuses it. When they disagree, an author writes the marker the ADR allows and meets a refusal the ADR does not explain. The decision itself (seat decision A on #32601, under the not-escalated class \"an existing gate's blind-spot repair\") is already in force; this card only brings the governing text level with it.\n\n## Ask\n\n- In the disposition paragraph and the category table, add the second refusal: `no-migration-prescription` is refused on a changeset declaring `Metadata-protocol: narrowed` (signal (5)), because a narrowing refuses something an author used to write and the upgrade guide is where an upgrading author learns it; the fix is a `registered` semantic entry, or a fact-checked category if one is true. Cite #32601 / PR #32649 as the source, in the ADR's own addendum style.\n- No gate or vocabulary change (`CATEGORIES` is unchanged; `assertInputs`' ADR/CATEGORIES set check is unaffected)."
+}

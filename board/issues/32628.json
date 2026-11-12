@@ -1,0 +1,36 @@
+{
+  "number": 32628,
+  "kind": "issue",
+  "title": "lint: field-no-consumers records no carrier site for a spec-shaped field-level grant `permissions[].fields[\"OBJECT.FIELD\"]`, so the fix line misses the grant it says to remove",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:35:00Z",
+  "updated_at": "2026-11-12T11:58:34Z",
+  "closed_at": "2026-11-12T11:57:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32628",
+  "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ① a named-producer defect in the platform's own lint, reported by the #32282 dev (os-dev-report 6818754300 on #32282, out_of_scope_findings 1, class b). ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:spec`, `packages/lint/src/validate-field-consumers.ts` (the `permissions` walk; the `OBJECT.FIELD` key of a `fields` map is never recorded as a site).\nDedupe: `is:issue field-no-consumers carrier grant` (14 hits), `is:issue field-no-consumers permissions fields` (16), `is:issue field-no-consumers inert` (22), open and closed → none on this. Nearest: #32282 (a field permission's `when` condition, in flight as PR #32625), #32256 (RLS predicates, closed), #20929 / #21091 (other inert misreadings, closed).\nreach: named producer. `examples/app-showcase/src/security/permission-sets.ts:68-70` grants `'showcase_project.budget': {...}` in the spec shape (`PermissionSetSchema.fields`, keyed `OBJECT.FIELD`). The dev's probe on `origin/main` `3452dec2`: that grant is recorded as no site at all, so a field named only there reads `inert []`, and the warning's `fix:` line (\"remove the declaration together with its N carrier site(s)\") names no grant to clean. The off-spec shape `permissions[].objects.inv.fields.region` reads `carrier-only [...]`; `ObjectPermissionSchema` (strict, no `fields` key) refuses that shape, yet the rule's existing pins (test lines ~137, ~380, the RLS block) use it.\n\n## Business reason\n\nAn author or agent removing a field the rule calls unused follows its `fix:` line. When the only other place the field appears is a field-level permission grant, the line says there is nothing else to clean, the field is deleted, and the grant is left naming a field that no longer exists. The rule's docblock and `os explain field-no-consumers` (rule-explanations.ts, paragraph 2) list \"a field-level permission grant\" as a carrier the removal must clean, so the declared behaviour is not delivered on the shape the spec actually accepts.\n\n## Ask\n\n- Record the `OBJECT.FIELD` key of `permissions[].fields` as a carrier site of that object's field (PR #32625's `fieldPermissionObjectOf` reads the same key head; type the key name against the spec as that PR does).\n- Move the existing pins to the spec shape (`PermissionSetSchema.safeParse` on the fixture), keep one pin of the off-spec shape only if the rule must still read it, and pin: a field named only by a spec-shaped grant reads `carrier-only` with the grant path in `fix:`.\n- `Clause-②: no`, `Metadata-protocol: none` expected (a warning's wording and carrier list; nothing refused). Lands after PR #32625 (same file)."
+}

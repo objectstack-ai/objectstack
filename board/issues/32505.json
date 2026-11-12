@@ -2,8 +2,8 @@
   "number": 32505,
   "kind": "issue",
   "title": "lint: validate-dataset-measure-aggregates keeps a private copy of the aggregate-pair declaration reading that aggregate-pair-verdict.ts now owns (#32449 follow-up)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T02:09:19Z",
-  "updated_at": "2026-11-12T08:00:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T08:31:22Z",
+  "closed_at": "2026-11-12T08:28:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32505",
   "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ③ cleanup, reported by the #32449 card thread in PR #32502 (os-dev-report 6812271120, out_of_scope_findings 2; contract review round 3 nit). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, `packages/lint/src/validate-dataset-measure-aggregates.ts` (`declaredAs`, line ~365, and its own reading of the field's declaration).\nDedupe: `is:issue is:open validate-dataset-measure-aggregates` → 3 hits, none on this (#32449, seat posts).\nreach: no behaviour today. PR #32502 adds `packages/lint/src/aggregate-pair-verdict.ts`, the one verdict and remedy for an aggregate × field pair that the list-view and grid members share. The dataset-measure member still carries its private twin of the same declaration reading (`aggregateAcceptsDeclaration` / `declaredAs`), so a later table change can make the three surfaces disagree.\nBlocked-by: #32449\n\n## Ask\n\nImport the shared verdict and delete the twin. The existing dataset-measure pins must stay green unchanged; if any message moves, say so. No contract change: `Clause-②: no`, `Metadata-protocol: unchanged`."

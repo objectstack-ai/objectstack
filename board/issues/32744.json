@@ -1,0 +1,31 @@
+{
+  "number": 32744,
+  "kind": "issue",
+  "title": "rest: pin details.candidates on the cross-object batch door and the census doors, and check the candidates elements before the cast in error-response",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:on-hold",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T13:44:43Z",
+  "updated_at": "2026-11-12T13:50:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32744",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32250 (PR #32740), from the epic red-line read 6825274386 on head `41354c38a`. Not a merge blocker (maintainer rule: only correctness, red-line or security items block). Parked under ruling 6824949405 on #31527.\n\n## What is owed\n\n1. The cross-object `POST /batch` door carries the `details.candidates` option unpinned (PR #32740 says NOT MEASURED). Measure and pin.\n2. `packages/rest/src/error-response.ts` (the candidates read near the 409 mapping) casts the recogniser's `readonly unknown[]` without an element check. Check each element's shape, or narrow the recogniser's return type.\n3. The census doors gain the member unpinned (ruling F1=A allows it). Pin one census door.\n\n## Acceptance\n\nEach item pinned (red before, green after) on `main` after PR #32740's merge; no answer moves.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"
+}

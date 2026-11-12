@@ -2,7 +2,7 @@
   "number": 32556,
   "kind": "pull_request",
   "title": "feat(pm): the relay appends a sealed, signed note to an unpublished advisory's description — advisory_note",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -13,7 +13,6 @@
   "labels": [
     "ci/cd",
     "documentation",
-    "pm:awaiting-merge",
     "size/xl",
     "skip-changeset"
   ],
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T04:37:06Z",
-  "updated_at": "2026-11-12T08:16:13Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-12T08:37:48Z",
+  "closed_at": "2026-11-12T08:36:04Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-12T08:36:04Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32556",

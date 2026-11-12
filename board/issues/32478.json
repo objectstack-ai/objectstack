@@ -16,16 +16,16 @@
     "priority:p1"
   ],
   "assignees": [
-    "sunhaolin"
+    "os-sales"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T23:12:59Z",
-  "updated_at": "2026-11-12T06:45:32Z",
+  "updated_at": "2026-11-12T12:55:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 10,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32478",
   "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ② measured gap, reported by the #32434 card thread in PR #32471 (os-dev-report 6809386221, open_questions 1–2 and out_of_scope_findings 2). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:ui`: the record-page renderer, `ui/packages/types` page node schemas, and `ui/packages/app-shell/src/views/metadata-admin/anchors.ts`.\nDedupe: `is:issue is:open record page blank fallback default record page console` → 13 hits, none on this (the only match is #32434 itself); `is:issue is:open create-seed anchors record page` → none.\nreach: after PR #32471 merges, the spec refuses a `kind: 'full'` record page that places no component at parse (every save door, `os validate` / `os build`, `defineStack`, artifact registration). What it does not reach is listed below.\nBlocked-by: #32434\n\n## What is left on the console side\n\n1. **Rows that already exist.** A record page row stored before the refusal, or a page inside a package body registered flat (installed packages keep installing), still draws the blank detail panel: the breadcrumb and nothing else, for every record of its object. Decide whether the record view falls back to the object's default record page (`packages/spec/src/ui/default-record-page.ts`) or shows a panel that says what is wrong and how to fix it. Either is better than a blank panel.\n2. **`PageKindNodeSchema`.** The census `ui/packages/types/src/__tests__/spec-object-refinements-7715.test.ts` lists `checkPageRecordPlacesComponent` as not attachable on `PageNodeSchema` (on that node `type` is the discriminator `'page'`). Decide whether the kind node that does carry the page type should attach it.\n3. **Studio create-seed paths.** In `ui/packages/app-shell/src/views/metadata-admin/anchors.ts`, four seed paths for an explicit full record page return no regions: no object, a falsy object definition, a synthesized page without regions, and a fetch error. Each save is now refused `422` with the spec's sentence instead of being stored blank. Seed `kind: 'slotted'` (the default record page with overrides) or the default page's regions there, so a new record page saves on the first try.\n\n## Ask\n\nOne PR or three is the lane's call. Pin each with a test. No spec change is needed; the refusal and its message are the spec's (`checkPageRecordPlacesComponent`, `@objectstack/spec/ui`)."

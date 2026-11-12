@@ -1,0 +1,34 @@
+{
+  "number": 32697,
+  "kind": "pull_request",
+  "title": "fix(spec): register the upgrade-guide entry for the flow by-name reads the flow-per-namespace change narrowed",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:24:05Z",
+  "updated_at": "2026-11-12T11:37:09Z",
+  "closed_at": "2026-11-12T11:37:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T11:37:07Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32697",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wg7hU4nqZzq4X97nuFabGxKv)_\nepic:#31527#1 · os-bill · session_01Utp6CYAGCZcafN5hk3uj4u\n\n## 维护者速读\n\n- 改了什么：给 flow 按命名空间分包（#32507，已合入）声明的收窄补一条 ADR-0087 语义迁移条目 `flow-by-name-read-shared-or-unreachable-refused`，并把那张 changeset 的 `adr-0087:` 标记从 `not-required (no-migration-prescription)` 改为 `registered`。\n- 为什么改：#32649 起，声明 `Metadata-protocol: narrowed` 的 changeset 不能再用这个豁免；#32507 在它合入后紧接着进了 main，欠一条升级指南条目。\n- 风险与回滚：只加一个条目文件和一张 spec patch changeset，不动 schema、导出和运行时。回滚即 revert。\n- 先看：`packages/spec/src/migrations/entries/semantic/18.flow-by-name-read-shared-or-unreachable-refused.ts`。\n- 需要你做的：无，专题席位落地。\n\nRefs #31696\n\n## What changes\n\n- **One semantic migration entry** in protocol 18's step of the upgrade guide and `os migrate meta`: `flow-by-name-read-shared-or-unreachable-refused` (`packages/spec/src/migrations/entries/semantic/`). It names the two by-name flow reads the flow-per-namespace change refuses: (1) a bare read of a name two packages of two namespaces hold (`GET /api/v1/meta/flow/NAME`, `MetadataManager` for type flow with no package) answers `409 RESOURCE_CONFLICT` naming both, where it served the first registered; (2) a package's by-name read of a flow only the environment holds, or one a package outside its declared dependencies holds, is refused naming the holders (ADR-0150 D3). Replacement: read by package (`?package=ID`, `/api/v1/meta/flow/NS/NAME`), declare a dependency on the shipping package (ADR-0141), or ship the flow in the reading package. Acceptance: every bare-name caller finds one holder or moves to the qualified read; every package's by-name read reaches its flow.\n- **`.changeset/31696-flow-names-per-namespace.md`**: its marker now reads `<!-- adr-0087: registered flow-by-name-read-shared-or-unreachable-refused -->`. Nothing else in it moves (a DELIBERATE CORRECTION of a pending note, declared below).\n- **`.changeset/31696-flow-by-name-read-upgrade-guide-entry.md`** (new): `@objectstack/spec` patch for the entry, as the flow refusal entries before it shipped.\n\n## DELIBERATE CORRECTION\n\n`Check Changeset` refuses this PR because it edits a pending changeset that is on the merge base: `.changeset/31696-flow-names-per-namespace.md` (the flow-per-namespace release note, merged in #32507). That is deliberate, not a filename collision: the note's ADR-0087 disposition said no ledger entry was owed, and this PR adds the entry, so the old disposition is now false. Only that one line changes; no rendered sentence of the note moves.\n\n- **Before** (merge base 9cd5fc161):\n\n  ```\n  <!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which flow a by-name read, an address, an action or an endpoint answers, and which second package an install admits; the stored metadata and the activation ledger are read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->\n  ```\n\n- **After** (head 418f091ed):\n\n  ```\n  <!-- adr-0087: registered flow-by-name-read-shared-or-unreachable-refused -->\n  ```\n\nRestoring the line from the base would put the false disposition back. Confirmed by the dispatching seat's record (its same-head contract review), per pm-dispatch `references/landing-operations.md`.\n\n## Why\n\n#32649 (merged 09:23Z) refuses `not-required (no-migration-prescription)` on a changeset that declares `Metadata-protocol: narrowed`: a narrowing owes the upgrade guide an entry. The flow-per-namespace PR merged at 09:45Z with that exemption, so its entry is owed here.\n\n## Verification\n\n- `node scripts/check-adr-0087-registration.mjs --base origin/main`: exit 0. On the flow-per-namespace branch merged with `main` a8c761fbe, before this fix, it exited 1 naming that changeset; with the entry and the marker it exited 0 (`registered … (new here: flow-by-name-read-shared-or-unreachable-refused)`).\n- `node scripts/check-changeset-no-major.mjs --base origin/main`: exit 0.\n- `pnpm --filter @objectstack/spec gen:migration-registry`: exit 0 (569 semantic entries). Spec migration tests (`vitest run --project local src/migrations/`): 5 files, 198 tests passed. eslint on the entry: exit 0.\n\nClause-②: no\nMetadata-protocol: none\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: one entry file; `registry.ts`, `spec-changes.json` and the upgrade guide are generated, git-ignored projections, nothing to commit.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CYAGCZcafN5hk3uj4u\n\n<!-- signed: epic:#31527#1 · os-bill · session_01Utp6CYAGCZcafN5hk3uj4u -->\n"
+}

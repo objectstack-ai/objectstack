@@ -1,0 +1,32 @@
+{
+  "number": 32743,
+  "kind": "pull_request",
+  "title": "test(scenarios): size the live-driver stand-in cases' timeout from measured process starts",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/xs",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T13:41:04Z",
+  "updated_at": "2026-11-12T14:01:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32743",
+  "body": "🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaA8pcS7BEcMt15WeW\n\ndomain:devx#2 · os-bill · session_01Utp6CaA8pcS7BEcMt15WeW\n\n## 维护者速读\n\n- 改了什么：`packages/qa/scenarios` 的一组单测（替身 `claude` 子进程那一组）现在有自己的 30 秒超时，不再用默认的 5 秒。只改测试文件，一处常量加一行。\n- 为什么改：其中 `--model` 那条测试要串行启动 19 次子进程。合并队列的机器忙时每次启动要 0.2 秒以上，正好卡在 5 秒边上，把一个无关的 PR 踢出了队列。\n- 风险与回滚：只影响测试的超时上限，不改任何产品代码，也不发布。回滚就是还原这一个提交。\n- 先看：`packages/qa/scenarios/test/runner/units.test.ts` 里新加的 `STAND_IN_TEST_TIMEOUT_MS` 和它所在的 `describe` 一行。\n- 两分钟验证：`pnpm --filter @objectstack/scenarios exec vitest run test/runner/units.test.ts`，预期 68 条全过，`--model` 那条约 1 秒。\n- 需要你做的：无，席位落地。\n\nFixes #32562\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — a test-only change; `git diff --name-only origin/main...HEAD | grep -cE '^(skills|content/docs)/'` answers 0.\n\n## What changes\n\nThe live-driver describe in `packages/qa/scenarios/test/runner/units.test.ts` (\"the live driver against a stand-in `claude` ...\") now carries `{ timeout: STAND_IN_TEST_TIMEOUT_MS }`, a named 30 000 ms constant with a one-line comment saying why: every case in it starts a real stand-in process, one start after another, so its time is a count of process starts under CI load. No skip, no retry, no quarantine, no global vitest timeout change, and nothing under `src/**` changes.\n\nWhy the whole describe and not the one case: six of its eight cases start the stand-in (3 to 19 starts each) and had no timeout of their own. The `--model` case is the heaviest (19 starts: 5 drivers x 2 constructor probes, `--version` and `auth status`, plus 9 turns), so it hit the 5 s line first; the others share the same mechanism with less headroom to spare under a worse shard.\n\n## Tests\n\nMeasured, three local runs each, same box, before and after (ms; box held under the shared verify lock, so these are shared-box figures):\n\n| case | starts | before | after |\n|---|---|---|---|\n| 200 KB prompt | 3 | 138 / 155 / 142 | 147 / 131 / 186 |\n| timeout kills a turn (1.2 s wait) | 3 | 1284 / 1296 / 1304 | 1300 / 1297 / 1333 |\n| CLI exits without result / binary gone | 5 | 211 / 275 / 212 | 217 / 275 / 240 |\n| `--author-timeout` | 4 | 178 / 183 / 181 | 180 / 169 / 191 |\n| tier sizes `--max-turns` | 6 | 259 / 300 / 283 | 287 / 257 / 274 |\n| `--author-max-turns` / `--ask-max-turns` | 6 | 255 / 290 / 268 | 267 / 269 / 301 |\n| `--model` | 19 | 835 / 926 / 861 | 898 / 873 / 965 |\n\nAbout 45 ms a start locally. Under six CPU burners on four cores the `--model` case took 2300 ms (about 120 ms a start).\n\nThe failing merge-queue job (run 43155496162, job 130975212814, Test Core 2/8) printed the same cases at 701, 1723, 1150, 773, 1217, 1048 and 5049 ms (cut off): 175 to 235 ms a start in the siblings, about 4.5x local. At that rate 19 starts is 3.3 to 4.5 s before any test overhead, so the `--model` case sat at roughly 1x headroom on that shard; 30 s is about 6x the 5049 ms it was cut off at. The siblings sat at roughly 3x to 7x headroom, the same risk at a lower level, so the describe-level budget covers them the same way.\n\n<details><summary>Proof the describe-level budget reaches every case (one-off mutation, not kept)</summary>\n\n`node scripts/ablation-replace.mjs` replaced `const STAND_IN_TEST_TIMEOUT_MS = 30_000;` with `... = 200;` (anchor 1 to 0, blob fce51b3d7cc3 to 39444d3359b5) and ran the file: `Tests 6 failed | 62 passed (68)`, each failure `Test timed out in 200ms.`, exactly the six stand-in-starting cases. Restored: blob equals HEAD (fce51b3d7cc3) and `git diff HEAD` empty.\n</details>\n\n<details><summary>Package suite on the final tree (head 39e16923a)</summary>\n\n- `pnpm --filter @objectstack/scenarios build && pnpm --filter @objectstack/scenarios test`: `Test Files 32 passed (32)`, `Tests 696 passed (696)`, exit 0.\n- `pnpm --filter @objectstack/scenarios typecheck` (`tsc --noEmit`, whose `include` has `test/**/*`; `--listFiles` counts `units.test.ts` once): exit 0.\n</details>\n\n## Acceptance notes\n\n- No changeset: the diff touches only `packages/qa/scenarios/test/**`. The package's `files[]` is `dist`, `README.md`, `CHANGELOG.md`; after a build `STAND_IN_TEST_TIMEOUT_MS` has 0 hits there while the positive control `ClaudeCodeDriver` has 8 files in `dist`. Nothing published changes, so this PR owes the `skip-changeset` label, which the seat applies (the dispatch forbade label writes from this run).\n- `test/runner/codex-driver.test.ts` has the same stand-in shape in a different file (its timeout case took 2449 ms and its `--model` case 1649 ms in the same job) with no per-test timeout. Out of this card's file scope; noted, not changed.\n\n## Verification\n\n<details><summary>Derived gates (dispatch-gates --commands, tree objectstack-ai/objectstack at 39e16923a)</summary>\n\n48 commands derived; 47 exit 0. `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 (shallow checkout could not read its pinned fixture commit 621a48760788); after fetching that one commit it exited 0. `pnpm check:dual-build-cjs-loads` exited 3, PREREQUISITE NOT MET (needs every package's `dist`, i.e. a full workspace build): NOT MEASURED locally, CI runs it. `dispatch-gates --ran` with the recorded exit codes: `48 derived famil(ies) accounted for — 47 run, 1 NOT-MEASURED`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaA8pcS7BEcMt15WeW)_\n"
+}

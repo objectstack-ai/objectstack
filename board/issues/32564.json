@@ -2,8 +2,8 @@
   "number": 32564,
   "kind": "issue",
   "title": "Flaky: ui/scripts git-paths-nested-layout test times out at 15s in Test UI (1/16)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2",
     "tooling"
   ],
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T05:07:40Z",
-  "updated_at": "2026-11-12T08:19:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T08:49:35Z",
+  "closed_at": "2026-11-12T08:49:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32564",
   "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① CI flake with a named producer, seen by the domain:skills seat on PR #32556 (a `scripts/pm/**` + workflow diff that touches no `ui/**` path). ⛔ Not a claim; triage decides lane and grade.\n\n## What failed\n\n`Test UI (1/16)`, run 43155985148 attempt 1, job 130976690042, head `8f329f4d0`: `ui/scripts/__tests__/git-paths-nested-layout.test.ts:77` — \"Test timed out in 15000ms\". The same job passed on its one re-run (attempt 2, job 130982100649) with no change to the head.\n\n## Reach\n\nAny PR whose Test UI matrix runs that shard: a red that is not the PR's, costing a re-run and a reader's time.\n\n## Duplicate check\n\nSearched open issues for `git-paths-nested-layout`: none.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"

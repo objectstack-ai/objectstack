@@ -1,0 +1,31 @@
+{
+  "number": 32670,
+  "kind": "issue",
+  "title": "ADR-0150: the email template send judges the served holders (a disabled package holds no name at the send)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:40:37Z",
+  "updated_at": "2026-11-12T09:54:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32670",
+  "body": "epic:#31527#1 · os-bill · session_01Utp6CYGYEUhpi29FpjLmxT\n\nParent: #32354 (nested here because #31527 is at GitHub's sub-issue cap). Filed under epic ruling R4-E on PR #32497 (#32183).\n\nBlocked-by: #32183\n\n## Premise\n\n#32183 makes a disabled package hold no name at the resolve. Under ruling R4-A, PR #32497 holds the email template send door (`packages/plugins/plugin-email/src/template-loader.ts`, `bundleAddressOf`) at `main`'s answers: the resolve, the holder count and the shared view read every holder (`includeDisabledPackages: true`). So at the send, a disabled package still counts as a holder, and a refusal still names it. This card makes the send judge the served holders without leaking another package's bundle member.\n\nWhy it was not done in #32183: the door reads a flat environment-wide list after a scoped resolve. Three review rounds each found another member on a disabled holder's side of that list: a row of its customization pair, or a locale a dependent adds (contract review 6819947096, M3).\n\n## Fix shape\n\n- The send judges the served holders: the resolve, the count and the shared view.\n- Member rule (6819947096): a send returns only members stored under one of:\n  - the resolved holder;\n  - its pair;\n  - a dependent whose closure holds the resolved holder;\n  - no package.\n- A dependent never gets a template from outside its closure.\n- Restore rows 27 to 31 of PR #32497's round-3 table (withdrawn under R4-A). Declare each FROM → TO with its Clause-② arm, and pin it.\n- Sweep: any other door held at `main` under R4-G of the same ruling joins this card.\n\n## Acceptance\n\n- The reviewer's probe matrix of 6819947096 ① (704 answers per tree at the send door):\n  - one or two holders, each enabled or disabled;\n  - a package-less row (the environment's item before or after, a stored row);\n  - a pair member row;\n  - a dependent's addition, enabled or disabled;\n  - a built-in template;\n  - every caller class;\n  - en-US and fr-FR, both reads, both orders.\n- Every answer is either unchanged from `main` or a declared, pinned row.\n- Real stored pair rows and a dependent's addition in the pins, not a double over `registry.listItems`.\n- CONTROLs: all enabled; one holder.\n\n## Order\n\n- Server lane (epic-dispatched). Start after #32183 (PR #32497) lands.\n- Lands after #32354, which owns the unmoved list cases.\n"
+}

@@ -1,0 +1,37 @@
+{
+  "number": 32708,
+  "kind": "pull_request",
+  "title": "fix(lint): field-no-consumers lists a field permission grant's OBJECT.FIELD key as a carrier site",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T11:01:26Z",
+  "updated_at": "2026-11-12T11:57:28Z",
+  "closed_at": "2026-11-12T11:57:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T11:57:27Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32708",
+  "body": "Fixes #32628\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:`field-no-consumers` 现在把权限集 `fields` 里 `OBJECT.FIELD` 形式的字段级授权键记为该字段的一个 carrier 站点;`os explain field-no-consumers` 同步写明字段权限的 `when` 是读、授权键是 carrier。\n- **为什么改**:规范唯一接受的字段授权写法(`fields: { 'showcase_project.budget': {...} }`)此前被记为\"无站点\",字段被判 `inert`,`fix:` 行说没有别处要清理;照做删掉字段后,授权键会留着去遮一个已不存在的列。\n- **风险与回滚**:只是一条 warning 的判定与提示文案变化,不拒收任何元数据;回滚即 revert 本 PR。\n- **先看**:`packages/lint/src/validate-field-consumers.ts`(新增 `fieldPermissionGrantOf` 与 walk 中记录 carrier 的那一段)、`packages/lint/src/validate-field-consumers.test.ts`(新 describe 块与迁到规范形状的旧 pin)、`.changeset/32628-field-grant-carrier-site.md`。\n- **两分钟验证**:`pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/validate-field-consumers.test.ts`,预期 193 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `packages/lint/src/validate-field-consumers.ts`: a new `fieldPermissionGrantOf` reads a permission set's `fields` key the way `PermissionEvaluator.getFieldPermissions` does: the head before the first `.` is the object (through the existing `fieldPermissionObjectOf`, whose map key `FIELD_PERMISSIONS_KEY` is typed `satisfies keyof PermissionSet`), and the whole remainder is the field. When the object declares that field, the walk records a **carrier** site at `permissions[i].fields[\"OBJECT.FIELD\"]` (the quoted spelling `validate-security-posture` uses for the same entry, because the key holds a `.`). A grant reads nothing, so it never counts as a consumer; a key whose remainder names no declared field (an unqualified key, a dotted remainder, an unknown field or object) records no site. The docblocks that said the key is \"never read as a reference\" now say it is a carrier.\n- `packages/lint/src/rule-explanations.ts` (`field-no-consumers` only): paragraph 1 names a field permission's row condition (`fields[...].when`) among the reads, as the ACCEPT of the previous PR on this rule asked; paragraph 2 names the grant key among the carriers.\n- `packages/lint/src/validate-field-consumers.test.ts`: every pin that used the off-spec `permissions[].objects.X.fields.Y` shape now uses the spec shape, with `PermissionSetSchema.safeParse` on the fixture (the corpus, the \"a carrier never rescues\" case, and the RLS block's grant case). A new `describe` pins: a field named only by a spec-shaped grant reads `carrier-only` with the grant path in `fix:`; a name-keyed set map carries the same way; a grant whose `when` reads another field carries its own target and credits the other; a grant never carries another object's same-name field; four keys that name no declared field record no site.\n- `.changeset/32628-field-grant-carrier-site.md`: patch on `@objectstack/lint`.\n\n## Tests\n\nProbe on the real producer (`examples/app-showcase/src/security/permission-sets.ts`, `ContributorPermissionSet`, keys `showcase_project.budget` / `.spent` / `.budget_remaining`), with a minimal `showcase_project` object and an empty view, the base copy of the rule against the head copy:\n\n```text\nBEFORE e4d75d6de showcase_project.budget inert [] | fix: add it to a view column or a form section, or remove the declaration\nAFTER HEAD showcase_project.budget carrier-only [\"permissions[0].fields[\\\"showcase_project.budget\\\"]\"] | fix: ... remove the declaration together with its 1 carrier site(s): permissions[0].fields[\"showcase_project.budget\"]\n```\n\nThe premise holds: at `e4d75d6de` the spec-shaped grant was recorded as no site.\n\nAblation (committed fix first, `node scripts/ablation-replace.mjs`, anchor `if (granted) {` replaced by `if (granted && false) {`): anchor 1 -> 0, blob `d18a34fcae07` -> `15cf95da6587`; `src/validate-field-consumers.test.ts` went **6 failed / 187 passed (193)**: the three moved pins and three of the new ones (the fixture pin and the two ⛔ pins stay green by design: they assert a parse, or that no site is recorded). Restore: blob == HEAD (`d18a34fcae07`), `git diff HEAD` empty.\n\n<details>\n<summary>Package suite and typecheck on head f86f6eaad</summary>\n\n```text\npnpm --filter @objectstack/lint test        Test Files 199 passed (199) · Tests 8524 passed | 5 skipped (8529)\npnpm --filter @objectstack/lint typecheck   exit 0 (includes check:test-typecheck)\nos-verify-lock: VERDICT command-exit 0\n```\n\n</details>\n\n## Acceptance notes\n\n- **The off-spec shape is dead input.** `ObjectPermissionSchema` is strict and has no `fields` key, so `permissions[].objects.X.fields.Y` is refused at parse. A scan of `examples/`, `packages/apps/` and `packages/qa/` (1026 tracked files, tree `52bcb943a`) for an object grant carrying `fields` found 0 hits, against a control of 14 spec-shaped `'OBJECT.FIELD': { readable ... }` keys. The rule has no branch of its own for the off-spec shape (it reaches it through the generic `fields` write-map read), so no pin of that shape is kept; the generic read is unchanged.\n- No public surface moves: no export, no spec key, no error code. The finding's `carriers` array gains entries only where a spec-shaped grant names a declared field.\n\n## Verification\n\nLocal subset on head `f86f6eaad` (branch merged with `origin/main` `0410fcf56` before opening): `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 66 commands for the 4 changed paths; all 66 run, exit codes captured before any pipe; `--ran` reconciliation: `✓ dispatch-gates --ran: 66 derived famil(ies) accounted for — 64 run, 2 NOT-MEASURED (2 DERIVED from a recorded exit 3)`.\n\n- 64 exit 0 (`check:docs-transcript-drift` first answered PREREQUISITE NOT MET for an unbuilt `@objectstack/lint`, then exit 0 after `pnpm --filter @objectstack/lint build`).\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: needs a whole-workspace `pnpm build` (98 packages without `dist/`); `pnpm check:lean-entry-closure`, reason: needs `@objectstack/objectql` built. Both are CI's (`Lint & Repo Gates`).\n- Dogfood: not run locally (no `!` in the title, no `(narrowing)` arm); `test:repo` not run locally (the diff touches no repo-project test), declared to CI's `Test Core`.\n- Every family CI runs on this PR is read from the PR's check-runs at review.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSbLCxEmyHf9upz3pz)_\n"
+}

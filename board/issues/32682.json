@@ -1,0 +1,36 @@
+{
+  "number": 32682,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): the PR that adds a key or bound member carries its skills enumeration row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:58:55Z",
+  "updated_at": "2026-11-12T10:41:15Z",
+  "closed_at": "2026-11-12T10:41:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T10:41:13Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32682",
+  "body": "Part of #32584\n\ndomain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:skills 车道章程在「产品车道 PR ⛔ 不改 `skills/**`」下加两行例外,派发职责在实施卡文件面那行下加一行;两张行数上限随之各抬到实测值。\n- 为什么改:新增一个可编写顶层键或绑定符号成员时,两道双向门禁让产品 PR 与技能 PR 谁先合都红;裁决 A 让新增它的 PR 同笔只加那一枚举行,讲解、示例、eval 仍走技能子卡。\n- 风险与回滚:只动内部规则文本与行数上限两行,不发布任何包,不改任何门禁逻辑;回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/references/lanes/skills.md` 第 15–16 行(例外与「枚举行」定义,边界就在这两句);`.claude/skills/pm-dispatch/references/execution-duties.md` 第 111 行;`scripts/pm/check-skill-line-ratchet.mjs` 的两行 `CEILINGS`。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期 `lanes/skills.md is 35 lines (ceiling 35; headroom 0)` 与 `execution-duties.md is 189 lines (ceiling 189; headroom 0)`。\n- 需要你做的:无,`.claude/**` 属 Tier S,席位凭契约复核落地。\n\n## What changes\n\nThree files, +18 / -2 against merge base `958734cb`.\n\n**The ruling this writes.** Ruling record 6819475461 on the card, the maintainer verbatim: 「同意 A」, answering analysis 6819422121. Option A as recorded: a PR that adds an authorable `defineStack()` top-level key, or a live member of a schema symbol bound to a registered exhaustive skills section, carries the matching skills enumeration row in the same PR; only that row; the removal direction keeps its reversed order; no gate changes.\n\n**`lanes/skills.md`, two new lines directly under the product-lane bar on `skills/**` (lines 15 and 16):**\n\n- 「例外仅新增:新增可编写顶层键或 liveness Leg 2 所绑符号活成员的 PR 同笔只加枚举行。」\n- 「枚举行 = `check:skill-top-level-keys` 锚段键名或所绑段成员项;讲解、示例、eval 仍归子卡。」\n\nThe second line names what the two gates read, so the exception is as narrow as the gates:\n\n- `scripts/check-skill-top-level-keys.mjs` reads the backticked identifiers after the words \"top-level key\" in the paragraph that opens with \"`defineStack()` accepts an `ObjectStackDefinitionInput`\" (its anchor paragraph) in `skills/objectstack-platform/SKILL.md`, and compares them both ways with the authorable keys of `COMPOSE_KEY_DISPOSITIONS`.\n- `scripts/check-skill-identifier-liveness.mjs` Leg 2 counts a member as documented when it appears in a backticked span inside the section a `BINDINGS` row names, or inside the one table row when the binding declares `row`.\n\nThe boundary is one grep: 「枚举行」 had zero hits under `.claude/` and in `AGENTS.md` before this branch, and now finds exactly these three lines.\n\n**`execution-duties.md`, one new line under the implementation-card file-surface line (line 111):**\n\n- 「例外仅新增:枚举行(见 `lanes/skills.md`)随实施卡同笔,派发令文件面只点该行。」\n\n**`scripts/pm/check-skill-line-ratchet.mjs`, two `CEILINGS` rows and their provenance comments, no gate logic:**\n\nBoth files sat at headroom 0. The script's own raise rule (ruling record 6184799323, letter B) lets the ruling of record that orders text into a file raise that file's ceiling by the measured line delta, quoted here:\n\n| File | Ordering ruling | Measured line delta | Row |\n|---|---|---|---|\n| `.claude/skills/pm-dispatch/references/lanes/skills.md` | 6819475461 | +2 | 33 to 35 |\n| `.claude/skills/pm-dispatch/references/execution-duties.md` | 6819475461 | +1 | 188 to 189 |\n\nWhy two lines and not one in `lanes/skills.md`: rule plus definition do not fit one line under the 120-byte cap; they land at 113 B and 115 B. Why a new line and not a clause in `execution-duties.md`: the line it sits under is 116 B against the same cap.\n\n## Tests\n\nNone owed. The diff touches no package, so there is no closure to build and no package suite to run, and rules text takes no ablation. The edited gate script's own suite is its `--self-test`, which `pnpm check:pm-skill-ratchet` runs first: exit 0.\n\n## Acceptance notes\n\n- Premise re-measured on main `1216abf1` before writing: `check-skill-top-level-keys.mjs --skill` on a copy of the page with one key added answers `[phantom]`, exit 1; on a copy with one key removed it answers `[missing]`, exit 1. Neither gate has a pending form.\n- Placement: directly under the bar it is an exception to, one line below the retirement line. The retirement line opens with 「退役时」 and this one with 「例外仅新增」, and 「只加」 keeps a rename's removal half on the reversed order.\n- 「所绑段成员项」, not \"table row\": of the 11 bindings, `access-scope-depth` is an inline list in a paragraph and `generate-kinds` is one table cell, so a row is not what Leg 2 reads in every section.\n- The subject is the PR that adds, whichever lane: `lanes/spec.md` sends an authorable-key addition to the spec sub-card, and that PR is the one the gate reds.\n- Noted, not written here, carried by the seat's decision card: who pays the row's tokens when it lands in a published file near its token ceiling (`skills/objectstack-platform/SKILL.md` is 6007 of 6011 on `1216abf1`); the `spec-property-retirement` checklist line that keeps skills out of a retirement PR, read against a rename that also adds; and that a PR carrying the row touches `skills/**` and so lands as a Tier H pull.\n\n## Verification\n\nLocal subset on head `dc7cf97b`, each exit code captured before any pipe.\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derives 37 commands for this diff; all 37 exit 0. `--ran` reconciliation: `37 derived, 37 run, 0 NOT-MEASURED, 0 UNRUN`.\n- `pnpm check:pm-skill-ratchet`: exit 0, `lanes/skills.md is 35 lines (ceiling 35; headroom 0)` and `execution-duties.md is 189 lines (ceiling 189; headroom 0)`.\n- `pnpm check:pm-skill-id-lint`: exit 0, `113 file(s) clean`.\n- `pnpm check:pm-dispatch-gates`: exit 0.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first answered exit 3 (its prerequisite package was not built in the fresh worktree); after the build under the verify lock (`VERDICT command-exit 0`) it answers exit 0.\n- Every other family is CI's: this PR's check-runs are the record.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcTAJajXtiVBRiECvT6)_\n\n<sub>Seat edit: `Fixes` → `Part of`. #32584 also collects the removal-side twin (an `os generate` kind retirement, per triage 6816972745), which this add-only diff does not reach (contract review 6820943647, ③). The card stays open for that question.</sub>\n\n<!-- signed: domain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6 -->\n"
+}

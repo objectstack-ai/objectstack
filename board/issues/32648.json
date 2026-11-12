@@ -1,0 +1,36 @@
+{
+  "number": 32648,
+  "kind": "issue",
+  "title": "ui: \"Delete organization\" promises to permanently delete all data, then surfaces plugin-auth's 409 DELETE_RESTRICTED as raw English listing internal sys_* table names — the console drops the `dependents` payload",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "domain:ui",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:06:44Z",
+  "updated_at": "2026-11-12T13:05:51Z",
+  "closed_at": "2026-11-12T13:02:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32648",
+  "body": "domain:ui#1 · os-bob · session_012dn2AdKZirKLfeBMp7zEGS\n\n**Filing-gate category:** ① — a user-visible product defect, reproduced on a public entry (production Console, organization settings → Danger zone → Delete).\n\n**Maintainer direct order** (routing and priority set from it, quoted verbatim — the order that filed objectstack-ai/objectstack#32645, then this one):\n\n> 按规则给平台报issue, 标记为优先.\n> 还有这个,删除组织, 确认后 报错\n\n## What happens\n\nHosted Console (`cloud.objectos.app/_console/organizations/<slug>/settings`, zh-CN UI), an organization that has environments and billing history: **危险操作 → 删除组织 → 删除**, type the slug, confirm. A red toast:\n\n```\nThis organization still owns records in sys_environment (2), sys_environment_credential (2),\nsys_package_installation (2), sys_billing_subscription (1), sys_domain (2), sys_billing_invoice (1),\nsys_billing_invoice_line (1), sys_billing_transaction (1), sys_environment_usage (2).\nDelete or move those records first, then delete the organization.\n```\n\nThe refusal itself is the contract (ruling on #24948, letter B; `packages/plugins/plugin-auth/src/organization-delete.ts`, thrown at `auth-manager-actor-guards.ts:330` as 409 `DELETE_RESTRICTED` with `dependents: [{ object, count }]`). What is broken is how the console presents it:\n\n1. **The page promises the opposite of the contract.** `organization.settings.deleteDescription` / `deleteConfirmDescription` say \"永久删除该组织及其全部数据 / This action is irreversible. All data will be permanently deleted.\" The server never deletes owned records — it refuses while any exist. The user types the slug for a delete that was never going to happen.\n2. **Raw server English in a zh-CN session, with API names.** `SettingsPage.tsx:189-194` toasts `err.message` verbatim. The user sees `sys_billing_invoice_line`, not \"账单明细\", and has no idea where those records live or how to remove them.\n3. **The structured payload is thrown away.** `createAuthClient.ts:1223-1228` → `toAuthError` keeps `message` and `code` but drops `dependents`, so the console cannot render the list itself even if it wanted to.\n4. **No pre-check.** The page offers the delete flow with no hint that the organization is not empty; the refusal arrives only after the confirm.\n\n## Expected\n\n- On `DELETE_RESTRICTED`, the console shows a localized refusal: \"This organization still owns data and cannot be deleted yet\", followed by the `dependents` rendered with each object's **label** (from metadata, `t()`-resolved) and count — never a `sys_*` API name, never server English verbatim.\n- The danger-zone and confirm copy state the real contract (the organization must be emptied first), in every shipped locale.\n- `toAuthError` (or the `deleteOrganization` method) preserves `dependents` on the thrown error.\n- Optional, cheap: the confirm dialog reads the same counts up front and disables the confirm with the list shown, instead of after the slug is typed.\n\n## Reach\n\nMeasured once on the public door (maintainer's screenshot, production Console, Nov 2026). Any organization holding any non-auth record reproduces it on any deployment; on hosted cloud every organization that ever had an environment does (the cloud side of that — the user has no door to remove billing ledgers — is a separate cloud card).\n\n## Acceptance\n\n- A `ui/packages/app-shell` test: `deleteOrganization` rejects with `code: 'DELETE_RESTRICTED'` and `dependents` → the toast/dialog shows localized text and object labels, no `sys_` substring, no server message.\n- A `ui/packages/auth` test: `toAuthError` carries `dependents` through.\n- i18n keys added in all shipped locales (`pnpm check:i18n`).\n- Changeset for the touched `ui/` packages.\n\n## Business reason\n\nWho benefits: every organization owner on every deployment, hosted or self-hosted. Scenario: an owner cleaning up a trial or duplicate workspace. Cost of not fixing: a destructive-action page that lies about what it does, then answers with an English wall of internal table names — reads as a crash, gives no path forward, and leaks internal schema names into the product surface.\n\n## Reader\n\nThe `domain:ui` seat: `ui/packages/app-shell/src/console/organizations/manage/SettingsPage.tsx`, `ui/packages/auth/src/createAuthClient.ts`, `ui/packages/i18n/src/locales/*`. No server change: plugin-auth's 409 body already carries everything needed.\n\n## Duplicate search\n\n`repo:objectstack-ai/objectstack is:issue` (open and closed), 2026-11-12: `organization delete DELETE_RESTRICTED` (51 hits), `delete organization still owns records` (323), `organization delete billing` (41), `organization settings delete` (329). None covers the console's presentation of the refusal. Related, not duplicates: #24948 (the ruling that introduced the refusal, closed), #23587 (hono's 409 body fields, closed), #32512 (engine-owned inbox rows kept after delete, open)."
+}

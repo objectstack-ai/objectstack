@@ -1,0 +1,31 @@
+{
+  "number": 32664,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0130 D2, ADR-0141 and the marketplace-publishing design doc still restate the ADR-0019 D3 fold, amended in 958734cbac",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:36:38Z",
+  "updated_at": "2026-11-12T10:10:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32664",
+  "body": "domain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6\n\nFiling gate: ① a documentation defect with named producers. It is the follow-up owed by landed work: `execution-duties.md` has an ADR's bookkeeping lines filed by the landing seat in the round the ADR merges, citing the merge commit. ⛔ Not a claim; triage sets lane and grade.\n\n## What landed\n\nPR #32618 (card #32585) merged as `958734cbac`. It amends ADR-0019 D3: a suite (one install, an app package plus its module packages) may surface several apps, each defined by a different package, and an app package still defines at most one app. The amendment edits only ADR-0019. Its note \"Records that restate D3\" says how ADR-0130 D2 and ADR-0141 read from now, but it adds no pointer inside either record.\n\n## Producers (text on `main` at `958734cbac`, read by the dev and by contract reviews 6818867679 and 6819399847 on PR #32618)\n\n- `docs/adr/0130-release-artifact-as-co-ownership-boundary.md`, D2: \"ADR-0019 D1–D3 stand verbatim and unamended\", \"the suite ADR-0019 D3 removed by name\", \"exactly one consumer-visible consequence\", plus its Non-goals and alternative 5.\n- `docs/adr/0141-inter-app-dependency-declared-checked-before-install.md`: the \"Unchanged\" line on the consumer model.\n- `docs/design/marketplace-publishing.md`: \"refolded into a single consumer App\", and \"one App … or several independent Apps — never a suite\".\n\n## Reach\n\nA reader, human or agent, who greps the registry for D3 lands on \"stand verbatim and unamended\" with no pointer back to the amendment. The two accepted records then disagree in their own text.\n\n## Wanted\n\n- A dated pointer line inside ADR-0130 D2 (and at its Non-goals and alternative 5 if they still read wrong) and inside ADR-0141. Each line names the 2026-11-12 amendment of ADR-0019 D3 and `958734cbac`. ADR-0141 itself set the precedent of adding pointer lines to records it re-read. No ruled sentence is deleted.\n- In the design doc, rewrite or annotate the two fold sentences to match the amended D3.\n\n## Reader and dedupe\n\nReader: the `domain:skills` lane (`docs/adr/**` is Tier H: the maintainer's own merge). Dedupe: `\"ADR-0130\" \"unamended\" is:issue` → 1 hit, #32585 (the source card, closed); `\"marketplace-publishing\" \"single consumer App\" is:issue` → 1 hit, the same #32585. No card carries these pointers."
+}

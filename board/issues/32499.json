@@ -2,8 +2,8 @@
   "number": 32499,
   "kind": "issue",
   "title": "metadata: unregister leaves a cluster peer's artifact-door copy answering after the acting node removed it",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T01:56:47Z",
-  "updated_at": "2026-11-12T06:48:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T09:34:13Z",
+  "closed_at": "2026-11-12T09:33:00Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32499",
   "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect (escalated by the CONTRACT_REVIEW_TIER review of PR #32493 for #32353, comment 6811661267 ③; read from the code, not run).\nRefs #32353 · Refs #32347\n\n## Business reason\n\nIn a multi-node deployment, removing a metadata item (package uninstall, datasource delete, a security catalog echo drop) should take it out of service everywhere. After #32353 the node that runs the removal stops answering for an item the artifact door loaded, but every other node keeps answering with the door's copy until it reloads or restarts. Nodes disagree about whether the item exists.\n\n## What happens\n\n1. `MetadataManager.unregister` on the acting node deletes the registry entry and, after #32353, the artifact door's `memory:` loader copy too (`isRemovalTarget`, every type).\n2. The peer nodes hear the change through `invalidateForForeignWrite`, which drops only the peer's registry entry. The peer's own door `MemoryLoader` still holds the body, so the next read on the peer falls through to it and serves the removed item.\n3. Before #32353, every node answered from the door copy for a type outside the package-slotted set, so all nodes agreed, though wrongly. Now the acting node answers nothing and the peers answer the door body.\n\nThe PR #32493 changeset declares this (\"a removal still reaches only the node it runs on\"). No first-party caller reaches a door copy on a peer today, as far as the review could read. The PR body pointed at #32347 as the carrier, but #32347 is closed, so no card carries it.\n\n## Expected\n\nA removal that the acting node applies to the door copy reaches peers as well. For example, the foreign-write invalidation also drops the peer's door-loader entry for that `(type, name[, package])`. Or the removal is recorded where a peer's read honours it. The cluster then answers the same thing on every node.\n\nRe-check (premise): `git grep -n \"invalidateForForeignWrite\" -- packages/metadata/src`, then read whether it touches any loader besides the registry.\nReader who acts: the seat that owns `packages/metadata` (`MetadataManager`, cluster invalidation)."

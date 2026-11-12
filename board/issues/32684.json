@@ -1,0 +1,37 @@
+{
+  "number": 32684,
+  "kind": "issue",
+  "title": "Files UX: a refused file type shows 「您没有权限保存这条记录」, a duplicate value shows an English generic message, and the upload-link page is English-only and names no record",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:files",
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:07:40Z",
+  "updated_at": "2026-11-12T13:53:08Z",
+  "closed_at": "2026-11-12T13:52:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 8,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32684",
+  "body": "Filing category: ① product defect (user-visible).\nreach: public entries — the console record form and the upload-link page in a browser (Playwright, zh-CN), measured once each on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`).\n\n## Business reason\n\nAn employee filing an expense line with an e-invoice gets told they lack permission when the real problem is the file type, and gets an English sentence naming no field when the invoice number is a duplicate. Both send them to an administrator for nothing.\n\n## What happens\n\n1. **File type refused → permission message.** File field `invoice_file` with `accept: ['.pdf','.ofd','.png','.jpg','.jpeg']`. Picking `not-an-invoice.txt` is accepted by the widget (no hint), and 创建 answers `POST /api/v1/data/k7en_claim_line` → `400 {\"error\":\"File type 'text/plain' is not permitted by the accept list declared for 'invoice_file' (.pdf, .ofd, .png, .jpg, .jpeg)\",\"code\":\"ERR_FILE_CONSTRAINT\"}`. The form shows 「您没有权限保存这条记录。」.\n2. **Unique violation → generic English.** A unique index on `invoice_no` (`unique: 'organization'`); a duplicate number shows 「A record with this value already exists」 at the top of the zh-CN form, naming no field (server log: `UNIQUE constraint failed: k7en_claim_line.organization_id, k7en_claim_line.invoice_no`).\n3. **Upload-link page.** The page `create_upload_link` hands out (`/api/v1/storage/upload-links/…`) reads only English (\"Upload a file / A file was asked for, to be put in a file field of a record … / File / Send / Done. The file was attached; you can close this page.\") in a zh-CN deployment, and does not say which record or field the file goes to.\n\n## Expected\n\n(1) `ERR_FILE_CONSTRAINT` shows the server's own reason on the file field, and the widget warns on a type outside `accept`. (2) A unique violation names the field (「发票号码已存在」). (3) The upload page is localized and names the record and field.\n\nReader who acts: the `domain:ui` seat (form error mapping in `ui/apps/console`) and the storage seat for the upload-link page.\nDedupe: `repo:objectstack-ai/objectstack is:issue ERR_FILE_CONSTRAINT` → 15 hits (#23932 REST declared client refusal, #21730 500 on accept refusal, both closed — server side, fixed); `upload link page` → 130 hits (#30892 closed, the MCP file tools), none on the console mapping or the page copy."
+}

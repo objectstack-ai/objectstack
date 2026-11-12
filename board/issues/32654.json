@@ -1,0 +1,31 @@
+{
+  "number": 32654,
+  "kind": "issue",
+  "title": "Platform: user-facing refusal and advisory text comes back in the request's language, composed by its producer (ruling C on #32440, #32043)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "enhancement",
+    "priority:p1",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:19:53Z",
+  "updated_at": "2026-11-12T09:26:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32654",
+  "body": "domain:ui#1 · sunhaolin · session_017xRBcSf5S4Kkc7aL9t5DSd\n\nFiling gate: ② a maintainer ruling's carrier. ⛔ Not a claim. Triage sets the lane, grade and split.\n\n**Ruling (maintainer, this seat's session, 2026-11-12 about 09:19 UTC), verbatim:** 「32440 选C，32043 一起按C处理」. Option C of the analysis on #32440 (6819513436): \"服务端按请求语言返回本地化的 advisory 文案(规则 id 不变);控制台、CLI、MCP 都直接得到译文。\" #32043 asked the same question for error codes (os-zhuang, 6760104871): 「类似需求，是否建议服务端直接返回对应语言的错误消息。」\n\n## What the platform owes\n\nText the platform marks as addressed to the END USER comes back in the request's language, composed where it is produced. The machine code or rule id stays stable, and consumers render the text without a per-code key table of their own.\n\n## Readings on `origin/main` `1216abf1a`\n\n- The carrier exists for errors: `ApiErrorSchema.userMessage` (`packages/spec/src/api/contract.zod.ts` ~line 93; `EnhancedApiErrorSchema.userMessage` in `packages/spec/src/api/errors.zod.ts` ~line 413) is \"Producer-marked user-facing refusal text, verbatim\". It was ruled on 2026-08-19 (objectui#5210). What it does not say today is which language that text is in.\n- The request's language is already parsed: `requestLocale` in `packages/core/src/security/request-execution-context.ts` (~line 161), from `Accept-Language` or `?locale`.\n- Advisories have no such carrier: the runtime authoring gate's findings (`packages/lint`, e.g. `security-private-no-readscope` in `validate-security-posture.ts`) ride a 200 with English `message`/`hint`. `grep -rn \"messageKey\\|message_key\" packages/lint/src` returns 0 hits. The console renders that text verbatim by design (`ui/packages/app-shell/src/providers/saveAdvisoryToast.ts` header).\n\n## Scope (for triage to split)\n\n1. **Contract (spec lane):** say in the spec that `userMessage` and an advisory's user-facing text are in the request's locale, with the fallback rule (the workspace default, then `en`). Give advisory findings a user-facing text field beside the stable rule id, or extend an existing one. Whether the catalog is a spec-shipped table or each producer's own is the spec lane's call within the ruling.\n2. **Server:** the save door's advisory findings and the `userMessage` producers compose their text in `requestLocale`.\n3. **Consumers:** the console stops substituting raw server prose (#32440's remaining half: `saveAdvisoryToast.ts`) and renders the localized text. #32043's member-limit refusal (`DEVELOPER_ORGANIZATION_MEMBER_LIMIT_REACHED`) is raised by cloud. Under this ruling cloud composes its `userMessage` in the request's locale through the same contract, which is a `repo:cloud` card once (1) lands.\n\n## Waiting on this card\n\n- #32440 (its post-save advisory half; the rest lands with PR #32646).\n- #32043 (the invite dialog's member-limit sentence).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue localized error message request locale server` → 43 hits; `… advisory translate locale lint message` → 75 hits. The nearest is #32278 (closed: 403s that carried no `userMessage`), which is about presence, not language. No card covers the language of producer text."
+}

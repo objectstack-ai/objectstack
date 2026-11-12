@@ -1,0 +1,36 @@
+{
+  "number": 32728,
+  "kind": "pull_request",
+  "title": "feat(console): the first-run checklist shows the built-in AI provider and folds done rows; every not-found page has a way back",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/l",
+    "tooling"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:29:47Z",
+  "updated_at": "2026-11-12T13:47:49Z",
+  "closed_at": "2026-11-12T13:47:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T13:47:46Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32728",
+  "body": "Part of #32021\nFixes #32157\nClause-②: yes (widening)\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：首次使用清单新增一行「设置内置 AI」，读取服务端实际在用的 AI 服务商（`GET /api/settings/ai` 的 `live.provider`）；清单里已完成的项默认折叠，只留待办；四种「找不到」页面（对象、网址、记录、应用）共用一个组件，每种都有返回路径（返回列表 / 返回首页）。\n- 为什么改：新装私有部署的管理员最先想用内置 AI，清单里却没有这一步；清单占满手机首屏且已完成项占位置；有两种「找不到」页面是死胡同。\n- 风险与回滚：只动控制台 UI 与语言包（只增键）；服务端未声明 `live` 时不画 AI 这一行，旧服务端行为不变。回滚即还原本 PR。\n- 先看：`ui/apps/console/src/pages/settings/firstRunChecklistLogic.ts`（`aiProviderState`：只读 `live`，不读 `values`）、`ui/packages/app-shell/src/components/NotFoundState.tsx`（`BackToHomeButton` 的首页解析）、`ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`（折叠控件）。\n- 两分钟验证：`pnpm --dir ui exec vitest run apps/console/src/pages/settings/__tests__/FirstRunChecklist.test.tsx packages/app-shell/src/components/__tests__/NotFoundState.test.tsx`，预期全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n**#32021 item 4: the built-in AI on the first-run checklist.** A new row, \"Set up the built-in AI\", is read from `live.provider` of `GET /api/settings/ai`, which landed in #32057. It never reads `values.provider`, because that only says what was saved, and the runtime can detect a provider from its boot environment while nothing is saved. A provider in use makes the row done. The row names the provider by its option label and says where it came from: \"set in Setup\", or \"detected from the server environment\". With `source: 'none'` the row is not done and links to Setup → AI & Embedder. A server that does not state the provider gets no row, because unknown is not unset. Only a session that may write `ai` reads it. The external assistant row keeps the wording from PR #32050, and its Home claim is unaffected. Item 4 was the last open item on #32021: once this merges, the card can close.\n\nThe values arrive once the AI runtime fills `registerLiveStatus('ai')`. That runtime is cloud service-ai, and the carry is recorded on #32052. On this repository alone `live` is absent, so the row stays out, as designed.\n\n**#32157: Home crowding.** Rows that are done are folded away. The list draws the rows still to do. One control under them (\"Show completed (N)\" / \"Hide completed\", with `aria-expanded` and `aria-controls`) unfolds the done rows in their place. Every visit starts folded. The progress count is unchanged.\n\n**#32157: not-found states.** Unknown object, unmatched URL, unknown record and unknown app now draw through one `NotFoundState`. Each keeps its own title and cause sentence and offers its own way back first, then \"Back to home\":\n- unknown object: \"Back to home\" only (before: no way out);\n- unmatched URL: \"Go back\" and \"Back to home\";\n- unknown record: \"Back to OBJECT-LIST\", a link to the object's list, then \"Back to home\" (before: no way out);\n- unknown app: \"Retry\" and \"Back to home\".\n\nThe app-access-denied screen uses the same button. `BackToHomeButton` resolves Home with `useHomePath()`'s policy (`resolveDeclaredHomePath`, else the launcher) against `@object-ui/react`'s metadata context. Screens that already hold `useHomePath()` pass it as `to`, as every AppContent screen does. It does not import `useHomePath` itself, because that module loads the console metadata provider and the metadata client factory into every view that draws a not-found state. That import broke 18 RecordDetailView harnesses at collection.\n\nNew `@object-ui/i18n` keys in all 11 packs (zh-Hant regenerated with `gen:zh-hant`): `console.firstRunChecklist.aiProvider.{title,todo,doneSettings,doneEnvironment,action}`, `console.firstRunChecklist.{showDone,hideDone}`, `empty.backToList`. No key is removed or renamed.\n\n## Tests\n\nFinal head `4b7db52a3`:\n- Consumer sweep: every test file in `packages/app-shell/src` and `apps/console/src` that reaches `RecordDetailView`, `objectViewChrome`, `ObjectView`, `NotFoundState` or `AppContent`, plus the checklist and i18n parity tests. 312 files, 2813 tests passed, in 4 chunks under the shared lock.\n- Type-checks: `@object-ui/app-shell`, `@object-ui/console`, `@object-ui/i18n` `type-check` all exit 0.\n\n<details><summary>Ablations (each via scripts/ablation-replace.mjs on the committed tree, restored blob == HEAD, git diff HEAD empty)</summary>\n\n- A1, environment-detected provider treated as not in use: `FirstRunChecklist.test.tsx` 1 failed / 35 passed (\"detected from the boot environment\").\n- A2, done rows not folded: `FirstRunChecklist.test.tsx` 2 failed / 34 passed (both fold pins).\n- A3, unknown-object state without its Home button: `NotFoundState.test.tsx` 3 failed / 0 passed.\n- A4, record not-found without the list link: `RecordDetailView.recordReadFailure-11902.test.tsx` 2 failed / 9 passed (control on the same head: 11/11 passed).\n</details>\n\n## Acceptance notes\n\n- The unknown-object title stays \"Object Not Found\" (title case) beside \"Page not found\" / \"Record not found\". Changing an `en` value reds `check:i18n-drift` for all ten follower packs, and the claim allows adding keys only. Noted, not changed.\n- The premise reading (the checklist takes about 60% of a 1440×900 first screen, and all of a 390 px one) was not re-measured in a browser in this run. NOT MEASURED: no backend stack was built, and the shared lock was contended. On `origin/main` the code draws every row, done or not, which is the mechanism #32157 names.\n- Existing harnesses touched: `AppContent.noAppComponentRoutes` now loads `@objectstack/lint` at module top, as `check:test-source-alias` asks of an edited file. `recordReadFailure-11902` mounts the record page on the console's record route, so the list link has its app segment.\n\n## Verification\n\nGates derived by `node scripts/pm/dispatch-gates.mjs --commands` at `4b7db52a3`, and run locally. Also run: `check:i18n-keys`, `check:i18n-drift` and `check:i18n-dead-keys` (all exit 0), `pnpm --dir ui exec vitest run scripts/` (5062 passed, 2 skipped), and `gen:zh-hant` reports zh-Hant already current. Dogfood battery: n/a (no `!` in the title, no narrowing arm).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsRT6hvZsQH9dTzn4CA)_\n"
+}

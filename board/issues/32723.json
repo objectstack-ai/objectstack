@@ -1,0 +1,34 @@
+{
+  "number": 32723,
+  "kind": "pull_request",
+  "title": "fix(plugin-audit)!: a row about a record is served only when the reader can open that record through the data door",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:server",
+    "size/l",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:18:59Z",
+  "updated_at": "2026-11-12T12:20:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32723",
+  "body": "Clause-②: no (narrowing)\nMetadata-protocol: none\nSkills-docs: none — no published skill names the parent-record read gates or which rows they serve\n\n## 维护者速读\n\n- 改了什么：活动流、审计日志（未持有审计豁免能力的读者）、评论三处，只有当读者能通过数据接口打开所属记录时才返回该行；数据接口对所有人都不开放的对象（如 OAuth 资源、连接器凭据），其相关行不再返回给任何人，管理员也不例外。\n- 为什么改：这三处以前只看对象读权限，没看数据接口是否开放，所以读者能看到它通过数据接口打不开的记录的相关行；现在三处都和数据接口用同一个判断。\n- 风险与回滚：组织管理员不再在审计日志里看到这类对象的行（包括自己 OAuth 授权的使用记录），需要的话显式授予 view_all_audit_log 即可；平台管理员不受影响。回滚即还原本 PR。\n- 先看：packages/plugins/plugin-audit/src/parent-record-read-gate.ts（enumerateParentObjects 与整读探针的 byObject 循环）、comment-access-hooks.ts（未盖章线程探针）、audit-log-read-visibility.ts（头注释）。\n- 两分钟验证：pnpm --filter @objectstack/plugin-audit exec vitest run src/parent-record-read-admission.integration.test.ts，预期新 describe「a parent the data door does not serve」全部通过。\n- 需要你做的：无，席位落地\n\n## What changes\n\nA row about a record (an activity row, a compliance-ledger row for a reader the ledger gate narrows, a comment) is served to a reader only when the reader can open that record through the data door. The shared parent-record gate now leaves out every parent object whose `enable` block the data door refuses `get` for, judged by the door's own decision, `canServeApiOperation(enable, 'get')` from `@objectstack/spec/data`. That decision depends on the declaration alone, so it holds for every reader, administrators included.\n\n- `parent-record-read-gate.ts`: applied in `enumerateParentObjects`, so no leaf is written for such a parent, and in the whole-read probe, which keeps no row naming one. With no registry view, the whole-read probe cannot say what the door serves: it keeps no row (fail closed) and says so once.\n- `comment-access-hooks.ts`: the same predicate in the unstamped-thread probe, so the comment rule holds on rows the parent-pair backfill has not reached.\n- `activity-field-redaction.ts` is unchanged. It reads the gate's own enumeration, so its WHERE carries no branch for such a parent; the rows served are the same, since the gate excludes them.\n- Not touched: `canReadObject`, the engine's leaf, `packages/rest`, `packages/spec`, and every object's `enable`. Internal reads, system reads and `current_user.can()` keep their answers.\n- Module headers (gate, activity, ledger, comments, credential-use writer) now state the rule. In the ledger, a parent the data door serves to no one counts as a record the reader cannot open. A credential-use row about such a parent is read through the ledger's audit capability.\n\nWho moves:\n\n- **Activity stream**: every reader, administrators included, stops being served rows about records of an object the data door does not serve.\n- **Compliance ledger**: readers the gate narrows, organization administrators included, stop being served those rows. That includes their own OAuth consent-use rows; the auth door's authorized-clients view still shows each client's last use. An explicit `view_all_audit_log` grant gives them back. Holders of that capability are decided first and stay whole.\n- **Comments**: no reader is served a comment on such a record.\n\nThe scope (all three gates, administrators included) was confirmed by the maintainer.\n\n## Tests\n\n- `parent-record-read-admission.integration.test.ts`: new top-level describe \"a parent the data door does not serve\". It uses a real engine and a real driver, with rows written by the real CRUD mirror. It covers the leaf path and the whole-read probe path, and for each gate (activity, ledger, comments) a member's list, count, aggregate and `findOne`. A non-vacuity control (system count of at least 1) runs first. It adds an administrator case, a CONTROL that a holder of the audit capability still reads every ledger row, and CONTROLs that a parent the door serves and one with no `enable` block keep their rows.\n- Unit cases in `activity-read-visibility.test.ts`, `audit-log-read-visibility.test.ts`, `comment-read-visibility.test.ts` and `comment-thread-leaf.test.ts`: the leaf path, the whole-read probe, a list-only object, and the no-registry fail-closed path with its once-only warning. The whole-read-probe fixtures of those files gain a registry view holding the parents they declare, because the fail-closed rule now needs one.\n- Dogfood `activity-parent-read-gate.dogfood.test.ts`: a system-context write to `sys_oauth_resource`. Neither the member nor the administrator is served its activity row, by list or by id.\n\n## Acceptance notes\n\n- The whole-read probe used to read every row's parent. It now keeps only parents the registry holds and the door serves. A row about an object no registry holds was already excluded by the leaf path; it is now excluded on the probe path too.\n\n## Verification\n\nHead: `c3027654d4`. NOT MEASURED means not run or not read. None of it is claimed green.\n\n- NOT MEASURED: plugin-audit unit and integration suites. Every try through the shared verify lock ended in queue-timeout (exit 99).\n- NOT MEASURED: ablation (remove the predicate, show red, restore).\n- NOT MEASURED: package `typecheck`.\n- NOT MEASURED: the full dogfood battery on the final head, and the dogfood file above.\n- Derived gate families (`dispatch-gates --commands`), run at an earlier head of this branch (before the last `origin/main` merge): 64 of the 77 derived commands exited 0. This includes `check-adr-0087-registration --base origin/main`, `check-changeset-no-major`, `check-empty-changeset`, `check:changeset-gate-self-tests` and `check:nul-bytes`.\n- NOT MEASURED: `check:dual-build-cjs-loads` (PREREQUISITE NOT MET: it reads built output this checkout did not have).\n- NOT MEASURED: the remaining 12 derived commands (not reached).\n- Not run on the current head: the `--ran` reconciliation.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcT1w3zpekijraHJE4f)_\n"
+}

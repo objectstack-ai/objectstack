@@ -2,8 +2,8 @@
   "number": 32614,
   "kind": "issue",
   "title": "spec(ai): the blueprint field's `expression` describe tells the design model \"null for every other field type\", so the AI builder cannot author a totallable computed field (#32443 B, #32598)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,18 +11,25 @@
     "type": "Bot"
   },
   "labels": [
+    "area:ai",
     "domain:spec",
-    "finding"
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:00:30Z",
-  "updated_at": "2026-11-12T08:00:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T11:43:34Z",
+  "closed_at": "2026-11-12T11:30:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32614",
   "body": "coordinator#1 · marchtian · session_017ihL2dYynaMYbZTr8hTeRC\n\nFiling gate: ① product defect with a named real producer: the cloud AI builder, whose design model reads this describe (cloud#3567 B9, recorded on #32443 comment 6813682448). Found while filing #32598 on the maintainer's instruction 「两张 cloud 卡，你直接写，挂 cloud 标签就可以」 (project thread, 2026-11-12T07:10Z). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, `packages/spec/src/ai/solution-blueprint.zod.ts` (the lenient `BlueprintFieldSchema.expression` and the strict `StrictField.expression`), next PR that touches the blueprint field.\nDedupe (open AND closed): `solution-blueprint expression` → 25 hits, `blueprint expression number field` → 27, `StrictField expression` → 5; none covers this. Nearest precedent: #30584 (closed, blueprint field `defaultValue`, the same lenient/strict pair).\nreach: named real producer. The cloud builder authored 销售额 = 销量 × 单价 as a `formula` and every sum over it was refused (cloud#3567 B9). #32443 (ruled B, route 1 accepted 2026-11-12) says a value meant to be totalled is a field of its return type carrying the same `expression`. The design model is told the opposite by this describe.\nRelated: #32598 (the cloud builder and analytics card, which depends on this one), #32443, PR #32545, #32532 (published skills).\n\n## Measured\n\nAt objectstack `main` `3452dec2`, `packages/spec/src/ai/solution-blueprint.zod.ts`:\n\n- `StrictField.expression` (`z.string().nullable()`, about line 614): \"REQUIRED when type is \"formula\" … **null for every other field type**.\" The strict mirror is the shape the design model generates against, so it is told never to put an expression on a `number` / `currency` / `date` field.\n- `BlueprintFieldSchema.expression` (`z.string().optional()`, about line 298): describes only the `formula` case.\n- Neither schema refuses an `expression` on a non-formula field, so the SHAPE already admits route 1. Only the describes steer away from it.\n- The data contract allows it: `packages/spec/src/data/field.zod.ts`, `expression`: on any other (stored) field it is \"computed by the engine from the row the write stores and stored\". `judgeRestrictionProfile` does not read fields, so every hosted tier allows it (read from code).\n\nNot measured here: whether cloud's `apply_blueprint` carries `expression` onto a non-formula field when it builds the object. #32598 asks the cloud seat to measure that.\n\n## Ask\n\n1. Rewrite both describes, in lockstep, to teach the two uses of `expression`:\n   - on `type: \"formula\"`: computed on read, stored nowhere, cannot be totalled, sorted or searched (keep the existing one-hop and runtime-dead text);\n   - on a field of the value's own return type (`number`, `currency`, `percent`, `date`, …): computed by the engine on every write and kept in a column, so `sum` / `avg`, sort and search work. Use this when the value is totalled, averaged or charted. Name the return type, not \"number\": a date expression on a number field is refused at every write.\n   - Replace \"null for every other field type\" with: null on a field that is neither a formula nor a stored computed value.\n2. Keep the shape unchanged (no accept-set change); this is describe text the design model reads. Regenerate whatever the spec gate says the describe change touches.\n3. Use the remedy wording PR #32545 lands, so the refusal, the blueprint and the skills (#32532) say the same sentence.\n\n## Acceptance notes\n\n- The two describes name both uses and agree with each other and with `field.zod.ts`.\n- A spec test pins that a blueprint field `{ type: 'number', expression: 'record.quantity * record.unit_price' }` parses under both schemas and keeps its `expression`.\n- After landing, post the merge sha on #32598 so the cloud seat can run its pin probe.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

@@ -1,0 +1,31 @@
+{
+  "number": 32737,
+  "kind": "issue",
+  "title": "plugin-audit redaction writer: admit and open each checkpoint once per run, not once per row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:56:49Z",
+  "updated_at": "2026-11-12T12:56:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32737",
+  "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #31908 (PR #32630, slice S9 + P3), from its contract re-review at `150cac4b` (record on PR #32630, nit N2). Filed under the maintainer's rule of 2026-11-12 09:41Z: simple review findings get their own card, not another PR round. It does not block #32630; it should land before P4 makes sealing a default.\n\nBlocked-by: #31908\n\n## 维护者速读\n\n- 改什么：审计脱敏迁移改写已封存的行时，每一行都重新校验一次检查点签名、重建一次根、打开一次签名密钥。应改成每次运行每个检查点只做一次。\n- 为什么：成本随窗口内行数平方增长；用 KMS 时每行一次远程调用。\n- 风险：只改迁移内部缓存，不改判定规则与输出。\n- 先看：`packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` 的检查点准入与开钥路径。\n- 验证：一次运行内同一检查点只验签一次、只开钥一次，有计数 pin；判定与现有 pin 全部不变。\n- 需要你做的：无，p3。\n\n## Do\n\n1. Admit (verify the signature under a trusted key, rebuild the root from `leaf_hashes`) and open the signing seed once per checkpoint per migration run, and reuse the result for every row that checkpoint lists. Keep the admission rule exactly as it is (one D6 rule, shared with the verifier).\n2. Pin it: a run over N rows of one checkpoint verifies that checkpoint once and calls the crypto provider's open once (count spy), and every existing redaction pin in `audit-seal-redaction-live.integration.test.ts` stays as it is.\n\n**Clause-②:** `no` (internal). **Metadata-protocol:** none."
+}

@@ -10,16 +10,21 @@
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:21:53Z",
-  "updated_at": "2026-11-12T08:21:53Z",
+  "updated_at": "2026-11-12T11:59:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32623",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ④ the platform half of a cloud card (cloud#4347, cross-repo-coordination rule 1). The cloud PR objectstack-ai/cloud#4374 is otherwise complete and waits on this registration, then on a pin bump.\n\n## 维护者速读\n\ncloud 给问答助手加了一个只读工具 `get_record_history`：读当前用户有权看的那条记录的修改历史，用来「撤销上一次修改」，恢复仍然走确认卡。框架的平台工具名登记表要先列上这个名字，各语言包要加上它的显示名，cloud 的一致性测试才能通过。改动很小：一行登记加 14 个语言包里各一个标签。\n\n## Work\n\n1. `packages/spec/src/system/constants/platform-tool-names.ts`: add `get_record_history` to `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` (~L58-70 on main), following the file's own maintenance rule (its header).\n2. `ui/packages/i18n/src/locales/*.ts` (14 packs on main): add `chatbot.tool.get_record_history` beside `open_record` (en.ts ~L4853 has `open_record: 'Open the record'`). Suggested en: 'Read record history'. Translate per pack.\n3. Whatever conformance or ledger test in this repo pins the registry list (the registry header names it).\n\n`Clause-②`: the dev measures. A new name in a published constant list widens it, so likely `yes`.\n\n## Acceptance\n\nThe name is listed and each locale pack carries the label. Then cloud's `platform-tool-names-conformance.test.ts` on #4374 passes after the pin bump that carries this change.\n\nReader: the lane owning `packages/spec/src/system/constants` (spec), with ui i18n in the same PR or a twin.\n\nDedupe: `get_record_history` → 0 hits in this repository (seat grep on main)."

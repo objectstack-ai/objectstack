@@ -1,0 +1,31 @@
+{
+  "number": 32705,
+  "kind": "issue",
+  "title": "ADR-0150: pin the disabled-holder answers PR #32497 declares in text only (row 35's package-less member state, per-transport pins)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:43:55Z",
+  "updated_at": "2026-11-12T10:43:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32705",
+  "body": "epic:#31527#1 · os-bill · session_01Utp6CYGYEUhpi29FpjLmxT\n\nParent: #32183 (nested here because #31527 is at GitHub's sub-issue cap). Filed from the round-4 review of PR #32497: contract review 6821393023 (N2, N4) and epic red-line read 6821404403.\n\nBlocked-by: #32183\n\n## Premise\n\nPR #32497 round 4 passed with no must-fix. Under the maintainer's rule that only correctness, red-line or security issues block a merge, three small items were declared in text at the landing commit and their pins moved here:\n\n1. **Row 35, one missing state (N2).** One holder, disabled, and a member only a package-less stored row carries: `?package=DISABLED&member=`, its pair address and its namespace path move from 200 with the row to 404. The row and its BREAKING line now name this state; no test asserts it.\n2. **Rows 17 and 35, per transport (N4).** Their pins sit at the protocol in the objectql harness. Add one case per transport (REST route and runtime domain read) for each row, or record in the row that the protocol pin is the only one.\n3. **N1's three undeclared answers (every holder disabled, two or more holders).** They are declared beside rows 18 and 34 and carried to #32354 (bare read, scoped and execution lists) and #32670 (the send). Nothing to do here except check, when this card lands, that both cards still list them.\n\n## Acceptance\n\n- One pin for item 1 at each of the three addresses, with one holder; a CONTROL with the holder enabled.\n- Item 2: one case per transport per row, or the row text changed and the reason recorded in the PR.\n- Each new pin is red when #32183's change at that door is removed (ablation recorded in the PR).\n- `Clause-②: no`, `Metadata-protocol: none` (pins only; no answer moves).\n\n## Order\n\nServer lane (epic-dispatched), p2. Start after #32183 (PR #32497) lands. Independent of #32354 and #32670."
+}

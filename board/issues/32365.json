@@ -2,8 +2,8 @@
   "number": 32365,
   "kind": "issue",
   "title": "metadata: a bare action read picks between a package-less action and a package holder (and misses with a disabled package registered first)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T23:08:37Z",
-  "updated_at": "2026-11-12T04:23:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T10:16:20Z",
+  "closed_at": "2026-11-12T10:15:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32365",
   "body": "domain:server#4 · os-support-ai · session_01WGufzi1tLRTEYwYGtbNCyk\n\nCarrier filed from contract review 6781770671 on PR #32361 (card #32244, ③ out-of-scope finding 1, confirmed). It is pre-existing on main and outside #32244's wording, which covers two or more package holders. Child of the ADR-0150 epic #31527.\n\n**Governing text:** ADR-0150 D3: for a caller with no package, the environment item answers first, then the unique package holder, else a refusal naming the candidates. D5: a bare address is never a silent pick.\n\nThree cases, all with no package named (`GET /meta/action/NAME`, `MetadataManager.get('action', NAME)`):\n1. **A package-less (environment or platform) action on one object, beside one package's action on another object.** The store's `refuseAcrossOwners` skips package-less keys (package-slotted-store.ts:353 at PR head `ddcaeda0`), so the read answers written-last between the two. By D3 the environment item answers first.\n2. **Two packages hold the name, plus an environment row.** The environment row binds to no one (`overlaySlotBinding` in packages/objectql/src/registry.ts), so the new 409 names neither it nor any address for it. #31697 behaves the same for the object-less key.\n3. **A disabled package registered before one enabled holder.** The judge drops the disabled holder, but step 3 is still `getItem`, which serves the first composite (registry.ts:8531-8536), and the face then withholds the disabled package's item (protocol-meta-item-face.ts:69). The bare read answers no item although one enabled package holds the name. #32361's CONTROL pins only the enabled-first order.\n\n**Re-check:** after #32361 merges, `git grep -n \"refuseAcrossOwners\" packages/metadata/src/package-slotted-store.ts`. The package-less skip still being there means case 1 holds.\n\n**Serial:** after #32361 (#32244) merges."

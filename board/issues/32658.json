@@ -1,0 +1,31 @@
+{
+  "number": 32658,
+  "kind": "issue",
+  "title": "runtime: dispatchAction on a tenant kernel cannot forward a same-origin type:api action on a kernel-resolver host (503 \"no in-process request path\"), while the REST action door succeeds for the same member",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T09:26:43Z",
+  "updated_at": "2026-11-12T09:47:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32658",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a platform defect with a named producer and a measured reach (cloud#4351, cross-repo-coordination rule 1). The cloud card is blocked on this one; cloud adds no workaround (cloud AGENTS.md 「平台缺陷在平台修」).\n\n## 维护者速读\n\n托管环境里，问答助手调用应用里的同源 api 动作，回 503「没有进程内请求路径」；同一个成员走 REST 动作接口却能成功。根子在框架：`dispatchAction` 在每个环境自己的内核上找 HTTP 服务，可托管上真正的 HTTP 服务在共用宿主那边，环境内核里没有。需要框架给这类宿主一条正经的转发路径。\n\n## Measured (cloud#4351 dev report, comment 6817202647; hosted tenant-kernel e2e rig)\n\n- REST action door: 200. `dispatchAction(tenantKernel)`: 503, under both postures.\n- `dispatchAction` resolves `http.server` on the tenant kernel it is handed (`packages/runtime/src/action-dispatch.ts` ~L944-947, `action-execution.ts` ~L1956-1963). A tenant kernel on a kernel-resolver host owns no socket. A host-door forward also carries no Host (`action-execution.ts` ~L2106); `Host: localhost` measured 401 on the host app.\n\n## Options (the dev's Q1)\n\n- **A (recommended by the dev):** run the forward on the host's `HttpDispatcher` with `context.kernel = tenant` and a declared routing-identity field. One path with REST, no new service, and the loud 503 stays for a kernel that truly cannot forward.\n- B: a new declared env-bound injector service the host hands to tenant kernels.\n- C: a cloud bridge, plus the host in `credentialHeaders`.\n\nThe `domain:server` lane chooses among A–C on the evidence. A choice that changes a published contract goes to the maintainer.\n\n## Separate spec question (the dev's Q2)\n\nThe assistant door's `action_invocation` audit row carries no `surface`, as `ExecutionContext.surface` (`packages/spec/src/kernel/execution-context.zod.ts` ~L372) declares no value for it. Whether to add an assistant-door value is a spec decision. It is not part of this card: the spec lane raises it with the four-facet block if pursued.\n\n## Acceptance\n\nOn the hosted tenant-kernel e2e rig, a same-origin `type: 'api'` action called through `dispatchAction` succeeds as the REST door does, and writes its audit row. A kernel that truly cannot forward still answers the loud 503.\n\nReader: `domain:server` lane.\n\nDedupe: `getRawApp in-process request path` and `dispatchAction tenant kernel` → no open card in this repository (the seat's search)."
+}

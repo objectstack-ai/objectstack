@@ -2,8 +2,8 @@
   "number": 32575,
   "kind": "issue",
   "title": "Build warns an app's requiredPermissions capability has no grant when the grant sits in another package of the same artifact",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:access",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T06:20:44Z",
-  "updated_at": "2026-11-12T06:56:34Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T10:29:16Z",
+  "closed_at": "2026-11-12T10:28:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32575",
   "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** while planning hotcrm#2417, which splits the suite into module-owned apps. The thread's reading is [hotcrm#2417 comment 6816277907](https://github.com/objectstack-ai/hotcrm/issues/2417#issuecomment-6816277907).\n\n| Observed on 18.3.0 | Seam | Suggestion |\n|---|---|---|\n| `crm_marketing` lives in the marketing module package and declares `requiredPermissions: ['crm_marketing_app']`. The grant (`systemPermissions: ['crm_marketing_app']`) sits in a permission set of the **app package** of the same artifact. The build warns: `requiredPermissions names capability \"crm_marketing_app\", which no built-in, defineCapability or systemPermissions grant provides, so this gate fails closed`. At runtime the marketing user **is** served the app, so the gate does not fail closed. | The lint's capability-provider check reads grants per package. The runtime resolves them over the installed artifact (the union of its packages). | Check providers over the artifact being built (all packages of one `defineStack`/bundle), as the runtime does. Or name the package scope in the message, so an author knows the warning is about scope and not a missing grant. |\n\nThe warning is false, and an author who trusts it may wrongly drop the gate or duplicate the grant. HotCRM can keep the grant in the app package and ignore the warning, but a false lint line is noise in every build.\n\nFiling gate **① a reproduced defect.** Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p3`.** A false warning, with no runtime effect. **Size: S.**\n\n**Dedupe:** I searched objectstack issues for `requiredPermissions capability no grant provides`, `requiredPermissions fails closed` and `systemPermissions cross-package lint`. The hits are closed cards on other requiredPermissions surfaces (#18159, #29015, #26971) and capability bootstrap (#8470, #18535). None covers the lint's package scope.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2417's out-of-scope findings.</sub>"

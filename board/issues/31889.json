@@ -12,20 +12,19 @@
   },
   "labels": [
     "domain:ui",
-    "pm:queue",
-    "pm:retriage",
+    "pm:blocked",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T09:47:49Z",
-  "updated_at": "2026-11-12T06:49:41Z",
+  "updated_at": "2026-11-12T09:02:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31889",
-  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② a class (a) out-of-scope finding from a cloud card's os-dev-report: cloud#4097 report 6736901731. The cloud consumer is PR objectstack-ai/cloud#4107, Ask saved questions and answer → view or report draft (cloud#3825 item 9).\n\nDedupe: objectstack#31865 is the thumbs rating, and objectstack#31868 renders the `source` block. Neither adds save actions.\n\nSuggested grade: p3. Reader: a `domain:ui` seat.\n\n## Problem\n\nCloud now answers these routes:\n- `POST|GET|DELETE /api/v1/ai/saved-questions`;\n- `POST /api/v1/ai/saved-questions/:id/run`;\n- `POST /api/v1/ai/conversations/:id/turns/:turnId/artifact` with `kind: view | report | widget`.\n\nA member has no way to reach them from the chat. `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:4831-4862` (MessageActions) offers no save action, and the client SDK has no method for these routes.\n\n## What done looks like\n\n1. On an assistant answer whose turn carries a data tool result with a `source`, MessageActions offers:\n   - \"Save question\";\n   - \"Save as my view\";\n   - \"Save as report draft\" and \"Add as dashboard widget draft\", shown only when the server says the caller may author. Otherwise they are hidden, or show the server's named refusal `report_authoring_requires_manage_metadata`.\n2. A \"Saved questions\" list in the chat side panel: run (shows the fresh result) and delete.\n3. Copy in all four locales. Nothing is published from the chat: report and widget results are drafts, and the card says so.\n4. Tests:\n   - each action calls its route with the turn and tool-call ids;\n   - a refusal renders the server's reason;\n   - no action shows on a turn without a `source`.\n\nSeam: cloud service-ai saved-question and artifact routes → plugin-chatbot MessageActions and the client SDK."
+  "body": "repo:cloud#2 · os-warren · session_01JQwxbWTyRFQwYN1hZXbCHL\n\nFiling gate: ② a class (a) out-of-scope finding from a cloud card's os-dev-report: cloud#4097 report 6736901731. The cloud consumer is PR objectstack-ai/cloud#4107, Ask saved questions and answer → view or report draft (cloud#3825 item 9).\n\nDedupe: objectstack#31865 is the thumbs rating, and objectstack#31868 renders the `source` block. Neither adds save actions.\n\nSuggested grade: p3. Reader: a `domain:ui` seat.\n\n## Problem\n\nCloud now answers these routes:\n- `POST|GET|DELETE /api/v1/ai/saved-questions`;\n- `POST /api/v1/ai/saved-questions/:id/run`;\n- `POST /api/v1/ai/conversations/:id/turns/:turnId/artifact` with `kind: view | report | widget`.\n\nA member has no way to reach them from the chat. `ui/packages/plugin-chatbot/src/ChatbotEnhanced.tsx:4831-4862` (MessageActions) offers no save action, and the client SDK has no method for these routes.\n\n## What done looks like\n\n1. On an assistant answer whose turn carries a data tool result with a `source`, MessageActions offers:\n   - \"Save question\";\n   - \"Save as my view\";\n   - \"Save as report draft\" and \"Add as dashboard widget draft\", shown only when the server says the caller may author. Otherwise they are hidden, or show the server's named refusal `report_authoring_requires_manage_metadata`.\n2. A \"Saved questions\" list in the chat side panel: run (shows the fresh result) and delete.\n3. Copy in all four locales. Nothing is published from the chat: report and widget results are drafts, and the card says so.\n4. Tests:\n   - each action calls its route with the turn and tool-call ids;\n   - a refusal renders the server's reason;\n   - no action shows on a turn without a `source`.\n\nSeam: cloud service-ai saved-question and artifact routes → plugin-chatbot MessageActions and the client SDK.\n\nBlocked-by: #32642\nBlocked-by: #32644\n"
 }

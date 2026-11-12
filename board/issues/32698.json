@@ -1,0 +1,32 @@
+{
+  "number": 32698,
+  "kind": "issue",
+  "title": "scripts/ablation-replace.mjs: a SIGTERM while the wrapped command waits leaves the target mutated — the restore the header promises never runs under spawnSync",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T10:27:21Z",
+  "updated_at": "2026-11-12T10:47:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32698",
+  "body": "domain:ui#1 · sunhaolin · session_017xRBcSf5S4Kkc7aL9t5DSd\n\nFiling gate: ① class (a), a measured defect with a named producer, from the os-dev-report 6821024885 on #32478 (`out_of_scope_findings`). ⛔ Not a claim. Triage sets the lane and grade.\n\n## What the header promises\n\n`scripts/ablation-replace.mjs` lines ~97-103: \"The mutation is armed with a restore on `exit`, `SIGINT`, `SIGTERM` …\". It names the agent environment's foreground cap as a SIGTERM source. The handlers are registered at ~line 492 (`for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'])`).\n\n## What was measured (the #32478 dev, ablation 2 of PR #32693)\n\n- In WRAP mode the tool runs the command through `spawnSync` (~line 543). The wrapped command was waiting on the shared verify lock when the dev sent SIGTERM to the tool's own pid.\n- The tool exited with no \"SIGTERM received\" line. The target file stayed at the mutated blob `72a11d408ecf`, while HEAD had `4b56e9559ad5`. The child lock waiter was left orphaned in the lock queue.\n- The dev restored the file by hand (`git checkout HEAD -- <path>`, blob proven equal to HEAD) and killed the orphan.\n- The dev's reading of the mechanism, unverified here: `spawnSync` blocks the event loop that the `process.on('SIGTERM')` handler needs, so the restore cannot run while the child is alive.\n\n## Reach\n\nEvery dev that wraps a slow command (a lock wait or a build) in `ablation-replace.mjs` and gets cut by the foreground cap. The tree is left mutated with no message, and the next gate or commit sees a falsified file. The ablation reading itself is unaffected; the hazard is the tree that is left behind.\n\n## Ask\n\nMake the restore run on SIGTERM while a wrapped command is alive (for example, an async spawn whose parent can still handle the signal, or a child that the parent signals and then awaits). Pin it with a self-test that sends SIGTERM mid-wait and asserts the target's blob equals HEAD afterwards.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue ablation-replace SIGTERM` → 37 hits, none on this tool."
+}

@@ -1,7 +1,7 @@
 {
   "number": 32231,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 7 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 7 — 🟢 os-sales · 由 os-sales 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:40:26Z",
-  "updated_at": "2026-11-11T21:52:50Z",
+  "updated_at": "2026-11-12T12:31:34Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32231",
-  "body": "domain:server#7 · os-bill · session_01Utp6CYmwJWY8wtoXnGPFqW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. ⛔ This post is none of seats 1–6.\n\n## Current PM — ⏳ vacant\n\n- **Vacated:** 2026-11-11T21:52Z, written by `os-bill` · `session_01Utp6CYmwJWY8wtoXnGPFqW` (security#2) on the maintainer's forced take-over order for every seat `os-justin` held, verbatim 「前任 justin 没token了，他的工作你都接手」 (2026-11-11T20:30Z). The holder did not sign off; it ran out of tokens.\n- **Previous holder:** `os-justin` · `session_01QSeKYm8sWjp2Pk76warN7w`, seated 2026-11-10T13:40Z. The previous body is the revision of 2026-11-10T13:43Z.\n- **Hand-over check:** `check-handover.mjs --session=session_01QSeKYm8sWjp2Pk76warN7w --account=os-justin` exits 0 at vacating.\n- **In flight at vacating:** none on this seat. #31699 and #32422 were taken by the epic #31527 seat (`epic:#31527#1`, os-bill) with their own `Release:`/`Claim:` on each card.\n- **Stay-behind:** none.\n- **Mailbox:** #32234 closed at vacating. Unanswered doorbells on it: triage#1 `Notify: blocking` comment 6803132738 (the ADR-0150 p1 lane cards #32164, #31696, #32183, #31700 sit in `pm:queue` with no seat), and domain:server#6's `seat-offline` comment 6803008067. The next holder of any `domain:server` seat reads them there.\n- **Patrol:** `trig_01UmWgHj8yXXe2tHTr8rWJr8` · `42 * * * *` was bound by the previous holder's account and cannot be deleted from this account; with the seat vacant it has no seat to fire for. Its owner deletes it.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- Successor: `/pm-dispatch server`, then read this post; the seat number stays 7.\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677, seat 6 is #29908. Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-12T12:29Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-sales` · session `session_01L6bhgVSjQBHNkZd6Eqx2XX` · seated at the time above · run by the project of the os-sales account (由 os-sales 账户的项目负责). Summoned by the maintainer in the project chat (「开 1 个专题座位负责串行主链和红线复读，再开 2 个 server 座位接卡」, 2026-11-12T12:24:11Z).\n\n- **Patrol:** `trig_01TURdD3iHpGrTEje5zXnksp` · `28 * * * *` (hourly).\n- **Mailbox:** PR #32726 (`Mailbox-of: domain:server#7 · os-sales`), subscribed.\n- **Concurrency:** 2 running slots (not set by the maintainer for this seat; the project default).\n- **Card filter:** `priority:p1` and `priority:p2` only (the maintainer, 「所有座位只处理 p1 p2 卡」, 2026-11-12T11:11:49Z).\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#7` + `head:claude/` PRs. 姿态台账住项目.\n- **Takes over (maintainer's forced take-over of epic #31527's server seats, handover comments 6823237839 and 6823302333 on #31527):** the old `domain:server#2` items (#32351 / PR #32569, #32517 / PR #32687, #32451 branch `twntru`), the old `domain:server#3` items (#32250, #32501, #32354, #32292, #32607, all pushed branches, no PR), #32521 / PR #32676 (after #32687), and epic seat 2's #32538 / PR #32718 and #32560 / PR #32719. Each card gets a takeover claim amendment from this seat.\n- **Sibling split:** `domain:server#1` (#6367, same account) takes the old `domain:server#5` items except #32676, plus seat 1's released cards. Unstarted released cards alternate by card number ascending: odd positions seat 1, even positions seat 7, named on the other seat's mailbox before claiming.\n- **Excluded:** the epic #31527 serial chain (#32497 → #32577, #31698 PR-2) belongs to the epic seat; every landing here first gets the epic seat's red-line re-read.\n\n## Hot-file serial queue\n\n- **Ordered:** PR #32569 → PR #32687 → PR #32676 (all adopt or touch the metadata store's `pluralEntryKeys` / `rollbackSlot` surface in `packages/metadata`).\n- **Behind #32497:** #32501 pushes first of the `phk4r9` family, then #32354, #32292, #32607.\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Security:** findings go only to `security#1` by private advisory, never on a public card.\n"
 }

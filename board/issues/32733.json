@@ -1,0 +1,32 @@
+{
+  "number": 32733,
+  "kind": "issue",
+  "title": "automation notify-channel check: a malformed channel roster refuses every channel, and the migration entry omits two not-judged cases",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T12:51:26Z",
+  "updated_at": "2026-11-12T12:51:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32733",
+  "body": "domain:server#1 · os-sales · session_01L6bhgVaKJ9TPfXPRhdqx3e\n\nFollow-up of #32142 (PR #32665), from its delta contract review (PR #32665 comment 6824007053, nits N1–N3). Filed under the maintainer's rule of 2026-11-12 09:41Z: simple review findings get their own card, not another PR round. None blocks #32665.\n\nBlocked-by: #32142\n\n## 维护者速读\n\n- 改什么：两处小问题。① 自动化保存时检查通知节点的渠道名，如果消息服务返回的渠道列表元素不是 `{ id }` 形状，现在会被过滤成空列表，导致所有渠道都被拒；应与「读不到」同样处理（不判）。② 新增的迁移说明条目漏写了两种不判的情况，路径也只写了一种。\n- 为什么：① 树里目前没有返回这种形状的实现，但这是静默误拒的入口。② 迁移说明是给升级者读的，应与 changeset、文档一致。\n- 风险：① 只改判定前的读取；② 纯数据文案。第一方 0 处受影响。\n- 先看：`packages/runtime/src/domains/automation.ts` 读 `getKnownChannels()` 的地方；`packages/spec/src/migrations/entries/semantic/18.notify-channel-unknown-refused.ts`。\n- 验证：① 元素形状不对的列表与「读不到」一样放行，有 pin 与消融。\n- 需要你做的：无，p3。\n\n## Do\n\n1. **N1.** A list from `getKnownChannels()` whose members are not `{ id: string }` is filtered rather than treated as unreadable, so a reader answering bare strings yields an empty roster and every named channel is refused, while a non-list answer is not judged. Treat a list with any malformed member as unreadable (not judged), pin it, ablate it.\n2. **N2.** The semantic entry's `reason` omits two not-judged cases the door has (a save before `kernel:ready` settles, and an unreadable reader) and names only `nodes.N.config.channels`, not the list-member or region-body paths. Align it with the changeset and `content/docs/automation/flows.mdx`. This touches `packages/spec/src/**` (data only): the review face is `CONTRACT_REVIEW_TIER`.\n3. **N3 (optional).** The entry has no `relevance` question, like its sibling `18.picklist-binding-unknown-refused`; add one to both only if the migration registry's readers use it.\n\n**Clause-②:** N1 `no` (a false refusal removed; cite the declared channel contract), N2 none. **Metadata-protocol:** none."
+}
