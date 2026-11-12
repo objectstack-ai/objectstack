@@ -5,7 +5,7 @@
 
 fix(cli, metadata-protocol): `os migrate plan` lists the permission-set grant's package-less guard that `os migrate apply` builds (#32460)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `os migrate apply` builds `sys_user_permission_set`'s package-less guard, `uniq_sys_user_permission_set_packageless`, after it performs the schema DDL it held back for the confirmation. `os migrate plan` listed the grant table apply creates and said nothing about that index, so the plan an operator reads before applying was silent about DDL the apply then ran.
