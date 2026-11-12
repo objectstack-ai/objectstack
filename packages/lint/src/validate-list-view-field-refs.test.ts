@@ -1184,7 +1184,10 @@ describe('[#25786] a grouping level ordered by another field', () => {
     const [finding, ...rest] = findingsFor(ordered('score'));
     expect(rest).toEqual([]);
     expect(finding.rule).toBe(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
-    expect(finding.hint).toMatch(/^The field is computed on read and stores no value/);
+    expect(finding.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    // A group order asks `min` / `max`: the stored answer is a field of the formula's RETURN type
+    // (a `date` field for a date formula), never `number` for every formula.
+    expect(finding.hint).toContain('a field of its return type');
   });
 
   it('a dotted `orderBy` is refused at the data door\'s ingress, whatever its head', () => {

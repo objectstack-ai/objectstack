@@ -503,7 +503,7 @@ function virtualDimensionFinding(
  *
  * [#24426] Except over a VIRTUAL field (`formula`): there the remedy line is
  * the spec's `virtualFieldAggregateRemedy`, the sentence the compile leg prints
- * too — a number field carrying the same `expression`, aggregated in its place — because naming
+ * too — a field of its return type carrying the same `expression`, aggregated in its place — because naming
  * `count` as the way out steers a total to a plausible wrong number (a record
  * count read as a sum). The count stays named, as a different question.
  */

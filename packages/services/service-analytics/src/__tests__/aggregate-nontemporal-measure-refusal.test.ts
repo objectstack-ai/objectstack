@@ -244,7 +244,7 @@ describe('#16099 — a DERIVING aggregate over a field type that cannot carry it
   });
 
   // [#24426] A total over a VIRTUAL field (`formula`) names the spec's remedy
-  // first — a number field carrying the same `expression`, aggregated in its place — and a count
+  // first — a field of its return type carrying the same `expression`, aggregated in its place — and a count
   // only as a different question. The sentence is the spec's, the one the lint
   // leg prints too, so the two doors cannot prescribe two different ways out.
   it('a total over a formula prints the stored-number remedy — the spec\'s sentence, not the count or sort one', async () => {
@@ -254,7 +254,7 @@ describe('#16099 — a DERIVING aggregate over a field type that cannot carry it
       expect(err.code, aggregate).toBe('DATASET_INVALID');
       expect(err.status, aggregate).toBe(400);
       expect(err.message, aggregate).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
-      expect(err.message, aggregate).toContain('make it a number field with the same `expression`');
+      expect(err.message, aggregate).toContain('make it a field of its return type with the same `expression`');
       expect(err.message, aggregate).not.toContain('For a non-numeric field');
       expect(err.message, aggregate).not.toContain('SORT on the record list');
       expect(sqls.length, aggregate).toBe(0);

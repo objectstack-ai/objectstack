@@ -8,15 +8,18 @@
  * `formula` it is computed on read and stores no value, so a dataset measure
  * `sum` over it is refused at the compile door (`400 DATASET_INVALID`) with the
  * spec's one sentence, `VIRTUAL_FIELD_AGGREGATE_REMEDY`. That sentence names a
- * `number` field carrying the same `expression`: a stored computed field,
- * which the engine computes from the row every write stores and keeps in a
- * column. This file follows the sentence and shows the total it leads to:
+ * field of the formula's return type (here `number`) carrying the same
+ * `expression`: a stored computed field, which the engine computes from the row
+ * every write stores and keeps in a column. This file follows the sentence and
+ * shows the total it leads to:
  *
  * - an insert stores the computed value, and a value the client sent for the
  *   field does not stand; a batch insert (the import path) computes each row;
  * - an update by id that moves an input stores the recomputed value;
  * - a dataset `sum` grouped by leave type answers the true totals after each
- *   write, on both analytics strategies (native SQL and the engine aggregate).
+ *   write, on both analytics strategies (native SQL and the engine aggregate);
+ * - the field takes the formula's RETURN type, not `number` for every formula:
+ *   a date expression stores on a `date` field and is refused on a `number`.
  *
  * It needs nothing an author on a hosted tier cannot write: no hook, no flow,
  * only the field's declaration.
@@ -47,7 +50,8 @@ const LEAVE = ObjectSchema.parse({
     leave_type: { type: 'text' },
     start_date: { type: 'date' },
     end_date: { type: 'date' },
-    // The remedy: a number field carrying the expression — computed and stored on every write.
+    // The remedy: a field of the formula's return type (`number`) carrying the expression —
+    // computed and stored on every write.
     days: { type: 'number', readonly: true, expression: DAYS },
     // The refused shape it replaces, kept as the control: computed on read, no column.
     days_formula: { type: 'formula', returnType: 'number', expression: DAYS },
@@ -154,5 +158,51 @@ describe('a stored computed field — the formula refusal\'s remedy — is total
     for (const face of FACES) {
       expect(await totals(face), face).toEqual({ annual: 8, sick: 3 });
     }
+  });
+});
+
+describe('the stored field takes the formula\'s RETURN type, not `number` for every formula (sqlite)', () => {
+  // A date formula's `min` / `max` (a list-view group order asks exactly that) is refused like its
+  // `sum`; its stored answer is a `date` field. The same expression on a `number` field computes a
+  // date the record validator refuses, so every write to the object fails.
+  const withLastDay = (name: string, type: string) => ObjectSchema.parse({
+    name,
+    label: name,
+    fields: {
+      start_date: { type: 'date' },
+      end_date: { type: 'date' },
+      last_day: { type, readonly: true, expression: 'record.end_date' },
+    },
+  });
+  let engine: ObjectQL;
+
+  beforeAll(async () => {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
+    engine = new ObjectQL({ logger: quiet } as never);
+    engine.registerDriver(driver, true);
+    await engine.init();
+    engine.registry.registerObject(withLastDay('leave_last_day_date', 'date') as never);
+    engine.registry.registerObject(withLastDay('leave_last_day_number', 'number') as never);
+    await engine.syncSchemas();
+    await installDefaultOrganization(engine as never);
+  });
+
+  afterAll(async () => {
+    try { await engine?.destroy(); } catch { /* noop */ }
+  });
+
+  it('a date expression on a `date` field is computed and stored', async () => {
+    const row = (await engine.insert('leave_last_day_date', { start_date: '2026-11-02', end_date: '2026-11-06' } as never)) as { id: string };
+    const back = (await engine.findOne('leave_last_day_date', { where: { id: row.id } } as never)) as Record<string, unknown> | null;
+    expect(back?.last_day).toBe('2026-11-06');
+  });
+
+  it('CONTROL the same expression on a `number` field is refused at the write', async () => {
+    const err = await engine.insert('leave_last_day_number', { start_date: '2026-11-02', end_date: '2026-11-06' } as never).then(
+      () => { throw new Error('a date stored into a number field must be refused'); },
+      (e: Error & { code?: string }) => e,
+    );
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(err.message).toContain('last_day');
   });
 });

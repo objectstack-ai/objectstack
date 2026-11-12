@@ -259,29 +259,43 @@ const VALUE_READING_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'mi
  * field's declared `returnType` says (see the module TSDoc).
  *
  * The way to a total, an average or an extreme of a computed value is to STORE
- * it, and the platform already does that declaratively: a `number` field (not a
- * `formula`) carrying the same `expression` is a stored computed field — the
- * engine computes it from the row every write stores, on insert, on an update
- * by id and on a batch insert, and stores the result, so a client-sent value
- * never stands (`expression` on `FieldSchema`). It has a column, so the pair
- * is accepted on it. The prescription names that mechanism and nothing that
- * needs code: a hook is no answer an author on a hosted tier can always take.
+ * it, and the platform already does that declaratively: a field of the
+ * formula's return type (not a `formula`: `number` for a day count, `currency`
+ * for an amount, `date` for a latest date) carrying the same `expression` is a
+ * stored computed field — the engine computes it from the row every write
+ * stores, on insert, on an update by id and on a batch insert, and stores the
+ * result, so a client-sent value never stands (`expression` on `FieldSchema`).
+ * It has a column, so the pair is accepted on it wherever the table accepts
+ * that type. The RETURN type, never `number` for every formula: a `min` / `max`
+ * over a date formula (a list-view group order asks exactly that) has its
+ * stored answer in a `date` field, and the same expression on a `number` field
+ * computes a date the record validator refuses on every write. The
+ * prescription names that mechanism and nothing that needs code: a hook is no
+ * answer an author on a hosted tier can always take.
+ *
+ * Two limits the sentence cannot carry, which the stored field has and the
+ * formula did not. Rows stored before the field gained its `expression` hold
+ * no value until each is written again (`os migrate stored-expressions
+ * --apply` fills them, and the boot names them), so a total over them reads
+ * low. And the expression is evaluated once, at the write, with the writer's
+ * clock, user and permissions: one reading `now()` / `today()`, the current
+ * user or `can()` keeps the value it had then, where a formula re-reads it.
  * A count stays named only as a DIFFERENT question, and by no aggregate name:
  * a count substituted for the total is a plausible wrong number (a "total leave
  * days" tile reading 3 records against a true 10 days), not a way to the
  * total, and the surfaces that print this sentence spell their counts apart (a
  * dataset measure's `count_distinct` is a list-view summary's `count_unique`).
  *
- * Every refusal of the pair reads this one sentence — the dataset compile leg
- * (`service-analytics`) and the authoring lint leg (`@objectstack/lint`: a
- * dataset measure, a list-view column summary or group order, an object-grid
- * aggregation; each rule's `os explain` entry holds it verbatim) — so they
- * cannot drift into several prescriptions. It is at most 200 characters: the
+ * The refusals that prescribe a way out of the pair read this one sentence —
+ * the dataset compile leg (`service-analytics`) and the authoring lint leg
+ * (`@objectstack/lint`: a dataset measure, a list-view column summary or group
+ * order, an object-grid aggregation; each rule's `os explain` entry holds it
+ * verbatim) — so they cannot drift into several prescriptions. It is at most 200 characters: the
  * lint prints it whole as a one-line `fix:`.
  */
 export const VIRTUAL_FIELD_AGGREGATE_REMEDY =
-  'The field is computed on read and stores no value: make it a number field with the same `expression` '
-  + '(computed and stored on every write) and aggregate that. Counting records is a different question.';
+  'Computed on read, the field stores no value: make it a field of its return type with the same `expression` '
+  + '(computed and stored on write) and aggregate that. Counting records is a different question.';
 
 /**
  * The prescription a refusal of `aggregate` over a `fieldType` field prints
