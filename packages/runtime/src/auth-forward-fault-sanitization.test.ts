@@ -237,3 +237,28 @@ describe('#5085 ② a throw out of the auth service is a sanitised 500', () => {
         expect(JSON.stringify(result.response?.body)).toContain('plugin-auth');
     });
 });
+
+describe('#32637 the auth service is handed the transport peer', () => {
+    it('passes the request\'s `remoteAddress` as the transport, and the request itself unchanged', async () => {
+        const handleRequest = vi.fn(async () => new Response('{}', { status: 401 }));
+        const dispatcher = makeDispatcher({ handleRequest });
+        const request = { remoteAddress: '203.0.113.7', headers: new Headers() };
+
+        await dispatcher.handleAuth('get-session', 'GET', {}, { request });
+
+        expect(handleRequest).toHaveBeenCalledTimes(1);
+        const [handed, transport] = handleRequest.mock.calls[0] as unknown as [unknown, unknown];
+        expect(handed).toBe(request);
+        expect(transport).toEqual({ remoteAddress: '203.0.113.7' });
+    });
+
+    it('passes no address for a request that carries none (a Fetch `Request`) — never one made up', async () => {
+        const handleRequest = vi.fn(async () => new Response('{}', { status: 401 }));
+        const dispatcher = makeDispatcher({ handleRequest });
+
+        await dispatcher.handleAuth('get-session', 'GET', {}, { request: new Request('http://localhost/api/v1/auth/get-session') });
+
+        const [, transport] = handleRequest.mock.calls[0] as unknown as [unknown, unknown];
+        expect(transport).toEqual({});
+    });
+});
