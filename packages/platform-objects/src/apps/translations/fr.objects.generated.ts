@@ -3079,6 +3079,34 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Par sujet"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Envoyer un message dans l’application",
+        description: "Envoyez un message à tous les membres de votre organisation, ou aux membres que vous choisissez. Il apparaît dans les notifications de chaque destinataire.",
+        successMessage: "Message envoyé à {{ result.recipients }} personnes",
+        params: {
+          everyone: {
+            label: "Tout le monde dans cette organisation",
+            helpText: "Envoyer à chaque membre de votre organisation actuelle. Laissez désactivé pour choisir les destinataires ci-dessous."
+          },
+          recipients: {
+            label: "Destinataires",
+            helpText: "Les membres de votre organisation à qui envoyer, lorsque le message n’est pas pour tout le monde."
+          },
+          title: {
+            label: "Titre",
+            helpText: "La ligne que chaque destinataire voit dans ses notifications."
+          },
+          body: {
+            label: "Contenu du message"
+          },
+          link: {
+            label: "Lien",
+            helpText: "Facultatif. Une page de cette application (commençant par /) ou une adresse web que le message ouvre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
