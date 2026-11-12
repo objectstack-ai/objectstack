@@ -74,6 +74,10 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
   // docblock declares and nothing wider. `ai/tool-confirmation-prescription-tense.pin.test.ts`
   // ties this text to that function, so neither half can move alone again.
   //
+  // [ADR-0151 D3 rule 3] The first bound carries the account rule: an AI
+  // service account never confirms for itself, so the gate refuses it at every
+  // door, REST included, and the REST carve-out is a person's alone.
+  //
   // The ids stay in this comment and out of the string: `check:doc-authoring`
   // reds on an internal tracker id inside a customer-facing prescription.
   requiresConfirmation:
@@ -96,7 +100,11 @@ const TOOL_RETIRED_KEY_GUIDANCE: Record<string, string> = {
     'read before you rely on it. (1) The enforced set is the doors that enforce the ' +
     'author\'s `ai.exposed` opt-in — today the action door reached from the MCP ' +
     '`run_action` tool. REST `/actions` is NOT `ai.exposed`-gated and sits OUTSIDE this ' +
-    'gate, so a human in front of that route is still yours to arrange. (2) Only the ' +
+    'gate for a person\'s call, so a human in front of that route is still yours to ' +
+    'arrange. An AI service account (an agent acting for itself, not on a person\'s ' +
+    'behalf) does not confirm an action for itself: it is refused at every action door, ' +
+    'REST `/actions` included, whatever its request carries, and a person runs the ' +
+    'action. (2) Only the ' +
     'author\'s declared `ai.requiresConfirmation: true` refuses, and only the boolean ' +
     '`true` confirms: the wider listing heuristic that reports `requiresConfirmation` ' +
     'for a destructive-looking action ADVISES a client to ask and never refuses, and an ' +
