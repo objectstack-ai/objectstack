@@ -843,13 +843,13 @@ describe('[#32534] the bare engine function read after a holder leaves', () => {
     expect(ql.resolveFunction('platform_fn')).toBe(platform);
   });
 
-  // CURRENT BEHAVIOUR, PENDING A RULING — not the rule. ADR-0150 D4 refuses a
-  // caller with no package `ambiguous-in-environment` when the platform and a
-  // package both hold a name (a 409 naming each); the bare read counts package
-  // holders only (epic seat ruling R2-C), so this pair answers nothing here.
-  // This PR leaves that unchanged; aligning the bare read with D4 flips this
-  // pin on purpose. What it pins for #32534: the restore picks no holder of two.
-  it('CONTROL (current behaviour, pending the D4 ruling) — the platform and one package remain after the last-registered package leaves: two holders, so the restore picks nothing', async () => {
+  // CURRENT BEHAVIOUR, see #32907 — not the rule. ADR-0150 D4 refuses a caller
+  // with no package `ambiguous-in-environment` when the platform and a package
+  // both hold a name (a 409 naming each); the bare read counts package holders
+  // only (epic seat ruling R2-C), so this pair answers nothing here. #32907
+  // aligns the bare read with D4 and flips this pin on purpose. What it pins
+  // for #32534: the restore picks no holder of two.
+  it('CONTROL (current behaviour, see #32907) — the platform and one package remain after the last-registered package leaves: two holders, so the restore picks nothing', async () => {
     const { ql } = await boot();
     ql.registerFunction('platform_fn', fn('platform'));
     ql.registerFunction('platform_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
