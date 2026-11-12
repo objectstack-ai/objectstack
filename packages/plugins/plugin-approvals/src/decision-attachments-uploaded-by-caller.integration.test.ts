@@ -27,7 +27,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import type { EngineQueryOptions } from '@objectstack/spec/data';
+import type { DataEngineInsertOptions, EngineQueryOptions } from '@objectstack/spec/data';
 import type { ApprovalService } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
@@ -63,6 +63,8 @@ const F_APPROVER_ORG_B = 'f_approver_org_b';
 const F_NOWHERE = 'f_nowhere';
 
 const SYSTEM = { isSystem: true, positions: [], permissions: [] } as any;
+/** A system write landing in `org`, as the upload door writes a file. */
+const inOrg = (org: string): DataEngineInsertOptions => ({ context: { isSystem: true, tenantId: org, positions: [], permissions: [] } });
 const asUser = (userId: string) => ({ userId, tenantId: ORG_A, positions: [], permissions: [] }) as any;
 
 let current: ObjectQL | undefined;
@@ -114,7 +116,7 @@ async function boot() {
     [F_APPROVER_ORG_B, APPROVER, ORG_B],
   ];
   for (const [id, uploader, org] of files) {
-    await engine.insert('sys_file', { id, name: `${id}.pdf`, owner_id: uploader } as any, { context: { isSystem: true, tenantId: org } } as any);
+    await engine.insert('sys_file', { id, name: `${id}.pdf`, owner_id: uploader }, inOrg(org));
   }
 
   // The kernel's data engine, except that the membership store this fixture
@@ -146,7 +148,7 @@ async function boot() {
   let n = 0;
   const open = async (): Promise<string> => {
     const recordId = `sheet_${++n}`;
-    await engine.insert('exam_sheet', { id: recordId, title: recordId } as any, { context: { isSystem: true, tenantId: ORG_A } } as any);
+    await engine.insert('exam_sheet', { id: recordId, title: recordId }, inOrg(ORG_A));
     const opened: any = await svc.openNodeRequest({
       object: 'exam_sheet', recordId, runId: `run_${n}`, nodeId: 'review', flowName: 'exam_review',
       config: { approvers: [{ type: 'user', value: APPROVER }], behavior: 'first_response' } as any,
@@ -157,10 +159,10 @@ async function boot() {
   };
   const actionsOf = async (requestId: string) => ((await engine.find('sys_approval_action', {
     where: { request_id: requestId }, context: SYSTEM,
-  } as any)) as any[]).map((a) => ({ action: a.action, attachments: a.attachments ?? null }));
+  } satisfies EngineQueryOptions)) as any[]).map((a) => ({ action: a.action, attachments: a.attachments ?? null }));
   const statusOf = async (requestId: string) => ((await engine.find('sys_approval_request', {
     where: { id: requestId }, context: SYSTEM,
-  } as any)) as any[])[0]?.status;
+  } satisfies EngineQueryOptions)) as any[])[0]?.status;
 
   return { svc, open, actionsOf, statusOf };
 }
