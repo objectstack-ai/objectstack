@@ -314,6 +314,7 @@ const pt = {
       upload: 'Enviar',
       remove: 'Remover {{name}}',
       exceedsMaxSize: '"{{name}}" excede o tamanho máximo ({{max}} MB)',
+      typeNotAccepted: '"{{name}}" não é um tipo de arquivo aceito ({{accept}})',
       uploadFailed: 'Falha ao enviar "{{name}}": {{error}}',
       uploadIncomplete: 'O envio de "{{name}}" não foi concluído: nenhum ID de arquivo foi retornado, então nada foi salvo',
       restricted: 'Arquivo restrito',

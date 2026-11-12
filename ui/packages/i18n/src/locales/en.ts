@@ -448,6 +448,7 @@ const en = {
       upload: 'Upload',
       remove: 'Remove {{name}}',
       exceedsMaxSize: '"{{name}}" exceeds max size ({{max}} MB)',
+      typeNotAccepted: '"{{name}}" is not an accepted file type ({{accept}})',
       uploadFailed: 'Failed to upload "{{name}}": {{error}}',
       uploadIncomplete: 'Upload of "{{name}}" did not complete: no file id was returned, so nothing was saved',
       restricted: 'Restricted file',

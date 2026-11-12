@@ -319,6 +319,7 @@ const es = {
       upload: 'Subir',
       remove: 'Quitar {{name}}',
       exceedsMaxSize: '«{{name}}» supera el tamaño máximo ({{max}} MB)',
+      typeNotAccepted: '«{{name}}» no es un tipo de archivo admitido ({{accept}})',
       uploadFailed: 'Error al subir «{{name}}»: {{error}}',
       uploadIncomplete: 'La subida de «{{name}}» no se completó: no se devolvió ningún identificador de archivo, así que no se guardó nada',
       restricted: 'Archivo restringido',

@@ -299,6 +299,7 @@ const zh = {
       upload: '上传',
       remove: '移除 {{name}}',
       exceedsMaxSize: '“{{name}}” 超过大小上限（{{max}} MB）',
+      typeNotAccepted: '“{{name}}” 不是允许的文件类型（{{accept}}）',
       uploadFailed: '上传 “{{name}}” 失败：{{error}}',
       uploadIncomplete: '“{{name}}” 上传未完成：未返回文件 ID，未保存任何内容',
       restricted: '受限文件',

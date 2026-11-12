@@ -311,6 +311,7 @@ const ja = {
       upload: 'アップロード',
       remove: '{{name}} を削除',
       exceedsMaxSize: '「{{name}}」は最大サイズ（{{max}} MB）を超えています',
+      typeNotAccepted: '「{{name}}」は許可されていないファイル形式です（{{accept}}）',
       uploadFailed: '「{{name}}」のアップロードに失敗しました：{{error}}',
       uploadIncomplete: '「{{name}}」のアップロードが完了しませんでした：ファイル ID が返されなかったため、何も保存されていません',
       restricted: '制限付きファイル',
