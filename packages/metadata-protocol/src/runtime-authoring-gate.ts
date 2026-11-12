@@ -737,6 +737,12 @@ export const CLOSURE_CONTEXT_KEY_BY_TYPE = {
     permission: 'permissions',
     book: 'books',
     dataset: 'datasets',
+    // [#32666] A batch's flow drafts are collected so an OBJECT write in the
+    // same batch is judged against the flows the batch leaves live: a live flow
+    // the batch redrafts is the draft's own write to answer for, against this
+    // batch's objects ({@link objectWriteFlowSubjects}). They are not folded in
+    // as subjects themselves, and no other write type reads them.
+    flow: 'flows',
 } as const satisfies Readonly<Record<string, keyof RuntimeStackContext>>;
 
 /**
@@ -852,6 +858,35 @@ export function mergePendingDeclarations(
         return !(typeof name === 'string' && supersededNames.has(name));
     });
     return [...kept, ...pending];
+}
+
+/**
+ * [#32666] The flows an OBJECT write is judged against as subjects
+ * (`RuntimeStackContext.flows`): the written package's live flows, minus every
+ * flow this write's own batch redrafts.
+ *
+ * A redrafted flow is not left live by the batch, and its draft is judged on
+ * its own write against the batch's objects, where a conflict with a readonly
+ * field is refused on the flow (the flow write's verdict, unchanged). Judging
+ * the stale live copy on the object write instead would refuse the way out:
+ * a batch that both elevates the flow and makes the field readonly. A NEW flow
+ * in the batch is the same flow write's to answer for, so pending flows are
+ * never added here — only subtracted.
+ *
+ * `undefined` for every write type but `object`: no other write carries flows.
+ */
+export function objectWriteFlowSubjects(
+    type: string,
+    liveFlows: readonly unknown[] | undefined,
+    pendingFlows: readonly unknown[] | undefined,
+): readonly unknown[] | undefined {
+    if (type !== 'object' || liveFlows === undefined) return undefined;
+    if (!pendingFlows || pendingFlows.length === 0) return liveFlows;
+    const redrafted = new Set<string>();
+    for (const entry of pendingFlows) {
+        if (isRec(entry) && typeof entry.name === 'string' && entry.name !== '') redrafted.add(entry.name);
+    }
+    return liveFlows.filter((entry) => !(isRec(entry) && typeof entry.name === 'string' && redrafted.has(entry.name)));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1153,6 +1188,14 @@ export function evaluateRuntimeAuthoringGate(args: {
      */
     datasets?: readonly unknown[];
     /**
+     * [#32666] The written package's live flow declarations, stated by the
+     * host on an OBJECT write only — the subjects `flow-update-readonly-field`
+     * judges against the written object (`RuntimeStackContext.flows`). Ignored
+     * on every other write type; the batch's flow drafts are subtracted, never
+     * added ({@link objectWriteFlowSubjects}).
+     */
+    flows?: readonly unknown[];
+    /**
      * [#10377] The declarations this write's own BATCH is publishing alongside
      * it — folded into the five collections above by
      * {@link mergePendingDeclarations} before any rule runs.
@@ -1297,6 +1340,8 @@ export function evaluateRuntimeAuthoringGate(args: {
     // The object universe, folded once: the shared rules resolve names against
     // it and the #21476 rule reads a form's target object out of it.
     const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
+    // [#32666] The flows an object write judges as subjects; none on any other type.
+    const objectWriteFlows = objectWriteFlowSubjects(args.type, args.flows, args.pending?.flows);
 
     const result = runRuntimeAuthoringRules({
         type: args.type,
@@ -1313,6 +1358,7 @@ export function evaluateRuntimeAuthoringGate(args: {
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
+            ...(objectWriteFlows !== undefined ? { flows: objectWriteFlows } : {}),
         },
         ...(args.sduiManifest !== undefined ? { sduiManifest: args.sduiManifest } : {}),
         ...(args.judgeFilter !== undefined ? { judgeFilter: args.judgeFilter } : {}),

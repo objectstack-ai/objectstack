@@ -213,7 +213,7 @@ export async function collectBatchPendingDeclarations(
     // how `pages` left this literal in the same edit it left
     // `RuntimeStackContext`.
     const pending: { [K in keyof RuntimePendingDeclarations]-?: unknown[] } = {
-        objects: [], permissions: [], books: [], datasets: [],
+        objects: [], permissions: [], books: [], datasets: [], flows: [],
     };
     let any = false;
     for (const d of drafts) {

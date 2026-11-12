@@ -303,7 +303,27 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * objects × permissions × books, `validateWidgetBindings` resolves widget
  * bindings against datasets (#7529). Widening the snapshot is a one-key edit
  * here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that RESOLVES
- * REFERENCES INTO the collection actually crosses the wall, never in advance.
+ * REFERENCES INTO the collection actually crosses the wall — or [#32666] when
+ * a write type's verdict needs the collection's entries as JUDGED SUBJECTS
+ * (below) — never in advance.
+ *
+ * [#32666] Judged subjects are the second, narrower admission, and `flows` is
+ * the one collection admitted on it. An OBJECT write can break a live flow
+ * without touching it: the object makes a field `readonly`, and a `runAs:'user'`
+ * flow that writes the field becomes a silent no-op (`flow-update-readonly-field`).
+ * The verdict is about the flow, so the flow has to be in the snapshot — not as
+ * something a reference resolves into, but as the entry a rule judges against
+ * the written object. Three properties keep the admission as narrow as that:
+ *
+ * - The host carries the WRITTEN package's live flows, on an `object` write
+ *   only; every other write type is handed none, so nothing else judges them.
+ * - On a write of the subject's own type (a `flow` write), the gate drops the
+ *   context copy — {@link SUBJECT_ONLY_CONTEXT_KEYS} — so the written flow stays
+ *   the sole member of its collection and its findings keep the positional
+ *   `flows[0]` spelling the flow-write wire has always carried.
+ * - The differential is unchanged: the subjects sit in every pass, so a flow
+ *   already broken on the tenant is in the stored universe and is not charged
+ *   to the object write; only the conflicts this write ADDS refuse it.
  *
  * [commit a227afa41] `positions` / `apps` are the measured limit of that sentence, and
  * the reason it now says RESOLVES rather than reads. `security-role-word`
@@ -378,7 +398,38 @@ export interface RuntimeStackContext {
    * datasets off this one.
    */
   datasets?: readonly unknown[];
+  /**
+   * [#32666] The written package's live flow declarations (stack key `flows`),
+   * carried on an OBJECT write only, as judged subjects (see the interface's
+   * docblock).
+   *
+   * `validateReadonlyFlowWrites` judges each against the candidate's objects:
+   * an object write that makes a field `readonly` while a carried `runAs:'user'`
+   * flow writes it adds a `flow-update-readonly-field` finding located on that
+   * flow (`readonlyWhen` adds the `-when` advisory), and the object write is
+   * refused for it — the admin is told, at that moment, which flow still writes
+   * the field. A finding the stored universe already holds is not charged.
+   *
+   * ⛔ Not carried on a `flow` write: the gate ignores it there
+   * ({@link SUBJECT_ONLY_CONTEXT_KEYS}). Flows of other packages are out of
+   * scope, by the ruling that admitted this collection; so are hook and action
+   * bodies, which are judged on their own writes.
+   */
+  flows?: readonly unknown[];
 }
+
+/**
+ * [#32666] The context collections carried only as JUDGED SUBJECTS of another
+ * write type, never as the universe a write of their own type lands in.
+ *
+ * On a write of a collection's own type the gate drops the context copy, so the
+ * written item is the sole member of its collection, exactly as before the
+ * collection was carried: `flows[0]` IS the written flow, its findings keep the
+ * positional spelling ({@link nameKeyFindingPath}), and the flow write's
+ * verdict is the one it always was. On every other write type the collection is
+ * an ordinary context collection: in every pass, name-keyed on the wire.
+ */
+export const SUBJECT_ONLY_CONTEXT_KEYS: ReadonlySet<keyof RuntimeStackContext> = new Set(['flows']);
 
 /**
  * Which package a write belongs to, and what that package is allowed to reach.
@@ -679,6 +730,9 @@ const CONTEXT_STACK_KEY_ORDER = {
   permissions: true,
   books: true,
   datasets: true,
+  // [#32666] Last, so the four collections ahead of it keep their order, their
+  // snapshot key order and the derived pattern's source.
+  flows: true,
 } as const satisfies { [K in keyof RuntimeStackContext]-?: true };
 
 /**
@@ -855,7 +909,11 @@ export function buildRuntimeWriteSnapshotSet(
     // [#30005] `datasets` stays whole, so the objects a written dashboard or
     // report binds THROUGH a dataset are kept beside the closure (limb 5,
     // {@link datasetBoundObjectNames}) — in both passes, by the same rule.
-    const raw = (args.context?.[key] ?? []) as readonly AnyRec[];
+    // [#32666] A judged-subject collection is dropped on a write of its own
+    // type, so the written item is the sole member (SUBJECT_ONLY_CONTEXT_KEYS).
+    const raw = (key === stackKey && SUBJECT_ONLY_CONTEXT_KEYS.has(key)
+      ? []
+      : args.context?.[key] ?? []) as readonly AnyRec[];
     const collection = key === 'objects'
       ? (narrowObjectsToWriteClosure(
           raw,
@@ -1044,8 +1102,12 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * ## Measured against the list it replaces (#13390)
  *
  * The members and their order are derived, never transcribed — today `objects`,
- * `permissions`, `books`, `datasets`. So **no member needs a hand-written
- * exception** and none is kept. If a future member ever does need one, state it
+ * `permissions`, `books`, `datasets`, `flows`. So **no member needs a hand-written
+ * exception** and none is kept. [#32666] `flows` is not one: it is name-keyed by
+ * this derivation, and the one write that must keep its index — a `flow` write,
+ * where the context copy is dropped — is decided per write by
+ * {@link nameKeyFindingPath} from {@link SUBJECT_ONLY_CONTEXT_KEYS}, not by
+ * leaving it out of this set. If a future member ever does need one, state it
  * here WITH its reason — quietly re-introducing a literal is the thing this
  * constant now exists to prevent.
  *
@@ -1093,16 +1155,28 @@ const TOP_LEVEL_INDEX = buildTopLevelIndexPattern(NAME_KEYED_STACK_KEYS);
  * Fallback is the positional spelling, never a hole: an entry that is missing,
  * unnamed, or whose name will not splice into a dotted path keeps the index.
  *
+ * [#32666] `writtenStackKey` is the written type's stack key. A judged-subject
+ * collection ({@link SUBJECT_ONLY_CONTEXT_KEYS}) is name-keyed on every other
+ * write type and keeps its index on a write of its own type, where the context
+ * copy was dropped and `flows[0]` IS the write. Omitted, every name-keyed
+ * collection is rewritten.
+ *
  * Applied AFTER the differential, not before it: the fingerprint diff keys on
  * the rules' raw positional paths, where two entries can never collide — two
  * stored items that (illegitimately) share a name must not have their distinct
  * findings merged or cancelled by the rewrite.
  */
-export function nameKeyFindingPath(path: string, candidate: AnyRec): string {
+export function nameKeyFindingPath(path: string, candidate: AnyRec, writtenStackKey?: string): string {
   const m = TOP_LEVEL_INDEX.exec(path);
   if (!m) return path;
   const [, stackKey, index, rest] = m;
   if (!NAME_KEYED_STACK_KEYS.includes(stackKey!)) return path;
+  // [#32666] On a write of a judged-subject collection's own type the context
+  // copy was dropped, so the written item is the sole member and its index is
+  // the stable spelling (SUBJECT_ONLY_CONTEXT_KEYS).
+  if (stackKey === writtenStackKey && SUBJECT_ONLY_CONTEXT_KEYS.has(stackKey as keyof RuntimeStackContext)) {
+    return path;
+  }
   const collection = candidate[stackKey!] as readonly unknown[] | undefined;
   const entry = collection?.[Number(index)];
   const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;
@@ -1325,7 +1399,7 @@ export function runRuntimeAuthoringRules(args: {
     // index. Rewritten only on what leaves the gate — the differential above
     // ran on the rules' raw positional paths.
     .map((f) => {
-      const path = nameKeyFindingPath(f.path, snapshots.candidate);
+      const path = nameKeyFindingPath(f.path, snapshots.candidate, stackKeyForType(args.type) ?? undefined);
       return path === f.path ? f : { ...f, path };
     });
 
