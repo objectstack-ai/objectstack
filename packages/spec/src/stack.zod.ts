@@ -8860,7 +8860,11 @@ function collectComposedSingleAppErrors(
  * Declaratively compose multiple stack definitions into a single unified stack.
  *
  * This eliminates the manual `...spread` merging pattern when combining
- * multiple applications (e.g., CRM + Todo + BI) into a single project.
+ * multiple stacks into a single project. Packages that each define an app (a
+ * suite: an app package plus module packages) are composed with
+ * `manifest: 'preserve'`, which keeps each package's own id — a flat
+ * composition would put their apps under one package id, and is refused (see
+ * **Apps** below).
  *
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
  * **Objects** are merged according to the `objectConflict` strategy. A package
