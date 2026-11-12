@@ -39,8 +39,8 @@ their callbacks, and **assignment rules**.
 | Type | When to Use |
 |:-----|:------------|
 | `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
-| `screen` | Interactive — presents UI screens to the user (wizards, forms) |
-| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
+| `screen` | Interactive — presents UI screens to the user |
+| `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative` |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** (*Inbound webhook triggers*); a flow only ever started explicitly is `autolaunched` |
 
@@ -84,7 +84,7 @@ Flows are built from **built-in node types** (plugins register more):
 | `create_record` | Insert a new record |
 | `update_record` | Modify existing records |
 | `delete_record` | Remove records |
-| `get_record` | Fetch records with filters — there is **no `query_record`** node (that name has no executor and throws) |
+| `get_record` | Fetch records with filters — there is **no `query_record`** node |
 | `save_notice` | Tell the saver what this create/update started — record create/update trigger only, not after a pause: **objectstack-data** `rules/lifecycle.md` § Save Notice |
 
 #### External Integration
@@ -103,7 +103,7 @@ Flows are built from **built-in node types** (plugins register more):
 |:-----|:--------|
 | `approval` | Route a record for human sign-off |
 
-### `notify` — the most-used node type
+### `notify`
 
 `NotifyConfigSchema` is `strictObject` — an undeclared key is a named parse
 error. **RAW** keys are read as written: a
@@ -161,11 +161,14 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > warnings — so a flow maintaining one (approval stamps, SLA markers, rollups)
 > runs `runAs: 'system'`; `os validate` / `os build` fail a `runAs:'user'`
 > `update_record` writing one (`readonlyWhen`: a warning).
+> A button or action does not let a user start an `autolaunched`,
+> `record_change` or `schedule` flow declared `runAs: 'system'`: it answers 403
+> `PERMISSION_DENIED`, so for a flow a user starts from a button the elevated
+> routes are a `screen` or `api` flow declared `runAs: 'system'`, or a user-run
+> flow whose `subflow` node calls the elevated flow.
 
-> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
-> step that must write a `readonly` field moves into a dedicated `runAs: 'system'`
-> flow called from a `subflow` node — raising the whole flow silently elevates
-> every other write in it.
+> **Elevate the write, not the flow.** Prefer the `subflow` route — raising a
+> whole `screen` flow silently elevates every other write in it.
 >
 > **Elevation stops at identity assignment.** A `runAs: 'system'` write (insert
 > through purge) of `sys_user_position`, `sys_user_permission_set`,
@@ -268,7 +271,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    **A flow `function` is a PURE compute step — it does NOT read/write the
    database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
    exposes that value as a flow variable, and a later **declarative** node persists
-   it. Keep data effects on the flow graph (visible, governed, build-checkable):
+   it:
 
    ```ts
    { id: 'ai', type: 'script', config: {
@@ -415,7 +418,6 @@ A flow around it also owns `label`, `type`, `nodes` and the `edges`
   config: {
     objectName: 'support_case',
     triggerType: 'record-after-update',
-    // gates whether the flow launches on the event
     condition: "previous.status != 'escalated' && record.status == 'escalated'",
   },
 }
