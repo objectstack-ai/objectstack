@@ -1,6 +1,6 @@
 ---
 '@object-ui/plugin-grid': patch
-'@object-ui/app-shell': patch
+'@object-ui/console': patch
 ---
 
 fix(console, grid): fewer requests per list navigation: a grouped grid asks the row write verdict once per operation, a list writes the user's preference row only when a preference changed, the inbox and approvals polls back off while nothing changes, and the command palette keeps the keys typed while it opens
