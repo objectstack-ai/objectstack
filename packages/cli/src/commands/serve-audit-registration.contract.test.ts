@@ -204,8 +204,8 @@ describe('os serve registers AuditPlugin with no config-derived options, above t
     // would mean the ruling was reversed. [ADR-0154 D2, D6] The one option is
     // the host's own crypto provider, which no config spells: the sealer seals
     // under it, and reads it when it starts, since the provider is built below
-    // the stack `plugins` loop.
-    expect(auditPluginConstructions(SERVE)).toEqual(['{ cryptoProvider: () => hostCrypto?.provider }']);
+    // the stack `plugins` loop. Its sealer is not armed on a migrate-and-exit boot.
+    expect(auditPluginConstructions(SERVE)).toEqual(['{ cryptoProvider: () => hostCrypto?.provider, armSealer: !migrateAndExit }']);
   });
 
   it('does not reach for a config-derived audit options helper', () => {
@@ -245,8 +245,16 @@ describe('os serve registers AuditPlugin with no config-derived options, above t
     expect(auditPluginConstructions(HARNESS)).toEqual([]);
   });
 
-  it('hands the `requires: [\'audit\']` provider the same host crypto provider', () => {
-    expect(SERVE).toMatch(/cap === 'audit' && hostCrypto\s*\?\s*\{ \.\.\.\(arg \?\? \{\}\), cryptoProvider: hostCrypto\.provider \}/);
+  it('hands the `requires: [\'audit\']` provider the same host crypto provider, with the same one-shot posture', () => {
+    expect(SERVE).toMatch(/cap === 'audit' && hostCrypto\s*\?\s*\{ \.\.\.\(arg \?\? \{\}\), cryptoProvider: hostCrypto\.provider, armSealer: !migrateAndExit \}/);
+  });
+
+  it('arms no sealer on an `OS_MIGRATE_AND_EXIT=1` boot, a one-shot job (ADR-0154 D3)', () => {
+    // One reading of the variable, ahead of both constructions; the exit reads the same constant.
+    const reading = "const migrateAndExit = process.env.OS_MIGRATE_AND_EXIT === '1';";
+    expect(SERVE.match(/process\.env\.OS_MIGRATE_AND_EXIT\b/g)).toHaveLength(1);
+    expect(soleOffset(SERVE, reading, 'migrate-and-exit reading')).toBeLessThan(soleOffset(SERVE, 'new AuditPlugin(', 'audit-construction'));
+    expect(SERVE).toContain('if (migrateAndExit) {');
   });
 });
 

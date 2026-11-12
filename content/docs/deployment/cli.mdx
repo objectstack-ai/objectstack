@@ -2094,6 +2094,10 @@ when:
 The dry run decides each row the same way and writes nothing. Re-run where the
 crypto provider `os serve` seals with is available.
 
+**Run them with the server stopped.** A running server's sealer seals each hour
+ten minutes after it ends, and it can seal a row between the command's decision
+and its write; that row then reads `modified`.
+
 #### `os migrate organization-ownership`
 
 The v18 ownership ceremony (ADR-0131 D10), and the upgrade path of a database

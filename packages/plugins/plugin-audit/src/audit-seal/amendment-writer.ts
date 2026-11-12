@@ -3,9 +3,9 @@
 import { randomUUID } from 'node:crypto';
 import type { IAuditCheckpointSigner, IAuditCheckpointSink, ICryptoProvider } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
-import { canonicalDatetime, canonicalValue, commitValue, leafHash, leafInput, type SealedFieldTypes } from './canonical.js';
+import { canonicalValue, commitValue, leafHash, leafInput, type SealedFieldTypes } from './canonical.js';
 import { canonicalJson } from './jcs.js';
-import { AUDIT_SEAL_WINDOW_MS, type AuditSealerEngine } from './sealer.js';
+import type { AuditSealerEngine } from './sealer.js';
 import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
 import {
   amendmentBodyFromRow,
@@ -18,6 +18,7 @@ import {
   type RedactionAmendmentBody,
 } from './signed-body.js';
 import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
+import { anchoredPublicKeyOf, readAll, SigningKeyTrust } from './verifier.js';
 
 /**
  * ADR-0154 D7 — the one redaction amendment writer. Every platform rewrite of
@@ -36,17 +37,26 @@ import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
  *    salt. {@link RedactionAmender.write} signs and stores them, and only then
  *    may the row be rewritten;
  *  - **`refused`** — the row is sealed and its amendment cannot be written: no
- *    crypto provider opens the checkpoint's seed, the row no longer matches the
- *    checkpoint (so what it sealed cannot be shown), or the rewrite would change
- *    a column sealed in clear. The row is not rewritten, and the migration
+ *    crypto provider opens the checkpoint's seed, a checkpoint that lists it
+ *    does not verify, the row no longer matches the checkpoint (so what it
+ *    sealed cannot be shown), or the rewrite would change a column sealed in
+ *    clear. The row is not rewritten, and the migration
  *    counts it refused.
  *
+ * ⛔ Stored inputs are admitted by the verifier's own trust rule (D6,
+ * `SigningKeyTrust`): a checkpoint, and a redaction amendment already written,
+ * counts only when its signature verifies under a key the trust anchor
+ * vouches for. A row a checkpoint that does not verify lists is refused, and
+ * an amendment that does not verify is neither proof nor a reason to skip a
+ * write. A checkpoint is found by the row ids it lists, never by the row's own
+ * columns.
+ *
  * ⛔ An amendment names a sealed commitment only once it is proven: the row's
- * leaf, rebuilt from its stored columns under the checkpoint's seed (and under
- * the redactions already written for it), must equal the leaf hash that
- * checkpoint signed. So a signature from this writer never vouches for a value
- * the checkpoint did not seal, and a row changed outside the platform stays
- * `modified` — it is refused here, never amended.
+ * leaf, rebuilt from its stored columns under the admitted checkpoint's seed
+ * (and under the admitted redactions already written for it), must equal the
+ * leaf hash that checkpoint signed. So a signature from this writer never
+ * vouches for a value the checkpoint did not seal, and a row changed outside
+ * the platform stays `modified` — it is refused here, never amended.
  *
  * A second redaction of the same column names the commitment the checkpoint
  * sealed, read from the first one, never the first rewrite's: that is what
@@ -99,12 +109,19 @@ const MAX_SIGN_ATTEMPTS = 3;
 const NO_KEY_YET = 'unknown';
 const NONE: RedactionDecision = Object.freeze({ kind: 'none' });
 
-const iso = (ms: number): string => new Date(ms).toISOString();
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 const refused = (reason: string): RedactionDecision => ({ kind: 'refused', reason });
 
+/** A stored checkpoint that lists a row, and its signed body. */
+interface ListedCheckpoint {
+  readonly stored: Row;
+  readonly body: CheckpointSignedBody;
+}
+
 export class RedactionAmender {
   private sealedFields: Map<string, SealedFieldTypes> | undefined;
+  private readonly listings = new Map<string, Promise<Map<string, ListedCheckpoint[]>>>();
+  private trust: SigningKeyTrust | undefined;
   private signer: (IAuditCheckpointSigner & { activeKeyId?(): Promise<string | null> }) | undefined;
   private keyId: string | null = null;
 
@@ -145,6 +162,70 @@ export class RedactionAmender {
     }
   }
 
+  /** The D6 trust rule this run admits signed bodies by, once there is a crypto provider to anchor it. */
+  private trustOf(): SigningKeyTrust | undefined {
+    const crypto = this.seal.crypto;
+    if (!crypto) return undefined;
+    this.trust ??= new SigningKeyTrust(anchoredPublicKeyOf(this.seal.engine, crypto, this.seal.signer));
+    return this.trust;
+  }
+
+  /** Whether a stored signed body is admitted: its signature verifies under a trusted key (D6). */
+  private async admits(trust: SigningKeyTrust, body: CheckpointSignedBody | RedactionAmendmentBody, stored: Row): Promise<boolean> {
+    return (await trust.signature(body.signing_key_id, signedBodyBytes(body), stored.signature)) === 'ok';
+  }
+
+  /**
+   * The stored checkpoints of `object`, by each row id they list: a row is
+   * located by its id, never by its own `created_at` or `tenant_id`, which an
+   * edit of the row can move. Read once per run, as the verifier reads them.
+   */
+  private listingOf(object: string): Promise<Map<string, ListedCheckpoint[]>> {
+    let pending = this.listings.get(object);
+    if (!pending) {
+      pending = (async () => {
+        const byRow = new Map<string, ListedCheckpoint[]>();
+        const driver = this.seal.engine.getDriverForObject(AUDIT_CHECKPOINT_OBJECT);
+        if (!driver) return byRow;
+        let rows: Row[];
+        try {
+          rows = await readAll(driver, AUDIT_CHECKPOINT_OBJECT, { sealed_object: object });
+        } catch (err) {
+          if (isMissingTableError(err, AUDIT_CHECKPOINT_OBJECT)) return byRow;
+          throw err;
+        }
+        for (const stored of rows) {
+          let body: CheckpointSignedBody;
+          try {
+            body = checkpointBodyFromRow(stored);
+          } catch {
+            continue; // a malformed checkpoint holds nothing (D9)
+          }
+          for (const id of body.row_ids) byRow.set(id, [...(byRow.get(id) ?? []), { stored, body }]);
+        }
+        return byRow;
+      })();
+      this.listings.set(object, pending);
+    }
+    return pending;
+  }
+
+  /** The redaction amendments stored for row `id` of `object` that are admitted; any other is not read at all. */
+  private async admittedRedactions(trust: SigningKeyTrust, object: string, id: string): Promise<RedactionAmendmentBody[]> {
+    const admitted: RedactionAmendmentBody[] = [];
+    for (const stored of await this.read(AUDIT_AMENDMENT_OBJECT, { row_id: id, sealed_object: object })) {
+      let body;
+      try {
+        body = amendmentBodyFromRow(stored);
+      } catch {
+        continue;
+      }
+      if (body.kind !== 'redaction' || body.sealed_object !== object || body.row_id !== id) continue;
+      if (await this.admits(trust, body, stored)) admitted.push(body);
+    }
+    return admitted;
+  }
+
   /**
    * Decide what rewriting `patch` into row `id` of `object` owes (see the
    * module header). Reads only; the row is read whole from `rows`, or from the
@@ -155,36 +236,21 @@ export class RedactionAmender {
     if (!fields) return NONE;
     if (typeof id !== 'string' || id === '') return refused('the row carries no id');
     try {
-      const reader = rows ?? this.seal.engine.getDriverForObject(object);
-      const [row] = reader ? await reader.find(object, { where: { id }, limit: 1 }) : [];
-      if (!row) return refused('the row could not be read whole, so whether it is sealed cannot be told');
-      const at = Date.parse(canonicalDatetime(row.created_at, `${id}.created_at`));
-      const window = Math.floor(at / AUDIT_SEAL_WINDOW_MS) * AUDIT_SEAL_WINDOW_MS;
-      const chain = chainKeyOf(typeof row.tenant_id === 'string' && row.tenant_id !== '' ? row.tenant_id : null);
-      const listing: Array<{ stored: Row; body: CheckpointSignedBody }> = [];
-      for (const stored of await this.read(AUDIT_CHECKPOINT_OBJECT, {
-        sealed_object: object, chain_key: chain, window_start: { $gte: iso(window), $lt: iso(window + AUDIT_SEAL_WINDOW_MS) },
-      })) {
-        let body: CheckpointSignedBody;
-        try {
-          body = checkpointBodyFromRow(stored);
-        } catch {
-          continue; // a malformed checkpoint holds nothing (D9)
-        }
-        if (body.row_ids.includes(id)) listing.push({ stored, body });
-      }
+      const listing = (await this.listingOf(object)).get(id) ?? [];
       // Not sealed yet: the sealer seals the rewritten value.
       if (listing.length === 0) return NONE;
       const crypto = this.seal.crypto;
-      if (!crypto) return refused('no crypto provider is available to this run, so the seed of the checkpoint that sealed it cannot be opened');
-      const prior = (await this.read(AUDIT_AMENDMENT_OBJECT, { row_id: id, sealed_object: object })).flatMap((stored) => {
-        try {
-          const body = amendmentBodyFromRow(stored);
-          return body.kind === 'redaction' && chainKeyOf(body.tenant_id) === chain ? [body] : [];
-        } catch {
-          return [];
+      const trust = this.trustOf();
+      if (!crypto || !trust) return refused('no crypto provider is available to this run, so the seed of the checkpoint that sealed it cannot be opened');
+      for (const { stored, body } of listing) {
+        if (!(await this.admits(trust, body, stored))) {
+          return refused(`checkpoint ${body.sequence} that lists it does not verify under a trusted signing key, so what it sealed cannot be shown`);
         }
-      });
+      }
+      const reader = rows ?? this.seal.engine.getDriverForObject(object);
+      const [row] = reader ? await reader.find(object, { where: { id }, limit: 1 }) : [];
+      if (!row) return refused('the row could not be read whole, so whether it still matches its checkpoint cannot be told');
+      const prior = await this.admittedRedactions(trust, object, id);
       const drafts: RedactionDraft[] = [];
       for (const { stored, body } of listing) {
         const proven = await this.proveLeaf(crypto, object, id, row, fields, stored, body, prior);
@@ -212,9 +278,10 @@ export class RedactionAmender {
   }
 
   /**
-   * The row's leaf under checkpoint `body`, rebuilt and matched against the
-   * leaf hash it signed: the current commitments, the commitments it sealed,
-   * and the salts; or why it does not match.
+   * The row's leaf under the admitted checkpoint `body`, rebuilt and matched
+   * against the leaf hash it signed, under the admitted redactions of the
+   * row: the current commitments, the commitments it sealed, and the salts;
+   * or why it does not match.
    */
   private async proveLeaf(
     crypto: ICryptoProvider,
@@ -237,10 +304,11 @@ export class RedactionAmender {
     }
     const saltOf = columnSaltsOf(seed, object);
     const current = leafInput(row, body.columns, fields, saltOf);
-    // The redactions already written for this row: a column holding the commitment one rewrote to sealed the one it names.
+    // The admitted redactions of this row: a column holding the commitment one rewrote to sealed the one it names.
     const sealed: Row = { ...current };
     for (const amendment of prior) {
-      if (amendment.checkpoint_sequence !== body.sequence || !body.columns.committed.includes(amendment.column_name)) continue;
+      if (amendment.checkpoint_sequence !== body.sequence || chainKeyOf(amendment.tenant_id) !== chainKeyOf(body.tenant_id)) continue;
+      if (!body.columns.committed.includes(amendment.column_name)) continue;
       if (current[amendment.column_name] === amendment.rewritten_commitment) sealed[amendment.column_name] = amendment.sealed_commitment;
     }
     if (leafHash(sealed).toString('hex') !== hashes[body.row_ids.indexOf(id)]) {
@@ -252,7 +320,8 @@ export class RedactionAmender {
   /**
    * Sign and store the amendments a decision owes, before the row is
    * rewritten. Throws when one cannot be written: the row must then be left as
-   * it is. An amendment already stored for the same rewrite is not written twice.
+   * it is. An admitted amendment already stored for the same rewrite is not
+   * written twice; a stored one that is not admitted is not one.
    */
   async write(object: string, decision: RedactionDecision): Promise<void> {
     if (decision.kind !== 'amend') return;
@@ -261,11 +330,13 @@ export class RedactionAmender {
       this.signer = this.seal.signer ?? (crypto ? new LocalCheckpointSigner({ engine, crypto }) : undefined);
     }
     const signer = this.signer;
-    if (!signer) throw new Error('no checkpoint signer is available to this run');
-    const stored = await this.read(AUDIT_AMENDMENT_OBJECT, { row_id: decision.rowId, sealed_object: object });
+    const trust = this.trustOf();
+    if (!signer || !trust) throw new Error('no checkpoint signer is available to this run');
+    const stored = await this.admittedRedactions(trust, object, decision.rowId);
     for (const draft of decision.drafts) {
-      const done = stored.some((r) => r.kind === 'redaction' && r.column_name === draft.column && Number(r.checkpoint_sequence) === draft.checkpoint.sequence
-        && r.sealed_commitment === draft.sealed && r.rewritten_commitment === draft.rewritten);
+      const done = stored.some((a) => a.column_name === draft.column && a.checkpoint_sequence === draft.checkpoint.sequence
+        && chainKeyOf(a.tenant_id) === chainKeyOf(draft.checkpoint.tenant_id)
+        && a.sealed_commitment === draft.sealed && a.rewritten_commitment === draft.rewritten);
       if (done) continue;
       const amendedAt = (this.seal.now?.() ?? new Date()).toISOString();
       const build = (signingKeyId: string): RedactionAmendmentBody => ({

@@ -8,13 +8,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AuditPlugin } from '../audit-plugin.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 import { migrateKeyMaterialCopies } from '../key-material-copy-migration.js';
-import { migrateArchivedMailLogBodyCopies, migrateMailLogBodyCopies } from '../mail-log-body-migration.js';
+import { migrateArchivedMailLogBodyCopies, migrateMailLogBodyCopies, planMailLogBodyAuditRowPatch } from '../mail-log-body-migration.js';
 import { SysAuditLog } from '../objects/sys-audit-log.object.js';
 import { migrateStoredMetadataBodyCopies } from '../stored-metadata-body-migration.js';
 import { RedactionAmender, type AuditRedactionSeal } from './amendment-writer.js';
-import { verifyAuditLedger, type AuditVerifyReport } from './index.js';
+import { canonicalValue, commitValue } from './canonical.js';
+import { checkpointBodyFromRow, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed, verifyAuditLedger, type AuditVerifyReport } from './index.js';
 import { bindingCrypto, recordingLogger } from './seal-store.testkit.js';
 import type { AuditSealer } from './sealer.js';
+import { amendmentRow, type RedactionAmendmentBody } from './signed-body.js';
+import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
 
 /**
  * ADR-0154 D7 on a live engine over SQLite, with an `archive` datasource:
@@ -47,6 +50,28 @@ const sealedLog = { ...SysAuditLog, lifecycle: { ...SysAuditLog.lifecycle, seal:
 const verdicts = (report: AuditVerifyReport) =>
   Object.fromEntries(report.rows.map((r) => [r.row, r.verdict === 'late' && !r.sealed ? 'late!' : r.verdict]));
 
+/** A kernel over SQLite with an `archive` datasource, the ledger sealed, and `plugin` composed. */
+async function bootSealedLog(plugin: AuditPlugin): Promise<{ kernel: ObjectKernel; engine: ObjectQL; cold: SqliteWasmDriver }> {
+  const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use(plugin);
+  await kernel.bootstrap();
+  const engine = kernel.getService<ObjectQL>('objectql');
+  const sqlite = new SqliteWasmDriver({ filename: ':memory:' });
+  await sqlite.connect();
+  engine.registerDriver(sqlite, true);
+  const cold = new SqliteWasmDriver({ filename: ':memory:' });
+  Object.defineProperty(cold, 'name', { value: 'archive' });
+  await cold.connect();
+  engine.registerDriver(cold);
+  engine.registry.registerObject(sealedLog as never, 'com.objectstack.audit');
+  engine.registry.registerObject(SysSecret as never, 'com.objectstack.audit.test.redaction');
+  await engine.syncSchemas();
+  await cold.syncSchema(LOG, engine.registry.getObject(LOG) as never); // the registered field map, as the Archiver's table has it
+  await installDefaultOrganization(engine);
+  return { kernel, engine, cold };
+}
+
 describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => {
   const crypto = bindingCrypto();
   // A function, as `os serve` hands it: read when the sealer starts.
@@ -67,23 +92,7 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
   });
 
   beforeAll(async () => {
-    kernel = new ObjectKernel({ logger: { level: 'silent' } });
-    await kernel.use(new ObjectQLPlugin());
-    await kernel.use(plugin);
-    await kernel.bootstrap();
-    engine = kernel.getService<ObjectQL>('objectql');
-    const sqlite = new SqliteWasmDriver({ filename: ':memory:' });
-    await sqlite.connect();
-    engine.registerDriver(sqlite, true);
-    cold = new SqliteWasmDriver({ filename: ':memory:' });
-    Object.defineProperty(cold, 'name', { value: 'archive' });
-    await cold.connect();
-    engine.registerDriver(cold);
-    engine.registry.registerObject(sealedLog as never, 'com.objectstack.audit');
-    engine.registry.registerObject(SysSecret as never, 'com.objectstack.audit.test.redaction');
-    await engine.syncSchemas();
-    await cold.syncSchema(LOG, engine.registry.getObject(LOG) as never); // the registered field map, as the Archiver's table has it
-    await installDefaultOrganization(engine);
+    ({ kernel, engine, cold } = await bootSealedLog(plugin));
 
     // Copies at rest in a settled window, one copy per migration, and one row nothing rewrites.
     await hot().create(LOG, copy('mail', past + 60_000, 'sys_email', { id: 'em_1', subject: 'kept', body_text: MAIL_BODY }));
@@ -130,7 +139,9 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
   });
 
   it('with a signer that cannot sign, refuses the sealed copy at the write and leaves it as it is', async () => {
-    const signer = { sign: async () => { throw new Error('the signing key is offline'); }, trustedPublicKey: async () => null };
+    // It vouches for the deployment's key, and cannot sign with it now.
+    const local = new LocalCheckpointSigner({ engine: engine as never, crypto });
+    const signer = { sign: async () => { throw new Error('the signing key is offline'); }, trustedPublicKey: (keyId: string) => local.trustedPublicKey(keyId) };
     const logger = recordingLogger();
     const report = await migrateMailLogBodyCopies(engine as never, logger, { apply: true, seal: { ...seal(), signer }, objects: ['sys_audit_log'] });
     expect(report.byObject.sys_audit_log).toEqual({ scanned: 3, rewritten: 0, refused: 2 });
@@ -193,6 +204,95 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
     const [first, second] = (await amendments()).filter((a) => a.row_id === 'mail').sort((a, b) => String(a.amended_at).localeCompare(String(b.amended_at)));
     expect(second.sealed_commitment).toBe(first.sealed_commitment);
     expect(verdicts(await verify())).toMatchObject({ mail: 'redacted' });
+  });
+});
+
+describe('the redaction writer admits only inputs that verify under a trusted key (ADR-0154 D6, D7)', () => {
+  const crypto = bindingCrypto();
+  const plugin = new AuditPlugin({ cryptoProvider: crypto });
+  let kernel: ObjectKernel;
+  let engine: ObjectQL;
+  const past = Math.floor(Date.now() / H) * H - 3 * H;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const hot = () => engine.getDriverForObject(LOG) as unknown as Driver;
+  const stored = async (id: string) => (await hot().find(LOG, { where: { id } }))[0]!;
+  const amender = () => new RedactionAmender({ engine: engine as never, crypto }, 'pin');
+  const patchOf = async (id: string) => planMailLogBodyAuditRowPatch(await stored(id))!;
+  /** The stored checkpoint listing `id`, with its body. */
+  const listing = async (id: string) => {
+    const rows = await engine.find('sys_audit_checkpoint', { context: SYS }) as Row[];
+    const row = rows.find((r) => checkpointBodyFromRow(r).row_ids.includes(id))!;
+    return { row, body: checkpointBodyFromRow(row) };
+  };
+  /** The commitment of `value` in `new_value` of row `id`, under its checkpoint's seed. */
+  const commitment = async (id: string, value: unknown) => {
+    const { body } = await listing(id);
+    const handle = await readAuditSealSecret(engine as never, body.seed_handle);
+    const seed = decodeCheckpointSeed(await crypto.decrypt(handle!, checkpointSeedContext(LOG, body.tenant_id, body.sequence)));
+    return commitValue(columnSaltsOf(seed, LOG)(id, 'new_value'), canonicalValue(value, { type: 'textarea' }));
+  };
+  /** Store a redaction amendment whose signature verifies under no trusted key. */
+  const storeUnverified = async (id: string, sealed: string, rewritten: string) => {
+    const { body } = await listing(id);
+    const amendment: RedactionAmendmentBody = {
+      kind: 'redaction', sealed_object: LOG, tenant_id: body.tenant_id, amended_at: iso(Date.now()), signing_key_id: body.signing_key_id,
+      checkpoint_sequence: body.sequence, row_id: id, column_name: 'new_value', sealed_commitment: sealed, rewritten_commitment: rewritten, rewritten_by: 'pin',
+    };
+    await hot().create('sys_audit_amendment', amendmentRow(amendment, { id: `unverified-${id}`, signature: Buffer.alloc(64).toString('base64') }));
+  };
+  const mailCopy = (id: string, at: number, tenant: string): Row => ({
+    id, created_at: iso(at), action: 'create', object_name: 'sys_email', record_id: `${id}_rec`, tenant_id: tenant,
+    new_value: JSON.stringify({ id: `em_${id}`, body_text: MAIL_BODY }),
+  });
+
+  beforeAll(async () => {
+    ({ kernel, engine } = await bootSealedLog(plugin));
+    await hot().create(LOG, mailCopy('prior', past + 60_000, 'org_a'));
+    await hot().create(LOG, mailCopy('stand_in', past + 120_000, 'org_a'));
+    await hot().create(LOG, mailCopy('moved', past + 150_000, 'org_a'));
+    await hot().create(LOG, mailCopy('other_chain', past + 180_000, 'org_b'));
+    const sealer = (plugin as unknown as { sealer: AuditSealer }).sealer;
+    await sealer.stop();
+    expect(await sealer.runPass()).toBe(2);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (kernel) await Promise.race([kernel.shutdown(), new Promise<void>((r) => setTimeout(r, 10_000))]);
+  }, 30_000);
+
+  it('admits a stored redaction amendment only when it verifies: a row only an unadmitted one would explain stays refused', async () => {
+    const before = await stored('prior');
+    const now = JSON.stringify({ id: 'em_prior', body_text: 'another-body-sentinel' });
+    await hot().update(LOG, 'prior', { new_value: now, updated_at: before.updated_at }, { preserveAudit: true });
+    await storeUnverified('prior', await commitment('prior', before.new_value), await commitment('prior', now));
+    const decision = await amender().decide(LOG, 'prior', await patchOf('prior'));
+    expect(decision).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/^it no longer matches checkpoint 0 that sealed it/) });
+  });
+
+  it('a stored amendment that does not verify never stands in for the one a rewrite owes', async () => {
+    const writer = amender();
+    const patch = await patchOf('stand_in');
+    const decision = await writer.decide(LOG, 'stand_in', patch);
+    if (decision.kind !== 'amend') throw new Error(`expected an amendment to be owed, got ${decision.kind}`);
+    const [draft] = decision.drafts;
+    await storeUnverified('stand_in', draft.sealed, draft.rewritten);
+    await writer.write(LOG, decision);
+    await hot().update(LOG, 'stand_in', { ...patch, updated_at: (await stored('stand_in')).updated_at }, { preserveAudit: true });
+    expect(verdicts(await verifyAuditLedger({ engine: engine as never, crypto }))).toMatchObject({ stand_in: 'redacted' });
+  });
+
+  it('finds a row\'s checkpoint by the row ids it lists: a sealed row whose created_at moved is refused, never rewritten unamended', async () => {
+    const before = await stored('moved');
+    await hot().update(LOG, 'moved', { created_at: iso(past - 5 * H), updated_at: before.updated_at }, { preserveAudit: true });
+    const decision = await amender().decide(LOG, 'moved', await patchOf('moved'));
+    expect(decision).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/^it no longer matches checkpoint 0 that sealed it/) });
+  });
+
+  it('refuses a row a checkpoint that does not verify lists', async () => {
+    const { row } = await listing('other_chain');
+    await hot().update('sys_audit_checkpoint', String(row.id), { signature: Buffer.alloc(64).toString('base64') });
+    const decision = await amender().decide(LOG, 'other_chain', await patchOf('other_chain'));
+    expect(decision).toMatchObject({ kind: 'refused', reason: expect.stringMatching(/^checkpoint 0 that lists it does not verify under a trusted signing key/) });
   });
 });
 

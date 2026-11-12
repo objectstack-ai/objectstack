@@ -4414,6 +4414,10 @@ export default class Serve extends Command {
       // AuditPlugin of 5d is composed before it exists and reads it when its
       // sealer starts, at `kernel:ready` [ADR-0154 D2, D6].
       let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
+      // `OS_MIGRATE_AND_EXIT=1` makes this boot a one-shot job (it exits below,
+      // once the plugins have started): the audit sealer is not armed on it
+      // [ADR-0154 D3], as on every one-shot command.
+      const migrateAndExit = process.env.OS_MIGRATE_AND_EXIT === '1';
 
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
@@ -4900,7 +4904,7 @@ export default class Serve extends Command {
             try {
               const auditPkg = '@objectstack/plugin-audit';
               const { AuditPlugin } = await import(/* webpackIgnore: true */ auditPkg);
-              await kernel.use(new AuditPlugin({ cryptoProvider: () => hostCrypto?.provider }));
+              await kernel.use(new AuditPlugin({ cryptoProvider: () => hostCrypto?.provider, armSealer: !migrateAndExit }));
               trackPlugin('Audit');
             } catch {
               // optional
@@ -5456,7 +5460,7 @@ export default class Serve extends Command {
           const ctorArg: any = cap === 'settings' && hostCrypto
             ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
             : cap === 'audit' && hostCrypto
-              ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
+              ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider, armSealer: !migrateAndExit }
               : arg;
           const provider = ctorArg !== undefined ? new Ctor(ctorArg) : new Ctor();
           await kernel.use(provider);
@@ -5952,7 +5956,7 @@ export default class Serve extends Command {
       // then exit. The HTTP server has already bound `port` at this point
       // but we never accept a request — shutdown immediately so the
       // deploy pipeline can move on.
-      if (process.env.OS_MIGRATE_AND_EXIT === '1') {
+      if (migrateAndExit) {
         // This path exits before the banner, so it has to replay the boot
         // diagnostics itself — a deploy pipeline is precisely where a
         // degraded-boot warning must not vanish (#4012).
