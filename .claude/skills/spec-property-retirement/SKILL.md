@@ -283,12 +283,15 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       点不出名字的 glob 另配 `heldBy` 证人。⛔ 半径未申报的 tree-scoped pin 不是完成的退役。
 - [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
       `tsc` 替你找齐。
-- [ ] **已发布 skills** —— 另立 `domain:skills` 卡,⛔ 不进退役 PR;先后由门禁定:标记示例写着
-      键 ⇒ `check:skill-examples`/`check:yaml-examples` 红退役 PR:skills 卡先落、只删键,退役卡
-      `Blocked-by:` 它。穷举段(`check:skill-identifier-liveness`)与 `check:skill-top-level-keys` 先删活成员
-      即红 ⇒ 退役先落,skills 卡 `Blocked-by:` 退役卡;值走 `enumWithRetiredValues` 则绑定 stale,退役
+- [ ] **已发布 skills** —— 另立 `domain:skills` 卡,⛔ 不进退役 PR;先后由门禁定。标记示例写着
+      键或值 ⇒ `check:skill-examples`/`check:yaml-examples` 红退役 PR ⇒ skills 卡先落(删键或改值),
+      退役卡 `Blocked-by:` 它。`check:skill-identifier-liveness` Leg 1 读首格为单个反引号标识符的
+      表行(否定列除外),该名在 `packages/**`、`ui/packages/**` 零词元命中即红:无墓碑删键且他处
+      无名时同上序,墓碑或缺席 pin 留名则不红。其登记穷举段(Leg 2)与 `check:skill-top-level-keys`
+      先删活成员即红 ⇒ 退役先落,skills 卡 `Blocked-by:` 退役卡;值兼在标记示例与穷举段 ⇒
+      skills 卡拆前后两张(合一则 `Blocked-by:` 成环)。值走 `enumWithRetiredValues` 则绑定 stale,退役
       PR 照处方改指。顶层键墓碑仍算声明,删它欠维护者的 `NOT_AUTHORED` 行 ⇒ `needs_decision`。
-      `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与普通表无门禁,grep 后排退役后。
+      `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与不红表行无门禁,grep 后排退役后。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
       Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写,你的
@@ -322,8 +325,6 @@ pnpm --filter @objectstack/spec check:generated  # 一条命令跑齐,首个失�
 pnpm check:i18n && pnpm --filter @objectstack/spec test
 ```
 
-⛔ 永不手搓 `check:*` 名单逐个跑(AGENTS.md 明禁);它不跑的五个纯源码审计照 §4 整组另跑。
-
 ## 6. 各费过一轮红构建的陷阱
 
 ⚠️ 四个陷阱不写在这里,因为它们对每个 dev 都成立、锚点在别处:过期 `dist` 的假
@@ -331,7 +332,6 @@ pnpm check:i18n && pnpm --filter @objectstack/spec test
 的「Touched `packages/spec`?」一节与 `.claude/agents/os-dev.md` 的「本地验证范围」;
 ⛔ 这里不留第二份拷贝。
 
-- **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示
-  例;`examples/` 有三处 `template: true`,不是一处。先按上下文找文件,再进文件里
-  grep 键 —— 且把 `tsc` 和门禁当权威清扫器。
+- **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示例;先按上下文找
+  文件,再进文件里 grep 键 —— 且把 `tsc` 和门禁当权威清扫器。
 - **只改 conversion 的 `summary` 不欠重生成。** 它逐字进两条 D4 投影,都不提交;PR 渲染其 diff。
