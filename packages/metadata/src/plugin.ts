@@ -14,7 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -1657,6 +1657,14 @@ export class MetadataPlugin implements Plugin {
                 });
 
                 if (items.length > 0) {
+                    // [#32488 R7-C] The loader that first registered each bundle
+                    // identity in this pass. `loadMany` keeps the earlier loader's
+                    // item of one `(package, name, member)`, but it keys an unstamped
+                    // item (a file's) package-less, so a row of the host's package
+                    // the file once seeded passes it. Keyed after the host's stamp,
+                    // the earlier loader's item keeps the entry — the file over its
+                    // own stale seed. One loader's own items never shadow each other.
+                    const primedBy = new Map<string, string | undefined>();
                     for (const item of primingOrder(entry.type, items)) {
                         const meta = item as any;
                         if (meta?.name) {
@@ -1669,6 +1677,12 @@ export class MetadataPlugin implements Plugin {
                             applyProtection(meta, {
                                 packageId: this.options.packageId,
                             });
+                            const identity = bundleEntryKey(entry.type, meta.name, meta);
+                            if (identity !== undefined) {
+                                const from = this.manager.sourceLoaderOf(meta);
+                                if (!primedBy.has(identity)) primedBy.set(identity, from);
+                                else if (primedBy.get(identity) !== from) continue;
+                            }
                             // Silent: boot-time priming, before any consumer
                             // has cached a definition to go stale. Post-boot
                             // edits to these files reach watchers through the

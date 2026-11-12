@@ -15,7 +15,7 @@
  */
 
 import type { FlowGraph, FlowNodeParsed, FlowParsed } from '@objectstack/spec/automation';
-import { DecisionConfigSchema, collectFlowGraphs } from '@objectstack/spec/automation';
+import { DecisionConfigSchema, FLOW_REGION_SLOTS_BY_TYPE, collectFlowGraphs } from '@objectstack/spec/automation';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, structuralConditionRefusal } from '@objectstack/spec/automation';
 // [#19939] The `{…}` template dialect retired from the value slots — the one
 // judge, shared with `objectstack validate` (`@objectstack/lint` calls the same
@@ -248,6 +248,11 @@ export function registrationChecks(
         // deploying; `trigger-api`'s own `start()` refuses the same binding
         // for a host that binds without this engine.
         (flowName, flow) => this.validateApiTriggerSecret(flowName, flow),
+        // A flow that runs after a record change holds the record's save
+        // until it returns, so an outbound call it retries inline holds the
+        // save for the whole backoff ladder. Refused here, naming the node
+        // and the background path. A plain function: it reads no engine state.
+        (flowName, flow) => validateAfterSaveInlineRetry(flowName, flow),
     ];
 }
 
@@ -307,6 +312,111 @@ export function validateStartNode(flowName: string, flow: FlowParsed): Registrat
             from: JSON.stringify(types),
             detail: `the flow at nodes: ${why}`,
         }],
+    };
+}
+
+/**
+ * The start-node `triggerType` tokens that run a flow AFTER a record change:
+ * the record-change trigger's own grammar (`triggerTypeToHookEvents` in
+ * `@objectstack/trigger-record-change`), after-phase only. Its hook handler
+ * awaits the run, so the save that fired it answers only when the run returns.
+ */
+const AFTER_RECORD_CHANGE_TRIGGER = /^record-after-(create|insert|update|delete|write)$/;
+
+/**
+ * The builtin node types that call a system outside the platform from inside
+ * the run, and the fix each one's refusal names. Measured over the builtin
+ * executors: `http` fetches inline unless `config.durable: true` hands the
+ * request to the messaging HTTP outbox; `connector_action` runs the
+ * connector's handler inline and has no background path. `notify` is not
+ * here: it hands its deliveries to the messaging service, which queues them
+ * on its own outbox, and the node carries no switch an author could set.
+ */
+const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
+    ['http', 'Set `durable: true` on the node. Where a messaging HTTP outbox is wired, the request is queued there and retried in the background, so the save does not wait for it; where none is wired, the node falls back to the inline call and the save waits for it as before.'],
+    ['connector_action', 'Remove the retry around it, or run the flow on demand or on a schedule instead of after the save: a connector action has no background delivery path. An `http` node with `durable: true` fits only a call that needs no credential, because a credential must not go in the url or headers of an `http` node.'],
+]);
+
+/** How many times a `try_catch` node re-runs its `try` region on failure: `retry.maxRetries`, 0 when absent. */
+function retryOfTryRegion(node: FlowNodeParsed): number {
+    const retry = (node.config as { retry?: { maxRetries?: unknown } } | undefined)?.retry;
+    return typeof retry?.maxRetries === 'number' ? retry.maxRetries : 0;
+}
+
+/**
+ * REFUSE an inline outbound call that is retried inside a flow run after a
+ * record change (ruling 6810500711, letter D).
+ *
+ * The record-change trigger awaits an after-trigger run inside the save's hook
+ * handler, so the save answers only when the run returns. An inline outbound
+ * call that fails and is retried keeps the save waiting through the whole
+ * backoff ladder: the measured case held a save for 8.8 s. Two things retry a
+ * node inline: a `try_catch` whose `retry.maxRetries` is at least 1 re-runs its
+ * `try` region, and `errorHandling.strategy: 'retry'` re-runs the whole flow
+ * (`retryExecution`). Both are judged, at any region depth.
+ *
+ * Only the after-phase is judged. A before-trigger, a schedule, an API or a
+ * manual flow with the same node is unaffected: the before-phase is part of the
+ * save's own validation, and the others have no save waiting on them. An
+ * inline call that is NOT retried is unaffected too; this check does not
+ * change what a save means, only refuses the retry ladder on its path.
+ *
+ * A subflow node's callee is not walked: it is another flow, registered on its
+ * own, and judging it here would read a registry that may still be filling.
+ */
+export function validateAfterSaveInlineRetry(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
+    const start = flow.nodes.find((node) => node.type === 'start');
+    // Trimmed as the record-change trigger trims it (`triggerTypeToHookEvents`): a token it binds is judged.
+    const rawTrigger = (start?.config as { triggerType?: unknown } | undefined)?.triggerType;
+    const triggerType = typeof rawTrigger === 'string' ? rawTrigger.trim() : undefined;
+    if (triggerType === undefined || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return undefined;
+
+    const flowRetry = flow.errorHandling?.strategy === 'retry' ? flow.errorHandling.maxRetries : 0;
+    const violations: string[] = [];
+    const sites: RegistrationCheckSite[] = [];
+
+    const visit = (nodes: readonly FlowNodeParsed[], path: string, retriedBy: string | undefined): void => {
+        nodes.forEach((node, index) => {
+            if (!node || typeof node !== 'object') return;
+            const nodePath = `${path}.nodes[${index}]`;
+            const fix = INLINE_CALLOUT_FIX.get(node.type);
+            const durable = node.type === 'http' && (node.config as { durable?: unknown } | undefined)?.durable === true;
+            if (fix && !durable && retriedBy) {
+                const line =
+                    `node '${node.id}' (\`${node.type}\`) calls an outside system inline and is retried by ${retriedBy}. ` +
+                    `The flow runs after a record change (\`${triggerType}\`), and the save waits for the run, so a ` +
+                    `failing call holds the user's save for every attempt and every backoff delay. ${fix}`;
+                violations.push(line);
+                sites.push({ path: nodePath, from: JSON.stringify(node.type), detail: `the flow at ${nodePath}: ${line}` });
+            }
+            for (const slot of FLOW_REGION_SLOTS_BY_TYPE.get(node.type) ?? []) {
+                const value = (node.config as Record<string, unknown> | undefined)?.[slot.key];
+                const regions = slot.arity === 'many' ? (Array.isArray(value) ? value : []) : [value];
+                regions.forEach((region, regionIndex) => {
+                    if (!region || typeof region !== 'object') return;
+                    const regionNodes = (region as { nodes?: unknown }).nodes;
+                    if (!Array.isArray(regionNodes)) return;
+                    const tryRetries = node.type === 'try_catch' && slot.key === 'try' ? retryOfTryRegion(node) : 0;
+                    const by = retriedBy
+                        ?? (tryRetries >= 1 ? `\`try_catch\` '${node.id}' (\`retry.maxRetries: ${tryRetries}\`)` : undefined);
+                    const slotPath = `${nodePath}.config.${slot.key}${slot.arity === 'many' ? `[${regionIndex}]` : ''}`;
+                    visit(regionNodes as FlowNodeParsed[], slotPath, by);
+                });
+            }
+        });
+    };
+    visit(
+        flow.nodes,
+        STORED_FLOW_PATH,
+        flowRetry >= 1 ? `the flow's \`errorHandling\` (\`strategy: 'retry'\`, \`maxRetries: ${flowRetry}\`)` : undefined,
+    );
+
+    if (violations.length === 0) return undefined;
+    return {
+        message:
+            `Flow '${flowName}' rejected: ${violations.length} inline outbound call(s) retried on the save path:\n` +
+            violations.map((v) => `  - ${v}`).join('\n'),
+        sites,
     };
 }
 

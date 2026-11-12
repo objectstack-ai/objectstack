@@ -87,10 +87,11 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
   keyIdentityOf,
-  readStoreEntry,
   namesSeveralPackagesHold,
   pluralEntryKey,
+  readStoreEntry,
   recordStoreWrite,
   slotPackageOf,
   slotStoreOf,
@@ -3352,6 +3353,17 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32488] The name of the loader {@link loadMany} read `item` — that very
+   * object — from; `undefined` for an object it did not hand out. The boot
+   * priming pass asks it so that, of two loaders' items stored under one
+   * identity once the host's package is stamped, the earlier loader's item
+   * keeps the entry (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.name;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
@@ -3374,13 +3386,18 @@ export class MetadataManager implements IMetadataService {
             // protocol's own read binds a row), so a caller that registers it
             // back — the boot priming pass — fills that package's slot and its
             // member's row, never a package-less one.
-            // [#32458] Every type stored per `(package, name)`, bundled or not:
-            // an unbundled one (`agent`, `skill`, `action`, `api`, `permission`)
-            // handed on unstamped filled the name's package-less slot, and with
-            // two holders its save inserted a package-less row.
-            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function'
+            // [#32458] An unbundled type stored per `(package, name)` (`api`,
+            // `agent`, `skill`, `action`, `permission`) keeps every body the
+            // loader's `loadMany` answers, a body its keyed read cannot name
+            // included, and stamps each one the loader holds for a package the
+            // same way ({@link withLoaderEntryPackages}): handed on unstamped,
+            // such a row filled the name's package-less slot, and with two
+            // holders its save inserted a package-less row.
+            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
-                : await loader.loadMany<T>(type, options);
+                : PACKAGE_SLOTTED_STORE_TYPES.has(type)
+                    ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
+                    : await loader.loadMany<T>(type, options);
             fetched.push({ loader, items });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
@@ -4105,11 +4122,85 @@ export class MetadataManager implements IMetadataService {
 
 /**
  * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
- * body names none itself; the body unchanged otherwise.
+ * body names none itself; the body unchanged otherwise. [#32458] The same stamp
+ * for an unbundled type stored per `(package, name)`, through
+ * {@link withLoaderEntryPackages}.
  */
 function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
   const data = entry.data as unknown;
   if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
   if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
   return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+}
+
+/**
+ * [#32458] `items`, the bodies `loader.loadMany` answered for an unbundled type
+ * stored per `(package, name)`, each stamped with the package the loader holds
+ * it for ({@link withEntryPackage}) when the body names none itself. The
+ * package is read off the loader's keyed entries, and only from a loader that
+ * holds items per package (`loadManySlots`): a body is stamped when its `name`
+ * is the key of exactly one keyed entry, that entry carries a package and its
+ * own body carries the entry's key as its `name`, and no other body `loadMany`
+ * answered carries that `name`. A body whose `name` is another row's key is
+ * never stamped with that row's package — a row's key and its body's `name`
+ * are two identities (#14205), and a save does not make them agree. Every body
+ * is kept, in `loadMany`'s order — a body the keyed read cannot
+ * name (a nested or extension-less file, a row whose `name` column is empty)
+ * is answered as before, unstamped. A loader that holds nothing per package is
+ * not read twice.
+ *
+ * [#32521; epic #31527 red line 2] A name two or more of the loader's keyed
+ * entries carry with their own packages (a name two packages hold, which
+ * `DatabaseLoader` now answers a row per package of): each body of that name
+ * is stamped with the package of the one keyed entry whose own body it is
+ * (the same content, each entry used once), so both holders are handed on
+ * stamped and the boot priming pass registers each. A body no such entry's
+ * body equals — a package-less row's among them — stays unstamped. Only where
+ * the bodies of the name are exactly the rows keyed by it (each of those rows'
+ * bodies carries the name, and as many bodies carry it as rows are keyed by
+ * it); otherwise none of them is stamped, as above.
+ */
+async function withLoaderEntryPackages<T>(
+  loader: MetadataLoader,
+  type: string,
+  items: T[],
+  options?: MetadataLoadOptions,
+): Promise<T[]> {
+  if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
+  const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
+  const packageOf = new Map<string, string | null>();
+  const entriesKeyed = new Map<string, { count: number; ownBodies: boolean }>();
+  const heldBodies = new Map<string, Array<{ body: string; packageId: string }>>();
+  for (const entry of await loader.loadManyKeyed<T>(type, options)) {
+    const ownBody = nameOf(entry.data) === entry.name;
+    const own = ownBody ? entry.packageId ?? null : null;
+    packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+    const keyed = entriesKeyed.get(entry.name) ?? { count: 0, ownBodies: true };
+    entriesKeyed.set(entry.name, { count: keyed.count + 1, ownBodies: keyed.ownBodies && ownBody });
+    if (own !== null) heldBodies.set(entry.name, [...(heldBodies.get(entry.name) ?? []), { body: JSON.stringify(entry.data), packageId: own }]);
+  }
+  const bodiesNamed = new Map<string, number>();
+  for (const item of items) {
+    const name = nameOf(item);
+    if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
+  }
+  // [#32521] Paired by content only where the bodies of the name are exactly
+  // the rows keyed by it: every such row's body carries the name, and no other
+  // body does.
+  const severallyHeld = new Set([...heldBodies]
+    .filter(([name, held]) => held.length > 1 && entriesKeyed.get(name)!.ownBodies && entriesKeyed.get(name)!.count === bodiesNamed.get(name))
+    .map(([name]) => name));
+  return items.map((item) => {
+    const name = nameOf(item);
+    if (typeof name !== 'string') return item;
+    const held = heldBodies.get(name);
+    if (held !== undefined && severallyHeld.has(name)) {
+      const body = JSON.stringify(item);
+      const at = held.findIndex((entry) => entry.body === body);
+      return at === -1 ? item : withEntryPackage({ name, data: item, packageId: held.splice(at, 1)[0]!.packageId });
+    }
+    if (bodiesNamed.get(name) !== 1) return item;
+    const packageId = packageOf.get(name);
+    return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
+  });
 }

@@ -8,6 +8,8 @@ import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { FilesystemLoader } from './filesystem-loader.js';
+import { JSONSerializer } from '../serializers/json-serializer.js';
 // Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
 import '@objectstack/metadata-fs';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -2012,6 +2014,44 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
     expect(driver.create).toHaveBeenCalledTimes(1);
     expect(await loader.loadMany('agent')).toEqual([{ name: 'helper', label: 'Helper' }]);
   });
+
+  // [#32488 item 3, R8-A; contract record 6811135944] The bind takes the loader's own rows only.
+  it('[#32488 item 3] another writer\'s row (source other than database, empty column, copied stamp): never bound (BEFORE: bound to the copied package)', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'api',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', _packageId: ALPHA }),
+    });
+    const before = await agentRow();
+    await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * [#32488 R7-C; epic ruling 6809488921] A file item and the row it seeded
+   * under the host's package: the boot after a file edit registers the file's
+   * body. BEFORE (measured at 27abd458, same fixture): the second boot's
+   * registry held `v1` while the row held `v2` (version 2); the third held `v2`.
+   */
+  it('[#32488 R7-C] a file edited from v1 to v2: the next boot registers v2, and the row it seeded holds v2 (BEFORE: v1 registered)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'r7c-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      const file = join(rootDir, 'email_template', 'welcome.email-template.json');
+      const write = (subject: string) => writeFileSync(file, JSON.stringify({ name: 'welcome', locale: 'en-US', subject, bodyHtml: '<p/>' }));
+      write('v1');
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      write('v2');
+      const manager = await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      expect(registered(manager, 'email_template').map((item) => item.subject)).toEqual(['v2']);
+      expect(((await manager.get('email_template', 'welcome')) as { subject?: string }).subject).toBe('v2');
+      expect(await stored()).toEqual([[ALPHA, null, 'v2']]);
+      const row = (await driver.findOne('sys_metadata', { where: { type: 'email_template' } } as never)) as Record<string, any>;
+      expect(row.version).toBe(2);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
 });
 
 /**
@@ -2071,9 +2111,74 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
     driver = createMockDriver();
   });
 
+  it('every body loadMany answered is kept: a file-system body its keyed read cannot name, and a row whose name column is empty (BEFORE this PR\'s first head: both dropped)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'i32458-'));
+    try {
+      for (const type of UNBUNDLED) {
+        mkdirSync(join(rootDir, type, 'crm'), { recursive: true });
+        writeFileSync(join(rootDir, type, 'flat.json'), JSON.stringify({ name: 'flat', label: 'flat' }));
+        writeFileSync(join(rootDir, type, 'crm', 'nested.json'), JSON.stringify({ label: 'nested nameless' }));
+        writeFileSync(join(rootDir, type, 'extensionless'), JSON.stringify({ label: 'extension-less nameless' }));
+        await driver.create('sys_metadata', {
+          id: `${type}_unnamed`, type, name: null, state: 'active', version: 1, checksum: `${type}_unnamed`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ label: 'empty name column' }),
+        });
+        await seed(type, BETA, 2);
+        const m = new MetadataManager({ formats: ['json'], loaders: [] });
+        m.registerLoader(new FilesystemLoader(rootDir, new Map([['json', new JSONSerializer()]]) as never));
+        m.registerLoader(new DatabaseLoader({ driver }));
+        const labels = ((await m.loadMany(type)) as Array<{ label: string; _packageId?: string }>)
+          .map((item) => [item._packageId ?? null, item.label]);
+        expect(labels).toEqual(expect.arrayContaining([
+          [null, 'flat'], [null, 'nested nameless'], [null, 'extension-less nameless'], [null, 'empty name column'], [BETA, BETA],
+        ]));
+        expect(labels).toHaveLength(5);
+      }
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
   it('the types are taken from the tree', () => {
     expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission']));
     expect(UNBUNDLED).not.toContain('email_template');
+  });
+
+  it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
+    for (const type of UNBUNDLED) {
+      for (const strayPackage of [BETA, null]) {
+        driver = createMockDriver();
+        // Row keyed `b` whose body says `name: 'a'` — storable through `save`, which does not refuse a
+        // name that disagrees with its key — beside row `a` bound to ALPHA by the column alone.
+        await driver.create('sys_metadata', {
+          id: `${type}_stray`, type, name: 'b', state: 'active', version: 1, checksum: `${type}_stray`,
+          source: 'database', package_id: strayPackage, metadata: JSON.stringify({ name: 'a', label: 'stray' }),
+        });
+        await driver.create('sys_metadata', {
+          id: `${type}_alpha`, type, name: 'a', state: 'active', version: 2, checksum: `${type}_alpha`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'a', label: ALPHA }),
+        });
+        // Main's answer for the name: the body `loadMany` keeps first, unstamped.
+        expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        const m = await bootPass();
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
+      }
+      // Row `a` bound to ALPHA whose own body says `name: 'z'`, beside a row whose `name` column is
+      // empty and whose body says `name: 'a'`: neither body is ALPHA's row's by its name.
+      driver = createMockDriver();
+      await driver.create('sys_metadata', {
+        id: `${type}_alpha`, type, name: 'a', state: 'active', version: 1, checksum: `${type}_alpha`,
+        source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'z', label: ALPHA }),
+      });
+      await driver.create('sys_metadata', {
+        id: `${type}_unkeyed`, type, name: null, state: 'active', version: 2, checksum: `${type}_unkeyed`,
+        source: 'database', package_id: null, metadata: JSON.stringify({ name: 'a', label: 'unkeyed' }),
+      });
+      const items = (await manager().loadMany(type)) as Array<{ label: string; _packageId?: string }>;
+      expect(items.map((item) => [item._packageId ?? null, item.label]))
+        .toEqual(expect.arrayContaining([[null, ALPHA], [null, 'unkeyed']]));
+      expect(items).toHaveLength(2);
+    }
   });
 
   for (const type of UNBUNDLED) {
@@ -2133,12 +2238,14 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
 });
 
 /**
- * [#32521; epic #31527 red line 2, epic seat ruling 2026-11-12] The boot
- * priming pass primes every holder of a name: one item per `(package, slot
- * identity)` of every type stored per `(package, name)`, so after the pass a
- * bare read of a name two packages hold is refused `409
- * ambiguous-in-environment` naming both, the same as without the pass, and an
- * unfiltered `list` keeps both.
+ * [#32521; epic #31527 red lines 2 and 3, epic seat rulings 2026-11-12] The
+ * boot priming pass primes every holder of a name two packages hold: the
+ * plural reads hand on one item per `(package, slot identity)` of such a name
+ * of every type stored per `(package, name)`, so after the pass a bare read of
+ * it is refused `409 ambiguous-in-environment` naming both, the same as without
+ * the pass, and an unfiltered `list` keeps both. A name one package holds —
+ * with or without a package-less row beside it, on any host — hands on one
+ * item and answers what it answered (the CONTROL pins).
  *
  * BEFORE (measured at efd4ea3a, #32458's head, same fixtures, all five
  * unbundled types alike): `DatabaseLoader.loadMany` / `loadManyKeyed` kept one
@@ -2347,6 +2454,19 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       });
     }
   }
+
+  it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
+    await seed('agent', ALPHA, 1);
+    await seed('agent', BETA, 2);
+    // Row keyed `stray` whose body says `name: 'helper'`, byte for byte ALPHA's row's body.
+    await driver.create('sys_metadata', {
+      id: 'agent_stray', type: 'agent', name: 'stray', state: 'active', version: 3, checksum: 'agent_stray',
+      source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: ALPHA }),
+    });
+    const m = cold();
+    expect((await m.loadMany('agent') as Array<Record<string, unknown>>).map((item) => [item._packageId ?? null, item.label]))
+      .toEqual([[null, ALPHA]]);
+  });
 
   it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
     for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
