@@ -234,7 +234,8 @@ const booleanFlagRule = (unsetRequired: string) =>
  * skill's reference index (`gen:skill-refs`), for a describe string.
  *
  * The stored half states the inputs it may read: this record's own fields. A
- * stored expression reading another record is refused at authoring, and one
+ * stored expression reading another record is warned at authoring
+ * (`stored-expression-cross-record-input`), and one
  * reading the clock or the acting user keeps the value it had at the write
  * (ruling 6816315099 on #32443), so neither appears here as an example.
  */
