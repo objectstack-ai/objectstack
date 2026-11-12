@@ -98,9 +98,9 @@ describe('[ADR-0151 Non-goals] an elevated run an AI service account started car
 
         await seedRunGrants.call(host(PERSON_GRANTS), 'bank_verify', run, 'triggering');
 
-        const facts = resolveRunDataContext(run) as Record<string, unknown>;
+        const facts = resolveRunDataContext(run);
         expect(facts).toMatchObject({ isSystem: true, userId: 'u_mia' });
-        expect('principalKind' in facts).toBe(false);
+        expect('principalKind' in (facts as object)).toBe(false);
     });
 
     it('CONTROL: only the literal agent kind is carried onto an elevated run\'s operations', () => {
