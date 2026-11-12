@@ -129,6 +129,16 @@ describe('the redaction amendment writer on a live engine (ADR-0154 D7)', () => 
     expect(result.ok).toBe(true);
   });
 
+  it('with a signer that cannot sign, refuses the sealed copy at the write and leaves it as it is', async () => {
+    const signer = { sign: async () => { throw new Error('the signing key is offline'); }, trustedPublicKey: async () => null };
+    const logger = recordingLogger();
+    const report = await migrateMailLogBodyCopies(engine as never, logger, { apply: true, seal: { ...seal(), signer }, objects: ['sys_audit_log'] });
+    expect(report.byObject.sys_audit_log).toEqual({ scanned: 3, rewritten: 0, refused: 2 });
+    expect(logger.lines.some((l) => /refused to rewrite sys_audit_log\/mail, a sealed row: its amendment could not be written \(the signing key is offline\)/.test(l.message))).toBe(true);
+    expect(String((await stored('mail'))!.new_value)).toContain(MAIL_BODY);
+    expect(await amendments()).toEqual([]);
+  });
+
   it('refuses a sealed copy changed outside the platform, never amending it: the change stays visible', async () => {
     await hot().update(LOG, 'tampered', { action: 'delete' });
     const logger = recordingLogger();
