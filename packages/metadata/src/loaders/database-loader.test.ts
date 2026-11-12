@@ -2110,7 +2110,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.create).toHaveBeenCalledTimes(2);
     });
 
-    it(`${type}: CONTROL — one holder: the boot pass writes nothing and a bare read answers the unique holder`, async () => {
+    it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
       await seed(type, ALPHA, 1);
       const before = await stored(type);
       const m = await bootPass();
