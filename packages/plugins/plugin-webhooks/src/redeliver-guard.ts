@@ -200,13 +200,29 @@ export function createWebhookRedeliverGuard(
  * doc). A lookup that throws propagates: "we could not check" never reads as
  * "allowed". A delivery naming no package of a name two packages declare is
  * refused naming both (ADR-0150 D3): it belongs to one of them, and nothing
- * says which.
+ * says which. Both are counted when one is disabled (`holdersOf`): the row is
+ * durable, and a disable does not say whose it is.
  */
 async function judgeDeclared(
     declared: DeclaredWebhookReader | undefined,
     address: { packageId?: string; name: string },
 ): Promise<string | undefined> {
     const { name } = address;
+    // [#31699 round 3] A delivery row is durable, so a reference naming no
+    // package is judged against EVERY package holder of the name, a disabled
+    // package's included: the delivery may be the disabled one's (written
+    // before the upgrade), and nothing says it is not.
+    if (address.packageId === undefined && typeof declared?.holdersOf === 'function') {
+        const packages = (await declared.holdersOf(name)).filter((holder): holder is string => holder !== null);
+        if (packages.length > 1) {
+            return (
+                `this delivery of declared webhook '${name}' names no package, and the name is declared by more than one: `
+                + `${packages.map((packageId) => `package "${packageId}"`).join(', ')} (a disabled package counts: the `
+                + 'delivery may be its). It is refused rather than sent to a holder picked for it. New events are '
+                + 'delivered per package, each under its own reference.'
+            );
+        }
+    }
     let declaration;
     try {
         declaration = !declared
@@ -223,12 +239,15 @@ async function judgeDeclared(
         );
     }
     if (!declaration) {
-        // [#31699 round 2] The slot's package still declares it but is
-        // disabled: a disabled package's webhooks are not served, so neither
-        // dispatched nor redelivered, until the package is enabled again.
-        if (address.packageId !== undefined && (await declared?.holdersOf?.(name))?.includes(address.packageId)) {
+        // [#31699 round 2] The slot's package (or, for a reference naming no
+        // package, the name's one holder) still declares it but is disabled:
+        // a disabled package's webhooks are not served, so neither dispatched
+        // nor redelivered, until the package is enabled again.
+        const held = await declared?.holdersOf?.(name);
+        const owner = address.packageId ?? (held?.length === 1 ? held[0] ?? undefined : undefined);
+        if (owner !== undefined && held?.includes(owner)) {
             return (
-                `declared webhook '${name}' of package '${address.packageId}' is not served: the package is disabled, `
+                `declared webhook '${name}' of package '${owner}' is not served: the package is disabled, `
                 + 'and a disabled package\'s webhooks are not dispatched, so this delivery is refused. Enable the '
                 + 'package, then redeliver.'
             );

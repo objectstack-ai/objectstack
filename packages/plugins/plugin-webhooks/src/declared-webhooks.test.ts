@@ -877,6 +877,50 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
             await enqueuer.stop();
         });
 
+        // [#31699 round 3, M1] A delivery row is durable: a reference naming no
+        // package is judged against every holder, a disabled one's included.
+        it.each(ORDERS)('[FROM allowed TO refused] %s: under A enabled and B disabled, a delivery naming no package is refused naming both', async (_order, order) => {
+            const registry = registryShipping(order);
+            registry.disablePackage(B);
+            const engine = engineOver(registry);
+            const verdict = await guardOver(engine, new DeclaredWebhookSource(engine, undefined))();
+            expect(verdict).toMatch(/names no package, and the name is declared by more than one/);
+            expect(verdict).toContain(`package "${A}"`);
+            expect(verdict).toContain(`package "${B}"`);
+        });
+
+        it.each(ORDERS)('CONTROL — %s, both enabled: a delivery naming no package is refused naming both', async (_order, order) => {
+            const engine = engineOver(registryShipping(order));
+            const verdict = await guardOver(engine, new DeclaredWebhookSource(engine, undefined))();
+            expect(verdict).toMatch(/names no package, and the name is declared by more than one/);
+            expect([verdict?.includes(`package "${A}"`), verdict?.includes(`package "${B}"`)]).toEqual([true, true]);
+        });
+
+        it('CONTROL — one holder: a delivery naming no package is judged by its declaration; disabled, refused naming it', async () => {
+            const registry = registryShipping([[A, ALPHA]]);
+            const engine = engineOver(registry);
+            const source = new DeclaredWebhookSource(engine, undefined);
+            expect(await guardOver(engine, source)()).toBeUndefined();
+            registry.disablePackage(A);
+            expect(await guardOver(engine, source)()).toMatch(new RegExp(`package '${A.replace(/\./g, '\\.')}' is not served: the package is disabled`));
+        });
+
+        // [#31699 round 3, M4] The registry knows the name's every holder is
+        // disabled, so what a metadata service lists of it is not served
+        // either: the listed path is for names the registry does not hold.
+        it('every holder disabled: the item a metadata service lists of the name is not dispatched', async () => {
+            const registry = registryShipping([[B, BETA]]);
+            registry.disablePackage(B);
+            const engine = engineOver(registry);
+            const listed = { list: (type: string) => (type === 'webhook' ? [{ ...BETA, _packageId: B }] : []) };
+            const source = new DeclaredWebhookSource(engine, listed);
+            expect(await source.list()).toEqual([]);
+            expect(await source.declaredWebhookNamed(T)).toBeNull();
+            expect(await source.holdersOf(T)).toEqual([B]);
+            registry.enablePackage(B);
+            expect((await source.list()).map((d) => [d.packageId, d.webhook.name])).toEqual([[B, T]]);
+        });
+
         it.each(ORDERS)('the name guard judges the served set: %s, B disabled, the conflict names A\'s address alone', async (_order, order) => {
             const registry = registryShipping(order);
             registry.disablePackage(B);
