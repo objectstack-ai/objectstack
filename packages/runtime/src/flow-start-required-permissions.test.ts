@@ -18,6 +18,10 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads `@objectstack/metadata` inside a function body
+// (`standalone-stack.ts`); paid here, during collection, so no case's clocked
+// window pays that first load (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
