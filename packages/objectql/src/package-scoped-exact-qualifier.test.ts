@@ -468,9 +468,11 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       expect(thrown?.message).toContain(`has no package-scoped resolver for '${type}' items`);
     });
 
-    it('CONTROL: a covered type not narrowed (tool) keeps `getItem` on the same view', async () => {
-      shipValid('tool', 'solo', A);
-      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'tool', name: 'solo' }))).toBe('alpha tool');
+    // [#31985] `tool` has narrowed, so the CONTROL is a package-scoped type no
+    // one-holder rule covers: no child B card ever narrows it.
+    it('CONTROL: a package-scoped type not narrowed (dashboard) keeps `getItem` on the same view', async () => {
+      shipValid('dashboard', 'solo', A);
+      expect(labelOf(await readsNothingByPackage.getMetaItem({ type: 'dashboard', name: 'solo' }))).toBe('alpha dashboard');
     });
 
     it('CONTROL: the registry WITH the resolver reads the narrowed AI types by package and serves them', async () => {
