@@ -105,21 +105,28 @@ interface ItemAddress {
     readonly member?: string;
     /**
      * [#32451] The package the row is bound to, `null` for none. Two packages'
-     * rows of one name are two items here, as they are two rows.
+     * rows of one name are two items here, as they are two rows. Absent only on
+     * a package-agnostic entry: an unstamped touch (a writer that predates
+     * `packageId`) that matched no entry of its `(type, name, member)`.
      */
-    readonly packageId: string | null;
+    readonly packageId?: string | null;
 }
 
 /** `undefined` = marked: re-converge on the next resync whatever the row's checksum says. */
 type ConvergedChecksum = string | null | undefined;
 
-function keyOf(address: ItemAddress): string {
-    return JSON.stringify([address.type, address.name, address.member ?? null, address.packageId]);
-}
-
 /** The `(type, name, member)` half of a key: what a touch naming no package marks. */
 function itemOf(address: Pick<ItemAddress, 'type' | 'name' | 'member'>): string {
     return JSON.stringify([address.type, address.name, address.member ?? null]);
+}
+
+/**
+ * A package-agnostic entry's key is its item's three-element key; every other
+ * key has four elements, so the two never collide.
+ */
+function keyOf(address: ItemAddress): string {
+    if (address.packageId === undefined) return itemOf(address);
+    return JSON.stringify([address.type, address.name, address.member ?? null, address.packageId]);
 }
 
 function addressOfRow(row: Record<string, unknown>): ItemAddress | undefined {
@@ -187,6 +194,9 @@ export class MetadataMutationResyncLedger {
      * A hint was received or a local write was announced: re-converge this item
      * on the next resync. [#32451] A hint naming no package (a writer that
      * predates `packageId`) marks every package's entry of `(type, name, member)`.
+     * When it matches none, it is kept as one package-agnostic marked entry, so
+     * a touch is never dropped: the next resync re-converges every current row
+     * of that item, or, when none is left, converges its delete naming no package.
      */
     touch(evt: Pick<MetadataMutationEvent, 'type' | 'name' | 'member' | 'packageId'>): void {
         if (typeof evt.type !== 'string' || typeof evt.name !== 'string' || evt.name === '') return;
@@ -198,15 +208,20 @@ export class MetadataMutationResyncLedger {
         const packageId = inboundMutationPackage(evt);
         if (packageId === undefined) {
             const wanted = itemOf(item);
+            let matched = false;
             for (const [key, address] of this.addresses) {
-                if (itemOf(address) !== wanted) continue;
-                this.converged.set(key, undefined);
-                this.touchedDuringResync?.add(key);
+                if (address.packageId === undefined || itemOf(address) !== wanted) continue;
+                matched = true;
+                this.mark(key, address);
             }
+            if (!matched) this.mark(keyOf(item), item);
             return;
         }
         const address: ItemAddress = { ...item, packageId };
-        const key = keyOf(address);
+        this.mark(keyOf(address), address);
+    }
+
+    private mark(key: string, address: ItemAddress): void {
         this.converged.set(key, undefined);
         this.addresses.set(key, address);
         this.touchedDuringResync?.add(key);
@@ -236,26 +251,38 @@ export class MetadataMutationResyncLedger {
             }
 
             const current = new Map<string, { address: ItemAddress; checksum: string | null }>();
+            /** The items that have a current row: what a package-agnostic entry re-converges. */
+            const currentItems = new Set<string>();
             for (const row of rows) {
                 const address = addressOfRow(row);
-                if (address) current.set(keyOf(address), { address, checksum: checksumOfRow(row) });
+                if (!address) continue;
+                current.set(keyOf(address), { address, checksum: checksumOfRow(row) });
+                currentItems.add(itemOf(address));
             }
 
             const due: Array<{ key: string; address: ItemAddress; checksum: string | null; gone: boolean }> = [];
             let unchanged = 0;
             for (const [key, { address, checksum }] of current) {
-                if (this.converged.has(key) && this.converged.get(key) === checksum) unchanged++;
+                // A package-agnostic entry marks every current row of its item.
+                const agnostic = this.converged.has(itemOf(address));
+                if (!agnostic && this.converged.has(key) && this.converged.get(key) === checksum) unchanged++;
                 else due.push({ key, address, checksum, gone: false });
             }
+            /** Package-agnostic entries whose item has a current row: retired once those rows converge. */
+            const covered: string[] = [];
             for (const key of this.converged.keys()) {
                 if (current.has(key)) continue;
                 const address = this.addresses.get(key);
-                if (address) due.push({ key, address, checksum: null, gone: true });
+                if (!address) continue;
+                if (address.packageId === undefined && currentItems.has(key)) covered.push(key);
+                else due.push({ key, address, checksum: null, gone: true });
             }
 
             let converged = 0;
             let deleted = 0;
             const failures: string[] = [];
+            /** Items one of whose converges failed: a package-agnostic entry of them stays marked. */
+            const failedItems = new Set<string>();
             let firstFailure: unknown;
             for (const item of due) {
                 const { type, name, member, packageId } = item.address;
@@ -267,13 +294,15 @@ export class MetadataMutationResyncLedger {
                         organizationId: null,
                         ...(member !== undefined ? { member } : {}),
                         // [#32451] The row's package, or for a gone item the
-                        // package it was converged on.
-                        packageId,
+                        // package it was converged on. A package-agnostic entry
+                        // names none, as the hint that left it named none.
+                        ...(packageId !== undefined ? { packageId } : {}),
                     });
                 } catch (err) {
                     // Not a delete: the entry stays as this replica holds it, marked for the next resync.
                     this.converged.set(item.key, undefined);
-                    failures.push(`${type}/${name}${member !== undefined ? `[${member}]` : ''}${packageId !== null ? ` (package '${packageId}')` : ''}`);
+                    failedItems.add(itemOf(item.address));
+                    failures.push(`${type}/${name}${member !== undefined ? `[${member}]` : ''}${typeof packageId === 'string' ? ` (package '${packageId}')` : ''}`);
                     if (firstFailure === undefined) firstFailure = err;
                     continue;
                 }
@@ -288,6 +317,11 @@ export class MetadataMutationResyncLedger {
                     this.converged.set(item.key, item.checksum);
                     this.addresses.set(item.key, item.address);
                 }
+            }
+            for (const key of covered) {
+                if (touched.has(key) || failedItems.has(key)) continue;
+                this.converged.delete(key);
+                this.addresses.delete(key);
             }
             this.hasBaseline = true;
 

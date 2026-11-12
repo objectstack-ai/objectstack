@@ -16,4 +16,4 @@ FROM → TO, the peer's read: a peer converging a save or a removal of such an i
 
 FROM → TO, transitional, for a signal with no `packageId` (sent by a replica running an earlier release during a rolling upgrade): on a name whose active rows are bound to two or more packages, FROM "re-registers the first row the store returns" TO "a logged stop: one `error` line names the holders, the replica keeps the entry it holds, and the next cluster resync, a re-save from an upgraded replica or a restart converges it". A name whose rows are bound to one package converges as before, and with no row left the heal runs as before.
 
-An older replica ignores the new key, so a rolling upgrade needs no order.
+The cluster resync never drops a signal with no `packageId`: when it names an item the resync holds no entry for, the next resync re-converges every current row of that item at its row's package, or, with none left, converges its removal naming no package, as before. An older replica ignores the new key, so a rolling upgrade needs no order.

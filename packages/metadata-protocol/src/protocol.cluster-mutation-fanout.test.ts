@@ -907,6 +907,112 @@ describe('[#32451] the peer converges a slotted item at the package the signal n
             expect(p.healed()).toEqual([ALPHA]);
             expect(p.registered()).toEqual([]);
         });
+
+        /**
+         * An unstamped hint (a writer on an earlier release) for an item the
+         * ledger holds no entry of: it names no package to key by, so the
+         * ledger keeps it package-agnostic and still marked. Before
+         * `packageId`, the ledger keyed by `(type, name, member)` and recorded
+         * every touch; a touch that matched nothing must not become a dropped
+         * one, or a delete whose hint is lost is never converged.
+         */
+        describe('an unstamped hint the ledger holds no entry for stays marked', () => {
+            async function ledgerOver(initial: Array<Record<string, unknown>>) {
+                const { MetadataMutationResyncLedger } = await import('./protocol-mutation-resync.js');
+                const state = { rows: initial, fail: 0 };
+                const ledger = new MetadataMutationResyncLedger();
+                ledger.seed(async () => state.rows);
+                const events: MetadataMutationEvent[] = [];
+                const io = {
+                    readActiveRows: async () => state.rows,
+                    converge: async (evt: MetadataMutationEvent) => {
+                        if (state.fail > 0) { state.fail--; throw new Error('store unreachable'); }
+                        events.push(evt);
+                    },
+                };
+                return { ledger, state, events, io };
+            }
+            const row = (type: string, name: string, packageId: string | null, checksum: string) =>
+                ({ id: `${type}_${name}_${packageId ?? 'none'}`, type, name, bundle_member: null, package_id: packageId, checksum });
+
+            it('⭐ baseline taken, an unstamped create hint, the row then deleted with its hint lost: the resync converges the delete, unstamped', async () => {
+                const l = await ledgerOver([]);
+                await l.ledger.resync(l.io);
+
+                // The create's hint was delivered and named no package; the row is
+                // gone again by the resync, its delete hint lost.
+                l.ledger.touch({ type: 'object', name: 'gizmo' });
+                const report = await l.ledger.resync(l.io);
+
+                expect(report).toMatchObject({ rows: 0, deleted: 1, converged: 0 });
+                expect(l.events).toHaveLength(1);
+                expect(l.events[0]).toStrictEqual({ type: 'object', name: 'gizmo', state: 'deleted', organizationId: null });
+                expect('packageId' in l.events[0], 'no package was named, so none is sent: absent, never `null`').toBe(false);
+
+                // Converged: the next resync has nothing left to re-read.
+                expect(await l.ledger.resync(l.io)).toMatchObject({ deleted: 0, converged: 0 });
+                expect(l.events).toHaveLength(1);
+            });
+
+            it('the row is current: the resync re-converges it at its row\'s package, and the mark retires', async () => {
+                const l = await ledgerOver([]);
+                await l.ledger.resync(l.io);
+
+                l.ledger.touch({ type: 'action', name: NAME });
+                l.state.rows = [row('action', NAME, ALPHA, 'c1')];
+                expect(await l.ledger.resync(l.io)).toMatchObject({ rows: 1, converged: 1, deleted: 0 });
+                expect(l.events).toEqual([{ type: 'action', name: NAME, state: 'active', organizationId: null, packageId: ALPHA }]);
+
+                expect(await l.ledger.resync(l.io)).toMatchObject({ converged: 0, deleted: 0, unchanged: 1 });
+            });
+
+            it('an unstamped hint that lands while the baseline read is in flight is not overwritten by that read', async () => {
+                const { MetadataMutationResyncLedger } = await import('./protocol-mutation-resync.js');
+                const rows = [row('action', NAME, BETA, 'c1')];
+                let release!: () => void;
+                const ledger = new MetadataMutationResyncLedger();
+                ledger.seed(() => new Promise((resolve) => { release = () => resolve(rows); }));
+                const events: MetadataMutationEvent[] = [];
+                const io = { readActiveRows: async () => rows, converge: async (evt: MetadataMutationEvent) => { events.push(evt); } };
+
+                // The hint names no package and arrives before the baseline holds the row.
+                ledger.touch({ type: 'action', name: NAME });
+                release();
+
+                expect(await ledger.resync(io)).toMatchObject({ rows: 1, converged: 1, unchanged: 0 });
+                expect(events.map((e) => e.packageId)).toEqual([BETA]);
+                expect(await ledger.resync(io)).toMatchObject({ converged: 0, unchanged: 1 });
+            });
+
+            it('an unstamped delete whose converge fails is kept and re-tried on the next resync', async () => {
+                const l = await ledgerOver([]);
+                await l.ledger.resync(l.io);
+                l.ledger.touch({ type: 'object', name: 'gizmo' });
+                l.state.fail = 1;
+                const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+                expect(await l.ledger.resync(l.io)).toMatchObject({ kept: 1, deleted: 0 });
+                expect(String(error.mock.calls[0]?.[0])).toContain('object/gizmo');
+                expect(String(error.mock.calls[0]?.[0])).not.toContain('package');
+
+                expect(await l.ledger.resync(l.io)).toMatchObject({ kept: 0, deleted: 1 });
+                expect(l.events).toEqual([{ type: 'object', name: 'gizmo', state: 'deleted', organizationId: null }]);
+            });
+
+            it('CONTROL — an unstamped hint matching a held entry marks that entry and adds no package-agnostic one', async () => {
+                const l = await ledgerOver([row('action', NAME, ALPHA, 'c1')]);
+                await l.ledger.resync(l.io);
+
+                l.ledger.touch({ type: 'action', name: NAME });
+                expect(await l.ledger.resync(l.io)).toMatchObject({ converged: 1, unchanged: 0 });
+
+                l.state.rows = [];
+                l.events.length = 0;
+                expect(await l.ledger.resync(l.io)).toMatchObject({ deleted: 1 });
+                // One delete, at the package it was converged on; no unstamped second one.
+                expect(l.events).toEqual([{ type: 'action', name: NAME, state: 'deleted', organizationId: null, packageId: ALPHA }]);
+            });
+        });
     });
 
     it('the writer stamps the package its write resolved, on the local event and the wire alike', async () => {
