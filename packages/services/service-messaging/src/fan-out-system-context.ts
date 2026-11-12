@@ -11,7 +11,10 @@
  * `RecipientResolver.resolveEmail` (`sys_user`).
  *
  * [#21908] Also by the rest of the fan-out: `RecipientResolver.resolveRole`
- * (`sys_member`), `resolveTeam` (`sys_team_member`) and `resolveOwnerOf` (the
+ * (`sys_member`), `resolveTeam` (`sys_team_member`) — and, since #32445,
+ * `resolveOrganizationMembers` (`sys_member` of the emitting organization,
+ * the `org:members` audience), all three through `memberUserIds`, projected
+ * to `user_id` — and `resolveOwnerOf` (the
  * named record, projected to `id` plus its owner fields — maintainer ruling
  * Q2), the email and SMS channels' recipient reads (`sys_user`: the address or
  * number, and the locale), `NotificationTemplateStore.load`
