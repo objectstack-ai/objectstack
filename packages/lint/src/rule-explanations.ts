@@ -64,13 +64,15 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
       'an inline grid column, a form section, a page binding, a flow node, a dataset or cube member, a ' +
       'dashboard widget, a formula, a validation, a hook or an action that names it; a row-level ' +
       'security predicate (`rowLevelSecurity[].using` / `.check`, or an object\'s `defaultRowScope`) that ' +
-      'filters or checks rows by it; the ' +
+      'filters or checks rows by it; a field permission\'s row condition (`fields[...].when`), judged on ' +
+      'the row a write touches; the ' +
       'line-position field an inline grid stamps on drag-reorder and orders its lines by; a declared field ' +
       'group (`group` naming one of the object\'s `fieldGroups`) that places it on the synthesized ' +
       'layout; or a seed or import mapping that matches on it (`externalId` / `upsertKey`). One such ' +
       'site is enough: a field that is only drawn is the ordinary state of most fields, not a defect.',
     'A CARRIER names a field without reading it, so it does not count: a translation label, a seed ' +
-      'value, an import-mapping target, a field-level permission grant, a flow that only WRITES it, an ' +
+      'value, an import-mapping target, a field-level permission grant (the `<object>.<field>` key of a ' +
+      'permission set\'s `fields`), a flow that only WRITES it, an ' +
       '`inlineColumns` entry on a relationship field that does not set `inlineEdit` (no grid is ' +
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
