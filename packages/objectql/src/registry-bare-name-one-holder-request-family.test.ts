@@ -19,11 +19,12 @@
  *    (`bindHooksToEngine`, `opts.functions`), which the runtime makes under the
  *    owner `app:<packageId>`.
  *
- * [ADR-0150 D2/D9, child B, #31697] the object-less `action` has narrowed to
- * the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the matrix below refuses
- * its second holder as a CO-OWNER of the first holder's namespace (a package
- * of namespace `alpha` that depends on `com.acme.alpha`), and an `api`'s as a
- * package of another namespace, as before. "the narrowing" pins what changed:
+ * [ADR-0150 D2/D9, child B, #31697, #31700] the object-less `action`, then the
+ * `api` and the function have narrowed to the namespace
+ * (`NAMESPACE_SCOPED_BARE_NAME_TYPES`): the matrix below refuses each one's
+ * second holder as a CO-OWNER of the first holder's namespace (a package of
+ * namespace `alpha` that depends on `com.acme.alpha`). The two "narrowing"
+ * sections pin what changed:
  * two namespaces' packages each hold the name, at every door and through the
  * cold boot, while a co-owner, a package with no namespace, the shareable
  * namespaces and a built-in name are still refused.
@@ -107,7 +108,7 @@ const pkg = (id: string, decl: Partial<Record<RequestType, string[]>> = {}, extr
 };
 
 /** Has `type`'s rule narrowed to the namespace (child B)? */
-const narrowed = (type: RequestType) => (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
+const narrowed = (type: RequestType | 'function') => (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
 
 /**
  * A co-owner of `holder`'s namespace: it declares the namespace and depends on
@@ -129,11 +130,11 @@ const coOwner = (holder: string, id: string, decl: Partial<Record<RequestType, s
  * narrowed to the namespace, a co-owner of alpha's namespace; otherwise a
  * package of its own namespace.
  */
-const rival = (type: RequestType, id: string, decl: Partial<Record<RequestType, string[]>> = {}, extra: Record<string, unknown> = {}) =>
+const rival = (type: RequestType | 'function', id: string, decl: Partial<Record<RequestType, string[]>> = {}, extra: Record<string, unknown> = {}) =>
   narrowed(type) ? coOwner('com.acme.alpha', id, decl, extra) : pkg(id, decl, extra);
 
 /** The rename a refusal of `id`'s `name` carries: its namespace prefixed. */
-const renameOf = (type: RequestType, id: string, name: string) => `${narrowed(type) ? 'alpha' : id.split('.').pop()}_${name}`;
+const renameOf = (type: RequestType | 'function', id: string, name: string) => `${narrowed(type) ? 'alpha' : id.split('.').pop()}_${name}`;
 
 const caught = async (fn: () => unknown): Promise<Refusal | undefined> => {
   try {
@@ -340,16 +341,15 @@ describe('action — only the object-less action holds its name', () => {
 describe('the narrowing — the object-less action holds one name per namespace (ADR-0150 D2/D9, child B, #31697)', () => {
   const name = 'shared_action';
 
-  it('the switch holds the object-less action, and an API has not narrowed', () => {
-    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('action');
-    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).not.toContain('api');
-    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).not.toContain('function');
-    expect(BARE_NAME_ONE_HOLDER_TYPES).toContain('action');
-    expect(bareNameHoldersMeet('action', 'alpha', 'beta')).toBe(false);
-    expect(bareNameHoldersMeet('action', 'alpha', 'alpha')).toBe(true);
-    expect(bareNameHoldersMeet('action', undefined, 'beta')).toBe(true);
-    expect(bareNameHoldersMeet('action', 'alpha', undefined)).toBe(true);
-    expect(bareNameHoldersMeet('api', 'alpha', 'beta')).toBe(true);
+  it('the switch holds the object-less action, and since #31700 the API and the function as well', () => {
+    for (const type of ['action', 'api', 'function'] as const) {
+      expect(NAMESPACE_SCOPED_BARE_NAME_TYPES, type).toContain(type);
+      expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
+      expect(bareNameHoldersMeet(type, 'alpha', 'beta'), type).toBe(false);
+      expect(bareNameHoldersMeet(type, 'alpha', 'alpha'), type).toBe(true);
+      expect(bareNameHoldersMeet(type, undefined, 'beta'), type).toBe(true);
+      expect(bareNameHoldersMeet(type, 'alpha', undefined), type).toBe(true);
+    }
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own item', async () => {
@@ -457,10 +457,87 @@ describe('the narrowing — the object-less action holds one name per namespace 
     }
   });
 
-  it('CONTROL — an API has not narrowed: a package of another namespace is still refused its name', async () => {
+});
+
+/**
+ * [#31700, ADR-0150 D2/D9, child B] The API and the engine's function hold
+ * one name per namespace, as the object-less action does above. Every reader
+ * of either resolves by `(package, name)` first: the `api` store and its
+ * qualified read (#32069), and a flow `script` node's function from the
+ * calling flow's package (#32073). On main both were refused here, naming the
+ * first holder.
+ */
+describe('the narrowing — the API and the function hold one name per namespace (ADR-0150 D2/D9, child B, #31700)', () => {
+  it('two packages of two namespaces each install an API name after the seal, and each holds its own item (BASE: the second was refused)', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { api: ['shared_api'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { api: ['shared_api'] }))).toBeUndefined();
+    expect(registry.getPackage('com.acme.beta')).toBeDefined();
+    const held = registry.listItems<{ _packageId?: string; label?: string; name?: string }>('api')
+      .filter((item) => item.name === 'shared_api')
+      .map((item) => [item._packageId, marker(item)]);
+    expect(held).toEqual([['com.acme.alpha', 'alpha api'], ['com.acme.beta', 'beta api']]);
+    expect(await caught(() => registry.registerItem('api', body('api', 'shared_api', 'beta'), 'name', 'com.acme.beta'))).toBeUndefined();
+  });
+
+  it('an API co-owner of the holder\'s namespace is still refused beside two namespaces\' holders, naming only its own namespace\'s holder', async () => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { api: ['shared_api'] }))).toBeUndefined();
-    expectRefusal(await register(pkg('com.acme.beta', { api: ['shared_api'] })), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_api');
+    expect(await register(pkg('com.acme.beta', { api: ['shared_api'] }))).toBeUndefined();
+    const err = await register(coOwner('com.acme.alpha', 'com.acme.gamma', { api: ['shared_api'] }));
+    expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, 'alpha_shared_api');
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+  });
+
+  it('a package with no namespace is still refused an API name beside a holder', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { api: ['shared_api'] }))).toBeUndefined();
+    const bare = pkg('com.acme.plain', { api: ['shared_api'] });
+    delete bare.namespace;
+    expectRefusal(await register(bare), 'com.acme.plain', { kind: 'package', packageId: 'com.acme.alpha' });
+  });
+
+  it('after the seal, two packages of two namespaces each bind a function of one name, and each keeps its own holder (BASE: the second bind was refused)', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    expect(await caught(() => bindFunctions(ql, 'com.acme.beta', ['shared_fn']))).toBeUndefined();
+    const holders = ql.functionHoldersOf('shared_fn');
+    expect([...holders.packageHolders].sort()).toEqual(['com.acme.alpha', 'com.acme.beta']);
+    expect(holders.packageItem('com.acme.alpha')?.packageId).toBe('app:com.acme.alpha');
+    expect(holders.packageItem('com.acme.beta')?.packageId).toBe('app:com.acme.beta');
+  });
+
+  it('a function co-owner of the holder\'s namespace is still refused at the bind, naming only its own namespace\'s holder', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    expect(await register(coOwner('com.acme.alpha', 'com.acme.gamma'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    const err = await caught(() => bindFunctions(ql, 'com.acme.gamma', ['shared_fn']));
+    expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, 'alpha_shared_fn');
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+  });
+
+  it('the cold boot of two namespaces\' API and function holders boots with no bare-name warning, and the seal reports no clash', async () => {
+    const { registry, bareNameWarnings } = await boot(
+      [pkg('com.acme.alpha', { api: ['shared_api'] }), pkg('com.acme.beta', { api: ['shared_api'] })],
+      [{ packageId: 'com.acme.alpha', names: ['shared_fn'] }, { packageId: 'com.acme.beta', names: ['shared_fn'] }],
+    );
+    expect(bareNameWarnings()).toEqual([]);
+    expect(registry.sealBareNameHolders().filter((c) => c.type === 'api' || c.type === 'function')).toEqual([]);
+  });
+
+  it('CONTROL — the owner-less (platform) function is still never judged at the bind beside two namespaces\' holders', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    expect(await caught(() => ql.bindHooks([], { functions: { shared_fn: fn('platform') } }))).toBeUndefined();
+    expect(ql.functionHoldersOf('shared_fn').platformItem?.()).toBeDefined();
   });
 });
 
@@ -471,15 +548,16 @@ describe('function — the engine function registry, through the hook binder\'s 
     expect(handlerOwnerPackageId('app:')).toBe('app:');
   });
 
-  it('after the cold boot, a bind bringing a function another package holds is refused naming both and the rename, and registers nothing', async () => {
+  it('after the cold boot, a bind bringing a function another package of its namespace holds is refused naming both and the rename, and registers nothing', async () => {
     const { ql, register } = await boot();
     expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
-    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    // [#31700] The function has narrowed to the namespace: the rival is a co-owner of alpha's.
+    expect(await register(rival('function', 'com.acme.beta'))).toBeUndefined();
     bindFunctions(ql, 'com.acme.alpha', ['shared_fn']);
     const served = ql.resolveFunction('shared_fn');
 
     const err = await caught(() => bindFunctions(ql, 'com.acme.beta', ['shared_fn', 'beta_only_fn']));
-    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_fn');
+    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, renameOf('function', 'com.acme.beta', 'shared_fn'));
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['function/shared_fn']);
     expect(err!.message).toContain('the function "shared_fn"');
     // Ahead of every registration: neither function of the refused bind is registered.
@@ -533,7 +611,8 @@ describe('function — the engine function registry, through the hook binder\'s 
   });
 
   describe('the cold boot of a deployment whose packages already bind one function name', () => {
-    const atBoot = () => [pkg('com.acme.alpha'), pkg('com.acme.beta')];
+    // [#31700] Two packages of one namespace: the function has narrowed to it.
+    const atBoot = () => [pkg('com.acme.alpha'), rival('function', 'com.acme.beta')];
     const binds = () => [
       { packageId: 'com.acme.alpha', names: ['shared_fn'] },
       { packageId: 'com.acme.beta', names: ['shared_fn'] },
@@ -547,7 +626,7 @@ describe('function — the engine function registry, through the hook binder\'s 
       expect(warnings[0]).toContain('package "com.acme.beta"');
       expect(warnings[0]).toContain('package "com.acme.alpha"');
       expect(warnings[0]).not.toContain('app:com.acme');
-      expect(warnings[0]).toContain('beta_shared_fn');
+      expect(warnings[0]).toContain(renameOf('function', 'com.acme.beta', 'shared_fn'));
       // Unchanged by the rule: the last-registered function is served.
       expect(ql.resolveFunctionEntry('shared_fn')?.packageId).toBe('app:com.acme.beta');
     });

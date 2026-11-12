@@ -437,9 +437,11 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
 /**
  * [ADR-0150 D3/D4, #32151] The in-memory store keeps one slot per
  * `(package, name)` for every type whose one-holder rule has narrowed to the
- * namespace — today `agent` and `skill` (objectql's
+ * namespace — `agent` and `skill` (objectql's
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`, #31701; objectql pins that set a subset
- * of `PACKAGE_SLOTTED_STORE_TYPES`). Two packages of two namespaces may each
+ * of `PACKAGE_SLOTTED_STORE_TYPES`), and [#31700] the picklist family's
+ * `picklist`, `mapping` and `dataset` (`api` has its own describe above, the
+ * object-less `action` its own file). Two packages of two namespaces may each
  * install such a name, and the artifact door registers every package body's
  * items here through `register(…, { notify: false })`, stamped by
  * `applyProtection` (`_packageId`). On main 45f0f81f the store was keyed by
@@ -448,7 +450,7 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
  * answered the survivor.
  */
 describe('the in-memory store keeps one slot per (package, name) for every namespace-scoped type (ADR-0150 D4, #32151)', () => {
-  const NAMESPACE_SCOPED = ['agent', 'skill'] as const;
+  const NAMESPACE_SCOPED = ['agent', 'skill', 'picklist', 'mapping', 'dataset'] as const;
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const shipped = (type: string, packageId: string, tag: string, envelope = false) => ({

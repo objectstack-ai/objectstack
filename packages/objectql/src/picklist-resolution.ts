@@ -247,11 +247,29 @@ export function describeUnresolvedPicklistReferences(
         + refusalSuffix(e.refusal),
     ),
   ];
+  // [ADR-0150 D3, #31700] A name the package-scoped resolver REFUSED is held,
+  // by more than one list or by none the referrer reaches: "no loaded package
+  // declares" would be false for it, and so would "declare the picklist". Each
+  // such line carries the refusal, every candidate named; the header and the
+  // remedy say what is true of both kinds.
+  const refused = [...unresolved, ...orphanExtensions].some((r) => r.refusal !== undefined);
+  if (!refused) {
+    return picklistMetadataError(
+      `${lines.length === 1 ? 'A picklist is named' : `${lines.length} picklist names are used`} `
+      + `that no loaded package declares: ${lines.join('; ')}. A field bound to a picklist takes its options `
+      + 'from that list and has none of its own, and an extension adds options to a list that must exist, so '
+      + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
+      + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
+    );
+  }
   return picklistMetadataError(
-    `${lines.length === 1 ? 'A picklist is named' : `${lines.length} picklist names are used`} `
-    + `that no loaded package declares: ${lines.join('; ')}. A field bound to a picklist takes its options `
-    + 'from that list and has none of its own, and an extension adds options to a list that must exist, so '
-    + 'neither can take effect until the list does. Declare the picklist (a `*.picklist.ts` file, or '
-    + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name.',
+    `${lines.length === 1 ? 'A picklist name resolves' : `${lines.length} picklist names resolve`} `
+    + `to no one list: ${lines.join('; ')}. A field bound to a picklist takes its options from that list and `
+    + 'has none of its own, and an extension adds options to one list, so neither can take effect until its '
+    + 'name means exactly one list. A name nothing declares: declare the picklist (a `*.picklist.ts` file, or '
+    + '`defineStack({ picklists })`) in the package or in one it depends on, or correct the name. A name whose '
+    + 'refusal names its holders: a field resolves from its own package and the packages it declares it depends '
+    + 'on, so make exactly one holder reachable from there; an extension\'s target is judged across the whole '
+    + 'environment, so extend a list whose name one package holds, or ask the holders to rename one of theirs.',
   );
 }

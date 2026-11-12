@@ -132,8 +132,17 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
- * `skill` first (#31701), then the object-less `action` (#31697). A type not
- * listed here keeps one package holder per deployment.
+ * `skill` first (#31701), then the object-less `action` (#31697), then the
+ * picklist family (#31700): `picklist`, `mapping` and `dataset`, the `api`
+ * and the engine's `function` registry. A type not listed here keeps one
+ * package holder per deployment.
+ *
+ * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
+ * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
+ * is the engine's: it keeps every holder per package itself (ADR-0150 D4's
+ * last row) and has no by-name metadata read, so the stores and the reads
+ * keyed on this list (`@objectstack/metadata`'s slotted store, the metadata
+ * protocol's fail-closed read) never meet it.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -144,6 +153,12 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'agent',
   'skill',
   'action',
+  // the picklist family (#31700)
+  'picklist',
+  'mapping',
+  'dataset',
+  'api',
+  'function',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

@@ -50,8 +50,8 @@
  * ## Which types
  *
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
- * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent` and
- * `skill` (#31701). Two packages of two namespaces may each install such a
+ * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`: `agent` and
+ * `skill` (#31701) first, every one of them since. Two packages of two namespaces may each install such a
  * name, so a store keyed by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
@@ -80,6 +80,15 @@
  * stamped with `_packageId`, the stack registrar (`AppPlugin`) likewise for
  * this type — so a read naming one package (`/meta/permission/NAME?package=`)
  * is served that package's grants, never the set registered last.
+ *
+ * `picklist`, `mapping` and `dataset` (#31700) join in the change that
+ * narrows their one-holder rule to the namespace, with `api` (already here)
+ * and the engine's functions (which are no metadata type: the engine keeps
+ * their holders per package itself). The artifact door registers each
+ * package's item stamped with `_packageId`, so two namespaces' same-named
+ * lists, mappings or datasets keep a slot each; a read naming no package of
+ * such a name answers D3's refusal naming both, never the one registered
+ * last.
  */
 
 import {
@@ -96,9 +105,12 @@ import { peelStoredEnvelope } from './stored-envelope.js';
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
  * then every namespace-scoped type (#32151, #31697; see "Which types" above),
- * then `permission` (#32162).
+ * then `permission` (#32162), then the picklist family's `picklist`,
+ * `mapping` and `dataset` (#31700).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'permission']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
+  'api', 'agent', 'skill', 'action', 'permission', 'picklist', 'mapping', 'dataset',
+]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
