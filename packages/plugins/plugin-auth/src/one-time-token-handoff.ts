@@ -152,10 +152,12 @@
  *
  * {@link answerOneTimeTokenHandoff} is the route's whole body, and the only
  * part of this module the package root publishes. AuthPlugin's own mount calls
- * it for its manager. A host that serves no AuthPlugin routes and forwards
- * `/api/v1/auth/*` to a kernel's `AuthManager` instead (a per-environment
- * kernel with no HTTP server of its own) calls it for the manager it forwards
- * to. Because the token is minted inside it, inside the challenge scope, such a
+ * it for its manager, on the host's app and on the private route table
+ * `AuthManager.handleRequest` answers through (#32637), where it declares that
+ * the table serves no sign-in page (`server: null`): a host that serves no
+ * AuthPlugin routes and forwards `/api/v1/auth/*` to a kernel's `AuthManager`
+ * (a per-environment kernel with no HTTP server of its own) is answered by
+ * that mount. A host may still call the export for the manager it forwards to. Because the token is minted inside it, inside the challenge scope, such a
  * host cannot mint the way the second paragraph above says fails closed. The
  * seams it is built from ({@link runOneTimeTokenHandoff},
  * {@link withHandoffChallenge}, {@link resolveHandoffSignInEntry} and
@@ -626,8 +628,15 @@ export interface OneTimeTokenHandoffManager {
 export interface OneTimeTokenHandoffServing {
   /** The path this server mounts the auth routes at, e.g. `/api/v1/auth`. */
   authMountPath: string;
-  /** The composed server, asked in-process whether it serves the sign-in page. */
-  server: { fetch(request: Request, env?: unknown): Response | Promise<Response> };
+  /**
+   * The composed server, asked in-process whether it serves the sign-in page;
+   * or `null`, the explicit declaration that this server serves none (the
+   * private route table `AuthManager.handleRequest` answers through: the host
+   * that forwarded the request owns its pages). With `null` nothing is asked,
+   * nothing is reported to {@link onUnserved}, and a signed-out page navigation
+   * is answered like any other refused caller.
+   */
+  server: { fetch(request: Request, env?: unknown): Response | Promise<Response> } | null;
   /** The transport's bindings `server.fetch` runs under. */
   serverEnv?: unknown;
   /** Told why this server serves no sign-in page; the caller says so once. */
@@ -660,17 +669,21 @@ export function answerOneTimeTokenHandoff(
         const api: any = await manager.getApi();
         return api.generateOneTimeToken({ headers });
       },
-      signInEntry: (headers) =>
-        resolveHandoffSignInEntry({
+      signInEntry: (headers) => {
+        // A server that declares it serves no sign-in page is not asked.
+        const server = serving.server;
+        if (server === null) return Promise.resolve(null);
+        return resolveHandoffSignInEntry({
           signInPageUrl: manager.getConsoleUrl('/login'),
           authBaseUrl: manager.getAuthIssuer(),
           authMountPath: serving.authMountPath,
           requestUrl: request.url,
           requestHost: headers.get('host'),
-          server: serving.server,
+          server,
           serverEnv: serving.serverEnv,
           onUnserved: serving.onUnserved,
-        }),
+        });
+      },
     },
     { queries: request.queries, headers: request.headers },
   );
