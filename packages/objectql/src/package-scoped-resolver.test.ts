@@ -540,6 +540,28 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
   });
 
+  it('unbound, beside a bundle addition of another package of the App → the one package holding the name, as `?package=X` reads it (contract review F1; BASE: the pair\'s own item)', () => {
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+    expect(templateOf(X, 'de-DE')).toBe('pair template');
+    expect(templateOf(Z, 'de-DE')).toBeUndefined();
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'de-DE')).toBeUndefined();
+  });
+
+  it('CONTROL — unbound, of the very locale a bundle addition of another package of the App ships → no package: the row may customize that package\'s member (never a guess)', () => {
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect(templateOf(X, 'fr-FR')).toBeUndefined();
+    expect(templateOf(Z, 'fr-FR')).toBe('zeta template');
+  });
+
   it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
     ship('page', 'home', X);
     pairRow('page', 'home', 'pair');
