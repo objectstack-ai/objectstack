@@ -162,6 +162,15 @@ describe('[#31699 F2] the upgrade report lists a pair member row two holders cou
     }]);
   });
 
+  it('[#32183] one of the two holders disabled: the row is still listed naming both (the report reads every holder)', async () => {
+    tpl(X);
+    tpl(Y);
+    pairRow();
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers.map((f) => f.candidates.map((c) => c.packageId)))
+      .toEqual([[X, Y]]);
+  });
+
   it('CONTROL: one holder of the pair, or a row that declares its base, is not listed', async () => {
     tpl(X);
     pairRow();
@@ -234,6 +243,15 @@ describe('[#31699] the upgrade report lists a package-less row two holders could
         ],
       },
     ]);
+  });
+
+  it('[#32183] one of the two holders disabled: the package-less row is still listed naming both (the report reads every holder)', async () => {
+    tpl(X);
+    tpl(Y);
+    envRow('row_fr', 'email_template', 'welcome', 'fr-FR');
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => c.packageId)))
+      .toEqual([[X, Y]]);
   });
 
   it('CONTROL: one holder, or a row bound to a package, is not listed', async () => {

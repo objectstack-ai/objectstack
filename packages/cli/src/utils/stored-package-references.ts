@@ -445,7 +445,10 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
       const pairId = row.package_id;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || typeof pairId !== 'string' || !isCustomizationPackage(pairId)) continue;
-      const owners = pairMemberOwners(pairId, registry.packageScopedHoldersOf(type, name) ?? [], installed, storedBody(row.metadata));
+      // [#32183] Every holder, a disabled package's included: the report is a
+      // durable judgment, so its listing never moves with a reversible disable.
+      const every = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+      const owners = pairMemberOwners(pairId, every, installed, storedBody(row.metadata));
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,
@@ -477,7 +480,7 @@ async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry:
       const { id, type, name } = row;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || (row.package_id !== null && row.package_id !== undefined && row.package_id !== '')) continue;
-      const owners = packageLessRowOwners(registry as never, type, name);
+      const owners = packageLessRowOwners(registry as never, type, name, { includeDisabledPackages: true });
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,

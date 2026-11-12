@@ -913,6 +913,24 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     });
   }
 
+  // [#32183, seat ruling A on the open question] The exact read judges the
+  // served holders: with the other holder disabled, the package-less row is
+  // the enabled holder's customization, served on its address; re-enabled,
+  // it is refused naming both again. Never a refusal naming the disabled one.
+  for (const type of ['agent', 'dashboard']) {
+    it(`[#32183] ${type}: the environment's item of a name two packages hold, one disabled, is the enabled holder's on its exact address; re-enabled, refused naming both`, async () => {
+      envItem(type, 'dup');
+      ship(type, 'dup', A);
+      ship(type, 'dup', B);
+      registry.disablePackage(B);
+      expect(labelOf(await protocol.getMetaItem({ type, name: 'dup', packageId: A } as never))).toBe(`env ${type}`);
+      registry.enablePackage(B);
+      const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'dup', packageId: A } as never));
+      expect([err.status, err.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    });
+  }
+
   for (const stamp of ['sys_metadata', '']) {
     it(`a package-less row hydrated into the registry (stamped ${JSON.stringify(stamp)}) is refused at both holders' exact addresses; with one holder it is served (contract review R2-A)`, async () => {
       registry.registerItem('agent', { name: 'dup', label: 'hydrated agent', _packageId: stamp, _provenance: 'org' }, 'name' as never);
