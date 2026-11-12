@@ -41,8 +41,6 @@ const probe = vi.hoisted(() => ({
   events: [] as string[],
   /** The list suspends once before it draws (a lazy chunk the route still loads). */
   suspend: null as null | { promise: Promise<void>; done: boolean },
-  /** On a phone the list answers its drawer link with the record page, as `ObjectView` does (objectstack#32750). */
-  phoneRedirect: false,
   /** The location as of the latest render. */
   where: '',
 }));
@@ -98,31 +96,6 @@ vi.mock('../../views/ObjectView', async () => {
   const { useSearchParams } = await import('react-router-dom');
   const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
   const { usePhoneViewport } = await import('../../hooks/usePhoneViewport');
-  const { useNavigate: useRouterNavigate, useLocation } = await import('react-router-dom');
-  const { useObjectViewRecordNavigation } = await import('../../views/objectViewRecordNavigation');
-  // The list's own navigation hook, as `ObjectView` calls it on a phone.
-  const PhoneRedirect = ({ objectDef }: { objectDef: unknown }) => {
-    const [searchParams, setSearchParams] = useSearchParams();
-    useObjectViewRecordNavigation({
-      activeView: { id: 'all', name: 'all', label: 'All accounts' } as never,
-      objectDef: objectDef as never,
-      objects: [] as never,
-      appName: 'crm',
-      viewId: undefined,
-      searchParams,
-      setSearchParams,
-      location: useLocation(),
-      navigate: useRouterNavigate(),
-      routerRootHref: '/',
-      servedViews: { views: [], objects: [] } as never,
-      viewLabel: (_object: string, _view: string, fallback: string) => fallback,
-      unlabelledViewText: 'Untitled view',
-      language: 'en',
-      recordOpenPreference: 'object' as never,
-      phone: true,
-    });
-    return null;
-  };
   return {
     ObjectView: ({ objects }: { objects: ReadonlyArray<unknown> }) => {
       if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
@@ -137,14 +110,7 @@ vi.mock('../../views/ObjectView', async () => {
       }, [recordId]);
       const stack = useRecordDrawerStack({ root });
       const phone = usePhoneViewport();
-      if (phone) {
-        return (
-          <>
-            {probe.phoneRedirect ? <PhoneRedirect objectDef={objects[0]} /> : null}
-            <div data-testid="list" />
-          </>
-        );
-      }
+      if (phone) return <div data-testid="list" />;
       return (
         <RecordStackDrawer
           stack={stack}
@@ -271,7 +237,6 @@ const RELATED_NEW = 'form=new&formObject=crm_contact&formLink=account%3Aa1';
 beforeEach(() => {
   probe.events.length = 0;
   probe.suspend = null;
-  probe.phoneRedirect = false;
   vi.clearAllMocks();
 });
 afterEach(cleanup);
@@ -335,44 +300,50 @@ describe('#32685 — a related-record form the URL opens over a record drawer is
 });
 
 /**
- * objectstack#32750 — on a phone the list answers the drawer link with the
- * record's page (objectstack#27058), and the related-record form the link
- * carries goes with it: the form opens over the record page and stays open,
- * as the same link opens it over the drawer on a desktop.
- * CONTROL: a drawer link with no form lands on the record page with no form.
+ * objectstack#32750 — on a phone the list answers a drawer link with the
+ * record's page (objectstack#27058), and carries the related-record form the
+ * link names onto it: `record/<id>?form=new&formObject=…&formLink=…`
+ * (`objectViewRecordNavigation.phonePush-29074.test.tsx` pins that redirect).
+ * Here, the page it lands on: the form opens over the record page and stays
+ * open, as the same link opens it over the drawer on a desktop.
+ * CONTROL: the record page with no form parameters draws no form.
+ *
+ * Mounted at the URL the redirect writes: in this harness a router
+ * transition from the list route to the record route never commits (measured
+ * on a desktop width too), so the redirect itself is pinned at the hook. The
+ * waits below are plain timers, not `act`: the record route keeps re-rendering
+ * under this harness's doubles, and `act` waits for that to settle.
  */
-describe('#32750 — on a phone the drawer link\'s related-record form stays open over the record page', () => {
+describe('#32750 — on a phone the related-record form a drawer link carries stays open over the record page', () => {
   const width = window.innerWidth;
   beforeEach(() => {
-    probe.phoneRedirect = true;
     Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
   });
   afterEach(() => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
   });
 
-  it('the record page carries the form, and the form is still open after the redirect settles', async () => {
-    mountAt(`/apps/crm/crm_account?recordId=a1&${RELATED_NEW}`);
+  it('the form opens over the record page and is still open after the page settles', async () => {
+    mountAt(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
     await screen.findByTestId('record-page', {}, { timeout: 5000 });
-    expect(probe.where).toBe(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
     const footer = await waitFor(() => {
       const found = document.querySelector('[data-testid="modal-form-footer"]');
       expect(found).not.toBeNull();
       return found!;
     }, { timeout: 5000 });
     // The card measured the form closing about half a second after it opened.
-    await act(() => new Promise((resolve) => setTimeout(resolve, 800)));
+    await new Promise((resolve) => setTimeout(resolve, 800));
     expect(footer.isConnected).toBe(true);
     expect(probe.events).not.toContain('form:false');
     expect(within(footer.closest('[role="dialog"]') as HTMLElement).getByRole('button', { name: 'Create' })).toBeEnabled();
     expect(probe.where).toBe(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
   });
 
-  it('CONTROL: a drawer link with no form lands on the record page with no search and no form', async () => {
-    mountAt('/apps/crm/crm_account?recordId=a1');
+  it('CONTROL: the record page with no form parameters draws no form', async () => {
+    mountAt('/apps/crm/crm_account/record/a1');
     await screen.findByTestId('record-page', {}, { timeout: 5000 });
-    expect(probe.where).toBe('/apps/crm/crm_account/record/a1');
-    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    await new Promise((resolve) => setTimeout(resolve, 300));
     expect(document.querySelector('[data-testid="modal-form-footer"]')).toBeNull();
+    expect(probe.where).toBe('/apps/crm/crm_account/record/a1');
   });
 });
