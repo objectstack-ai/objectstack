@@ -798,7 +798,8 @@ describe('[#32666] an object write that makes a field readonly is judged against
         delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
 
         // A label edit adds no conflict, so it publishes.
-        await stageDraft(protocol, 'object', { ...leaveRequest(), label: 'Leave Request (renamed)' });
+        const renamed = { ...leaveRequest(), label: 'Leave Request (renamed)' };
+        await stageDraft(protocol, 'object', renamed);
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
         expect(res.failed, JSON.stringify(res.failed)).toEqual([]);
