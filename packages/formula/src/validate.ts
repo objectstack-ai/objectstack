@@ -677,6 +677,8 @@ function dateTextIssue(
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
   const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
+  // [#32595] A call the date text cannot take faults that typing too, so it is
+  // asked only where the date-text check faulted on something but arithmetic.
   if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
   const reference = verdict.field
     ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
@@ -703,9 +705,7 @@ function dateTextIssue(
         ),
     };
   }
-  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') {
-    return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
-  }
+  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
   return {
     severity: 'error',
     issue: refusal(
