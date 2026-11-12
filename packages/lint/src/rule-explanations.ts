@@ -1466,6 +1466,13 @@ const FLOW_UPDATE_READONLY_FIELD_EXPLANATION: RuleExplanation = {
       'remove the field from the node. Seeding a readonly column at create time is a SYSTEM act, so a ' +
       '`create_record` has a third route: stamp the value in a `beforeInsert` hook on the object, because a ' +
       'hook-assigned key is the hook\'s write, not a caller-supplied one, and survives the strip.',
+    'Elevation has one limit where a person starts the flow. A button, an action, an endpoint or the ' +
+      'trigger route does not let a user start an `autolaunched`, `record_change` or `schedule` flow ' +
+      'declared `runAs: \'system\'`: it answers 403 `PERMISSION_DENIED`, because those types start on ' +
+      'their own trigger or from a parent flow\'s `subflow` node. So for a flow a user starts from a ' +
+      'button, the elevated routes are a `screen` or `api` flow declared `runAs: \'system\'` (it admits ' +
+      'whoever holds the capabilities its `requiredPermissions` names), or a user-run flow whose ' +
+      '`subflow` node calls the elevated flow, which then writes as the system.',
   ],
 };
 
