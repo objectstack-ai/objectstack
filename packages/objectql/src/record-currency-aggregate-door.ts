@@ -445,7 +445,8 @@ export interface RecordCurrencyFollowRegistryView {
 }
 
 /**
- * [ADR-0144 D2 and D6, amended] The refusal for an object about to register,
+ * [ADR-0144 D2 and D6, amended] The refusal for an object about to register
+ * (or one of a unit just registered, asked with the whole unit in the view),
  * or `undefined`. Two pairs, each judged at whichever registration completes
  * it; a pair with an end not registered yet is no verdict:
  *
@@ -471,14 +472,27 @@ export interface RecordCurrencyFollowRegistryView {
  * `defineStack` skips it. The parent's fields at its own registration are its
  * body with its registered extensions' fields under it.
  *
- * The registry asks this only of a single save or publish that relays the
- * refusal to its author (`SchemaRegistry.objectRegistrationRefusal`'s
- * `againstRegistry`), and only once the cold boot has ended (the AGENTS.md
- * startup-registry rule): during the boot an `extend` contribution or the
- * other end can still register and contradict a verdict, and a stored row is
- * hydrated in no particular order. A multi-registration unit after the boot
- * (`registerApp`, whose `objectExtensions` register after its `objects`, and
- * the batch writers) has the same hazard, so `registerObject` never asks it.
+ * The registry asks this of a unit that is whole, and only once the cold boot
+ * has ended (the AGENTS.md startup-registry rule): during the boot an `extend`
+ * contribution or the other end can still register and contradict a verdict,
+ * and a stored row is hydrated in no particular order. A multi-registration
+ * unit after the boot — `registerApp`, whose `objectExtensions` register
+ * after its `objects`; the packages of one artifact and its residual; a batch
+ * writer's rows — has the same hazard at each of its registrations, so
+ * `registerObject` never asks it. Who does:
+ *
+ * - a single save or publish, of its one body before it registers
+ *   (`SchemaRegistry.objectRegistrationRefusal`'s `againstRegistry`), which
+ *   relays the refusal to its author;
+ * - a batch writer, of each row once all its rows are registered (the same
+ *   option, from `@objectstack/metadata-protocol`'s
+ *   `batch-object-registration.ts`), which answers the refused row in the
+ *   batch's own result;
+ * - a registration run on a running server — an install, an upgrade, a
+ *   reload — of every object layer it registered, once at the end of the
+ *   outermost run (`SchemaRegistry.restoringOnRefusal`). The refusal is
+ *   thrown with the run put back: the install report answers it 422, and a
+ *   reload keeps the definitions that served.
  */
 export function recordCurrencyFollowRefusal(
   incoming: ObjectLike,

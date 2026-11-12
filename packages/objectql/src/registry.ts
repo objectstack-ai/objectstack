@@ -3797,10 +3797,16 @@ function withoutField(schema: ServiceObject, name: string): ServiceObject {
  * write to it. An entry the run never writes is never recorded, so a restore
  * puts back exactly the entries the run touched and nothing else — another
  * package's entries and a tenant's layers are left as they are.
+ *
+ * It also holds what the run REGISTERED: each object layer, as its
+ * registration's doors judged it, so the run's end can ask of the whole unit
+ * the one question no single registration can
+ * ({@link SchemaRegistry.restoringOnRefusal}).
  */
 class RegistrationRestorePoint {
   private readonly touched = new Set<string>();
-  private readonly undo: Array<() => void> = [];
+  private readonly undo: Array<{ readonly key: string; readonly putBack: () => void }> = [];
+  private readonly registered = new Map<string, RunRegisteredObject>();
 
   /**
    * Record `key` before its first write in this run. `capture` reads the
@@ -3809,13 +3815,57 @@ class RegistrationRestorePoint {
   note(key: string, capture: () => () => void): void {
     if (this.touched.has(key)) return;
     this.touched.add(key);
-    this.undo.push(capture());
+    this.undo.push({ key, putBack: capture() });
+  }
+
+  /**
+   * Record an object layer the run registered, under the slot it fills (one
+   * owner and one overlay per object, one extension per package): a layer the
+   * run registers again replaces the one it registered before, as it does in
+   * the registry.
+   */
+  noteRegisteredObject(slot: string, layer: RunRegisteredObject): void {
+    this.registered.delete(slot);
+    this.registered.set(slot, layer);
+  }
+
+  /** The object layers the run registered, in registration order. */
+  registeredObjects(): RunRegisteredObject[] {
+    return [...this.registered.values()];
+  }
+
+  /**
+   * Take over a nested run that ended without a refusal: its entries become
+   * this run's, so a refusal later in this run puts them back too. An entry
+   * this run wrote first keeps this run's record of it (what it held before
+   * the outer run), and what remains is exactly what one run recording every
+   * write of both would hold, in the same order.
+   */
+  adopt(nested: RegistrationRestorePoint): void {
+    for (const entry of nested.undo) {
+      if (this.touched.has(entry.key)) continue;
+      this.touched.add(entry.key);
+      this.undo.push(entry);
+    }
+    for (const [slot, layer] of nested.registered) this.noteRegisteredObject(slot, layer);
   }
 
   /** Put every recorded entry back, the last one written first. */
   restore(): void {
-    for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
+    for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i].putBack();
   }
+}
+
+/**
+ * One object layer a registration run registered: the body its registration's
+ * doors judged, and the contributor it became — the registry's own entry, so
+ * the run's end can tell a layer a later write of the run took out again, and
+ * reads the kind the layer holds by then.
+ */
+interface RunRegisteredObject {
+  readonly fqn: string;
+  readonly schema: ServiceObject;
+  readonly contributor: ObjectContributor;
 }
 
 /**
@@ -4229,12 +4279,27 @@ export class SchemaRegistry {
    * {@link unregisterObject} and the overlay removals are never journaled.
    * Synchronous by contract: `register` must not return a promise, so no
    * other caller's write can land between the run's writes and its restore.
-   * A nested call joins the run that is already open: the engine's `manifest`
-   * service registers every package of one artifact (and its residual) in ONE
-   * run, so a refusal of any of them puts back all of them.
+   *
+   * A nested call is part of the run that is already open: the engine's
+   * `manifest` service registers every package of one artifact (and its
+   * residual) in ONE run, so a refusal of any of them puts back all of them.
+   * The nested run puts back its own writes first and throws; when nothing in
+   * the open run catches that, the open run puts back the rest, so what is
+   * left is the same. A caller that does catch it (a reload skipping one
+   * package it could not re-register) goes on with the open run as it stood
+   * before that package. A nested run that ends without a refusal hands its
+   * record to the open run.
+   *
+   * [ADR-0144 D2 and D6, amended] Once the cold boot has sealed the registry,
+   * the OUTERMOST run ends by asking the record-currency follow door of every
+   * object layer it registered, against the registry the whole run leaves
+   * ({@link recordCurrencyFollowRefusalOfRun}). A refusal is thrown from
+   * inside the run, so the run is put back like any other refused one. A
+   * nested run never asks: its unit is smaller than the unit being
+   * registered, and a pair a later member completes would be refused.
    */
   restoringOnRefusal<T>(register: () => T): T {
-    if (this.restorePoint) return register();
+    const open = this.restorePoint;
     const point = new RegistrationRestorePoint();
     this.restorePoint = point;
     try {
@@ -4242,14 +4307,64 @@ export class SchemaRegistry {
       if (result instanceof Promise) {
         throw new TypeError('[Registry] restoringOnRefusal takes a synchronous registration; it was handed one that returned a promise.');
       }
+      if (open) {
+        open.adopt(point);
+      } else {
+        const follow = this.recordCurrencyFollowRefusalOfRun(point);
+        if (follow) throw follow;
+      }
       return result;
     } catch (err) {
       point.restore();
       this.invalidateAll();
       throw err;
     } finally {
-      this.restorePoint = undefined;
+      this.restorePoint = open;
     }
+  }
+
+  /**
+   * [ADR-0144 D2 and D6, amended] The record-currency follow door, asked of
+   * one whole registration run at its end: the refusal of the first object
+   * layer the run registered that the door refuses, or `undefined`.
+   *
+   * A single save asks the door before its one body registers
+   * ({@link objectRegistrationRefusal}'s `againstRegistry`). A run registers
+   * several, in an order a later one can still complete — a package's
+   * `objectExtensions` after its `objects`, a later package of the artifact,
+   * its residual, on a reload the new version of an object an earlier body
+   * follows — so no registration inside it can ask. Its end can: each layer is
+   * asked exactly as a single save of it would be, with the registry holding
+   * the whole run. A pair with an end outside the run is judged against the
+   * object that is registered, as a single save judges it.
+   *
+   * ⛔ Asked only of a layer the served object reads. An owner under a
+   * tenant's overlay is not one: the overlay's body is the base that is
+   * served ({@link resolveObject}), the run did not register it, and asking
+   * the owner beneath it would refuse a package whose tenant added the very
+   * code field a child follows. Nor is a layer a later write of the run took
+   * out again (the same package registered twice).
+   *
+   * Asked only once the cold boot has sealed the registry, for the reason the
+   * single save's question is: before that an `extend` contribution or the
+   * other end can still register (AGENTS.md, startup registry reads). D6's
+   * roll-up half is not asked again: {@link registerObject} asked it of every
+   * layer as it registered.
+   */
+  private recordCurrencyFollowRefusalOfRun(point: RegistrationRestorePoint): Error | undefined {
+    if (!this.bareNameHoldersAreSealed) return undefined;
+    const layers = point.registeredObjects();
+    if (layers.length === 0) return undefined;
+    // One read for the whole question: nothing registers while it is asked.
+    const all = this.getAllObjects();
+    for (const { fqn, schema, contributor } of layers) {
+      const sitting = this.objectContributors.get(fqn);
+      if (!sitting?.includes(contributor)) continue;
+      if (contributor.ownership === 'own' && sitting.some((c) => c.ownership === 'overlay')) continue;
+      const refusal = this.recordCurrencyFollowRefusalOf(schema, contributor.ownership, () => all);
+      if (refusal) return refusal;
+    }
+    return undefined;
   }
 
   /**
@@ -5317,9 +5432,10 @@ export class SchemaRegistry {
    * it refuses a draft whose sibling in the same batch takes the child amount
    * out of record-currency mode, and it passes one whose sibling completes the
    * pair. D6's door stays the registration's own question, and the follow
-   * door is asked nowhere else: both are asked here only for a single save
-   * or publish that names `againstRegistry` on a sealed registry (see that
-   * option). The single-owner rule is
+   * door is no registration's: both are asked here only of a caller that
+   * names `againstRegistry` on a sealed registry (see that option), and the
+   * follow door is asked besides of a whole registration run at its end
+   * ({@link restoringOnRefusal}). The single-owner rule is
    * the protocol's (`classifyObjectContribution`), and a code package's action
    * parse never judges a tenant-authored body.
    */
@@ -5329,22 +5445,32 @@ export class SchemaRegistry {
     ownership: ObjectOwnership = 'own',
     options: {
       /**
-       * [ADR-0144 D2 and D6, amended] The caller is a SINGLE save or publish
-       * that makes the body live in the same breath and relays the refusal to
-       * its author (the producers are enumerated in `@objectstack/metadata-protocol`'s
-       * `registry-question.ts`; not a batch publish, an install or a migration
-       * pass): no sibling of a batch can still change the other end of a pair,
-       * so the doors that read the registry's other objects are asked too —
-       * D6's roll-up half and its follow door — once the cold boot has sealed
-       * the registry. A refused save is then answered with the door's own
-       * envelope and stores nothing, instead of being stored and refused,
-       * logged, at the write-through.
+       * [ADR-0144 D2 and D6, amended] The caller asks about a body whose unit
+       * is whole, so nothing it registers with can still change the other end
+       * of a pair, and it relays the refusal to its author. Two callers are:
+       * a SINGLE save or publish that makes the body live in the same breath
+       * (the producers are enumerated in `@objectstack/metadata-protocol`'s
+       * `registry-question.ts`), and a batch writer — a package duplicate, an
+       * unmanaged import, a package publish, the stored-metadata migration
+       * pass — asking of each row once all its rows are registered
+       * (`batch-object-registration.ts`, which answers a refused row in the
+       * batch's own result). The doors that read the registry's other objects
+       * are then asked too — D6's roll-up half and its follow door — once the
+       * cold boot has sealed the registry. A refused save is answered with
+       * the door's own envelope and stores nothing, instead of being stored
+       * and refused, logged, at the write-through. ⛔ Not for a row asked
+       * before its batch has registered: a later sibling can still complete
+       * the pair (#29673).
        *
-       * The follow door is asked ONLY under this option (seat ruling on the
-       * contract review of PR #32368): {@link registerObject} never asks it,
-       * so the boot, hydration, `registerApp` (install and reload, whose
-       * `objectExtensions` register after its `objects`), the batch writers
-       * and a package publish register the follow pair exactly as before.
+       * The follow door has two askers, and {@link registerObject} is neither
+       * (seat ruling on the contract review of PR #32368): this option, and
+       * the end of a registration run on a sealed registry
+       * ({@link restoringOnRefusal}) — a running install or reload, which
+       * registers a package's `objectExtensions` after its `objects` and the
+       * packages of an artifact one after another, and hears the refusal as
+       * a thrown error with the run put back. The cold boot, the stored-row
+       * hydration and every other bare `registerObject` register the follow
+       * pair exactly as before.
        */
       againstRegistry?: boolean;
     } = {},
@@ -5360,8 +5486,10 @@ export class SchemaRegistry {
    * registration throws: the refusal, or the body to register (an `extend`
    * body re-keyed to the object it extends). `bodyOnly` skips the doors
    * that read the registry's other objects, and `againstRegistry` (a sealed
-   * registry's single save or publish) is the only way the follow door is
-   * asked (see {@link objectRegistrationRefusal}).
+   * registry asked about a body whose unit is whole) is the only way these
+   * doors ask the follow door (see {@link objectRegistrationRefusal}); a
+   * registration run asks it of every body it registered, at its end
+   * ({@link restoringOnRefusal}).
    */
   private judgeRegistrationDoors(
     schema: ServiceObject,
@@ -5439,36 +5567,54 @@ export class SchemaRegistry {
     // following amount whose parent holds no code field under that name, and a
     // `record` roll-up over a child amount that follows nothing — the halves
     // `defineStack` judges where a stack holds both objects, for the
-    // single-object save that holds one. Asked only of a single save or
-    // publish that relays the refusal (`againstRegistry`, which
+    // single-object save that holds one. Asked here only of a caller whose
+    // unit is whole and who relays the refusal (`againstRegistry`, which
     // {@link objectRegistrationRefusal} grants only once the cold boot has
     // sealed the registry): before the seal an `extend` contribution or the
     // other end can still register and contradict the verdict (AGENTS.md,
     // startup registry reads), and a multi-registration unit after it —
-    // `registerApp`'s objects before its `objectExtensions`, a batch writer's
-    // rows in its own order — has the same hazard and hears a refusal only as
-    // a log line. So `registerObject` registers the follow pair as before.
+    // `registerApp`'s objects before its `objectExtensions`, the packages of
+    // one artifact, a batch writer's rows in its own order — has the same
+    // hazard at each of its registrations. So `registerObject` never asks
+    // it. The unit does, once it is whole: a batch writer through this
+    // option, a registration run at its end
+    // ({@link recordCurrencyFollowRefusalOfRun}).
     if (opts.againstRegistry === true && this.bareNameHoldersAreSealed) {
-      const recordCurrencyFollow = recordCurrencyFollowRefusal(schema, {
-        lookup: (name) => this.getObject(name),
-        all: () => this.getAllObjects(),
-        extensionFieldsOf: (name) => {
-          const fqn = this.resolveObjectKey(name);
-          // As the served fold reads the parent ({@link resolveObject}): a
-          // disabled package's extension is withheld, so both ends of the pair
-          // read one parent.
-          const extensions = fqn === undefined
-            ? []
-            : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend' && !this.isPackageDisabled(c.packageId));
-          return extensions.length === 0
-            ? undefined
-            : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));
-        },
-        partial: ownership === 'extend',
-      });
+      const recordCurrencyFollow = this.recordCurrencyFollowRefusalOf(schema, ownership);
       if (recordCurrencyFollow) return { refusal: recordCurrencyFollow };
     }
     return { schema };
+  }
+
+  /**
+   * [ADR-0144 D2 and D6, amended] The follow door's question of one body, as
+   * `ownership`, against the registry as it stands: the one copy a single
+   * save ({@link judgeRegistrationDoors}) and a registration run
+   * ({@link recordCurrencyFollowRefusalOfRun}) ask. `all` answers the
+   * registered objects; a caller asking of several bodies reads them once.
+   */
+  private recordCurrencyFollowRefusalOf(
+    schema: ServiceObject,
+    ownership: ObjectOwnership,
+    all: () => readonly ServiceObject[] = () => this.getAllObjects(),
+  ): Error | undefined {
+    return recordCurrencyFollowRefusal(schema, {
+      lookup: (name) => this.getObject(name),
+      all,
+      extensionFieldsOf: (name) => {
+        const fqn = this.resolveObjectKey(name);
+        // As the served fold reads the parent ({@link resolveObject}): a
+        // disabled package's extension is withheld, so both ends of the pair
+        // read one parent.
+        const extensions = fqn === undefined
+          ? []
+          : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend' && !this.isPackageDisabled(c.packageId));
+        return extensions.length === 0
+          ? undefined
+          : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));
+      },
+      partial: ownership === 'extend',
+    });
   }
 
   /**
@@ -5517,6 +5663,10 @@ export class SchemaRegistry {
     const door = this.judgeRegistrationDoors(schema, packageId, ownership);
     if ('refusal' in door) throw door.refusal;
     schema = door.schema;
+    // The body as the doors judged it, before anything below materializes it:
+    // what an open registration run is asked about at its end (below, where
+    // the layer is stored).
+    const judged = schema;
 
     // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] After the
     // boot sealed the picklist vocabulary, a packaged body registered on its
@@ -5751,6 +5901,15 @@ export class SchemaRegistry {
       definition: { ...schema, name: fqn }, // Store with FQN as name
     };
     contributors.push(contributor);
+    // [ADR-0144 D2 and D6, amended] …and told to the open registration run,
+    // under the slot the layer just filled (the replacement rules above: one
+    // owner, one overlay, one extension per package), so the run's end asks
+    // the record-currency follow door of it with the whole run registered
+    // ({@link restoringOnRefusal}). Outside a run nothing is recorded.
+    this.restorePoint?.noteRegisteredObject(
+      `${fqn}\u0000${ownership}${ownership === 'extend' ? `\u0000${packageId ?? ''}` : ''}`,
+      { fqn, schema: judged, contributor },
+    );
 
     // Sort by priority (ascending: lower priority applied first)
     contributors.sort((a, b) => a.priority - b.priority);
