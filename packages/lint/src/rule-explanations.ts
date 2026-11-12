@@ -4090,6 +4090,11 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'whole-set figure (`count_unique` over a multi-select counts distinct lists); once the set ' +
       'outgrows the page or the view is grouped, that figure becomes the page\'s or no group at all, ' +
       'so the declaration is refused whatever the row count.',
+    'An `object-grid` page component\'s `properties.columns` carry the same column entry, and a paged ' +
+      'grid asks the same footer whole-set query of their summaries, so a grid column\'s `summary` is ' +
+      'judged the same way, under this id, and refused when the page is saved. The grid is bound by its ' +
+      '`dataSource.object`, else `properties.objectName`; its grouped header numbers come from its ' +
+      '`aggregations` (`grid-aggregation-field-type-refused`), not from the column summaries.',
     AGGREGATE_PAIR_ROWS,
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
       'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
