@@ -441,10 +441,10 @@ describe('[#32148] SCIM still refuses with 409 when any condition fails', () => 
       const h = await boot();
       const facts = c.facts(`refuse${i}`);
       const userId = await seedSsoAccount(h, facts);
-      // The judge names THIS fixture's one cause — the 409 below is not some other condition's.
+      await expectRefused(h, userId, facts.email, await h.send(scimRequest(h.token, 'POST', '/Users', createBody(facts.email))));
+      // The judge names THIS fixture's one cause — the 409 above is not some other condition's.
       const verdict = await judgeScimSsoAdoption(h.engine as never, { email: facts.email, organizationId: ORG });
       expect(verdict).toEqual({ adopt: false, reason: c.reason });
-      await expectRefused(h, userId, facts.email, await h.send(scimRequest(h.token, 'POST', '/Users', createBody(facts.email))));
     });
   }
 
@@ -462,10 +462,10 @@ describe('[#32148] SCIM still refuses with 409 when any condition fails', () => 
       SYSTEM,
     );
     await linkAccount(h, user.id, PROVIDER);
-    const verdict = await judgeScimSsoAdoption(h.engine as never, { email: facts.email, organizationId: ORG });
-    expect(verdict).toEqual({ adopt: false, reason: 'held_by_scim' });
     await expectRefused(h, user.id, facts.email, await h.send(scimRequest(h.token, 'POST', '/Users', createBody(facts.email))));
     expect(await scimUsersOf(h, user.id)).toEqual([{ connection_id: OTHER_CONNECTION }]);
+    const verdict = await judgeScimSsoAdoption(h.engine as never, { email: facts.email, organizationId: ORG });
+    expect(verdict).toEqual({ adopt: false, reason: 'held_by_scim' });
   });
 
   it('a create for an address no account holds still creates (the rule only ever links or refuses)', async () => {
