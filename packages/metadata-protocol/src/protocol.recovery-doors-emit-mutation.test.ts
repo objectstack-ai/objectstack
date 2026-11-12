@@ -355,7 +355,7 @@ describe('[#14179] positive control: an already-emitting door reaches this subsc
         });
 
         expect(seen).toEqual([
-            { type: 'object', name: 'ticket', state: 'active', organizationId: null },
+            { type: 'object', name: 'ticket', state: 'active', organizationId: null, packageId: PKG },
         ]);
     });
 });
@@ -379,7 +379,7 @@ describe('[#14179] door 1 — rollbackMetaItem', () => {
 
         expect(res.success).toBe(true);
         expect(seen).toEqual([
-            { type: 'object', name: 'ticket', state: 'active', organizationId: null },
+            { type: 'object', name: 'ticket', state: 'active', organizationId: null, packageId: PKG },
         ]);
     });
 
@@ -422,7 +422,7 @@ describe('[#14179] door 2 — revertCommit', () => {
         expect(res.revertedCount).toBe(1);
         expect(res.reverted[0].action).toBe('restored');
         expect(seen).toEqual([
-            { type: 'object', name: 'ticket', state: 'active', organizationId: null },
+            { type: 'object', name: 'ticket', state: 'active', organizationId: null, packageId: PKG },
         ]);
     });
 
@@ -441,7 +441,7 @@ describe('[#14179] door 2 — revertCommit', () => {
         expect(res.revertedCount).toBe(1);
         expect(res.reverted[0].action).toBe('removed');
         expect(seen).toEqual([
-            { type: 'object', name: 'ticket', state: 'deleted', organizationId: null },
+            { type: 'object', name: 'ticket', state: 'deleted', organizationId: null, packageId: PKG },
         ]);
     });
 
@@ -469,8 +469,8 @@ describe('[#14179] door 2 — revertCommit', () => {
 
         expect(res.revertedCount).toBe(2);
         expect(seen).toEqual([
-            { type: 'object', name: 'invoice', state: 'deleted', organizationId: null },
-            { type: 'object', name: 'ticket', state: 'active', organizationId: null },
+            { type: 'object', name: 'invoice', state: 'deleted', organizationId: null, packageId: PKG },
+            { type: 'object', name: 'ticket', state: 'active', organizationId: null, packageId: PKG },
         ]);
     });
 });
@@ -506,7 +506,7 @@ describe('[#14179] door 3 — deleteMetaItem’s legacy raw-engine exit', () => 
         // narrating a no-op.
         expect(rows.size).toBe(0);
         expect(seen).toEqual([
-            { type: 'api', name: 'legacy_endpoint', state: 'deleted', organizationId: null },
+            { type: 'api', name: 'legacy_endpoint', state: 'deleted', organizationId: null, packageId: null },
         ]);
     });
 
@@ -642,7 +642,7 @@ describe('[#14179] the row-absent exits stay silent', () => {
         });
 
         expect(seen).toEqual([
-            { type: 'object', name: 'ticket', state: 'draft', organizationId: null },
+            { type: 'object', name: 'ticket', state: 'draft', organizationId: null, packageId: PKG },
         ]);
     });
 });

@@ -654,7 +654,7 @@ describe('[#13609] the read door under measurement', () => {
         expect(published).toHaveLength(1);
         expect(published[0].channel).toBe(METADATA_MUTATION_CLUSTER_CHANNEL);
         expect(published[0].payload.event).toEqual({
-            type: 'datasource', name: 'billing_db', state: 'deleted', organizationId: null,
+            type: 'datasource', name: 'billing_db', state: 'deleted', organizationId: null, packageId: null,
         });
     });
 

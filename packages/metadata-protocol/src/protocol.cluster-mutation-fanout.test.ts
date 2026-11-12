@@ -35,7 +35,7 @@
  * from the shipped defect.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 // `@objectstack/lint` is reached through the save door's author-time gate, a
 // dynamic `import()` (`metadata-diagnostics.ts`). Paid here, at collection, so no
 // case's `testTimeout` window pays that first load
@@ -48,6 +48,7 @@ import {
     type ClusterMetadataMutationPayload,
     type MetadataMutationEvent,
 } from './protocol.js';
+import { HEAL_BINDING_UNKNOWN } from './protocol-heal-binding.js';
 
 interface Row {
     id: string;
@@ -353,11 +354,13 @@ describe('[#13331] the payload is a signal, never content', () => {
         expect(payload.originNode).toBe('node-a');
         // Address-only: the ruled contract (2026-09-01) — a peer must re-read
         // its own DB, so the wire must not offer it anything else to trust.
+        // [#32451, ADR-0150 D4] The row's package is part of its address:
+        // `null` here, the object's row is bound to no package.
         expect(Object.keys(payload.event).sort()).toEqual(
-            ['name', 'organizationId', 'state', 'type'],
+            ['name', 'organizationId', 'packageId', 'state', 'type'],
         );
         expect(payload.event).toEqual({
-            type: 'object', name: 'gadget', state: 'active', organizationId: null,
+            type: 'object', name: 'gadget', state: 'active', organizationId: null, packageId: null,
         });
     });
 
@@ -488,7 +491,7 @@ describe('[#13331] listener replay — boot-cached consumers hear remote mutatio
         await vi.waitFor(() => expect(peerSeen).toHaveLength(1));
 
         expect(peerSeen[0]).toEqual({
-            type: 'object', name: 'gadget', state: 'active', organizationId: null,
+            type: 'object', name: 'gadget', state: 'active', organizationId: null, packageId: null,
         });
         // The writer's listeners heard the LOCAL emit exactly once — the
         // remote replay stays local to the receiving node (no echo).
@@ -695,5 +698,228 @@ describe('[#31722] cluster.resync — the peer re-converges what a lost hint wou
         await expect(solo.protocol.resyncMetadataMutationPubSub()).resolves.toBeUndefined();
         expect(solo.registeredObjects).toEqual(['gadget']);
         expect(solo.unregisteredObjects).toEqual([]);
+    });
+});
+
+/**
+ * [#32451, ADR-0150 D4; epic ruling 6819919065] The signal names the row's
+ * package, and a peer converging a type stored per `(package, name)`
+ * (`PACKAGE_SLOTTED_STORE_TYPES`, `action` here) reads THAT package's row.
+ *
+ * Observed on the PEER's own decisions: the binding its write-through registers
+ * under and the body it registers, or the package its heal is handed. Both are
+ * spied on the peer's protocol and stubbed, so nothing below depends on what
+ * this file's recording registry does with a non-object type. The real
+ * registry's exact-address answers, step by step on two replicas, are pinned in
+ * `@objectstack/objectql`'s `protocol-cluster-signal-package.test.ts`.
+ *
+ * Measured at #32447's head `45f80780` before the change: the peer read the
+ * first row the store returned whatever package the writer wrote, so every
+ * case that names `beta` below registered `alpha`'s body; an unstamped signal
+ * over two packages' rows converged on that first row; and a heal was always
+ * handed `HEAL_BINDING_UNKNOWN`.
+ */
+describe('[#32451] the peer converges a slotted item at the package the signal names (ADR-0150 D4)', () => {
+    const ALPHA = 'com.acme.alpha';
+    const BETA = 'com.acme.beta';
+    const NAME = 'digest';
+    const actionRow = (packageId: string | null, label: string, checksum = `sha256:${label}`): Row => ({
+        id: `row_${packageId ?? 'none'}`,
+        type: 'action',
+        name: NAME,
+        organization_id: null,
+        package_id: packageId,
+        state: 'active',
+        checksum,
+        metadata: JSON.stringify({ name: NAME, label, type: 'script', target: `${label}_impl` }),
+    });
+    const put = (store: ReturnType<typeof makeSharedStore>, row: Row) => {
+        for (const [k, r] of store.rows) if (r.id === row.id) store.rows.delete(k);
+        store.rows.set(keyOf(row as unknown as Record<string, unknown>), row);
+    };
+    /** A peer over a store holding `rows`, its write-through and heal spied. */
+    function makePeer(rows: Row[]) {
+        const cluster = makeCluster({ attach: true });
+        // Only the peer hears the hints below; the writer's lane is not under test.
+        cluster.writer.protocol.detachMetadataMutationPubSub();
+        for (const row of rows) put(cluster.store, row);
+        const writes = vi.spyOn(cluster.peer.protocol, 'applyRegistryWriteThrough').mockResolvedValue(undefined);
+        const heals = vi.spyOn(cluster.peer.protocol, 'restoreArtifactRegistryView').mockResolvedValue(undefined);
+        const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+        /** What the peer registered: `[binding, label]` per write-through. */
+        const registered = () => writes.mock.calls.map(([args]: any[]) => [args.packageId, args.item?.label]);
+        /** The `packageId` each heal was handed. */
+        const healed = () => heals.mock.calls.map((call: any[]) => call[3]);
+        const apply = (event: Partial<MetadataMutationEvent> & Record<string, unknown>) =>
+            cluster.peer.protocol.applyRemoteMetadataMutation({
+                type: 'action', name: NAME, state: 'active', organizationId: null, ...event,
+            });
+        /** A hint as a peer's bus delivers it, from a third node. */
+        const deliver = async (event: Record<string, unknown>) => {
+            await cluster.bus.publish(METADATA_MUTATION_CLUSTER_CHANNEL, {
+                originNode: 'node-c',
+                event: { type: 'action', name: NAME, organizationId: null, ...event },
+            });
+            await settle();
+        };
+        const stopLines = () => errors.mock.calls.map((c: unknown[]) => String(c[0]))
+            .filter((line: string) => line.includes('cluster metadata convergence stopped'));
+        return { ...cluster, writes, heals, registered, healed, apply, deliver, stopLines };
+    }
+
+    afterEach(() => { vi.restoreAllMocks(); });
+
+    it('a signal naming beta registers beta\'s row with beta\'s binding, never the first row (alpha)', async () => {
+        const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(BETA, 'beta-1')]);
+
+        await p.apply({ packageId: BETA });
+
+        // At 45f80780: [[ALPHA, 'alpha-1']].
+        expect(p.registered()).toEqual([[BETA, 'beta-1']]);
+        expect(p.heals).not.toHaveBeenCalled();
+    });
+
+    it('a removal naming alpha, with beta\'s row still stored, runs the writer\'s heal for alpha — never a re-registration of beta', async () => {
+        const p = makePeer([actionRow(BETA, 'beta-2')]);
+
+        await p.apply({ packageId: ALPHA, state: 'deleted' });
+
+        // At 45f80780: beta's surviving row was re-registered, and no heal ran.
+        expect(p.registered()).toEqual([]);
+        expect(p.healed()).toEqual([ALPHA]);
+    });
+
+    describe('absent versus null (ruling Q1)', () => {
+        it('a `packageId: undefined` key over the in-process bus reads as ABSENT: two bindings stop, as an unstamped signal does', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(BETA, 'beta-1')]);
+
+            await p.deliver({ state: 'active', packageId: undefined });
+
+            expect(p.registered()).toEqual([]);
+            expect(p.stopLines()).toHaveLength(1);
+        });
+
+        it('`null` reads the row bound to no package (IS NULL), beside a package\'s row of the name', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(null, 'env-1')]);
+
+            await p.apply({ packageId: null });
+
+            expect(p.registered()).toEqual([[null, 'env-1']]);
+        });
+
+        it('`null` with no such row heals as package-less (`null`, never HEAL_BINDING_UNKNOWN)', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1')]);
+
+            await p.apply({ packageId: null, state: 'deleted' });
+
+            expect(p.registered()).toEqual([]);
+            expect(p.healed()).toEqual([null]);
+        });
+
+        it.each([[''], ['sys_metadata']])('an inbound %j reads as `null`', async (spelling) => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(null, 'env-1')]);
+
+            await p.apply({ packageId: spelling });
+
+            expect(p.registered()).toEqual([[null, 'env-1']]);
+        });
+
+        it('any other non-string value reads as absent, never as a package', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1')]);
+
+            await p.apply({ packageId: 42 as unknown as string });
+
+            // Absent, one binding: converges on it by name, as before.
+            expect(p.registered()).toEqual([[ALPHA, 'alpha-1']]);
+        });
+    });
+
+    describe('an unstamped signal, from a writer that predates the field (ruling Q2-A)', () => {
+        it('two packages\' rows: one `error` line naming both, nothing registered or healed, and the ledger entry of each package stays marked', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(BETA, 'beta-1')]);
+            await settle();
+            // Converged once on both rows, so the resync baseline holds both.
+            expect(await p.peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ rows: 2, converged: 2 });
+            p.writes.mockClear();
+
+            await p.deliver({ state: 'active' });
+
+            expect(p.registered()).toEqual([]);
+            expect(p.heals).not.toHaveBeenCalled();
+            const lines = p.stopLines();
+            // At 45f80780: no line, and [[ALPHA, 'alpha-1']] registered.
+            expect(lines).toHaveLength(1);
+            expect(lines[0]).toContain(`action '${NAME}'`);
+            expect(lines[0]).toContain(ALPHA);
+            expect(lines[0]).toContain(BETA);
+            // Marked: the next resync re-converges both packages' rows,
+            // each at its own package, though neither checksum moved.
+            expect(await p.peer.protocol.resyncMetadataMutationPubSub()).toMatchObject({ converged: 2, unchanged: 0 });
+            expect(p.registered()).toEqual([[ALPHA, 'alpha-1'], [BETA, 'beta-1']]);
+        });
+
+        it('CONTROL — exactly one row: converges on it, as before', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1')]);
+
+            await p.deliver({ state: 'active' });
+
+            expect(p.registered()).toEqual([[ALPHA, 'alpha-1']]);
+            expect(p.stopLines()).toEqual([]);
+        });
+
+        it('no row: the heal runs with HEAL_BINDING_UNKNOWN, as #32447 pins', async () => {
+            const p = makePeer([]);
+
+            await p.deliver({ state: 'deleted' });
+
+            expect(p.heals.mock.calls.map((call: any[]) => call[3])).toEqual([HEAL_BINDING_UNKNOWN]);
+            expect(p.stopLines()).toEqual([]);
+        });
+    });
+
+    describe('cluster.resync keys and converges by package (ruling Q1)', () => {
+        it('one lost hint on a two-package name converges the package whose row moved', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(BETA, 'beta-1')]);
+            await settle();
+            await p.peer.protocol.resyncMetadataMutationPubSub();
+            p.writes.mockClear();
+
+            // Beta's row moves while the hint is lost.
+            put(p.store, actionRow(BETA, 'beta-2'));
+            const report = await p.peer.protocol.resyncMetadataMutationPubSub();
+
+            // At 45f80780 the ledger held ONE key for both rows: the resync
+            // re-read the name with no package and registered alpha's row.
+            expect(report).toMatchObject({ rows: 2, converged: 1, unchanged: 1 });
+            expect(p.registered()).toEqual([[BETA, 'beta-2']]);
+        });
+
+        it('a gone item heals with the package it was converged on', async () => {
+            const p = makePeer([actionRow(ALPHA, 'alpha-1'), actionRow(BETA, 'beta-1')]);
+            await settle();
+            await p.peer.protocol.resyncMetadataMutationPubSub();
+            p.writes.mockClear();
+
+            for (const [k, r] of p.store.rows) if (r.package_id === ALPHA) p.store.rows.delete(k);
+            const report = await p.peer.protocol.resyncMetadataMutationPubSub();
+
+            expect(report).toMatchObject({ rows: 1, deleted: 1, unchanged: 1 });
+            expect(p.healed()).toEqual([ALPHA]);
+            expect(p.registered()).toEqual([]);
+        });
+    });
+
+    it('the writer stamps the package its write resolved, on the local event and the wire alike', async () => {
+        const { writer, published } = makeCluster({ attach: true });
+        const seen: MetadataMutationEvent[] = [];
+        writer.protocol.onMetadataMutation((evt: MetadataMutationEvent) => { seen.push({ ...evt }); });
+        vi.spyOn(writer.protocol, 'applyRegistryWriteThrough').mockResolvedValue(undefined);
+
+        await writer.protocol.saveMetaItem({ type: 'object', name: 'gadget', item: objectBody('gadget'), mode: 'publish' });
+        await settle();
+
+        // A package-less object row: `null`, said, never omitted.
+        expect(seen.map((e) => e.packageId)).toEqual([null]);
+        expect(published.map((m) => m.payload.event.packageId)).toEqual([null]);
     });
 });
