@@ -3,6 +3,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MetadataManager } from './metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
 import type { MetadataLoaderContract, MetadataLoadResult, MetadataSaveResult, MetadataStats } from '@objectstack/spec/system';
 import type { IPubSub, PubSubMessage } from '@objectstack/spec/contracts';
@@ -563,5 +564,147 @@ describe('MetadataManager — resyncClusterPubSub() converges a hint lost in a c
         await solo.list('view');
         solo.resyncClusterPubSub();
         expect(cachedTypes(solo)).toEqual(['view']);
+    });
+});
+
+/**
+ * [#32499] The cluster half of #32353: `unregister()` on the node that runs it
+ * deletes the artifact door's in-memory copy (`MemoryLoader`, one per node),
+ * and a peer that hears the removal deletes ITS copy by the same key — by name,
+ * or one package's slot of a type stored per `(package, name)` — so the item
+ * stops answering on every node. Each node here boots the door the way the
+ * artifact ingest does (its own `MemoryLoader` saved, then `register(…, {
+ * notify: false })`), over one shared writable store and one bus.
+ *
+ * BASE (3452dec2): the peer's receipt dropped its registry entry only, so its
+ * next read fell through to its own door copy and served the removed item.
+ */
+describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (artifact door) copy too (#32499)', () => {
+    const P = 'com.acme.alpha';
+    const Q = 'com.acme.beta';
+    const doorItem = (type: string, name: string, packageId = P) =>
+        ({ name, label: `${packageId === P ? 'alpha' : 'beta'} ${type} ${name}`, _packageId: packageId, _provenance: 'package' });
+
+    async function bootDoorCluster(type: string, items: ReadonlyArray<ReturnType<typeof doorItem>>, opts: { sharedStore: boolean }) {
+        const bus = new TestPubSub();
+        const store = new SharedStoreLoader();
+        const node = async (nodeId: string) => {
+            const mgr = new MetadataManager({ formats: ['json'], loaders: opts.sharedStore ? [store] : [] });
+            const door = new MemoryLoader();
+            for (const item of items) {
+                await door.save(type, item.name, item);
+                await mgr.register(type, item.name, item, { notify: false });
+            }
+            mgr.registerLoader(door);
+            mgr.attachClusterPubSub(bus, nodeId);
+            const watched: string[] = [];
+            mgr.subscribe(type, (event) => { watched.push(`${event.type} ${event.name}`); });
+            return { mgr, door, watched };
+        };
+        return { bus, store, a: await node('node-A'), b: await node('node-B') };
+    }
+
+    /** What a read answers for `name`: its `list` labels, bare `get`, `exists`. */
+    async function readsOf(mgr: MetadataManager, type: string, name: string) {
+        const listed = ((await mgr.list(type)) as any[]).filter((item) => item?.name === name).map((item) => item.label);
+        return { listed, get: ((await mgr.get(type, name)) as any)?.label, exists: await mgr.exists(type, name) };
+    }
+    const GONE = { listed: [], get: undefined, exists: false };
+    const answering = (label: string) => ({ listed: [label], get: label, exists: true });
+
+    /** The first-party removal types of #32353's census plus its CONTROL type, all outside the set. */
+    const BY_NAME = ['view', 'object', 'datasource', 'position'];
+    const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+
+    it('every by-name type is outside the set, and the set is not empty', () => {
+        for (const type of BY_NAME) expect(PACKAGE_SLOTTED_STORE_TYPES.has(type), type).toBe(false);
+        expect(SLOTTED.length).toBeGreaterThan(0);
+    });
+
+    it.each(BY_NAME)('%s: unregister() on A — B answers nothing at once, from no loader (BASE: B served its door copy)', async (type) => {
+        const { a, b } = await bootDoorCluster(type, [doorItem(type, 'doomed'), doorItem(type, 'kept')], { sharedStore: true });
+        expect(await readsOf(b.mgr, type, 'doomed')).toEqual(answering(`alpha ${type} doomed`));
+
+        await a.mgr.unregister(type, 'doomed');
+
+        expect(await readsOf(a.mgr, type, 'doomed')).toEqual(GONE);
+        expect(await readsOf(b.mgr, type, 'doomed')).toEqual(GONE);
+        expect((await b.door.load(type, 'doomed')).data).toBeNull();
+        // CONTROL — the other door item answers on both nodes.
+        expect(await readsOf(b.mgr, type, 'kept')).toEqual(answering(`alpha ${type} kept`));
+        expect(await readsOf(a.mgr, type, 'kept')).toEqual(answering(`alpha ${type} kept`));
+    });
+
+    it.each(SLOTTED)('%s: one package\'s removal on A — B drops that package\'s slot and keeps the other package\'s (BASE: B served the removed package\'s item)', async (type) => {
+        for (const remove of [
+            (mgr: MetadataManager) => mgr.unregister(type, 'shared', { packageId: P }),
+            (mgr: MetadataManager) => mgr.unregisterPackage(P),
+        ]) {
+            const { a, b } = await bootDoorCluster(type, [doorItem(type, 'shared', P), doorItem(type, 'shared', Q)], { sharedStore: false });
+            expect(((await b.mgr.get(type, 'shared', P)) as any)?.label).toBe(`alpha ${type} shared`);
+
+            await remove(a.mgr);
+
+            for (const node of [a, b]) {
+                expect(await node.mgr.get(type, 'shared', P)).toBeUndefined();
+                expect(((await node.mgr.get(type, 'shared', Q)) as any)?.label).toBe(`beta ${type} shared`);
+            }
+            expect((await b.door.loadSlots(type, 'shared')).map((slot) => slot.packageId)).toEqual([Q]);
+        }
+    });
+
+    it('the shared store is the origin\'s to delete from: the peer never deletes from it again', async () => {
+        const { a, store } = await bootDoorCluster('view', [doorItem('view', 'doomed')], { sharedStore: true });
+        const deletes = vi.spyOn(store, 'delete');
+        await a.mgr.unregister('view', 'doomed');
+        expect(deletes.mock.calls).toEqual([['view', 'doomed']]);
+    });
+
+    it('CONTROL — a peer\'s update reaches B and B keeps its door copy, which no loader could restore', async () => {
+        const { a, b } = await bootDoorCluster('view', [doorItem('view', 'edited')], { sharedStore: true });
+        await a.mgr.register('view', 'edited', { ...doorItem('view', 'edited'), label: 'edited on A' });
+        await flush();
+        expect(b.watched).toHaveLength(1);
+        expect(((await b.door.load('view', 'edited')).data as any)?.label).toBe('alpha view edited');
+    });
+
+    it('a `deleted` event that carries no removal (a file or repository event, an origin predating the field) keeps B\'s door copy answering', async () => {
+        const { bus, b } = await bootDoorCluster('view', [doorItem('view', 'unlinked')], { sharedStore: true });
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type: 'view',
+            event: { type: 'deleted', metadataType: 'view', name: 'unlinked', path: '', timestamp: new Date().toISOString() },
+        });
+        await flush();
+        expect(b.watched).toEqual(['deleted unlinked']);
+        expect(await readsOf(b.mgr, 'view', 'unlinked')).toEqual(answering('alpha view unlinked'));
+    });
+
+    it.each(SLOTTED)('%s: a removal whose package is not a string is dropped — B deletes nothing, not by name', async (type) => {
+        const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'only')], { sharedStore: false });
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type,
+            event: { type: 'deleted', metadataType: type, name: 'only', path: '', timestamp: new Date().toISOString() },
+            removal: { packageId: 42 },
+        });
+        await flush();
+        expect((await b.door.loadSlots(type, 'only')).map((slot) => slot.packageId)).toEqual([P]);
+    });
+
+    it.each(SLOTTED)('%s: a by-name removal B\'s door cannot apply (two packages hold the name there) is reported once at error, naming the item', async (type) => {
+        const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'twice', P), doorItem(type, 'twice', Q)], { sharedStore: false });
+        const logError = (b.mgr as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error;
+        logError.mockClear();
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type,
+            event: { type: 'deleted', metadataType: type, name: 'twice', path: '', timestamp: new Date().toISOString() },
+            removal: {},
+        });
+        await flush();
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(String(logError.mock.calls[0]![0])).toContain(`could NOT delete \`${type}/twice\` that a cluster peer removed`);
+        expect((await b.door.loadSlots(type, 'twice')).map((slot) => slot.packageId).sort()).toEqual([P, Q]);
     });
 });
