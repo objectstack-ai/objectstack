@@ -2246,6 +2246,46 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     expect(labels(await m.list('action'))).toEqual([ALPHA, BETA]);
   });
 
+  /** A package-less row of `helper` (no column, no stamp). */
+  const seedPackageless = (type: string, version: number) =>
+    driver.create('sys_metadata', {
+      id: `${type}_env_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_env_${version}`,
+      source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'env' }),
+    });
+
+  for (const order of ['package-less row first', 'package-less row last'] as const) {
+    it(`agent, a package-less row beside one package's row (${order}): after the pass the reads answer as without it — the package's item (BEFORE: the row saved last, so the package-less one when it came last)`, async () => {
+      if (order === 'package-less row first') {
+        await seedPackageless('agent', 1);
+        await seed('agent', ALPHA, 2);
+      } else {
+        await seed('agent', ALPHA, 1);
+        await seedPackageless('agent', 2);
+      }
+      const m = await bootPass();
+      for (const packageId of [undefined, ALPHA]) {
+        expect(await answer(m, 'agent', 'helper', packageId)).toBe(await answer(cold(), 'agent', 'helper', packageId));
+        expect(await answer(m, 'agent', 'helper', packageId)).toBe(ALPHA);
+      }
+      expect([...((m as any).registry.get('agent')?.keys() ?? [])]).toEqual([`${ALPHA}\u0000helper`]);
+    });
+  }
+
+  it('agent, the same on a host that declares its package: the package-less row is primed as the host\'s, beside the package\'s, so a bare read is refused naming both (BEFORE: the row saved last)', async () => {
+    const HOST = 'com.host.app';
+    await seed('agent', ALPHA, 1);
+    await seedPackageless('agent', 2);
+    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    expect(await answer(m, 'agent', 'helper')).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, HOST]);
+    expect(await answer(m, 'agent', 'helper', ALPHA)).toBe(ALPHA);
+    expect(await answer(m, 'agent', 'helper', HOST)).toBe('env');
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
   it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
     for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
       await driver.create('sys_metadata', {
