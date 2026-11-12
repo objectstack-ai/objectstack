@@ -998,13 +998,14 @@ describe('FileField and FileCell — a type outside `accept` is refused with a h
         return { adapter, upload };
     }
 
-    function renderField(accept: string[] | undefined = ACCEPT) {
+    /** `null` renders the field with no `accept` at all. */
+    function renderField(accept: string[] | null = ACCEPT) {
         const { adapter, upload } = spyUpload();
         const onChange = vi.fn();
         render(
             <UploadProvider adapter={adapter}>
                 <FileField
-                    field={{ name: 'invoice_file', label: 'Invoice', type: 'file', accept } as any}
+                    field={{ name: 'invoice_file', label: 'Invoice', type: 'file', accept: accept ?? undefined } as any}
                     value={undefined}
                     onChange={onChange}
                 />
@@ -1056,7 +1057,7 @@ describe('FileField and FileCell — a type outside `accept` is refused with a h
     });
 
     it('CONTROL: no `accept` admits every file, and a pick reporting no type is not judged on a MIME entry', async () => {
-        const { onChange } = renderField(undefined);
+        const { onChange } = renderField(null);
         fireEvent.change(input(), { target: { files: [txt()] } });
         await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
         cleanup();
