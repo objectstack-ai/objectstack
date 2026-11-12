@@ -420,7 +420,7 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect(labelOf(await rowOf(type, B))).toBe('B5');
       });
 
-      it('M1: one row slot: the environment\'s own version rolls back by name into the one row, as before', async () => {
+      it('M1/F2 CONTROL: one row slot: the environment\'s own version rolls back by name into the one row at both doors, as before', async () => {
         // A takes over the package-less row: the name has one row slot.
         await loader.save(type, 'x', body('env1'));
         await loader.save(type, 'x', body('A2', A));
@@ -435,6 +435,9 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'A6']]);
         await manager.rollback(type, 'x', 4);
         expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'env4']]);
+        // The loader's door answers the same: the environment's v1 lands in the one row.
+        await loader.registerRollback(type, 'x', body('env1'), 1);
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'env1']]);
       });
 
       it('an environment version is not written into a package\'s row', async () => {
