@@ -19,7 +19,9 @@
  *   3. that person's session has ended, and after a FRESH sign-in their reads
  *      of the organization's data resolve to nothing, their writes are refused
  *      `403 PERMISSION_DENIED` and nothing lands, and the key they minted is
- *      refused; the other person — still a member — is served throughout.
+ *      refused; a flow they launch that runs as them reads none of the
+ *      organization's data and writes nothing; the other person — still a
+ *      member — is served throughout, by the same doors and the same flows.
  *
  * The posture is read off the `tenancy` service, not assumed: a degraded boot
  * resolves to `single`, and a matrix whose walled legs were really `single`
@@ -166,6 +168,50 @@ describe.each(['single', 'isolated', 'group'] as const)(
       expect(write.status).toBe(403);
       expect(errorCodeOf(await write.json())).toBe('PERMISSION_DENIED');
       expect(await findRows(ql, NOTE, { title: 'written after the membership ended' }, 5)).toEqual([]);
+    });
+
+    it('a flow run as the user is judged by the same rule: launched by the removed person it reads none of the organization\'s data and writes nothing; launched by the member it reads its note and its write lands', async () => {
+      const automation = await stack.kernel.getServiceAsync<any>('automation');
+      const reader = `membership_${posture}_reader`;
+      const writer = (who: string) => `membership_${posture}_writer_${who}`;
+      const flowOf = (name: string, node: Record<string, unknown>, variables: unknown[] = []) => ({
+        name, label: name, type: 'autolaunched', status: 'active', runAs: 'user', variables,
+        nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'step', label: 'Step', ...node }, { id: 'end', type: 'end', label: 'End' }],
+        edges: [{ id: 'e1', source: 'start', target: 'step' }, { id: 'e2', source: 'step', target: 'end' }],
+      });
+      automation.registerFlow(reader, flowOf(reader,
+        { type: 'get_record', config: { objectName: NOTE, fields: ['id', 'title'], limit: 50, outputVariable: 'notes' } },
+        [{ name: 'notes', type: 'object', isOutput: true }]));
+      for (const who of ['leaves', 'stays']) {
+        automation.registerFlow(writer(who), flowOf(writer(who),
+          { type: 'create_record', config: { objectName: NOTE, fields: { title: `${writer(who)} wrote this` } } }));
+      }
+      const launch = (token: string, flow: string) => stack.apiAs(token, 'POST', `/automation/${flow}/trigger`, {});
+      const notesOf = async (res: Response) => {
+        const body: any = await res.json();
+        return rowsOf(body?.data?.output?.notes ?? []).map((r: any) => String(r.id));
+      };
+
+      const fresh = await stack.signIn(leaves.email, PASSWORD);
+      const read = await launch(fresh, reader);
+      expect(read.status, await read.clone().text()).toBeLessThan(300);
+      expect(await notesOf(read)).toEqual([]);
+      const write = await launch(fresh, writer('leaves'));
+      // The run fails, and the refusal inside it is the data door's own answer.
+      const writeText = await write.clone().text();
+      expect(write.status, writeText).toBe(400);
+      const writeBody: any = await write.json();
+      expect(errorCodeOf(writeBody), writeText).toBe('FLOW_FAILED');
+      expect(writeBody?.error?.details?.innerRefusal?.code, writeText).toBe('PERMISSION_DENIED');
+      expect(await findRows(ql, NOTE, { title: `${writer('leaves')} wrote this` }, 5)).toEqual([]);
+
+      // CONTROL — the same flows, launched by the person who is still a member.
+      const memberRead = await launch(stays.token, reader);
+      expect(memberRead.status, await memberRead.clone().text()).toBeLessThan(300);
+      expect(await notesOf(memberRead)).toContain(stays.noteId);
+      const memberWrite = await launch(stays.token, writer('stays'));
+      expect(memberWrite.status, await memberWrite.clone().text()).toBeLessThan(300);
+      expect(await findRows(ql, NOTE, { title: `${writer('stays')} wrote this` }, 5)).toHaveLength(1);
     });
 
     it('an API key follows its owner\'s membership: the removed person\'s key is refused, the member\'s is admitted', async () => {

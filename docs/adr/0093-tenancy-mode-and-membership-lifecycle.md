@@ -54,7 +54,8 @@ Decision:
   **terminal boot warning** and `features.degradedTenancy` in `/auth/config`.
   (A Setup-dashboard banner was considered and **descoped** — see D5.)
 - **D6** — A bounded, idempotent **backfill** binds pre-existing member-less users
-  to the default org on `kernel:ready` — single-org mode only.
+  to the default org on `kernel:ready` — single-org mode only, once per
+  deployment (recorded in the `sys_migration` ledger).
 - **D7** — Edge-case ledger: existing memberships always win; platform-admin
   bootstrap keeps its own path; phone-only users bind like anyone else;
   multi-org backfill is explicitly refused.
@@ -158,6 +159,15 @@ service with app end-users who are deliberately *not* teammates), and a
 framework that force-joins every end-user into the operator org would be wrong
 for them.
 
+> *Amended 2026-11-11 (D8 amendment note).* Under every tenancy posture a
+> person's data access requires a current membership in the organization, so an
+> invite-only deployment whose end-users are not teammates still gives each of
+> them a membership — of the grade that fits, which for such a population is
+> the `external` membership tier (the portal grade: no member defaults, never
+> in a business unit, application data only through what is granted to it
+> explicitly). What `invite-only` decides is *who grants* the membership and
+> *when*, not whether a person who reaches the data holds one.
+
 ### D2 — One owner: the membership reconciler hook
 
 plugin-auth composes a `user.create.after` step into `composeDatabaseHooks`,
@@ -180,7 +190,10 @@ host user.create.after (if any)  →  framework membership reconciler
 - **Failure semantics:** best-effort. A failed bind logs a structured warning
   and never fails user creation — membership is recoverable bookkeeping; a
   created-but-unbindable user is strictly better than a failed signup. The
-  D6 backfill is the self-healing net for exactly these misses.
+  D6 backfill is the self-healing net for exactly these misses. *(Amended: the
+  backfill runs once per deployment (D6 note), so a bind that fails after it
+  ran is not healed by it; under the D8 amendment that person reaches no data
+  until an administrator adds them — see the amendment note's consequences.)*
 - **Idempotency:** keyed on the `(organization_id, user_id)` unique index;
   the check-then-insert tolerates races because a lost race hits the unique
   index and is swallowed as "already bound".
@@ -362,6 +375,16 @@ to load (missing, or its `init()` throws):
 
 ### D6 — Backfill for pre-existing member-less users
 
+> *Amended (D7, one-time pass).* The pass below runs **once per deployment**:
+> it records its verdict in the deployment ledger (`sys_migration` row
+> `adr-0093-membership-backfill`, `plugin-auth/src/membership-backfill-ledger.ts`),
+> and every later pass — the `app:seeded` re-run included — reads the record
+> and does nothing. A verdict is recorded when the pass ran, when the policy was
+> `invite-only` (so a later switch to `auto` never sweeps those users in), and
+> when organizations exist but none is an unambiguous target. Without a readable
+> ledger the pass does not run. The `kernel:ready` / `app:seeded` wording below
+> describes the triggers; the ledger decides whether a trigger does anything.
+
 On `kernel:ready`, **single mode + `membershipPolicy: 'auto'` only**:
 
 - find users with zero `sys_member` rows (bounded scan, same pattern and
@@ -434,12 +457,21 @@ admin surfaces.
 >   Membership is read once per request (`resolveUserAuthzGrants` → `accessible_org_ids`, ADR-0091
 >   windows applied), so a membership that ends ends access on the next request.
 > - **The organization's own wall under `single`.** `single` keeps no wall *between* organizations
->   (ADR-0105 D1). A person who holds no current membership in any organization meets the Layer 0
->   verdict's deny (`computeTenantLayer0Verdict` with `outsideEveryOrganization`, and the one
->   predicate every reader asks, `isOutsideEveryOrganization` — `core/src/security/tenant-layer0-verdict.ts`):
+>   (ADR-0105 D1). A person who holds no current membership in any organization, save the platform
+>   operator, meets the Layer 0 verdict's deny (`computeTenantLayer0Verdict` with
+>   `outsideEveryOrganization`, set from `isOutsideEveryOrganization` —
+>   `core/src/security/tenant-layer0-verdict.ts` — which the wall's enforcers ask):
 >   reads of the organization's tenant rows resolve to nothing and writes are refused
->   `403 PERMISSION_DENIED` naming the missing active organization — the answers ADR-0123 already
->   gives, and the ones `isolated` and `group` give the same person.
+>   `403 PERMISSION_DENIED` naming the membership rule — the answers ADR-0123 already gives, and
+>   the ones `isolated` and `group` give the same person. The verdict asks that person the same
+>   rungs the walled ladder asks: an object outside tenancy is untouched, and an external object
+>   whose organization scope is undeclared is refused (ADR-0015).
+> - **Every person context carries the membership.** The predicate reads the membership set the
+>   context carries (`accessible_org_ids`), so every person context the platform builds carries the
+>   resolver's set: a request's; a flow run's — the two launch doors hand the run the request's, run
+>   setup resolves it otherwise (a decider's afresh on a decision), and a run whose set cannot be
+>   resolved takes an empty one; and a hook that runs as the user, whose grant seeding resolves it
+>   the same way. A membership that cannot be read is not a current one.
 > - **What keeps its existing rule.** System contexts. The platform operator (the `PLATFORM_ADMIN`
 >   rung): platform standing is the deployment's, not a membership's (ADR-0131 D5). Objects outside
 >   tenancy — identity tables and platform-global objects — sit outside the wall under every posture,
@@ -451,12 +483,29 @@ admin surfaces.
 > - **Delegation.** A delegated operation runs in the live principal's organization only while the
 >   delegator's own current membership backs it (ADR-0090 D10), under every posture.
 >
-> Consequences for this record. D6 and its `app:seeded` re-run are how a single-org deployment's
-> people get the membership that admits them; a deployment that opts out of them
-> (`OS_SKIP_MEMBERSHIP_BACKFILL=1`, or `membershipPolicy: 'invite-only'`) gives each person a
-> membership through the member admin surfaces. D7's "user leaves their only org" row stands as a
-> lifecycle fact, and leaving now also ends data access. The "Deferred" line's D8.1 entry is
-> resolved by this note.
+> Consequences for this record — who can hold no membership, and what the operator does. Under
+> `auto` a person gets a membership at creation (the D2 reconciler, which is best-effort: a failed
+> bind logs a warning and never fails the creation) or from the D6 backfill, which runs once per
+> deployment and is a no-op on every later trigger, the `app:seeded` re-run included. No later sweep
+> exists, deliberately: a scan cannot tell a user who was never bound from a person whose
+> membership ended, and binding the second would re-admit a person this rule excludes (D7). So these
+> people hold no membership, and with it no data access, until an administrator adds them:
+>
+> - a user whose creation-time bind failed, or whom the backfill failed to bind;
+> - a `sys_user` row inserted directly after the backfill recorded its verdict — an app seed's raw
+>   insert bypasses the reconciler, including a seed bundle that finishes in the background after
+>   `kernel:ready` recorded it;
+> - a user created while the policy was `invite-only` (the recorded verdict means a later switch to
+>   `auto` never sweeps them in), and every user of a deployment that runs `invite-only`;
+> - every pre-existing member-less user while `OS_SKIP_MEMBERSHIP_BACKFILL=1` is set, or while the
+>   ledger cannot be read;
+> - a person removed from the organization: D7's "user leaves their only org" row stands as a
+>   lifecycle fact, and leaving now also ends data access.
+>
+> The operator finds them by comparing users with members (Setup → Members, or `sys_user` against
+> `sys_member`) and adds each through the member admin surfaces — an invitation, or
+> `POST /api/v1/auth/organization/add-member` (platform administrator) — with the membership grade
+> that fits the person (D1). The "Deferred" line's D8.1 entry is resolved by this note.
 
 ### D9 — The session's active organization is resolved from membership, here
 

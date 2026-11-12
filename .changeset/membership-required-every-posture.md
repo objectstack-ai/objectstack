@@ -2,6 +2,8 @@
 '@objectstack/core': patch
 '@objectstack/objectql': patch
 '@objectstack/plugin-security': patch
+'@objectstack/runtime': patch
+'@objectstack/service-automation': patch
 ---
 
 fix(security)!: a person's data access requires a current membership in the organization, under every tenancy posture
@@ -13,9 +15,10 @@ Metadata-protocol: none
 
 **BREAKING** — under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request (ADR-0093 D8.1, as amended 2026-11-11).
 
-**Migration note.** After the upgrade, a person without a current membership no longer reads or writes the organization's data in any posture, `single` included. Their reads of the organization's records resolve to nothing, and their writes are refused with `403 PERMISSION_DENIED` naming the missing active organization — the answers the `isolated` and `group` postures already gave. To give someone access, make them a member of the organization.
+**Migration note.** After the upgrade, a person without a current membership no longer reads or writes the organization's data in any posture, `single` included. Their reads of the organization's records resolve to nothing, and their writes are refused with `403 PERMISSION_DENIED` — the answers the `isolated` and `group` postures already gave. To give someone access, make them a member of the organization.
 
-- Single-organization deployments that keep the default membership backfill (ADR-0093 D6) need no action: every user is bound to the default organization when they are created and when seed data settles. A deployment that turned it off (`OS_SKIP_MEMBERSHIP_BACKFILL=1`, or `membershipPolicy: 'invite-only'`) gives each person who should reach the data a membership through the member admin screens.
+- Before upgrading a single-organization deployment, compare its users with its members (Setup → Members, or `sys_user` against `sys_member`) and add every person who should keep access. Under the default `auto` policy a user is bound to the default organization when created, but that bind is best-effort, and the membership backfill (ADR-0093 D6) runs once per deployment and does nothing on any later boot or seed. So these people can hold no membership: a user whose creation-time bind failed; a user an app's seed data inserted after the backfill ran; users created under `membershipPolicy: 'invite-only'` (also after a later switch to `auto`); every pre-existing member-less user of a deployment that set `OS_SKIP_MEMBERSHIP_BACKFILL=1`; and people removed from the organization. Add them with an invitation or `POST /api/v1/auth/organization/add-member` (platform administrator), at the grade that fits — end-users who are not teammates take the `external` tier.
+- A flow that runs as the user, and a hook that runs as the user, are judged by the same rule as that user's own request.
 - An API key is its owner's credential: it follows its owner's membership in the key's organization, under every posture.
 - A delegated (on-behalf-of) operation runs in an organization only while the delegator holds a current membership there, under every posture.
 - Unchanged: system contexts; platform operators (platform standing is the deployment's, not a membership's); a person's own account, session and invitation flows, and every object that is outside tenancy.

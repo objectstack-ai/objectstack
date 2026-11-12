@@ -69,9 +69,9 @@ all plants' data. Two requirements are *inherent* to the shape, not optional:
 
 - **`single`** (ADR-0093): one logical tenant. Layer 0 inert
   (`packages/plugins/plugin-security/src/tenant-layer.ts`) *(amended 2026-11-11, ADR-0093
-  D8.1 as amended: inert between organizations; a person who holds no current membership in
-  any organization still meets Layer 0's deny — a person's data access requires a current
-  membership in the organization under every posture)*. Factories can be modeled as
+  D8.1 as amended: Layer 0 draws no line between organizations, and judges one person — a
+  person who holds no current membership in any organization meets its deny, since a person's
+  data access requires a current membership in the organization under every posture)*. Factories can be modeled as
   business units in one tree — group visibility and approvals are native, but
   there is no per-factory membership/invitation boundary, and org scoping
   relies entirely on authored configuration.
@@ -153,7 +153,7 @@ The tenancy service (ADR-0093) gains a `group` mode. Semantics:
 
 | Posture | Wall | Stamping | Intended shape |
 |---|---|---|---|
-| `single` | none between organizations (Layer 0 inert); a person outside every organization is denied (ADR-0093 D8.1, as amended 2026-11-11) | none | one logical tenant; factories as BUs in one tree remain a fully supported deployment (Appendix A) |
+| `single` | none between organizations; Layer 0 judges only a person outside every organization, who is denied (ADR-0093 D8.1, as amended 2026-11-11) | none | one logical tenant; factories as BUs in one tree remain a fully supported deployment (Appendix A) |
 | `group` | `organization_id IN accessible_org_ids` — engine-enforced, union | engine stamps + validates on write | organizations = membership/invitation boundaries over one shared dataset |
 | `isolated` | `organization_id = activeOrganizationId` (today's `multi`, ADR-0095 Layer 0) | engine stamps active org | legal-entity / sovereignty isolation |
 
