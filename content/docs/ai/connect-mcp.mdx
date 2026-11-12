@@ -371,7 +371,8 @@ can reach is the **default exposure policy (v1)**:
   `run_action` decides only once the call carries `confirm: true`. Each forwards
   to its approvals route as the caller, and the approval service admits the
   same people the console's buttons admit: a current approver of the request,
-  or the administrator who may override it. Anyone else, the submitter
+  and, for approve, reject and reassign, the administrator who may override it.
+  Anyone else, the submitter
   included, is refused and the request stays pending. The submitter's own
   levers (remind, recall, resubmit), request-info and comments are not exposed.
 

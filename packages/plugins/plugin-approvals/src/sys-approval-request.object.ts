@@ -590,7 +590,8 @@ export const SysApprovalRequest = ObjectSchema.create({
   // decides WHO may: each is a same-origin `type: 'api'` action, so the action
   // door forwards the call to its approvals route under the caller's own
   // identity, and `ApprovalService` admits only a current approver of the
-  // request (or the override holder) — the gate the console's button reaches.
+  // request (and, for approve/reject/reassign, the override holder) — the
+  // gate the console's buttons reach.
   // `visible` is not that gate and the door does not read it. Each declares
   // `requiresConfirmation: true`, ADR-0011's bucket C for a consequential,
   // bounded act (`sys_user.ban_user` is the precedent), so `run_action`
