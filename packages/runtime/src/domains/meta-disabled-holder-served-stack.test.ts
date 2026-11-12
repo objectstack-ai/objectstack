@@ -329,3 +329,102 @@ describe.each([
         }
     }, 120_000);
 });
+
+// ---------------------------------------------------------------------------
+// [#32607, ADR-0150 D3] With NO package disabled, a name two enabled packages
+// hold only as stored rows (no package ships it) is refused on every bare door
+// naming both, by the row-aware served-holder judgment above, so the answer
+// follows no save order; each exact address serves its own row, and one row
+// holder is served as before.
+//
+// Measured on the #32183 head plus #32354's work (step 0 of #32607): the plain
+// read and `/published` served the row saved first (`/published` on this
+// dispatcher served the first package by id in every order), while `/layers`
+// refused 409 naming both, before and after a reboot.
+// ---------------------------------------------------------------------------
+
+describe.each([
+    { regOrder: 'E registered first', registered: [ROW_E, ROW_F] },
+    { regOrder: 'F registered first', registered: [ROW_F, ROW_E] },
+])('[#32607] two enabled row holders and no shipper, $regOrder', ({ registered }) => {
+    const roots: string[] = [];
+    afterAll(() => { for (const dir of roots) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-meta-two-rows-db-'));
+        roots.push(dir);
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (booted: Booted) => {
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        roots.push(booted.root);
+    };
+    const expectRefusedNamingBoth = async (booted: Booted, name: string) => {
+        const read = await get(booted.kernel, `/meta/dashboard/${name}`);
+        expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect([...(read.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
+            .toEqual([ROW_E, ROW_F].sort());
+        // The layered door and /published answer the refusal by its sentence (#32622): both holders named, no row served.
+        for (const door of ['layers', 'published']) {
+            const answer = await get(booted.kernel, `/meta/dashboard/${name}/${door}`);
+            expect([answer.status, codeOf(answer.body), door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', door]);
+            for (const id of [ROW_E, ROW_F]) expect(JSON.stringify(answer.body)).toContain(id);
+            expect(JSON.stringify(answer.body)).not.toMatch(/(enabled|third) row/);
+        }
+        // The execution face takes the same refusal.
+        const protocol: any = booted.kernel.getService('protocol');
+        await expect(protocol.getMetaItemForExecution({ type: 'dashboard', name }))
+            .rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', httpStatus: 409 });
+        // Each exact address serves its own row.
+        for (const id of [ROW_E, ROW_F]) {
+            const exact = await get(booted.kernel, `/meta/dashboard/${name}`, { package: id });
+            expect([exact.status, unwrap(exact.body)?.item?.label], JSON.stringify(exact.body)).toEqual([200, `${rowTag(id)} row`]);
+        }
+    };
+
+    it.each([
+        { saveOrder: 'E saved first', saved: [ROW_E, ROW_F] },
+        { saveOrder: 'F saved first', saved: [ROW_F, ROW_E] },
+    ])('$saveOrder: the plain read, /layers, /published and the execution face refuse naming both, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'two_rows_dash', id, `${rowTag(id)} row`);
+            await expectRefusedNamingBoth(booted, 'two_rows_dash');
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectRefusedNamingBoth(booted, 'two_rows_dash');
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('CONTROL: one row holder is served on every bare door as before, before and after a reboot', async () => {
+        const file = freshFile();
+        let booted = await bootRowKernel(registered, file);
+        const expectServed = async (b: Booted) => {
+            const read = await get(b.kernel, '/meta/dashboard/one_row_dash');
+            expect([read.status, unwrap(read.body)?.item?.label, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, 'enabled row', ROW_E]);
+            const layers = await get(b.kernel, '/meta/dashboard/one_row_dash/layers');
+            expect([layers.status, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body)).toEqual([200, 'enabled row']);
+            const published = await get(b.kernel, '/meta/dashboard/one_row_dash/published');
+            expect([published.status, unwrap(published.body)?.label], JSON.stringify(published.body)).toEqual([200, 'enabled row']);
+            const executed = await (b.kernel.getService('protocol') as any).getMetaItemForExecution({ type: 'dashboard', name: 'one_row_dash' });
+            expect(executed?.item?.label).toBe('enabled row');
+        };
+        try {
+            await layStoredRow(booted.engine, 'one_row_dash', ROW_E, 'enabled row');
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+        booted = await bootRowKernel(registered, file);
+        try {
+            await expectServed(booted);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+});
