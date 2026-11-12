@@ -163,7 +163,9 @@
  * namespace (`/api/v1/apps/NS/…`, ADR-0121 D1), so two namespaces' same-named
  * APIs never claim one route; a flow `script` node's function, from the
  * calling flow's package (#32073). A bare read of a name two packages hold
- * answers `409 RESOURCE_CONFLICT` naming both, and the metadata service's
+ * answers `409 RESOURCE_CONFLICT` naming both — the engine's own bare function
+ * read (`resolveFunction` / `resolveFunctionEntry`) included (epic seat ruling
+ * R2-C, 6812862622) — and the metadata service's
  * in-memory store keeps a slot per `(package, name)` for the three metadata
  * types besides `api` (`PACKAGE_SLOTTED_STORE_TYPES`). An owner-less function
  * a plugin or the host registers is the platform's holder: never judged at

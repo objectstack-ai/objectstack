@@ -509,6 +509,24 @@ describe('the narrowing — the API and the function hold one name per namespace
     expect(holders.packageItem('com.acme.beta')?.packageId).toBe('app:com.acme.beta');
   });
 
+  it('[epic seat ruling R2-C] the bare engine function read of a name two namespaces hold is refused, naming both (FROM the last-registered TO 409)', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    bindFunctions(ql, 'com.acme.alpha', ['shared_fn', 'alpha_only_fn']);
+    bindFunctions(ql, 'com.acme.beta', ['shared_fn']);
+    for (const read of [() => ql.resolveFunction('shared_fn'), () => ql.resolveFunctionEntry('shared_fn')]) {
+      const err = await caught(read);
+      expect(err?.name).toBe('PackageScopedNameRefusedError');
+      expect(err?.status).toBe(409);
+      expect(err!.message).toContain('package "com.acme.alpha"');
+      expect(err!.message).toContain('package "com.acme.beta"');
+    }
+    // CONTROL — a name one package holds answers as before.
+    expect(ql.resolveFunctionEntry('alpha_only_fn')?.packageId).toBe('app:com.acme.alpha');
+    expect(ql.resolveFunction('alpha_only_fn')).toBeTypeOf('function');
+  });
+
   it('a function co-owner of the holder\'s namespace is still refused at the bind, naming only its own namespace\'s holder', async () => {
     const { ql, register } = await boot();
     expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
@@ -627,8 +645,12 @@ describe('function — the engine function registry, through the hook binder\'s 
       expect(warnings[0]).toContain('package "com.acme.alpha"');
       expect(warnings[0]).not.toContain('app:com.acme');
       expect(warnings[0]).toContain(renameOf('function', 'com.acme.beta', 'shared_fn'));
-      // Unchanged by the rule: the last-registered function is served.
-      expect(ql.resolveFunctionEntry('shared_fn')?.packageId).toBe('app:com.acme.beta');
+      // [#31700, epic seat ruling R2-C] The bare read picks neither of the two
+      // holders the warned boot kept (FROM the last-registered TO 409).
+      const bare = await caught(() => ql.resolveFunctionEntry('shared_fn'));
+      expect(bare?.status).toBe(409);
+      expect(bare!.message).toContain('package "com.acme.alpha"');
+      expect(bare!.message).toContain('package "com.acme.beta"');
     });
 
     it('both keep binding their own function after the boot; a third package is refused naming both', async () => {

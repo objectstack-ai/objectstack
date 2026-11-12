@@ -219,19 +219,41 @@ export type UnresolvedPicklistReference = PicklistReference & { readonly refusal
 /** A `picklistExtensions` entry whose target resolves to no list from its package (as above). */
 export type UnresolvedPicklistExtension = OrphanPicklistExtension & { readonly refusal?: string };
 
+/** What brings a picklist arrival: an install or upgrade, a hot reload, or one item a seam registers. */
+export type PicklistArrivalAct = 'install' | 'reload' | 'register';
+
 /**
- * [ADR-0150 D3, #31700; epic seat ruling A, 6811306558] The install door's
- * refusal of an artifact that would leave references ALREADY installed with
- * no one list (`SchemaRegistry.findPicklistReferencesBrokenBy`): every such
- * field and extension, with the refusal it would meet (every holder named),
- * and the fix. `undefined` when there is none.
+ * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+ * (6812862622)] The one re-judge's answer for an arrival
+ * (`SchemaRegistry.judgePicklistArrival`): the arrival's own references and
+ * extensions that resolve to no one list, the installed ones it would leave
+ * with no one list, and the fields whose writers it would split between two
+ * lists.
+ */
+export interface PicklistArrivalVerdict {
+  readonly unresolved: UnresolvedPicklistReference[];
+  readonly orphans: UnresolvedPicklistExtension[];
+  readonly references: UnresolvedPicklistReference[];
+  readonly extensions: UnresolvedPicklistExtension[];
+  readonly disagreeing: DisagreeingPicklistReference[];
+}
+
+/**
+ * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+ * (6812862622)] The refusal of an arrival that would leave references ALREADY
+ * installed with no one list, or split one field's writers between two lists
+ * (`SchemaRegistry.judgePicklistArrival`): every such field and extension,
+ * with the refusal it would meet or the list each writer would reach, and the
+ * fix. `undefined` when there is none.
  */
 export function describePicklistReferencesBrokenByInstall(
   incomingPackageIds: readonly string[],
   references: readonly UnresolvedPicklistReference[],
   extensions: readonly UnresolvedPicklistExtension[] = [],
+  disagreeing: readonly DisagreeingPicklistReference[] = [],
+  options: { act?: PicklistArrivalAct; subject?: string } = {},
 ): PicklistMetadataError | undefined {
-  if (references.length === 0 && extensions.length === 0) return undefined;
+  if (references.length === 0 && extensions.length === 0 && disagreeing.length === 0) return undefined;
   const lines = [
     ...references.map(
       (r) => `field '${r.object}.${r.field}' (${describePackage(r.packageId)}) references picklist '${r.picklist}'`
@@ -241,17 +263,30 @@ export function describePicklistReferencesBrokenByInstall(
       (e) => `a \`picklistExtensions\` entry (${describePackage(e.packageId)}) extends picklist '${e.picklist}'`
         + refusalSuffix(e.refusal),
     ),
+    ...disagreeing.map(
+      (d) => `field '${d.object}.${d.field}' would be written to picklist '${d.picklist}' by packages that reach `
+        + `different lists (${d.referrers
+          .map((r) => `${describePackage(r.packageId)} reaches the list of ${describePackageScopedHolder(r.holder)}`)
+          .join('; ')})`,
+    ),
   ];
-  const installing = incomingPackageIds.length > 0
+  const packages = incomingPackageIds.length > 0
     ? incomingPackageIds.map((id) => `'${id}'`).join(', ')
     : 'this artifact';
+  const act = options.act ?? 'install';
+  const doing = act === 'register'
+    ? `Registering ${options.subject ?? packages}`
+    : `${act === 'reload' ? 'Reloading' : 'Installing'} ${packages}`;
+  const nothing = act === 'register' ? 'Nothing was registered.' : act === 'reload'
+    ? 'Nothing was reloaded: every package keeps its previous definitions.'
+    : 'Nothing was installed.';
   return picklistMetadataError(
-    `Installing ${installing} would leave ${lines.length === 1 ? 'a picklist reference' : `${lines.length} picklist references`} `
-    + `already installed with no one list: ${lines.join('; ')}. Each resolves to one list now; the list of the same `
-    + 'name this install declares would be a second holder it cannot choose between, so the field would lose its '
-    + 'options and the extension would add its options to nothing, and the next boot would refuse both. Nothing '
-    + 'was installed. Rename the list in the package being installed, or remove the reference or extension that '
-    + 'names it first.',
+    `${doing} would leave ${lines.length === 1 ? 'a picklist reference' : `${lines.length} picklist references`} `
+    + `already installed with no one list: ${lines.join('; ')}. Each reaches one list now; once this registered, `
+    + 'a field would lose its options and refuse every value, and an extension would add its options to nothing '
+    + '(the next boot refuses a reference or an extension with no one list, and warns for a field whose writers '
+    + `reach different lists). ${nothing} Rename the list in the package being ${act === 'register' ? 'registered' : 'installed'}, `
+    + 'or remove the reference, the redeclared field or the extension that names it first.',
   );
 }
 

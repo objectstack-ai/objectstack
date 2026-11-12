@@ -123,12 +123,16 @@ const caught = async (fn: () => unknown): Promise<Refusal | undefined> => {
 };
 
 /** A plugin registering `manifests` in its `start()` — a package of the cold boot, before the seal. */
+/** The hook trigger of the last boot's package plugin: a `metadata:reloaded` announce reaches the engine plugin through it. */
+let bootTrigger: ((name: string, payload: unknown) => Promise<void>) | undefined;
+
 const bootPackages = (manifests: unknown[]) => ({
   name: 'test.bare-name.boot-packages',
   version: '1.0.0',
   dependencies: ['com.objectstack.engine.objectql'],
   init: async () => {},
-  start: async (ctx: { getService<T>(name: string): T }) => {
+  start: async (ctx: { getService<T>(name: string): T; trigger: (name: string, payload: unknown) => Promise<void> }) => {
+    bootTrigger = (name, payload) => ctx.trigger(name, payload);
     const manifest = ctx.getService<ManifestService>('manifest');
     for (const m of manifests) await manifest.register(m);
   },
@@ -147,7 +151,14 @@ const boot = async (atBoot: unknown[] = []) => {
   const manifest = kernel.getService<ManifestService>('manifest');
   const bareNameWarnings = () =>
     warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('Bare-name conflict at boot'));
-  return { registry: ql.registry, register: (m: unknown) => caught(() => manifest.register(m)), bareNameWarnings };
+  return {
+    registry: ql.registry,
+    register: (m: unknown) => caught(() => manifest.register(m)),
+    bareNameWarnings,
+    /** [#31700] The artifact hot reload (`metadata:reloaded`) of a package payload, and every warning the kernel logged. */
+    reload: (m: unknown) => bootTrigger!('metadata:reloaded', { metadata: m }),
+    warnings: () => warn.mock.calls.map((c) => String(c[0])),
+  };
 };
 
 afterEach(async () => {
@@ -571,6 +582,106 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }), extension('com.acme.gamma')]);
       expect(await register(pkg('com.acme.delta', { picklist: ['p2'], mapping: ['m2'] }))).toBeUndefined();
       expect(registry.getPackage('com.acme.delta')).toBeDefined();
+      expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+    });
+
+    // [#31700, epic seat ruling R2-A 6812862622] Every way a list, an extension
+    // or a field's reference arrives after the seal meets the registry's one
+    // re-judge (`SchemaRegistry.judgePicklistArrival`), the whole arrival
+    // together: an install, an upgrade, a hot reload and the per-item seams.
+    const redeclare = (object: string) => ({
+      objectExtensions: [{ extend: object, fields: { s: { name: 's', type: 'select', picklist: 'p1' } } }],
+    });
+    const onAlpha = { dependencies: { 'com.acme.alpha': '^1.0.0' } };
+
+    it('a late install that extends its own list of a name another namespace holds is refused: the extension is judged caller-less', async () => {
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] })]);
+      const err = await register(pkg('com.acme.gamma', { picklist: ['p1'] }, {
+        picklistExtensions: [{ extend: 'p1', options: [{ label: 'extra', value: 'extra' }] }],
+      }));
+      expect(err, 'the install was refused').toBeDefined();
+      expect(err!.message).toContain("a `picklistExtensions` entry (package 'com.acme.gamma') extends picklist 'p1'");
+      expect(err!.message).toContain('package "com.acme.alpha"');
+      expect(err!.message).toContain('package "com.acme.gamma"');
+      expect(registry.getPackage('com.acme.gamma'), 'nothing of it registered').toBeUndefined();
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
+    });
+
+    it('a late install redeclaring another package\'s field with its own list of the name is refused: the field would lose its options', async () => {
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item'))]);
+      const err = await register(pkg('com.acme.gamma', { picklist: ['p1'] }, { ...onAlpha, ...redeclare('alpha_item') }));
+      expect(err, 'the install was refused').toBeDefined();
+      expect(err!.message).toContain("Installing 'com.acme.gamma' would leave a picklist reference already installed with no one list");
+      expect(err!.message).toContain("field 'alpha_item.s' would be written to picklist 'p1' by packages that reach different lists");
+      expect(err!.message).toContain('reaches the list of package "com.acme.alpha"');
+      expect(err!.message).toContain('reaches the list of package "com.acme.gamma"');
+      expect(registry.getPackage('com.acme.gamma')).toBeUndefined();
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+    });
+
+    it('an upgrade adding a list under the name its installed redeclare of another package\'s field names is refused', async () => {
+      const gamma = pkg('com.acme.gamma', {}, { ...onAlpha, ...redeclare('alpha_item') });
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item')), gamma]);
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+      const err = await register(pkg('com.acme.gamma', { picklist: ['p1'] }, { ...onAlpha, ...redeclare('alpha_item'), version: '1.1.0' }));
+      expect(err, 'the upgrade was refused').toBeDefined();
+      expect(err!.message).toContain("field 'alpha_item.s' would be written to picklist 'p1' by packages that reach different lists");
+      expect(registry.getPackage('com.acme.gamma')?.manifest?.version, 'the installed version stays').toBe('1.0.0');
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+      expect(registry.findDisagreeingPicklistReferences()).toEqual([]);
+    });
+
+    it('CONTROL — a redeclare whose package holds no list of the name reaches the owner\'s: installed and served', async () => {
+      const { registry, register } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item'))]);
+      expect(await register(pkg('com.acme.gamma', {}, { ...onAlpha, ...redeclare('alpha_item') }))).toBeUndefined();
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+    });
+
+    it('the item seam: a list registered on its own after the seal is refused like an install of it', async () => {
+      const { registry } = await boot([
+        pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item')),
+        extension('com.acme.gamma'),
+        pkg('com.acme.beta'),
+      ]);
+      const list = await caught(() => registry.registerItem('picklist', { name: 'p1', options: [{ label: 'b', value: 'beta_one' }] } as never, 'name' as never, 'com.acme.beta'));
+      expect(list, 'registerItem refused').toBeDefined();
+      expect(list!.message).toContain("Registering picklist 'p1' of package 'com.acme.beta' would leave");
+      expect(list!.message).toContain("a `picklistExtensions` entry (package 'com.acme.gamma') extends picklist 'p1'");
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+      // CONTROL: an unrelated name registers.
+      expect(await caught(() => registry.registerItem('picklist', { name: 'p2', options: [{ label: 'b', value: 'beta_two' }] } as never, 'name' as never, 'com.acme.beta'))).toBeUndefined();
+    });
+
+    it('the item seams: an extension of a name two namespaces hold, or a body redeclaring a field with its own list, is refused', async () => {
+      const { registry } = await boot([
+        pkg('com.acme.alpha', { picklist: ['p1'] }, fieldOn('alpha_item')),
+        pkg('com.acme.delta', { picklist: ['p1'] }),
+      ]);
+      const ext = await caught(() => registry.registerPicklistExtension({ extend: 'p1', options: [{ label: 'x', value: 'x' }] }, 'com.acme.delta'));
+      expect(ext, 'registerPicklistExtension refused').toBeDefined();
+      expect(ext!.message).toContain("a `picklistExtensions` entry (package 'com.acme.delta') extends picklist 'p1'");
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
+      const body = await caught(() => registry.registerObject(
+        { name: 'alpha_item', fields: { s: { name: 's', type: 'select', picklist: 'p1' } } } as never, 'com.acme.delta', undefined, 'extend',
+      ));
+      expect(body, 'registerObject refused').toBeDefined();
+      expect(body!.message).toContain("Registering object 'alpha_item' of package 'com.acme.delta' would leave");
+      expect(body!.message).toContain("field 'alpha_item.s' would be written to picklist 'p1' by packages that reach different lists");
+      expect(served(registry, 'alpha_item')).toEqual(['alpha_one']);
+    });
+
+    it('a hot reload adding a list under a name another namespace holds is refused whole: every package keeps its previous definitions', async () => {
+      const { registry, reload, warnings } = await boot([
+        pkg('com.acme.alpha', { picklist: ['p1'] }),
+        extension('com.acme.gamma'),
+        pkg('com.acme.beta'),
+      ]);
+      await reload(pkg('com.acme.beta', { picklist: ['p1'] }));
+      expect(warnings().some((w) => w.includes('reload refused')), 'the reload was refused and named').toBe(true);
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
       expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
     });
   });

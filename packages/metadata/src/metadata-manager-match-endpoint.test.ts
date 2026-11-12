@@ -753,7 +753,8 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: `unregisterPackage` removes each package\'s `_packageId`-only item from its own slot and leaves the other\'s, in either order (BASE: it removed nothing)', async (type) => {
@@ -823,6 +824,30 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     await ctx.manager.unregister(type, ctx.name, { packageId: B });
     expect(ctx.rowBodies(), 'beta\'s row: deleted with beta').toEqual([]);
     // No slot of the name is left; the residue pin below reads what is served now (#32246).
+  });
+
+  /**
+   * [#31700, epic seat ruling R2-B (a)] A removal naming a package that holds
+   * no slot of the name takes nothing: that package's slot is empty. Outside
+   * the set the store keeps one item per name and the removal takes it
+   * whatever package it names, which is what `picklist`, `mapping` and
+   * `dataset` did before #31700. The announcement is unchanged and is not
+   * this move: `unregister` announces every call, an absent name's too — the
+   * watcher hears `deleted` by name and the realtime event names the package
+   * the call named.
+   */
+  it.each(SLOTTED)('%s: `unregister(type, name, { packageId })` naming a package that holds no slot of a one-holder name removes nothing (BASE, outside the set: the item and its row went)', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.unregister(type, ctx.name, { packageId: B });
+    expect(await ctx.labels()).toEqual([`alpha ${type}`]);
+    expect(((await ctx.manager.get(type, ctx.name)) as any)?.label).toBe(`alpha ${type}`);
+    expect(ctx.rowBodies()).toEqual([`alpha ${type}`]);
+    expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+    if (hasRealtimeDeleted(type)) {
+      expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([B]);
+    } else {
+      expect(ctx.published).toEqual([]);
+    }
   });
 
   describe.each(SLOTTED)('CONTROL — %s, one holder: a removal naming no package is unchanged', (type) => {
@@ -978,7 +1003,8 @@ describe('per-package loader storage for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: each package\'s item has its own row with `package_id` filled, and its own entry in the door\'s store (BASE: one row and one entry, the body saved last)', async (type) => {
