@@ -705,12 +705,14 @@ describe('[#32521] the bare door over the metadata service\'s own plural read, w
         harness.ql.find = vi.fn(async (object: string) => (object === 'sys_metadata' ? [] : [{ id: 'r1' }]));
         return { ...harness, manager };
     };
+    /** Each declaration `loadMany` hands on: its package stamp and the row it is (its description). */
     const holders = async (manager: MetadataManager) =>
-        ((await manager.loadMany('action')) as Array<{ _packageId?: string }>).map((item) => item._packageId ?? 'none');
+        ((await manager.loadMany('action')) as Array<{ _packageId?: string; ai?: { description?: string } }>)
+            .map((item) => `${item._packageId ?? 'none'}: ${item.ai?.description}`);
 
     it('two packages\' rows of the name: the bare call is refused on REST and MCP, 409 naming both (BEFORE: one declaration reached the door and the call ran)', async () => {
         const { post, bridge, ran, manager } = over([row(CRM, 1), row(HR, 2)], act('send_digest', HR));
-        expect(await holders(manager)).toEqual([CRM, HR]);
+        expect(await holders(manager)).toEqual([`${CRM}: ${CRM} send_digest`, `${HR}: ${HR} send_digest`]);
         const rest = await post('/global/send_digest');
         expect(rest.status, JSON.stringify(rest.body)).toBe(409);
         expect(codeOf(rest)).toBe('RESOURCE_CONFLICT');
@@ -724,9 +726,9 @@ describe('[#32521] the bare door over the metadata service\'s own plural read, w
     });
 
     for (const [shape, rows, handedOn] of [
-        ['one package\'s row', [row(CRM, 1)], [CRM]],
-        ['one package\'s row and a package-less row of the name saved after it (its customization)', [row(CRM, 1), row(undefined, 2)], ['none']],
-        ['a package-less row and one package\'s row of the name saved after it', [row(undefined, 1), row(CRM, 2)], [CRM]],
+        ['one package\'s row', [row(CRM, 1)], [`${CRM}: ${CRM} send_digest`]],
+        ['one package\'s row and a package-less row of the name saved after it (its customization)', [row(CRM, 1), row(undefined, 2)], ['none: env send_digest']],
+        ['a package-less row and one package\'s row of the name saved after it', [row(undefined, 1), row(CRM, 2)], [`${CRM}: ${CRM} send_digest`]],
     ] as const) {
         it(`CONTROL — ${shape}: one declaration reaches the door, the row saved last, and the bare call runs on REST and MCP, as before`, async () => {
             const { post, bridge, ran, manager } = over([...rows], act('send_digest', CRM));
