@@ -511,7 +511,10 @@ interface FunctionHoldingEngine {
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
     resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
-    functionHoldersOf?(name: string): { packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined };
+    functionHoldersOf?(name: string): {
+        readonly packageHolders: readonly string[];
+        packageItem(packageId: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
+    };
 }
 
 /** The `handler` names `owner`'s hooks in `groups` carry. */
@@ -536,6 +539,11 @@ function hookHandlersOf(groups: readonly HookBindingGroup[], owner: string): str
  * `known`. The bare slot of each kept name is put back as it was. A function
  * code outside this binder registered under `holder` that none of those names
  * leaves with the removal, as a dropped body's does.
+ *
+ * [#31700, epic seat ruling R3-B] Only for a name one package holds: two
+ * namespaces' packages may each hold one function name, and the bare read of
+ * such a name is refused (409, ADR-0150 D3) and answers no reader, so for it
+ * `holder`'s own entry is all that is read and put back.
  */
 function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, moved: readonly string[], known: Iterable<string>): void {
     if (typeof engine.registerFunction !== 'function' || typeof engine.functionHoldersOf !== 'function') return;
@@ -544,8 +552,9 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
     const keep: Array<{ name: string; entry: { readonly handler: any; readonly effect?: unknown }; bare?: { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } }> = [];
     for (const name of new Set(known)) {
         if (leaving.has(name)) continue;
-        const entry = engine.functionHoldersOf(name).packageItem(packageId);
-        if (entry) keep.push({ name, entry, bare: engine.resolveFunctionEntry?.(name) });
+        const holders = engine.functionHoldersOf(name);
+        const entry = holders.packageItem(packageId);
+        if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : engine.resolveFunctionEntry?.(name) });
     }
     engine.unregisterFunctionsByPackage?.(holder);
     for (const { name, entry, bare } of keep) {

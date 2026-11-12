@@ -612,7 +612,15 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         expect(ql.functionHoldersOf('qa_twice').packageHolders, 'one package holder').toEqual([ALPHA]);
     });
 
-    it('a re-bind that moves a function to another owner takes it off the owner the previous bind gave it, which keeps its other functions', async () => {
+    // [#31700, epic seat ruling R3-B] The kept name held by beta alone (CONTROL),
+    // or by beta and a package of another namespace too, as two namespaces may
+    // hold one function name since #31700: a bare read of that name is refused
+    // (409), so the teardown reads beta's own entry and never aborts on it.
+    it.each([
+        ['beta alone holds the name it keeps (CONTROL: the bare slot answers as before)', false],
+        ['another namespace\'s package holds the name beta keeps too', true],
+    ] as const)('a re-bind that moves a function to another owner takes it off the owner the previous bind gave it, which keeps its other functions — %s', async (_case, sharedKept) => {
+        const GAMMA = 'com.qa.bodies.gamma';
         const body = (ns: Ns, hooks: unknown[]) => ({
             id: `com.qa.bodies.${ns}`, namespace: ns, name: `qa_bodies_${ns}`, version: '1.0.0', type: ns === 'alpha' ? 'app' : 'module',
             objects: [{ name: `${ns}_doc`, fields: {} }],
@@ -628,17 +636,26 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
             functions: { qa_moving: stamp('moving'), qa_kept: stamp('kept') },
         });
         const first = artifactWith([]);
-        const ql = engineFor(first);
-        bind(ql, first);
+        const { errors, logger } = recordingErrors();
+        const ql = engineFor(first, logger);
+        bind(ql, first, logger);
         expect(ql.functionHoldersOf('qa_moving').packageHolders, 'precondition: only beta\'s hook names it').toEqual([BETA]);
+        if (sharedKept) ql.registerFunction('qa_kept', stamp('gamma'), { packageId: appArtifactHandlerOwner(GAMMA) });
 
         // Now the top level names it too: one function two owners' hooks name, under the artifact's id.
-        bind(ql, artifactWith([hookOn('alpha', 'qa_res_moving', 'qa_moving')]));
+        bind(ql, artifactWith([hookOn('alpha', 'qa_res_moving', 'qa_moving')]), logger);
 
+        expect(errors.map((e) => e.message), 'the teardown ran whole').toEqual([]);
         expect(ql.functionHoldersOf('qa_moving').packageHolders, 'held once, by the artifact\'s id').toEqual([ALPHA]);
-        expect(ql.functionHoldersOf('qa_kept').packageHolders, 'beta keeps the function only its hook names').toEqual([BETA]);
+        expect([...ql.functionHoldersOf('qa_kept').packageHolders].sort(), 'beta keeps the function only its hook names').toEqual(sharedKept ? [BETA, GAMMA] : [BETA]);
         expect(String(await insertInto(ql, 'beta')).split(';').filter(Boolean).sort()).toEqual(['kept', 'moving']);
         expect(await insertInto(ql, 'alpha')).toBe('moving;');
+        if (sharedKept) {
+            expect(ql.functionHoldersOf('qa_kept').packageItem(GAMMA)?.packageId, 'the other holder keeps its own').toBe(appArtifactHandlerOwner(GAMMA));
+            expect(() => ql.resolveFunctionEntry('qa_kept'), 'the bare read of a name two packages hold stays refused').toThrow(/com\.qa\.bodies\.beta[\s\S]*com\.qa\.bodies\.gamma|com\.qa\.bodies\.gamma[\s\S]*com\.qa\.bodies\.beta/);
+        } else {
+            expect(ql.resolveFunctionEntry('qa_kept')?.packageId).toBe(appArtifactHandlerOwner(BETA));
+        }
     });
 
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {

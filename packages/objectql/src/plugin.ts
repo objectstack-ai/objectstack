@@ -1432,8 +1432,9 @@ export class ObjectQLPlugin implements Plugin {
         //      email template sent its old wording, an edited flow re-bound its
         //      old body, while the by-name read served the edit. See
         //      {@link refreshReloadedPackages}.
-        this.refreshReloadedPackages(ctx, payload);
-        this.ingestReloadedObjects(ctx, payload);
+        // [#31700, epic seat ruling R3-C] A reload the picklist re-judge refused
+        // is refused whole: its objects are not ingested either.
+        if (this.refreshReloadedPackages(ctx, payload) !== 'refused') this.ingestReloadedObjects(ctx, payload);
         if (this.skipSchemaSync) {
             // DDL is managed out-of-band here, but the objects this reload just
             // ingested still have to be TOLD to the driver, or every JSON /
@@ -1783,9 +1784,10 @@ export class ObjectQLPlugin implements Plugin {
    * Items removed from the artifact stay registered until restart, the
    * lifecycle {@link ingestReloadedObjects} keeps for objects. A body that
    * fails to register is named and skipped: the reload goes on, and that
-   * package keeps serving what it served before.
+   * package keeps serving what it served before. Answers `'refused'` when the
+   * picklist re-judge refused the reload whole.
    */
-  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): void {
+  private refreshReloadedPackages(ctx: PluginContext, payload: unknown): 'refused' | undefined {
     if (!this.ql) return;
     const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
     if (!metadata || typeof metadata !== 'object') return;
@@ -1829,7 +1831,7 @@ export class ObjectQLPlugin implements Plugin {
         packageIds: reloading.map((r) => r.id),
         error: e?.message,
       });
-      return;
+      return 'refused';
     }
     this.ql.registry.registeringPicklistArrival(() => {
       for (const { manifest, id, source } of reloading) {

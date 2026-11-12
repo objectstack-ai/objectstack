@@ -153,6 +153,7 @@ const boot = async (atBoot: unknown[] = []) => {
     warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('Bare-name conflict at boot'));
   return {
     registry: ql.registry,
+    ql,
     register: (m: unknown) => caught(() => manifest.register(m)),
     bareNameWarnings,
     /** [#31700] The artifact hot reload (`metadata:reloaded`) of a package payload, and every warning the kernel logged. */
@@ -429,6 +430,17 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
     });
 
+    it('the item seam judges a tenant-authored body under a package as any: a co-owner of the holder\'s namespace is refused (seat ruling R3-A)', async () => {
+      const { registry, register } = await boot();
+      expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+      expect(await register(coOwner('com.acme.alpha', 'com.acme.gamma'))).toBeUndefined();
+      const authored = (tag: string) => ({ ...body(type, name, tag), _provenance: 'org' });
+      expectRefusal(await caught(() => registry.registerItem(type, authored('gamma'), 'name', 'com.acme.gamma')), 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' });
+      // CONTROL: the holder's own tenant-authored overlay adds no holder.
+      expect(await caught(() => registry.registerItem(type, authored('alpha'), 'name', 'com.acme.alpha'))).toBeUndefined();
+      expect(registry.packageScopedHoldersOf(type, name)).toEqual(['com.acme.alpha']);
+    });
+
     it('the cold boot of two namespaces\' holders boots with no bare-name warning, and the seal reports no clash', async () => {
       const { registry, bareNameWarnings } = await boot([pkg('com.acme.alpha', { [type]: [name] }), pkg('com.acme.beta', { [type]: [name] })]);
       expect(bareNameWarnings()).toEqual([]);
@@ -650,6 +662,16 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       expect(list!.message).toContain("a `picklistExtensions` entry (package 'com.acme.gamma') extends picklist 'p1'");
       expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
       expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+      // [contract review 6815437823 must-fix 1] A tenant-authored body under a
+      // package fills that package's slot all the same: refused alike (main:
+      // 422, the one-holder rule).
+      const authored = await caught(() => registry.registerItem('picklist', { name: 'p1', _provenance: 'org', options: [{ label: 'b', value: 'beta_one' }] } as never, 'name' as never, 'com.acme.beta'));
+      expect(authored, 'a tenant-authored registerItem under a package refused').toBeDefined();
+      expect(authored!.message).toContain("Registering picklist 'p1' of package 'com.acme.beta' would leave");
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
+      // CONTROL: the holder's own tenant-authored overlay adds no holder and registers.
+      expect(await caught(() => registry.registerItem('picklist', { name: 'p1', _provenance: 'org', options: [{ label: 'a', value: 'alpha_one' }] } as never, 'name' as never, 'com.acme.alpha'))).toBeUndefined();
       // CONTROL: an unrelated name registers.
       expect(await caught(() => registry.registerItem('picklist', { name: 'p2', options: [{ label: 'b', value: 'beta_two' }] } as never, 'name' as never, 'com.acme.beta'))).toBeUndefined();
     });
@@ -678,11 +700,35 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
         extension('com.acme.gamma'),
         pkg('com.acme.beta'),
       ]);
-      await reload(pkg('com.acme.beta', { picklist: ['p1'] }));
+      await reload(pkg('com.acme.beta', { picklist: ['p1'] }, { objects: [{ name: 'beta_reloaded', fields: { title: { name: 'title', type: 'text' } } }] }));
       expect(warnings().some((w) => w.includes('reload refused')), 'the reload was refused and named').toBe(true);
       expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
       expect(registry.findOrphanPicklistExtensions()).toEqual([]);
       expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
+      // [seat ruling R3-C] Refused whole: the payload's objects are not ingested either.
+      expect(registry.getObject('beta_reloaded'), 'no object of the refused reload registered').toBeUndefined();
+    });
+
+    // [contract review 6815437823 must-fix 1; seat ruling R3-A] Every door that
+    // fills a package's slot with a list judges a tenant-authored one as any:
+    // provenance is no shortcut. CONTROL: the holder's own overlay adds no holder.
+    const authoredList = (id: string) => pkg(id, {}, { picklists: [{ ...body('picklist', 'p1', id.split('.').pop()!), _provenance: 'org' }] });
+    it.each(['the install door', 'the engine\'s registerApp', 'a hot reload'] as const)('%s judges a tenant-authored list under a package as any list of it', async (door) => {
+      const { registry, ql, register, reload, warnings } = await boot([pkg('com.acme.alpha', { picklist: ['p1'] }), extension('com.acme.gamma'), pkg('com.acme.beta')]);
+      const arrive = async (m: unknown): Promise<boolean> => {
+        if (door === 'the install door') return (await register(m)) !== undefined;
+        if (door === 'a hot reload') {
+          const before = warnings().filter((w) => w.includes('reload refused')).length;
+          await reload(m);
+          return warnings().filter((w) => w.includes('reload refused')).length > before;
+        }
+        return (await caught(() => ql.registerApp(m as never))) !== undefined;
+      };
+      expect(await arrive(authoredList('com.acme.beta')), 'refused').toBe(true);
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
+      expect(registry.findOrphanPicklistExtensions()).toEqual([]);
+      expect(await arrive(authoredList('com.acme.alpha')), 'CONTROL: the holder\'s own overlay').toBe(false);
+      expect(registry.packageScopedHoldersOf('picklist', 'p1')).toEqual(['com.acme.alpha']);
     });
   });
 });

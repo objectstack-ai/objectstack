@@ -5508,7 +5508,9 @@ export class SchemaRegistry {
     // meets the one re-judge before its layer is stored: a field it writes
     // must not leave another package's field of the same name writing to a
     // different list ({@link refusePicklistItemArrival}). ⛔ Never an overlay
-    // or a tenant-authored body.
+    // or a tenant-authored body: it fills no package's slot and writes no
+    // package's reference, resolving as the environment's (`picklistReferrerOf`;
+    // swept for seat ruling R3-A).
     if (packageId && (ownership === 'own' || ownership === 'extend') && !isTenantAuthored(schema)) {
       this.refusePicklistItemArrival(
         packageId,
@@ -8181,9 +8183,12 @@ export class SchemaRegistry {
     // directly — meets the one re-judge an install meets, before anything
     // below stores it: a list of a name another namespace's package holds must
     // not leave an installed extension or reference with no one list
-    // ({@link refusePicklistItemArrival}). ⛔ Never a registration with no
-    // package or a tenant-authored body: the environment catalog.
-    if (type === 'picklist' && packageId && !isTenantAuthored(item)) {
+    // ({@link refusePicklistItemArrival}). Any registration under a package
+    // fills that package's slot, a tenant-authored body included (contract
+    // review 6815437823 must-fix 1): the holder's own overlay adds no holder
+    // and passes. ⛔ Never a registration with no package: the environment
+    // catalog.
+    if (type === 'picklist' && packageId) {
       this.refusePicklistItemArrival(
         packageId,
         { picklists: [{ ...(item as object), name: baseName }] },
@@ -10699,9 +10704,11 @@ export class SchemaRegistry {
    * namespaces' holders open; a name nothing holds, or holds only outside the
    * package's closure, keeps the seam's answer (served no options, named by
    * the boot audit). What it does to everyone else's references is judged in
-   * full. ⛔ Never a registration with no package, and never a tenant-authored
-   * body: those come out of `sys_metadata`, and a stored row is not refused
-   * here.
+   * full. ⛔ Never a registration with no package: the environment catalog
+   * (`sys_metadata`), whose stored row is not refused here. A tenant-authored
+   * list under a package is judged as any list of it (seat ruling R3-A); a
+   * tenant-authored object layer is not asked, as it writes no package's
+   * reference ({@link registerObject}).
    */
   private refusePicklistItemArrival(packageId: string | undefined, part: Record<string, unknown>, subject: string): void {
     if (!this.picklistVocabularySealed || this.picklistArrivalDepth > 0 || !packageId) return;
