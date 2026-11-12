@@ -28,6 +28,8 @@ import {
 import { SystemObjectName } from '@objectstack/spec/system';
 import type { IDataEngine } from '@objectstack/core';
 import { sso } from '@better-auth/sso';
+import { AuthManager } from './auth-manager';
+import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 
 describe('AUTH_MODEL_TO_PROTOCOL mapping', () => {
   it('should map all four core better-auth models to sys_ protocol names', () => {
@@ -617,5 +619,137 @@ describe('withValidationErrorMapping – ObjectQL ValidationError → better-aut
     expect(isAPIError(caught)).toBe(true);
     expect(caught.statusCode).toBe(400);
     expect(caught.body).toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+});
+
+describe('an unbounded ssoProvider read reads every row (the 100-row factory default does not apply)', () => {
+  // `@better-auth/sso` reads `ssoProvider` with no `limit` and treats the
+  // answer as the whole table; better-auth's adapter factory turns that into
+  // `defaultFindManyLimit ?? 100` before this adapter runs. End of the chain:
+  // a real AuthManager with the real `sso()` plugin over the in-memory engine
+  // (which honours `limit`), driven through its HTTP surface.
+  const SECRET = 'test-secret-at-least-32-chars-long-sso-provider-rows';
+  const BASE = 'http://localhost:3000';
+  const AUTH = `${BASE}/api/v1/auth`;
+
+  const oidcRow = (providerId: string, domain: string, userId?: string) => {
+    const idp = `https://${providerId}.idp.example.test`;
+    return {
+      providerId,
+      domain,
+      issuer: idp,
+      ...(userId ? { userId } : {}),
+      oidcConfig: JSON.stringify({
+        issuer: idp,
+        clientId: `client-${providerId}`,
+        clientSecret: 'secret',
+        authorizationEndpoint: `${idp}/authorize`,
+        tokenEndpoint: `${idp}/token`,
+        jwksEndpoint: `${idp}/jwks`,
+        discoveryEndpoint: `${idp}/.well-known/openid-configuration`,
+        pkce: true,
+        scopes: ['openid', 'email'],
+        mapping: { id: 'sub', email: 'email', name: 'name' },
+      }),
+    };
+  };
+
+  /** `fillers` unrelated providers first, then `acme` (domain `acme.com`) at row `fillers + 1`. */
+  const boot = async (fillers: number, ownerId?: string) => {
+    const engine = createMemoryEngine();
+    (engine as any).resolveSecretField = async () => 'secret';
+    const manager = new AuthManager({
+      secret: SECRET,
+      baseUrl: BASE,
+      dataEngine: engine,
+      trustedOrigins: [BASE],
+      plugins: { sso: true },
+      logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
+    } as never);
+    const ctx = await ((await manager.getAuthInstance()) as any).$context;
+    for (let i = 0; i < fillers; i++) {
+      await ctx.adapter.create({ model: 'ssoProvider', data: oidcRow(`filler-${i}`, `filler-${i}.example`, ownerId) });
+    }
+    await ctx.adapter.create({ model: 'ssoProvider', data: oidcRow('acme', 'acme.com', ownerId) });
+    expect((engine as any).tables.get('sys_sso_provider')).toHaveLength(fillers + 1);
+    return { manager, engine, ctx };
+  };
+
+  const signInSso = async (manager: AuthManager, email: string) => {
+    const res = await manager.handleRequest(
+      new Request(`${AUTH}/sign-in/sso`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ email, callbackURL: `${BASE}/after` }),
+      }),
+    );
+    const body: any = await res.json().catch(() => null);
+    return {
+      status: res.status,
+      body,
+      clientId: body?.url ? new URL(body.url).searchParams.get('client_id') : null,
+    };
+  };
+
+  for (const row of [101, 151]) {
+    it(`a provider matched only by domainMatches (a subdomain) at row ${row} routes`, async () => {
+      const { manager } = await boot(row - 1);
+      const res = await signInSso(manager, 'mia@eng.acme.com');
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.clientId).toBe('client-acme');
+    });
+  }
+
+  it('CONTROL: an exact-domain address routes by the step-1 findOne at row 151, unchanged', async () => {
+    const { manager } = await boot(150);
+    const res = await signInSso(manager, 'mia@acme.com');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.clientId).toBe('client-acme');
+  });
+
+  it('CONTROL: an address no provider matches gets the same refusal past 100 rows', async () => {
+    const { manager } = await boot(150);
+    const res = await signInSso(manager, 'mia@nobody.example');
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ message: 'No provider found for the issuer' });
+  });
+
+  it('/sso/providers lists the caller\'s own provider past row 100', async () => {
+    const engine0 = await boot(0);
+    // Sign a user up first so the providers can be owned by that user.
+    const signUp = await engine0.manager.handleRequest(
+      new Request(`${AUTH}/sign-up/email`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: BASE },
+        body: JSON.stringify({ email: 'owner@acme.com', password: 'S3cure!Passw0rd-32388', name: 'Owner' }),
+      }),
+    );
+    expect(signUp.status, await signUp.clone().text()).toBeLessThan(300);
+    const cookie = (signUp.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+    const ownerId = (await signUp.json()).user.id as string;
+    for (let i = 0; i < 150; i++) {
+      await engine0.ctx.adapter.create({ model: 'ssoProvider', data: oidcRow(`owned-${i}`, `owned-${i}.example`, ownerId) });
+    }
+    const res = await engine0.manager.handleRequest(
+      new Request(`${AUTH}/sso/providers`, { headers: { cookie, origin: BASE } }),
+    );
+    const body: any = await res.json().catch(() => null);
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    const ids = (body.providers as Array<{ providerId: string }>).map((p) => p.providerId);
+    expect(ids).toHaveLength(150);
+    expect(ids).toContain('owned-149');
+  });
+
+  it('an explicit limit, and every other model, keep the bound the caller or the factory gave', async () => {
+    const { engine, ctx } = await boot(150);
+    const find = vi.spyOn(engine as any, 'find');
+    await ctx.adapter.findMany({ model: 'ssoProvider', limit: 5 });
+    await ctx.adapter.findMany({ model: 'user' });
+    await ctx.adapter.findMany({ model: 'ssoProvider' });
+    expect(find.mock.calls.map(([name, q]: any) => [name, q.limit])).toEqual([
+      ['sys_sso_provider', 5],
+      ['sys_user', 100],
+      ['sys_sso_provider', 151],
+    ]);
   });
 });

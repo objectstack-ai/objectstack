@@ -49,6 +49,7 @@ import { storedEntryRow } from './protocol-stored-overlay-types.js';
 import { viewIdentityPatch } from './protocol-view-normalization.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { packageLessRowWithheld, pairMemberWithheldAt } from './protocol-exact-qualifier.js';
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItems`; the method's docblock there is its contract. */
 export async function getMetaItems(host: Pick<ProtocolHost, 'readFlattenedMetaItems'>, request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean }) {
@@ -256,8 +257,12 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             }));
             // [#21817] The package-less rows, placed the same way, as
             // stand-ins: the same parse and the same stored-row rule.
+            // [epic ruling 6761802819 on #31699] …except one of a name two or
+            // more packages hold: it is no holder's own, so no holder's list
+            // serves it ({@link packageLessRowWithheld}).
             const standIns = host.storedOverlayEntries(request, standInRows)
                 .filter((entry) => !host.declinesStoredRow(request.type, (entry.data as { name?: unknown } | null)?.name, storedEntryRow(entry)))
+                .filter((entry) => !packageLessRowWithheld(host, request.type, entry.name ?? (entry.data as { name?: unknown } | null)?.name))
                 .map(({ name, data, type: recType }) => ({
                     data, packageId: undefined, stored: { type: recType, name }, standIn: true,
                 }));
@@ -704,7 +709,9 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
             const bound = boundPackageOf(it._packageId);
             if (bound === undefined || !pairsOfList.includes(bound) || typeof it.name !== 'string') continue;
             if (host.shipsBundleName(request.type, it.name, packageId, typeShipping)
-                && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)) {
+                && host.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)
+                // [#31699 F2] …unless the row could be two holders' member.
+                && !pairMemberWithheldAt(host, request.type, it.name, packageId, bound, it)) {
                 unseated.delete(it);
             }
         }

@@ -202,16 +202,19 @@ export function resolveActivationLedgerIndexSeam(engine: unknown): { exec: Index
     return resolveIndexSeamForTable(engine, ACTIVATION_LEDGER_TABLE);
 }
 
-/** MySQL's "an index of that name already exists" (ER_DUP_KEYNAME). */
-function isDuplicateKeyName(error: unknown): boolean {
+/**
+ * MySQL's "an index of that name already exists" (ER_DUP_KEYNAME). Shared with
+ * the grant's package-less guard (`user-permission-set-packageless-index.ts`).
+ */
+export function isDuplicateKeyName(error: unknown): boolean {
     const e = error as { errno?: unknown; code?: unknown; message?: unknown; cause?: unknown } | undefined;
     if (e?.errno === 1061 || e?.code === 'ER_DUP_KEYNAME') return true;
     if (typeof e?.message === 'string' && /duplicate key name/i.test(e.message)) return true;
     return e?.cause !== undefined && e.cause !== error && isDuplicateKeyName(e.cause);
 }
 
-/** MySQL/MariaDB's "a column of that name already exists" (ER_DUP_FIELDNAME). */
-function isDuplicateColumnName(error: unknown): boolean {
+/** MySQL/MariaDB's "a column of that name already exists" (ER_DUP_FIELDNAME). Shared as {@link isDuplicateKeyName} is. */
+export function isDuplicateColumnName(error: unknown): boolean {
     const e = error as { errno?: unknown; code?: unknown; message?: unknown; cause?: unknown } | undefined;
     if (e?.errno === 1060 || e?.code === 'ER_DUP_FIELDNAME') return true;
     if (typeof e?.message === 'string' && /duplicate column name/i.test(e.message)) return true;
@@ -224,7 +227,7 @@ function isDuplicateColumnName(error: unknown): boolean {
  * MySQL form is then tried, and a MariaDB that refuses it is reported
  * `unsupported`, as before this arm existed.
  */
-async function isMariaDb(exec: IndexExec): Promise<boolean> {
+export async function isMariaDb(exec: IndexExec): Promise<boolean> {
     try {
         const row = normalizeRows(await exec('SELECT VERSION() AS version'))[0];
         return /mariadb/i.test(String(row?.version ?? row?.VERSION ?? ''));

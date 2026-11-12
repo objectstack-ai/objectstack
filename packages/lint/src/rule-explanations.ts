@@ -2145,6 +2145,31 @@ const FLOW_START_NODE_MISSING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION: RuleExplanation = {
+  rule: 'flow-after-save-inline-retry',
+  covers: 'why an after-save flow may not retry an inline callout',
+  paragraphs: [
+    'A flow whose start node runs it after a record change (`record-after-create`, `-update`, `-delete`, ' +
+      '`-insert` or `-write`) runs inside the save: the record-change trigger waits for the run before the ' +
+      'save answers. An `http` or `connector_action` node calls an outside system inline, so when that system ' +
+      'is down and the node is retried, the user\'s save waits through every attempt and every backoff delay ' +
+      '(a three-retry ladder held one save for 8.8 seconds). The automation engine refuses to register such a ' +
+      'flow, so the stored row reads `registration: refused`.',
+    'Two things retry a node inline: a `try_catch` whose `retry.maxRetries` is 1 or more re-runs its `try` ' +
+      'region, at any depth, and `errorHandling.strategy: \'retry\'` re-runs the whole flow. The `catch` ' +
+      'region of a `try_catch` is not retried by that node.',
+    'The cure for `http` is `durable: true`. Where a messaging HTTP outbox is wired, the request is queued ' +
+      'there and retried in the background with its own backoff and dead-letter, so the save does not wait. ' +
+      'Where none is wired, the node falls back to the inline call and the save waits for it as before.',
+    'A `connector_action` has no background path. Remove the retry around it, or run the flow on demand or ' +
+      'on a schedule instead of after the save. An `http` node with `durable: true` fits only a call that ' +
+      'needs no credential, because a credential must not go in an `http` node\'s url or headers.',
+    'Not judged: a before-trigger flow, a scheduled, API or manual flow, and an inline call nothing retries. ' +
+      'A `subflow` node\'s callee is another flow and is judged on its own trigger, not this one\'s.',
+    FLOW_GATE_REACH,
+  ],
+};
+
 const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION: RuleExplanation = {
   rule: 'flow-time-relative-descriptor-invalid',
   covers: 'why a refused timeRelative descriptor never binds',
@@ -2797,25 +2822,39 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/**
+ * [#32449] The table's rows in words — shared by the two authoring surfaces
+ * whose declarations reach the engine's `aggregate` door (an `object-grid`'s
+ * `aggregations`, a list view's column summaries). Written by hand from
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY`: the rules' tests check that its key
+ * facts are present, not that its type lists equal the table's.
+ */
+const AGGREGATE_PAIR_ROWS =
+  'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
+  'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
+  'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
+  '`avg` the same plus percent; `min` and `max` the numeric types, date, datetime, time, boolean and ' +
+  'toggle (an extreme of a date is the earliest or latest value, drawn as the field draws it) — never ' +
+  'text, option values or references, whose order is collation-dependent. `count_distinct` accepts ' +
+  'every type except the JSON-stored ones (json, composite, repeater, record, location, address, ' +
+  'vector, multiselect, checkboxes, tags) and a field declared `multiple: true`, whose values no two ' +
+  'backends compare alike; `count` accepts every type.';
+
 const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
   rule: 'grid-aggregation-field-type-refused',
-  covers: 'why a grouped grid cannot sum or average that field',
+  covers: 'why a grouped grid cannot aggregate that field that way',
   paragraphs: [
     'An `object-grid` block\'s `aggregations` (`[{ field, type }]`) are the per-group numbers a grouped ' +
       'grid draws in its group headers, answered by ONE aggregate query on the server. The engine\'s ' +
       '`aggregate` door asks the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, ' +
       '`@objectstack/spec/data`) about every pair and refuses one it refuses with `400 INVALID_FIELD`, so ' +
-      'a `sum` or `avg` over a refused type breaks the grid\'s grouped load, and every load after it. A ' +
-      'grid handed its rows (`data.provider: \'value\'`) groups them in the browser instead and draws a ' +
-      'number the pair cannot mean, `0` for a text sum; the declaration is refused either way.',
-    'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
-      'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
-      'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
-      '`avg` the same plus percent. A `date` or `datetime` field takes `min` / `max` (the earliest or ' +
-      'latest value, drawn as the field draws it) or a count; a text field takes a count.',
-    'The fix is a numeric field, or an aggregate the field\'s type accepts. A `formula` field stores no ' +
-      'value, whatever its `returnType`, so a total over it has to be STORED as a number field (kept by a ' +
-      'hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      'such an aggregation breaks the grid\'s grouped load, and every load after it. A grid handed its ' +
+      'rows (`data.provider: \'value\'`) groups them in the browser instead and draws a figure the pair ' +
+      'cannot mean, `0` for a text sum; the declaration is refused either way.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts, or a function the field accepts. A `formula` ' +
+      'field stores no value, whatever its `returnType`, so a total over it has to be STORED as a number ' +
+      'field (kept by a hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
       '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
       'dotted path, a field two packages define at the same priority, and a field with no declared ' +
       'type (or one outside `FieldType`) are not judged here.',
@@ -4018,6 +4057,33 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
+  ],
+};
+
+const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-summary-field-type-refused',
+  covers: 'which functions a column summary can apply to its field',
+  paragraphs: [
+    'A list column\'s `summary` is answered on the server, by two aggregate queries: the group header ' +
+      'query of a grouped view (one number per group) and the footer\'s whole-set query of a paged grid. ' +
+      'Both lower the summary through `COLUMN_SUMMARY_AGGREGATION`: `count_unique` to `count_distinct`, ' +
+      '`sum`, `avg`, `min` and `max` by name. The field is `summary.field` on the object form, else the ' +
+      'column\'s own `field`. The engine\'s `aggregate` door asks the aggregate × field-type table ' +
+      '(`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) about every pair and refuses one ' +
+      'it refuses with `400 INVALID_FIELD`, so the grouped view renders no group and the footer falls ' +
+      'back to the page\'s figure, labelled as the page\'s. An ungrouped view whose rows fit one page ' +
+      'sends neither query and computes its footer in the browser, where such a pair can still show a ' +
+      'whole-set figure (`count_unique` over a multi-select counts distinct lists); once the set ' +
+      'outgrows the page or the view is grouped, that figure becomes the page\'s or no group at all, ' +
+      'so the declaration is refused whatever the row count.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
+      'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
+      'A `formula` field stores no value, whatever its `returnType`, so a total over it has to be ' +
+      'STORED as a number field (kept by a hook). Not judged: ' +
+      '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
+      'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +
+      'outside `FieldType`, which the door does not judge either.',
   ],
 };
 
@@ -6017,6 +6083,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
   [FLOW_START_NODE_MISSING_EXPLANATION.rule]: FLOW_START_NODE_MISSING_EXPLANATION,
+  [FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION.rule]: FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,
@@ -6085,6 +6152,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
   [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
+  [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION.rule]: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION,
   [LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION.rule]: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION,
