@@ -630,8 +630,9 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
     const pkg = (packageId: string) => ({ kind: 'package', packageId });
     const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, answer.body?.error?.code, answer.body?.error?.details?.candidates];
     const DOORS = ['/action/approve', '/action/approve/layers', '/action/approve/published'];
-    // `/layers` and `/published` carry the refusal's text, not its
-    // `details.candidates`: each holder is read from the message there.
+    // Each holder is read from the refusal's text, and, since #32250 carried a
+    // thrown refusal's candidates through `resolveThrownHttpError`, from its
+    // `details.candidates` on all three doors (before it, the item read only).
     const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
     const refusalOf = (answer: { status?: number; body?: any }) => {
         const message = String(answer.body?.error?.message ?? '');
@@ -644,9 +645,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), { kind: 'platform' }]);
     });
 
     it('beside two packages\' on two objects: 409 naming both packages and the package-less holder, on all three doors', async () => {
@@ -656,9 +656,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A, B], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
     });
 
     it('a disabled package registered before the one enabled holder: the item read answers the enabled holder', async () => {
