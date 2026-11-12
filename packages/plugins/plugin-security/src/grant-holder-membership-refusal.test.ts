@@ -617,6 +617,15 @@ describe('a refused grant holder the caller cannot read is answered as a holder 
       expect(isUniqueViolationError(err)).toBe(true);
       expect(await rowsOf(h, 'sys_user_permission_set', { user_id: 'u_member_a' })).toHaveLength(1);
     });
+
+    it('one partial batch: each row is judged on the holder it names, as written; a readable non-member is refused on membership, nothing stored', async () => {
+      const h = await bootWith('member elsewhere');
+      const rows = [' u_admin_a', 'u_admin_a'].map((user_id) => ({ user_id, permission_set: SET }));
+      const err = await refusalOf(() => (h.engine as any).insertMany('sys_user_permission_set', rows, { context: OWN_ROW_ADMIN_A }));
+      expectMembershipRefusal(err);
+      expect(envelopeOf(err).fields[0]?.constraint?.target).toBe('sys_member');
+      expect(await rowsOf(h, 'sys_user_permission_set', {})).toEqual([]);
+    });
   });
 
   it("a holder the caller cannot read is read only through the caller's own door, projected to its id, and no membership is read for it", async () => {

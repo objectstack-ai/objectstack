@@ -263,6 +263,32 @@ describe('[E2] a second grant of a set to one user in one organization', () => {
     await engine.insert(GRANTS, grant('p2', TWO, { user_id: 'u_p1', permission_set_package: HR }), { context: ADMIN } as any);
     expect(await stored(engine)).toEqual({ p1: CRM, p2: HR });
   });
+
+  // Declared precedence (changeset, "Moved, refused either way"): `reason` is 600 characters, past its maxLength 500.
+  const invalid = { reason: 'r'.repeat(600) };
+  it('a second grant whose row record validation also refuses: FROM 400 VALIDATION_FAILED TO the one-grant 409, system and non-system writers alike; nothing stored', async () => {
+    // FROM: with the seam's reads off, the store's key answers last, after validation.
+    const bare = await boot({ seamReads: false });
+    await bare.insert(GRANTS, grant('v1', ONE), { context: SYS } as any);
+    const before = await refusalOf(() => bare.insert(GRANTS, grant('v2', ONE, { user_id: 'u_v1', ...invalid }), { context: SYS } as any));
+    expect(asWire(before).envelope).toEqual(['VALIDATION_FAILED', 400]);
+    for (const context of [SYS, ADMIN]) {
+      const engine = await boot();
+      await engine.insert(GRANTS, grant('v1', ONE), { context: SYS } as any);
+      const err = await refusalOf(() => engine.insert(GRANTS, grant('v2', ONE, { user_id: 'u_v1', ...invalid }), { context } as any));
+      expect(asWire(err)).toEqual({ envelope: ['DUPLICATE_RECORD', 409], wire: [409, 'UNIQUE_VIOLATION', 'A record with this value already exists'] });
+      expect(await stored(engine)).toEqual({ v1: CRM });
+    }
+  });
+
+  it('CONTROL: the same invalid row with no grant beside it is still 400 VALIDATION_FAILED, system and non-system writers alike', async () => {
+    for (const context of [SYS, ADMIN]) {
+      const engine = await boot();
+      const err = await refusalOf(() => engine.insert(GRANTS, grant('v2', ONE, invalid), { context } as any));
+      expect(asWire(err).envelope).toEqual(['VALIDATION_FAILED', 400]);
+      expect(await stored(engine)).toEqual({});
+    }
+  });
 });
 
 describe('a set one package holds — CONTROL, every answer as before', () => {
