@@ -305,3 +305,76 @@ describe('objectui#7249 — the inbox feed holds ONE declared cadence', () => {
     expect(inboxReads()).toBe(2 + WINDOW_MS / INBOX_POLL_MS);
   });
 });
+
+describe('objectstack#32627 — a poll that finds nothing new asks less often', () => {
+  /** The idle ceiling (`MAX_IDLE_POLL_MS`), the backgrounded cadence. */
+  const MAX_IDLE_POLL_MS = HIDDEN_POLL_MS;
+  /** Ten minutes: long enough for the delay to reach its ceiling and hold there. */
+  const LONG_WINDOW_MS = 600_000;
+
+  it('an inbox that never changes is read at 0, 60, 180, 360 and 540 s, not every 60 s', async () => {
+    renderHook(() => useSharedInboxFeed());
+    await settle();
+    await advance(LONG_WINDOW_MS);
+
+    // 0 (attach) → +60 → +120 → +180 (ceiling) → +180.
+    expect(inboxReads()).toBe(5);
+  });
+
+  it('CONTROL: an inbox that changes on every read keeps the 60 s cadence', async () => {
+    let n = 0;
+    const realFind = fakeAdapter.find;
+    fakeAdapter.find = (object: string) => {
+      if (object === 'sys_inbox_message') {
+        findCalls.push({ object });
+        n += 1;
+        return Promise.resolve({ data: [{ ...INBOX_ROWS[0], id: `ibx_new_${n}` }, ...INBOX_ROWS] });
+      }
+      return realFind(object);
+    };
+    try {
+      renderHook(() => useSharedInboxFeed());
+      await settle();
+      await advance(LONG_WINDOW_MS);
+      expect(inboxReads()).toBe(1 + LONG_WINDOW_MS / INBOX_POLL_MS);
+    } finally {
+      fakeAdapter.find = realFind;
+    }
+  });
+
+  it('an arrival after the backoff is on screen at the next tick, and the cadence is back to 60 s', async () => {
+    const { result } = renderHook(() => useSharedInboxFeed());
+    await settle();
+    // 0, 60, 180, 360: three unchanged ticks, the delay is at its ceiling.
+    await advance(360_000);
+    expect(inboxReads()).toBe(4);
+
+    inboxRows = [{ ...INBOX_ROWS[0], id: 'ibx_arrival', title: 'Assigned to you: New' }, ...INBOX_ROWS];
+    await advance(MAX_IDLE_POLL_MS);
+    expect(inboxReads()).toBe(5);
+    expect(result.current.value.map((m) => m.id)).toContain('ibx_arrival');
+
+    // The changed answer restored the declared cadence.
+    await advance(INBOX_POLL_MS);
+    expect(inboxReads()).toBe(6);
+  });
+
+  it('coming back to the tab reads at once and restores the 60 s cadence', async () => {
+    renderHook(() => useSharedInboxFeed());
+    await settle();
+    await advance(360_000);
+    expect(inboxReads()).toBe(4);
+
+    setHidden(true);
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    setHidden(false);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(inboxReads()).toBe(5);
+
+    await advance(INBOX_POLL_MS);
+    expect(inboxReads()).toBe(6);
+  });
+});
