@@ -1516,7 +1516,8 @@ export const ProjectEscalationFlow = defineFlow({
       config: {
         // `durable: true` — this flow runs after a record save, and the save
         // waits for the run, so the push is queued on the messaging HTTP
-        // outbox, which retries it in the background; an inline push retried
+        // outbox where one is wired (without one the node falls back to the
+        // inline call), which retries it in the background; an inline push retried
         // here would hold the save through every backoff delay
         // (`flow-after-save-inline-retry`). The try region now fails only when
         // the request cannot be queued, and the catch region reports that.

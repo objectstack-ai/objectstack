@@ -1229,11 +1229,15 @@ any depth of its `try` region, or the flow's `errorHandling: { strategy:
 delay while the outside system is down. Such a flow is refused at publish
 (`flow-after-save-inline-retry`: a `422` at the metadata save door, a refused
 registration at the engine, an error at `objectstack validate`). Give the
-`http` node `durable: true` instead: the request is queued on the messaging
-HTTP outbox, which retries it in the background, and the save no longer waits.
-A `connector_action` has no background path: drop the retry around it, or make
-the call through a durable `http` node. A before-trigger, scheduled, API or
-on-demand flow, and an inline call nothing retries, are unaffected.
+`http` node `durable: true` instead. Where a messaging HTTP outbox is wired,
+the request is queued there and retried in the background, so the save does
+not wait; where none is wired, the node falls back to the inline call and the
+save waits for it as before. A `connector_action` has no background path:
+remove the retry around it, or run the flow on demand or on a schedule. A
+durable `http` node fits only a call that needs no credential, because a
+credential must not go in an `http` node's url or headers. A before-trigger,
+scheduled, API or on-demand flow, and an inline call nothing retries, are
+unaffected.
 
 > BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
 > protocol as the **interop** representation and map onto these constructs on

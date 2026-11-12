@@ -2036,8 +2036,8 @@ const AFTER_RECORD_CHANGE_TRIGGER = /^record-after-(create|insert|update|delete|
  * background path).
  */
 const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
-  ['http', 'Set `durable: true` on the node: the request is then queued on the messaging HTTP outbox, which retries it in the background, and the save no longer waits for it.'],
-  ['connector_action', 'A connector action has no background delivery path, so remove the retry around it, or send the call through an `http` node with `durable: true`.'],
+  ['http', 'Set `durable: true` on the node. Where a messaging HTTP outbox is wired, the request is queued there and retried in the background, so the save does not wait for it; where none is wired, the node falls back to the inline call and the save waits for it as before.'],
+  ['connector_action', 'Remove the retry around it, or run the flow on demand or on a schedule instead of after the save: a connector action has no background delivery path. An `http` node with `durable: true` fits only a call that needs no credential, because a credential must not go in the url or headers of an `http` node.'],
 ]);
 
 /**
@@ -2053,8 +2053,10 @@ const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
  */
 function scanAfterSaveInlineRetry(flowName: string, flow: AnyRec, nodes: AnyRec[], findings: FlowLintFinding[]): void {
   const start = nodes.find((n) => n.type === START_NODE_TYPE);
-  const triggerType = (start?.config as AnyRec | undefined)?.triggerType;
-  if (typeof triggerType !== 'string' || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return;
+  // Trimmed as the record-change trigger trims it (`triggerTypeToHookEvents`): a token it binds is judged.
+  const rawTrigger = (start?.config as AnyRec | undefined)?.triggerType;
+  const triggerType = typeof rawTrigger === 'string' ? rawTrigger.trim() : undefined;
+  if (triggerType === undefined || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return;
   const eh = (flow.errorHandling ?? undefined) as AnyRec | undefined;
   const flowRetries = eh?.strategy === 'retry' && typeof eh.maxRetries === 'number' ? eh.maxRetries : 0;
 

@@ -333,8 +333,8 @@ const AFTER_RECORD_CHANGE_TRIGGER = /^record-after-(create|insert|update|delete|
  * on its own outbox, and the node carries no switch an author could set.
  */
 const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
-    ['http', 'Set `durable: true` on the node: the request is then queued on the messaging HTTP outbox, which retries it in the background, and the save no longer waits for it.'],
-    ['connector_action', 'A connector action has no background delivery path, so remove the retry around it, or send the call through an `http` node with `durable: true`.'],
+    ['http', 'Set `durable: true` on the node. Where a messaging HTTP outbox is wired, the request is queued there and retried in the background, so the save does not wait for it; where none is wired, the node falls back to the inline call and the save waits for it as before.'],
+    ['connector_action', 'Remove the retry around it, or run the flow on demand or on a schedule instead of after the save: a connector action has no background delivery path. An `http` node with `durable: true` fits only a call that needs no credential, because a credential must not go in the url or headers of an `http` node.'],
 ]);
 
 /** How many times a `try_catch` node re-runs its `try` region on failure: `retry.maxRetries`, 0 when absent. */
@@ -366,8 +366,10 @@ function retryOfTryRegion(node: FlowNodeParsed): number {
  */
 export function validateAfterSaveInlineRetry(flowName: string, flow: FlowParsed): RegistrationCheckRefusal | undefined {
     const start = flow.nodes.find((node) => node.type === 'start');
-    const triggerType = (start?.config as { triggerType?: unknown } | undefined)?.triggerType;
-    if (typeof triggerType !== 'string' || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return undefined;
+    // Trimmed as the record-change trigger trims it (`triggerTypeToHookEvents`): a token it binds is judged.
+    const rawTrigger = (start?.config as { triggerType?: unknown } | undefined)?.triggerType;
+    const triggerType = typeof rawTrigger === 'string' ? rawTrigger.trim() : undefined;
+    if (triggerType === undefined || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return undefined;
 
     const flowRetry = flow.errorHandling?.strategy === 'retry' ? flow.errorHandling.maxRetries : 0;
     const violations: string[] = [];

@@ -3950,7 +3950,7 @@ describe('lintFlowPatterns — a retried inline outbound call in an after-save f
   const found = (stack: unknown) =>
     lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_AFTER_SAVE_INLINE_RETRY);
 
-  it.each(['record-after-create', 'record-after-update', 'record-after-delete', 'record-after-write'])(
+  it.each(['record-after-create', 'record-after-insert', 'record-after-update', 'record-after-delete', 'record-after-write'])(
     '%s: an inline http node inside a retrying try_catch is an error naming the node, the retry and durable: true',
     (triggerType) => {
       const hits = found(flowOf({ objectName: 'task', triggerType }, guarded(http())));
@@ -3964,7 +3964,19 @@ describe('lintFlowPatterns — a retried inline outbound call in an after-save f
   it('the flow-level retry reaches a top-level inline http node; a retried connector_action gets its own fix', () => {
     expect(found(flowOf(afterUpdate, http(), { errorHandling: { strategy: 'retry', maxRetries: 2 } }))[0].message)
       .toContain("retried by the flow's `errorHandling` (`strategy: 'retry'`, `maxRetries: 2`)");
-    expect(found(flowOf(afterUpdate, guarded(connector)))[0].hint).toMatch(/^A connector action has no background delivery path/);
+    expect(found(flowOf(afterUpdate, guarded(connector)))[0].hint)
+      .toMatch(/^Remove the retry around it, or run the flow on demand or on a schedule instead of after the save/);
+  });
+
+  it('a token with surrounding blanks is judged as the record-change trigger reads it (trimmed)', () => {
+    const hits = found(flowOf({ objectName: 'task', triggerType: 'record-after-update ' }, guarded(http())));
+    expect(hits.map((f) => f.where)).toEqual(["flow 'sync' · node 'push'"]);
+    expect(hits[0].message).toContain('(`record-after-update`)');
+  });
+
+  it('the flow-level retry also re-runs a try_catch catch region, so an inline call there is flagged', () => {
+    const flow = flowOf(afterUpdate, guarded(flag, 0, [http()]), { errorHandling: { strategy: 'retry', maxRetries: 2 } });
+    expect(found(flow).map((f) => f.where)).toEqual(["flow 'sync' · node 'push'"]);
   });
 
   it('a node nested deeper in the retried try region is flagged', () => {
@@ -3981,8 +3993,9 @@ describe('lintFlowPatterns — a retried inline outbound call in an after-save f
       expect(found(flowOf(afterUpdate, guarded(http(), 0)))).toEqual([]);
       expect(found(flowOf(afterUpdate, guarded(flag, 3, [http()])))).toEqual([]);
     });
-    it('a before-trigger, a scheduled and a manual flow', () => {
+    it('a before-trigger, a scheduled, an api and a manual flow', () => {
       expect(found(flowOf({ objectName: 'task', triggerType: 'record-before-update' }, guarded(http())))).toEqual([]);
+      expect(found(flowOf({ triggerType: 'api', secret: 'hook-secret' }, guarded(http())))).toEqual([]);
       expect(found(flowOf({ schedule: { type: 'cron', expression: '0 8 * * *' } }, guarded(http())))).toEqual([]);
       expect(found(flowOf(undefined, guarded(http())))).toEqual([]);
     });
