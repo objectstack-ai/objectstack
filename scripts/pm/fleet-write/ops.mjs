@@ -548,8 +548,10 @@
  * (the endpoint creates a draft and takes none), the versions row's is its
  * entries alone, and the other two PATCH bodies are the executor's
  * (`validate.mjs --self-test` pins every one). Editing an advisory's summary or
- * description, removing a collaborator, the CVE request and the temporary fork
- * are out of reach of every row; reading an advisory's text is one row's alone,
+ * the text of its description, removing a collaborator, the CVE request and the
+ * temporary fork are out of reach of every row; APPENDING a note to its
+ * description is one row's alone, sealed inbound (`advisory_note`, the last of
+ * these sections); reading an advisory's text is one row's alone,
  * which seals it (`advisory_read`, the next section); and listing advisories is
  * one row's alone too, narrowed to three states and five fields per advisory
  * and sealed the same way (`advisory_list`, the section after it):
@@ -833,6 +835,72 @@
  * is a FAILED action carrying `ADVISORY_LIST_ACCESS_REMEDY`, ⛔ never a retry
  * under a wider token.
  *
+ * ## The one row that APPENDS to an advisory — `advisory_note`, sealed to the relay's own key
+ *
+ * A security seat records a ruling at rule level on its public seat post, because no mechanism of an unfixed
+ * finding may appear in public text; the analysis behind it — the reach, the options weighed, the measurements —
+ * then survives nowhere a later seat or the maintainer can read. An advisory has no comment thread, so its
+ * `description` is the one private place: the maintainers and its collaborators read it until it is published. The
+ * maintainer's words, verbatim as the body of issue 32424 records them:
+ * 「立卡处理 给 relay 加一个"改 advisory 正文"的操作（长期办法）」. How the note reaches the relay's step was the
+ * maintainer's ruling on that card (comment 6813624778), verbatim: 「B」 — the relay's private key a repository secret.
+ *
+ *   row             request                                                              the payload carries
+ *   `advisory_note` `GET`, `GET`, then `PATCH …/security-advisories/{id}`, then `GET`      `ghsa_id` and `sealed_note`
+ *
+ * APPEND ONLY. The PATCH sends `{ description }` and nothing else: the text already there, byte for byte as read,
+ * then `ADVISORY_NOTE_SEPARATOR` and the section (`advisoryNoteDescription`; the section alone on an empty one). No
+ * row edits or removes a byte of an existing description, the finder's or an earlier note's.
+ *
+ * SEALED END TO END — the same envelope as `advisory_read`'s answer, the other way. The seat (`dispatch.mjs`,
+ * `armAdvisoryNotes`) reads the note from a file the actions file names (`note_file`, a key of that file and never of
+ * the payload), judges it and composes the section: the seat's signature line, a UTC stamp its own clock reads, a
+ * blank line, the note (`advisoryNoteSection`). It draws a one-time digest key and seals the key and the section to
+ * `ADVISORY_NOTE_RELAY_PUBLIC_KEY`, the committed public half, with `sealAdvisoryNote`, under `advisorySealAad`
+ * (the request id, the action's index, the op and the id) and the note's own HKDF label, so a sealed note opens for
+ * that request, action and advisory alone and never as a read. The payload carries the ciphertext alone
+ * (`sealed_note`, its own kind `sealed`, judged by `advisoryNoteSealedFailure`); the plaintext never enters the
+ * actions file, the payload, a dry run, the run's log, its summary, an annotation or a step output. The private half
+ * is the repository secret `ADVISORY_NOTE_KEY_SECRET`; the validator writes `ADVISORY_NOTE_OUTPUT`=`yes` for a note's
+ * stroke alone, and the workflow hands the secret to the execute step's env as `ADVISORY_NOTE_KEY_ENV` for that stroke
+ * and an empty value for every other (`validate.mjs --self-test` pins both).
+ *
+ * The executor (`advisoryNoteAction`, `execute.mjs`), in this order, nothing sent before the PATCH:
+ *
+ *   1. the key: `advisoryNoteKeyFailure` — the secret parses as an X25519 private key whose public half IS the
+ *      committed constant; a null constant, an unset secret or a pair made apart is FAILED with no request;
+ *   2. the advisory's GET, judged by `ADVISORY_NOTE_FENCES`: the advisory the action names, in `triage`, `draft` or
+ *      `closed` (`ADVISORY_NOTE_STATES`) — `published` and `withdrawn` refused, since a note there is public — and a
+ *      description that is text or none;
+ *   3. the open (`openAdvisoryNote`), then `::add-mask::` for every line of the section of at least
+ *      `ADVISORY_NOTE_MASK_MIN_CHARS` characters — the runner's own net behind the first, that nothing prints the
+ *      text; the runner never echoes that command (`AddMaskCommandExtension.OmitEcho`, `actions/runner`
+ *      `ActionCommandManager.cs`);
+ *   4. the section judged again (`advisoryNoteSectionFailure`, `dispatch.mjs`): the seat's check is never trusted
+ *      alone — its signature line, its stamp, its cap;
+ *   5. the CONCURRENCY read: a second GET immediately before the PATCH, refused unless it passes the fences and its
+ *      description is exactly the first's. The platform documents no conditional write on this PATCH (no `If-Match`
+ *      or `If-Unmodified-Since` anywhere in its REST description, read 2026-11-12), so this re-read is the guard;
+ *   6. the cap: the new description at most `ADVISORY_DESCRIPTION_MAX_CHARS` characters, or nothing is sent;
+ *   7. ONE PATCH `{ description }`;
+ *   8. the READ-BACK (`advisoryNoteReadBack`): the PATCH's answer, then a GET after it, each holding exactly the text
+ *      read, the separator and the section, byte for byte.
+ *
+ * The residual window is one round trip: a write landing between step 5's read and the PATCH is overwritten
+ * undetected; a write after the PATCH fails the read-back. A read-back that fails is FAILED carrying
+ * `ADVISORY_NOTE_NOT_RESENT` — the PATCH was sent, so ⛔ the note is never re-sent; the advisory is read first.
+ *
+ * ⛔ What crosses the public run: the id, the state, the HTTP statuses, three byte counts (the description read, the
+ * section, the description stored) and the section's KEYED digest (`advisoryNoteDigest`: HMAC-SHA256 under the
+ * seat's one-time digest key, sealed in front of the section) — never a byte of the note or of the description. An
+ * unkeyed digest of a short note would let any reader of the log test a guess; the keyed one confirms the section to
+ * the seat that holds the key and to no one else. A landed note earns ONE notice annotation naming its action, its
+ * byte count and that digest (`relayAdvisoryNoteAnnotationMessage`, `dispatch.mjs`); the seat recomputes both from
+ * what it sealed, and a match is its read-back (`confirmRunAdvisoryNotes`).
+ *
+ * The grant and the gate are `advisory_state`'s: `repository-advisories: write`, minted for the stroke alone; it
+ * travels `alone`; and the stroke's target-write sender gate, write, maintain or admin on the target.
+ *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
  * "The maximum number of top-level properties is 10. The total size of the
@@ -846,7 +914,7 @@
  * reject with a 422 is refused locally with the reason.
  */
 
-import { createCipheriv, createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
 import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD } from '../check-governed-merges.mjs';
 
@@ -1574,6 +1642,7 @@ export const ADVISORY_ACCESS_REMEDY =
 const advisoryRead = (c) => c.answer?.status === 200 && advisoryShaped(c.answer.json);
 const fromOf = (c) => (Array.isArray(c.from) ? c.from : c.to ? [] : ADVISORY_OPEN_STATES);
 const setsVersions = (c) => Array.isArray(c.versions);
+const orList = (xs) => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} or ${xs[xs.length - 1]}` : xs.join(''));
 const publishes = (c) => c.to === ADVISORY_PUBLISHED_STATE;
 export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
@@ -1592,7 +1661,7 @@ export const ADVISORY_FENCES = Object.freeze([
   Object.freeze({
     fence: 'state',
     wants: (c) => {
-      if (!c.to) return `an unpublished advisory — state ${fromOf(c).join(' or ')}; never published, closed or withdrawn`;
+      if (!c.to) return `an unpublished advisory — state ${fromOf(c).join(' or ')}; never ${orList(['published', 'closed', 'withdrawn'].filter((s) => !fromOf(c).includes(s)))}`;
       const to = advisoryPrintable(c.to, ADVISORY_STATE_SHAPE, 'advisory state');
       return fromOf(c).length ? `a move to ${to} from ${fromOf(c).join(' or ')} alone` : `no move to ${to} — the relay's transitions name none, so it fails closed`;
     },
@@ -1841,10 +1910,14 @@ export const ADVISORY_READ_SEAL_OVERHEAD = 1 + X25519_RAW_BYTES + ADVISORY_READ_
 
 const rawX25519 = (key) => key.export({ format: 'der', type: 'spki' }).subarray(X25519_SPKI_PREFIX.length);
 const x25519FromRaw = (raw) => createPublicKey({ key: Buffer.concat([X25519_SPKI_PREFIX, raw]), format: 'der', type: 'spki' });
-/** The AES key, from the shared secret and both public keys; an all-zero secret is refused, never used. */
-function advisoryReadAesKey(shared, ephemeralRaw, recipientRaw) {
+/**
+ * The AES key, from the shared secret and both public keys; an all-zero secret is refused, never used. `label` is the
+ * row's HKDF info — `advisory_read`'s for a read or a listing, `advisory_note`'s for a note — so a seal made for one
+ * direction never opens as the other.
+ */
+function advisoryReadAesKey(shared, ephemeralRaw, recipientRaw, label = ADVISORY_READ_INFO) {
   if (allZero(shared)) throw new Error('the shared secret is all zeros');
-  const info = Buffer.concat([Buffer.from(ADVISORY_READ_INFO, 'utf8'), ephemeralRaw, recipientRaw]);
+  const info = Buffer.concat([Buffer.from(label, 'utf8'), ephemeralRaw, recipientRaw]);
   return Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), info, 32));
 }
 
@@ -1857,23 +1930,22 @@ export function advisoryReadAad({ requestId, action, ghsaId }) {
 }
 
 /**
- * Seal `plaintext` (a string, sealed as its UTF-8 bytes) to `publicKey` (a `public_key` value) under `aad`:
- * version ‖ ephemeral X25519 key ‖ nonce ‖ ciphertext ‖ tag, as base64url without padding. The shared secret
- * and the AES key are zeroed after use. Throws on any failure, with a message that carries nothing of the
- * plaintext — and the executor prints its own fixed sentence, never the message.
+ * Seal `bytes` to `publicKey` (a `public_key` value) under `aad` and the HKDF `label`: version ‖ ephemeral X25519 key ‖
+ * nonce ‖ ciphertext ‖ tag, as base64url without padding — the one envelope both directions share. The shared secret
+ * and the AES key are zeroed after use. Throws on any failure, with a message that carries nothing of the bytes.
  */
-export function sealAdvisoryRead({ plaintext, publicKey, aad }) {
+function sealX25519({ bytes, publicKey, aad, label }) {
   const recipient = createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' });
   const ephemeral = generateKeyPairSync(ADVISORY_READ_KEY_TYPE);
   const shared = diffieHellman({ privateKey: ephemeral.privateKey, publicKey: recipient });
   const ephemeralRaw = rawX25519(ephemeral.publicKey);
   let key = null;
   try {
-    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(recipient));
+    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(recipient), label);
     const nonce = randomBytes(ADVISORY_READ_NONCE_BYTES);
     const cipher = createCipheriv('aes-256-gcm', key, nonce, { authTagLength: ADVISORY_READ_TAG_BYTES });
     cipher.setAAD(aad);
-    const body = Buffer.concat([cipher.update(Buffer.from(plaintext, 'utf8')), cipher.final()]);
+    const body = Buffer.concat([cipher.update(bytes), cipher.final()]);
     return Buffer.concat([Buffer.from([ADVISORY_READ_SEAL_VERSION]), ephemeralRaw, nonce, body, cipher.getAuthTag()]).toString('base64url');
   } finally {
     shared.fill(0);
@@ -1881,9 +1953,48 @@ export function sealAdvisoryRead({ plaintext, publicKey, aad }) {
   }
 }
 
+/**
+ * Seal `plaintext` (a string, sealed as its UTF-8 bytes) to `publicKey` (a `public_key` value) under `aad`:
+ * version ‖ ephemeral X25519 key ‖ nonce ‖ ciphertext ‖ tag, as base64url without padding. The shared secret
+ * and the AES key are zeroed after use. Throws on any failure, with a message that carries nothing of the
+ * plaintext — and the executor prints its own fixed sentence, never the message.
+ */
+export function sealAdvisoryRead({ plaintext, publicKey, aad }) {
+  return sealX25519({ bytes: Buffer.from(plaintext, 'utf8'), publicKey, aad, label: ADVISORY_READ_INFO });
+}
+
 /** Why a sealed answer did not open — the one sentence, which carries nothing of what was sealed. */
 export const ADVISORY_READ_OPEN_FAILED = 'the sealed answer does not open with this key — tampered, truncated, or sealed for another read';
 const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * Open an envelope `sealX25519` made, with `privateKey` (a `KeyObject`) under `aad` and `label`: the sealed bytes, or
+ * null for anything else — not canonical base64url, another version, too short, tampered with, sealed to another key,
+ * bound to another request or made for the other direction. The private key is read, never exported. Never throws.
+ */
+function openX25519({ sealed, privateKey, aad, label }) {
+  const box = typeof sealed === 'string' && /^[A-Za-z0-9_-]+$/.test(sealed) ? Buffer.from(sealed, 'base64url') : null;
+  if (!box || box.toString('base64url') !== sealed || box.length < ADVISORY_READ_SEAL_OVERHEAD || box[0] !== ADVISORY_READ_SEAL_VERSION) return null;
+  const ephemeralRaw = box.subarray(1, 1 + X25519_RAW_BYTES);
+  const nonce = box.subarray(1 + X25519_RAW_BYTES, 1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES);
+  const body = box.subarray(1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES, box.length - ADVISORY_READ_TAG_BYTES);
+  const tag = box.subarray(box.length - ADVISORY_READ_TAG_BYTES);
+  let shared = null;
+  let key = null;
+  try {
+    shared = diffieHellman({ privateKey, publicKey: x25519FromRaw(ephemeralRaw) });
+    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(createPublicKey(privateKey)), label);
+    const decipher = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: ADVISORY_READ_TAG_BYTES });
+    decipher.setAAD(aad);
+    decipher.setAuthTag(tag);
+    return Buffer.concat([decipher.update(body), decipher.final()]);
+  } catch {
+    return null;
+  } finally {
+    shared?.fill(0);
+    key?.fill(0);
+  }
+}
 
 /**
  * Open a sealed answer with `privateKey` (the seat's in-memory `KeyObject`) under `aad`: the plaintext string,
@@ -1892,27 +2003,14 @@ const strictUtf8 = new TextDecoder('utf-8', { fatal: true });
  * another read. The private key is read, never exported.
  */
 export function openAdvisoryRead({ sealed, privateKey, aad }) {
-  const box = typeof sealed === 'string' && /^[A-Za-z0-9_-]+$/.test(sealed) ? Buffer.from(sealed, 'base64url') : null;
-  if (!box || box.toString('base64url') !== sealed || box.length < ADVISORY_READ_SEAL_OVERHEAD || box[0] !== ADVISORY_READ_SEAL_VERSION) throw new Error(ADVISORY_READ_OPEN_FAILED);
-  const ephemeralRaw = box.subarray(1, 1 + X25519_RAW_BYTES);
-  const nonce = box.subarray(1 + X25519_RAW_BYTES, 1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES);
-  const body = box.subarray(1 + X25519_RAW_BYTES + ADVISORY_READ_NONCE_BYTES, box.length - ADVISORY_READ_TAG_BYTES);
-  const tag = box.subarray(box.length - ADVISORY_READ_TAG_BYTES);
-  let shared = null;
-  let key = null;
+  const bytes = openX25519({ sealed, privateKey, aad, label: ADVISORY_READ_INFO });
   let opened = null;
   try {
-    shared = diffieHellman({ privateKey, publicKey: x25519FromRaw(ephemeralRaw) });
-    key = advisoryReadAesKey(shared, ephemeralRaw, rawX25519(createPublicKey(privateKey)));
-    const decipher = createDecipheriv('aes-256-gcm', key, nonce, { authTagLength: ADVISORY_READ_TAG_BYTES });
-    decipher.setAAD(aad);
-    decipher.setAuthTag(tag);
-    opened = strictUtf8.decode(Buffer.concat([decipher.update(body), decipher.final()]));
+    opened = bytes === null ? null : strictUtf8.decode(bytes);
   } catch {
     opened = null;
   } finally {
-    shared?.fill(0);
-    key?.fill(0);
+    bytes?.fill(0);
   }
   if (opened === null) throw new Error(ADVISORY_READ_OPEN_FAILED);
   return opened;
@@ -2182,11 +2280,15 @@ export function advisoryListDisplay(plaintext) {
  * The associated data a sealed answer is bound to, for either row that seals one — the ONE spelling the executor
  * seals under and the seat opens under: `advisory_read`'s is `advisoryReadAad`, byte for byte (the request id, the
  * action's index and the advisory's id); `advisory_list`'s binds the request id, the action's index and the op.
- * Throws for any other op, with a message naming no value. Pure.
+ * `advisory_note`'s runs the other way — the seat seals, the executor opens — under the note's own label, binding the
+ * request id, the action's index, the op and the advisory's id. Throws for any other op, with a message naming no
+ * value. Pure.
  */
 export function advisorySealAad({ requestId, action, op, ghsaId }) {
   if (op === 'advisory_read') return advisoryReadAad({ requestId, action, ghsaId });
   if (op === 'advisory_list') return Buffer.from(`${ADVISORY_READ_INFO} request=${requestId} action=${action} op=advisory_list`, 'utf8');
+  // The one INBOUND seal (header: "The one row that APPENDS"): the note's own label, the op and the advisory's id.
+  if (op === 'advisory_note') return Buffer.from(`fleet-write:advisory_note:v1 request=${requestId} action=${action} op=advisory_note ghsa_id=${ghsaId}`, 'utf8');
   throw new Error('no sealed answer is bound for this op');
 }
 
@@ -2224,6 +2326,197 @@ export const ADVISORY_LIST_OVER_CAP =
 /** The row a landed listing prints — ⛔ no id, no count, no state, no byte or part count. */
 export const ADVISORY_LIST_LANDED =
   "sealed the listing to the seat's one-time key, padded to the run's full notice size so its length says nothing — only that seat's process opens it";
+
+// ---------------------------------------------------------------------------
+// `advisory_note` (header: "The one row that APPENDS to an advisory") — the relay's key, the seal, the digest, the
+// fences, the description and the read-back.
+// ---------------------------------------------------------------------------
+
+/**
+ * The PUBLIC half of the relay's note key, committed here — base64 SPKI DER in `public_key`'s one spelling
+ * (`ADVISORY_READ_PUBLIC_KEY_SHAPE`). ⛔ null until the maintainer makes the pair (header): while it is null the seat
+ * seals no note (a prerequisite, exit 3, nothing sent) and the executor opens none (FAILED before its first GET). It is
+ * never invented: the private half exists only where the maintainer put it.
+ */
+export const ADVISORY_NOTE_RELAY_PUBLIC_KEY = null;
+/** The repository secret that holds the private half — set by the maintainer, by the ruling in the header. */
+export const ADVISORY_NOTE_KEY_SECRET = 'OS_FLEET_ADVISORY_NOTE_KEY';
+/** The variable the execute step hands the private half through — for a stroke the validator marks as a note's alone. */
+export const ADVISORY_NOTE_KEY_ENV = 'FLEET_WRITE_ADVISORY_NOTE_KEY';
+/** The validator's `$GITHUB_OUTPUT` name that marks a note's stroke: `yes` for it, EMPTY for every other. */
+export const ADVISORY_NOTE_OUTPUT = 'advisory_note';
+/** The private half's one spelling: base64 PKCS#8 DER of an X25519 key — 48 bytes, 64 characters, no pad. */
+export const ADVISORY_NOTE_PRIVATE_KEY_SHAPE = /^MC4CAQAwBQYDK2VuBCIEI[A-P][A-Za-z0-9+/]{42}$/;
+
+/**
+ * Why `text` is not the relay's note key for `relayPublicKey`, or null when it is: a string in
+ * `ADVISORY_NOTE_PRIVATE_KEY_SHAPE`, parsed as an X25519 private key whose public half is exactly `relayPublicKey` —
+ * so a secret rotated without the committed half, or the other way round, is named before any request. ⛔ The reason
+ * never carries the value. Never throws.
+ */
+export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY) {
+  if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null until the maintainer makes the pair and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}`;
+  if (advisoryReadKeyFailure(relayPublicKey) !== null) return 'the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY is not an X25519 public key in its one spelling';
+  if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked a note's`;
+  if (!ADVISORY_NOTE_PRIVATE_KEY_SHAPE.test(text)) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 private key in base64 PKCS#8 DER, its one spelling`;
+  let key;
+  try {
+    key = createPrivateKey({ key: Buffer.from(text, 'base64'), format: 'der', type: 'pkcs8' });
+  } catch {
+    return `${ADVISORY_NOTE_KEY_ENV} does not parse as a private key`;
+  }
+  if (key.asymmetricKeyType !== ADVISORY_READ_KEY_TYPE) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 key`;
+  const half = createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64');
+  return half === relayPublicKey ? null : `${ADVISORY_NOTE_KEY_ENV}'s public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY — the secret and the constant were not made as one pair`;
+}
+
+/** The note's HKDF label and associated-data prefix: its own, so a note never opens as a read and a read never as a note. */
+const ADVISORY_NOTE_INFO = 'fleet-write:advisory_note:v1';
+/** The bytes of the seat's one-time digest key, sealed in front of the section. */
+export const ADVISORY_NOTE_DIGEST_KEY_BYTES = 32;
+/** The longest section a note carries, in UTF-8 bytes: its seal stays near 40,000 characters, far under the payload's 64 KiB. */
+export const MAX_ADVISORY_NOTE_BYTES = 30_000;
+/** `sealed_note`'s shortest and longest length, in characters: a one-byte section and a `MAX_ADVISORY_NOTE_BYTES` one, sealed. */
+export const ADVISORY_NOTE_MIN_SEALED_CHARS = Math.ceil(((ADVISORY_READ_SEAL_OVERHEAD + ADVISORY_NOTE_DIGEST_KEY_BYTES + 1) * 4) / 3);
+export const ADVISORY_NOTE_MAX_SEALED_CHARS = Math.ceil(((ADVISORY_READ_SEAL_OVERHEAD + ADVISORY_NOTE_DIGEST_KEY_BYTES + MAX_ADVISORY_NOTE_BYTES) * 4) / 3);
+
+/**
+ * Why `value` is not a `sealed_note`, or null when it is one in shape: a string of `ADVISORY_NOTE_MIN_SEALED_CHARS` to
+ * `ADVISORY_NOTE_MAX_SEALED_CHARS` characters, canonical base64url without padding, whose first byte is the seal's
+ * version. Only the relay's private key tells more — the validator holds none. ⛔ Never carries the value. Pure.
+ */
+export function advisoryNoteSealedFailure(value) {
+  if (typeof value !== 'string') return 'is not a string';
+  if (value.length < ADVISORY_NOTE_MIN_SEALED_CHARS || value.length > ADVISORY_NOTE_MAX_SEALED_CHARS) return `is not ${ADVISORY_NOTE_MIN_SEALED_CHARS} to ${ADVISORY_NOTE_MAX_SEALED_CHARS} characters long`;
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return 'is not base64url';
+  const box = Buffer.from(value, 'base64url');
+  if (box.toString('base64url') !== value) return 'is not canonical base64url';
+  return box[0] === ADVISORY_READ_SEAL_VERSION ? null : 'does not open with the seal version';
+}
+
+/**
+ * Seal a note: `digestKey` (`ADVISORY_NOTE_DIGEST_KEY_BYTES` random bytes the seat keeps) ‖ the section's UTF-8 bytes,
+ * to `publicKey` — the committed relay half — under `aad` (`advisorySealAad`, op `advisory_note`) and the note's own
+ * HKDF label. The envelope is `advisory_read`'s. Throws on any failure, carrying nothing of the section.
+ */
+export function sealAdvisoryNote({ section, digestKey, publicKey, aad }) {
+  if (!Buffer.isBuffer(digestKey) || digestKey.length !== ADVISORY_NOTE_DIGEST_KEY_BYTES) throw new Error('the digest key is not 32 bytes');
+  const bytes = Buffer.concat([digestKey, Buffer.from(section, 'utf8')]);
+  try {
+    return sealX25519({ bytes, publicKey, aad, label: ADVISORY_NOTE_INFO });
+  } finally {
+    bytes.fill(0);
+  }
+}
+
+/** Why a sealed note did not open — the one sentence, which carries nothing of what was sealed. */
+export const ADVISORY_NOTE_OPEN_FAILED = "the sealed note does not open with the relay's key — tampered, truncated, sealed to another key or for another request, action or advisory";
+
+/**
+ * Open a sealed note with the relay's `privateKey` under `aad`: `{ digestKey, section }`, the section byte for byte
+ * what the seat sealed. Throws `ADVISORY_NOTE_OPEN_FAILED` for anything else, a section that is not UTF-8 included.
+ */
+export function openAdvisoryNote({ sealed, privateKey, aad }) {
+  const bytes = openX25519({ sealed, privateKey, aad, label: ADVISORY_NOTE_INFO });
+  let opened = null;
+  try {
+    if (bytes !== null && bytes.length > ADVISORY_NOTE_DIGEST_KEY_BYTES) {
+      opened = { digestKey: Buffer.from(bytes.subarray(0, ADVISORY_NOTE_DIGEST_KEY_BYTES)), section: strictUtf8.decode(bytes.subarray(ADVISORY_NOTE_DIGEST_KEY_BYTES)) };
+    }
+  } catch {
+    opened = null;
+  } finally {
+    bytes?.fill(0);
+  }
+  if (opened === null) throw new Error(ADVISORY_NOTE_OPEN_FAILED);
+  return opened;
+}
+
+/**
+ * The digest a note's row and annotation print: HMAC-SHA256 of the section's UTF-8 bytes under the seat's one-time
+ * digest key, as 64 hex characters. Keyed, so it confirms the section to the seat that holds the key and to no one
+ * else — a bare SHA-256 of a short, guessable note would let any reader of the public log test a guess. Pure.
+ */
+export function advisoryNoteDigest({ digestKey, section }) {
+  return createHmac('sha256', digestKey).update(Buffer.from(section, 'utf8')).digest('hex');
+}
+
+/** The states a note is appended in — every unpublished state a description is private in. `published` and `withdrawn` are refused. */
+export const ADVISORY_NOTE_STATES = Object.freeze(['triage', 'draft', 'closed']);
+/** The platform's cap on an advisory's `description`, in characters (its REST description's `maxLength`). */
+export const ADVISORY_DESCRIPTION_MAX_CHARS = 65_535;
+/** What stands between the text already there and a note: a blank line, a rule, a blank line — never inside the text. */
+export const ADVISORY_NOTE_SEPARATOR = '\n\n---\n\n';
+/** The shortest line of an opened note the executor masks: a shorter one is punctuation or a word, which would mask the log's own text. */
+export const ADVISORY_NOTE_MASK_MIN_CHARS = 6;
+
+/** The description as read: the text, or '' for the null an advisory with none answers. Pure. */
+export const advisoryDescriptionOf = (json) => (typeof json?.description === 'string' ? json.description : '');
+
+/**
+ * The fences on a note's advisory, judged on each of the executor's GETs — `ADVISORY_FENCES` with `from` the note's
+ * states, then the description: a string, or null. `ctx` is `ADVISORY_FENCES`' `{ ghsaId, answer, from }`.
+ */
+export const ADVISORY_NOTE_FENCES = Object.freeze([
+  ...ADVISORY_FENCES,
+  Object.freeze({
+    fence: 'description',
+    wants: () => 'a description that is text, or none at all',
+    fails: (c) => {
+      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
+      const d = c.answer.json.description;
+      return d === undefined || d === null || typeof d === 'string' ? null : `the advisory's description is ${Array.isArray(d) ? 'an array' : typeof d}`;
+    },
+  }),
+]);
+
+/** The note fences `ctx` fails: `[{ fence, wants, got }]`, `[]` when all hold — spoken through `advisoryFenceText`. Pure. */
+export function advisoryNoteFenceFailures(ctx = {}) {
+  return ADVISORY_NOTE_FENCES.map((f) => ({ fence: f.fence, wants: f.wants(ctx), got: f.fails(ctx) })).filter((f) => f.got !== null);
+}
+
+/** The description a note's PATCH sends: the text already there, unchanged, then the separator and the section — or the section alone. Pure. */
+export function advisoryNoteDescription(existing, section) {
+  return existing === '' ? section : `${existing}${ADVISORY_NOTE_SEPARATOR}${section}`;
+}
+
+/** A text's length as the platform's `maxLength` counts it: code points. Pure. */
+export const codePoints = (text) => [...text].length;
+
+/**
+ * What LANDED means for a note (header): the stored description — the PATCH's answer, then a GET after it — is EXACTLY
+ * `expected`, the text read before the PATCH, the separator and the section, byte for byte. `answer` is one of the two
+ * reads. Answers `{ ok, why }`; `why` carries the id, a status and byte counts alone — ⛔ never a byte of either text.
+ * A stored text that still ends with the section but holds other text before it is a write that raced the PATCH;
+ * either way the note may be there, so ⛔ never re-sent. Pure.
+ */
+export function advisoryNoteReadBack({ ghsaId, expected, section, answer, read = 'the PATCH answer' } = {}) {
+  if (!twoXX(answer)) return { ok: false, why: `${read} is HTTP ${answer?.status ?? 'none'}` };
+  if (!advisoryShaped(answer.json)) return { ok: false, why: `${read} is HTTP ${answer.status}, but not an advisory, so its description cannot be read back` };
+  if (answer.json.ghsa_id !== ghsaId) return { ok: false, why: `${read} is HTTP ${answer.status}, but names ${advisoryPrintable(answer.json.ghsa_id, GHSA_ID_SHAPE, 'advisory id')}` };
+  const stored = advisoryDescriptionOf(answer.json);
+  if (stored === expected) return { ok: true, why: '' };
+  const bytes = Buffer.byteLength(stored, 'utf8');
+  const tail = `${ADVISORY_NOTE_SEPARATOR}${section}`;
+  const raced = stored.endsWith(tail) || stored === section;
+  return {
+    ok: false,
+    why: raced
+      ? `${read} holds a ${bytes}-byte description that ends with the section, but the text before it is not the text read before the PATCH — another write raced this one`
+      : `${read} holds a ${bytes}-byte description that does not end with the section byte for byte (${Buffer.byteLength(expected, 'utf8')} bytes were sent)`,
+  };
+}
+
+/** What a note whose read-back failed adds: the PATCH was sent, so the note may be there. */
+export const ADVISORY_NOTE_NOT_RESENT = 'the PATCH was sent, so the note may be on the advisory — read it (advisory_read) before anything else, ⛔ never re-send the note';
+
+/** The row a landed note prints: the id, the state, byte counts and the keyed digest — ⛔ never a byte of either text. Pure. */
+export function advisoryNoteLandedText({ ghsaId, state, existingBytes, sectionBytes, storedBytes, digest }) {
+  return (
+    `${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} · ` +
+    `appended a ${sectionBytes}-byte note to a ${existingBytes}-byte description — ${storedBytes} bytes stored, read back byte for byte · keyed digest ${digest}`
+  );
+}
 
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
@@ -2312,6 +2605,11 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *           judged by `advisoryReadKeyFailure` (header: "The one row that
  *           READS an advisory") — a refusal names the key, the byte count and
  *           what the value failed to be, and never echoes it;
+ *   `sealed` one note sealed to the relay's committed key, judged by
+ *           `advisoryNoteSealedFailure` (header: "The one row that APPENDS to
+ *           an advisory"): canonical base64url of a capped length opening with
+ *           the seal's version — ciphertext alone; a refusal names the key and
+ *           what the value failed to be, and never echoes it;
  *   `versions` an array of 1..`max` closed entries — exactly `package`,
  *           `vulnerable_version_range` and `patched_versions` — each judged by
  *           `advisoryVersionEntryFailure` (header: "The rows that write a
@@ -2366,6 +2664,8 @@ export const FIELDS = Object.freeze({
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
   // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
   public_key: Object.freeze({ kind: 'x25519' }),
+  // A note sealed to the relay's committed key (header: "The one row that APPENDS to an advisory") — its own kind, ciphertext alone.
+  sealed_note: Object.freeze({ kind: 'sealed' }),
 });
 
 /**
@@ -2380,7 +2680,7 @@ export const FIELDS = Object.freeze({
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
  * by the `workflow_dispatch` and `run_rerun_failed` rows alone, and minted
  * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
- * `repository-advisories: write` is spent by the five advisory rows that
+ * `repository-advisories: write` is spent by the six advisory rows that
  * write alone, and minted only for a stroke carrying one of them, the same
  * way; `advisory_read` and `advisory_list` spend that grant at `read` (each
  * row's `grant`), so a read's stroke is minted the lower level and never write.
@@ -2393,7 +2693,7 @@ export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'wr
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, `repository-advisories`, the seven advisory rows' alone, and
+ * alone, `repository-advisories`, the eight advisory rows' alone, and
  * `merge-queues`, the `pr_enqueue_front` row's alone — at
  * write, or at the row's `grant` (`advisory_read`'s and `advisory_list`'s `read`); each of those
  * rows travels alone in its stroke. `validate.mjs`
@@ -2515,7 +2815,7 @@ export function transferRemedy(source, target) {
  *   `alone`       (optional) true for a row whose stroke carries exactly that
  *                 one action — `workflow_dispatch`'s and `run_rerun_failed`'s,
  *                 the two rows spending `actions: write`, and
- *                 the seven advisory rows', the ones spending
+ *                 the eight advisory rows', the ones spending
  *                 `repository-advisories`, and `pr_enqueue_front`'s, the one
  *                 spending `merge-queues` (header above);
  *   `closedInputs` (optional) the per-repository, per-workflow closed inputs —
@@ -2541,7 +2841,7 @@ export function transferRemedy(source, target) {
  *                 the hierarchy rows' `issue` and `sub_issue`: an issue is
  *                 never its own sub-issue (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, fromAnswer?, assigned?, labelled? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, rerunFailed?, enqueueFront?, subIssue?, advisoryRead?, advisoryNote?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -2571,7 +2871,12 @@ export function transferRemedy(source, target) {
  *                 `advisoryRead` descriptor carries the
  *                 advisory's id and the seat's public key, whose GET the
  *                 executor fences, seals and emits as notice parts and prints
- *                 nothing else of (`advisoryReadAction`, execute.mjs); a `fromAnswer` descriptor names the
+ *                 nothing else of (`advisoryReadAction`, execute.mjs); an
+ *                 `advisoryNote` descriptor carries the advisory's id and the
+ *                 sealed note, which the executor opens, fences, sends as the
+ *                 description and reads back (`advisoryNoteAction`,
+ *                 execute.mjs) — it carries no `body`, the description is the
+ *                 executor's; a `fromAnswer` descriptor names the
  *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
@@ -2905,6 +3210,18 @@ export const OPS = Object.freeze({
     optional: Object.freeze([]),
     alone: true,
     requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories`, advisoryList: { publicKey: a.public_key } }],
+  }),
+  // The one row that APPENDS to an advisory — see the header. The id and the note SEALED to the relay's committed key,
+  // and no plaintext: the executor opens it inside its own step, reads the advisory twice (the fences, then the
+  // description just before the write), sends ONE PATCH `{ description }` — the text already there unchanged, then the
+  // section — and lands only when a GET after it reads that description back byte for byte. repository-advisories
+  // write, alone, the stroke's target-write gate — `advisory_state`'s grant and gate.
+  advisory_note: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['ghsa_id', 'sealed_note']),
+    optional: Object.freeze([]),
+    alone: true,
+    requests: (a, repo) => [{ verb: 'PATCH', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryNote: { ghsaId: a.ghsa_id, sealedNote: a.sealed_note } }],
   }),
 });
 
