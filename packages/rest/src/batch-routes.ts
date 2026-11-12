@@ -297,10 +297,12 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     Boolean(this.objectQLProvider),
                     async () => this.objectQLProvider!(await this.resolveRequestEnvironmentId(environmentId, req)),
                 );
+                // [#32604] One body for both "no transaction" answers: below, and the engine's refusal on a driver that cannot roll back.
+                const refuseNoTransaction = () => { res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' }); };
                 if (!ql || typeof ql.transaction !== 'function') {
                     // Typed like every other 501 on this server (clone/search,
                     // #4067) so a client can key on the code, not the prose.
-                    res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
+                    refuseNoTransaction();
                     return;
                 }
 
@@ -510,7 +512,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     results = await ql.transaction(runOps, context, { require: true });
                 } catch (error: unknown) {
                     if (!entered && isTransactionUnsupportedRefusal(error)) {
-                        res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
+                        refuseNoTransaction();
                         return;
                     }
                     throw error;
