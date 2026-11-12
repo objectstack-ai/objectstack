@@ -36,6 +36,32 @@
  * A CONTROL leg runs the three commands on the bare starter: zero findings,
  * which is what makes a finding in any other leg one that `os g` caused.
  *
+ * ## Two legs meet the starter's app (#32393)
+ *
+ * The starter ships one app, `src/apps/main.app.ts`, whose navigation lists
+ * the starter's own object. Two generators meet it, and each of their legs
+ * pins what the starter really does instead of a zero it cannot give:
+ *
+ *   os g app          REFUSED. A package whose manifest type is 'app' holds at
+ *                     most one app (ADR-0019 D3), and the starter's is that
+ *                     one. The leg asserts the refusal names both apps and the
+ *                     decision and that nothing was written; its gate legs then
+ *                     hold the project the refusal left to zero findings.
+ *   os g permission   writes the stack's FIRST permission set, and a stack
+ *                     that declares one has its navigation judged by
+ *                     `nav-object-ungranted` (a stack with none is not): the
+ *                     starter's entry lists an object the new set does not
+ *                     grant. That finding is true, and it is the author's to
+ *                     answer — the same generator grants the object when asked
+ *                     to — so it is neither the scaffold's nor the template's,
+ *                     and ⛔ not a ledger line. The leg pins that it fires on
+ *                     the starter app's entries and nowhere else, then grants
+ *                     each listed object with `os g permission`, as an author
+ *                     would, before the three gates run.
+ *
+ * Both expectations are read off the bare starter's own build, and each must
+ * still hold there — so the PR that changes the starter turns this file red.
+ *
  * ## The starter ledger — EMPTY since #21370, and shrink-only
  *
  * A bare starter can be clean without being clean: `field-no-consumers` stays
@@ -71,7 +97,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
@@ -102,8 +128,65 @@ const PREREQUISITE_STEM: Record<string, string> = { object: 'gate_target', flow:
  */
 const STARTER_LATENT_FINDINGS: Record<string, string> = {};
 
+/**
+ * [#32393] The generator the bare starter refuses: the starter ships the one
+ * app a package of manifest type 'app' may hold (ADR-0019 D3). See the header.
+ */
+const REFUSED_ON_STARTER = 'app';
+
+/**
+ * [#32393] The stack collection `nav-object-ungranted` judges an app's
+ * navigation against. A leg whose generator writes into it gives the starter
+ * its first permission set, and the rule wakes on the starter app's entries.
+ */
+const NAV_ACCESS_COLLECTION = 'permissions';
+
 const GATES = ['validate', 'build', 'lint'] as const;
 type Gate = (typeof GATES)[number];
+
+type AnyRec = Record<string, unknown>;
+
+/** What a project's `os build` compiled, `dist/objectstack.json`. */
+function builtStack(dir: string): AnyRec {
+  const file = join(dir, 'dist', 'objectstack.json');
+  if (!existsSync(file)) throw new Error(`no ${file}: the project's \`os build\` wrote no artifact`);
+  return JSON.parse(readFileSync(file, 'utf-8')) as AnyRec;
+}
+
+/** A stack collection's items, whether it compiled to an array or a map. */
+const itemsOf = (v: unknown): AnyRec[] =>
+  (Array.isArray(v) ? v : v && typeof v === 'object' ? Object.values(v) : [])
+    .filter((x): x is AnyRec => !!x && typeof x === 'object');
+
+/**
+ * [#32393] Every object a stack's app navigation lists that the stack itself
+ * declares, once each, at the path `nav-object-ungranted` reports it: the
+ * first `type: 'object'` entry naming it, walking each app's `navigation`
+ * (nested `children` included) and then each area's.
+ */
+function navListedObjects(stack: AnyRec): { objectName: string; path: string }[] {
+  const declared = new Set(itemsOf(stack.objects).map((o) => o.name));
+  const out: { objectName: string; path: string }[] = [];
+  const walk = (items: unknown, base: string) => {
+    if (!Array.isArray(items)) return;
+    items.forEach((nav: unknown, i) => {
+      if (!nav || typeof nav !== 'object') return;
+      const { type, objectName, children } = nav as AnyRec;
+      if (type === 'object' && typeof objectName === 'string' && declared.has(objectName)
+        && !out.some((o) => o.objectName === objectName)) {
+        out.push({ objectName, path: `${base}[${i}].objectName` });
+      }
+      walk(children, `${base}[${i}].children`);
+    });
+  };
+  itemsOf(stack.apps).forEach((app, a) => {
+    walk(app.navigation, `apps[${a}].navigation`);
+    if (Array.isArray(app.areas)) {
+      app.areas.forEach((area: unknown, r) => walk((area as AnyRec | null)?.navigation, `apps[${a}].areas[${r}].navigation`));
+    }
+  });
+  return out;
+}
 
 interface Run {
   code: number;
@@ -170,6 +253,11 @@ function chainFor(type: string, name: string, steps: string[][] = [], seen = new
 interface Leg {
   dir: string;
   steps: { args: string[]; run: Run }[];
+  /**
+   * [#32393] For a leg whose generator writes a permission set: `os validate`
+   * after the chain and BEFORE the starter's listed objects are granted.
+   */
+  wake?: { run: Run; findings: string[] | null };
   gates: Record<Gate, { run: Run; findings: string[] | null }>;
 }
 
@@ -189,7 +277,19 @@ function findingsOf(gate: Gate, stdout: string): string[] | null {
 
 let root: string;
 const legs: Record<string, Leg> = {};
-const LEG_NAMES = ['(bare starter)', ...GENERATOR_SCAFFOLD_TARGETS.map((t) => t.type)];
+const BARE = '(bare starter)';
+const LEG_NAMES = [BARE, ...GENERATOR_SCAFFOLD_TARGETS.map((t) => t.type)];
+/** [#32393] What the bare starter's app navigation lists, read off its build (the CONTROL leg runs first). */
+let starterListed: { objectName: string; path: string }[] = [];
+
+/**
+ * [#32393] The `os g permission` that grants an object the starter's app
+ * lists, as an author answering `nav-object-ungranted` would run it.
+ */
+const grantFor = (objectName: string) => [
+  'g', 'permission', `${objectName.startsWith(`${NS}_`) ? objectName.slice(NS.length + 1) : objectName}_access`,
+  '--object', objectName,
+];
 
 beforeAll(async () => {
   root = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-scaffold-gates-'));
@@ -200,15 +300,25 @@ beforeAll(async () => {
     if (scaffold.code !== 0) throw new Error(`the on-ramp failed for leg ${leg}: ${out(scaffold)}`);
     const dir = join(legRoot, PROJECT);
     const steps: Leg['steps'] = [];
-    for (const args of leg === '(bare starter)' ? [] : chainFor(leg, ITEM)) {
+    for (const args of leg === BARE ? [] : chainFor(leg, ITEM)) {
       steps.push({ args, run: await os(args, dir) });
+    }
+    let wake: Leg['wake'];
+    if (leg !== BARE && target(leg).stackKey === NAV_ACCESS_COLLECTION) {
+      const r = await os(['validate', '--json'], dir);
+      wake = { run: r, findings: findingsOf('validate', r.stdout) };
+      for (const { objectName } of starterListed) {
+        const args = grantFor(objectName);
+        steps.push({ args, run: await os(args, dir) });
+      }
     }
     const gates = {} as Leg['gates'];
     for (const gate of GATES) {
       const r = await os([gate, '--json'], dir);
       gates[gate] = { run: r, findings: findingsOf(gate, r.stdout) };
     }
-    legs[leg] = { dir, steps, gates };
+    legs[leg] = { dir, steps, ...(wake ? { wake } : {}), gates };
+    if (leg === BARE) starterListed = navListedObjects(builtStack(dir));
   }
 }, RUN_TIMEOUT_MS);
 
@@ -218,11 +328,59 @@ afterAll(() => {
 
 describe('[#21325] CONTROL — the bare starter passes all three gates with zero findings', () => {
   it.each(GATES)('`os %s` exits 0 and reports nothing', (gate) => {
-    const { run: r, findings } = legs['(bare starter)'].gates[gate];
+    const { run: r, findings } = legs[BARE].gates[gate];
     expect(r.code, out(r)).toBe(0);
     expect(findings, `os ${gate} --json printed no JSON:\n${out(r)}`).not.toBeNull();
     expect(findings).toEqual([]);
   });
+});
+
+describe('[#32393] the starter\'s app, which `os g app` and `os g permission` meet', () => {
+  const navAccessKinds = GENERATOR_SCAFFOLD_TARGETS.filter((t) => t.stackKey === NAV_ACCESS_COLLECTION).map((t) => t.type);
+
+  it('the bare starter ships the one app its manifest type allows, listing an object it declares', () => {
+    const stack = builtStack(legs[BARE].dir);
+    expect((stack.manifest as AnyRec | undefined)?.type).toBe('app');
+    expect(itemsOf(stack.apps).map((a) => a.name)).toHaveLength(1);
+    expect(
+      starterListed,
+      'the starter app lists no object it declares, so no leg has anything to grant: drop the grant half',
+    ).not.toEqual([]);
+    expect(navAccessKinds, `no generator writes into \`${NAV_ACCESS_COLLECTION}\``).not.toEqual([]);
+  });
+
+  it(`\`os g ${REFUSED_ON_STARTER}\` is refused, one app per app package (ADR-0019 D3), and nothing is written`, () => {
+    const leg = legs[REFUSED_ON_STARTER];
+    const refused = leg.steps[leg.steps.length - 1];
+    expect(refused.args.slice(0, 2)).toEqual(['g', REFUSED_ON_STARTER]);
+    for (const { args, run: r } of leg.steps.slice(0, -1)) {
+      expect(r.code, `os ${args.join(' ')}\n${out(r)}`).toBe(0);
+    }
+    const said = out(refused.run);
+    expect(refused.run.code, said).toBe(1);
+    expect(said).toContain('Refusing to generate');
+    // The decision, and both apps it counts: the starter's and the scaffold's.
+    expect(said).toMatch(/ADR-0019\b.*\bD3\b/);
+    expect(said).toContain(String(itemsOf(builtStack(legs[BARE].dir).apps)[0]?.name));
+    expect(said).toContain(target(REFUSED_ON_STARTER).itemName(ITEM, NS));
+    const apps = (dir: string) => readdirSync(join(dir, 'src', 'apps')).sort();
+    expect(apps(leg.dir)).toEqual(apps(legs[BARE].dir));
+    expect(readFileSync(join(leg.dir, 'src', 'apps', 'index.ts'), 'utf-8'))
+      .toBe(readFileSync(join(legs[BARE].dir, 'src', 'apps', 'index.ts'), 'utf-8'));
+  });
+
+  it.each(navAccessKinds)(
+    '`os g %s` gives the starter its first permission set: `nav-object-ungranted` wakes on the starter app\'s entries, nowhere else',
+    (kind) => {
+      const { wake } = legs[kind];
+      expect(wake, `leg ${kind} ran no \`os validate\` before granting`).toBeDefined();
+      expect(wake!.run.code, out(wake!.run)).toBe(0);
+      expect(wake!.findings, `os validate --json printed no JSON:\n${out(wake!.run)}`).not.toBeNull();
+      expect([...wake!.findings!].sort()).toEqual(
+        starterListed.map(({ path }) => `nav-object-ungranted@${path}`).sort(),
+      );
+    },
+  );
 });
 
 describe('[#21325] every generator: fresh starter + `os g <kind>` → zero findings at every gate', () => {
@@ -233,7 +391,8 @@ describe('[#21325] every generator: fresh starter + `os g <kind>` → zero findi
     for (const kind of kinds) expect(legs[kind], kind).toBeDefined();
   });
 
-  it.each(kinds)('`os g %s` and its prerequisites exit 0', (kind) => {
+  // The refused one is pinned above: its prerequisites exit 0, it exits 1.
+  it.each(kinds.filter((kind) => kind !== REFUSED_ON_STARTER))('`os g %s` and its prerequisites exit 0', (kind) => {
     for (const { args, run: r } of legs[kind].steps) {
       expect(r.code, `os ${args.join(' ')}\n${out(r)}`).toBe(0);
     }
@@ -272,7 +431,7 @@ describe('[#21325] the starter ledger cannot outlive its defect or cover a scaff
     const objectsOf = (dir: string) =>
       ((JSON.parse(readFileSync(join(dir, 'dist', 'objectstack.json'), 'utf-8')) as { objects?: { name?: string }[] })
         .objects ?? []).map((o) => o.name);
-    const starterObjects = objectsOf(legs['(bare starter)'].dir);
+    const starterObjects = objectsOf(legs[BARE].dir);
     for (const { leg } of fired(key)) {
       expect(starterObjects, `${key} in leg ${leg}`).toContain(objectsOf(legs[leg].dir)[Number(index)]);
     }

@@ -687,6 +687,8 @@ export const HookSchema = lazySchema(() => strictObject(
         'declare user for position holdings and permission-set grants (the ADR-0090 D12 delegated-administration ' +
         'gate then judges the user the hook acts for), and change invitations and memberships through the ' +
         'organization endpoints. ' +
+        "Nor does it reach a ledger: a system hook body's update, transfer, delete, purge or restore of an object " +
+        "declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. " +
         'Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged.',
     ),
 
