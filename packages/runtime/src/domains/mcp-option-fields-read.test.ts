@@ -3,6 +3,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a case's clock: the dispatcher's reach loads it lazily.
+import '@objectstack/metadata';
 
 /**
  * [#28715] The HTTP MCP bridge answers `optionFieldsOf(name)`: the fields of
