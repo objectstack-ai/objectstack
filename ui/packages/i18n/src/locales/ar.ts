@@ -329,6 +329,7 @@ const ar = {
       upload: 'رفع',
       remove: 'إزالة {{name}}',
       exceedsMaxSize: '"{{name}}" يتجاوز الحجم الأقصى ({{max}} ميغابايت)',
+      typeNotAccepted: '"{{name}}" ليس نوع ملف مقبولًا ({{accept}})',
       uploadFailed: 'فشل رفع "{{name}}": {{error}}',
       uploadIncomplete: 'لم يكتمل رفع "{{name}}": لم يتم إرجاع معرّف الملف، ولم يُحفظ شيء',
       restricted: 'ملف مقيد',

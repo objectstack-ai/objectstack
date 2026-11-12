@@ -311,6 +311,7 @@ const ko = {
       upload: '업로드',
       remove: '{{name}} 제거',
       exceedsMaxSize: '"{{name}}"이(가) 최대 크기({{max}} MB)를 초과합니다',
+      typeNotAccepted: '"{{name}}"은(는) 허용되는 파일 형식이 아닙니다({{accept}})',
       uploadFailed: '"{{name}}" 업로드 실패: {{error}}',
       uploadIncomplete: '"{{name}}" 업로드가 완료되지 않았습니다: 파일 ID가 반환되지 않아 저장된 내용이 없습니다',
       restricted: '제한된 파일',

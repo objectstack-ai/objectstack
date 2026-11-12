@@ -311,6 +311,7 @@ const de = {
       upload: 'Hochladen',
       remove: '{{name}} entfernen',
       exceedsMaxSize: '„{{name}}“ überschreitet die maximale Größe ({{max}} MB)',
+      typeNotAccepted: '„{{name}}“ ist kein zulässiger Dateityp ({{accept}})',
       uploadFailed: 'Hochladen von „{{name}}“ fehlgeschlagen: {{error}}',
       uploadIncomplete: 'Hochladen von „{{name}}“ wurde nicht abgeschlossen: Es wurde keine Datei-ID zurückgegeben, nichts wurde gespeichert',
       restricted: 'Eingeschränkte Datei',

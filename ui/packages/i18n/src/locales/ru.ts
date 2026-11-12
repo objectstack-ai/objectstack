@@ -320,6 +320,7 @@ const ru = {
       upload: 'Загрузить',
       remove: 'Удалить {{name}}',
       exceedsMaxSize: '«{{name}}» превышает максимальный размер ({{max}} МБ)',
+      typeNotAccepted: '«{{name}}» — недопустимый тип файла ({{accept}})',
       uploadFailed: 'Не удалось загрузить «{{name}}»: {{error}}',
       uploadIncomplete: 'Загрузка «{{name}}» не завершена: идентификатор файла не получен, ничего не сохранено',
       restricted: 'Файл с ограниченным доступом',

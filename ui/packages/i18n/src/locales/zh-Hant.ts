@@ -299,6 +299,7 @@ const zhHant = {
       upload: '上傳',
       remove: '移除 {{name}}',
       exceedsMaxSize: '“{{name}}” 超過大小上限（{{max}} MB）',
+      typeNotAccepted: '“{{name}}” 不是允許的檔案型別（{{accept}}）',
       uploadFailed: '上傳 “{{name}}” 失敗：{{error}}',
       uploadIncomplete: '“{{name}}” 上傳未完成：未返回檔案 ID，未儲存任何內容',
       restricted: '受限檔案',
