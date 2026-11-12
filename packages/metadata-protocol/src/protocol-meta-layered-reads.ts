@@ -56,6 +56,7 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import {
     admitExactQualifier,
+    declinedCopyReplaced,
     declinesPackageLessRowAt,
     exactQualifierItem,
     isPackageLessRow,
@@ -318,7 +319,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // admitted holder's, and a package-less item of a name two or more
     // packages hold is refused naming every holder. Admission alone left both
     // to whichever layer answered first.
-    if (exactAddress && code !== null) code = exactQualifierItem(host, request, exactAddress, code, member) ?? null;
+    // [#32568, contract review S1 on #32741] …and a registry or service copy
+    // of a package-less row the address declines is replaced by the holder's
+    // own item first, as the plain read's code step does
+    // ({@link declinedCopyReplaced}): a `metadata` service keying the type by
+    // name alone answered the declined row as the holder's code layer.
+    if (exactAddress && code !== null) {
+        code = exactQualifierItem(host, request, exactAddress,
+            declinedCopyReplaced(host, request, exactAddress, code, wantedMember), member) ?? null;
+    }
 
     if (code === null && codeDegraded?.degraded) {
         host.throwMetadataServiceUnavailable(codeDegraded.errors);

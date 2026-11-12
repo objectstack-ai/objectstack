@@ -19,12 +19,18 @@ export const entry: SemanticMigration = {
     + 'layer, and the list scoped to a package with drafts previewed. (1) An overlay type (email_template, '
     + 'dashboard, report): a package-less draft of a name two or more packages hold. (2) A sealed managed type '
     + '(artifact-backed with no overlay channel: action, agent, page, hook, job, queue, sharing_rule, '
-    + 'assignment_rule and the like): any package-less row of a name a package ships',
+    + 'assignment_rule and the like): any package-less row of a name a package ships. Whether the change moves to a '
+    + 'declared override turns on the type: only flow, action, page, app, dataset, doc, book and mapping have one',
   replacement:
     'For (1), save the customization under the one package it customizes (?package=ID on the write), then delete '
-    + 'the package-less draft. For (2), author the change as a declared override in the holder\'s paired .custom '
-    + 'package (ADR-0146), then delete the package-less row. A package-less overlay row of a name one package holds '
-    + 'is that holder\'s customization and is served as before',
+    + 'the package-less draft. For (2), what the change becomes depends on whether the type has a declared override '
+    + 'channel (ADR-0146). (2a) flow and action (under ADR-0146 D9\'s conditions), page, app, dataset, doc, book and '
+    + 'mapping: author the change as a declared override in the holder\'s paired .custom package, then delete the '
+    + 'package-less row. (2b) every other sealed type (hook, job, queue, sharing_rule, assignment_rule, agent, skill, '
+    + 'api and the like) has no override channel: delete the package-less row, and ship the change as a new version of '
+    + 'the holding package\'s source, or keep it as an item of its own under a name no package ships (an environment '
+    + 'action bound to an object neither holder binds included). A package-less overlay row of a name one package '
+    + 'holds is that holder\'s customization and is served as before',
   reason:
     'A package-less row of an overlay type is a holder\'s customization that cannot say which holder when two '
     + 'packages hold the name (ADR-0150 D4), so each holder\'s exact read refuses it 409 RESOURCE_CONFLICT naming '
@@ -40,7 +46,8 @@ export const entry: SemanticMigration = {
     'For every package-less draft of an email_template, dashboard or report whose name two installed packages '
     + 'hold, the draft is re-saved under one package and the package-less draft deleted: each holder\'s '
     + '?package=ID&state=draft then answers its own draft, never 409 naming both. For every package-less stored row '
-    + 'of a sealed type whose name a package ships, the change lives in a declared override of the holder\'s '
-    + '.custom package: ?package=ID answers the override, before and after a reload, and no package-less row of '
-    + 'the name remains.',
+    + 'of a sealed type whose name a package ships, no package-less row of the name remains, and: for a type of '
+    + '(2a), the change lives in a declared override of the holder\'s .custom package and ?package=ID answers the '
+    + 'override, before and after a reload; for a type of (2b), ?package=ID answers the holder\'s own shipped item '
+    + 'at the version that carries the change, or the change answers under its own name, which no package ships.',
 };

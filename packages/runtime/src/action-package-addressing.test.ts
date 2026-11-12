@@ -622,8 +622,12 @@ describe('[#32244] the bare read of an action name two packages hold on any obje
  *  2. beside TWO packages, the refusal names the environment too;
  *  3. one enabled holder answers, though a disabled package registered first.
  *
- * The route (`/actions/:object/NAME`) sees the object, so it still takes the
- * declaration that owns it, the package-less one included.
+ * The route (`/actions/:object/NAME`) sees the object, so it takes the
+ * declaration of the holder that owns it, read at that holder's exact
+ * address. [#32568] A sealed type's package-less copy is declined there
+ * (epic ruling 6817768147), so beside two packages the environment's item is
+ * no route's declaration (case 2); the execution face reading the
+ * environment's own item is #32751.
  *
  * BASE (main 89d815c5; #32497's head 1483899c measured the same): (1) the
  * layered read answered the package's item, the in-process store the one
@@ -721,7 +725,7 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             // ruling 6817768147), so neither holder owns `lead` and the route
             // answers no declaration, not a refusal. FROM the environment's
             // item TO none; the execution face reading the environment's own
-            // item stays its owner seat's follow-up.
+            // item is #32751.
             const onLead = await routeTo('lead');
             expect([onLead.action, onLead.refusal]).toEqual([undefined, undefined]);
         });

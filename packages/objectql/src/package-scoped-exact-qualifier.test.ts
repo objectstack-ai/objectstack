@@ -1496,6 +1496,37 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       });
     }
 
+    // [Contract review S1 on #32741] The `metadata` service keys some types by
+    // name alone, so it can answer a package-less copy of the declined row at
+    // a holder's exact address. The layered read's code layer is the plain
+    // read's code step judged as the plain read judges it: the copy is
+    // declined there too, never the holder's `code` (one holder) nor a 409
+    // naming both (two).
+    for (const type of ['action', 'queue']) {
+      for (const holders of [[A], [A, B]]) {
+        it(`${type}, ${holders.length} holder(s): a service copy of the package-less row is declined on the plain read and the layered read's code layer alike`, async () => {
+          for (const p of holders) shipSealed(type, p);
+          storeRow(type, 'active', 'stored');
+          const copy = { ...sealedBody(type, 'stored'), _provenance: 'org', _packageId: '' };
+          const metadata = {
+            get: vi.fn(async () => copy),
+            getDiagnosed: vi.fn(async () => ({ data: copy, degraded: false, errors: [] })),
+          };
+          const served = new ObjectStackProtocolImplementation(
+            (protocol as unknown as { engine: never }).engine,
+            () => new Map<string, unknown>([['metadata', metadata]]),
+          );
+          for (const at of holders) {
+            const own = `${at.split('.').pop()} ${type}`;
+            expect(labelOf(await served.getMetaItem({ type, name: 'approve', packageId: at } as never)), `${at} plain`).toBe(own);
+            const layers = await served.getMetaItemLayered({ type, name: 'approve', packageId: at } as never) as { code?: { label?: string } | null; overlay?: unknown; effective?: { label?: string } };
+            expect([layers.code?.label, layers.overlay ?? null, layers.effective?.label], `${at} layered`).toEqual([own, null, own]);
+          }
+          expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+        });
+      }
+    }
+
     it('CONTROL — the bare read of a two-holder action keeps #32244\'s 409, after the hydrator too', async () => {
       shipSealed('action', A);
       shipSealed('action', B);
