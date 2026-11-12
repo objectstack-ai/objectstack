@@ -586,7 +586,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
    * body, read by `holderCandidatesOfError`) becomes the pick, with the users
    * not yet granted; ⛔ no holder is chosen here.
    */
-  const grantUsers = React.useCallback(
+  const addUsers = React.useCallback(
     async (userIds: string[], packageId: string | undefined) => {
       setBusy(true);
       setError(null);
@@ -628,7 +628,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
     [adapter, permissionSetName, load, rows.length, c],
   );
 
-  const addUsers = React.useCallback(
+  const addPicked = React.useCallback(
     async (records: any[]) => {
       const userIds: string[] = [];
       for (const u of records || []) {
@@ -636,17 +636,17 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
         if (!uid || assignedIds.has(uid)) continue;
         userIds.push(uid);
       }
-      await grantUsers(userIds, addressing);
+      await addUsers(userIds, addressing);
     },
-    [grantUsers, addressing, assignedIds],
+    [addUsers, addressing, assignedIds],
   );
 
   const pickAddHolder = React.useCallback(
     (candidate: PermissionSetHolderCandidate) => {
       if (!addConflict) return;
-      void grantUsers(addConflict.userIds, candidatePackage(candidate));
+      void addUsers(addConflict.userIds, candidatePackage(candidate));
     },
-    [addConflict, grantUsers],
+    [addConflict, addUsers],
   );
 
   /**
@@ -884,7 +884,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
           title={c.pickTitle}
           baseFilter={memberFilter}
           onSelect={() => {}}
-          onSelectRecords={(records: any[]) => void addUsers(records)}
+          onSelectRecords={(records: any[]) => void addPicked(records)}
         />
       )}
       <AlertDialog
