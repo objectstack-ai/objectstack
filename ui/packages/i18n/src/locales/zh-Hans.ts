@@ -3422,6 +3422,8 @@ const zh = {
     recordAccessEndedDescription: '你的审批环节已结束，对此记录的访问权限也随之结束。',
     pageNotFound: '未找到页面',
     pageNotFoundDescription: '未找到页面 “{{name}}”，可能已被删除或重命名。',
+    recordPagePlacesNoComponent: '此记录页没有可显示的内容',
+    recordPagePlacesNoComponentDescription: '记录页 “{{name}}” 的区域中没有放置任何组件，因此对任何记录都不显示内容。管理员可以在 Studio 中修复：向某个区域添加组件、将页面设为 slotted 以显示默认记录页，或删除该页面以显示默认记录页。',
     dashboardNotFound: '未找到仪表盘',
     dashboardNotFoundDescription: '未找到仪表盘 “{{name}}”，可能已被删除或重命名。',
     reportNotFound: '未找到报表',

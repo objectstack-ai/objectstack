@@ -21,6 +21,7 @@ import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordan
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
 import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
+import { checkPageRecordPlacesComponent } from '@objectstack/spec/ui';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -308,6 +309,21 @@ const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
  * other strip keeps its selection in its own state, which this view cannot see.
  */
 const TABS_URL_SYNC_KEYS: ReadonlySet<string> = new Set(['regions', 'components', 'children']);
+
+/**
+ * Whether an authored record page places no component, by the spec's own
+ * reading: `checkPageRecordPlacesComponent` (`@objectstack/spec/ui`) refuses a
+ * `full` record page whose regions place nothing, because it draws a blank
+ * detail panel. The save door refuses one, but a row stored before that
+ * refusal, or a page a package registers flat, still arrives here; it is
+ * explained where its body would be, never swapped for the default page.
+ */
+function recordPagePlacesNoComponent(page: Parameters<typeof checkPageRecordPlacesComponent>[0] | null | undefined): boolean {
+  if (!page || typeof page !== 'object') return false;
+  let refused = false;
+  checkPageRecordPlacesComponent(page, { value: page, issues: [], addIssue: () => { refused = true; } });
+  return refused;
+}
 
 /**
  * The fields the highlight strip of a synthesized record page draws: the
@@ -4508,6 +4524,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
           </div>
+        </Empty>
+      </div>
+    );
+  }
+
+  // The authored record page places no component, so its body would be a
+  // blank panel for every record. A page is what its author composes, so the
+  // default page is not drawn in its place: the panel says what is wrong and
+  // how to fix it. Judged on the page as authored, before pruning. Like the
+  // refused named page, it stamps no print root.
+  if (assignedPage && recordPagePlacesNoComponent(resolvedPage)) {
+    return withPhoneBar(
+      <div className="flex h-full items-center justify-center p-4">
+        <Empty data-testid="record-page-places-no-component">
+          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <FileText className="h-6 w-6 text-muted-foreground" />
+          </div>
+          <EmptyTitle>
+            {t('empty.recordPagePlacesNoComponent', { defaultValue: 'This record page has nothing to show' })}
+          </EmptyTitle>
+          <EmptyDescription>
+            {t('empty.recordPagePlacesNoComponentDescription', {
+              name: resolvedPage?.name ?? '',
+              defaultValue:
+                'The record page "{{name}}" places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
+            })}
+          </EmptyDescription>
         </Empty>
       </div>
     );

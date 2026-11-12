@@ -4003,6 +4003,8 @@ const en = {
     recordAccessEndedDescription: 'Your approval step is complete, so your access to this record has ended.',
     pageNotFound: 'Page Not Found',
     pageNotFoundDescription: 'The page "{{name}}" could not be found. It may have been removed or renamed.',
+    recordPagePlacesNoComponent: 'This record page has nothing to show',
+    recordPagePlacesNoComponentDescription: 'The record page "{{name}}" places no component in its regions, so it shows nothing for any record. An administrator can fix it in Studio: add components to a region, make the page slotted to show the default record page, or delete the page so the default record page shows.',
     dashboardNotFound: 'Dashboard Not Found',
     dashboardNotFoundDescription: 'The dashboard "{{name}}" could not be found. It may have been removed or renamed.',
     reportNotFound: 'Report Not Found',

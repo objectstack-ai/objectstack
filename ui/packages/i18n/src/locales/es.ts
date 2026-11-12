@@ -3407,6 +3407,8 @@ const es = {
     interfacePageSourceMissing: "Esta página de interfaz hace referencia a \"{{name}}\", que no está disponible.",
     pageNotFound: "Página no encontrada",
     pageNotFoundDescription: "La página \"{{name}}\" no fue encontrada. Puede haber sido eliminada o renombrada.",
+    recordPagePlacesNoComponent: "Esta página de registro no tiene nada que mostrar",
+    recordPagePlacesNoComponentDescription: "La página de registro \"{{name}}\" no coloca ningún componente en sus regiones, así que no muestra nada para ningún registro. Un administrador puede corregirlo en Studio: añadir componentes a una región, hacer que la página sea slotted para mostrar la página de registro predeterminada, o eliminar la página para que se muestre la página de registro predeterminada.",
     dashboardNotFound: "Panel no encontrado",
     dashboardNotFoundDescription: "El panel \"{{name}}\" no fue encontrado. Puede haber sido eliminado o renombrado.",
     reportNotFound: "Informe no encontrado",
