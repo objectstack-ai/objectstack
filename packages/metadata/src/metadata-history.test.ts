@@ -338,6 +338,29 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect(labelOf(await rowOf(type, B))).toBe('B1');
       });
 
+      it('a history row written before the column (package_id NULL) reads as before; by package, the package its body names', async () => {
+        await manager.getHistory(type, 'x'); // provisions both tables, writes nothing
+        const legacy = (version: number, data: Record<string, unknown>) => driver.create('sys_metadata_history', {
+          id: `legacy_${version}`, event_seq: version, type, name: 'x', version, operation_type: 'update',
+          metadata: JSON.stringify(data), checksum: `c${version}`, recorded_at: `2026-01-0${version}T00:00:00.000Z`,
+          source: 'database-loader',
+        });
+        await legacy(1, body('A1', A));
+        await legacy(2, body('custom'));
+        await loader.save(type, 'x', body('A3', A));
+        const rows = (await driver.find('sys_metadata_history', { where: { type } } as never)) as Array<Record<string, unknown>>;
+        expect(rows.map((row) => [row.version, row.package_id ?? null])).toEqual([[1, null], [2, null], [3, A]]);
+        expect((await manager.getHistory(type, 'x')).records.map((record) => [record.version, record.metadata])).toEqual([
+          [3, body('A3', A)],
+          [2, body('custom')],
+          [1, body('A1', A)],
+        ]);
+        expect(await versions(type, { packageId: A })).toEqual([3, 1]);
+        // An unattributed version lands in the one holder's row, as before.
+        await manager.rollback(type, 'x', 2);
+        expect((await rowsOf(type)).map((row) => [row.package_id, labelOf(row), row.version])).toEqual([[A, 'custom', 4]]);
+      });
+
       it('CONTROL: one holder and no package answer as before', async () => {
         await loader.save(type, 'x', body('A1', A));
         await loader.save(type, 'x', body('custom'));

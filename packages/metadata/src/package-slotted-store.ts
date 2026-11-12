@@ -442,6 +442,30 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
 }
 
 /**
+ * [ADR-0150 D3/D4, #32351] Refuse a write that names `packageId` (the package a
+ * rollback names, or the package whose version it restores) when `store` holds
+ * no slot of `name` for that package: no row is that package's to write, and
+ * ⛔ never another holder's. The refusal names every slot the store holds (each
+ * package, and the environment for the package-less slot).
+ *
+ * @throws {PackageScopedNameRefusedError} always (`not-held-by-qualifier`).
+ */
+export function refuseSlotNotHeld(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string, packageId: string): never {
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'not-held-by-qualifier',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: packageId,
+    candidates: storeKeysNamed(store, type, name).map((key) => {
+      const holder = slotPackageOf(key);
+      return holder === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: holder };
+    }),
+  };
+  throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+}
+
+/**
  * The in-memory answer to a by-name read of `(type, name)`.
  *
  *  - `{ found: true, data }` — the store answers;
