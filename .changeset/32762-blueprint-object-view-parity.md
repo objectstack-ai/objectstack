@@ -6,7 +6,7 @@ fix(spec): the AI blueprint object and view follow the object and view rules: st
 
 Clause-②: yes
 Metadata-protocol: narrowed
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is removed, renamed or re-shaped: BlueprintObjectSchema gains an optional icon and BlueprintViewSchema.name admits more, and the one narrowing refuses a blueprint whose object write the object schema already refused. A blueprint is never persisted (apply_blueprint parses it and stages its objects), so there is nothing at rest for a migration to rewrite; the refusal names the option and the kind to add. -->
+<!-- adr-0087: registered blueprint-stage-field-option-kind-required -->
 Skills-docs: none — no file under `skills/**` restates a blueprint object or view key (`skills/objectstack-ai/references/_index.md` only points at `solution-blueprint.zod.ts`); the reference page `content/docs/references/ai/solution-blueprint.mdx` is regenerated from the new describes.
 
 Three places where the AI solution blueprint (`SolutionBlueprintSchema`, the shape `apply_blueprint` parses) disagreed with the object and view schemas the applier writes through:
