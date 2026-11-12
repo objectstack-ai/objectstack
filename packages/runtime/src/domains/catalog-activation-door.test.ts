@@ -19,6 +19,9 @@
 import { describe, it, expect } from 'vitest';
 import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
 import { assertEngineUpdateDispatch } from '@objectstack/objectql';
+// Paid at collection, not inside a case's clocked window: the dispatcher's
+// package domain loads `@objectstack/metadata` lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
