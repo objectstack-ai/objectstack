@@ -599,7 +599,7 @@ export class ProtocolRegistryHydrationFacet {
         // the package's item, not a tenant-authored one, so it stops there.
         if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) {
             if (isTenantAuthored(registry.getItem?.(type, rowName))) {
-                await host.restoreArtifactRegistryView(type, rowName, null, bundleMemberOf(type, data));
+                await host.restoreArtifactRegistryView(type, rowName, null, null, bundleMemberOf(type, data));
             }
             return false;
         }
