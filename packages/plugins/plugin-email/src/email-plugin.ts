@@ -40,7 +40,12 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
-import { describeLiveMailTransport, mailDeliveryCopy, type LiveMailTransportStatus } from './live-transport-status.js';
+import {
+  describeLiveMailTransport,
+  mailDeliveryCopy,
+  type LiveMailTransportOrigin,
+  type LiveMailTransportStatus,
+} from './live-transport-status.js';
 import {
   EMAIL_LOG_OBJECTS,
   TENANT_EMAIL_OBJECT,
@@ -443,6 +448,14 @@ export class EmailServicePlugin implements Plugin {
   /** SMTP transport currently in use, if any — closed in dispose(). */
   private liveSmtp?: SmtpTransport;
   /**
+   * Where the transport this plugin last installed came from: the boot
+   * (`environment`: these options, so the stack's `email` block, `OS_EMAIL_*`
+   * or a host `transport`) or the `mail` namespace (`settings`). Kept with the
+   * transport it describes, so a transport installed by anything else reads as
+   * not stated ({@link liveTransportOrigin}).
+   */
+  private installedTransport?: { transport: IEmailTransport; origin: LiveMailTransportOrigin };
+  /**
    * The `mail` settings page's override of `options.queueDelivery`.
    * `undefined` means no operator has touched the toggle (the manifest
    * default still resolves it), so the constructor declaration stands —
@@ -530,6 +543,18 @@ export class EmailServicePlugin implements Plugin {
   }
 
   /**
+   * Where the LIVE transport came from, for the page's `live.provider`:
+   * the origin recorded when this plugin installed it, and `undefined` when
+   * the live transport is not the one it installed (a caller swapped it
+   * through `EmailService.setTransport`), since its origin is then unknown.
+   */
+  private liveTransportOrigin(): LiveMailTransportOrigin | undefined {
+    const installed = this.installedTransport;
+    if (!installed || !this.service) return undefined;
+    return this.service.options.transport === installed.transport ? installed.origin : undefined;
+  }
+
+  /**
    * Materialise the constructor-configured transport.
    *
    * Deliberately propagates `makeTransport`'s throw (missing SMTP host,
@@ -604,6 +629,7 @@ export class EmailServicePlugin implements Plugin {
       );
     }
 
+    this.installedTransport = { transport, origin: 'environment' };
     this.service = new EmailService({
       transport,
       defaultFrom: this.namedSender(this.options.defaultFrom),
@@ -851,7 +877,9 @@ export class EmailServicePlugin implements Plugin {
           if (typeof settings.registerLiveStatus === 'function') {
             settings.registerLiveStatus('mail', async (input) => {
               await Promise.allSettled([...applying]);
-              return this.service ? describeLiveMailTransport(this.service, input?.locale) : undefined;
+              return this.service
+                ? describeLiveMailTransport(this.service, input?.locale, this.liveTransportOrigin())
+                : undefined;
             });
           }
 
@@ -1616,6 +1644,7 @@ export class EmailServicePlugin implements Plugin {
       try {
         const transport = this.buildSmtpTransport(smtp, ctx.logger);
         this.service.setTransport(transport);
+        this.installedTransport = { transport, origin: 'settings' };
         this.liveSmtp = transport;
         ctx.logger.info(
           `EmailServicePlugin: SMTP transport built from settings (host=${smtp.host}:${smtp.port ?? 587}, `
@@ -1642,7 +1671,9 @@ export class EmailServicePlugin implements Plugin {
         ? undefined
         : describeLiveMailTransport(this.service).label;
       if (replaced) {
-        this.service.setTransport(new LogTransport(ctx.logger));
+        const transport = new LogTransport(ctx.logger);
+        this.service.setTransport(transport);
+        this.installedTransport = { transport, origin: 'settings' };
         this.liveSmtp = undefined;
       }
       ctx.logger.info(
@@ -1686,6 +1717,7 @@ export class EmailServicePlugin implements Plugin {
         logger: ctx.logger,
       });
       this.service.setTransport(transport);
+      this.installedTransport = { transport, origin: 'settings' };
       this.liveSmtp = undefined;
       ctx.logger.info(`EmailServicePlugin: transport rebuilt from settings (provider=${provider}).`);
     } catch (err: any) {

@@ -21,6 +21,31 @@ export interface LiveMailTransportStatus {
   label: string;
   bannerText: string;
   bannerSeverity: 'info' | 'warning';
+  /**
+   * The provider in use, machine-readable, for a reader that needs the answer
+   * and not the banner's prose (the console's first-run checklist). The
+   * settings `GET` route serves it as the page's `live.provider`, the shape the
+   * `ai` namespace's runtime states its provider in. Absent = not stated: the
+   * live transport is one the `provider` options cannot name (a host's own
+   * transport class), or the plugin cannot say where it came from.
+   */
+  values?: { provider: LiveMailProviderValue };
+}
+
+/**
+ * Where the live transport came from, as service-settings' `SettingsLiveValue`
+ * spells a source: `settings` is a transport built from the `mail` namespace
+ * (saved, or `OS_MAIL_*`-locked, which that namespace resolves); `environment`
+ * is the one the boot built or the host handed over, outside that namespace
+ * (`EmailServicePluginOptions`: the stack's `email` block, `OS_EMAIL_*`, or a
+ * host `transport`).
+ */
+export type LiveMailTransportOrigin = 'settings' | 'environment';
+
+/** The `provider` key's value in the running system: one of its options, or `null` when nothing delivers. */
+export interface LiveMailProviderValue {
+  value: string | null;
+  source: LiveMailTransportOrigin | 'none';
 }
 
 /** The part of `EmailService` the statement reads. */
@@ -275,6 +300,18 @@ export function mailDeliveryCopy(locale: string | undefined): MailDeliveryCopy {
   return MAIL_DELIVERY_COPY[(picked ?? 'en') as keyof typeof MAIL_DELIVERY_COPY];
 }
 
+/**
+ * The `mail` namespace's `provider` option that names the live transport, or
+ * `undefined` when none does (a host's own transport class). `log` is never
+ * returned: a LogTransport delivers nothing, which is stated as `none`.
+ */
+function providerOptionOf(transport: IEmailTransport): string | undefined {
+  if (transport instanceof SmtpTransport) return 'smtp';
+  if (transport instanceof ResendTransport) return 'resend';
+  if (transport instanceof PostmarkTransport) return 'postmark';
+  return undefined;
+}
+
 /** A name an administrator recognises for the live transport. */
 function transportName(transport: IEmailTransport, copy: MailDeliveryCopy): string {
   if (transport instanceof SmtpTransport) {
@@ -293,15 +330,29 @@ function transportName(transport: IEmailTransport, copy: MailDeliveryCopy): stri
  *
  * `isConfigured()` decides the branch: `false` means no mail leaves this machine,
  * whatever the form says. The transport is read only to name it.
+ *
+ * `values.provider` states the provider in use: `{ value: null, source: 'none' }`
+ * when nothing delivers, else the option naming the transport with the `origin`
+ * the caller holds for it. With no `origin`, or a transport no option names, the
+ * provider is not stated, which a reader tells from `none`.
  */
 export function describeLiveMailTransport(
   source: LiveMailTransportSource,
   locale?: string,
+  origin?: LiveMailTransportOrigin,
 ): LiveMailTransportStatus {
   const copy = mailDeliveryCopy(locale);
   if (!source.isConfigured()) {
-    return { label: copy.noMailLabel, bannerSeverity: 'warning', bannerText: copy.noMailText };
+    return {
+      label: copy.noMailLabel, bannerSeverity: 'warning', bannerText: copy.noMailText,
+      values: { provider: { value: null, source: 'none' } },
+    };
   }
   const name = transportName(source.options.transport, copy);
-  return { label: copy.deliveredLabel(name), bannerSeverity: 'info', bannerText: copy.deliveredText(name) };
+  const status: LiveMailTransportStatus = {
+    label: copy.deliveredLabel(name), bannerSeverity: 'info', bannerText: copy.deliveredText(name),
+  };
+  const option = providerOptionOf(source.options.transport);
+  if (option && origin) status.values = { provider: { value: option, source: origin } };
+  return status;
 }

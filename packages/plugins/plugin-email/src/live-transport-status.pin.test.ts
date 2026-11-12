@@ -8,9 +8,15 @@
 // follows a transport swap made from the same page.
 
 import { describe, it, expect, vi } from 'vitest';
-import { EmailServicePlugin } from './email-plugin.js';
+import type {
+  IEmailTransport, IHttpServer, IHttpRequest, IHttpResponse, RouteHandler,
+} from '@objectstack/spec/contracts';
+import { SettingsNamespacePayloadSchema } from '@objectstack/spec/system';
+import { SettingsService, mailSettingsManifest, registerSettingsRoutes } from '@objectstack/service-settings';
+import { EmailServicePlugin, type EmailServicePluginOptions } from './email-plugin.js';
 import { EmailService, LogTransport } from './email-service.js';
 import { SmtpTransport } from './transports/smtp.js';
+import { ResendTransport } from './transports/resend.js';
 import {
   describeLiveMailTransport,
   mailDeliveryCopy,
@@ -181,5 +187,132 @@ describe('Setup → Email copy carries the eleven platform languages', () => {
 
   it('a code naming no language here, or none at all, is served English', () => {
     for (const code of ['xx', 'sw-KE', undefined]) expect(mailDeliveryCopy(code), String(code)).toBe(MAIL_DELIVERY_COPY.en);
+  });
+});
+
+// GET /api/settings/mail states the provider in use as `live.provider`, in the
+// shape the `ai` namespace's runtime states its provider in
+// (service-settings' `settings-routes.live-status.pin.test.ts`): `{ value,
+// source }`, `value` one of the `provider` options. A hosted tenant's
+// first-run checklist reads mail as configured from it, as it reads the
+// built-in AI. Driven through the SERVED door: a real `SettingsService` with
+// the real `mail` manifest, its real REST routes, and the live status this
+// plugin registers at `kernel:ready`.
+describe('GET /api/settings/mail — live.provider states the provider in use', () => {
+  class MockHttp implements IHttpServer {
+    routes = new Map<string, RouteHandler>();
+    private add(method: string, path: string, handler: RouteHandler) { this.routes.set(`${method} ${path}`, handler); }
+    get(path: string, h: RouteHandler) { this.add('GET', path, h); return this as any; }
+    post(path: string, h: RouteHandler) { this.add('POST', path, h); return this as any; }
+    put(path: string, h: RouteHandler) { this.add('PUT', path, h); return this as any; }
+    delete(path: string, h: RouteHandler) { this.add('DELETE', path, h); return this as any; }
+    patch(path: string, h: RouteHandler) { this.add('PATCH', path, h); return this as any; }
+    use() { return this as any; }
+    listen() { return Promise.resolve(); }
+    close() { return Promise.resolve(); }
+    getInstance() { return null; }
+  }
+
+  /** Boot the plugin against a real settings service holding `saved`, and mount its routes. */
+  async function serve(saved: Record<string, unknown>, opts: EmailServicePluginOptions = {}) {
+    const settings = new SettingsService({ env: {} });
+    settings.registerManifest(mailSettingsManifest);
+    if (Object.keys(saved).length > 0) await settings.setMany('mail', saved);
+    const engine = { async find() { return []; } };
+    const services: Record<string, unknown> = { manifest: { register: () => {} }, objectql: engine, settings };
+    const hooks: Record<string, Array<() => Promise<void> | void>> = {};
+    const ctx = {
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+      getService: <T,>(name: string): T => {
+        if (!(name in services)) throw new Error(`service '${name}' not registered`);
+        return services[name] as T;
+      },
+      registerService: (name: string, svc: unknown) => { services[name] = svc; },
+      hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
+    };
+    const plugin = new EmailServicePlugin({ persist: false, ...opts });
+    await plugin.init(ctx as never);
+    await plugin.start(ctx as never);
+    for (const fn of hooks['kernel:ready'] ?? []) await fn();
+
+    const http = new MockHttp();
+    registerSettingsRoutes(http, settings, {
+      contextFromRequest: () => ({ enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' }),
+    });
+    /** GET /api/settings/mail as the console reads it. */
+    const read = async () => {
+      const captured: { status: number; body: any } = { status: 200, body: undefined };
+      const res: IHttpResponse = {
+        json: vi.fn((data: any) => { captured.body = data; }) as any,
+        send: vi.fn() as any,
+        status: vi.fn((code: number) => { captured.status = code; return res; }) as any,
+        header: vi.fn(() => res) as any,
+      };
+      const req: IHttpRequest = {
+        params: { namespace: 'mail' }, query: {}, body: undefined, headers: {}, method: 'GET', path: '/api/settings/mail',
+      };
+      await http.routes.get('GET /api/settings/:namespace')!(req, res);
+      expect(captured.status).toBe(200);
+      expect(SettingsNamespacePayloadSchema.safeParse(captured.body.data).success).toBe(true);
+      return captured.body.data as { live?: Record<string, unknown>; manifest: { specifiers: any[] } };
+    };
+    return { settings, read, service: services.email as EmailService };
+  }
+
+  /** The live-status banner heading the page: its fields are unchanged by the new statement. */
+  const banner = (data: { manifest: { specifiers: any[] } }) => {
+    const first = data.manifest.specifiers[0];
+    expect(first).toMatchObject({ type: 'info_banner', id: 'live_status' });
+    return { label: first.label, bannerSeverity: first.bannerSeverity };
+  };
+
+  it("none: the out-of-the-box boot delivers nothing, and says so as { value: null, source: 'none' }", async () => {
+    const { read } = await serve({});
+    const data = await read();
+    expect(data.live).toEqual({ provider: { value: null, source: 'none' } });
+    expect(banner(data)).toEqual({ label: 'No mail leaves this machine', bannerSeverity: 'warning' });
+  });
+
+  it("environment: SMTP the boot built (OS_EMAIL_SMTP_* / the stack's email block) reads as source 'environment'", async () => {
+    const { read } = await serve({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test', port: 2525 } });
+    const data = await read();
+    expect(data.live).toEqual({ provider: { value: 'smtp', source: 'environment' } });
+    expect(banner(data)).toEqual({ label: 'Mail is delivered through SMTP (smtp.boot.test:2525)', bannerSeverity: 'info' });
+  });
+
+  it("environment: a stock transport the host hands over reads as the option that names it", async () => {
+    const { read } = await serve({}, { transport: new ResendTransport({ apiKey: 're_test_key' }) });
+    expect((await read()).live).toEqual({ provider: { value: 'resend', source: 'environment' } });
+  });
+
+  it("settings: SMTP saved on the page reads as source 'settings'", async () => {
+    const { read } = await serve({ provider: 'smtp', smtp_host: 'smtp.saved.test', from_email: 'no-reply@acme.test' });
+    const data = await read();
+    expect(data.live).toEqual({ provider: { value: 'smtp', source: 'settings' } });
+    expect(banner(data)).toEqual({ label: 'Mail is delivered through SMTP (smtp.saved.test:587)', bannerSeverity: 'info' });
+  });
+
+  it('follows a save: a boot SMTP replaced from the page reads settings, then "None (log only)" reads none', async () => {
+    const { settings, read } = await serve({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
+    expect((await read()).live).toEqual({ provider: { value: 'smtp', source: 'environment' } });
+    await settings.setMany('mail', { provider: 'smtp', smtp_host: 'smtp.saved.test' });
+    expect((await read()).live).toEqual({ provider: { value: 'smtp', source: 'settings' } });
+    await settings.setMany('mail', { provider: 'log' });
+    const data = await read();
+    expect(data.live).toEqual({ provider: { value: null, source: 'none' } });
+    expect(banner(data)).toEqual({ label: 'No mail leaves this machine', bannerSeverity: 'warning' });
+  });
+
+  it("states nothing for a transport no option names, or one this plugin did not install: unknown is not 'none'", async () => {
+    const own: IEmailTransport = { send: async () => ({ messageId: 'host-own-1' }) } as never;
+    const hosted = await serve({}, { transport: own });
+    const data = await hosted.read();
+    expect('live' in data).toBe(false);
+    // The banner still names the host's transport.
+    expect(banner(data).bannerSeverity).toBe('info');
+
+    const swapped = await serve({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
+    swapped.service.setTransport(new SmtpTransport({ host: 'smtp.elsewhere.test' }));
+    expect('live' in (await swapped.read())).toBe(false);
   });
 });
