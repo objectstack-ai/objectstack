@@ -17,14 +17,14 @@
 //    with no bare-name warning for it; each flow is armed in its own slot;
 //  - each namespace's `/automation` address reads and runs its own package's
 //    flow; the bare name is refused 409 naming both, at `/automation` and at
-//    `/meta/flow`, and a package-less save of it is refused the same way
-//    (409, never a 500), storing nothing;
+//    `/meta/flow`; a package-less save of it is refused by the managed seal
+//    (403 NOT_OVERRIDABLE, ADR-0131 D6), never a 500, storing nothing;
 //  - the package's own flow action and its own flow endpoint run that
 //    package's flow, never the other namespace's (D3: the caller package's
 //    own item first; seat ruling 6810580480 item 2);
 //  - install-local of a third namespace's package shipping the name installs,
-//    and its flow is armed in its own slot; a package of no namespace and a
-//    co-owner of a holder's namespace are still refused;
+//    and its flow is armed in its own slot; a co-owner of a holder's namespace
+//    is still refused;
 //  - the epic's Q4 (6760226691): a flow the deployment switched off while one
 //    package held its name stays off after a second namespace's package
 //    installs a flow of that name, and the newcomer's flow arms.
@@ -210,9 +210,13 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     expectRefusedNamingBoth(await call('GET', `/meta/flow/${FLOW}`));
   });
 
-  it('a package-less save of the shared name is refused 409 naming both (never a 500), and stores nothing', async () => {
+  it('a package-less save of the shared name is refused by the managed seal (never a 500), and stores nothing', async () => {
     const put = await call('PUT', `/meta/flow/${FLOW}`, flow('env'));
-    expectRefusedNamingBoth(put);
+    // Either holder's flow is a managed package's, sealed against an in-place
+    // edit (ADR-0131 D6): refused before anything is stored or registered.
+    expect([put.status, put.code], JSON.stringify(put.body)).toEqual([403, 'NOT_OVERRIDABLE']);
+    const ql = (await stack.kernel.getServiceAsync('objectql')) as any;
+    expect(await ql.find('sys_metadata', { where: { type: 'flow', name: FLOW }, context: SYSTEM_CTX })).toEqual([]);
     expect([slotLabel(ALPHA), slotLabel(BETA)]).toEqual(['alpha flow', 'beta flow']);
   });
 
