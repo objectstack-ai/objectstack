@@ -1438,19 +1438,23 @@ export class MetadataManager implements IMetadataService {
    * registry's slots of the name, then the loaders' stored items keyed as the
    * store keys them ({@link slotStoreOf}), what the registry (then an earlier
    * loader) holds kept over a later item of the same slot. Reads and removals
-   * judge a name the registry cannot answer alone over this view, so they
-   * agree on who holds it.
+   * judge a name the registry cannot answer alone over this view.
    *
    * [ADR-0150 D4, #32791] `asStored`, for a read naming no package: a
    * registry slot of a package whose item is a stored package-less row
-   * ({@link storedPackagelessRows}: the boot pass stamped it with the host's
-   * package) that a loader still stores is that row, not a holder of its
-   * own. It is filed in the view as the store files a write that carries no
-   * package ({@link packagelessWriteKeyOf}: the name's one holder's
-   * customization, else the environment's own item) in place of the loader's
-   * copy of the row, so one row is never counted twice — as the host's
-   * package and as the environment. A package's own item, and a host's own
-   * item that no stored row is, keep their slots.
+   * ({@link storedPackagelessRows}) stamped with that same package (the boot
+   * pass stamps it with the host's package before it registers it), while a
+   * loader still stores the row, is that row, not a holder of its own. It is
+   * filed in the view as the store files a write that carries no package
+   * ({@link packagelessWriteKeyOf}: the name's one holder's customization,
+   * else the environment's own item) in place of the loader's copy of the
+   * row, and keeps the write order of the registry slot it came from, so one
+   * row is counted once, never as the host's package and as the environment.
+   * A package's own item, a host's own item that no stored row is, and an
+   * unstamped row the registry's own write rule filed in its one holder's
+   * slot (that holder's customization) keep their slots. A removal judges
+   * the view without `asStored`, so in that composition the read and the
+   * removal naming no package do not count the same holders.
    */
   private slotViewOf(
     type: string,
@@ -1460,17 +1464,21 @@ export class MetadataManager implements IMetadataService {
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    const storedRows: unknown[] = [];
+    const storedRows: Array<{ key: string; data: unknown }> = [];
     const storedKeys = new Set<string>();
     // [#32517] Each slot's member written last first: a slot no key of which
     // came from the registry answers its first member (`latestMemberOf`).
     if (registryStore) {
       for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) {
         const data = registryStore.get(key);
-        if (asStored && slotPackageOf(key) !== undefined && data !== null && typeof data === 'object' && this.storedPackagelessRows.has(data)) {
+        const stampedWith = slotPackageOf(key);
+        if (
+          asStored && stampedWith !== undefined && data !== null && typeof data === 'object'
+          && this.storedPackagelessRows.has(data) && indexedItemPackageId(data) === stampedWith
+        ) {
           const stored = storeSlotKey(type, name, undefined, data);
           if (loaderStore.has(stored)) {
-            storedRows.push(data);
+            storedRows.push({ key, data });
             storedKeys.add(stored);
             continue;
           }
@@ -1482,12 +1490,16 @@ export class MetadataManager implements IMetadataService {
       if (!view.has(key) && !storedKeys.has(key)) view.set(key, data);
     }
     // [#32791] The row the boot pass primed, over the loader's copy of the
-    // slot it fills (its holder's row: the customization shadows it, D4). It
-    // is filed under a key the registry does not hold, so, like a loader's
-    // item, it inherits no write order below.
-    for (const data of storedRows) view.set(packagelessWriteKeyOf(view, type, name, data), data);
+    // slot it fills (its holder's row: the customization shadows it, D4),
+    // written when the registry's slot it came from was.
+    const aliases = new Map<string, string>();
+    for (const { key, data } of storedRows) {
+      const at = packagelessWriteKeyOf(view, type, name, data);
+      view.set(at, data);
+      aliases.set(at, key);
+    }
     // [#32560] "Written last" over the view is the registry's own order.
-    inheritStoreWriteOrder(view, registryStore);
+    inheritStoreWriteOrder(view, registryStore, aliases);
     return view;
   }
 
