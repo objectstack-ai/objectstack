@@ -629,6 +629,9 @@ const en = {
       tomorrow: 'Tomorrow',
       clear: 'Clear date',
       openCalendar: 'Open calendar',
+      time: 'Time',
+      hour: 'Hour',
+      minute: 'Minute',
       invalid:
         'Not saved: "{{value}}" is not a date. Type it as {{format}}, or pick one from the calendar.',
     },
@@ -1201,6 +1204,8 @@ const en = {
     addGroup: 'Add group field',
     collapsedByDefault: 'Collapsed by default',
     removeGroup: 'Remove',
+    groupingUnstoredNotice: 'This list cannot be grouped by {{fields}}: its value is calculated when shown, not stored. The list is shown without that grouping.',
+    groupingUnstoredRemove: 'Remove from grouping',
     inlineEditShort: 'Edit inline',
     inlineEditLabel: 'Edit records inline (click a cell to edit)',
   },

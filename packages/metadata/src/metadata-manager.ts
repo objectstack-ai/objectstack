@@ -1855,12 +1855,23 @@ export class MetadataManager implements IMetadataService {
    *    slot and the precedence above decides between them, as the bare-name
    *    map did;
    *  - an item that carries none, under a name no package holds, is the
-   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *    environment's own (D1 bucket 4) and fills the environment's slot;
+   *  - [#31700] an item that carries none, under a name TWO or more packages
+   *    hold here (packages of different namespaces, since the API narrowed to
+   *    one holder per namespace), is a customization of no one holder: none is
+   *    picked, so it fills the environment's slot. The store's write rule
+   *    puts the same row there ({@link storeWriteKey}: a package-less write of
+   *    a name two packages hold lands in the bare slot), so the index and the
+   *    store agree on what that row is.
    *
-   * While phase 1 keeps one package holder per `api` name, every slot holds
-   * what the bare-name map held, so the index answers what it answered. No
-   * name is resolved here: a request carries no caller package, and the
-   * matcher keys its routes by METHOD + path (bucket 1).
+   * Each holder keeps its own slot, so two namespaces' same-named APIs are
+   * both indexed. They cannot claim one route between them: the publish gate
+   * requires each path under `/api/v1/apps/<namespace>/`, so their paths
+   * differ by namespace. Only the environment's row can share a holder's
+   * METHOD + path, and the matcher's duplicate-claim rule decides that,
+   * announced at `error`. No name is resolved here: a request carries no
+   * caller package, and the matcher keys its routes by METHOD + path
+   * (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
     // [#32246] Every item a loader stores, each with the package the loader

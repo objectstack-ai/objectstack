@@ -406,6 +406,9 @@ const ko = {
       tomorrow: "내일",
       clear: "날짜 지우기",
       openCalendar: "달력 열기",
+      time: "시간",
+      hour: "시",
+      minute: "분",
       invalid:
         "저장되지 않음: “{{value}}”은(는) 날짜가 아닙니다. {{format}} 형식으로 입력하거나 달력에서 선택하세요.",
     },
@@ -920,6 +923,8 @@ const ko = {
     addGroup: "그룹 필드 추가",
     collapsedByDefault: "기본적으로 접힘",
     removeGroup: "제거",
+    groupingUnstoredNotice: "{{fields}} 기준으로 이 목록을 그룹화할 수 없습니다. 값이 표시될 때 계산되며 저장되지 않습니다. 해당 그룹화 없이 목록을 표시합니다.",
+    groupingUnstoredRemove: "그룹화에서 제거",
     inlineEditShort: "인라인 편집",
     inlineEditLabel: "레코드를 인라인으로 편집(셀을 클릭하여 편집)",
   },

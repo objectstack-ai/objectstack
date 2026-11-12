@@ -48,8 +48,10 @@
  *     `highlightFields`, `searchableFields`, an index.
  *   - **carrier** — the field is merely carried along: a translation label, a
  *     seed value, an import-mapping column, a field-level permission grant
- *     (every path under `permissions` but an RLS predicate and a field
- *     permission's row condition), a flow's WRITE of
+ *     (the `"<object>.<field>"` key of a permission set's `fields` —
+ *     {@link fieldPermissionGrantOf} — and every other path under
+ *     `permissions` but an RLS predicate and a field permission's row
+ *     condition), a flow's WRITE of
  *     the field, prose that names it. These are what a REMOVAL
  *     must clean up; none of them is evidence that anything reads the field.
  *     A seeded value nothing reads is precisely the shape being hunted.
@@ -97,7 +99,8 @@
  *     condition in the same language, judged on the row a write touches, so
  *     it is read the same way, against the object its `"<object>.<field>"`
  *     key names ({@link fieldPermissionObjectOf}). The key itself, which
- *     names the field the entry grants on, is not a read.
+ *     names the field the entry grants on, is not a read: it is a carrier
+ *     ({@link fieldPermissionGrantOf}).
  *   - **A derived inline grid** ({@link creditDerivedInlineGrid},
  *     `deriveInlineGridColumns`). A relationship field that sets `inlineEdit`
  *     with no `inlineColumns`, and a `subforms` entry with no `columns`, both
@@ -414,8 +417,8 @@ const FIELD_PERMISSION_CONDITION_KEY = 'when' satisfies keyof FieldPermission;
  * authored in.
  *
  * Only the condition is credited. The entry's key names the field the
- * permission grants on, and a grant is a carrier: it is a key the walk never
- * reads as a reference, so nothing here credits it.
+ * permission grants on, and a grant is a carrier
+ * ({@link fieldPermissionGrantOf}), so nothing here credits it.
  */
 function isFieldPermissionConditionSite(root: string, segments: readonly string[]): boolean {
   const n = segments.length;
@@ -447,6 +450,33 @@ function fieldPermissionObjectOf(
   const dot = key.indexOf('.');
   const head = dot > 0 ? key.slice(0, dot) : undefined;
   return ledger.isObject(head) ? head : undefined;
+}
+
+/**
+ * [#32628] The field a field permission entry grants on, when its key names
+ * one this stack declares: the head of `"<object>.<field>"` is the object
+ * ({@link fieldPermissionObjectOf}), and the remainder is the column
+ * `PermissionEvaluator.getFieldPermissions` looks up
+ * (`key.substring(objectName.length + 1)`), dots and all — FLS keys address
+ * columns, never joins, so a remainder with a dot names no declared field.
+ *
+ * The grant is a CARRIER: it reads nothing, but it names the field, so a
+ * removal must clean it or leave a key that masks a column that no longer
+ * exists. The walk reads a map key as a reference only where the key is a
+ * bare field name, so without this the spec's own shape (a composite key)
+ * was recorded as no site at all, and the `fix:` line named no grant.
+ * `undefined` for any other map and for a key that names no declared field.
+ */
+function fieldPermissionGrantOf(
+  ledger: ConsumerLedger,
+  root: string,
+  segments: readonly string[],
+  key: string,
+): { object: string; field: string } | undefined {
+  const object = fieldPermissionObjectOf(ledger, root, segments, key);
+  if (object === undefined) return undefined;
+  const field = key.slice(object.length + 1);
+  return ledger.declares(object, field) ? { object, field } : undefined;
 }
 
 /** Roots whose sites are display by default; `BEHAVIOUR_SEGMENTS` earn behaviour back. */
@@ -1140,6 +1170,13 @@ function walk(
       } else {
         ledger.unresolved += 1;
       }
+    }
+    // [#32628] A field permission's composite key names the field it grants
+    // on. Spelled as a quoted key, the way `validate-security-posture` locates
+    // the same entry, because the key itself holds a `.`.
+    const granted = fieldPermissionGrantOf(ledger, root, segments, key);
+    if (granted) {
+      ledger.record(granted.object, granted.field, { root, path: `${path}[${JSON.stringify(key)}]`, kind: 'carrier' });
     }
     // [#21091] A `record:line_items` block's `properties` is a child entry,
     // and that entry's child-query keys name fields of its `childObject`.
