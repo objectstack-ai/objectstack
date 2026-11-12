@@ -189,7 +189,9 @@ export interface AuditProofBundleObject {
  * The proof bundle of D9 (`--out`): what an auditor needs to re-judge a live
  * run offline — public keys, checkpoints, amendments and per-row leaf inputs.
  * It carries no value, salt or seed, and its keys are candidates only: the
- * offline check trusts a key only through a fingerprint it is given.
+ * offline check trusts a key only through a fingerprint it is given. It does
+ * carry personal data — the leaf inputs' clear columns identify people — so it
+ * is an export of the ledger, handled as one (D9).
  */
 export interface AuditProofBundle {
   readonly format: typeof AUDIT_PROOF_BUNDLE_FORMAT;

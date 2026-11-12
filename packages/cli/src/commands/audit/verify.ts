@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
@@ -59,7 +59,10 @@ const FINGERPRINT = /^[0-9a-f]{64}$/;
  * `--out FILE` also writes the run's proof bundle
  * (`objectstack.audit.proof-bundle.v1`): the trusted public keys, the
  * checkpoints and amendments, and each judged row's leaf input — its value
- * columns as salted commitments only, never a value, salt or seed.
+ * columns as salted commitments only, never a value, salt or seed. It still
+ * carries personal data: the clear columns (`user_id`, `actor`, `ip_address`,
+ * `user_agent`, `tenant_id`) identify people, so a bundle is an export of the
+ * ledger, handled as one and narrowed with `--org` / `--from` / `--to` (D9).
  * `--bundle FILE` re-judges such a bundle offline, with no boot and no
  * database, trusting only the keys named by `--trusted-key` fingerprints
  * (learnt out of band, at least one): never a key because the bundle carries
@@ -103,7 +106,10 @@ export default class AuditVerify extends Command {
     to: Flags.string({ description: 'Judge only rows of the windows before this ISO-8601 instant' }),
     json: Flags.boolean({ description: 'Print the machine-readable report' }),
     out: Flags.string({
-      description: 'Also write the proof bundle to this file: public keys, checkpoints, amendments and leaf inputs (never a value, salt or seed)',
+      description:
+        'Also write the proof bundle to this file. It is an export of the ledger and carries personal data (its clear columns ' +
+        'identify people): handle it as the ledger, and narrow it with --org / --from / --to. Value columns appear only as ' +
+        'commitments; no salt or seed',
     }),
     bundle: Flags.string({
       description: 'Verify this proof bundle offline instead of the live ledger: no boot, no database (requires --trusted-key)',
@@ -311,6 +317,8 @@ export default class AuditVerify extends Command {
       if (out !== undefined) {
         try {
           await writeFile(out, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600 });
+          // `mode` applies only when the file is created: an overwritten one is narrowed too.
+          await chmod(out, 0o600);
         } catch (error) {
           await this.refuse(json, 'bundle_write_failed', `The proof bundle could not be written to ${out}: ${error instanceof Error ? error.message : String(error)}`);
           return;
@@ -329,6 +337,10 @@ export default class AuditVerify extends Command {
       this.render(report);
       if (out !== undefined) {
         printSuccess(`Proof bundle written to ${out}. Check it offline with: os audit verify --bundle ${flags.out} --trusted-key <fingerprint>`);
+        printWarning(
+          'The bundle carries personal data: its clear columns (user, actor, IP address, user agent, organization) identify ' +
+            'people. Keep and pass it on under the rules for the ledger it came from.',
+        );
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');

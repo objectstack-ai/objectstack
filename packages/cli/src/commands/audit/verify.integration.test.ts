@@ -23,13 +23,14 @@
  *      secret in it, and `--bundle` re-judges it with no boot, from an empty
  *      directory with no data key: the right `--trusted-key` exits 0, a wrong
  *      one 1, the tampered ledger's bundle reads tampered (1), and the flag
- *      rules (`--bundle` needs `--trusted-key`, takes no `--out`;
- *      `--trusted-key` needs `--bundle`) exit 2.
+ *      rules (`--bundle` needs a well-formed `--trusted-key`, takes no
+ *      `--out`, `--database-url` or scope flag; `--trusted-key` needs
+ *      `--bundle`) exit 2. The bundle file is `0600`, even overwritten.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -192,7 +193,8 @@ let archiveDb: string;
 let sealed: { checkpoints: number; archived: number | null };
 let archivedIds: string[];
 type RunName = 'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'noKey' | 'unreachable' | 'nothing';
-type BundleRunName = 'right' | 'rightHuman' | 'wrong' | 'tampered' | 'noTrustedKey' | 'keyWithoutBundle' | 'withOut';
+type BundleRunName =
+  | 'right' | 'rightHuman' | 'wrong' | 'tampered' | 'noTrustedKey' | 'keyWithoutBundle' | 'withOut' | 'scoped' | 'withDatabaseUrl' | 'badKey';
 const runs: Record<RunName, Run> = {} as never;
 const bundleRuns: Record<BundleRunName, Run> = {} as never;
 let cleanBundle: string;
@@ -218,6 +220,9 @@ beforeAll(async () => {
 
   cleanBundle = join(dir, 'clean.proof.json');
   tamperedBundle = join(dir, 'tampered.proof.json');
+  // An existing, world-readable file at the --out path: the write narrows it to 0600.
+  writeFileSync(cleanBundle, '{}');
+  chmodSync(cleanBundle, 0o644);
   runs.clean = await verify(dir, mainDb, ['--json', '--out', cleanBundle]);
   runs.cleanHuman = await verify(dir, mainDb, []);
   runs.badDate = await verify(dir, mainDb, ['--from', 'yesterday', '--json']);
@@ -250,12 +255,20 @@ beforeAll(async () => {
   const offline = (args: string[]) => run(auditor, args, { OS_SECRET_KEY: undefined, HOME: auditor });
   const fingerprint = String(doc(runs.clean).report?.keys?.trusted?.[0]);
   bundleRuns.right = await offline(['--bundle', cleanBundle, '--trusted-key', fingerprint, '--json']);
-  bundleRuns.rightHuman = await offline(['--bundle', cleanBundle, '--trusted-key', fingerprint]);
+  // `$OS_DATABASE_URL` alone fills --database-url's value, and is not a usage error with --bundle.
+  bundleRuns.rightHuman = await run(auditor, ['--bundle', cleanBundle, '--trusted-key', fingerprint], {
+    OS_SECRET_KEY: undefined,
+    HOME: auditor,
+    OS_DATABASE_URL: `file:${join(auditor, 'never-opened.db')}`,
+  });
   bundleRuns.wrong = await offline(['--bundle', cleanBundle, '--trusted-key', 'f'.repeat(64), '--json']);
   bundleRuns.tampered = await offline(['--bundle', tamperedBundle, '--trusted-key', fingerprint, '--json']);
   bundleRuns.noTrustedKey = await offline(['--bundle', cleanBundle, '--json']);
   bundleRuns.keyWithoutBundle = await verify(dir, mainDb, ['--trusted-key', fingerprint, '--json']);
   bundleRuns.withOut = await offline(['--bundle', cleanBundle, '--out', join(auditor, 'again.json'), '--trusted-key', fingerprint, '--json']);
+  bundleRuns.scoped = await offline(['--bundle', cleanBundle, '--org', 'org_a', '--from', '2026-11-01', '--to', '2026-11-02', '--trusted-key', fingerprint, '--json']);
+  bundleRuns.withDatabaseUrl = await offline(['--bundle', cleanBundle, '--database-url', `file:${mainDb}`, '--trusted-key', fingerprint, '--json']);
+  bundleRuns.badKey = await offline(['--bundle', cleanBundle, '--trusted-key', 'not-a-fingerprint', '--json']);
 
   // A declared archive this boot cannot reach: a Postgres server on a port
   // nothing listens on (an unopenable SQLite file steps down to in-memory
@@ -347,6 +360,7 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
 describe('os audit verify --out / --bundle: the proof bundle, judged offline (ADR-0154 D9)', () => {
   it('5. --out writes the bundle beside the verdict: the trusted key, the checkpoints, and no stored value or wrapped secret', () => {
     expect(doc(runs.clean).out).toBe(cleanBundle);
+    expect(statSync(cleanBundle).mode & 0o777).toBe(0o600);
     const text = readFileSync(cleanBundle, 'utf8');
     const bundle = JSON.parse(text);
     expect(bundle.format).toBe('objectstack.audit.proof-bundle.v1');
@@ -364,7 +378,7 @@ describe('os audit verify --out / --bundle: the proof bundle, judged offline (AD
     expect(doc(right).report).toMatchObject({ ok: true, faults: [], rows: [] });
     expect(doc(right).report.totals).toEqual(doc(runs.clean).report.totals);
     expect(bundleRuns.rightHuman.code, bundleRuns.rightHuman.stderr.slice(-2000)).toBe(0);
-    expect(bundleRuns.rightHuman.stdout).toContain('The sealed ledger verifies');
+    expect(bundleRuns.rightHuman.stdout).toContain('The sealed ledger verifies'); // with $OS_DATABASE_URL set: not a usage error
     const wrong = bundleRuns.wrong;
     expect(wrong.code, wrong.stderr.slice(-2000)).toBe(1);
     expect(doc(wrong).report.keys).toEqual({ trusted: [], untrusted: doc(runs.clean).report.keys.trusted });
@@ -376,11 +390,14 @@ describe('os audit verify --out / --bundle: the proof bundle, judged offline (AD
     expect(verdicts(run)).toEqual({ v1: 'modified', v2: 'missing' });
   });
 
-  it('7. --bundle without --trusted-key, --trusted-key without --bundle, and --bundle with --out exit 2', () => {
+  it('7. --bundle without a well-formed --trusted-key, or with --out, --database-url or a scope flag, and --trusted-key without --bundle, exit 2', () => {
     for (const [run, message] of [
       [bundleRuns.noTrustedKey, /--bundle requires at least one --trusted-key FINGERPRINT/],
       [bundleRuns.keyWithoutBundle, /--trusted-key applies to --bundle only/],
       [bundleRuns.withOut, /it cannot also write one \(--out\)/],
+      [bundleRuns.scoped, /--bundle judges the scope of the run that wrote it: --org, --from, --to apply when it is written/],
+      [bundleRuns.withDatabaseUrl, /--bundle verifies offline and boots nothing: --database-url does not apply/],
+      [bundleRuns.badKey, /--trusted-key 'not-a-fingerprint' is not a signing key fingerprint/],
     ] as const) {
       expect(run.code, run.stderr.slice(-2000)).toBe(2);
       expect(doc(run)).toMatchObject({ error: 'usage' });
