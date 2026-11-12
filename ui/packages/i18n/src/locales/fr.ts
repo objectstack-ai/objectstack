@@ -4081,6 +4081,7 @@ const fr = {
       get_authoring_rules: "Consulter les règles d’écriture",
       get_metadata_schema: "Consulter le format des métadonnées",
       get_package: "Examiner le paquet",
+      get_record_history: "Lire l'historique de cette fiche",
       list_metadata: "Lister les métadonnées existantes",
       list_objects: "Lister les objets existants",
       list_packages: "Lister les paquets existants",

@@ -1745,6 +1745,7 @@
     "api/RuntimeAuthoringIssue:path",
     "api/RuntimeAuthoringIssue:rule",
     "api/RuntimeAuthoringIssue:severity",
+    "api/RuntimeAuthoringIssue:userMessage",
     "api/RuntimeAuthoringIssue:where",
     "api/SaveMetaItemRequest:actor",
     "api/SaveMetaItemRequest:client",
