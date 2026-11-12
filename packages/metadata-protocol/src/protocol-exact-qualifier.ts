@@ -324,7 +324,10 @@ export async function admitExactQualifier(
  * no package) of a name two or more packages hold is no holder's own, for a
  * type whose by-name readers consult `(package, name)` or whose one-holder
  * rule has narrowed to the namespace ({@link packageLessRowOwners}, epic
- * ruling on #31699, #32407): refused naming every holder.
+ * ruling on #31699, #32407): refused naming every holder. That is an overlay
+ * type's row; a sealed type's is declined before it reaches here
+ * ({@link declinesPackageLessRowAt}, {@link declinedCopyReplaced}, epic ruling
+ * 6817768147 on #32568).
  *
  * @returns the item to serve (unchanged when it is the address's).
  */

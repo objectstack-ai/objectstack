@@ -1367,10 +1367,15 @@ describe('[#32310] the caller arm resolves a dataset from the reader\'s package 
  * 200 at both holders on the strict draft read, the preview and the layered
  * `draft` layer, and the list scoped to either holder previewed it; a
  * package-less `hook`/`job`/`queue`/`sharing_rule`/`assignment_rule` item of
- * a two-holder name was served at both; a stored package-less `action` row
- * answered `?package=alpha` with alpha's own before an unscoped list read and
- * with the stored body as alpha's after it, and 409 once a bare-slot copy
- * (stamp `''`/`sys_metadata`) was registered.
+ * a two-holder name was served at both. A stored package-less `action` or
+ * `queue` row, two holders: `?package=` of each answered its own before an
+ * unscoped list read; after it, the first-registered holder's address served
+ * the stored body as that holder's own (the hydrator had laid it into that
+ * holder's slot under its envelope); with a bare-slot copy (stamp `''` or
+ * `sys_metadata`) `action` answered 409 and `queue` the copy; the layered read
+ * refused `action` 409 and reported the `queue` row as each holder's overlay.
+ * With one holder, the exact and the bare read served the stored body after
+ * the list read and the holder's own before it.
  */
 describe('[#32568] a package-less row at a holder\'s exact address: declined for a sealed type, refused with two holders for an overlay type, in every state', () => {
   const tpl = (packageId: string) => registry.registerItem('email_template', {
@@ -1463,7 +1468,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     for (const type of ['action', 'queue']) {
       for (const order of [[A, B], [B, A]]) {
         for (const state of STATES) {
-          it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: 200 own / 200 the row as the first holder's / 409 / 409)`, async () => {
+          it(`${type}, two holders (${order.map((p) => p.split('.').pop()).join(' then ')}), ${state}: each exact address serves its own; the layered read reports no overlay (BASE: in the describe header)`, async () => {
             for (const p of order) shipSealed(type, p);
             await enter(type, state);
             for (const at of [A, B]) {
@@ -1497,7 +1502,7 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       expect(err?.status).toBe(409);
     });
 
-    it('CONTROL — overlay type (`email_template`), two holders: 409 naming both before and after the read-side hydrator; the holders\' slots keep their own', async () => {
+    it('overlay type (`email_template`), two holders: 409 naming both before and after the read-side hydrator, as before; the first holder\'s slot keeps its own (BASE: the hydrator laid the row into it)', async () => {
       tpl(A);
       tpl(B);
       storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
