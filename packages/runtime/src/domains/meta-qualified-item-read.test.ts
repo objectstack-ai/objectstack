@@ -377,6 +377,32 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             refusedNaming(await read(`/${type}/_env/shared`), [A], [B]);
         });
 
+        // [ruling (c), the owed exact-qualifier hunk] The disabled holder's own
+        // address, its namespace and its pair are admitted (admission asks every
+        // holder) and answer the withheld item's 404: never its body, never a
+        // refusal naming the enabled holder. BASE (main f0f729e7): 404; the
+        // interim head (#32327's source change alone): 409 naming alpha.
+        it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)(`${type}: two holders, one disabled (%s) — the disabled holder's address, namespace and pair answer 404, naming no package`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            registry.disablePackage(B);
+            for (const [path, query] of [
+                [`/${type}/shared`, { package: B }],
+                [`/${type}/beta/shared`, undefined],
+                [`/${type}/shared`, { package: `${B}.custom` }],
+            ] as const) {
+                const answer = await read(path, query);
+                expect([answer.status, path, query], JSON.stringify(answer.body)).toEqual([404, path, query]);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(A);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(`beta ${type}`);
+            }
+            // CONTROL — the enabled holder's pair serves its item. Enabled first
+            // only: registered second, the pair address's envelope is looked up
+            // at the pair id and falls back to the first holder that ships the
+            // name, the disabled one (a separate defect, reported on the card).
+            if (order[0] === A) expect(labelOf(await read(`/${type}/shared`, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
+        });
+
         it(`${type}: only a disabled holder — no holder: 404 on every address, never a 409 naming it`, async () => {
             ship(type, 'solo', B);
             registry.disablePackage(B);
@@ -770,6 +796,15 @@ describe('#32183 × #32310 — the caller arm judges the served holders', () => 
         expect(answer.body?.error?.message).toContain(`held outside the declared dependency closure of package "${P}"`);
         expect(answer.body?.error?.message).toContain(`package "${C}"`);
         expect(JSON.stringify(answer.body)).not.toContain(B);
+    });
+
+    it('[ruling (c)] P\'s own holding, disabled, beside an enabled dependency: P\'s withheld 404, never the dependency\'s dataset (interim: 409 naming alpha)', async () => {
+        ship('dataset', 'own', A);
+        ship('dataset', 'own', P);
+        registry.disablePackage(P);
+        const answer = await read('/dataset/own', { callerPackage: P });
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect(JSON.stringify(answer.body)).not.toContain(A);
     });
 
     it('a name only a disabled closure package holds: 404, naming no package', async () => {

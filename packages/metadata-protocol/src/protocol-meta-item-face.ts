@@ -11,7 +11,10 @@
  * A MOVE, not a redesign. The function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
  * re-indented one level and otherwise unedited. Since then, [#32183] added
- * one arm: a name only disabled packages hold reads as their withheld item.
+ * two arms: a name only disabled packages hold reads as their withheld item,
+ * and so does an exact address that reads only disabled packages (a disabled
+ * package named, or a pair whose every base is disabled), judged by
+ * `disabledExactAddressHolder` (`protocol-exact-qualifier.ts`).
  *
  * ## How the moved body reaches the class
  *
@@ -30,6 +33,7 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
@@ -141,10 +145,15 @@ export async function readMetaItemFace(
     // every door that asks the envelope whether a disable withheld the item
     // (the layered view's step 1b, `/published`) keeps answering the missing
     // name and never serves that package's layers.
-    const disabledOnlyHolder = request.type !== 'object' && request.type !== 'package' && answer?.item == null
-        ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
-        : undefined;
-    if (disabledOnlyHolder === undefined && (request.type === 'object' || request.type === 'package'
+    // [#32183, ruling (c)] …and an address naming a disabled package, or a
+    // pair whose every base is disabled, is that package's withheld item,
+    // whichever envelope a layer of the read reached: the disabled body is
+    // never served under another package's envelope.
+    const withheldHolder = request.type === 'object' || request.type === 'package'
+        ? undefined
+        : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
+            ?? (answer?.item == null ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name) : undefined);
+    if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;
     }
@@ -152,6 +161,6 @@ export async function readMetaItemFace(
     const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
     const withheld = { ...envelope, item: undefined };
     // Not every arm of the read's envelope declares `packageId`; each may carry it.
-    if (disabledOnlyHolder !== undefined) (withheld as { packageId?: string }).packageId = disabledOnlyHolder;
+    if (withheldHolder !== undefined) (withheld as { packageId?: string }).packageId = withheldHolder;
     return withheld;
 }
