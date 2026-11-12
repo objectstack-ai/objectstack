@@ -918,7 +918,9 @@ describe('[#6363] listInbox — unreadCount is the TOTAL unread, not the fetched
         // the same order as the receipt scan `listInbox` already performs.
         expect(totalRead.query.where).toEqual(windowRead.query.where);
         expect(totalRead.query.limit).toBeUndefined();
-        expect(totalRead.query.fields).toEqual(['notification_id']);
+        // [#32512] Plus the organization, so a deleted organization's rows
+        // outside the window are left out of the badge too.
+        expect(totalRead.query.fields).toEqual(['notification_id', 'organization_id']);
     });
 
     it('a failing total read is NOT swallowed into a window-sized answer', async () => {
@@ -1048,7 +1050,8 @@ describe('[#6436] markAllRead — sweeps the whole inbox, not one 200-row window
             // the sweep asks the data layer for nothing the bell poll does not
             // ask it on every saturated page.
             expect(inboxRead.query.where).toEqual({ user_id: 'u1' });
-            expect(inboxRead.query.fields).toEqual(['notification_id']);
+            // [#32512] Plus the organization: a deleted organization's rows are not swept.
+            expect(inboxRead.query.fields).toEqual(['notification_id', 'organization_id']);
             expect(inboxRead.query.limit).toBeUndefined();
             expect(inboxRead.query.orderBy).toBeUndefined();
             expect(calls.filter((c) => c.object === 'sys_notification_receipt')).toHaveLength(1);
@@ -1486,7 +1489,8 @@ describe('[#22026] markRead writes a read receipt only for a notification delive
 
         const inboxReads = callsOn(findOne, 'sys_inbox_message');
         expect(inboxReads).toHaveLength(1);
-        expect(inboxReads[0][1]).toEqual({ where: { user_id: 'u_other', notification_id: 'n1' }, fields: ['id'] });
+        // [#32512] The id, and the organization a deleted one is withheld by.
+        expect(inboxReads[0][1]).toEqual({ where: { user_id: 'u_other', notification_id: 'n1' }, fields: ['id', 'organization_id'] });
         expect(inboxReads[0][2]).toEqual({ context: { isSystem: true } });
     });
 
@@ -1526,5 +1530,161 @@ describe('[#22026] markRead writes a read receipt only for a notification delive
         ]);
         expect((await svc.listInbox('u_recipient')).unreadCount).toBe(0);
         expect((await svc.listInbox('u_other')).unreadCount).toBe(1);
+    });
+});
+
+/**
+ * [#32512] The inbox readers serve no row of a deleted organization — the
+ * shapes the real-engine pins
+ * (`notification-organization-follows-event.integration.test.ts`) do not reach:
+ * an organization-less row, the read's cost, and a `sys_organization` read
+ * that fails.
+ *
+ * The double answers `where` the way a SQL store does: `$or`, `$in`, and a
+ * `$nin` that a NULL never satisfies, so a narrowing that forgot the
+ * organization-less rows loses them here as it would on PostgreSQL.
+ */
+describe('[#32512] inbox readers and a deleted organization', () => {
+    type Row = Record<string, unknown>;
+    type Call = { verb: string; object: string; query: any; options: any };
+
+    function sqlMatch(row: Row, where: any = {}): boolean {
+        return Object.entries(where).every(([k, v]) => {
+            if (k === '$or') return (v as any[]).some((w) => sqlMatch(row, w));
+            if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+            const cell = row[k] ?? null;
+            if (v === null) return cell === null;
+            if (v && typeof v === 'object' && '$in' in (v as any)) return cell !== null && (v as any).$in.map(String).includes(String(cell));
+            if (v && typeof v === 'object' && '$nin' in (v as any)) return cell !== null && !(v as any).$nin.map(String).includes(String(cell));
+            return cell !== null && String(cell) === String(v);
+        });
+    }
+
+    function engineWith(seed: { inbox: Row[]; receipts?: Row[]; organizations: string[]; organizationReadFails?: boolean }) {
+        const store: Record<string, Row[]> = {
+            sys_inbox_message: seed.inbox.map((r) => ({ ...r })),
+            sys_notification_receipt: (seed.receipts ?? []).map((r) => ({ ...r })),
+            sys_organization: seed.organizations.map((id) => ({ id })),
+        };
+        const calls: Call[] = [];
+        let seq = 0;
+        const engine: any = {
+            store,
+            calls,
+            async find(object: string, query: any = {}, options?: any) {
+                calls.push({ verb: 'find', object, query, options });
+                if (object === 'sys_organization' && seed.organizationReadFails) throw new Error('OBJECT_NOT_FOUND: sys_organization');
+                let rows = (store[object] ?? []).filter((r) => sqlMatch(r, query.where));
+                if ((query.orderBy ?? []).some((o: any) => o.field === 'created_at' && o.order === 'desc')) {
+                    rows = [...rows].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+                }
+                return typeof query.limit === 'number' ? rows.slice(0, query.limit) : rows;
+            },
+            async findOne(object: string, query: any = {}, options?: any) {
+                assertEngineFindOnePredicate(object, query);
+                calls.push({ verb: 'findOne', object, query, options });
+                return (store[object] ?? []).find((r) => sqlMatch(r, query.where)) ?? null;
+            },
+            async insert(object: string, row: Row) {
+                const created = { id: `row_${++seq}`, ...row };
+                (store[object] ??= []).push(created);
+                return created;
+            },
+            async update(object: string, data: Row, options: any = {}) {
+                for (const r of store[object] ?? []) if (sqlMatch(r, options.where)) Object.assign(r, data);
+                return 1;
+            },
+            async delete() { return 0; },
+            async count() { return 0; },
+            async aggregate() { return []; },
+        };
+        return engine;
+    }
+
+    const msg = (n: number, organization_id: string | null) => ({
+        id: `m${n}`, user_id: 'u1', notification_id: `n${n}`, topic: 't', title: `T${n}`,
+        created_at: `2026-01-01T00:00:0${n}Z`, organization_id,
+    });
+    const delivered = (n: number, organization_id: string | null) => ({
+        id: `r${n}`, notification_id: `n${n}`, user_id: 'u1', channel: 'inbox', state: 'delivered', organization_id,
+    });
+    // Oldest first: a live organization's row, an organization-less platform
+    // row, then two rows of the deleted organization (the newest).
+    const inbox = [msg(1, 'org_live'), msg(2, null), msg(3, 'org_gone'), msg(4, 'org_gone')];
+    const receipts = [delivered(1, 'org_live'), delivered(2, null), delivered(3, 'org_gone'), delivered(4, 'org_gone')];
+
+    function recordingLogger() {
+        const warnings: string[] = [];
+        return { warnings, logger: { info: () => {}, warn: (m: unknown) => warnings.push(String(m)), error: () => {}, debug: () => {} } };
+    }
+
+    it('an organization-less row stays served beside a deleted organization: listed, counted and swept', async () => {
+        const engine = engineWith({ inbox, receipts, organizations: ['org_live'] });
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
+
+        // A window of 2 opens on the two deleted rows, so it is re-read with them excluded.
+        const listed = await svc.listInbox('u1', { limit: 2 });
+        expect(listed.notifications.map((n) => n.id)).toEqual(['n2', 'n1']);
+        expect(listed.unreadCount).toBe(2);
+
+        expect(await svc.markAllRead('u1')).toEqual({ success: true, readCount: 2 });
+        const state = (n: string) => engine.store.sys_notification_receipt.find((r: Row) => r.notification_id === n)?.state;
+        expect([state('n1'), state('n2'), state('n3'), state('n4')]).toEqual(['read', 'read', 'delivered', 'delivered']);
+    });
+
+    it('the re-read keeps the user term at the top of its where, and excludes by organization with NULL kept', async () => {
+        const engine = engineWith({ inbox, receipts, organizations: ['org_live'] });
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
+
+        await svc.listInbox('u1', { limit: 2 });
+
+        const windows = engine.calls.filter((c: Call) => c.verb === 'find' && c.object === 'sys_inbox_message' && c.query.limit === 2);
+        expect(windows.map((c: Call) => c.query.where)).toEqual([
+            { user_id: 'u1' },
+            { user_id: 'u1', $or: [{ organization_id: null }, { organization_id: { $nin: ['org_gone'] } }] },
+        ]);
+        for (const c of engine.calls as Call[]) expect(c.options).toEqual({ context: { isSystem: true } });
+    });
+
+    it('asks about each organization once per call, by id, one column wide, under the system opt-in', async () => {
+        const engine = engineWith({ inbox, receipts, organizations: ['org_live'] });
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
+
+        await svc.listInbox('u1', { limit: 2 });
+
+        const orgReads = engine.calls.filter((c: Call) => c.object === 'sys_organization');
+        // The first window names org_gone; the re-read names org_live; the
+        // total read names both, already known, so it asks nothing.
+        expect(orgReads.map((c: Call) => c.query)).toEqual([
+            { where: { id: { $in: ['org_gone'] } }, fields: ['id'] },
+            { where: { id: { $in: ['org_live'] } }, fields: ['id'] },
+        ]);
+    });
+
+    it('an inbox naming no organization reads no organization and asks the engine exactly what it asked before', async () => {
+        const engine = engineWith({ inbox: [msg(1, null), msg(2, null)], organizations: [] });
+        const svc = new MessagingService({ logger: silentLogger(), getData: () => engine });
+
+        await svc.listInbox('u1', { limit: 2 });
+        await svc.markAllRead('u1');
+
+        expect(engine.calls.filter((c: Call) => c.object === 'sys_organization')).toEqual([]);
+        const window = engine.calls.find((c: Call) => c.object === 'sys_inbox_message' && c.query.limit === 2);
+        expect(window.query.where).toEqual({ user_id: 'u1' });
+    });
+
+    it('a failed organization read serves the inbox as stored and says so once', async () => {
+        const engine = engineWith({ inbox, receipts, organizations: ['org_live'], organizationReadFails: true });
+        const { logger, warnings } = recordingLogger();
+        const svc = new MessagingService({ logger, getData: () => engine });
+
+        const first = await svc.listInbox('u1');
+        const second = await svc.listInbox('u1');
+
+        // Not evidence that an organization is gone: nothing is withheld.
+        expect(first.notifications.map((n) => n.id)).toEqual(['n4', 'n3', 'n2', 'n1']);
+        expect(second.unreadCount).toBe(4);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toMatch(/OBJECT_NOT_FOUND: sys_organization/);
     });
 });
