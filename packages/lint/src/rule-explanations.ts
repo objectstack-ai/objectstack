@@ -6045,6 +6045,29 @@ const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'stored-expression-volatile-input',
+  covers: 'which inputs a stored expression keeps from the write',
+  paragraphs: [
+    'A field that is not a `formula` and declares an `expression` is computed when the record is written, ' +
+      'and the result is stored until the next write of that record. A `formula` field carrying the same ' +
+      'expression is computed again on every read. For an expression over the record\'s own fields the two ' +
+      'agree; for one that reads an input that changes without a write, they do not.',
+    'Counted, as the engine binds them for a stored expression: the clock, through `now()`, `today()`, ' +
+      '`daysFromNow()` and `daysAgo()`, so the stored value is the date or time of the last write; the acting ' +
+      'user, under any of its four spellings `current_user`, `user`, `ctx.user` and `os.user`, so the stored ' +
+      'value is about the user who last wrote the record, not the one reading it; and the acting user\'s ' +
+      'permissions, through `can()` and `hasCapability()`, so it holds the writer\'s permission at that write. ' +
+      'Not counted: `os.org`, the writer\'s organization, which is the record\'s own; and `label()`, which ' +
+      'reads the declared option labels for a stored value, never the reader\'s locale.',
+    'A warning, not a refusal: a value of the moment of the write is sometimes what is meant (who last ' +
+      'changed the record), and the build and the save door both pass it. A `formula` field reading the same ' +
+      'inputs is not judged.',
+    'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +
+      'a stored value current as time passes, recompute it with a scheduled flow that updates the records.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6276,6 +6299,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
   [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
+  [STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

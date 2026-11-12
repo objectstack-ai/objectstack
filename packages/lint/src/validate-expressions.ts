@@ -186,8 +186,8 @@ export interface ExprIssue {
   /**
    * The rule id the finding is reported under, when it is not the pass's
    * own `expression-invalid`: set only by the stored-expression input member
-   * (`stored-expression-inputs.ts`), whose findings carry an id of their own
-   * so `os explain` can name them. Absent, the finding is
+   * (`stored-expression-inputs.ts`), whose two findings each carry an id of
+   * their own so `os explain` can name them. Absent, the finding is
    * `expression-invalid`.
    */
   rule?: string;
@@ -3650,9 +3650,10 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
-        // [#32529] A STORED field's `expression` (any field but a `formula`)
-        // is computed at the write and kept: a read of another record is
-        // refused. A `formula` answers nothing here.
+        // [#32529, #32554] A STORED field's `expression` (any field but a
+        // `formula`) is computed at the write and kept: a read of another
+        // record is refused, and a read of the clock, the acting user or a
+        // permission is warned. A `formula` answers nothing here.
         const storedSource = celSourceOf(f.expression);
         for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name))) {
           issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });

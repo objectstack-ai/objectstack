@@ -808,8 +808,8 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     run: (stack, ctx) =>
       runStackExpressionPasses(stack, { runtimeWriteType: ctx.runtimeWriteType }).map((i) => ({
         severity: i.severity ?? 'error',
-        // [#32529] The stored-expression input member names its own id;
-        // every other finding of the pass is `expression-invalid`.
+        // [#32529, #32554] The stored-expression input member names its own
+        // two ids; every other finding of the pass is `expression-invalid`.
         rule: i.rule ?? EXPRESSION_INVALID,
         where: i.where,
         // [#26858] The slot's key path where the pass spells one (a flow edge's

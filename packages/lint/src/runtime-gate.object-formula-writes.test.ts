@@ -41,7 +41,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPRESSION_INVALID, runAuthoringRules } from './authoring-rules.js';
 import { runRuntimeAuthoringRules, runtimeAuthoringRulesFor } from './runtime-gate.js';
 import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
-import { STORED_EXPRESSION_CROSS_RECORD_INPUT } from './stored-expression-inputs.js';
+import { STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT } from './stored-expression-inputs.js';
 
 /** The card's object, with the formula under test. `sharingModel` keeps `security-owd-unset` quiet. */
 const fxSqrt = (expression: string, over: Record<string, unknown> = {}) => ({
@@ -266,7 +266,7 @@ describe('#22019 / #22032 — every pass over the object\'s body judges on this 
   });
 });
 
-describe('#32529 — the object door judges a stored expression\'s inputs as the build does', () => {
+describe('#32529 / #32554 — the object door judges a stored expression\'s inputs as the build does', () => {
   /** The related record, delivered by the stored universe the door reads. */
   const employee = {
     name: 'fx_employee', label: 'Employee', sharingModel: 'private',
@@ -294,6 +294,13 @@ describe('#32529 — the object door judges a stored expression\'s inputs as the
     const errs = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.errors);
     expect(errs, dump(result)).toHaveLength(1);
     expect(errs[0]).toMatchObject({ severity: 'error', where: LEAVE_WHERE, path: LEAVE_WHERE });
+  });
+
+  it('⭐ LIT — a stored expression reading the clock is an ADVISORY at the door, never a refusal', () => {
+    const result = gateLeave('today()', 'date');
+
+    expect(ofRule(STORED_EXPRESSION_VOLATILE_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
   });
 
   it('⭐ CONTROL — a same-row stored expression, and a `formula` reading the hop, publish clean', () => {
