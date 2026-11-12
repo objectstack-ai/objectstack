@@ -4,6 +4,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { MetadataManager } from './metadata-manager.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 
 describe('Metadata History', () => {
   let manager: MetadataManager;
@@ -208,5 +209,156 @@ describe('Metadata History', () => {
     await expect(
       manager.rollback('object', 'test_object', 999)
     ).rejects.toThrow();
+  });
+});
+
+/**
+ * [ADR-0150 D3/D4, #32351] A type stored per `(package, name)` keeps a row per
+ * package of a name, and its versions are numbered per name across them. Its
+ * history rows carry the package of the row they snapshot, so history, diff
+ * and rollback address one package's versions: a rollback writes the named
+ * package's row and never another's, a version lands only in its own
+ * package's row (S8a: a departed package's version is refused, not written
+ * into the remaining holder's row), and a name two row slots hold is refused
+ * 409 when no package is named. One holder and every other type answer as
+ * before (CONTROL).
+ *
+ * BEFORE (origin/main 35929be7, every type): the package is not read; with two
+ * holders `getHistory` / `diff` answered both packages' versions and a rollback
+ * by package was impossible (409 by name); after B's removal a rollback to B's
+ * version wrote B's body into A's row.
+ */
+describe('history and rollback of a type stored per package (#32351)', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  let driver: SqliteWasmDriver;
+  let loader: DatabaseLoader;
+  let manager: MetadataManager;
+
+  const body = (label: string, packageId?: string) =>
+    ({ name: 'x', label, locale: 'en-US', ...(packageId ? { _packageId: packageId } : {}) });
+  const rowsOf = async (type: string) =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, unknown>>)
+      .map((row) => ({ ...row }))
+      .sort((l, r) => String(l.id).localeCompare(String(r.id)));
+  const rowOf = async (type: string, packageId: string) =>
+    (await rowsOf(type)).find((row) => row.package_id === packageId);
+  const labelOf = (row: Record<string, unknown> | undefined) => JSON.parse(String(row?.metadata)).label;
+  const versions = async (type: string, options?: { packageId?: string }) =>
+    (await manager.getHistory(type, 'x', options as never)).records.map((record) => record.version);
+  const refusal = (promise: Promise<unknown>) =>
+    promise.then(() => undefined, (error: any) => ({
+      code: error?.code,
+      status: error?.status,
+      reason: error?.refusal?.reason,
+      callerPackageId: error?.refusal?.callerPackageId,
+      candidates: error?.refusal?.candidates,
+    }));
+
+  beforeEach(async () => {
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    loader = new DatabaseLoader({ driver, cache: { enabled: false } });
+    manager = new MetadataManager({ datasource: 'sqlite', loaders: [loader] });
+  });
+
+  for (const type of PACKAGE_SLOTTED_STORE_TYPES) {
+    describe(type, () => {
+      // A v1, B v2, A v3: two holders of `x`.
+      const twoHolders = async () => {
+        await loader.save(type, 'x', body('A1', A));
+        await loader.save(type, 'x', body('B1', B));
+        await loader.save(type, 'x', body('A2', A));
+      };
+
+      it('two holders: a rollback naming A to its v1 writes A\'s row only, and B\'s row is byte-identical', async () => {
+        await twoHolders();
+        const before = await rowOf(type, B);
+        await manager.rollback(type, 'x', 1, { packageId: A } as never);
+        expect(labelOf(await rowOf(type, A))).toBe('A1');
+        expect(await rowOf(type, B)).toEqual(before);
+        expect(await versions(type, { packageId: A })).toEqual([4, 3, 1]);
+        expect(await versions(type, { packageId: B })).toEqual([2]);
+      });
+
+      it('two holders and no package: getHistory, diff and rollback answer 409 naming both, and nothing is written', async () => {
+        await twoHolders();
+        const before = await rowsOf(type);
+        const both = {
+          code: 'RESOURCE_CONFLICT',
+          status: 409,
+          reason: 'ambiguous-in-environment',
+          callerPackageId: null,
+          candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+        };
+        expect(await refusal(manager.getHistory(type, 'x'))).toEqual(both);
+        expect(await refusal(manager.diff(type, 'x', 1, 3))).toEqual(both);
+        expect(await refusal(manager.rollback(type, 'x', 1))).toEqual(both);
+        expect(await rowsOf(type)).toEqual(before);
+      });
+
+      it('a package\'s history, version and diff are its own versions only', async () => {
+        await twoHolders();
+        expect(await versions(type, { packageId: A })).toEqual([3, 1]);
+        expect(await versions(type, { packageId: B })).toEqual([2]);
+        expect((await loader.getHistoryRecord(type, 'x', 1, { packageId: A }))?.metadata).toEqual(body('A1', A));
+        expect(await loader.getHistoryRecord(type, 'x', 2, { packageId: A })).toBeNull();
+        expect((await manager.diff(type, 'x', 1, 3, { packageId: A } as never)).identical).toBe(false);
+        await expect(manager.diff(type, 'x', 1, 2, { packageId: A } as never)).rejects.toThrow(/Version 2 not found/);
+        await expect(manager.rollback(type, 'x', 2, { packageId: A } as never)).rejects.toThrow(/Version 2 not found/);
+        // Paging counts the package's versions, not the name's.
+        const page = await manager.getHistory(type, 'x', { packageId: A, limit: 1 } as never);
+        expect([page.records.map((record) => record.version), page.total, page.hasMore]).toEqual([[3], 2, true]);
+      });
+
+      it('S8a: after B is removed, a rollback to B\'s version is refused 409 and A\'s row is unchanged', async () => {
+        await twoHolders();
+        await loader.delete(type, 'x', { packageId: B });
+        const before = await rowsOf(type);
+        expect(await refusal(manager.rollback(type, 'x', 2))).toEqual({
+          code: 'RESOURCE_CONFLICT',
+          status: 409,
+          reason: 'not-held-by-qualifier',
+          callerPackageId: B,
+          candidates: [{ kind: 'package', packageId: A }],
+        });
+        expect(await rowsOf(type)).toEqual(before);
+        // A rollback naming a package that holds no row is refused the same way.
+        expect((await refusal(manager.rollback(type, 'x', 2, { packageId: B } as never)))?.reason).toBe('not-held-by-qualifier');
+      });
+
+      it('a package-less customization saved into A\'s row is A\'s version, and its snapshot is byte-identical', async () => {
+        await loader.save(type, 'x', body('A1', A));
+        await loader.save(type, 'x', body('custom'));
+        await loader.save(type, 'x', body('B1', B));
+        expect(await versions(type, { packageId: A })).toEqual([2, 1]);
+        expect((await loader.getHistoryRecord(type, 'x', 2, { packageId: A }))?.metadata).toEqual(body('custom'));
+        await manager.rollback(type, 'x', 2, { packageId: A } as never);
+        expect(labelOf(await rowOf(type, A))).toBe('custom');
+        expect(labelOf(await rowOf(type, B))).toBe('B1');
+      });
+
+      it('CONTROL: one holder and no package answer as before', async () => {
+        await loader.save(type, 'x', body('A1', A));
+        await loader.save(type, 'x', body('custom'));
+        const history = await manager.getHistory(type, 'x');
+        expect(history.records.map((record) => [record.version, record.operationType, record.metadata])).toEqual([
+          [2, 'update', body('custom')],
+          [1, 'create', body('A1', A)],
+        ]);
+        await manager.rollback(type, 'x', 1);
+        expect((await rowsOf(type)).map((row) => [row.package_id, labelOf(row), row.version])).toEqual([[A, 'A1', 3]]);
+      });
+    });
+  }
+
+  it('CONTROL: a type stored per name keeps one row per name, and its history, diff and rollback ignore packages', async () => {
+    await loader.save('object', 'x', body('A1', A));
+    await loader.save('object', 'x', body('B1', B));
+    expect(await versions('object')).toEqual([2, 1]);
+    expect(await versions('object', { packageId: A })).toEqual([2, 1]);
+    expect((await manager.diff('object', 'x', 1, 2)).identical).toBe(false);
+    await manager.rollback('object', 'x', 1);
+    expect((await rowsOf('object')).map((row) => [labelOf(row), row.version])).toEqual([['A1', 3]]);
   });
 });
