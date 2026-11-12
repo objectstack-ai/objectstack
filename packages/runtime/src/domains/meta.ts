@@ -86,6 +86,7 @@ import {
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
+    metaCallerPackageQuery,
     metaListNames,
     metaListQueryRefusal,
     metaMemberSelector,
@@ -1125,6 +1126,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             throw e;
         }
         if (address) {
+            // [ADR-0150 D3, #32310] A qualified address is already exact, so
+            // the caller arm beside it names a second address: refused like
+            // `?package=`, naming both, as `RestServer` refuses it.
+            if (query?.callerPackage !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${parts[1]}'`} `
+                        + 'as the exact qualifier, so `?callerPackage=` cannot resolve the name from another package. Send one '
+                        + 'of the two: the bare path with `?callerPackage=`, or the qualified path (ADR-0150 D3, D5).',
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
             // Two qualifiers on one read name two addresses; neither is picked.
             if (query?.package !== undefined) {
                 return {
@@ -1947,8 +1963,33 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // third (a member on the layered view) is answered where the layered
         // view is chosen, below. This branch declared no set, so `?member=` and
         // every misspelling were dropped and answered with the canonical item.
-        const queryRefusal = metaItemQueryRefusal('item', query);
+        // [ADR-0150 D3, #32310] …its fourth rule, the caller arm's, reads the type.
+        const queryRefusal = metaItemQueryRefusal('item', query, { type });
         if (queryRefusal && queryRefusal.rule !== 'layered-member') return queryRefusalAnswer(deps, queryRefusal);
+        // [ADR-0150 D3, #32310] The caller arm (`?callerPackage=P`), read ONCE,
+        // here, by `RestServer`'s reading (`metaCallerPackageQuery` in
+        // `@objectstack/rest`): the name resolves FROM P by D3, and this read
+        // then reads the resolved holder at its exact qualifier (`?package=`),
+        // so every branch below answers as that address answers; a refusal is
+        // the `409` naming the candidates, answered like the item read's.
+        if (query?.callerPackage !== undefined) {
+            try {
+                const callerQuery = metaCallerPackageQuery(
+                    await resolveProtocol(deps, _context), { type, name, ...metaMemberSelector(query) }, query,
+                );
+                if (callerQuery) query = callerQuery;
+            } catch (e) {
+                if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
+                // The arm's fail-closed refusal (a protocol or registry that
+                // cannot resolve by caller): its own `503`, answered here as
+                // `RestServer` answers it, never left to an outer catch.
+                if ((e as { code?: unknown; status?: unknown })?.code === 'SERVICE_UNAVAILABLE'
+                    && (e as { status?: unknown }).status === 503) {
+                    return { handled: true, response: deps.errorFromThrown(e, 503) };
+                }
+                throw e;
+            }
+        }
         const packageId = packageBinding();
         // [#23072] …and the member it names (`metaMemberSelector`, the one
         // reading `RestServer`'s doors read), handed to EVERY protocol read

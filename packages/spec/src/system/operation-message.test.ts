@@ -418,3 +418,51 @@ describe('operation message catalog — sharing write denial and approvals recal
     }
   });
 });
+
+/**
+ * The queue refusal's two sentences: `record_queue_change_denied` for a change
+ * of an existing record's queue, `record_queue_assign_denied` for a create into
+ * a queue the caller does not belong to. The call sites are pinned in
+ * `packages/plugins/plugin-security/src/owner-queue-field-write-user-message.test.ts`,
+ * on the REST data door's body.
+ */
+describe('operation message catalog — the queue refusal, a sentence per verb', () => {
+  const KEYS = ['record_queue_change_denied', 'record_queue_assign_denied'] as const;
+  const GRANT_VOCABULARY = /allowTransfer|modifyAllRecords|owner_id|_id\b|\[Security\]|Access denied/;
+
+  it('every locale defines both, placeholder-free and naming no grant or API name', () => {
+    const locales = Object.keys(BUILTIN_OPERATION_MESSAGES);
+    // Guard the guard: a catalog that lost its locales would make the loop
+    // below vacuously true.
+    expect(locales.length).toBeGreaterThanOrEqual(4);
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const key of KEYS) {
+        expect(catalog[key], `${locale} defines ${key}`).toBeTypeOf('string');
+        expect(catalog[key].length, `${locale}.${key}`).toBeGreaterThan(10);
+        expect(catalog[key], `${locale}.${key} placeholder-free`).not.toMatch(/[{}]/);
+        expect(catalog[key], `${locale}.${key}`).not.toMatch(GRANT_VOCABULARY);
+      }
+    }
+  });
+
+  it('the create sentence is not the change sentence, nor any sibling, in any locale', () => {
+    // A create into a queue is admitted for a member of that queue, a change of
+    // an existing record's queue for no member: two situations, two next steps.
+    // Identical copy would make the new key a synonym, which the header bars.
+    const SIBLINGS = ['permission_denied', 'record_queue_change_denied', 'record_owner_assign_denied'] as const;
+    for (const [locale, catalog] of Object.entries(BUILTIN_OPERATION_MESSAGES)) {
+      for (const sibling of SIBLINGS) {
+        expect(catalog.record_queue_assign_denied, `${locale} vs ${sibling}`).not.toBe(catalog[sibling]);
+      }
+    }
+  });
+
+  it('a deployment translation override wins, under the shared `errors.` address', () => {
+    for (const key of KEYS) {
+      expect(operationMessageTranslationKey(key)).toBe(`errors.${key}`);
+      const translate = (k: string) => (k === `errors.${key}` ? '部署自定义文案。' : k);
+      expect(renderOperationMessage({ messageKey: key }, { locale: 'zh-CN', translate }))
+        .toBe('部署自定义文案。');
+    }
+  });
+});

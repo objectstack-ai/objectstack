@@ -96,8 +96,8 @@ export interface FlowDefinitionsHost {
 }
 
 /** The body of {@link AutomationEngine.resolveFunction}, moved unedited; that method's docblock is its contract. */
-export function resolveFunction(this: Pick<FlowDefinitionsHost, 'functionResolver'>, name: string): FlowFunctionRegistration | undefined {
-    const resolved = this.functionResolver?.(name);
+export function resolveFunction(this: Pick<FlowDefinitionsHost, 'functionResolver'>, name: string, callerPackageId: string | null): FlowFunctionRegistration | undefined {
+    const resolved = this.functionResolver?.(name, callerPackageId);
     if (!resolved) return undefined;
     if (typeof resolved === 'function') return { handler: resolved };
     return typeof resolved.handler === 'function' ? resolved : undefined;

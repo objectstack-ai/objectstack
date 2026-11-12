@@ -5,6 +5,7 @@ import { FilterConditionSchema } from './filter.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
+import { withRefusalHead } from '../shared/refusal-head';
 import { strictObject } from '../shared/strict-object';
 import { transportProjectionArray } from './projection-names-a-field';
 import { SEARCH_FIELDS_ACCEPT_SET, searchFieldsArray } from './search-fields-names-a-field';
@@ -95,16 +96,27 @@ const AGG_RETIRED_TAIL =
   + 'only WITH a portable lowering — ADR-0049\'s enforce leg, implementation first. '
   + 'This edit left `os migrate meta` with the protocol-16.x conversions: apply it by hand, or run the tool on a release that still carries the conversion — https://objectstack.ai/docs/protocol-upgrade.';
 
-const ARRAY_AGG_RETIRED =
+//
+// [#32279] Each prescription also carries a one-line head (`withRefusalHead`),
+// written by hand: the data doors answer it as the message and the
+// prescription beside it as the hint, while `os compile` and the save doors
+// keep printing the prescription byte for byte.
+const ARRAY_AGG_RETIRED = withRefusalHead(
   '`array_agg`' + AGG_RETIRED_MIDDLE
-  + 'Delete the aggregation, or the dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+  + 'Delete the aggregation, or the dataset measure that declared it. ' + AGG_RETIRED_TAIL,
+  '`array_agg` was removed from `AggregationFunction` in @objectstack/spec 17: delete the '
+  + 'aggregation; there is no replacement function.',
+);
 
-const STRING_AGG_RETIRED =
+const STRING_AGG_RETIRED = withRefusalHead(
   '`string_agg`' + AGG_RETIRED_MIDDLE
   + 'Its dialect divergence is the widest of the family — the delimiter is a second argument '
   + 'in PostgreSQL, a `SEPARATOR` clause in MySQL and a differently-named function in SQL '
   + 'Server — so there was never one shape to lower it to. Delete the aggregation, or the '
-  + 'dataset measure that declared it. ' + AGG_RETIRED_TAIL;
+  + 'dataset measure that declared it. ' + AGG_RETIRED_TAIL,
+  '`string_agg` was removed from `AggregationFunction` in @objectstack/spec 17: delete the '
+  + 'aggregation; there is no replacement function.',
+);
 
 /**
  * Aggregation Function Enum
@@ -226,7 +238,7 @@ export const GroupByNodeSchema = lazySchema(() => z.union([
  * — the #4286 disposition, verbatim. The ADR-0087 registration is the
  * protocol-17 semantic migration `aggregation-node-distinct-retired`.
  */
-const AGGREGATION_DISTINCT_REMOVED =
+const AGGREGATION_DISTINCT_REMOVED = withRefusalHead(
   '`query.aggregations[].distinct` was removed in @objectstack/spec 17 (ADR-0049) — '
   + 'exactly ONE of the six faces that read an aggregation honoured it. The objectql in-memory '
   + 'fallback deduplicated the values before applying the function, while `driver-sql`, '
@@ -239,7 +251,10 @@ const AGGREGATION_DISTINCT_REMOVED =
   + 'every SQL face compiles to `COUNT(DISTINCT field)` and the in-memory fallback '
   + 'computes identically. `SUM(DISTINCT …)` / `AVG(DISTINCT …)` get no replacement: no '
   + 'backend ever computed them here, and a per-row measure that needs deduplicating is a '
-  + 'modelling problem to fix in the data, not a flag on the read.';
+  + 'modelling problem to fix in the data, not a flag on the read.',
+  '`query.aggregations[].distinct` was removed in @objectstack/spec 17: delete the key; for a '
+  + 'deduplicated count use `count_distinct`.',
+);
 
 /**
  * Aggregation Node
@@ -411,7 +426,7 @@ export const FieldNodeSchema = z.string({
  * `os migrate meta` step — callers rewrite their own queries (the protocol-17
  * semantic migrations `query-joins-retired` / `query-window-functions-retired`).
  */
-const QUERY_JOINS_REMOVED =
+const QUERY_JOINS_REMOVED = withRefusalHead(
   '`query.joins` was removed in @objectstack/spec 17 (ADR-0049) — no engine or driver '
   + 'ever read it: a query carrying `joins` behaved exactly as if the key were absent, while '
   + 'its name squatted on the reserved REST parameter set. Delete the key. Related records are '
@@ -420,14 +435,17 @@ const QUERY_JOINS_REMOVED =
   + "record's own columns. Keep the foreign key in your own projection (`fields: ['title', "
   + "'owner_id']`): the relation is carried by that column, so projecting it away leaves "
   + 'expansion nothing to resolve. A dotted `fields` path is NOT a replacement — no driver ever '
-  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`).';
+  + 'resolved one and the ingress refuses it (`400 INVALID_FIELD`).',
+  '`query.joins` was removed in @objectstack/spec 17: delete the key and read related records '
+  + 'through `expand`.',
+);
 
 /**
  * Exported (unlike the two above) because `EngineQueryOptionsSchema`
  * (`data-engine.zod.ts`) re-declared both keys and tombstones them with the
  * same prescription — one string, two rejection sites.
  */
-export const QUERY_CURSOR_REMOVED =
+export const QUERY_CURSOR_REMOVED: string = withRefusalHead(
   '`query.cursor` was removed in @objectstack/spec 17 (ADR-0049) — no driver ever '
   + 'implemented keyset pagination, so the cursor was accepted and ignored and every page came '
   + 'back identical (a caller looping "until hasMore is false" never terminates). Delete the '
@@ -435,10 +453,13 @@ export const QUERY_CURSOR_REMOVED =
   + '`where` predicate on your sort key — `where: { created_at: { $gt: last.created_at } }` '
   + 'with the matching `orderBy` — which every driver executes with canonicalised comparands. '
   + 'A first-class cursor, if ever built, will be a response-minted opaque token, not this '
-  + 'caller-built record.';
+  + 'caller-built record.',
+  '`query.cursor` was removed in @objectstack/spec 17: delete the key and page with a `where` '
+  + 'predicate on your sort key.',
+);
 
 /** See {@link QUERY_CURSOR_REMOVED} for why this one is exported. */
-export const QUERY_DISTINCT_REMOVED =
+export const QUERY_DISTINCT_REMOVED: string = withRefusalHead(
   '`query.distinct` was removed in @objectstack/spec 17 (ADR-0049 / ADR-0078) — no '
   + "driver ever rendered SELECT DISTINCT; the flag's only observable effect was MIS-WIRED: "
   + 'the REST list path treated a distinct query as not countable and silently degraded '
@@ -446,7 +467,10 @@ export const QUERY_DISTINCT_REMOVED =
   + 'the key; `QueryBuilder.distinct()` was removed with it, and the count suppression is gone '
   + '(`total` is truthful again). For unique values of one column use the SQL/memory drivers\' '
   + '`distinct(object, field)` door; for unique combinations, `groupBy`; for a deduplicated '
-  + 'count, the `count_distinct` aggregation.';
+  + 'count, the `count_distinct` aggregation.',
+  '`query.distinct` was removed in @objectstack/spec 17: delete the key; use `groupBy` for unique '
+  + 'combinations, `count_distinct` to count.',
+);
 
 const QUERY_WINDOW_FUNCTIONS_REMOVED =
   '`query.windowFunctions` was removed in @objectstack/spec 17 (ADR-0049) — `find()` '

@@ -52,6 +52,22 @@ export {
   type OneTimeTokenHandoffServing,
   type HandoffAnswer,
 } from './one-time-token-handoff.js';
+// The OAuth consent page's account of the request it asks a person to approve,
+// for the same kind of host: `POST /oauth-consent/request` is answered with
+// `runOAuthConsentRequestRead(oauthConsentRequestDepsFor(authManager), request)`,
+// the same two calls AuthPlugin's own mount makes, so the answer and every
+// refusal stay the framework's. The page keeps Authorize disabled until this
+// route answers 200, so a host that forwards the auth routes without it serves
+// a consent page nobody can approve.
+export {
+  runOAuthConsentRequestRead,
+  oauthConsentRequestDepsFor,
+  type OAuthConsentRequestManager,
+  type OAuthConsentRequestDeps,
+  type OAuthConsentRequestResult,
+  type OAuthConsentRequestData,
+  type ConsentRequestClient,
+} from './oauth-consent-request.js';
 export * from './ensure-default-organization.js';
 // [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
 // v18 organization-ownership ceremony (`os migrate organization-ownership

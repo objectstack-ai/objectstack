@@ -58,6 +58,7 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -171,6 +172,10 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // the exact qualifier's, refused 409 naming every holder when the package
     // holds no item of the name ({@link admitExactQualifier}).
     if (!request.packageId) refuseUnjudgeableByNameRead(host, request, { kind: 'none' });
+    // [ADR-0150 D3, #32244] …and, as there, an action name two enabled
+    // packages hold on any object key is refused naming each with its object
+    // ({@link refuseActionHeldByPackages}).
+    if (!request.packageId && request.type === 'action') refuseActionHeldByPackages(host, request.name);
     await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
@@ -216,8 +221,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             // fallback below, which may still produce a real code layer.
             codeDegraded = fromService;
         }
-    } catch {
-        // ignore
+    } catch (error) {
+        // [ADR-0150 D3, #32244] The store's package-scoped refusal is an
+        // answer, never "no code layer" ({@link rethrowPackageScopedRefusal});
+        // anything else is ignored, as before.
+        rethrowPackageScopedRefusal(host, request.type, error);
     }
     if (code === null) {
         // Prefer the artifact-only lookup so an overlay row hydrated

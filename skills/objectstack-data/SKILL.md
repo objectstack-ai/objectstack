@@ -213,15 +213,12 @@ export const Invoice = ObjectSchema.create({
   incoming changes when the predicate is `TRUE` (for everyone; per permission
   set → field permission `when`, rules/security.md).
 - **`readonly: true` governs the end-user surface, not trusted system writers.**
-  A non-system write (REST/UI, and any `runAs:'user'` flow — the default) has
+  A non-system write (REST/UI, and any `runAs:'user'` flow) has
   the field **stripped**; the write reports
   success but the value never lands. System-context writes —
   `runAs:'system'` flows, system hooks, seeds, imports, migrations — are exempt
-  and DO write it. So the pattern "users can't edit this, but automation
-  maintains it" is expressed by declaring the field `readonly` **and** running
-  the maintaining flow `runAs:'system'` (see **objectstack-automation**), not by
-  removing `readonly`. Writing a `readonly` field from a `runAs:'user'`
-  `update_record` node is a build-time **error** (`os validate` / `os build`).
+  and DO write it. Keep the field `readonly` when automation maintains it; the
+  flow side: [objectstack-automation → Failure routing & `runAs`](../objectstack-automation/SKILL.md#failure-routing--runas).
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in
   protocol 17 — emitting it is a parse error.

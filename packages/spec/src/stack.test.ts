@@ -1091,7 +1091,7 @@ describe('defineStack - Modal Cross-Reference Validation', () => {
   const makePage = (name: string) => ({
     name,
     label: name,
-    regions: [{ name: 'main', components: [] }],
+    regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
   });
 
   it('should detect modal action referencing undefined page', () => {

@@ -988,7 +988,14 @@ export class ProtocolDiscoveryAndBasesFacet {
      * a registry that cannot answer the question (a partial double).
      */
     static objectRegistrationRefusal(host: Pick<ProtocolHost, 'engine'>, body: unknown,
-            layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,): Error | null {
+            layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+            /**
+             * [ADR-0144 D2 and D6, amended] A single save that makes the body
+             * live at once: the registry also asks the doors that read its
+             * other objects, once its cold boot has sealed it
+             * (`SchemaRegistry.objectRegistrationRefusal`'s `againstRegistry`).
+             */
+            options: { againstRegistry?: boolean } = {},): Error | null {
         if (layer.kind === 'mismatch') return null;
         const registry = host.engine?.registry as { objectRegistrationRefusal?: (...args: unknown[]) => Error | null } | undefined;
         if (typeof registry?.objectRegistrationRefusal !== 'function') return null;
@@ -997,6 +1004,7 @@ export class ProtocolDiscoveryAndBasesFacet {
             { ...(body as Record<string, unknown>), _provenance: 'org' },
             layer.packageId,
             layer.kind,
+            { againstRegistry: options.againstRegistry === true },
         );
     }
 

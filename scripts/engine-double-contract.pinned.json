@@ -297,6 +297,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-all-or-nothing.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-all-or-nothing.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol-publish-drafts-all-or-nothing.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol-publish-drafts-closure.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4287,6 +4302,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/owner-queue-field-write-user-message.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/ownership-floor-alternates.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4717,6 +4737,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/qa/dogfood/test/flow-hook-per-slot.dogfood.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/qa/http-conformance/src/hono-webhooks-redeliver.conformance.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -5023,6 +5053,11 @@
     },
     {
       "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-artifact-handlers.job-pull-run.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -5412,6 +5447,11 @@
       "pinned": 2
     },
     {
+      "file": "packages/services/service-automation/src/datasource-pull.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/flow-activation-ledger.test.ts",
       "verb": "update",
       "pinned": 1
@@ -5563,6 +5603,11 @@
     },
     {
       "file": "packages/services/service-job/src/db-job-adapter.timeout.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-job/src/job-run-context.test.ts",
       "verb": "update",
       "pinned": 1
     },

@@ -53,11 +53,12 @@ const regenerate = (target: string) =>
   `run \`pnpm --filter @object-ui/i18n gen:zh-hant\` and commit ${target}`;
 
 describe('every zh-Hant catalogue is generated, and current', () => {
-  it('generates the pack and the marketplace namespace catalogue', () => {
+  it('generates the pack and each pack-shaped namespace catalogue', () => {
     // Counter-probe: an emptied target list would make the cases below vacuous.
     expect(ZH_HANT_TARGETS.map(({ target }) => target)).toEqual([
       'src/locales/zh-Hant.ts',
       'src/namespaces/marketplace/zh-Hant.ts',
+      'src/namespaces/developer/zh-Hant.ts',
     ]);
   });
 

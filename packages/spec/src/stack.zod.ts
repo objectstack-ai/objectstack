@@ -11,7 +11,7 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -42,7 +42,13 @@ import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
-import { InlineGridColumnSchema, summaryFunctionReadsField, VALUE_DOMAIN_FIELD_TYPES } from './data/field.zod';
+import { InlineGridColumnSchema, summaryFunctionReadsField } from './data/field.zod';
+import {
+  isRecordCurrencyCodeField,
+  recordCurrencyFollowedCodeError,
+  recordCurrencyRecordRollupError,
+  recordCurrencyUnfollowedRollupError,
+} from './data/record-currency-path';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -4492,30 +4498,6 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
 }
 
 /**
- * Why a child amount that follows no parent cannot be the subject of a
- * `record` roll-up, and what to declare instead: the end of the refusal
- * {@link collectRecordCurrencyPathErrors} (c) prints.
- */
-function unfollowedAmountReason(childObject: string, childField: string, def: unknown): string {
-  const named = `'${childObject}.${childField}'`;
-  const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
-  if (config?.currencyMode === 'record' && typeof config.currencyField === 'string') {
-    return `${named} is in each '${childObject}' record's own currency (the code in '${config.currencyField}'), so the `
-      + 'roll-up would add amounts in several currencies. Make the child amount follow this record '
-      + '(`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or roll up a stored home-currency amount of the child '
-      + 'instead and declare that currency.';
-  }
-  if (config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string') {
-    return `${named} is fixed to ${config.defaultCurrency}, so the total is in ${config.defaultCurrency} whatever this `
-      + `record's code holds. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: '${config.defaultCurrency}' }\` `
-      + 'on the summary instead.';
-  }
-  return `${named} declares no currency that follows this record, so the total is not in the currency this record's `
-    + 'code holds. Delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads '
-    + 'is in one currency.';
-}
-
-/**
  * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
  * 6739066323] The two halves of a child that follows its parent's currency
  * that need both objects, judged where the stack holds both — the
@@ -4565,6 +4547,10 @@ function unfollowedAmountReason(childObject: string, childField: string, def: un
  * extension or a child field it does not hold; and neither is a roll-up whose
  * relationship field is neither written nor the child's one relation back to
  * the parent.
+ *
+ * The (a) and (c)-unfollowed wording is `data/record-currency-path.ts`'s,
+ * shared with the engine registry, which judges the same pairs at a
+ * single-object save.
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4572,14 +4558,6 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
   // fields elsewhere: judging a code field or a roll-up against it would refuse
   // what the owner declares. Such a parent is skipped (not in `declared`).
   const { fieldsByObject, declared } = stackObjectFields(config);
-  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
-  const isCodeField = (f: unknown): boolean =>
-    isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
-  const codeFieldsOf = (fields: Record<string, unknown>): string =>
-    ((names) => (names.length > 0
-      ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
-      : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`'))(
-      Object.keys(fields).filter((k) => isCodeField(fields[k])));
 
   for (const [objectName, fields] of fieldsByObject) {
     for (const [fieldName, field] of Object.entries(fields)) {
@@ -4590,23 +4568,10 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
         const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
         if (parentName !== undefined && parent !== undefined) {
-          const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
-          const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
-          if (!isRecord(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}', the object the master_detail `
-                + `'${followed.via}' references, and '${parentName}' declares no field '${followed.code}', so the amount `
-                + `has no code to follow. Name the field of '${parentName}' that holds its ISO 4217 code — `
-                + `${codeFieldsOf(parent)}.`,
-            );
-          } else if (!isCodeField(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}.${followed.code}', a `
-                + `'${String(code.type)}' field that does not hold an ISO 4217 code, so a write could store any value as `
-                + `the currency. A followed code field is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` `
-                + `on '${parentName}' — ${codeFieldsOf(parent)}.`,
-            );
-          }
+          const refusal = recordCurrencyFollowedCodeError({
+            object: objectName, field: fieldName, via: followed.via, code: followed.code, parent: parentName, parentFields: parent,
+          });
+          if (refusal !== undefined) errors.push(refusal);
         }
       }
 
@@ -4623,17 +4588,13 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       // unresolved or extension-only child is skipped, as (a) and (b) skip one.
       const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
       const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
+      const rollup = { object: objectName, field: fieldName, fn: String(ops.function), childObject: ops.object, childField: ops.field };
       const refuseRecord = (why: string): void => {
-        errors.push(
-          `Object '${objectName}' field '${fieldName}' currencyConfig: \`currencyMode: 'record'\` on a summary is admitted `
-            + `only for a roll-up through a master_detail whose child amounts follow this record's currency through that `
-            + `very field (\`currencyField: 'MASTER_DETAIL_FIELD.CODE_FIELD'\` on the child amount). This summary rolls up `
-            + `${String(ops.function)}(${ops.object}.${ops.field}), and ${why}`,
-        );
+        errors.push(recordCurrencyRecordRollupError(rollup, why));
       };
       const amount = recordCurrencyPathOf(childField);
       if (amount === undefined) {
-        if (judgeRecord) refuseRecord(unfollowedAmountReason(ops.object, ops.field, childField));
+        if (judgeRecord) errors.push(recordCurrencyUnfollowedRollupError(rollup, childField));
         continue;
       }
       const amountVia = child[amount.via];
@@ -4668,7 +4629,7 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         continue;
       }
       // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
-      if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
+      if (!isRecordCurrencyCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
       if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
       const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
       errors.push(
@@ -6532,8 +6493,8 @@ const warnedAddressLiteralNamespaces = new Set<string>();
  * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
  * namespace this stack declares (its own `manifest.namespace` or a
  * `packages[]` body's) that spells a literal segment of the address grammar
- * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
- * sentence is the install door's own judge
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`).
+ * The sentence is the install door's own judge
  * (`validateNamespaceNotAddressLiteral`).
  *
  * ## Why a warning here and a refusal at the build
@@ -7771,9 +7732,11 @@ function mergeObjects(
  * - An embedded action reaches the output through exactly ONE stack's object —
  *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
  *   Under `objectConflict: 'override'` the other stacks' embedded declarations
- *   on that object are not in the artifact at all, so they cannot collide with
+ *   on that object are not in the COMPOSED object, so they cannot collide with
  *   anything; that loss is the object strategy's own semantics, not an action
- *   collision. Under `'merge'` two objects declaring DIFFERENT `actions` are
+ *   collision. (A `manifest: 'preserve'` artifact still carries them in their
+ *   own package bodies; the runtime binder binds what the composed artifact
+ *   carries, so they are bound at no address.) Under `'merge'` two objects declaring DIFFERENT `actions` are
  *   refused at `mergeObjects` before this walk runs (#14848), and identical
  *   ones are one declaration carried once — so the array attributed here never
  *   displaced another stack's entries.
@@ -7788,6 +7751,19 @@ function mergeObjects(
  * Deliberately NOT refused, as in `defineStack`: the cross-scope pair (a global
  * and an object-bound action sharing a name — two keys) and one name bound to
  * two different objects.
+ *
+ * [ADR-0150 D2/D4] Nor, under `manifest: 'preserve'` (`preserve`), two
+ * packages' object-less action of one name when the packages hold the name
+ * apart ({@link composedPackagesHoldApart}): the rule the install gate applies
+ * to the same pair, so one artifact carries what two installs carry. Preserve
+ * keeps each body under its own package, the boot registers each under that
+ * package, and a call reaches each by its namespace's address
+ * (`/actions/NS/global/NAME`) while the call that names no package is refused
+ * naming both. Under the default (flattening) manifest the package identity
+ * is lost, so the pair stays refused, and the refusal names `preserve`
+ * ({@link formatComposedActionKeyCollisions}). Two packages of one namespace,
+ * two bodies of one package, and a package with no namespace stay refused
+ * under either manifest, and an object-bound key keeps the one-holder rule.
  *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
@@ -7807,10 +7783,13 @@ function collectComposedActionKeyCollisions(
   stacks: ObjectStackDefinition[],
   composedObjects: ObjectStackDefinition['objects'],
   actionsOwner: ReadonlyMap<string, number>,
-): string[] {
+  preserve: boolean,
+): { lines: string[]; preserveWouldAdmit: boolean } {
   type Action = NonNullable<ObjectStackDefinition['actions']>[number];
   // key → stack index → where that stack declares it
   const sitesByKey = new Map<string, Map<number, string[]>>();
+  // Keys some object EMBEDS: object-bound, whatever the scope string reads.
+  const embeddedKeys = new Set<string>();
   const note = (scope: string, name: string, stackIndex: number, site: string): void => {
     const key = `${scope}:${name}`;
     const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
@@ -7851,12 +7830,26 @@ function collectComposedActionKeyCollisions(
     for (const [j, action] of (embedded as Action[]).entries()) {
       if (!isRecord(action)) continue;
       note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
+      embeddedKeys.add(`${obj.name}:${action.name}`);
     }
   }
 
   const errors: string[] = [];
+  // [ADR-0150 D2/D4] Whether `preserve` would admit EVERY refused key: the
+  // refusal names it only then, never beside a key it would refuse too.
+  let admissible = 0;
+  let inadmissible = 0;
   for (const [key, byStack] of sitesByKey) {
     if (byStack.size < 2) continue;
+    // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
+    // under `preserve`, and under the flattening manifest the refusal names it.
+    if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
+      && composedPackagesHoldApart(stacks, [...byStack.keys()])) {
+      if (preserve) continue;
+      admissible += 1;
+    } else {
+      inadmissible += 1;
+    }
     // Stack order, not note order — standalone declarations are walked before
     // embedded ones, so a later stack's standalone would otherwise be named
     // ahead of an earlier stack's embedded action.
@@ -7865,7 +7858,38 @@ function collectComposedActionKeyCollisions(
       .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
     errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
   }
-  return errors;
+  return { lines: errors, preserveWouldAdmit: admissible > 0 && inadmissible === 0 };
+}
+
+/**
+ * [ADR-0150 D2/D4] Do the input stacks at `indices` hold one object-less
+ * action name APART, as packages the install gate would admit side by side?
+ * Each must be ONE package — a `manifest` with an `id`, and no `packages` list
+ * of its own (a nested artifact's top-level actions belong to no single body)
+ * — no two may be one package (two bodies of one package are one holder, and
+ * it holds one body per name), and no two may meet under
+ * {@link namespacedHoldersMeet}, the namespace half of the install gate's rule,
+ * read from its one copy: a package with no namespace, or two packages of one
+ * namespace, meet.
+ * @internal
+ */
+function composedPackagesHoldApart(stacks: readonly ObjectStackDefinition[], indices: readonly number[]): boolean {
+  const holders: Array<{ id: string; namespace: string | undefined }> = [];
+  for (const index of indices) {
+    const stack = stacks[index] as Record<string, unknown> & ObjectStackDefinition;
+    if (Array.isArray(stack.packages)) return false;
+    const id = stack.manifest?.id;
+    if (typeof id !== 'string' || id === '') return false;
+    const namespace = stack.manifest?.namespace;
+    holders.push({ id, namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined });
+  }
+  for (let a = 0; a < holders.length; a += 1) {
+    for (let b = a + 1; b < holders.length; b += 1) {
+      if (holders[a].id === holders[b].id) return false;
+      if (namespacedHoldersMeet(holders[a].namespace, holders[b].namespace)) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -7875,7 +7899,7 @@ function collectComposedActionKeyCollisions(
  * carries. Names no strategy option: there is none for actions by ruling.
  * @internal
  */
-function formatComposedActionKeyCollisions(lines: readonly string[]): string {
+function formatComposedActionKeyCollisions(lines: readonly string[], preserveWouldAdmit: boolean): string {
   const header =
     `composeStacks conflict: cross-stack action key collision ` +
     `(${lines.length} issue${lines.length === 1 ? '' : 's'}):`;
@@ -7889,7 +7913,14 @@ function formatComposedActionKeyCollisions(lines: readonly string[]): string {
   const fix =
     `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
     `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
-  return `${header}\n\n${body}\n\n${why}\n${fix}`;
+  // [ADR-0150 D2/D4] Only where `preserve` would admit every refused key:
+  // each package of its own namespace keeps its object-less action there.
+  const preserve = preserveWouldAdmit
+    ? `\nTo keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's ` +
+      `body under its own package, so two packages of two namespaces may each declare one object-less ` +
+      `action of a name, called at '/actions/NAMESPACE/${GLOBAL_ACTION_SCOPE}/NAME'.`
+    : '';
+  return `${header}\n\n${body}\n\n${why}\n${fix}${preserve}`;
 }
 
 /**
@@ -8702,11 +8733,13 @@ function composeBuiltStacks(
   //    copies each bound standalone action into its object: that copy is the
   //    echo an input built by `defineStack` already carries, and counting it
   //    would make every bound action collide with itself.
-  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
-  if (actionCollisions.length > 0) {
+  //    [ADR-0150 D2/D4] Under `manifest: 'preserve'`, two packages' object-less
+  //    action of one name is admitted when the packages hold it apart.
+  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner, opts.manifest === 'preserve');
+  if (actionCollisions.lines.length > 0) {
     throw new StackComposeActionKeyCollisionError(
-      formatComposedActionKeyCollisions(actionCollisions),
-      actionCollisions,
+      formatComposedActionKeyCollisions(actionCollisions.lines, actionCollisions.preserveWouldAdmit),
+      actionCollisions.lines,
     );
   }
 

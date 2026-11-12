@@ -131,6 +131,12 @@ const ACTIONS_WITH_WRITERS: ReadonlyArray<readonly [action: string, writer: stri
       + 'passes) through plugin-auth/src/scim-refusal-audit.ts for each request answered 400 or above, '
       + 'bounded per connection (#31829)',
   ],
+  [
+    'audit_signing_key_change',
+    'plugin-audit/src/audit-signing-key-audit.ts — writeAuditSigningKeyChange; called by '
+      + 'plugin-audit/src/audit-seal/signer.ts (LocalCheckpointSigner.createKey, which the audit sealer '
+      + 'reaches on its first signature) once per deployment signing key created, before the key row (#31908)',
+  ],
 ];
 
 /** Option values declared by the `action` select field. */

@@ -82,6 +82,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Lifecycle.retention`
@@ -114,6 +115,12 @@ const result = ApiMethod.parse(data);
 | **after** | `string` | ✅ | Rows older than this are copied to the archive datasource before hot deletion. |
 | **to** | `string` | ✅ | Target datasource name for cold storage. When it is not registered, the Archiver skips (audit rows are then retained, never dropped unarchived). |
 | **keep** | `string` | optional | How long archived rows are kept in cold storage (undefined = forever). |
+
+### Nested Shape: `Lifecycle.seal`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **valueFields** | `string[]` | ✅ | Columns that enter each sealed row as salted commitments instead of in clear, so a checkpoint never carries their values; every other declared column enters in clear. Each must name a declared field other than `id` and `created_at`, which order the leaves. |
 
 
 ---
@@ -358,6 +365,7 @@ const result = ApiMethod.parse(data);
 | **ttl** | `{ field: string; expireAfter: string; onlyWhen?: Record<string, string \| number \| boolean \| object \| object> }` | optional | Per-row TTL auto-expiry (transient/event classes). |
 | **storage** | `{ strategy: 'rotation'; shards: integer; unit: Enum<'day' \| 'week' \| 'month'> }` | optional | Physical storage strategy for high-frequency telemetry (LifecycleService Rotator). |
 | **archive** | `{ after: string; to: string; keep?: string }` | optional | Cold-store archival (LifecycleService Archiver) — audit-class hot→cold hand-off. |
+| **seal** | `{ valueFields: string[] }` | optional | Seals the rows into signed, chained checkpoints (ADR-0154), so a change, insert or delete made outside the platform shows. Only `class: 'audit'` may declare it, and not beside a `retention` or `ttl` `onlyWhen`, a `ttl` on another field than `created_at`, or rotation `storage`. Until expiry amendments ship (ADR-0154 P4), the retention sweeper still deletes sealed rows, which then read as missing. A deployment with no crypto provider seals nothing and reports that at error. |
 | **reclaim** | `boolean` | optional | Run driver space reclamation (SQLite incremental_vacuum) after sweeping this object. Default true for non-record classes. |
 
 ### Nested Shape: `Object.activityMilestones[number]`
@@ -488,7 +496,7 @@ const result = ApiMethod.parse(data);
 | **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. For type:'url': an http:// or https:// URL, a mailto: address, or an in-app path starting with / or ./ (a console route; a record is /apps/APP/OBJECT/record/ID, APP being the app's route segment — see onSuccess.navigate) — every other scheme and a protocol-relative //host are refused. |
 | **openIn** | `Enum<'self' \| 'new-tab'>` | optional | For type:'url' — where to open `target`. 'new-tab' opens a new browser tab; 'self' navigates in place. When omitted, external/absolute URLs open in a new tab and relative URLs navigate in place. Static execution option — keep it OUT of `params` (which is user-input-collection only). |
-| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. |
+| **body** | `{ language: 'expression'; source: string } \| { language: 'js'; source: string; capabilities?: Enum<'api.read' \| 'api.write' \| 'api.transaction' \| 'crypto.uuid' \| 'log'>[]; timeoutMs?: integer; … }` | optional | Action body — expression (L1) or sandboxed JS (L2). Only used when type is `script`. An action body runs as system, and its update, transfer, delete, purge or restore of an object declared managedBy: 'append-only' is refused with PERMISSION_DENIED; an insert is not judged by this rule. |
 | **operation** | `Enum<'update'>` | optional | The declarative single-record field write, mirroring a list view's `bulkActionDefs`: `'update'` applies `patch` (merged under the collected `params`) to the current record on the data plane AS THE CALLER — never system-elevated — so the caller's permissions, the object's hooks and its validations fire as for a user edit. `type` stays at its default `'script'` (the platform action route the write is performed on); `target`/`body`/`method`/`bodyExtra` are refused beside it. `'delete'` and `'custom'` have no row-level form. |
 | **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values written to the current record, merged UNDER the user-supplied `params` so a fixed value can be declared without exposing it in the dialog. Written on the data plane as the caller: object permissions, hooks and validations fire as for a user edit. Refused on an action without `operation: 'update'` (it would be silently dropped). |
 | **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | The bulk dispatch contract this action's BODY is written for, in `bulkActionDefs`' own vocabulary: 'perRecord' = one dispatch per selected row carrying that row's `recordId` (the view's `bulkActions: ['<name>']` bare-string form); 'aggregate' = ONE dispatch for the whole selection carrying every id in `params._selectedIds` (a `bulkActionDefs` entry with `execution: 'aggregate'`). Optional with NO default — omit it only when the body genuinely serves both. A list view wiring a declared action under the other contract is refused by `@objectstack/lint` (`action-dispatch-contract-mismatch`). |

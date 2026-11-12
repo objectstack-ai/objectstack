@@ -19,7 +19,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { NavigationItem } from '@object-ui/types';
 
@@ -151,5 +151,34 @@ describe('UnifiedSidebar — a group opens unless it declares otherwise (objectu
     renderSidebar('/apps/setup/advanced_3');
     expect(disclosure('Advanced')).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('link', { name: 'advanced 3' })).toBeInTheDocument();
+  });
+});
+
+/**
+ * A group's disclosure is named by the group's label and reports its state,
+ * so it is never an unnamed icon button: the chevron and a collapsed group's
+ * entry count stay out of its name.
+ */
+describe('UnifiedSidebar — a group disclosure is named by its label and reports open or closed', () => {
+  it('a collapsed group is "Advanced", not expanded, and its count badge is not in the name', () => {
+    renderSidebar();
+    expect(screen.getByRole('button', { name: 'Advanced', expanded: false })).toBeInTheDocument();
+  });
+
+  it('clicking it opens and closes the group under the same name', () => {
+    renderSidebar();
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced', expanded: false }));
+    expect(screen.getByRole('button', { name: 'Advanced', expanded: true })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'advanced 1' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced', expanded: true }));
+    expect(screen.getByRole('button', { name: 'Advanced', expanded: false })).toBeInTheDocument();
+  });
+
+  it('every group disclosure sits inside the sidebar\'s one navigation landmark', () => {
+    renderSidebar();
+    const nav = screen.getByRole('navigation', { name: 'App navigation' });
+    expect(within(nav).getByRole('button', { name: 'Configuration', expanded: true })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: 'Advanced', expanded: false })).toBeInTheDocument();
   });
 });

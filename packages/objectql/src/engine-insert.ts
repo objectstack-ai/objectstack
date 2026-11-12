@@ -685,13 +685,20 @@ export class InsertFacet {
       // payload it saw before the hide existed, wherever no hook wrote the key.
       // The per-key rule is `handBackWithheldInsertReadonly`'s. A culled row is
       // handed back too: it ran no hook, so it gets its caller's row back whole.
+      //
+      // A withheld audit provenance value a hook stamped over (the audit
+      // binder's `created_by`) is recorded per row (`insertSuperseded`) and
+      // joins the strips' `readonly` drops: reported through `onFieldsDropped`
+      // and refused under `strictReadonlyWrites`, like every reported drop.
+      // See `handBackWithheldInsertReadonly`.
+      const insertSuperseded: string[][] = rowHookContexts.map(() => []);
       for (let i = 0; i < rowHookContexts.length; i++) {
         const withheld = insertWithheld[i];
         if (!withheld) continue;
         const target = rowHookContexts[i]!.input.data as Record<string, unknown> | null | undefined;
         if (!target || typeof target !== 'object' || Array.isArray(target)) continue;
         rowHookWrittenKeys[i] = handBackWithheldInsertReadonly(
-          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i],
+          target, withheld, insertShown[i] ?? new Map(), rowHookWrittenKeys[i], insertSuperseded[i],
         );
       }
 
@@ -1179,6 +1186,17 @@ export class InsertFacet {
         // round-trip per class. The computation writes nothing (it evaluates
         // over copies and assigns onto the in-memory rows), so the refusal
         // still lands before validation and before any driver dispatch.
+        // [#32278] The `readonly` drops the write reports and strict refuses:
+        // the static strip's, plus every audit provenance value a stamp wrote
+        // over (`insertSuperseded`) on a row that is written.
+        const readonlyReported = (): string[] => {
+          const out = [...insertDropped];
+          insertSuperseded.forEach((keys, i) => {
+            if (rowErrors[i] !== undefined) return;
+            for (const k of keys) if (!out.includes(k)) out.push(k);
+          });
+          return out;
+        };
         const storedExpressionReplaced: string[] = [];
         const storedExpressionReplacedPerRow: string[][] = rows.map(() => []);
         if (storedExpressionPlan.length > 0) {
@@ -1194,7 +1212,7 @@ export class InsertFacet {
             // A pass that THROWS is pre-empted by the strict verdict on the
             // strips' drops (#5126's ordering — the check used to sit ahead
             // of this pass), then rethrown.
-            const stripDrops = droppedFieldEvents(object, computedDropped, insertDropped);
+            const stripDrops = droppedFieldEvents(object, computedDropped, readonlyReported());
             if (stripDrops.length > 0 && options?.strictReadonlyWrites === true) {
               throw new ReadonlyFieldRejectedError(
                 object, [...new Set(stripDrops.flatMap((d) => d.fields))], stripDrops, 'insert',
@@ -1212,7 +1230,7 @@ export class InsertFacet {
             for (const name of replaced) if (!storedExpressionReplaced.includes(name)) storedExpressionReplaced.push(name);
           });
         }
-        const insertDrops = droppedFieldEvents(object, computedDropped, insertDropped, storedExpressionReplaced);
+        const insertDrops = droppedFieldEvents(object, computedDropped, readonlyReported(), storedExpressionReplaced);
         if (insertDrops.length > 0 && options?.strictReadonlyWrites === true) {
           // Before the driver write and before validation — nothing is
           // written, and "you sent a runtime-owned field" should not depend on
@@ -1631,8 +1649,10 @@ export class InsertFacet {
           ? (partialMode
               ? rows.map((_r, i): InsertManyRowOutcome => {
                   if (rowErrors[i] !== undefined) return { ok: false as const, error: rowErrors[i] };
+                  const rowReadonly = [...(insertDroppedPerRow[i] ?? [])];
+                  for (const k of insertSuperseded[i] ?? []) if (!rowReadonly.includes(k)) rowReadonly.push(k);
                   const droppedFields = droppedFieldEvents(
-                    object, computedStrip.droppedPerRow[i] ?? [], insertDroppedPerRow[i] ?? [],
+                    object, computedStrip.droppedPerRow[i] ?? [], rowReadonly,
                     storedExpressionReplacedPerRow[i] ?? [],
                   );
                   return {

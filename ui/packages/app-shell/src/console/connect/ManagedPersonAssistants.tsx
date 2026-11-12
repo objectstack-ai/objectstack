@@ -24,6 +24,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { useRecordContext } from '@object-ui/react';
 import { AuthorizedAssistantsSection } from './AuthorizedAccessList.js';
+import { DeveloperNamespaceGate } from './DeveloperNamespaceGate.js';
 
 /** The object whose record pages this widget belongs on. */
 export const MANAGED_PERSON_OBJECT = 'sys_user';
@@ -33,11 +34,24 @@ export interface ManagedPersonAssistantsProps {
   className?: string;
 }
 
+/**
+ * Its strings are the lazy `developer` namespace's, so the body renders under
+ * `DeveloperNamespaceGate` — only on the page it belongs on, so a page that
+ * draws nothing here fetches nothing.
+ */
 export function ManagedPersonAssistants({ className }: ManagedPersonAssistantsProps = {}) {
-  const { t } = useObjectTranslation();
   const record = useRecordContext();
   const userId = record?.objectName === MANAGED_PERSON_OBJECT && record.recordId ? record.recordId : null;
   if (!userId) return null;
+  return (
+    <DeveloperNamespaceGate>
+      <ManagedPersonAssistantsBody className={className} userId={userId} />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function ManagedPersonAssistantsBody({ className, userId }: ManagedPersonAssistantsProps & { userId: string }) {
+  const { t } = useObjectTranslation();
   return (
     <Card className={cn(className)}>
       <CardContent className="space-y-3 pt-4">
