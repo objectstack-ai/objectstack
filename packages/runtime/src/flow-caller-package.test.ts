@@ -489,7 +489,7 @@ async function answersOf(registry: SchemaRegistry) {
         const engine = engineWithBothSlots();
         try {
             const service = flowServiceForCaller(engine, registry, FLOW, caller);
-            await service.execute(FLOW, {} as never);
+            await service.execute(FLOW);
             out[`action ${caller}`] = ['ran', engine.executeSlot.mock.calls.map((c) => c[0])];
         } catch (err) {
             out[`action ${caller}`] = refusalOf(err);
@@ -506,14 +506,15 @@ async function answersOf(registry: SchemaRegistry) {
     out.root = await flowWalkReads(engineWithBothSlots(), async () => registry).rootPackage(FLOW);
     out.endpoint = endpointPackageOf(registry, API);
     out.bare = bareNameRefusal(registry, 'flow', FLOW)?.candidates.map((c: any) => c.packageId ?? c.kind);
+    const addressOf = (admitted: ReturnType<typeof admitAutomationAddress>) => {
+        if (admitted === undefined) return 'bare path';
+        if ('packageId' in admitted) return ['slot', admitted.packageId];
+        return [admitted.status, 'refusal' in admitted ? admitted.refusal.candidates.map((c: any) => c.packageId ?? c.kind) : undefined];
+    };
     for (const namespace of NAMESPACES) {
-        const admitted = admitAutomationAddress(registry, { kind: 'namespace', namespace }, { type: 'flow', name: FLOW });
-        out[`address ${namespace}`] = admitted === undefined
-            ? 'bare path'
-            : 'packageId' in admitted ? ['slot', admitted.packageId] : [admitted.status, admitted.refusal?.candidates?.map((c: any) => c.packageId ?? c.kind)];
+        out[`address ${namespace}`] = addressOf(admitAutomationAddress(registry, { kind: 'namespace', namespace }, { type: 'flow', name: FLOW }));
     }
-    const env = admitAutomationAddress(registry, { kind: 'environment' }, { type: 'flow', name: FLOW });
-    out['address _env'] = env === undefined ? 'bare path' : 'packageId' in env ? ['slot', env.packageId] : [env.status, env.refusal?.candidates?.map((c: any) => c.packageId ?? c.kind)];
+    out['address _env'] = addressOf(admitAutomationAddress(registry, { kind: 'environment' }, { type: 'flow', name: FLOW }));
     return out;
 }
 
