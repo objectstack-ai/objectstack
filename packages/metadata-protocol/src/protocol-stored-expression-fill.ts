@@ -25,6 +25,13 @@
  * node's mutation (`applyRemoteMetadataMutation`) fills nothing either: the
  * node whose door took the change filled the shared rows once.
  *
+ * ⚠️ Two doors make a changed definition live WITHOUT a fill: `rollbackMetaItem`
+ * and `revertCommit` (`protocol-package-commits.ts`) write the restored body
+ * through to the registry and run no storage sync and no fill, so a rollback
+ * or revert that changes a stored computed field leaves the rows on what the
+ * definition it moved away from computed. Not covered here; the command
+ * (`os migrate stored-expressions --changed --apply`) fills them.
+ *
  * ## The fill and its report
  *
  * The door captures the object BEFORE its write-through
@@ -65,6 +72,8 @@ export interface StoredExpressionFillReport {
         staleRows: number;
         faultedRows: number;
         written: number;
+        /** Rows another write changed after the fill read them, left to that write (which computed the value). */
+        concurrentRows?: number;
     }>;
     skippedRows: number;
     truncated: boolean;
@@ -169,7 +178,11 @@ export async function fillStoredExpressionChange(
     if (whole && report.scannedRecords === 0) return [];
     const notices: RuntimeAuthoringIssue[] = [];
     for (const f of report.fields) {
-        const left = Math.max(0, f.nullRows + f.staleRows - f.written);
+        const concurrent = f.concurrentRows ?? 0;
+        const left = Math.max(0, f.nullRows + f.staleRows - f.written - concurrent);
+        const meanwhile = concurrent > 0
+            ? ` ${rows(concurrent)} written by another write while the fill ran computed it there, and were not written over.`
+            : '';
         const faulted = f.faultedRows > 0
             ? ` On ${rows(f.faultedRows)} the expression does not evaluate, so it computes NULL there, as any write of them stores.`
             : '';
@@ -181,7 +194,7 @@ export async function fillStoredExpressionChange(
                 path: path(f.object, f.field),
                 message: `'${f.object}.${f.field}' computes a new value at this change, so the platform filled the `
                     + `object's existing rows: ${rows(f.written)} of ${report.scannedRecords} written with the value its `
-                    + `expression computes; the others already held it.${faulted}`,
+                    + `expression computes; the others already held it.${meanwhile}${faulted}`,
                 hint: 'Nothing to do: every row holds what a write of it would store.',
             });
             continue;
@@ -201,7 +214,7 @@ export async function fillStoredExpressionChange(
             message: `'${f.object}.${f.field}' computes a new value at this change, and the fill of the object's existing `
                 + `rows did not finish: ${rows(f.written)} written, ${left > 0 ? `${rows(left)} not` : 'others not read'} `
                 + `(${why}). Until they are written, those rows hold NULL or the old value, and every reader of the column `
-                + `(filters, sorts, roll-ups, reports) reads it.${faulted}`,
+                + `(filters, sorts, roll-ups, reports) reads it.${meanwhile}${faulted}`,
             hint: fillRemedy(f.object, f.field),
         });
     }

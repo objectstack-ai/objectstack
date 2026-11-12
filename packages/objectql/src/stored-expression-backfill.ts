@@ -50,7 +50,10 @@
  * `preserveAudit` with the row's stored `updated_at`, as the other `os migrate`
  * data runs that rewrite a computed column do: `updated_at` does not move.
  * Hooks, roll-ups over the column and the audit writers see each write as any
- * write. One row's failure does not stop the run; it is listed. Idempotent: a
+ * write. [#32527] A row another write changed after the run read it is not
+ * written over: each write is conditional on the stamp the read saw
+ * (`writeUnlessMovedSince`), and such a row is counted (`concurrentRows`).
+ * One row's failure does not stop the run; it is listed. Idempotent: a
  * second run finds nothing to fill. No `sys_migration` flag is recorded:
  * nothing gates on the run (the `summary-nulls` reasoning).
  *
@@ -78,7 +81,8 @@
 import { keysetWalk, type KeysetPageQuery } from '@objectstack/types';
 import { objectNotFoundError, withTransientRetry, type RetryOptions } from '@objectstack/core';
 
-import { planStoredExpressions } from './engine-top-level.js';
+import { WRITE_PRECONDITION_OPTION, planStoredExpressions } from './engine-top-level.js';
+import { CONCURRENT_UPDATE_CODE } from './concurrent-update-error.js';
 import { isFederatedUnprovisionedInjectedColumn } from './federated-object.js';
 
 /** The engine surface the run needs: the declarations, a read, the stored-expression computation and the update. */
@@ -136,6 +140,11 @@ export interface StoredExpressionBackfillFieldOutcome {
   faultedRows: number;
   /** Values written (an apply run). */
   written: number;
+  /**
+   * [#32527] Rows an engine write changed between this run's read and its write
+   * (an apply run): not written over — that write computed the field itself.
+   */
+  concurrentRows: number;
   /** A few record ids with a hole, so an operator can go and look. */
   sampleRecordIds: string[];
 }
@@ -170,6 +179,8 @@ export interface StoredExpressionBackfillReport {
   skippedRows: number;
   /** Rows written (an apply run). */
   writtenRows: number;
+  /** [#32527] Rows another write changed after this run read them: left to that write (an apply run). */
+  concurrentRows: number;
   /** The scope: NULL holes only (false), or every stale value too (true). */
   changed: boolean;
   applied: boolean;
@@ -355,6 +366,56 @@ async function computePage(
 }
 
 /**
+ * [#32527] One row's write, never over a write that landed after this run read
+ * the row. The apply keeps the row's `updated_at` (`preserveAudit`), so a plain
+ * write would put the stamp of the page read back over the stamp of a user's
+ * edit made in between — routine once the fill runs at a live server's save
+ * door, not only under the command's occupancy gate.
+ *
+ * So the write carries the read stamp as the engine's own precondition
+ * (ADR-0142 D4: the driver's conditional update over `{ id, updated_at }`, the
+ * claim gate's mechanism). It matching no row answers `CONCURRENT_UPDATE`;
+ * the row is then read again, and:
+ *  - it holds another stamp, or is gone: another write moved it, and that
+ *    write — an engine write, which computes every stored field — already
+ *    stored the value. `'moved'`, nothing written over it;
+ *  - it holds the SAME stamp (a driver that hands back a spelling of the
+ *    stamp its own predicate does not equal — a timestamp read back at a
+ *    coarser precision than stored): nothing moved it, and it is written as
+ *    before this guard existed, unconditionally.
+ * A row with no stamp (no `updated_at`, or a blank one) has none to regress,
+ * and is written unconditionally. Answers `'written'` or `'moved'`, inside the
+ * caller's retry: a `CONCURRENT_UPDATE` is an answer, never retried.
+ */
+async function writeUnlessMovedSince(
+  engine: StoredExpressionBackfillEngine,
+  object: string,
+  id: unknown,
+  patch: Record<string, unknown>,
+  stamp: unknown,
+): Promise<'written' | 'moved'> {
+  const write = (expect: Record<string, unknown> | undefined) => engine.update(
+    object,
+    { id, ...patch, ...(stamp !== undefined ? { updated_at: stamp } : {}) },
+    { context: { ...SYSTEM_PRESERVING_CTX }, ...(expect ? { [WRITE_PRECONDITION_OPTION]: expect } : {}) },
+  );
+  if (stamp === undefined) {
+    await write(undefined);
+    return 'written';
+  }
+  try {
+    await write({ updated_at: stamp });
+    return 'written';
+  } catch (err) {
+    if ((err as { code?: unknown })?.code !== CONCURRENT_UPDATE_CODE) throw err;
+  }
+  const [now] = await engine.find(object, { where: { id }, limit: 1, context: { ...SYSTEM_CTX } });
+  if (!now || !sameStoredValue(now.updated_at, stamp)) return 'moved';
+  await write(undefined);
+  return 'written';
+}
+
+/**
  * Fill the stored computed fields of stored rows — the NULL holes by default,
  * every stale value too under `options.changed`.
  *
@@ -381,6 +442,7 @@ export async function backfillStoredExpressions(
     faultedRows: 0,
     skippedRows: 0,
     writtenRows: 0,
+    concurrentRows: 0,
     changed,
     applied: apply,
     truncated: false,
@@ -394,7 +456,7 @@ export async function backfillStoredExpressions(
     report.scannedObjects.push(object);
     const outcomes = new Map<string, StoredExpressionBackfillFieldOutcome>();
     for (const field of fields) {
-      const outcome = { object, field, nullRows: 0, staleRows: 0, faultedRows: 0, written: 0, sampleRecordIds: [] };
+      const outcome = { object, field, nullRows: 0, staleRows: 0, faultedRows: 0, written: 0, concurrentRows: 0, sampleRecordIds: [] };
       outcomes.set(field, outcome);
       report.fields.push(outcome);
     }
@@ -457,15 +519,18 @@ export async function backfillStoredExpressions(
           }
           if (!apply) continue;
           try {
-            await withTransientRetry(
-              () => engine.update(
-                object,
-                { id: row.id, ...patch, ...(hasUpdatedAt && !isBlank(row.updated_at) ? { updated_at: row.updated_at } : {}) },
-                { context: { ...SYSTEM_PRESERVING_CTX } },
-              ),
+            // [#32527] The stamp the page read: the write keeps it, and is made only while the row still holds it.
+            const stamp = hasUpdatedAt && !isBlank(row.updated_at) ? row.updated_at : undefined;
+            const landed = await withTransientRetry(
+              () => writeUnlessMovedSince(engine, object, row.id, patch, stamp),
               options.retry ?? {},
             );
             // Bumped AFTER the retry settles, never inside the retried closure.
+            if (landed === 'moved') {
+              report.concurrentRows++;
+              for (const field of Object.keys(patch)) outcomes.get(field)!.concurrentRows++;
+              continue;
+            }
             report.writtenRows++;
             for (const field of Object.keys(patch)) outcomes.get(field)!.written++;
           } catch (err) {
@@ -541,6 +606,12 @@ export function formatStoredExpressionBackfillReport(report: StoredExpressionBac
       lines.push(`  • ${fault.object}.${fault.field} ${fault.recordId}${fault.blocksWrite ? ' (holds a value: row not written)' : ''}: ${fault.error.split('\n')[0]}`);
     }
     if (report.faultedRows > MAX_SAMPLE_IDS) lines.push(`  … and ${report.faultedRows - MAX_SAMPLE_IDS} more`);
+  }
+  if (report.concurrentRows > 0) {
+    lines.push(
+      `· ${report.concurrentRows} row(s) were written by another write after this run read them; that write computed `
+        + 'the stored values itself, so they were not written over (and their updated_at stays the newer one).',
+    );
   }
   if (report.skippedRows > 0) {
     lines.push(

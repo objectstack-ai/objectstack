@@ -433,10 +433,28 @@ function makeDoorDriver() {
   };
   const updates: Array<{ object: string; id: string }> = [];
   let failUpdateFor: string | null = null;
+  /** Runs once, after the first keyset page (`limit` 200, ordered by `id`) of a user object is read. */
+  let afterFirstPage: ((object: string) => Promise<void>) | null = null;
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
+      const page = await this.read(object, ast);
+      const order = Array.isArray(ast?.orderBy) ? ast.orderBy[0] : undefined;
+      if (afterFirstPage && !object.startsWith('sys_') && ast?.limit === 200 && order?.field === 'id') {
+        const run = afterFirstPage;
+        afterFirstPage = null;
+        await run(object);
+      }
+      return page;
+    },
+    // The conditional write the engine's by-id precondition issues (ADR-0142 D4).
+    async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+      const hit = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      for (const r of hit) await this.update(object, String(r.id), data);
+      return hit.length;
+    },
+    async read(object: string, ast: any) {
       let rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
       const order = Array.isArray(ast?.orderBy) ? ast.orderBy[0] : undefined;
       if (order?.field === 'id') {
@@ -481,7 +499,11 @@ function makeDoorDriver() {
     async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
   };
-  return { driver, storeFor, updates, failUpdateFor: (id: string | null) => { failUpdateFor = id; } };
+  return {
+    driver, storeFor, updates,
+    failUpdateFor: (id: string | null) => { failUpdateFor = id; },
+    afterFirstPage: (fn: (object: string) => Promise<void>) => { afterFirstPage = fn; },
+  };
 }
 
 describe('[#32527] the save and publish doors fill a stored computed field the change made live', () => {
@@ -628,6 +650,31 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     expect(warning.message).toContain('2 rows written, 1 row not (1 row refused the write)');
     expect(warning.hint).toContain(`os migrate stored-expressions --object ${OBJ} --field days --changed --apply`);
     expect(notices(res, 'stored-expression-filled')).toEqual([]);
+  });
+
+  it('a write landing between the fill\'s read and its write keeps its updated_at, and its own computed value', async () => {
+    const rig = await populated();
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    const stampBefore = rig.storeFor(OBJ).get(second!)!.updated_at;
+    expect(stampBefore, 'the rows carry the stamp the guard keys on').toBeTruthy();
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    // A user's edit lands after the walk read its first page, before the fill writes that row.
+    rig.afterFirstPage(async (object) => {
+      await rig.engine.update(object, { id: second, end_day: 13, updated_at: EDITED }, {
+        context: { isSystem: true, preserveAudit: true },
+      });
+    });
+
+    const res = await rig.save(STORED);
+
+    const edited = rig.storeFor(OBJ).get(second!)!;
+    expect(edited.updated_at).toBe(EDITED);
+    // The edit computed the field itself (13 - 3), under the definition the save made live.
+    expect(edited.days).toBe(10);
+    expect(await stored(rig)).toEqual([1, 10, 3]);
+    const [notice] = notices(res, 'stored-expression-filled');
+    expect(notice.message).toContain('2 rows of 3 written');
+    expect(notice.message).toContain('1 row written by another write while the fill ran');
   });
 
   it('a refused storage sync is not followed by a fill: no row is written, and each field is reported unfilled', async () => {

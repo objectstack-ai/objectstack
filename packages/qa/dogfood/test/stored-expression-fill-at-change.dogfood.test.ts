@@ -69,9 +69,9 @@ describe('dogfood: a formula turned into a stored number on a populated object i
     return { status: res.status, json };
   };
 
-  /** The dataset door's `sum` over `days`. */
-  const totalDays = async (object: string) => {
-    const res = await call('POST', '/analytics/dataset/query', {
+  /** The dataset door's answer to a `sum` over `days`. */
+  const askTotal = (object: string) =>
+    call('POST', '/analytics/dataset/query', {
       dataset: {
         name: `${object}_days`,
         label: 'Days',
@@ -81,6 +81,10 @@ describe('dogfood: a formula turned into a stored number on a populated object i
       },
       selection: { dimensions: [], measures: ['total_days'] },
     });
+
+  /** The dataset door's `sum` over `days`. */
+  const totalDays = async (object: string) => {
+    const res = await askTotal(object);
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     const rows = (res.json?.rows ?? res.json?.data?.rows ?? []) as Array<Record<string, unknown>>;
     return Number(rows[0]?.total_days ?? 0);
@@ -136,6 +140,8 @@ describe('dogfood: a formula turned into a stored number on a populated object i
     expect(draft.status, JSON.stringify(draft.json)).toBe(200);
     // A draft is not live: nothing is filled yet.
     expect(filledNotice(draft.json)).toEqual([]);
+    const beforePublish = await askTotal(object);
+    console.log('PROBE draft-time total', beforePublish.status, JSON.stringify(beforePublish.json).slice(0, 600));
 
     const published = await call('POST', `/meta/object/${object}/publish`, {});
 
