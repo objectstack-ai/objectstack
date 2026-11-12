@@ -438,7 +438,7 @@ export async function judgeDroppedServiceRefusal(
     const service = host.getServicesRegistry?.()?.get('metadata') as { list?(type: string): Promise<unknown[]> } | undefined;
     if (typeof service?.list !== 'function') return undefined;
     const packageless = ((await service.list('action')) ?? []).filter((item) =>
-        (item as { name?: unknown } | null | undefined)?.name === name && actionItemPackageOf(item) === undefined);
+        (item as { name?: unknown } | null | undefined)?.name === name && storedItemPackageId(item) === undefined);
     if (packageless.length !== 1) return undefined;
     const entry = packageless[0];
     const registry = actionHolderRegistry(host);
