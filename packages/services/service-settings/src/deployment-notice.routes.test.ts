@@ -59,7 +59,6 @@ function productionEnv(over: Record<string, string | undefined> = {}): Record<st
 function sources(env: Record<string, string | undefined>, extra: Partial<DeploymentNoticeSources> = {}): DeploymentNoticeSources {
   return {
     env: () => env,
-    emailDeliveryLive: () => true,
     storageAdapter: async () => 's3',
     ...extra,
   };
@@ -101,24 +100,38 @@ describe('§1 the findings a production process states', () => {
     expect(state.findings).toEqual([]);
   });
 
-  it('local file storage and an email service that does not deliver are the two lower-severity lines', async () => {
+  it('local file storage is the one lower-severity line', async () => {
     const env = productionEnv({ [CHANNEL]: undefined, OS_SECRET_KEY: 'a'.repeat(64) });
-    const local = await readDeploymentNotice(sources(env, { storageAdapter: async () => 'local', emailDeliveryLive: () => false }));
-    expect(local.findings).toEqual([
-      { id: 'file_storage_local', severity: 'low' },
-      { id: 'email_not_configured', severity: 'low' },
-    ]);
-    // No email service composed at all is not a deliverable one either.
-    const none = await readDeploymentNotice(sources(env, { emailDeliveryLive: () => undefined }));
-    expect(none.findings.map((f) => f.id)).toEqual(['email_not_configured']);
-    // CONTROL: S3 and a live transport say nothing.
+    const local = await readDeploymentNotice(sources(env, { storageAdapter: async () => 'local' }));
+    expect(local.findings).toEqual([{ id: 'file_storage_local', severity: 'low' }]);
+    expect(local.fingerprint).toBe('file_storage_local');
+    // CONTROL: S3 says nothing.
     expect((await readDeploymentNotice(sources(env))).findings).toEqual([]);
+  });
+
+  it('mail is not a finding: a deployment with no email service states nothing about it', async () => {
+    // Mail is an optional setting (the ruling on #32643); the notice speaks
+    // about it only when something needs mail and cannot send it, and nothing
+    // states that. The sources carry no mail fact at all, so configuring mail
+    // later cannot change the fingerprint a hide acknowledged.
+    const env = productionEnv({ [CHANNEL]: undefined, OS_SECRET_KEY: 'a'.repeat(64) });
+    const bare = await readDeploymentNotice(sources(env));
+    expect(bare).toEqual({ production: true, findings: [], fingerprint: '' });
+    // Beside a real finding, the fingerprint names that finding alone.
+    const full = await readDeploymentNotice(sources(productionEnv(), { storageAdapter: async () => 'local' }));
+    expect(full.findings.map((f) => f.id)).toEqual([
+      'database_local_file',
+      'auth_secret_generated',
+      'data_key_file',
+      'file_storage_local',
+    ]);
+    expect(full.fingerprint).toBe('database_local_file+auth_secret_generated+data_key_file+file_storage_local');
   });
 
   it('outside production mode the notice has nothing to say, whatever the process keeps', async () => {
     for (const NODE_ENV of ['development', 'test', undefined]) {
       const state = await readDeploymentNotice(
-        sources(productionEnv({ NODE_ENV }), { storageAdapter: async () => 'local', emailDeliveryLive: () => false }),
+        sources(productionEnv({ NODE_ENV }), { storageAdapter: async () => 'local' }),
       );
       expect(state).toEqual({ production: false, findings: [], fingerprint: '' });
     }
