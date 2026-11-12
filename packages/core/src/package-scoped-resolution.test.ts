@@ -237,7 +237,9 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES.length).toBeGreaterThan(0);
     for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
       expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
-      expect(isPackageScopedType(type), type).toBe(true);
+      // [#31700] The engine's function registry is the one member that is no
+      // metadata type: it keeps its holders per package itself (D4's last row).
+      expect(isPackageScopedType(type), type).toBe(type !== ENGINE_FUNCTION_TYPE);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
     // [#31696, #31699 PR 2] The flow and the webhook have narrowed (they are in the set above); a connector has not.
@@ -245,6 +247,12 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
     expect(isNamespaceScopedBareNameType('webhook')).toBe(true);
     expect(isNamespaceScopedBareNameType('connector')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
+  });
+
+  it('[#31700] the picklist family has narrowed: picklist, mapping, dataset, api and the engine function', () => {
+    for (const type of ['picklist', 'mapping', 'dataset', 'api', ENGINE_FUNCTION_TYPE]) {
+      expect(isNamespaceScopedBareNameType(type), type).toBe(true);
+    }
   });
 });
 

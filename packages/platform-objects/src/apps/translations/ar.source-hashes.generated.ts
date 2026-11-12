@@ -48,6 +48,7 @@ export const arGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_commit.fields.parent_commit_id.label": "b2023cb42663fc01",
   "objects.sys_metadata_commit.label": "e468d6648e2b0c37",
   "objects.sys_metadata_commit.pluralLabel": "20e7caa05a2b0373",
+  "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
   "objects.sys_oauth_application.fields.jwks.label": "b2cf79f9d66c0dbc",
   "objects.sys_oauth_application.fields.jwks_uri.label": "2a4339df734ab269",
   "objects.sys_platform_setting_audit.fields.source.options.api": "4baeeff968e192d1",

@@ -12,6 +12,8 @@
 - 子卡带 `Blocked-by:` 产品卡,技能只记已落地的行为;产品 PR 正文点名该子卡。
 - 退役时必跑门禁红产品 PR 则反序(spec-property-retirement §4):子卡只删键或改值,不记未落地。
 - 产品车道 PR ⛔ 不改 `skills/**`;触了即把该 hunk 移入子卡,同 `spec.md` 的 `protocol:*` 兜底。
+- 例外仅新增:新增可编写顶层键或 liveness Leg 2 所绑符号活成员的 PR 同笔只加枚举行。
+- 枚举行 = `check:skill-top-level-keys` 锚段键名或所绑段成员项;讲解、示例、eval 仍归子卡。
 - 内部规则(`.claude/skills/**`、`AGENTS.md`、`CLAUDE.md`、`scripts/pm/**`)⛔ 永不搭产品 PR。
 - 改规则(归属、门禁、上限、车道边界)先立决策卡,裁后本域写;新增门禁默认否照旧。
 - 不改规则的修复(错字、陈旧路径、坏链)直交本域,不立决策卡。

@@ -356,7 +356,8 @@ export async function undoBatchRowWrite(
         await repo.delete(ref, { ...options, parentVersion: row.writtenHash, state: 'active' });
     }
     try {
-        await host.restoreArtifactRegistryView(row.type, row.name, null);
+        // [#32366] For the package of the row the undo restored or removed.
+        await host.restoreArtifactRegistryView(row.type, row.name, null, row.packageId);
     } catch (healError) {
         throw new BatchRowHealError(healError);
     }
