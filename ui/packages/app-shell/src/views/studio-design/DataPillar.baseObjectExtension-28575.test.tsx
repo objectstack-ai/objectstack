@@ -121,6 +121,9 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
   return { ...mod, ObjectView: GridDouble };
 });
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
 import { emitMetadataRefresh } from '../../assistant/assistantBus';

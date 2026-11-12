@@ -86,6 +86,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
   return { ...mod, useAdapter: () => dataSource };
 });
 
+// The console's preview and authoring code loads `@objectstack/lint` lazily;
+// warmed here so its first load is paid at import, not inside a test's clock.
+import '@objectstack/lint';
 import { DataPillar } from './StudioDesignSurface';
 import { createEmptyDataSource, failOnAbsorbedFetchError } from './__tests__/emptyDataSource';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
