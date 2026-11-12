@@ -79,6 +79,8 @@ describe('a stored expression reading another record is warned (#32529)', () => 
     expect(warned[0]).toMatchObject({ severity: 'warning', where: WHERE, source: expression });
     // The path is named, so the author can find the read.
     expect(warned[0]!.message).toContain('`record.employee.daily_hours`');
+    // The repair names this object and this field, so it is scoped to their rows.
+    expect(warned[0]!.message).toContain('--object hr_leave_request --field probe --changed --apply');
     // A warning only: the build does not fail on it.
     expect(found.filter((i) => (i.severity ?? 'error') === 'error')).toEqual([]);
   });

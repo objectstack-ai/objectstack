@@ -6057,11 +6057,12 @@ const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
       'but a `formula` cannot be totalled. To keep a stored copy current, make it a snapshot field written by a ' +
       'flow on the related object that runs when the value changes and updates the records that point at it. ' +
       'To repair stored values that have drifted, run `os migrate stored-expressions --object OBJECT --field ' +
-      'FIELD --changed --apply`, which recomputes and writes every row of that field whose stored value ' +
-      'differs from its expression (it needs the database URL). Keep it scoped: without `--object` and ' +
-      '`--field`, `--changed` recomputes every stored computed value in the database that differs, and one ' +
-      'reading the clock always differs, so it moves to the time of the run. Without `--apply` the command ' +
-      'is a dry run: it counts those rows and writes nothing.',
+      'FIELD --changed --apply`, which writes every row of that object whose stored value of that field ' +
+      'differs from its expression (it needs the database URL). The scope picks the rows, not the fields: ' +
+      'the apply is a write, so each row it writes recomputes every stored field of that row, and a field ' +
+      'of the same object reading the clock moves to the time of the run on those rows. Unscoped, ' +
+      '`--changed` writes every row in the database whose stored value differs, and one reading the clock ' +
+      'always differs. Without `--apply` the command is a dry run: it counts those rows and writes nothing.',
   ],
 };
 
@@ -6087,9 +6088,9 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
       'the same inputs is not judged.',
     'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +
       'a stored value current as time passes, recompute it with a scheduled flow that updates the records. ' +
-      '`os migrate stored-expressions --changed --apply` recomputes such a value to the time of the run, so ' +
-      'a repair of another field\'s drift is scoped with `--object` and `--field`, which leaves this one as ' +
-      'it was written.',
+      '`os migrate stored-expressions --changed --apply` recomputes such a value to the time of the run: ' +
+      'unscoped, on every row; scoped with `--object` and `--field` to another field, on every row of that ' +
+      'object the repair writes, since a write recomputes every stored field of its row.',
   ],
 };
 
