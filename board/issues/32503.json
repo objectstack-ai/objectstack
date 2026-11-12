@@ -1,0 +1,29 @@
+{
+  "number": 32503,
+  "kind": "issue",
+  "title": "lint: an object-grid's properties.columns[].summary over a field the aggregate door refuses is not refused at authoring (#32449 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T02:08:50Z",
+  "updated_at": "2026-11-12T02:08:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32503",
+  "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ② measured gap, reported by the #32449 card thread in PR #32502 (os-dev-report 6812271120, out_of_scope_findings 1). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, `packages/lint`: the member that reads an `object-grid` component's `properties.columns`, next to `validateGridAggregations` in `packages/lint/src/validate-sortable-fields.ts`.\nDedupe: `is:issue is:open object-grid columns summary` → 7 hits, none on this (#32449 itself, seat posts, unrelated epics).\nreach: an `object-grid` page component whose `properties.columns[].summary` asks for a pair the aggregate × field-type table refuses (e.g. `sum` over a text field). That summary reaches the same footer whole-set query as a list-view column summary, which the aggregate door answers with `400 INVALID_FIELD`. After PR #32502, list-view summaries (`list-view-summary-field-type-refused`) and grid `aggregations` (`grid-aggregation-field-type-refused`) are judged; this third carrier is judged by no lint member.\nBlocked-by: #32449\n\n## Ask\n\nJudge it with the shared verdict PR #32502 adds (`packages/lint/src/aggregate-pair-verdict.ts`). Use no second type list, and follow the same in-page browser-sum ruling as #32449 (seat ruling A: refused even when a single page would compute in the browser). The rule id is the lane's call; extending one of the two existing ids is preferred. `Clause-②: no (narrowing)`, `Metadata-protocol: narrowed`. Measure first-party exposure on the final head."
+}

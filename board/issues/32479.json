@@ -1,0 +1,30 @@
+{
+  "number": 32479,
+  "kind": "issue",
+  "title": "artifact registration: a package entry that is wrapped correctly but fails on content still ends its refusal with the generic \"is not a package entry\" tail (#32434 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-11T23:13:50Z",
+  "updated_at": "2026-11-12T00:03:14Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32479",
+  "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ② measured gap, reported by the #32434 card thread in PR #32471 (os-dev-report 6809386221, out_of_scope_findings 1). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: `packages/core/src/artifact-packages.ts` (`resolveArtifactPackageEntries`), likely `domain:server`.\nDedupe: `is:issue is:open resolveArtifactPackageEntries` → 2 hits, neither on this (#32434, a seat post).\nreach: every `PageSchema` refinement (and any other content refusal) raised for an artifact handed in whole. PR #32471's pin `packages/objectql/src/registry-package-record-page-no-component.test.ts` shows it: the path (`packages[0]`, `manifest.pages.0.regions`) and the real sentence come first, and then the text continues with the generic advice for a malformed entry (not a package entry, wrap it as a manifest wrapper, glob patterns).\n\n## What is wrong\n\n`resolveArtifactPackageEntries` adds its \"is not a package entry\" advice to every entry refusal, including one where the entry is wrapped correctly and only its content fails to parse. The author is pointed at the wrapper, which is fine, and away from the page, which is the actual problem.\n\n## Ask\n\nKeep the shape advice for an entry whose shape is wrong. For an entry whose shape is right and whose content is refused, end on the content refusal itself. Pin both branches."
+}

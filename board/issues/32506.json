@@ -1,0 +1,28 @@
+{
+  "number": 32506,
+  "kind": "issue",
+  "title": "spec: VIRTUAL_FIELD_AGGREGATE_REMEDY suggests count_distinct, which a list-view column summary cannot take (#32449 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T02:09:41Z",
+  "updated_at": "2026-11-12T02:09:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32506",
+  "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ② measured gap, reported by the #32449 card thread in PR #32502 (os-dev-report 6812271120, out_of_scope_findings 3). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, `packages/spec/src/data/aggregate-field-type-compatibility.ts:274` (`VIRTUAL_FIELD_AGGREGATE_REMEDY`) and the members that print it.\nDedupe: `is:issue is:open VIRTUAL_FIELD_AGGREGATE_REMEDY` → 1 hit (#32449 itself).\nreach: an author who puts a summary over a formula (virtual) field on a list-view column. After PR #32502 the refusal prints this one remedy sentence, which ends \"`count` / `count_distinct` answer a different question\". `count_distinct` is not a `ColumnSummary` member (the list-view summary takes `count_unique`), so the hint names a value the author cannot write there. The dataset compile leg (`service-analytics`) and the grid surface print the same sentence, and `count_distinct` is correct there.\n\n## Ask\n\nMake the remedy name a value each surface accepts. Two options: one surface-neutral sentence, or a per-surface variant chosen by the caller. Keep the 200-character bound and the single source; `os explain` holds the sentence verbatim. Pin the list-view wording. No accept-set change: `Clause-②: no`, `Metadata-protocol: unchanged`."
+}

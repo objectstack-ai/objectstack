@@ -2,8 +2,8 @@
   "number": 32075,
   "kind": "issue",
   "title": "spec: install refuses the namespace `runs`, so every package with a hook has a qualified hook address",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,8 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:blocking",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T06:20:43Z",
-  "updated_at": "2026-11-11T16:51:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T21:29:13Z",
+  "closed_at": "2026-11-11T21:28:01Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32075",
   "body": "domain:server#1 · os-steve · session_01ADHkmPF1skfu2kx89BEXZi\n\nFiling gate: ④ follow-up node of #32060 (PR #32067). Item 3 of #32060 asked that the `runs` qualifier question be recorded or filed as its own card; the ADR-0150 amendment note on PR #32067 records it as undecided, and the contract review record on PR #32067 (③) asked the seat to file it.\nBusiness reason: a package whose namespace is `runs` gets no qualified inbound hook address, so a caller cannot reach its hook by package once a second package holds the same hook name. Every other namespace has one.\nReader: the `domain:spec` seat that owns `packages/spec/src/kernel/address-grammar.ts`.\nDedupe: no open or closed card names the `runs` namespace or `INBOUND_HOOK_QUALIFIER_EXCLUSIONS`.\nclass: c · type: Tech debt\n\n## 维护者速读\n\n- 问题：入站 hook 的限定地址 `/automation/hooks/:ns/:name` 的命名空间位置不能是 `runs`（会和 `hooks` 这个 flow 的 run 门撞上），所以命名空间叫 `runs` 的包没有限定 hook 地址，只能裸名到达。安装目前接受这个命名空间。\n- 要做：让安装拒绝命名空间 `runs`（声明过的收窄，第一方计数为 0），或者明确保留现状并写进 ADR-0150 的注记。\n- 需要你做的：无，车道派发。\n\n## What to build\n\n1. **The literal.** `NAMESPACE_POSITION_LITERALS.inboundHook.literals` (`packages/spec/src/kernel/address-grammar.ts`) is empty today. Adding `runs` there puts it in the refused-literal set the install gate, `os validate`/`os build` and the `defineStack` warning already read (G1, #31691), without reshaping the derivation. Check that `route-ledger.conformance.test.ts` and `INBOUND_HOOK_QUALIFIER_EXCLUSIONS` (`packages/core/src/security/auth-gate.ts`) then read the same set, so the exclusion has one source.\n2. **The narrowing.** This refuses a namespace install accepts today: `Narrowing: yes`, `Clause-②: yes (narrowing)`, ADR-0087 marker in the changeset. Measure the first-party count on the final head (manifests, examples, fixtures, templates) and state it. A package already installed under `runs` keeps booting and is warned once, exactly as G1's rule for the other literals (ADR-0150 D5 step 1, note of #32060 item 5).\n3. **The record.** Add a dated amendment note under ADR-0150 D5 that closes the question the #32060 item 3 note left open. `docs/adr/` is Tier H.\n\nAlternative, if the spec seat prefers it: keep install accepting `runs`, and make that a ruled sentence in ADR-0150 instead of an open question. Either way the note's open question closes."

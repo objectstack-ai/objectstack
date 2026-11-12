@@ -1,7 +1,7 @@
 {
   "number": 32231,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 7 — 🟢 os-justin",
+  "title": "[PM seat] domain:server · seat 7 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:server",
     "pm:seat"
   ],
-  "assignees": [
-    "os-justin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T13:40:26Z",
-  "updated_at": "2026-11-10T13:43:07Z",
+  "updated_at": "2026-11-11T21:52:50Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32231",
-  "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**, added because seats 1–6 (#6367, #20966, #26761, #27737, #28677, #29908) are all held. ⛔ This post is none of them.\n\n## Current PM — 🟢 os-justin\n\n<sub>Refreshed 2026-11-10T13:42Z at seating.</sub>\n\n- **Holder:** `os-justin` · `session_01QSeKYm8sWjp2Pk76warN7w` (a cloud session summoned by `/pm-dispatch server`), seated 2026-11-10 (the seating comment carries the time and the readings).\n- **Mailbox:** PR #32234 (subscribed). **Patrol:** `trig_01UmWgHj8yXXe2tHTr8rWJr8` · `42 * * * *` (self-bound).\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#7` + `head:claude/` PRs. Posture and round records live in the session and on the cards.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Concurrency:** batch 5 (the maintainer's 「并发5」), `mode:subagent` dev agents; an L card goes to `mode:cloud`.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
+  "body": "domain:server#7 · os-bill · session_01Utp6CYmwJWY8wtoXnGPFqW\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 7**. ⛔ This post is none of seats 1–6.\n\n## Current PM — ⏳ vacant\n\n- **Vacated:** 2026-11-11T21:52Z, written by `os-bill` · `session_01Utp6CYmwJWY8wtoXnGPFqW` (security#2) on the maintainer's forced take-over order for every seat `os-justin` held, verbatim 「前任 justin 没token了，他的工作你都接手」 (2026-11-11T20:30Z). The holder did not sign off; it ran out of tokens.\n- **Previous holder:** `os-justin` · `session_01QSeKYm8sWjp2Pk76warN7w`, seated 2026-11-10T13:40Z. The previous body is the revision of 2026-11-10T13:43Z.\n- **Hand-over check:** `check-handover.mjs --session=session_01QSeKYm8sWjp2Pk76warN7w --account=os-justin` exits 0 at vacating.\n- **In flight at vacating:** none on this seat. #31699 and #32422 were taken by the epic #31527 seat (`epic:#31527#1`, os-bill) with their own `Release:`/`Claim:` on each card.\n- **Stay-behind:** none.\n- **Mailbox:** #32234 closed at vacating. Unanswered doorbells on it: triage#1 `Notify: blocking` comment 6803132738 (the ADR-0150 p1 lane cards #32164, #31696, #32183, #31700 sit in `pm:queue` with no seat), and domain:server#6's `seat-offline` comment 6803008067. The next holder of any `domain:server` seat reads them there.\n- **Patrol:** `trig_01UmWgHj8yXXe2tHTr8rWJr8` · `42 * * * *` was bound by the previous holder's account and cannot be deleted from this account; with the seat vacant it has no seat to fire for. Its owner deletes it.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- Successor: `/pm-dispatch server`, then read this post; the seat number stays 7.\n- Write path: the relay. ⛔ No GitHub MCP writes.\n"
 }

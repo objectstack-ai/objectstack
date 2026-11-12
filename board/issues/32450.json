@@ -2,8 +2,8 @@
   "number": 32450,
   "kind": "issue",
   "title": "docs(adr-0135): D4 gains a dated note for the third identity-source writer (SCIM provisioning) and its boot backfill",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T14:37:51Z",
-  "updated_at": "2026-11-11T15:06:08Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T02:20:34Z",
+  "closed_at": "2026-11-12T02:19:47Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32450",
   "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n**Filing gate ②: a contract-review finding.** The contract review of #32400 on `0113ef3331` (comment 6792533556, boundary flag) graded this should-fix and owed it before landing.\n\nADR-0135 D4 names two writers of the row mark `sys_user.source`, and says both fail open. #32400 adds a third writer:\n- **Where it writes.** On the SCIM provisioning path, inside the directory's transaction.\n- **Active states.** It fails closed: a mark that cannot be written fails the provisioning request, and the identity provider retries.\n- **Deprovision.** On deactivation and delete it is best-effort, after the deprovision write, so a failed mark never leaves the account enabled.\n- **Boot backfill.** A one-time, idempotent pass marks users the directory provisioned before the change.\n\nD4's writer list is how a reader of the ADR learns where the mark comes from.\n\n## Asked\n\nAdd a dated Note under ADR-0135 D4. The note should:\n- name the SCIM provisioning writer and its two postures;\n- name the boot backfill;\n- explain why the fail-closed posture is right for a provisioning request the identity provider retries, when a sign-in must never break;\n- cite #32400 and this card.\n\nThis is a governed path (Tier H), so it lands with the maintainer's approval.\n\n## Not asked\n\nAny behaviour change."

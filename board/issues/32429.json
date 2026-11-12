@@ -13,18 +13,18 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:blocked",
+    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T13:10:34Z",
-  "updated_at": "2026-11-11T13:54:00Z",
+  "updated_at": "2026-11-11T21:29:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32429",
   "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ④ coordination — the `Skills-docs: follow-up owed` line of #32075 (install refuses the namespace `runs`, the inbound-hook position literal; card thread branch `claude/project-thread-hkkvip`). ⛔ Not a claim. Triage sets the grade.\nReader: `domain:skills` — `skills/objectstack-platform/SKILL.md:123` (the `manifest.namespace` paragraph), after #32075's PR merges.\nDedupe (open AND closed): `is:issue \"route literals\" skills namespace` → 2 hits (#12206, #25222, both closed, other topics); `is:issue namespace runs skill` → 566 hits, the open ones are the ADR-0150 epic family (#31527, #31696, #31699, #31985, #30806), none edits this skill line.\nBusiness reason: the skill tells an AI author which namespaces it may never declare. Once #32075 lands, a package declaring `namespace: 'runs'` is refused at install, `os validate` and build, but the skill's list still reads `actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`, so an AI author picks `runs` and meets the refusal only at the door.\nBlocked-by: #32075\n\n## Owed\n\n1. `skills/objectstack-platform/SKILL.md:123`: add `runs` to \"Never `actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger` (route literals; `os validate` and build refuse)\", in the order the merged `NAMESPACE_POSITION_LITERALS` (`packages/spec/src/kernel/address-grammar.ts`) gives. If an eval in `skills/objectstack-platform/evals/` already asks for the reserved list, extend it; do not add a new eval for one word.\n\nWording source: the merged #32075 PR (the literal set and the ADR-0150 D5 amendment note).\n\n**Level:** one-word skill text; `skills/**` is governed, so the landing tier follows `check-governed-merges` at landing. Fable review per the maintainer's standing skills rule.\n\nRelated: #32075, #32060, ADR-0150 D5."

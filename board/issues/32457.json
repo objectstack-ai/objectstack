@@ -2,7 +2,7 @@
   "number": 32457,
   "kind": "pull_request",
   "title": "fix(spec)!: install refuses the namespace `runs`, so no namespace it accepts is left without a qualified hook address",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "tests",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T16:16:59Z",
-  "updated_at": "2026-11-11T16:50:41Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-11T21:30:34Z",
+  "closed_at": "2026-11-11T21:27:59Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-11T21:27:59Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32457",

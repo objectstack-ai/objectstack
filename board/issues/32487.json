@@ -1,0 +1,36 @@
+{
+  "number": 32487,
+  "kind": "pull_request",
+  "title": "docs(automation): a notify node names no organization, and in-app notifications stay organization-bound",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T00:53:47Z",
+  "updated_at": "2026-11-12T01:27:03Z",
+  "closed_at": "2026-11-12T01:27:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T01:27:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32487",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgSnFirZ8ynCmAemTPrCvXpF)_\n\nFixes #32446\n\ndomain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — the automation skill sits at its token ceiling (6861 of 6861) and already teaches that the notify config is a strict object, so an invented organization key is refused at parse; the boundary sentence lives in the node reference and the tenancy page\n\n## 维护者速读\n\n- 改了什么:两页文档各加一段话。流程文档的 notify 节点说明写明「节点不指定组织,通知归流程运行所在的组织」;部署文档的「一行数据归谁」写明「站内通知、收件箱行、已读回执都带发出它的那个组织」。\n- 为什么改:裁决记录 6810338738 选 A(原话「32443 直接做 B,其他同意」):站内信保持按组织隔离,不提供跨组织发送,只把这条边界写清楚。\n- 风险与回滚:纯文档,净增 12 行,不动代码、不动技能包、不动任何门禁。回滚即 revert 本 PR。\n- 先看:① `content/docs/automation/flows.mdx` 新增的 notify 段(措辞是否只说了代码真正保证的事);② `content/docs/deployment/tenancy-modes.mdx` 规则列表后的新增段。\n- 两分钟验证:打开文档站 `/docs/automation/flows`,搜「names no organization」,预期看到新增段,其中链接跳到同页「The acting organization」一节。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nRuling record 6810338738 (letter A), verbatim: \"**Chosen: A.** In-app messages stay organization-bound. The boundary is documented on the notify node and in the admin docs, and no cross-organization send is offered.\"\n\nDocs only, two hand-written pages, +12 −0:\n\n| File | Where | Lines before → after |\n|:--|:--|:--|\n| `content/docs/automation/flows.mdx` | a new paragraph in the notify node's recipient reference, before the email-field paragraph | 3153 → 3160 |\n| `content/docs/deployment/tenancy-modes.mdx` | a new paragraph under the three ownership rules of \"Who owns a row\" | 452 → 457 |\n\nThe text is written from the code at `f0f729e7`, not from the card's paraphrase:\n\n- `packages/services/service-automation/src/builtin/notify-node.ts`: the organization is the run's `tenantId`; a run that carries none takes the organization of the stored click-through record, else of the trigger record; there is no guessed limb, and the node config has no key that names an organization.\n- `packages/services/service-messaging/src/messaging-service.ts` and `inbox-channel.ts`: the inbox row, the delivery and the read receipt follow their notification's organization.\n- `packages/services/service-messaging/src/recipient-resolver.ts`: the membership-based selector filters `sys_member` by the emitting organization.\n\n## Tests\n\nNo executable behaviour changes, so there is no test to add and no ablation. The readings are the gates below, taken on head `3e7d2c48c`.\n\n## Acceptance notes\n\n- **The claim is as narrow as the read points above.** The pages say who owns a notification, that no key or setting addresses another organization, and that membership expansion stays inside the owning organization. Nothing wider is claimed.\n- **The membership selector is described, not spelled.** Its literal spelling contains a word `check:role-word` reserves in prose (ADR-0090 D3), and the first draft that spelled it went red on that gate; the sentence now reads \"a selector that expands over organization membership\".\n- **Candidates not touched, and why:**\n  - `skills/objectstack-automation/SKILL.md` — see the `Skills-docs:` line. A one-line draft measured 6889 tokens against the 6861 ceiling (`check-skills-token-ratchet`, over by 28); paying for it means deleting a rule from the same file, for a sentence the strict notify config already enforces. Reverted in a follow-up commit on this branch; the final diff has no `skills/**` path, so no eval is added either (no existing eval in `skills/objectstack-automation/evals/` covers the organization boundary).\n  - `content/docs/references/automation/io-node-config.mdx` — generated (`AUTO-GENERATED — DO NOT EDIT` banner, `packages/spec/scripts/build-docs.ts`); its source is a schema description under `packages/spec`, which is outside this card's file surface.\n  - There is no dedicated notifications admin page under `content/docs/**` (the only `notification` pages are generated references). `deployment/tenancy-modes.mdx` is the page an administrator reads for what the organization boundary covers, and its ownership rules are the ones this sentence applies.\n  - `content/docs/automation/flows.mdx`, section \"The acting organization\" — already says a notify node's notifications land in the run's organization and that nothing invents one; the new paragraph links to it instead of repeating it.\n- **Budget:** 12 net added lines of the 12 allowed; `skills/**` 0 of 4.\n\n## Verification\n\nDerived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on head `3e7d2c48c` (2 paths, merge base `f0f729e71`): 43 commands, each run with its exit code captured to a file before any pipe; all 43 exit 0.\n\n`dispatch-gates --ran`: \"43 derived famil(ies) accounted for — 43 run, 0 NOT-MEASURED (a DERIVED zero — all 43 recorded an exit code and none of them is 3)\".\n\nTwo families first answered exit 3 (prerequisite not met, nothing measured) and were re-run after building what they read, under the verify lock: `check:docs-transcript-drift` after `pnpm --filter '@objectstack/lint...' build` (VERDICT command-exit 0), and `check:skill-examples` after `pnpm --filter '@objectstack/client-react...' build` (VERDICT command-exit 0).\n\n`dispatch-gates --tier`: \"no path-derived mandate: the surface hits none of the 4 declared glob(s)\".\n\nNo changeset: `content/docs/**` ships in no package (`skip-changeset`).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaqHXh17Qc3C7MRAQw)_\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
+}

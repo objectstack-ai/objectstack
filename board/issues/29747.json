@@ -1,7 +1,7 @@
 {
   "number": 29747,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 3 — 🟢 huangyiirene · 由 huangyiirene 账户的项目负责",
+  "title": "[PM seat] domain:skills · seat 3 — 🟢 os-bill",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -15,17 +15,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "huangyiirene"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-03T03:16:22Z",
-  "updated_at": "2026-11-09T23:10:56Z",
+  "updated_at": "2026-11-12T00:15:29Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29747",
-  "body": "domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 3**. Seat 1 is #7623 and seat 2 is #19287; ⛔ this post is neither.\n\n## Current PM — 🟢 huangyiirene\n\n- **Holder:** `huangyiirene` · `session_01J8VVAmAzSRKZHAn7T8sArV` · seated by the seat-taken comment 6753945972 (its stamp is the seating time) · project \"objectstack skills\". Previous PM: `zhuangjianguo` · `session_01QsR2jULfPnqQFGcZUtKDFH`, vacant since its clock-out brief 6739354270.\n- **Mailbox:** PR #31984 (subscribed). **Patrol:** `trig_012NFNi6f6t5eL7EHu1kZrDC` · `8 * * * *`.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- The only seated `domain:skills` PM (the 11:47Z one-seat order is kept; seat 2 clocked out at brief 6743013298). Serial, one card thread at a time, p0 first, then p1/p2. Every `pm:epic` subtree is out of scope.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** the seat self-runs contract review at `CONTRACT_REVIEW_TIER` on an isolated sub-agent and lands Tier S PRs on a PASS record; Tier H PRs request the governed approvers. ⛔ Release PRs are never touched.\n- **Tiers:** `.claude/**` is Tier S; `skills/**` and `docs/adr/**` are Tier H. A `skills/**` PR owes an `'@objectstack/skills': patch` changeset.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** a merge to `main` publishes nothing; `@objectstack/skills` reaches customers only on a release the maintainer runs.\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n\n<!-- signed: domain:skills#3 · huangyiirene · session_01J8VVAmAzSRKZHAn7T8sArV -->\n"
+  "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:skills` seat 3**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here).\n- The other skills seats: seat 1 objectstack-ai/objectstack#7623, seat 2 objectstack-ai/objectstack#19287. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T00:16Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CaqHXh17Qc3C7MRAQw` (project \"Objectstack server 31527 devx\", thread \"运行 skills 车道座位 3\"), seated 2026-11-12T00:16Z.\n- **Terms (maintainer, 2026-11-12 00:11Z, all lanes):** 「所有车道只处理 p1 p2 任务」 and 「并发5」: `priority:p1` / `priority:p2` cards only, batch 5. M+ / p1 cards run as card threads opened by this project's coordinator; S mechanical cards as in-seat subagents.\n- **Mailbox:** PR #32482. **Patrol:** `trig_016gWWQsFkxpgwEbkdtAWjaS` · `14 * * * *` (hourly, bound to the seated session).\n- **Posture ledger:** lives in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#3` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- **Inherited from the previous holder (brief 6807500060):** #32379 (`Resume-from: claude/project-thread-xb2225@ab838308e`) and #31112 are p3, out of the current terms. #29471 (p2, `zhuangjianguo`) owes only its 30-day report, due 2026-12-02. #31982 `pm:blocked` on PR #31983; #32065 `pm:on-hold`; #25583 (p1) `pm:awaiting-maintainer`.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and open PR file lists before each dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** Tier H PRs (`skills/**`, `docs/adr/**`, `AGENTS.md`) get a seat record with `pm:awaiting-merge` and a request to `os-zhuang` and `hotlong`; a human merges. Tier S `.claude/**` lands by the seat after a PASS of record. The contract review of record runs on an isolated sub-agent at `CONTRACT_REVIEW_TIER`.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
 }

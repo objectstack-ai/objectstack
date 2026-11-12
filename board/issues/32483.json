@@ -1,0 +1,31 @@
+{
+  "number": 32483,
+  "kind": "issue",
+  "title": "fix(objectql)!: a running install or reload is asked the record-currency follow door once, at the end of its restore run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T00:29:21Z",
+  "updated_at": "2026-11-12T00:56:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32483",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续(PR #32474 / #32369 拆出的半张)。reach: 具名真实生产者 — 运行中安装与重载(`marketplace-install-local-plugin.ts` → `manifest` 服务 → `registerApp`)。\n\n## What\n\nAfter the seal (`kernel:bootstrapped`), the `manifest` service registers every body of an artifact, then the residual's top-level objects, in ONE `restoringOnRefusal` run (`packages/objectql/src/plugin.ts`, the #31564 block; each `registerApp` joins it). Nested plugins (step 7 of `registerPackageBody`) register inside the same run. None of that unit is asked #32312's record-currency follow door (`againstRegistry`), so a running install whose follow pair is really bad is registered and answered \"installed\".\n\nCard #32369's scope addition ({{WAS:2026-11-10T23:47Z}}, comment 6782529809) put this half on #32369. PR #32474's first round judged it per body (step 2c at the end of each `registerPackageBody`); the contract review (6810655259 round 2, round 1 F1) showed the unit is smaller than the unit the tree registers, so a valid artifact whose pair spans members was refused. Step 2c was taken out and the half moved here.\n\n## Acceptance\n\n- The follow door is asked once, at the end of the OUTERMOST restore run, over every body, the residual's objects and the nested plugins' objects the run registered. A refusal undoes the whole run (as the run already does for other refusals) and reaches the install report as a 4xx (`marketplace-install-local-plugin.ts` answers a 4xx register refusal as `422 PLUGIN_REGISTER_FAILED`).\n- From 6782529809: a package whose own `objectExtensions` supplies the parent's code field still installs; the same when the field comes from a LATER member of the artifact or from its residual.\n- A reload that adds the code field in a later member and makes an earlier body's child follow it still reloads (the parent judged is the new one, not the version that served).\n- A package with a really bad follow pair (in a body, in the residual, or in a nested plugin) reports the refusal in the install report, and the reload keeps the version that served.\n- Unmoved: cold boot (no follow door before the seal), stored-row hydration, `restoreArtifactRegistryView`, draft save (body-only).\n- Docblocks: `packages/objectql/src/registry.ts` and `packages/objectql/src/record-currency-aggregate-door.ts` still say the batch writers and `registerApp` hear a refusal \"only as a log line\" and that `againstRegistry` is \"not a batch publish, an install or a migration pass\". After #32474 the batch-writer half is false; after this card the install half is. Rewrite both to the tree.\n- BREAKING (narrowing: a running install that registered before is refused) ⇒ changeset major note and the maintainer's word before queueing.\n\n## Order\n\nBlocked-by #32474 (it lands the batch writers' half and the `objectRegistrationRefusal` answer this card reuses). Serial after the open PRs on `objectql/src/plugin.ts` / `registry.ts`: #32357, #32306, #32214, #32327 — take it after those land or rebase on them; ⛔ do not race them.\n\n## 业务理由\n\n谁受益: 在运行中的实例上安装或重载包的管理员。场景: 包的 `record` 跟随对确实错误(金额跟随一个父对象上不存在的币种代码字段)。不做: 安装报「成功」,币种错配的记录照常写入,直到读取或汇总时才暴露;而批量写入器(#32474)已在同一情况下拒收,两条路径对同一元数据给出不同答案。\n\n## 读者\n\ndomain:server 席位(server seat A/B),认领后派 os-dev;起点 `plugin.ts` #31564 块与 `engine-registration.ts` step 2b/7。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue registerApp restoringOnRefusal` → 3 hits (#32369 open = parent of this split; #31564 closed = the restore run itself; #28697 closed, unrelated). `is:issue registerApp follow door` → 65 hits; open ones are #32369 and #20966 (seat post) only. No duplicate.\n"
+}

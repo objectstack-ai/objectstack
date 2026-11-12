@@ -2,8 +2,8 @@
   "number": 32434,
   "kind": "issue",
   "title": "A record page with no regions saves and publishes as valid, then every record of its object opens a blank detail panel",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T14:00:25Z",
-  "updated_at": "2026-11-11T16:54:52Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-11T23:49:37Z",
+  "closed_at": "2026-11-11T23:48:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32434",
   "body": "Filing category: ① product defect (user-visible).\nreach: public entries — `PUT /api/v1/meta/page/:name` (through the hosted MCP build door's `create_metadata`) accepted it with `_diagnostics.valid: true`; Studio publish accepted it; the console record view rendered it blank. Measured once on a hosted tenant (`pnpm dev:stack`; cloud `ff373e02`, framework `d7c3d44e`, cloud pin `ff04ad81`).\nBatch-of: 15 cards filed together from one MCP capability test session (2026-11-11; 6 in cloud, 9 in objectstack).\n\n## Business reason\n\nOne metadata item silently takes away every record's detail view for an object — users cannot read, edit or approve any record from the list. An AI agent writes this shape easily (it is the smallest valid page) and nothing tells it the page is empty.\n\n## Steps\n\n1. Object `leave_request` with records; its detail panel shows fields and the approval bar.\n2. Save `page` `leave_request_record`: `{ \"label\": \"请假详情页\", \"type\": \"record\", \"object\": \"leave_request\", \"template\": \"default\" }` — no `regions`. `GET /api/v1/meta/page/leave_request_record` → 200, `_diagnostics: { valid: true }`.\n3. Publish. Open any `leave_request` record from its list (`…/leave_request?recordId=…`).\n\n## What happens / expected\n\nThe detail panel shows only the breadcrumb (`请假申请 › 病假`) and nothing else, for every record. Deleting the page (`DELETE /api/v1/meta/page/leave_request_record`) restores the default detail at once.\n\nExpected: either the save door refuses a record page that places nothing (no regions, no template body), or the renderer falls back to the default record page for an empty one — not a blank panel. (`packages/spec/src/ui/default-record-page.ts` exists for the default case.)\n\nReader who acts: the `domain:ui` / spec seat that owns `page` (save-door validation or record-page renderer).\nDedupe: `repo:objectstack-ai/objectstack is:issue record page regions blank detail` → 58 hits, top 3 are QA run records and the triage seat card; none describes this."

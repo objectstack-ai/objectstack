@@ -2,8 +2,8 @@
   "number": 32388,
   "kind": "issue",
   "title": "plugin-auth: SSO sign-in's domain step reads at most 100 providers, because the auth adapter turns a findMany with no limit into limit 100",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T04:36:37Z",
-  "updated_at": "2026-11-11T12:43:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T00:32:05Z",
+  "closed_at": "2026-11-12T00:30:58Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32388",
   "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nFiling gate: ① a defect read in code. It was found by the #32308 dev (PR #32383, an out-of-scope note) and escalated to the seat by the contract review of PR #32383 at `acc38713` (record 6787108839, ③). Code reading only: the reach is NOT MEASURED.\n\n**Where (`origin/main` `26f4e6d84a`):** `packages/plugins/plugin-auth/src/objectql-adapter.ts`, `findMany` at L1046 and L1315: `limit: limit || 100`.\n\n**What happens:** `@better-auth/sso` (1.7.12) routes `/sign-in/sso` by an address's domain in two steps:\n1. a `findOne` on `domain` equal to the address's domain;\n2. `findMany({ model: \"ssoProvider\" })` with no `limit` and no `sortBy`, then `.find(domainMatches)`. `domainMatches` is \"equal, or ends with `.` + entry\" over the parsed comma-separated entries.\n\nThe adapter turns that missing `limit` into 100. So when a deployment has more than 100 SSO providers, step 2 sees only the first 100 rows, in storage order. An address whose provider is matched only at step 2 (a subdomain of a listed parent, a non-first entry of a multi-entry list, a trailing-dot or case-variant spelling) silently fails to route when its provider is row 101 or later. #32308's domain-collision check reads every row, so the check and the router disagree past 100 providers.\n\n**Do:**\n1. Measure: seed 101+ providers, put the step-2-only provider past row 100, and record what `/sign-in/sso` answers.\n2. If it misses: make the adapter's no-limit `findMany` read every row for this model, or for every model if the measurement shows the 100-row default is wrong in general. Read the adapter's other callers before choosing, and state the choice.\n3. Pin it: the 101st provider routes. Ablate once.\n\n**Clause-②:** to be declared by the claiming seat (most likely `yes (widening)`: an address that failed to route now routes).\n**Business reason:** a larger tenant's SSO sign-in fails for some users depending on row order, with no error naming the cause.\n\nDedupe (`limit || 100`, `ssoProvider findMany`, `domainMatches`): none found."

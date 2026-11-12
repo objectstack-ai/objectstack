@@ -14,20 +14,21 @@
     "area:devpath",
     "bug",
     "domain:server",
+    "pm:blocking",
     "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
-    "os-justin"
+    "os-bill"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T12:38:22Z",
-  "updated_at": "2026-11-11T16:31:27Z",
+  "updated_at": "2026-11-12T01:59:06Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32422",
   "body": "domain:server#7 · os-justin · session_01QSeKYm8sWjp2Pk76warN7w\n\nChild of the ADR-0150 epic #31527. This defect was measured by the #31699 dev in round 4 of PR #32214 (report 6795944262, out-of-scope finding, class a). It already exists on `main`; #32214 does not introduce it.\n\n**Where.** In `packages/metadata/src/loaders/database-loader.ts`, `baseFilter` has no `bundle_member`, so `save` and the single-package `registerRollback` target the first row of the name's (package, name) slot, whatever its locale.\n\n**What happens.** Measured probe: a save of `fr-FR` into a slot that holds `en-US` overwrote the `en-US` row. The rows went from `[[A,null,en-US,1],[A,fr-FR,fr-FR,2]]` to `[[A,null,fr-FR,3],[A,fr-FR,fr-FR,2]]`. The same happens on `main` through the name's first row. `email_template` is the only bundled type today.\n\n**Do:**\n1. Measure on `main` once #32214 lands:\n   - a save of each locale of a two-locale bundle;\n   - a rollback of each locale.\n2. Make `save` / `registerRollback` target the member's row: `(package, name, bundle_member)`, with the canonical member stored as `NULL` (`overlayMemberValue`).\n3. Pin that each locale saves and rolls back alone and that the other locale is untouched. Ablate once.\n\n**Serial:** after #32214, which fixes the read half (loadMany / loadManyKeyed keep every member) under the epic ruling on that PR.\n**Clause-②:** the claimer declares it.\n**Business reason:** editing one language of an email template silently destroys another language's customization.\n\nDedupe (`DatabaseLoader bundle_member locale overwrite`, `email_template save loses locale`): none found."

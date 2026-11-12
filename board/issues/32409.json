@@ -2,8 +2,8 @@
   "number": 32409,
   "kind": "issue",
   "title": "fleet-write: 让席位能经中继触发 cloud 的 deploy-staging.yml（合并后更新 staging 不必每次找维护者）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T09:28:05Z",
-  "updated_at": "2026-11-11T10:00:05Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T02:18:03Z",
+  "closed_at": "2026-11-12T02:17:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32409",
   "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: **③ 账户所有者的话。** 原话：「同意立卡」——针对席位提议「把 `deploy-staging.yml` 加进中继的白名单，以后合并后可以由席位直接更新 staging」。起因：p0 cloud#4326 的修复（PR #4327）合并后要先上 staging 验证，而席位无法触发。\n\nReader: 分诊定车道（预计 PM 工具 / `scripts/pm/fleet-write/`）。\n\n## 维护者速读\n\ncloud 的 staging 自 2026-11-08 起只能手动部署（省 CI 费用的裁决，见 cloud `.github/workflows/deploy-staging.yml` 头注）：卡合并后若需要在 staging 上验收，要有人跑一次 `gh workflow run deploy-staging.yml`。席位的 GitHub 写入只走中继，而中继的 `workflow_dispatch` 是封闭白名单（`scripts/pm/fleet-write/ops.mjs` 的 `WORKFLOW_DISPATCH_INPUTS`，目前只有本仓 `shard-timings-refresh.yml` 与 `release.yml`），所以每次都得请维护者动手。要做：允许席位经中继、对 **cloud 仓**、在 `main` 上触发 `deploy-staging.yml`（默认 `apps=affected`），并在 pm-dispatch 写明何时可以触发。\n\n## Facts\n\n- 白名单按文件名匹配，`ref` 固定为 `main`；当前没有区分目标仓库，需要确认 `deploy-staging.yml` 这个名字在两个仓库里不会混淆（cloud 有、objectstack 是否有同名文件需核对）。\n- `deploy-staging` 的 `decide` 作业只部署自上次成功部署以来有变化的应用，没有变化的那次运行只是一个短作业，费用可控。\n- 生产不受影响：生产只在 `v*` 标签时从标签重建（`deploy-cloud-prod.yml`）。\n\n## Ask\n\n1. 中继：`WORKFLOW_DISPATCH_INPUTS` 增加 cloud 的 `deploy-staging.yml`，输入封闭为默认值（`apps` 只允许 `affected`）；若白名单需要按「仓库 + 文件」匹配，一并改为按仓库区分，并有自检。\n2. pm-dispatch（`landing-operations.md`）：卡的验收需要 staging 读数时，席位在 PR 合并后可触发一次；同一合并只触发一次；在卡上记录运行编号。\n3. 自检：白名单外的文件、非默认输入、非 `main` 的 ref 都被拒。\n\nDedupe（objectstack）：`WORKFLOW_DISPATCH_ALLOWLIST deploy-staging` —— 无。\n\nPriority: p2。"

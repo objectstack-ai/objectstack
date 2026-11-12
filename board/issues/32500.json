@@ -1,0 +1,30 @@
+{
+  "number": 32500,
+  "kind": "issue",
+  "title": "[专题] 事务：远程 libSQL（Turso）上的真事务，让元数据提交在托管环境也不会半落地（暂停，libSQL 路线）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "pm:on-hold",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T01:56:52Z",
+  "updated_at": "2026-11-12T01:56:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32500",
+  "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\nTopic parent (专题). Owning lane: `domain:server`. Not dispatchable: it carries `tracking`, no pm state label besides the hold, and no `pm:epic`. Decisions are anchored on the children.\n\n## Provenance\n\nThe maintainer (account owner `huangyiirene`), in session `session_01J8VVAnTcb4cZVkPdhkPicW`, 2026-11-12, verbatim:\n- 「事务立专题卡，现在不开发」: open a topic card for transactions; do not develop now.\n- 「先至处理 libsql」 (i.e. 先只处理 libSQL): scope the topic to the libSQL route first.\n\nThis follows ruling A on #32481 (record 6811907944).\n\n## Goal\n\nOn a hosted deployment that stores data in remote Turso, a package publish, a revert or an AI commit is all-or-nothing, as ADR-0067 D2 promises. The route is native `@libsql/client` interactive transactions threaded through `driver-turso`'s remote arm (`RemoteTransport`), behind an executor seam. When it lands, the remote arm stops declaring `transactionsUnsupported`, and the atomic-batch `501` is lifted.\n\n**Out of scope for this topic:** the Turso Rust engine (MVCC / `BEGIN CONCURRENT`). It is evaluated only at its 1.0 and Turso Cloud concurrent-writes GA, or earlier if M1 finds the single-writer lock cost unacceptable, which comes back to the maintainer.\n\n## Milestones\n\n| Milestone | Child | Blocked-by | Lane |\n|:--|:--|:--|:--|\n| M1 · Measure | #32481: measure tranche on a live Turso DB (interactive transaction over the driver's transport, single-writer lock under concurrent writers, server-side idle timeout over HTTP/WebSocket, size of the executor seam over the 21 data methods). Infeasible or XL ⇒ back to the box once. | — | `domain:server` |\n| M2 · Executor seam | (row) `RemoteTransport`'s data methods run on an executor (`execute` / `batch`, plus `commit` / `rollback` on a transaction executor), never on the libSQL client type. No behaviour change. | M1 | `domain:server` |\n| M3 · Flip | (row) The remote arm's `beginTransaction` / `commit` / `rollback` drive a `client.transaction('write')`. The engine's ambient transaction (ADR-0034) carries it. Live conformance pins on Turso. `transactionsUnsupported` → false on the remote arm, and the atomic batch stops answering 501. Re-word ADR-0067's caveat again (after #32480). | M2 | `domain:server` |\n\n## Related\n\n- #32480: ADR-0067 D2 wording made honest now (ruled A; independent of this topic).\n- #32396 / PR #32454: the publish half-land and its compensation path.\n- #18063 (ruled B by batch #148 item 3: declare absent), #18116 (measured only the Knex routes), #18616.\n\n## Hold\n\nPaused on the maintainer's words above. No child is started.\n\nRestart-when: the maintainer says to start this transactions topic (paused 2026-11-12 on 「事务立专题卡，现在不开发」; scope libSQL first per 「先至处理 libsql」)"
+}

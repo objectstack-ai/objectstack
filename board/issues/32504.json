@@ -1,0 +1,28 @@
+{
+  "number": 32504,
+  "kind": "issue",
+  "title": "Stale rollback claims: three code comments say the in-memory driver cannot roll back, and ADR-0067 D3 calls revertCommit atomic",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T02:08:51Z",
+  "updated_at": "2026-11-12T02:08:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32504",
+  "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① documentation defect with a named producer (two places where written text contradicts the code on `main`), found while reviewing PR #32496 (#32480). ⛔ Not a claim; triage decides lane and grade.\n\n## Item 1 — three code comments say the in-memory driver cannot roll back\n\nOn `main`, `packages/drivers/driver-memory/src/memory-driver.ts` declares `readonly supports = {}` and implements `beginTransaction` (L1265, snapshot of the store) and `rollback` (L1291, restores it). So `driverSupportsTransactions` answers yes and `engineCanRollBack` answers yes for it (PR #32496's amendment and contract review 6812037875 read this; the dev measured it with a one-time probe). These comments still say the opposite:\n\n- `packages/spec/src/data/driver.zod.ts` ~L843, `driverSupportsTransactions` docblock: \"A driver with no `beginTransaction` (the in-memory driver, a test double, a foreign engine) has nothing to open.\"\n- `packages/metadata-protocol/src/sys-metadata-repository.ts` ~L396, `withTxn` docblock: \"Repository code must not rely on rollback for correctness against in-memory drivers.\"\n- `packages/objectql/src/engine.ts` ~L5233, `transaction` docblock: \"safe to call on drivers without ACID support (e.g. the in-memory driver in tests)\".\n\nFix shape: comments only, no behaviour change.\n\n## Item 2 — ADR-0067 D3 says `revertCommit` is atomic inside one transaction\n\n`docs/adr/0067-commit-history-and-rollback-for-ai-authoring.md` L83 (D3): \"`revertCommit(commitId)` — restore every item the commit touched to its pre-commit body, atomically (reuse `restoreVersion` per item inside one transaction)\". L18 says the same. On `main`, `packages/metadata-protocol/src/protocol-package-commits.ts` `revertCommit` (L1067) is a per-item loop collecting `reverted[]` and `failed[]`; no `engine.transaction()` is opened in that function. Read from code only; not measured through the public door.\n\nOpen for triage: whether this is an ADR amendment (record what the code does) or a code defect (make revert atomic as D3 promises). Either way the text and the code disagree today.\n\n## Reach\n\nItem 1: anyone reading those docblocks to decide whether tests on the in-memory driver exercise rollback. Item 2: anyone reading ADR-0067 to judge whether a failed revert can leave a package half-reverted.\n\n## Duplicate check\n\nSearched open issues for \"in-memory rollback driverSupportsTransactions\" and \"revertCommit atomic\": only #32480 (the ADR-0067 D2 amendment, which does not cover D3 or code comments).\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
+}

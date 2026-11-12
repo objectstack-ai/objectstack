@@ -1,0 +1,36 @@
+{
+  "number": 32492,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): the whole-set footer query leaves out a money aggregate over a record-mode amount",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-lizheng"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T01:16:36Z",
+  "updated_at": "2026-11-12T01:57:55Z",
+  "closed_at": "2026-11-12T01:57:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T01:57:53Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32492",
+  "body": "Fixes #32334\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:列表/表格分页时,页脚的\"全量汇总\"查询不再带上对 `record` 模式金额(按记录各自币种)的 sum/avg/min/max;字段定义还没读到时,这几类汇总先不问,等读到再问。\n- **为什么改**:引擎按 ADR-0144 D6 拒绝跨币种的原始汇总,整条查询被拒,导致同一视图里其它汇总列(如数量合计)悄悄退回成\"本页合计\",财务用户会把本页数当成全量数;每次翻页还多发一次被拒请求。\n- **风险与回滚**:风险低,仅影响 `plugin-grid` 页脚全量汇总的发问内容;`record` 模式金额列本身仍不显示数字(与原来一致)。回滚即 revert 本 PR。\n- **先看**:`ui/packages/plugin-grid/src/useWholeSetSummary.ts`(`wholeSetSummaryNodes` 里的排除一行,和 hook 里的 `awaitingFields` 等待);`ui/packages/plugin-grid/src/objectGridSummaries.ts`(字段目录接线)。\n- **两分钟验证**:在 `ui/` 下运行 `pnpm exec vitest run packages/plugin-grid/src/__tests__/footerSummaryScope-12081.test.tsx`,预期 26 个测试全部通过,其中 ADR-0144 D6 的 4 个新 pin 通过。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `wholeSetSummaryNodes(columns, objectFields)` drops a `sum` / `avg` / `min` / `max` node over an amount whose `currencyConfig.currencyMode` is `record`, for a sibling `currencyField` and for a parent path (`invoice.currency_code`). It uses the predicate the group headers already use (`requiredCurrencyGrouping` in `recordCurrencyAggregates.ts`), the same test `useScopedColumnSummary` uses to draw nothing for that column. A grid whose only summary is such an aggregate now asks nothing (`off`), instead of sending a count-only query.\n- The test sits in `wholeSetSummaryNodes`, not in `compileWholeSetSummaryQuery`, because the node set also drives the hook's `active` gate. `compileWholeSetSummaryQuery` takes `objectFields` and passes it through.\n- `useWholeSetSummary` takes `objectFields` and `objectFieldsPending`. While the grid still awaits its field catalogue (`objectTypesPending`), a money aggregate is not asked, because its currency mode is unknown and guessing would send the refused request. The status is `pending` and the footer stays on the page, labelled as the page's. Counts do not wait.\n- `objectGridSummaries.ts` / `ObjectGrid.tsx` hand the grid's existing catalogue pair (`objectFields` = `objectSchema.fields`, else the host's `objectFields`; and `objectTypesPending`) to the hook. That wiring is outside the claimed file surface: the hook had no field metadata to test against.\n- ADR-0144 D6 and both card rulings are kept. No aggregate across currencies is sent, the engine is unchanged, and no per-currency grouping is added.\n- Scope note: the card names sum/avg. The engine door (`record-currency-aggregate-door.ts`, `RAW_AMOUNT_FUNCTIONS`) also refuses `min` / `max`, and the footer already skips all four, so all four are left out.\n\n## Tests\n\nNew top-level `describe` in the shared harness `footerSummaryScope-12081.test.tsx`. The harness double now refuses a raw money aggregate over a `record`-mode field, as the engine does, and records each refusal.\n\n- Sibling pointer and parent path (`it.each`): one record-mode `sum` and one plain-number `sum`. The plain column shows the whole-set figure, the record-mode column draws nothing, there are zero refusals, and exactly one query is sent, with `[count, sum_qty]`.\n- Field catalogue in flight: no query is sent before the definition lands, and the footer is the page's. After it lands, one query is sent with zero refusals and the whole-set figure.\n- `wholeSetSummaryNodes` directly: a lone record-mode sum gives `null`. `min` / `max` / `avg` over the amount are dropped, while `count_filled` / `count_unique` over it stay. CONTROL: the same columns over a non-record catalogue keep `sum_amount`.\n\n<details><summary>Ablations (each via scripts/ablation-replace.mjs; mutation landed and restore proven, blob equal to HEAD, git diff HEAD empty)</summary>\n\n- A: deleted the leave-out line in `wholeSetSummaryNodes`. Result: 4 failed, 22 passed (26), with all four D6 pins red. Restored to blob `abc0c982ded8`.\n- B: `objectFieldsPending &&` replaced by `false &&`. Result: 3 failed, 23 passed (26). The pending pin got \"expected vi.fn() to not be called at all, but actually been called 1 times\". Both render pins also went red (\"expected [ 'sum(amount)' ] to deeply equal []\"), because without the gate the pre-definition query carried the record-mode sum. Restored to blob `abc0c982ded8`.\n\n</details>\n\n## Acceptance notes\n\n- Observation, not filed: `useScopedColumnSummary` reads `objectSchema?.fields`. In the window where only the host's catalogue is in hand, it does not yet know an amount is `record`-mode and may draw a page figure (labelled as the page's) for it. The whole-set query uses the wider catalogue (`objectFields`), so it never sends the refused aggregate in that window. Unmeasured with a repro, so it is noted here and not filed.\n- `ui/packages/plugin-list` has no separate whole-set compiler. `ListView` hands its page to `ObjectGrid`, and the footer read lives only in `plugin-grid`.\n\n## Verification\n\n<details><summary>Local readings at head eb1f7cae1 (after merging origin/main)</summary>\n\n- Closure build: `pnpm turbo run build --concurrency=2 --filter='@object-ui/plugin-grid^...'` gave VERDICT command-exit 0 (53/53 tasks).\n- `pnpm --filter @object-ui/plugin-grid type-check` (both tsc programs), then `pnpm exec vitest run packages/plugin-grid/` in `ui/`: VERDICT command-exit 0, Test Files 279 passed (279), Tests 2429 passed (2429).\n- Derived gate families (`dispatch-gates.mjs --commands`): 34 lock-free commands, each exit 0. Under the lock, `pnpm --dir ui exec vitest run scripts/` gave Test Files 171 passed and 2 skipped (173), Tests 5062 passed and 2 skipped.\n- eslint on the four changed source and test files: 0 errors. The warnings are all on lines this diff did not write. `objectGridSummaries.ts:66` is the existing `lastFindParamsRef.current` read, moved down 3 lines.\n- `check:type-check-debt` is NOT MEASURED locally (its closure re-measure is left to CI; no tsconfig or typecheck script changed).\n- The CI-owned families (repo lint, Test Core, UI jobs) are left to the PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_012MmDsRT6hvZsQH9dTzn4CA)_\n"
+}
