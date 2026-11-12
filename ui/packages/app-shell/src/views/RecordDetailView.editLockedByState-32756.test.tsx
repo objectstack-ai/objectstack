@@ -24,7 +24,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -199,14 +199,40 @@ describe('console record header — a record whose state locks every edit-form f
   });
 
   it('the approval lock is unchanged: Edit stays disabled and only the lock band explains it', async () => {
-    // No approvals read answers here, so the record's `approval_status`
-    // mirror stands in for the lock (`resolveApprovalLock`).
-    await mountRecordPage({ ...DRAFT, approval_status: 'pending' }, LOCKED_FIELDS);
-    expect(headerEditButton()).toBeDisabled();
+    // A locking approval request on the record, answered by the approvals list.
+    const request = {
+      id: 'req_1',
+      object_name: OBJECT_NAME,
+      record_id: RECORD_ID,
+      status: 'pending',
+      submitter_id: 'u1',
+      pending_approvers: ['u_manager'],
+      lock_record: true,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        const body = u.includes('/approvals/requests?object=')
+          ? { data: [request] }
+          : u.endsWith('/approvals/requests/req_1')
+            ? request
+            : { data: [] };
+        return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+      }),
+    );
+
+    // Writable record under the lock: Edit off, as before this change.
+    await mountRecordPage(DRAFT, LOCKED_FIELDS);
+    await waitFor(() => expect(headerEditButton()).toBeDisabled());
     expect(stateLockBadge()).toBeNull();
 
+    // Every field also state-locked: still the approval lock alone that speaks.
     cleanup();
-    await mountRecordPage({ ...APPROVED, approval_status: 'pending' }, LOCKED_FIELDS);
+    await mountRecordPage(APPROVED, LOCKED_FIELDS);
+    // Wait for the lock band itself: Edit is off from the state alone before
+    // the approvals read lands, so a disabled Edit proves nothing here.
+    await waitFor(() => expect(screen.getByText('Locked for approval')).toBeInTheDocument());
     expect(headerEditButton()).toBeDisabled();
     expect(stateLockBadge()).toBeNull();
   });
