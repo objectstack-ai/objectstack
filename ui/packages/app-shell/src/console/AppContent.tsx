@@ -1254,7 +1254,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               'This app exists, but your account is not authorized to open it. Ask an administrator to grant you access.',
           })}
         </EmptyDescription>
-        <div className="mt-4"><BackToHomeButton testId="app-access-denied-home" variant="default" /></div>
+        <div className="mt-4"><BackToHomeButton testId="app-access-denied-home" variant="default" to={homePath} /></div>
       </Empty>
     </div>
   );
@@ -1331,7 +1331,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             <Button onClick={() => setMissingRecheckRun(null)} data-testid={`${verdictScreen.testId}-retry`}>
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
-            <BackToHomeButton testId={`${verdictScreen.testId}-home`} variant="default" />
+            <BackToHomeButton testId={`${verdictScreen.testId}-home`} variant="default" to={homePath} />
           </>
         }
       />
@@ -2108,6 +2108,7 @@ function ShorthandRecordRedirect() {
  */
 function RouteNotFound() {
   const navigate = useNavigate();
+  const homePath = useHomePath();
   const { t } = useObjectTranslation();
   return (
     <NotFoundState
@@ -2122,7 +2123,7 @@ function RouteNotFound() {
           <Button variant="outline" onClick={() => navigate(-1)} data-testid="route-not-found-back">
             {t('console.notFound.back', { defaultValue: 'Go back' })}
           </Button>
-          <BackToHomeButton testId="route-not-found-home" />
+          <BackToHomeButton testId="route-not-found-home" to={homePath} />
         </>
       }
     />
