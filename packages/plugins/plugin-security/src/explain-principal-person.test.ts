@@ -79,8 +79,9 @@ const DELEGATED_UNTIL = '2099-01-01T00:00:00.000Z';
 /**
  * The organization the rig runs in. A grant applies only in its own
  * organization, so Grace's and Lin's grant rows are this organization's and
- * every asker acts in it; under `single` the claim stands without a
- * membership row.
+ * every asker acts in it — and the people it resolves are current members of
+ * it, since the claim needs a current membership under every posture
+ * (ADR-0093 D8.1, as amended).
  */
 const ORG = 'org_pp';
 
@@ -145,6 +146,9 @@ beforeAll(async () => {
     { id: MASKED_ADMIN.userId, name: 'Masked Admin', email: 'masked@example.test' },
     { id: BLIND_ADMIN.userId, name: 'Blind Admin', email: 'blind@example.test' },
   ], SYS);
+  await e.insert('sys_member', [ADA, GRACE, PLAIN, LIN].map((id) => ({
+    id: `mem_${id}`, user_id: id, organization_id: ORG, role: 'member',
+  })), SYS);
   // Grace holds the directory too, so an agent acting for her keeps it under
   // the D10 intersection; the plain user holds nothing beyond the baseline.
   // [C8 stage 8b] The catalogue row below carries no organization: under

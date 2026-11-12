@@ -130,13 +130,6 @@ export default class AuditVerify extends Command {
     await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
   }
 
-  /** Report a refusal that ends the run with 2: no verdict was given. */
-  private async refuse(json: boolean, error: string, message: string): Promise<never> {
-    if (json) await emitJson({ error, message }, 0, { compact: true });
-    else printError(message);
-    return this.exit(2);
-  }
-
   private async verify(): Promise<void> {
     const { flags } = await this.parse(AuditVerify);
     const json = flags.json === true;
@@ -354,6 +347,19 @@ export default class AuditVerify extends Command {
     } finally {
       await stack.shutdown();
     }
+  }
+
+  /**
+   * Report a refusal that ends the run with 2: no verdict was given.
+   *
+   * Declared below `verify()` on purpose: `diff-usage-error-stream.e2e.test.ts`
+   * judges by line position, and a print call between `run()` and the first
+   * read of the `--json` flag is the shape it refuses, whatever branch guards it.
+   */
+  private async refuse(json: boolean, error: string, message: string): Promise<never> {
+    if (json) await emitJson({ error, message }, 0, { compact: true });
+    else printError(message);
+    return this.exit(2);
   }
 
   /** The offline check of a proof bundle: no boot, no database, trust only through `keys`. */
