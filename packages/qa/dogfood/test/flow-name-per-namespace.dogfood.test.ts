@@ -61,6 +61,10 @@ const ACTION = 'alpha_run_shared';
 /** The screen flow `alpha` and `beta` both ship, and alpha's AI-exposed flow action that starts it. */
 const SCREEN = 'qa_ns_screen';
 const SCREEN_ACTION = 'alpha_run_screen';
+/** [R3] A screen flow alpha ships alone at boot, its AI-exposed action, and the namespace that installs the name later. */
+const LATE = 'qa_ns_screen_late';
+const LATE_ACTION = 'alpha_run_screen_late';
+const IOTA = 'com.qa.ns.iota';
 const ENDPOINT_PATH = '/apps/alpha/run-shared';
 
 const item = (p: string) => ({
@@ -74,8 +78,8 @@ const flow = (p: string, name = FLOW) => ({
 });
 
 /** A screen flow of the shared name `SCREEN`: one screen asking for a required `note`, then the end. */
-const screenFlow = (p: string) => ({
-  name: SCREEN, label: `${p} screen flow`, type: 'screen', status: 'active', runAs: 'user',
+const screenFlow = (p: string, name = SCREEN) => ({
+  name, label: `${p} screen flow`, type: 'screen', status: 'active', runAs: 'user',
   nodes: [
     { id: 'start', type: 'start', label: 'Start' },
     { id: 'ask', type: 'screen', label: 'Ask', config: { title: `${p} asks`, fields: [{ name: 'note', label: 'Note', type: 'text', required: true }] } },
@@ -89,12 +93,16 @@ const alphaStack = defineStack({
   manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_ns_alpha', version: '1.0.0', type: 'app' },
   requires: ['automation'],
   objects: [item('alpha')],
-  flows: [flow('alpha'), flow('alpha', Q4), screenFlow('alpha')],
+  flows: [flow('alpha'), flow('alpha', Q4), screenFlow('alpha'), screenFlow('alpha', LATE)],
   actions: [
     { name: ACTION, label: 'Run the shared flow', objectName: 'alpha_item', type: 'flow', target: FLOW },
     {
       name: SCREEN_ACTION, label: 'Run the shared screen flow', objectName: 'alpha_item', type: 'flow', target: SCREEN,
       ai: { exposed: true, description: 'Run alpha\'s screen flow: it asks for a note, then ends.' },
+    },
+    {
+      name: LATE_ACTION, label: 'Run the late screen flow', objectName: 'alpha_item', type: 'flow', target: LATE,
+      ai: { exposed: true, description: 'Run alpha\'s late screen flow: it asks for a note, then ends.' },
     },
   ],
   apis: [{
@@ -311,7 +319,7 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     expect(await ledgerRows(Q4)).toEqual([{ package_id: ALPHA, active: false }]);
   });
 
-  it('alpha\'s screen flow, started by alpha\'s flow action with beta\'s of the name installed, pauses and is finished at the bare run door and through MCP resume_run', async () => {
+  it('alpha\'s screen flow, started by alpha\'s flow action with beta\'s of the name installed, pauses and is finished at the bare run door and through MCP resume_run; [R3] so is a run paused while alpha alone held its name, once a second namespace installs it', async () => {
     /** One `tools/call` over the live MCP transport, as the signed-in admin. */
     const tool = async (name: string, args: Record<string, unknown>) => {
       const res = await stack.api('/mcp', {
@@ -327,13 +335,13 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
       try { payload = JSON.parse(text); } catch { payload = { message: text }; }
       return { isError: rpc.result?.isError === true, payload, text };
     };
-    /** Start alpha's screen flow through alpha's own flow action: the run pauses on alpha's screen, in alpha's slot. */
-    const startPaused = async (): Promise<string> => {
-      const started = await call('POST', `/actions/alpha_item/${SCREEN_ACTION}`, { params: {} });
+    /** Start alpha's screen flow `name` through alpha's own flow action: the run pauses on alpha's screen, in alpha's slot. */
+    const startPaused = async (action = SCREEN_ACTION, name = SCREEN): Promise<string> => {
+      const started = await call('POST', `/actions/alpha_item/${action}`, { params: {} });
       expect(started.status, JSON.stringify(started.body)).toBe(200);
       const result = started.body?.data?.result ?? started.body?.data ?? started.body?.result ?? started.body;
       expect([result?.status, result?.screen?.title], JSON.stringify(started.body)).toEqual(['paused', 'alpha asks']);
-      expect((await automation().getRun(result.runId))?.flowName).toBe(automation().flowSlotKey(ALPHA, SCREEN));
+      expect((await automation().getRun(result.runId))?.flowName).toBe(automation().flowSlotKey(ALPHA, name));
       return String(result.runId);
     };
     expect([slotLabel(ALPHA, SCREEN), slotLabel(BETA, SCREEN)]).toEqual(['alpha screen flow', 'beta screen flow']);
@@ -354,5 +362,27 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     expect(viaMcp.isError, viaMcp.text).toBe(false);
     expect(viaMcp.payload?.action).toBe(SCREEN_ACTION);
     expect((await automation().getRun(agentRun))?.status).toBe('completed');
+
+    // [R3] Two runs paused while alpha alone holds LATE (its bare key), then iota installs the name.
+    const [lateRun, lateAgentRun] = [await startPaused(LATE_ACTION, LATE), await startPaused(LATE_ACTION, LATE)];
+    expect((await automation().getRun(lateRun))?.flowName).toBe(LATE);
+    const installed = await call('POST', '/marketplace/install-local', inline('iota', { flows: [screenFlow('iota', LATE)] }));
+    expect(installed.status, JSON.stringify(installed.body)).toBeLessThan(300);
+    expect([slotLabel(ALPHA, LATE), slotLabel(IOTA, LATE)]).toEqual(['alpha screen flow', 'iota screen flow']);
+    expect((await automation().getRun(lateRun))?.flowName).toBe(automation().flowSlotKey(ALPHA, LATE));
+    // iota's address answers alpha's run as a run nobody holds; alpha's address and the bare door read alpha's screen.
+    const nobody = await call('GET', `/automation/iota/${LATE}/runs/run_nobody/screen`);
+    const underIota = await call('GET', `/automation/iota/${LATE}/runs/${lateRun}/screen`);
+    expect([underIota.status, underIota.code, nobody.status >= 400]).toEqual([nobody.status, nobody.code, true]);
+    for (const prefix of [`/automation/alpha/${LATE}`, `/automation/${LATE}`]) {
+      const read = await call('GET', `${prefix}/runs/${lateRun}/screen`);
+      expect([read.status, read.body?.data?.screen?.title], JSON.stringify(read.body)).toEqual([200, 'alpha asks']);
+    }
+    const lateResumed = await call('POST', `/automation/${LATE}/runs/${lateRun}/resume`, { inputs: { note: 'done' } });
+    expect(lateResumed.status, JSON.stringify(lateResumed.body)).toBe(200);
+    // MCP resume_run admits alpha's own flow action for alpha's run.
+    const lateViaMcp = await tool('resume_run', { runId: lateAgentRun, values: { note: 'done' } });
+    expect([lateViaMcp.isError, lateViaMcp.payload?.action], lateViaMcp.text).toEqual([false, LATE_ACTION]);
+    expect([(await automation().getRun(lateRun))?.status, (await automation().getRun(lateAgentRun))?.status]).toEqual(['completed', 'completed']);
   });
 });

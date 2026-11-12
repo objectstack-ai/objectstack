@@ -3646,7 +3646,8 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // read, resume, cancel, restore-suspension and the screen read) on such a
     // name acts on the run's own slot: a run id names exactly one run, and
     // the run carries its slot key, so it is no guess at a name. A run of
-    // another flow, or one carrying no package, keeps the `409`.
+    // another flow, or one whose key no one holder's slot is filed under,
+    // keeps the `409`.
     {
         const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
@@ -3659,7 +3660,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             automationService = slotted;
         } else if (admission) {
             const byRun = !address.qualifier && admission.status === 409 && parts[1] === 'runs' && parts[2]
-                ? await runSlotView(automationService, parts[0], parts[2])
+                ? await runSlotView(automationService, parts[0], parts[2], admission.refusal.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])))
                 : undefined;
             if (!byRun) return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
             automationService = byRun;

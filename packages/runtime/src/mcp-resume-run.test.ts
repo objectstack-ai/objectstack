@@ -753,11 +753,11 @@ describe('MCP resumeRun — a run of a flow name two namespaces hold (ADR-0150 D
         getPackage: (id: string) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' }),
         getAllPackages: () => holders.map((id) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' })),
     };
-    /** A paused run of `pkg`'s `schedule_followup`, started by `u1` on `lead_1`, keyed as the engine keys it. */
-    const parkedRunOf = (h: ReturnType<typeof makeHarness>, pkg: string): string => {
+    /** A paused run of `pkg`'s `schedule_followup`, started by `u1` on `lead_1`, keyed as the engine keys it (or `key`). */
+    const parkedRunOf = (h: ReturnType<typeof makeHarness>, pkg: string, key = `${pkg}/${SCHEDULE.target}`): string => {
         const runId = `run_${pkg}`;
         h.engine.runs.set(runId, {
-            runId, flowName: `${pkg}/${SCHEDULE.target}`, status: 'paused',
+            runId, flowName: key, status: 'paused',
             userId: 'u1', object: OBJECT, recordId: 'lead_1', screens: [SCREEN_1],
         });
         return runId;
@@ -790,4 +790,34 @@ describe('MCP resumeRun — a run of a flow name two namespaces hold (ADR-0150 D
         expect(h.engine.resume).not.toHaveBeenCalled();
         expect(h.engine.runs.get(runId)?.status).toBe('paused');
     });
+
+    /** The engine's slot entries, filing `filed`'s slots of the name under the bare name (the engine holds one slot: M1). */
+    const slotted = (h: ReturnType<typeof makeHarness>, filed: string[]) => Object.assign(h.engine, {
+        executeSlot: vi.fn(), getFlowSlot: vi.fn(), toggleFlowSlot: vi.fn(),
+        flowSlotKey: (pkg: string, name: string) => (name === SCHEDULE.target && filed.includes(pkg) ? name : undefined),
+    });
+
+    it('[R3-B] a run under the bare name the engine files CRM\'s one slot under is CRM\'s: CRM\'s action resumes it, HR\'s does not', async () => {
+        const crm = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+        slotted(crm, [CRM]);
+        const resumed = await crm.bridgeFor('u1').resumeRun(parkedRunOf(crm, CRM, SCHEDULE.target), { values: { subject: 'Call back' } });
+        expect(resumed).toMatchObject({ ok: true, action: SCHEDULE.name });
+
+        const hr = makeHarness({ actions: [SCHEDULE], objectPackage: HR, registry });
+        slotted(hr, [CRM]);
+        const runId = parkedRunOf(hr, CRM, SCHEDULE.target);
+        expect((await refusalOf(hr.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }))).status).toBe(403);
+        expect(hr.engine.resume).not.toHaveBeenCalled();
+    });
+
+    for (const [filed, what] of [[[], 'no holder\'s slot'], [[CRM, HR], 'both holders\' slots (CONTROL)']] as const) {
+        it(`[R3-B] a run under a key ${what} is filed under is refused 409 naming every holder, and stays parked`, async () => {
+            const h = makeHarness({ actions: [SCHEDULE], objectPackage: CRM, registry });
+            slotted(h, [...filed]);
+            const runId = parkedRunOf(h, CRM, SCHEDULE.target);
+            const refusal = await refusalOf(h.bridgeFor('u1').resumeRun(runId, { values: { subject: 'Call back' } }));
+            expect([refusal.status, refusal.message.includes(CRM) && refusal.message.includes(HR)]).toEqual([409, true]);
+            expect([h.engine.resume.mock.calls.length, h.engine.runs.get(runId)?.status]).toEqual([0, 'paused']);
+        });
+    }
 });

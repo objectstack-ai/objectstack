@@ -46,6 +46,8 @@ interface HarnessOptions {
     slots?: string[];
     /** The engine has no slot entries at all. */
     noSlots?: boolean;
+    /** Every slot the engine holds is filed under the bare name: two holders' slots under one key. */
+    bareKeys?: boolean;
     /** `getRun` answers `null` for every run: only the suspended-run list names it. */
     getRunBlind?: boolean;
 }
@@ -56,7 +58,7 @@ function harness(options: HarnessOptions = {}) {
     const known = (runId: string) => Object.prototype.hasOwnProperty.call(runs, runId);
     const keyOf = (pkg: string | null, name: string) => {
         if (name !== NAME || pkg === null || !slots.includes(pkg)) return undefined;
-        return slots.length > 1 ? `${pkg}/${NAME}` : NAME;
+        return slots.length > 1 && !options.bareKeys ? `${pkg}/${NAME}` : NAME;
     };
     const shared = () => Object.assign(new Error(`Flow '${NAME}' is held by several packages`), { code: 'RESOURCE_CONFLICT', status: 409 });
     const automation: Record<string, any> = {
@@ -231,10 +233,19 @@ describe('[ADR-0150 D4, #31696] a bare run door on a shared name acts on the run
                 if (WRITES.has(door.verb)) expect(h.automation[door.verb]).not.toHaveBeenCalled();
             });
 
-            it('CONTROL — the run filed under the bare name while the registry holds the name twice carries no package: 409', async () => {
+            it('[R3] a run under the bare name the engine files CRM\'s one slot under (the registry holds the name twice) is CRM\'s, as under `crm`', async () => {
                 const h = harness({ slots: [CRM], runs: { 'r-lone': NAME } });
+                const bare = await send(h, door, `/${NAME}`, 'r-lone');
+                expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+                expect(bare).toEqual(await send(harness({ slots: [CRM], runs: { 'r-lone': NAME } }), door, `/crm/${NAME}`, 'r-lone'));
+                if (WRITES.has(door.verb)) expect(verbRunIds(h, door.verb)).toEqual(['r-lone']);
+            });
+
+            it('CONTROL [R3] — a bare key both holders\' slots are filed under is no one holder\'s: 409 naming both, nothing acted on', async () => {
+                const h = harness({ bareKeys: true, runs: { 'r-lone': NAME } });
                 const answer = await send(h, door, `/${NAME}`, 'r-lone');
                 expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+                expect(candidatesOf(answer)).toEqual(BOTH);
                 if (WRITES.has(door.verb)) expect(h.automation[door.verb]).not.toHaveBeenCalled();
             });
         });

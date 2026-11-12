@@ -260,23 +260,32 @@ export function flowHolderForCaller(
 }
 
 /**
+ * [ADR-0150 D4, #31696] The package whose slot of `name` the engine files
+ * under the run key `key`: the key's own package for `PACKAGE/name`; for any
+ * other key, the one package of `holders` (every holder the registry names)
+ * whose slot is filed under it. `undefined` when no holder's is, or two or
+ * more are: the run is then no one holder's.
+ */
+export function runSlotPackage(service: unknown, name: string, key: unknown, holders: readonly string[]): string | undefined {
+    const slots = slotEntriesOf(service);
+    const flow = runFlowOf(key);
+    if (!slots || !flow || flow.name !== name) return undefined;
+    const filed = (flow.packageId === undefined ? holders : [flow.packageId]).filter((packageId) => slots.flowSlotKey(packageId, name) === key);
+    return filed.length === 1 ? filed[0] : undefined;
+}
+
+/**
  * [ADR-0150 D4, #31696] The automation service a bare run door
  * (`/automation/:name/runs/:runId/…`) reads when `name` is one two packages
- * hold, which the bare doors refuse: a run id names exactly one run, and the
- * run carries its own slot key, so the door acts on THAT run's slot when the
- * key is `name`'s slot, `PACKAGE/name`, the engine files. `undefined` — the
- * door keeps its `409` naming every holder — for a run it cannot read, a run
- * of another flow, a run carrying no package (a package-less run of a shared
- * name), or an engine with no slot entries.
+ * hold (`holders`), which the bare doors refuse: a run id names exactly one
+ * run, and the run carries its own slot key, so the door acts on the slot of
+ * {@link runSlotPackage}. `undefined` — the door keeps its `409` naming every
+ * holder — for a run it cannot read, a run of another flow, a key no one
+ * holder's slot is filed under, or an engine with no slot entries.
  */
-export async function runSlotView<T extends object>(service: T, name: string, runId: string): Promise<T | undefined> {
-    const slots = slotEntriesOf(service);
-    if (!slots) return undefined;
-    const key = await runFlowKeyOf(service, runId);
-    const flow = runFlowOf(key);
-    if (!flow || flow.name !== name || flow.packageId === undefined) return undefined;
-    if (slots.flowSlotKey(flow.packageId, name) !== key) return undefined;
-    return flowSlotView(service, flow.packageId, name);
+export async function runSlotView<T extends object>(service: T, name: string, runId: string, holders: readonly string[] = []): Promise<T | undefined> {
+    const packageId = runSlotPackage(service, name, await runFlowKeyOf(service, runId), holders);
+    return packageId === undefined ? undefined : flowSlotView(service, packageId, name);
 }
 
 /**

@@ -40,7 +40,8 @@ import { declaresOptions } from '@objectstack/formula';
 import { classifyResumeResult } from './automation.js';
 // [ADR-0150 D3/D4, #31696] A flow action's `target` read from the action's own
 // package; a run's flow read off the slot key it carries.
-import { flowHolderForCaller, flowServiceForCaller, runFlowOf } from '../flow-slot-view.js';
+import { flowHolderForCaller, flowServiceForCaller, runFlowOf, runSlotPackage } from '../flow-slot-view.js';
+import { automationAddressRegistryOf, bareNameRefusal } from './automation-address.js';
 // [ADR-0106 D1/D5] The `/meta` door's object-schema masker and projection —
 // imported, never restated, so `describe_object` and `list_objects` answer a
 // caller the same field set the `/meta` object read answers that caller.
@@ -1657,8 +1658,9 @@ export async function resumeActionRun(
     // slot key, `PACKAGE/NAME`: the run's flow is that NAME, of that package.
     // A candidate targets the name, and its target reaches the run's package
     // from the action's own (`run_action`'s resolution of it): the action that
-    // could have started this run. A run carrying no package compares its
-    // name, as before.
+    // could have started this run. A run whose key carries no package, of a
+    // name two packages hold, is the one holder's whose slot is filed under
+    // the key (`runSlotPackage`), else refused naming every holder.
     const runFlow = runFlowOf(run.flowName);
     const flowName: unknown = runFlow?.name ?? run.flowName;
     const runObject = typeof trigger?.object === 'string' && trigger.object !== '' ? trigger.object : undefined;
@@ -1666,13 +1668,20 @@ export async function resumeActionRun(
     const objectsListing = await readObjects?.();
     const declarations = await actionExec.collectActionDeclarations(deps, meta, objectsListing, await readActions?.());
     const activationEngine: any = await deps.getObjectQL(context, envId).catch(() => undefined);
+    let runPackage = runFlow?.packageId;
+    const runName = runPackage === undefined && typeof flowName === 'string' ? flowName.replace(/^\u0000/, '') : '';
+    const shared = runName ? bareNameRefusal(automationAddressRegistryOf(activationEngine), 'flow', runName) : undefined;
+    if (shared) {
+        runPackage = runSlotPackage(automation, runName, run.flowName, shared.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])));
+        if (runPackage === undefined) throw resumeDoorError(deps, shared.message, 409, { candidates: shared.candidates });
+    }
     const candidates = declarations.filter(({ action, objectName, packageId }) =>
         action?.type === 'flow'
         && !actionExec.isDeclarativeUpdateAction(action)
         && typeof action?.target === 'string'
         && action.target === flowName
-        && (runFlow?.packageId === undefined
-            || flowHolderForCaller(activationEngine?.registry, action.target, packageId) === runFlow.packageId)
+        && (runPackage === undefined
+            || flowHolderForCaller(activationEngine?.registry, action.target, packageId) === runPackage)
         && (runObject === undefined ? actionExec.isObjectLessActionKey(objectName) : objectName === runObject));
     let admitted: { action: any; objectName: string } | undefined;
     let firstRefusal: Error | undefined;
