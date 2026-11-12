@@ -43,6 +43,16 @@
  * ({@link slotStoreOf}). A loader's own unscoped read still answers the item
  * of a name written last ({@link lastWrittenOf}), as it did.
  *
+ * [#32517] A bundled type (`isBundledStoreType`: `email_template`, one member
+ * per `locale`) holds several members in one slot, as `DatabaseLoader` holds a
+ * row per member since #32214: each member has its own key under its slot
+ * ({@link memberKeyOf}; the canonical member keeps the slot's own key), so a
+ * second locale of one package's item never overwrites the first. The slot
+ * rules above count SLOTS, never members: one package's two locales are one
+ * holder (no D3 refusal), a package-less member under a one-holder name is
+ * that holder's member (D4), a removal naming a package drops every member of
+ * its slot, and a read of a slot answers its member written last.
+ *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
  * every package's endpoint instead of the last one registered under a name.
@@ -111,6 +121,9 @@ const SLOT_SEPARATOR = '\u0000';
 /** Between an action's owning object and its name in a slot identity. */
 const OWNER_SEPARATOR = '\u0001';
 
+/** [#32517] Between a slot and a bundled type's non-canonical member in a store key. */
+const MEMBER_SEPARATOR = '\u0002';
+
 /** The types whose slot identity carries the owning object besides the name. */
 const OWNER_KEYED_SLOT_TYPES: ReadonlySet<string> = new Set(['action']);
 
@@ -141,10 +154,37 @@ function slotIdentityOf(type: string, name: string, data: unknown): string {
   return owner === undefined ? name : `${owner}${OWNER_SEPARATOR}${name}`;
 }
 
-/** The identity a store key addresses: the key without its package. */
+/**
+ * [#32517] The slot a store key addresses: the key without a bundled type's
+ * member — the key itself for every other key.
+ */
+export function slotOfKey(key: string): string {
+  const at = key.indexOf(MEMBER_SEPARATOR);
+  return at === -1 ? key : key.slice(0, at);
+}
+
+/** [#32517] The member part of a store key (`''` for a slot's own key), to address the same member of another slot. */
+export function memberSuffixOf(key: string): string {
+  return key.slice(slotOfKey(key).length);
+}
+
+/**
+ * [#32517] The store key of `data` in `slot`: for a bundled type stored per
+ * `(package, name)`, the slot and the member the item holds
+ * ({@link storedBundleMemberOf}) — the canonical member keeps the slot's own
+ * key, so a one-locale bundle is keyed as before; every other type, the slot.
+ */
+export function memberKeyOf(type: string, slot: string, data: unknown): string {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return slot;
+  const member = storedBundleMemberOf(type, data);
+  return member === null || member === undefined ? slot : `${slot}${MEMBER_SEPARATOR}${member}`;
+}
+
+/** The identity a store key addresses: the key without its package (and without its member). */
 export function keyIdentityOf(key: string): string {
-  const at = key.indexOf(SLOT_SEPARATOR);
-  return at === -1 ? key : key.slice(at + 1);
+  const slot = slotOfKey(key);
+  const at = slot.indexOf(SLOT_SEPARATOR);
+  return at === -1 ? slot : slot.slice(at + 1);
 }
 
 /**
@@ -196,11 +236,12 @@ export function slotPackageOf(key: string): string | undefined {
  * [#32246] The store key of `data`, an item of `name` held for `packageId`:
  * that package's slot of the item's identity ({@link slotIdentityOf} — the
  * name, or an object-bound action's object and name), or the identity's bare
- * slot when it is held for no package.
+ * slot when it is held for no package; [#32517] a bundled type's member keyed
+ * under its slot ({@link memberKeyOf}).
  */
 export function storeSlotKey(type: string, name: string, packageId: string | null | undefined, data: unknown): string {
   const identity = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? slotIdentityOf(type, name, data) : name;
-  return isPackageCaller(packageId) ? slotKey(packageId, identity) : identity;
+  return memberKeyOf(type, isPackageCaller(packageId) ? slotKey(packageId, identity) : identity, data);
 }
 
 /**
@@ -215,7 +256,8 @@ export function storeRowKey(name: string, packageId: string | null | undefined):
 /**
  * [ADR-0150 D3/D4, #32246] Loaders' stored items of `name` (one loader's, or
  * every loader's in precedence order), keyed the way the in-memory store keys
- * them ({@link storeSlotKey}), the first item of a slot kept. The store's own
+ * them ({@link storeSlotKey}), the first item of a slot (a bundled type: of a
+ * slot's member) kept. The store's own
  * rule ({@link readStoreEntry}) then answers for the loaders exactly as it
  * answers for the registry, so the rule stays here, once.
  */
@@ -309,40 +351,75 @@ export function storeKeysNamed(store: ReadonlyMap<string, unknown> | undefined, 
   return [...store.keys()].filter((key) => storedNameOf(key) === name);
 }
 
-/** The packages holding a slot of `identity`, in the store's order. */
+/**
+ * The packages holding a slot of `identity`, in the store's order, each once
+ * ([#32517] a package holding several members of a bundle is one holder).
+ */
 function packageSlotsOf(store: ReadonlyMap<string, unknown>, identity: string): string[] {
   const holders: string[] = [];
   for (const key of store.keys()) {
     const packageId = slotPackageOf(key);
-    if (packageId !== undefined && keyIdentityOf(key) === identity) holders.push(packageId);
+    if (packageId !== undefined && keyIdentityOf(key) === identity && !holders.includes(packageId)) holders.push(packageId);
   }
   return holders;
+}
+
+/** [#32517] Whether `store` holds any member of `slot`. */
+function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
+  for (const key of store.keys()) if (slotOfKey(key) === slot) return true;
+  return false;
+}
+
+/** [#32517] Of `slot`'s members in `store`, the key written last ({@link writtenLast}); the slot itself when none is held. */
+function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
+  const members = [...store.keys()].filter((key) => slotOfKey(key) === slot);
+  return members.length === 0 ? slot : writtenLast(store, members);
 }
 
 /**
  * Where a write of `(type, name, data)` lands: the key it fills, and the keys
  * it replaces besides that one (the bare slot a package's first item takes
- * over). See the module doc's **write** rule.
+ * over). See the module doc's **write** rule. [#32517] A bundled type's
+ * member fills its own key under the slot ({@link memberKeyOf}), and a
+ * package's first item takes over the bare slot's SAME member only, as
+ * `DatabaseLoader` binds the package-less row of the member it writes.
  */
 export function storeWriteKey(
   store: ReadonlyMap<string, unknown> | undefined,
   type: string,
   name: string,
   data: unknown,
-  identity: string = slotIdentityOf(type, name, data),
+): { key: string; replaces: string[] } {
+  return slottedWriteKey(store, type, name, data, slotIdentityOf(type, name, data), true);
+}
+
+/**
+ * {@link storeWriteKey} over `identity`; `members` keys a bundled type's
+ * member under its slot ({@link memberKeyOf}), off for a store that holds
+ * one entry per slot ({@link storeRowWriteKey}).
+ */
+function slottedWriteKey(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  data: unknown,
+  identity: string,
+  members: boolean,
 ): { key: string; replaces: string[] } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { key: name, replaces: [] };
+  const keyed = (slot: string): string => (members ? memberKeyOf(type, slot, data) : slot);
   if (!store) {
     const packageId = storedItemPackageId(data);
-    return { key: packageId === undefined ? identity : slotKey(packageId, identity), replaces: [] };
+    return { key: keyed(packageId === undefined ? identity : slotKey(packageId, identity)), replaces: [] };
   }
   const holders = packageSlotsOf(store, identity);
   const packageId = storedItemPackageId(data);
   if (packageId === undefined) {
-    return { key: holders.length === 1 ? slotKey(holders[0]!, identity) : identity, replaces: [] };
+    return { key: keyed(holders.length === 1 ? slotKey(holders[0]!, identity) : identity), replaces: [] };
   }
   const others = holders.filter((holder) => holder !== packageId);
-  return { key: slotKey(packageId, identity), replaces: others.length === 0 && store.has(identity) ? [identity] : [] };
+  const bare = keyed(identity);
+  return { key: keyed(slotKey(packageId, identity)), replaces: others.length === 0 && store.has(bare) ? [bare] : [] };
 }
 
 /**
@@ -357,7 +434,7 @@ export function storeRowWriteKey(
   name: string,
   data: unknown,
 ): { key: string; replaces: string[] } {
-  return storeWriteKey(store, type, name, data, name);
+  return slottedWriteKey(store, type, name, data, name, false);
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
@@ -371,8 +448,8 @@ function isPackageCaller(packageId: string | null | undefined): packageId is str
  * removed by one package — that package, which the storage half deletes by
  * and the `deleted` announcement names.
  *
- *  - **naming a package**: that package's slot only; no key when it holds no
- *    slot of the name. ⛔ Never another package's item, and never the name's
+ *  - **naming a package**: that package's slot only ([#32517] every member
+ *    of it); no key when it holds no slot of the name. ⛔ Never another package's item, and never the name's
  *    bare slot (the environment's own item, or a customization of a holder).
  *  - **naming none**: every slot of the name while at most one package holds
  *    it — the one item the bare-name map held, removed as it was. With two or
@@ -396,8 +473,8 @@ export function storeRemovalKeys(
 ): { keys: string[]; packageId?: string } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
   if (isPackageCaller(packageId)) {
-    const key = slotKey(packageId, name);
-    return { keys: store?.has(key) ? [key] : [], packageId };
+    const slot = slotKey(packageId, name);
+    return { keys: storeKeysNamed(store, type, name).filter((key) => slotOfKey(key) === slot), packageId };
   }
   const holders = store ? packageSlotsOf(store, name) : [];
   if (holders.length > 1) {
@@ -420,12 +497,13 @@ export function storeRemovalKeys(
  * packages', or a package's beside the name's package-less slot. The refusal
  * names every holder in the store's order (each package, and the environment
  * for the package-less slot), and nothing picks one. `DatabaseLoader`'s
- * rollback by name asks it over the name's rows.
+ * rollback by name asks it over the name's rows. [#32517] Slots are counted,
+ * never a bundle's members: one slot's two locales are one holder.
  *
  * @throws {PackageScopedNameRefusedError} two or more slots of the name.
  */
 export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): void {
-  const keys = storeKeysNamed(store, type, name);
+  const keys = [...new Set(storeKeysNamed(store, type, name).map(slotOfKey))];
   if (keys.length <= 1) return;
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
@@ -457,7 +535,9 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
  * package's slots; one naming none: every identity's D3 answer), as the
  * bare-name map did. [#32244] A read naming none whose answers belong to two
  * or more packages is refused instead ({@link refuseAcrossOwners}): it would
- * pick one package's action over another's.
+ * pick one package's action over another's. [#32517] A slot that holds a
+ * bundle's members answers its member written last, as the slot keyed by
+ * `(package, name)` alone held it.
  *
  * @throws {PackageScopedNameRefusedError} a read naming no package of a name
  *   two or more packages hold on one identity, or each on its own object
@@ -480,8 +560,9 @@ export function readStoreEntry(
   if (found.length === 0) {
     return { found: false, settled: answers.some((answer) => answer === 'settled') };
   }
-  if (!isPackageCaller(packageId)) refuseAcrossOwners(store, type, name, found.map((answer) => answer.key));
-  return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
+  const keys = found.map((answer) => latestMemberOf(store, answer.key));
+  if (!isPackageCaller(packageId)) refuseAcrossOwners(store, type, name, keys);
+  return { found: true, data: store.get(writtenLast(store, keys)) };
 }
 
 /**
@@ -524,7 +605,7 @@ function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, n
 }
 
 /**
- * One identity's answer to a by-name read: the key that answers, `'settled'`
+ * One identity's answer to a by-name read: the slot that answers, `'settled'`
  * when the read names a package and only other packages hold the identity, or
  * `undefined` when nothing does. See the module doc's **read** rule.
  */
@@ -536,7 +617,7 @@ function readIdentity(
   packageId: string | null | undefined,
 ): { key: string } | 'settled' | undefined {
   const holders = packageSlotsOf(store, identity);
-  if (holders.length === 0) return store.has(identity) ? { key: identity } : undefined;
+  if (holders.length === 0) return holdsSlot(store, identity) ? { key: identity } : undefined;
   if (isPackageCaller(packageId)) {
     return holders.includes(packageId) ? { key: slotKey(packageId, identity) } : 'settled';
   }

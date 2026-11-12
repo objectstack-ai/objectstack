@@ -90,9 +90,11 @@ import {
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
+  memberSuffixOf,
   readStoreEntry,
   recordStoreWrite,
   slotPackageOf,
+  slotOfKey,
   slotStoreOf,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
@@ -1442,6 +1444,11 @@ export class MetadataManager implements IMetadataService {
    *    package-held name it is that holder's customization, never a second
    *    item).
    *
+   * [#32517] A bundled type's member is shadowed by the SAME member only (a
+   * slot's member, or the package-less slot's same member), so one package's
+   * second locale is listed beside its first, as the store keys them
+   * ({@link storeSlotKey}).
+   *
    * One loader's own slots do not shadow each other.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
@@ -1449,15 +1456,16 @@ export class MetadataManager implements IMetadataService {
     const heldIdentities = new Set<string>();
     const packageHeldIdentities = new Set<string>();
     for (const key of prior) {
-      heldIdentities.add(keyIdentityOf(key));
+      heldIdentities.add(keyIdentityOf(key) + memberSuffixOf(key));
       if (slotPackageOf(key) !== undefined) packageHeldIdentities.add(keyIdentityOf(key));
     }
     for (const entry of await this.loaderSlotEntries(loader, type)) {
       const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
       const identity = keyIdentityOf(key);
+      const member = memberSuffixOf(key);
       const shadowed = items.has(key) || (slotPackageOf(key) === undefined
-        ? heldIdentities.has(identity)
-        : prior.has(identity) && !packageHeldIdentities.has(identity));
+        ? heldIdentities.has(identity + member)
+        : prior.has(identity + member) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
   }
@@ -2266,8 +2274,10 @@ export class MetadataManager implements IMetadataService {
    * package's row and the `deleted` event names this package.
    */
   async unregisterPackage(packageName: string): Promise<void> {
-    // Collect all items to delete (type and name pairs)
-    const itemsToDelete: Array<{ type: string; name: string; key: string }> = [];
+    // Collect all items to delete (type and name pairs). [#32517] One entry
+    // per slot: a bundled type's members of one slot are removed together,
+    // with the one `deleted` announcement the slot made before.
+    const itemsToDelete = new Map<string, { type: string; name: string; keys: string[] }>();
 
     for (const [type, typeStore] of this.registry) {
       const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
@@ -2275,15 +2285,18 @@ export class MetadataManager implements IMetadataService {
         // [#32246] A by-package type: also every item in the package's slot,
         // a package-less customization of its item (D4) included.
         if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
-          itemsToDelete.push({ type, name: storedNameOf(key), key });
+          const slot = `${type}\u0000${slotOfKey(key)}`;
+          const entry = itemsToDelete.get(slot);
+          if (entry) entry.keys.push(key);
+          else itemsToDelete.set(slot, { type, name: storedNameOf(key), keys: [key] });
         }
       }
     }
 
     // Delete each item using unregister() to ensure deletion from both registry and loaders
-    for (const { type, name, key } of itemsToDelete) {
+    for (const { type, name, keys } of itemsToDelete.values()) {
       await this.unregisterAt(type, name, undefined, {
-        keys: [key],
+        keys,
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
     }
