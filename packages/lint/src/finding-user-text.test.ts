@@ -13,7 +13,6 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PLATFORM_LOCALE_TAGS } from '@objectstack/spec/system';
 import {
   FINDING_USER_TEXT_CATALOG,
-  USER_TEXT_FALLBACK_LOCALE,
   findingUserMessage,
   mergeUserTextCatalogs,
   renderUserText,
@@ -55,8 +54,7 @@ describe('finding user text · the locale ladder (request locale, then workspace
   });
 
   it('ends at en: an unknown locale, and a platform locale a rule has no sentence for, both render English', () => {
-    expect(USER_TEXT_FALLBACK_LOCALE).toBe('en');
-    expect(PLATFORM_LOCALE_TAGS).toContain(USER_TEXT_FALLBACK_LOCALE);
+    expect(PLATFORM_LOCALE_TAGS).toContain('en');
     expect(userTextLocaleOf(entry, ['tlh'])).toBe('en');
     expect(userTextLocaleOf(entry, ['ja'])).toBe('en');
     expect(userTextLocaleOf(entry, ['ja', 'ko'])).toBe('en');

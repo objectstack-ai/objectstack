@@ -1217,7 +1217,6 @@ export type {
 // `RuntimeAuthoringIssueSchema.userMessage`; also on `@objectstack/lint/runtime`.
 export {
   FINDING_USER_TEXT_CATALOG,
-  USER_TEXT_FALLBACK_LOCALE,
   findingUserMessage,
   mergeUserTextCatalogs,
   renderUserText,

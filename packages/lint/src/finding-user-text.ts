@@ -71,8 +71,12 @@ export type UserTextEntry = { readonly en: UserTextTemplate } & {
 /** A producer's catalog: rule id → its sentences. */
 export type UserTextCatalog = Readonly<Record<string, UserTextEntry>>;
 
-/** The ladder's last rung, which every {@link UserTextEntry} carries. */
-export const USER_TEXT_FALLBACK_LOCALE: PlatformLocaleTag = 'en';
+/**
+ * The ladder's last rung, which every {@link UserTextEntry} carries. Not
+ * exported: it is a locale tag, and an exported slug-shaped string reads as a
+ * rule id to this package's barrel census (`rule-id-barrel-exports.test.ts`).
+ */
+const USER_TEXT_FALLBACK_LOCALE: PlatformLocaleTag = 'en';
 
 /**
  * The locale an entry answers in, for an ordered list of candidates (the
