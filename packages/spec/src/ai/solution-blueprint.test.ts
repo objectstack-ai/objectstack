@@ -574,6 +574,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         name: 'project',
         label: null,
         description: null,
+        icon: null,
         sharingModel: null,
         nameField: null,
         stageField: null,
@@ -617,7 +618,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
+        { name: 'x', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -638,6 +639,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           name: 'project',
           label: null,
           description: null,
+          icon: null,
           sharingModel: null,
           nameField: null,
           stageField: null,
@@ -1236,6 +1238,7 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
         name: 'customer',
         label: null,
         description: null,
+        icon: null,
         sharingModel: null,
         nameField: null,
         stageField: null,
@@ -1275,7 +1278,7 @@ describe('blueprint widget `aggregate` and calendar view `startDateField`', () =
     assumptions: [],
     questions: null,
     objects: [{
-      name: 'interview', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      name: 'interview', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'score', label: null, type: 'number', required: null, reference: null, options: null,
         summaryOperations: null, expression: null, defaultValue: null,
@@ -1455,7 +1458,7 @@ describe('blueprint field `defaultValue`', () => {
     assumptions: [],
     questions: null,
     objects: [{
-      name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+      name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
       fields: [{
         name: 'flag', label: null, required: null, reference: null, options: null, summaryOperations: null,
         expression: null, defaultValue: null, ...field,
@@ -1563,7 +1566,7 @@ describe('blueprint field `defaultValue`', () => {
     const bare = SolutionBlueprintStrictSchema.safeParse({
       summary: 's', assumptions: [], questions: null, views: null, dashboards: null, app: null,
       objects: [{
-        name: 'task', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        name: 'task', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
           name: 'flag', label: null, type: 'boolean', required: null, reference: null, options: null,
           summaryOperations: null, expression: null,
@@ -1662,7 +1665,7 @@ describe('blueprint field `expression` — the stored computed value', () => {
       assumptions: [],
       questions: null,
       objects: [{
-        name: 'order_line', label: null, description: null, sharingModel: null, nameField: null, stageField: null,
+        name: 'order_line', label: null, description: null, icon: null, sharingModel: null, nameField: null, stageField: null,
         fields: [{
           ...STORED, label: null, required: null, reference: null, options: null, summaryOperations: null, defaultValue: null,
         }],
@@ -1706,5 +1709,58 @@ describe('blueprint field `expression` — the stored computed value', () => {
       expect(stored).not.toMatch(/record\.\w+\.\w+/);
       expect(text).not.toMatch(/\b(today|now)\(\)/);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#32763] The blueprint object's `icon` — `ObjectSchema.icon`'s own leaf.
+// ---------------------------------------------------------------------------
+describe('blueprint object `icon`', () => {
+  const lenientIcon = () => (SolutionBlueprintSchema as any).shape.objects.element.shape.icon;
+  const strictIcon = () => (SolutionBlueprintStrictSchema as any).shape.objects.element.shape.icon;
+  const objectIcon = () => (ObjectSchema as any).shape.icon;
+
+  it('is ObjectSchema.icon\'s own leaf, by identity, on both sides', () => {
+    // Identity, not shape: a re-declared leaf would agree today and drift the
+    // day the object's icon gains a rule.
+    expect(lenientIcon().unwrap()).toBe(objectIcon().unwrap());
+    expect(strictIcon().unwrap()).toBe(objectIcon().unwrap());
+  });
+
+  it('carries an icon through the lenient parse, into a body the object schema accepts', () => {
+    const parsed = SolutionBlueprintSchema.parse({
+      summary: 's',
+      objects: [{ name: 'invoice', icon: 'receipt', fields: [{ name: 'title', type: 'text' }] }],
+    });
+    expect(parsed.objects[0].icon).toBe('receipt');
+    const asObject = {
+      name: parsed.objects[0].name,
+      icon: parsed.objects[0].icon,
+      fields: { title: { label: 'Title', type: 'text' } },
+    };
+    expect(ObjectSchema.safeParse(asObject).success).toBe(true);
+  });
+
+  it('stays optional on the lenient side, and is refused when it is not a string, at the key', () => {
+    const absent = SolutionBlueprintSchema.parse({ summary: 's', objects: [{ name: 'invoice', fields: [] }] });
+    expect(absent.objects[0].icon).toBeUndefined();
+    const result = SolutionBlueprintSchema.safeParse({ summary: 's', objects: [{ name: 'invoice', icon: 7, fields: [] }] });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+      .toEqual([{ path: ['objects', 0, 'icon'], code: 'invalid_type' }]);
+  });
+
+  it('is required-but-nullable on the strict mirror (OpenAI strict: every key in `required`)', () => {
+    const object = {
+      name: 'invoice', label: null, description: null, icon: 'receipt', sharingModel: null, nameField: null, stageField: null,
+      fields: [{ name: 'title', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null, defaultValue: null }],
+    };
+    const bp = (o: Record<string, unknown>) => ({ summary: 's', assumptions: [], questions: null, objects: [o], views: null, dashboards: null, app: null });
+    expect(SolutionBlueprintStrictSchema.parse(bp(object)).objects[0].icon).toBe('receipt');
+    expect(SolutionBlueprintStrictSchema.parse(bp({ ...object, icon: null })).objects[0].icon).toBeNull();
+    const { icon: _omit, ...missing } = object;
+    const result = SolutionBlueprintStrictSchema.safeParse(bp(missing));
+    expect(result.success).toBe(false);
+    expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['objects.0.icon']);
   });
 });

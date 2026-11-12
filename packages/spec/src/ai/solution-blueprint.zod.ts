@@ -6,6 +6,7 @@ import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { OBJECT_ICON_SCHEMA } from '../data/object-icon';
 import { refuseStageFieldWithoutKinds } from '../data/stage-field-kinds';
 import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
 import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
@@ -383,11 +384,19 @@ function refuseBlueprintStageFieldWithoutKinds(object: unknown, ctx: z.Refinemen
 }
 
 /**
+ * What a blueprint object's `icon` is, read on both sides (#32763): the
+ * object's own icon, carried onto the built object as `ObjectSchema.icon`.
+ */
+const OBJECT_ICON_RULE = 'The built object\'s icon, carried into the object as its `icon`: a Lucide icon name for what the records are (e.g. "users" for contacts, "receipt" for invoices, "ticket" for support tickets). SET it on every object: an object without one is drawn with a generic glyph.';
+
 /** A proposed business object (table) with its fields. */
 export const BlueprintObjectSchema = lazySchema(() => z.object({
   name: z.string().regex(SNAKE_CASE).describe('Object machine name (snake_case)'),
   label: z.string().optional().describe('Human-readable singular label'),
   description: z.string().optional().describe('What this object represents'),
+  // [#32763] `ObjectSchema.icon`'s own leaf, re-described for the blueprint,
+  // so the blueprint accepts exactly the icon the object accepts.
+  icon: OBJECT_ICON_SCHEMA.describe(OBJECT_ICON_RULE),
   fields: z.array(BlueprintFieldSchema).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user\'s description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform\'s deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it.'),
@@ -711,6 +720,11 @@ const StrictObject = z.object({
   name: strictIdent('Object machine name (snake_case)'),
   label: z.string().nullable().describe('Human-readable singular label, or null'),
   description: z.string().nullable().describe('What this object represents, or null'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintObjectSchema.icon`
+  // (#32763): a key present only there is one no proposal can ever contain.
+  // The same `ObjectSchema.icon` leaf, in this mirror's spelling of "optional";
+  // the object key-parity pin fails if either side drops it.
+  icon: OBJECT_ICON_SCHEMA.unwrap().nullable().describe(`${OBJECT_ICON_RULE} Null only when no icon fits.`),
   fields: z.array(StrictField).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).nullable()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user\'s description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it.'),
