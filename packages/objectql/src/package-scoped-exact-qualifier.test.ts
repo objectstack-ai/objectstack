@@ -1102,6 +1102,106 @@ describe('[#32407] a package-less item of a two-holder name of a narrowed type o
 });
 
 /**
+ * [#31699 PR 2 × #32566, ADR-0150 D4] `webhook` joins both type sets in this
+ * change, so the package-less judgement #32566 extends to every narrowed type
+ * reaches a declared webhook two packages hold. The plain exact read of the
+ * environment's item was refused already (the read set, #31699); the layered
+ * read of a package-less stored row is #32566's judgement, and it moves.
+ *
+ * BASE (measured on this branch's round-3 head 2200b8c9, before main's #32566
+ * was merged, same fixture): `?layers=true&package=X` of a package-less stored
+ * webhook row of a two-holder name reported that row as the overlay of both
+ * holders; every other read below answered as it does now. On `origin/main`
+ * the two-holder state is not reachable: a second namespace's webhook of the
+ * name was refused `422`.
+ */
+describe('[#31699 PR 2] a package-less webhook of a name two packages hold is no holder\'s own, plain and layered (#32566)', () => {
+  const hookBody = (label: string) => ({ name: 'hook', label, object: 'task', url: 'https://hooks.example/x' });
+  const shipHook = (packageId: string) =>
+    registry.registerItem('webhook', hookBody(`${packageId.split('.').pop()} webhook`), 'name' as never, packageId);
+  /** The environment's item in the registry's bare slot: as the hydrator puts a package-less row there, or as code registers one. */
+  const envHook = (stamp?: string) => registry.registerItem('webhook', {
+    ...hookBody('env webhook'), _provenance: 'org', ...(stamp === undefined ? {} : { _packageId: stamp }),
+  }, 'name' as never);
+  const storeHook = (packageId: string | null, label: string) => rows.push({
+    id: `row_${packageId ?? 'env'}`, type: 'webhook', name: 'hook', state: 'active', package_id: packageId,
+    bundle_member: null, metadata: JSON.stringify(hookBody(label)),
+  });
+  const read = (packageId: string) => protocol.getMetaItem({ type: 'webhook', name: 'hook', packageId } as never);
+  const layered = (packageId: string) =>
+    protocol.getMetaItemLayered({ type: 'webhook', name: 'hook', packageId } as never) as Promise<{ overlay?: { label?: string } | null; code?: { label?: string } | null }>;
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'webhook', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'hook').map((i) => i.label).sort();
+  const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
+
+  it('the premise: `webhook` is narrowed to the namespace and its readers consult `(package, name)`', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
+    expect(registry.readsByPackage('webhook')).toBe(true);
+  });
+
+  it('[FROM each holder\'s overlay TO 409] two holders: `?layers=true&package=X` of a package-less stored row refuses naming both, at both holders', async () => {
+    shipHook(A);
+    shipHook(B);
+    storeHook(null, 'stored webhook');
+    for (const at of [A, B]) {
+      const err = await refusalOf(() => layered(at));
+      expect([err.code, err.status, err.refusal.reason, err.refusal.candidates], at)
+        .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure', BOTH]);
+    }
+  });
+
+  it('CONTROL — one holder: the layered read reports the package-less row as the overlay, over the holder\'s code layer', async () => {
+    shipHook(A);
+    storeHook(null, 'stored webhook');
+    const answer = await layered(A);
+    expect([answer.code?.label, answer.overlay?.label]).toEqual(['alpha webhook', 'stored webhook']);
+  });
+
+  it('CONTROL — a row bound to alpha: alpha\'s layered read reports it, beta\'s reports none; each code layer is the holder\'s own', async () => {
+    shipHook(A);
+    shipHook(B);
+    storeHook(A, 'bound webhook');
+    const [atA, atB] = [await layered(A), await layered(B)];
+    expect([atA.code?.label, atA.overlay?.label]).toEqual(['alpha webhook', 'bound webhook']);
+    expect([atB.code?.label, atB.overlay ?? null]).toEqual(['beta webhook', null]);
+  });
+
+  for (const stamp of [undefined, '', 'sys_metadata']) {
+    it(`two holders: both plain exact reads of the environment's item (stamp ${JSON.stringify(stamp)}) refuse 409 naming both; each list serves the holder's own`, async () => {
+      envHook(stamp);
+      shipHook(A);
+      shipHook(B);
+      for (const [at, own] of [[A, 'alpha webhook'], [B, 'beta webhook']] as const) {
+        const err = await refusalOf(() => read(at));
+        expect([err.code, err.status, err.refusal.reason, err.refusal.candidates], at)
+          .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure', BOTH]);
+        expect(await listed(at), at).toEqual([own]);
+      }
+    });
+  }
+
+  it('CONTROL — one holder: the environment\'s item is that holder\'s customization, served on its exact address; after a bind to alpha, beta serves its own', async () => {
+    envHook();
+    shipHook(A);
+    expect(labelOf(await read(A))).toBe('env webhook');
+    shipHook(B);
+    registry.registerItem('webhook', { ...hookBody('env webhook'), _provenance: 'org', _packageId: A }, 'name' as never);
+    expect(labelOf(await read(A))).toBe('env webhook');
+    expect(labelOf(await read(B))).toBe('beta webhook');
+  });
+
+  it('CONTROL — a stored package-less row of a two-holder name is declined at each plain exact read (ADR-0126 Regime C): each serves and lists its own', async () => {
+    shipHook(A);
+    shipHook(B);
+    storeHook(null, 'stored webhook');
+    for (const [at, own] of [[A, 'alpha webhook'], [B, 'beta webhook']] as const) {
+      expect(labelOf(await read(at)), at).toBe(own);
+      expect(await listed(at), at).toEqual([own]);
+    }
+  });
+});
+
+/**
  * [#32162, ADR-0150 D3/D5] `permission` joins the types whose by-name readers
  * consult `(package, name)`. The four `/meta` read forms, at the protocol the
  * two transports share: bare (a caller with no package), `?package=`, the

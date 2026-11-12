@@ -555,3 +555,75 @@ describe('history and rollback of a type stored per package (#32351)', () => {
     expect((await rowsOf('object')).map((row) => [labelOf(row), row.version])).toEqual([['A1', 3]]);
   });
 });
+
+/**
+ * [#31699 PR 2, ADR-0150 D3/D4] `webhook` joins `PACKAGE_SLOTTED_STORE_TYPES`
+ * in this change, so #32351's history above reaches a declared webhook. Named
+ * here rather than derived from the set, so taking the webhook out of the set
+ * turns these red instead of dropping them.
+ *
+ * BASE (measured on this branch with `webhook` taken out of the set, same
+ * fixture): a webhook's `sys_metadata` row and its history rows carried no
+ * package; a second package's save wrote the one row of the name, whose
+ * history answered every version by name, with or without a package; after
+ * B's removal, a rollback to B's version wrote B's body into that row.
+ */
+describe('[#31699 PR 2] a declared webhook\'s history is per package (#32351)', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  let driver: SqliteWasmDriver;
+  let loader: DatabaseLoader;
+  let manager: MetadataManager;
+
+  const hook = (label: string, packageId: string) =>
+    ({ name: 'x', label, object: 'task', url: 'https://hooks.example/x', _packageId: packageId });
+  const packagesOf = async (table: string) =>
+    ((await driver.find(table, { where: { type: 'webhook' } } as never)) as Array<Record<string, unknown>>)
+      .map((row) => [row.version, row.package_id ?? null, JSON.parse(String(row.metadata)).label])
+      .sort((l, r) => Number(l[0]) - Number(r[0]));
+  const refusal = (promise: Promise<unknown>) =>
+    promise.then(() => undefined, (error: any) => [error?.status, error?.refusal?.reason, error?.refusal?.candidates]);
+  const twoHolders = async () => {
+    await loader.save('webhook', 'x', hook('A1', A));
+    await loader.save('webhook', 'x', hook('B1', B));
+    await loader.save('webhook', 'x', hook('A2', A));
+  };
+
+  beforeEach(async () => {
+    driver = new SqliteWasmDriver({ filename: ':memory:' });
+    await driver.connect();
+    loader = new DatabaseLoader({ driver, cache: { enabled: false } });
+    manager = new MetadataManager({ datasource: 'sqlite', loaders: [loader] });
+  });
+
+  it('the premise: `webhook` is stored per package', () => {
+    expect(PACKAGE_SLOTTED_STORE_TYPES.has('webhook')).toBe(true);
+  });
+
+  it('[FROM no package TO the package] one holder: its row and each history row name its package; the history by name answers as before', async () => {
+    await loader.save('webhook', 'x', hook('A1', A));
+    await loader.save('webhook', 'x', hook('A2', A));
+    expect(await packagesOf('sys_metadata')).toEqual([[2, A, 'A2']]);
+    expect(await packagesOf('sys_metadata_history')).toEqual([[1, A, 'A1'], [2, A, 'A2']]);
+    expect((await manager.getHistory('webhook', 'x')).records.map((record) => record.version)).toEqual([2, 1]);
+  });
+
+  it('[FROM one row, every version TO a row each, 409] two holders: a row per package; naming none refuses naming both and writes nothing; naming A reads and rolls back A\'s own', async () => {
+    await twoHolders();
+    expect(await packagesOf('sys_metadata')).toEqual([[2, B, 'B1'], [3, A, 'A2']]);
+    const both = [409, 'ambiguous-in-environment', [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]];
+    expect(await refusal(manager.getHistory('webhook', 'x'))).toEqual(both);
+    expect(await refusal(manager.rollback('webhook', 'x', 1))).toEqual(both);
+    expect(await packagesOf('sys_metadata')).toEqual([[2, B, 'B1'], [3, A, 'A2']]);
+    expect((await manager.getHistory('webhook', 'x', { packageId: A })).records.map((record) => record.version)).toEqual([3, 1]);
+    await manager.rollback('webhook', 'x', 1, { packageId: A });
+    expect(await packagesOf('sys_metadata')).toEqual([[2, B, 'B1'], [4, A, 'A1']]);
+  });
+
+  it('[FROM B\'s body written TO 409] after B is removed, a rollback to B\'s version is refused naming B, and A\'s row is unchanged', async () => {
+    await twoHolders();
+    await loader.delete('webhook', 'x', { packageId: B });
+    expect(await refusal(manager.rollback('webhook', 'x', 2))).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: A }]]);
+    expect(await packagesOf('sys_metadata')).toEqual([[3, A, 'A2']]);
+  });
+});
