@@ -10,6 +10,7 @@ import { deferRequestBody } from './deferred-request-body.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
+import type { EndpointExecutorDeps } from './endpoint-executor.js';
 import { callData } from './action-execution.js';
 import { createEndpointRateLimiterRegistry } from './endpoint-policy.js';
 import {
@@ -2474,6 +2475,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         const automationService = await execDeps
                             .resolveService(protocolContext, 'automation')
                             .catch(() => undefined);
+                        // [ADR-0150 D3, #31696] The holder table a flow
+                        // endpoint's `target` resolves over, from the
+                        // endpoint's own package: the request kernel's
+                        // ObjectQL registry. One that cannot be read leaves
+                        // the bare name, which the engine refuses for a
+                        // shared name (fail closed).
+                        const registry = (await Promise.resolve()
+                            .then(() => execDeps.getObjectQL(protocolContext, protocolContext.environmentId))
+                            .catch(() => null) as { registry?: EndpointExecutorDeps['registry'] } | null)?.registry;
 
                         const answer = await runAppEndpointStep({
                             method: req.method,
@@ -2544,6 +2554,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     callData: (action, params, driver, scope, ec) =>
                                         callData(execDeps, protocolContext, action, params, driver, scope, ec),
                                     ...(automationService !== undefined ? { automationService } : {}),
+                                    ...(registry && typeof registry === 'object' ? { registry } : {}),
                                 },
                                 ...(protocolContext.executionContext !== undefined
                                     ? { executionContext: protocolContext.executionContext }

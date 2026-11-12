@@ -164,7 +164,14 @@ export class RegistrationFacet {
       // package's extension of its objects — reads as it did. Never through
       // uninstall, which refuses an extended object and drops a tenant's
       // overlay with its owner (D9.7). See {@link SchemaRegistry.restoringOnRefusal}.
-      this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
+      //
+      // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] Once the boot
+      // has sealed the picklist vocabulary, a body registered here on its own —
+      // not inside an arrival the `manifest` service or a reload already judged
+      // as a whole — meets the registry's one picklist re-judge first, before
+      // anything of it registers ({@link SchemaRegistry.admitPicklistArrival}).
+      this._registry.admitPicklistArrival([manifest], () =>
+          this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope)));
 
       // [#28697] Written only once nothing above threw, so a refused body
       // leaves none of them. Nothing above reads any of them.

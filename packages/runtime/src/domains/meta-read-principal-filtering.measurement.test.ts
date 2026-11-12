@@ -82,6 +82,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SERVICE_SELF_INFO_KEY } from '@objectstack/spec/api';
 import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+// Paid at collection: the dispatcher reaches it through a dynamic import.
+import '@objectstack/metadata';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
 /** The header the auth double reads to decide which principal a request is. */
@@ -166,7 +168,13 @@ function boot(options: { security: 'none' | 'per-principal' }) {
         getServiceAsync: async (n: string) => get(n),
     } as any;
 
-    const dispatcher = new HttpDispatcher(kernel);
+    // This boot registers no data engine, so it holds no environment
+    // membership to judge: it is a host that does not enforce the
+    // environment-membership check, and says so. (Left on, a signed-in caller
+    // on the scoped context below is refused as the outage the check answers
+    // when its read cannot be made — that check is not what this file
+    // measures.)
+    const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
 
     /** Drive one request as `principal`, or anonymously when it is undefined. */
     const read = (path: string, principal?: string) => dispatcher.dispatch(

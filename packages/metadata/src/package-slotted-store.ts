@@ -52,8 +52,10 @@
  *
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
  * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent`,
- * `skill` (#31701), `action` (#31697, below) and `email_template` (#31699).
- * Two packages of two namespaces may each install such a name, so a store keyed by bare name would keep whichever registered last:
+ * `skill` (#31701), `action` (#31697, below), `email_template` (#31699) and
+ * `flow` (#31696) and the picklist family's `picklist`, `mapping` and
+ * `dataset` (#31700). Two packages of two namespaces may each install such
+ * a name, so a store keyed by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
  * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
@@ -66,7 +68,10 @@
  * name bound to two objects are two names that never meet (objectql's
  * `actionOwnerScopedRegistry`). So an action BOUND to an object is slotted by
  * its object and name ({@link slotIdentityOf}); an object-less action by its
- * name alone, exactly as `api`. A write's and a by-identity read's D3 refusal
+ * name alone, exactly as `api`. [#32540] `DatabaseLoader` keeps a row per
+ * such binding too: its rows of a `(package, name)` slot are told apart by
+ * `sys_metadata.bundle_member`, which holds the bound object
+ * ({@link storedRowMemberOf}). A write's and a by-identity read's D3 refusal
  * fires only among slots of one identity: two packages on the object-less
  * name, or on one object and name. A removal counts packages over every
  * identity of the name instead ({@link storeRemovalKeys}), as `DatabaseLoader`'s
@@ -84,6 +89,15 @@
  * stamped with `_packageId`, the stack registrar (`AppPlugin`) likewise for
  * this type — so a read naming one package (`/meta/permission/NAME?package=`)
  * is served that package's grants, never the set registered last.
+ *
+ * `picklist`, `mapping` and `dataset` (#31700) join in the change that
+ * narrows their one-holder rule to the namespace, with `api` (already here)
+ * and the engine's functions (which are no metadata type: the engine keeps
+ * their holders per package itself). The artifact door registers each
+ * package's item stamped with `_packageId`, so two namespaces' same-named
+ * lists, mappings or datasets keep a slot each; a read naming no package of
+ * such a name answers D3's refusal naming both, never the one registered
+ * last.
  */
 
 import {
@@ -95,7 +109,7 @@ import {
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
-import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
@@ -103,9 +117,13 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * then every namespace-scoped type (#32151, #31697; see "Which types" above):
  * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
  * ADR-0150 child B), which joins in the same change that adds it to
- * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162).
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then `flow`
+ * (#31696), which joins in the same change that adds it to that set; then the
+ * picklist family's `picklist`, `mapping` and `dataset` (#31700).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
@@ -125,8 +143,8 @@ const OWNER_KEYED_SLOT_TYPES: ReadonlySet<string> = new Set(['action']);
  */
 const OBJECT_LESS_OWNERS: ReadonlySet<string> = new Set(['global', '*']);
 
-/** The object an action item is bound to; `undefined` for an object-less one. */
-function boundObjectOf(data: unknown): string | undefined {
+/** The object an action item is bound to (its stored envelope peeled); `undefined` for an object-less one. */
+export function boundObjectOf(data: unknown): string | undefined {
   const body = peelStoredEnvelope(data).body as { objectName?: unknown; object?: unknown } | null | undefined;
   if (!body || typeof body !== 'object') return undefined;
   for (const owner of [body.objectName, body.object]) {
@@ -210,7 +228,9 @@ export function storeSlotKey(type: string, name: string, packageId: string | nul
 /**
  * [#32246] The key of a `DatabaseLoader` row of `name` held for `packageId`:
  * one slot per `(package, name)`, whatever object an action is bound to
- * (see {@link storeRowWriteKey}).
+ * (see {@link storeRowWriteKey}). [#32540] A slot holds a row per member
+ * ({@link storedRowMemberOf}): each object an action of the package is bound
+ * to, as each member of a bundled type.
  */
 export function storeRowKey(name: string, packageId: string | null | undefined): string {
   return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
@@ -295,6 +315,52 @@ export function storedBundleMemberOf(type: string, item: unknown, column?: unkno
 }
 
 /**
+ * [#32540, ADR-0150 D4/D6] The member a stored row of `type` holds within its
+ * `(package, name)` slot, spelled as `sys_metadata.bundle_member` spells it —
+ * the store's unique key `(type, name, package_id, bundle_member)` keeps one
+ * row per member:
+ *
+ *  - a bundled type: its bundle member ({@link storedBundleMemberOf});
+ *  - `action`: the object an object-bound action is bound to, `null` for an
+ *    object-less one. One package may bind one action name to several objects
+ *    (D6), and each binding is its own item (D4: `(package, objectName,
+ *    name)`), so each keeps its own row. A non-empty `column` is read first;
+ *    else the body's object (a row written before the loader named it); the
+ *    object-less owners (`global`, `*`) read as `null` either way. ⛔ Never
+ *    through `ITEM_KEY_DISCRIMINATORS`: an action has no canonical member and
+ *    no `?member=` address (ruling on #32540, C1) — the column is shared, the
+ *    reading is this type's own;
+ *  - every other type: `undefined`, one row per slot.
+ */
+export function storedRowMemberOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  if (isBundledStoreType(type)) return storedBundleMemberOf(type, item, column);
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return undefined;
+  if (typeof column === 'string' && column.trim() !== '') {
+    const owner = column.trim();
+    return OBJECT_LESS_OWNERS.has(owner) ? null : owner;
+  }
+  return boundObjectOf(item) ?? null;
+}
+
+/** [#32540 C8] The longest member `sys_metadata.bundle_member` stores (its declared `maxLength`). */
+export const STORED_MEMBER_MAX_LENGTH = SysMetadataObject.fields.bundle_member.maxLength as number;
+
+/**
+ * [#32540 C3/C8] The `bundle_member` an action row holds once the loader has
+ * named it, as the store's unique key reads it: the object it is bound to
+ * ({@link storedRowMemberOf}) when the column can store that name, else `null`.
+ * A row written before the loader named objects, bound to an object longer
+ * than {@link STORED_MEMBER_MAX_LENGTH}, cannot be named: it keeps the
+ * object-less binding's place in its package's bucket of the key, and only a
+ * write into that place collides with it. `undefined` for every other type.
+ */
+export function namedRowColumnOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return undefined;
+  const member = storedRowMemberOf(type, item, column);
+  return typeof member === 'string' && member.length <= STORED_MEMBER_MAX_LENGTH ? member : null;
+}
+
+/**
  * [#31699 R3-B] The identity an unscoped plural read keeps one entry per, for
  * a bundled type stored per `(package, name)`: `(package, name, member)`, the
  * package being `packageId` else the one the item carries
@@ -353,7 +419,8 @@ export function storeWriteKey(
  * [#32246] {@link storeWriteKey} for a store with one slot per `(package,
  * name)` whatever object an action is bound to: `DatabaseLoader`'s rows,
  * which `sys_metadata`'s unique key `(type, name, package_id, bundle_member)`
- * holds once per package of a name.
+ * holds once per package of a name and member. [#32540] The row within the
+ * slot is the one of the written body's member ({@link storedRowMemberOf}).
  */
 export function storeRowWriteKey(
   store: ReadonlyMap<string, unknown> | undefined,
@@ -498,7 +565,10 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
  * package's slots; one naming none: every identity's D3 answer), as the
  * bare-name map did. [#32244] A read naming none whose answers belong to two
  * or more packages is refused instead ({@link refuseAcrossOwners}): it would
- * pick one package's action over another's.
+ * pick one package's action over another's. [#32365] Otherwise a read naming
+ * none answers a package-less slot first (the environment's own item, D3),
+ * and a read naming a package answers that package's own slots first; the
+ * slot written last decides only among those.
  *
  * @throws {PackageScopedNameRefusedError} a read naming no package of a name
  *   two or more packages hold on one identity, or each on its own object
@@ -521,7 +591,22 @@ export function readStoreEntry(
   if (found.length === 0) {
     return { found: false, settled: answers.some((answer) => answer === 'settled') };
   }
-  if (!isPackageCaller(packageId)) refuseAcrossOwners(store, type, name, found.map((answer) => answer.key));
+  if (!isPackageCaller(packageId)) {
+    const keys = found.map((answer) => answer.key);
+    refuseAcrossOwners(store, type, name, keys);
+    // [ADR-0150 D3, #32365] The environment's own item answers first: a
+    // package-less slot beside one package's answers, whatever object each
+    // binds the name to, never the one written last between them.
+    const packageless = keys.filter((key) => slotPackageOf(key) === undefined);
+    if (packageless.length > 0) return { found: true, data: store.get(writtenLast(store, packageless)) };
+  } else {
+    // [#32365] …and a read naming a package is served that package's own
+    // item first (D3 step 1), never the environment's item on another object
+    // because it was written last; the package-less slot answers only where
+    // the package holds no slot of the name.
+    const own = found.filter((answer) => slotPackageOf(answer.key) === packageId);
+    if (own.length > 0) return { found: true, data: store.get(writtenLast(store, own.map((answer) => answer.key))) };
+  }
   return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
 }
 
@@ -535,33 +620,51 @@ export function readStoreEntry(
  *
  * One package binding the name to two objects is one holder: the read answers
  * the one written last, as before. A package-less item beside one package's
- * is not two packages, and answers as before too.
+ * is not two packages: [#32365] it answers first ({@link readStoreEntry}).
+ * Beside two packages it is named too (`environment`).
  *
  * @throws {PackageScopedNameRefusedError} when `keys` span two or more packages.
  */
 function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
   if (!OWNER_KEYED_SLOT_TYPES.has(type) || keys.length < 2) return;
   const objectsOf = new Map<string, Array<string | undefined>>();
+  const packagelessObjects: Array<string | undefined> = [];
   for (const key of keys) {
     const packageId = slotPackageOf(key);
-    if (packageId === undefined) continue;
+    if (packageId === undefined) {
+      packagelessObjects.push(boundObjectOf(store.get(key)));
+      continue;
+    }
     const objects = objectsOf.get(packageId) ?? [];
     objects.push(boundObjectOf(store.get(key)));
     objectsOf.set(packageId, objects);
   }
   if (objectsOf.size < 2) return;
+  // [#32365] …and the environment's own item beside them is named too: a
+  // refusal names every candidate, and with two packages it answers no one.
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'ambiguous-in-environment',
     type: type as PackageScopedResolvableType,
     name,
     callerPackageId: null,
-    candidates: [...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
+    candidates: [
+      ...[...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
+      ...(packagelessObjects.length > 0 ? [{ kind: 'environment' as const }] : []),
+    ],
   };
+  const sentences = [packageScopedActionOwnersSentence(objectsOf)];
+  if (packagelessObjects.length > 0) sentences.push(environmentOwnerSentence(packagelessObjects));
   throw new PackageScopedNameRefusedError({
     ...base,
-    message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsOf)}`,
+    message: `${packageScopedRefusalMessage(base)} ${sentences.join(' ')}`,
   });
+}
+
+/** [#32365] The sentence a refusal appends for the environment's own item(s) of an action name. */
+function environmentOwnerSentence(objects: ReadonlyArray<string | undefined>): string {
+  const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
+  return `The environment's own item binds it to ${named.join(' and ')}.`;
 }
 
 /**
@@ -586,6 +689,24 @@ function readIdentity(
     packageScopedHolderSource(holders.map((holder) => [holder, slotKey(holder, identity)] as const)),
     () => new Set<string>(),
   );
-  if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+  if (resolution.status === 'refused') {
+    // [ADR-0150 D3, #32365] An action name's package-less slot — on this
+    // identity (a customization it cannot say whose) or on another object —
+    // answers no one beside two packages either, and the refusal names it:
+    // every candidate is named.
+    const packageless = OWNER_KEYED_SLOT_TYPES.has(type)
+      ? storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined)
+      : [];
+    if (packageless.length === 0) throw new PackageScopedNameRefusedError(resolution);
+    const base: Omit<PackageScopedRefusal, 'message'> = {
+      ...resolution,
+      candidates: [...resolution.candidates, { kind: 'environment' as const }],
+    };
+    const objects = packageless.map((key) => boundObjectOf(store.get(key)));
+    throw new PackageScopedNameRefusedError({
+      ...base,
+      message: `${packageScopedRefusalMessage(base)} ${environmentOwnerSentence(objects)}`,
+    });
+  }
   return resolution.status === 'resolved' ? { key: resolution.item as string } : undefined;
 }
