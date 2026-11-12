@@ -7,7 +7,7 @@
 // A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
 // above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
 // are new. `protocol.ts` re-exports what it exported.
-import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, resolveThrownHttpError, sandboxBusinessMessage, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
+import { declaredHttpStatus, declaredUserMessage, isSandboxOrigin, packageScopedRefusalCandidates, resolveThrownHttpError, sandboxBusinessMessage, UNDECLARED_HOOK_REFUSAL_CODE } from '@objectstack/types';
 import type { ApiError, BatchOperationResult } from '@objectstack/spec/api';
 import { ErrorCode, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { zodIssuesToMetadataIssues } from './protocol-metadata-issues.js';
@@ -145,6 +145,16 @@ export type BatchDataRowResult = BatchOperationResult;
  *
  * ⛔ `httpStatus` is NOT stamped for it. That limb carries only a status the
  * producer declared (above), and this body declared none.
+ *
+ * ## [#32250] A package-scoped refusal names its candidates on the row
+ *
+ * A write hook's package-scoped refusal (`409 RESOURCE_CONFLICT`, core's
+ * `PackageScopedNameRefusedError`: a by-name value two packages hold) carries
+ * its holders as `details.candidates`, the member every whole-request `/data`
+ * door answers it with (ADR-0150 D5), so a batch or upsert row tells the
+ * caller which packages to choose between as a single write does. Read through
+ * `@objectstack/types`' one recogniser; every other row error carries no
+ * `details`, as before.
  */
 export function toRowApiError(err: any, fallback: string): ApiError {
     const thrown = isEngineDuplicateRecordEnvelope(err)
@@ -155,12 +165,14 @@ export function toRowApiError(err: any, fallback: string): ApiError {
     const { declaredStatus } = resolveThrownHttpError(err);
     const refusal = sandboxRefusalSentence(err) !== undefined;
     const servedStatus = declaredStatus ?? (refusal ? 400 : undefined);
+    const candidates = packageScopedRefusalCandidates(err);
     return {
         code: thrown
             ?? (isUndeclaredHookAbort(err, refusal, servedStatus) ? UNDECLARED_HOOK_REFUSAL_CODE
                 : servedStatus !== undefined ? standardErrorCodeForHttpStatus(servedStatus) : 'INTERNAL_ERROR'),
         message: clientFacingRowFailureText(err, fallback),
         ...(declaredStatus !== undefined ? { httpStatus: declaredStatus } : {}),
+        ...(candidates ? { details: { candidates } } : {}),
     };
 }
 

@@ -412,5 +412,84 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         help: "The sys_secret row holding the wrapped private half"
       }
     }
+  },
+  sys_audit_amendment: {
+    label: "Audit Amendment",
+    pluralLabel: "Audit Amendments",
+    description: "Signed records of redactions and expiries of sealed audit rows. Written only by the platform.",
+    fields: {
+      id: {
+        label: "Amendment ID"
+      },
+      kind: {
+        label: "Kind",
+        options: {
+          redaction: "Redaction",
+          expiry: "Expiry"
+        }
+      },
+      sealed_object: {
+        label: "Sealed Object"
+      },
+      chain_key: {
+        label: "Chain Key",
+        help: "`org:` and the organization id, or `deployment` for rows about no organization"
+      },
+      tenant_id: {
+        label: "Organization",
+        help: "The organization of the amended chain; empty for the deployment chain"
+      },
+      amended_at: {
+        label: "Amended At"
+      },
+      checkpoint_sequence: {
+        label: "Checkpoint Sequence",
+        help: "The sequence, in this chain, of the checkpoint that sealed the row"
+      },
+      row_id: {
+        label: "Row ID"
+      },
+      column_name: {
+        label: "Column"
+      },
+      sealed_commitment: {
+        label: "Sealed Commitment"
+      },
+      rewritten_commitment: {
+        label: "Rewritten Commitment"
+      },
+      rewritten_by: {
+        label: "Rewritten By",
+        help: "The migration that rewrote the value"
+      },
+      first_sequence: {
+        label: "First Sequence"
+      },
+      last_sequence: {
+        label: "Last Sequence"
+      },
+      covered_from: {
+        label: "Covered From"
+      },
+      covered_to: {
+        label: "Covered To"
+      },
+      last_removed_digest: {
+        label: "Last Removed Digest"
+      },
+      policy: {
+        label: "Policy",
+        help: "The retention policy that expired the range, e.g. archive.keep"
+      },
+      policy_value: {
+        label: "Policy Value"
+      },
+      signing_key_id: {
+        label: "Signing Key"
+      },
+      signature: {
+        label: "Signature"
+      }
+    }
   }
 };
