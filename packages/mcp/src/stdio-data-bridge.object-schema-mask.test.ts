@@ -117,16 +117,33 @@ async function answersUnder(testCase: ObjectSchemaMaskCase | undefined) {
   });
 }
 
-/** The answer this tool always served: the declared fields, projected to name/type/label/required. */
+/**
+ * The answer this tool serves an unrestricted caller: the declared fields with
+ * what a write needs ([#32435]: `readonly`, `system`, a select's options as
+ * value + label), and the declared rules' messages without their expressions.
+ */
 const DECLARED_ANSWER = {
   name: FLS_CONTRACT_OBJECT.name,
   label: FLS_CONTRACT_OBJECT.label,
-  fields: Object.entries(FLS_CONTRACT_OBJECT.fields as Record<string, any>).map(([name, f]) => ({
-    name,
-    type: f?.type,
-    label: f?.label ?? name,
-    required: f?.required ?? false,
-  })),
+  fields: [
+    { name: 'id', type: 'text', label: 'Id', required: false, readonly: false, system: false },
+    { name: 'name', type: 'text', label: 'Name', required: false, readonly: false, system: false },
+    {
+      name: 'salary_grade',
+      type: 'select',
+      label: 'Salary Grade',
+      required: false,
+      readonly: false,
+      system: false,
+      options: [{ value: 'band_a', label: 'Band A' }, { value: 'band_b', label: 'Band B' }],
+    },
+    { name: 'bonus_formula', type: 'formula', label: 'Bonus', required: false, readonly: false, system: false },
+  ],
+  validations: [
+    { name: 'graded_account_needs_name', type: 'script', message: 'A graded account needs a name.', fields: [] },
+    { name: 'bonus_needs_name', type: 'cross_field', message: 'A bonus needs a name.', fields: ['bonus_formula', 'name'] },
+    { name: 'name_not_blank', type: 'script', message: 'Name must not be blank.', fields: [] },
+  ].map(({ fields, ...rule }) => ({ ...rule, severity: 'error', events: ['insert', 'update'], fields })),
   enableFeatures: (FLS_CONTRACT_OBJECT as { enable?: unknown }).enable ?? {},
 };
 
