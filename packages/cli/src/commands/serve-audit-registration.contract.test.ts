@@ -18,9 +18,11 @@
 // in `serve.ts` and in #9863's ruling comment; what lives HERE is the part that
 // has to keep being true:
 //
-//   1. The CLI constructs `AuditPlugin` exactly once, with NO options. That is
-//      the ruling itself. Re-opening it means editing this file deliberately,
-//      not discovering later that the shape drifted.
+//   1. The CLI constructs `AuditPlugin` exactly once, with no config-derived
+//      options. That is the ruling itself. Re-opening it means editing this
+//      file deliberately, not discovering later that the shape drifted. The one
+//      option it carries is the host's own crypto provider (ADR-0154 D2, D6),
+//      which no config spells.
 //   2. That construction sits inside the auth-gated pair block and ABOVE the
 //      stack `plugins` loop. The ORDER is load-bearing and was, until this file,
 //      asserted by nothing: invert it and the CLI's option-less instance
@@ -51,7 +53,7 @@
 // that WOULD have caught each edit, mechanised, is the honest instrument.
 
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 // The separator (#9367) is a plain `.mjs`, but it ships a hand-written `.d.mts`
@@ -196,11 +198,14 @@ const AUTH_GATE = "if (!hasAuthPlugin && tierEnabled('auth'))";
 /** The stack `plugins` loop, i.e. where an app's own configured instance is registered. */
 const PLUGINS_LOOP = 'for (const plugin of plugins)';
 
-describe('os serve registers AuditPlugin bare, above the stack `plugins` loop (#9863)', () => {
-  it('constructs AuditPlugin exactly once, with NO options — the ruling', () => {
-    // The empty string is the whole point: `[]` would mean "never constructed"
-    // and `['appAuditPluginOptions(config)']` would mean the ruling was reversed.
-    expect(auditPluginConstructions(SERVE)).toEqual(['']);
+describe('os serve registers AuditPlugin with no config-derived options, above the stack `plugins` loop (#9863)', () => {
+  it('constructs AuditPlugin exactly once, with no config-derived options — the ruling', () => {
+    // `[]` would mean "never constructed" and `['appAuditPluginOptions(config)']`
+    // would mean the ruling was reversed. [ADR-0154 D2, D6] The one option is
+    // the host's own crypto provider, which no config spells: the sealer seals
+    // under it, and reads it when it starts, since the provider is built below
+    // the stack `plugins` loop.
+    expect(auditPluginConstructions(SERVE)).toEqual(['{ cryptoProvider: () => hostCrypto?.provider }']);
   });
 
   it('does not reach for a config-derived audit options helper', () => {
@@ -238,5 +243,46 @@ describe('os serve registers AuditPlugin bare, above the stack `plugins` loop (#
 
   it("verify's bootStack has no AuditPlugin opinion — no #7001-shaped disagreement to close", () => {
     expect(auditPluginConstructions(HARNESS)).toEqual([]);
+  });
+
+  it('hands the `requires: [\'audit\']` provider the same host crypto provider', () => {
+    expect(SERVE).toMatch(/cap === 'audit' && hostCrypto\s*\?\s*\{ \.\.\.\(arg \?\? \{\}\), cryptoProvider: hostCrypto\.provider \}/);
+  });
+});
+
+/**
+ * Every source file of this package under `src/` that spells an AuditPlugin
+ * construction, tests and `serve.ts` aside, with its comments masked.
+ */
+function oneShotSources(): Array<{ file: string; source: string }> {
+  const root = path.join(PACKAGES_DIR, 'cli/src');
+  const out: Array<{ file: string; source: string }> = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (/\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name) && full !== path.join(root, 'commands/serve.ts')) {
+        const raw = readFileSync(full, 'utf8');
+        if (raw.includes('new AuditPlugin(')) out.push({ file: path.relative(root, full), source: maskComments(raw) });
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
+
+describe('a one-shot command composes AuditPlugin with its sealer off (ADR-0154 D3)', () => {
+  it('passes `armSealer: false` at every AuditPlugin it constructs outside `os serve`', () => {
+    // A one-shot run is not a second server: a sealer armed there writes
+    // checkpoints from `os audit verify` or a dry run. Read across the package,
+    // so a new one-shot boot that forgets it is named here by file.
+    const sites = oneShotSources().flatMap(({ file, source }) => auditPluginConstructions(source).map((args) => ({ file, args })));
+    expect(sites.map((s) => s.file).sort()).toEqual([
+      'commands/migrate/stored-references/bind.ts',
+      'utils/data-migration-plugins.ts',
+      'utils/plugin-trust-store.ts',
+      'utils/schema-migration-plugins.ts',
+    ]);
+    for (const site of sites) expect(site, site.file).toMatchObject({ args: '{ armSealer: false }' });
   });
 });

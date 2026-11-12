@@ -130,14 +130,30 @@ export interface AuditPluginOptions {
   /**
    * [ADR-0154 D2, D6] The crypto provider the audit sealer seals each
    * checkpoint's seed under, and the default checkpoint signer seals its
-   * private key under (scope `audit_seal`). The host composes it here.
+   * private key under (scope `audit_seal`). The host composes it here: `os
+   * serve` hands over the one provider it seals every `sys_secret` row with.
+   *
+   * A function is read once, when the sealer starts (`kernel:ready`), for a
+   * host that composes this plugin before it has built its provider; an
+   * `undefined` answer is an absent provider.
    *
    * Absent, nothing is sealed: an object that declares `lifecycle.seal` is
    * reported once, at `error`, naming the consequence and this option as the
    * fix. A host that registers its own `audit.checkpointSigner` still needs
    * it, for the seeds.
    */
-  cryptoProvider?: ICryptoProvider;
+  cryptoProvider?: ICryptoProvider | (() => ICryptoProvider | undefined);
+  /**
+   * [ADR-0154 D3] Start the audit sealer. Default `true`: every server wants
+   * it, and a server that cannot seal says so at `error`.
+   *
+   * Set `false` for a one-shot command — `os audit verify` and the `os
+   * migrate …` boots. Such a run is not a second server: a sealer started there
+   * would write checkpoints (and, on a first run, the signing key) from a
+   * read-only check or a dry run, and with no crypto provider it would report
+   * the sealed objects unsealed on the command's own output.
+   */
+  armSealer?: boolean;
 }
 
 /**
@@ -731,13 +747,16 @@ export class AuditPlugin implements Plugin {
    * and `audit.checkpointSink` slots (D11), the signer falling back to the
    * default local key of D6; the `cluster` service, when registered, holds the
    * `audit.sealer` lock. An engine without the storage surface the sealer
-   * reads (a test double) starts no sealer.
+   * reads (a test double) starts no sealer, and neither does a one-shot
+   * command's boot (`armSealer: false`).
    */
   private startSealer(engine: IDataEngine, ctx: PluginContext): void {
+    if (this.options.armSealer === false) return;
     const storage = engine as unknown as Partial<AuditSealerEngine>;
     if (typeof storage.getDriverForObject !== 'function' || typeof storage.registry?.getAllObjects !== 'function') return;
     const sealEngine = storage as AuditSealerEngine;
-    const crypto = this.options.cryptoProvider;
+    const option = this.options.cryptoProvider;
+    const crypto = typeof option === 'function' ? option() : option;
     const localSigner = crypto ? new LocalCheckpointSigner({ engine: sealEngine, crypto }) : undefined;
     const optional = <T>(name: string): T | undefined => {
       try {
