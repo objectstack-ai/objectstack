@@ -162,8 +162,17 @@ function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPack
   if (resolved.status !== 'resolved' || resolved.holder.kind !== 'package') return undefined;
   const holders = (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name) ?? [])
     .filter((id) => id !== BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
-  if (holders.length < 2) return undefined;
   const holder = resolved.holder.packageId;
+  // [ADR-0150 D3, #32183] The served holders leave a disabled package out,
+  // but the resolver keeps a caller's own holding, so a send made from a
+  // disabled holder resolves to it. Read it at its own address, where its
+  // items are withheld, so it sends nothing. The environment-wide list would
+  // hide it and send another package's template.
+  if (holder === callerPackageId && !holders.includes(holder)
+    && (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name, null, { includeDisabledPackages: true }) ?? []).includes(holder)) {
+    return holder;
+  }
+  if (holders.length < 2) return undefined;
   if (holders.includes(holder)) return holder;
   // The caller holds an addition only: resolve from its closure over the
   // holders every other reader sees (its own addition left out).

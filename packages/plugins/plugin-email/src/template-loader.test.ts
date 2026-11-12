@@ -462,3 +462,125 @@ describe('createRegistryEmailTemplateLoader — the send resolves the name from 
     expect(await subjectOf(loader, ALPHA)).toBe('alpha welcome');
   });
 });
+
+/**
+ * [ADR-0150 D3, #32183] A disabled package holds no name at the send door: the
+ * name resolves over the served holders, and the caller's own holding stays.
+ * Each case runs in both registration orders and on both reads the loader
+ * takes: the protocol's execution list (a double over the registry's served
+ * list, which withholds a disabled package's items, at its own address too)
+ * and the registry's own list.
+ */
+describe('createRegistryEmailTemplateLoader — a disabled holder holds no name at the send (ADR-0150 D3, #32183)', () => {
+  const ALPHA = 'com.example.alpha';
+  const BETA = 'com.example.beta';
+  const BOTH = 'com.example.both';
+  const VIA_BETA = 'com.example.viabeta';
+  const NEITHER = 'com.example.neither';
+  const tpl = (packageId: string): AnyRecord => ({
+    name: 'welcome', label: 'Welcome', subject: `${packageId.split('.').pop()} welcome`, bodyHtml: '<p>hi</p>',
+    _packageId: packageId,
+  });
+
+  /** A real registry with ALPHA and BETA shipping `welcome` in `order`, and the callers around them. */
+  function registryShipping(order: readonly string[], disabled: readonly string[]): SchemaRegistry {
+    const reg = new SchemaRegistry();
+    reg.logLevel = 'silent';
+    const packages: Array<[string, string[]]> = [
+      ...order.map((id): [string, string[]] => [id, []]),
+      [BOTH, [ALPHA, BETA]], [VIA_BETA, [BETA]], [NEITHER, []],
+    ];
+    for (const [id, deps] of packages) {
+      reg.installPackage({
+        id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop(),
+        ...(deps.length ? { dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])) } : {}),
+      } as never, 'code');
+    }
+    for (const id of order) {
+      const { _packageId: _ignored, ...body } = tpl(id);
+      reg.registerItem('email_template', body, 'name' as never, id);
+    }
+    for (const id of disabled) reg.disablePackage(id);
+    return reg;
+  }
+
+  /** The execution list over the registry's served list, at the address a request names. */
+  function servedProtocol(reg: SchemaRegistry) {
+    const requests: AnyRecord[] = [];
+    return {
+      requests,
+      async getMetaItemsForExecution(request: { type: string; packageId?: string }) {
+        requests.push({ ...request });
+        const listed = (reg.listItems(request.type) ?? []) as AnyRecord[];
+        const items = request.packageId === undefined ? listed : listed.filter((i) => i._packageId === request.packageId);
+        return { type: request.type, items: items.map((i) => ({ ...i })) };
+      },
+    };
+  }
+
+  const ORDERS = [[ALPHA, BETA], [BETA, ALPHA]] as const;
+  const READS = ['protocol', 'registry'] as const;
+  const loaderOver = (reg: SchemaRegistry, read: (typeof READS)[number]) =>
+    createRegistryEmailTemplateLoader(read === 'protocol' ? { protocol: servedProtocol(reg), registry: reg } : { registry: reg });
+  const send = (loader: ReturnType<typeof createRegistryEmailTemplateLoader>, caller?: string | null) =>
+    loader.load('welcome', 'en-US', caller === undefined ? undefined : { callerPackageId: caller })
+      .then((row) => ({ subject: row?.subject ?? null }), (e: unknown) => ({ error: e }));
+  const refusalOf = (answer: AnyRecord) => {
+    expect(answer.error).toBeInstanceOf(EmailTemplateAmbiguousError);
+    const err = answer.error as EmailTemplateAmbiguousError;
+    return { status: err.status, candidates: err.candidates.map((c) => (c as { packageId?: string }).packageId).sort() };
+  };
+
+  describe.each(READS)('read: %s', (read) => {
+    describe.each(ORDERS)('registered %s first', (first, second) => {
+      const order = [first, second];
+
+      it('CONTROL — both enabled: each holder sends its own template; a send with no package, or from a caller whose closure holds both, is refused naming both', async () => {
+        const loader = loaderOver(registryShipping(order, []), read);
+        expect(await send(loader, ALPHA)).toEqual({ subject: 'alpha welcome' });
+        expect(await send(loader, BETA)).toEqual({ subject: 'beta welcome' });
+        expect(refusalOf(await send(loader))).toEqual({ status: 409, candidates: [ALPHA, BETA] });
+        expect(refusalOf(await send(loader, BOTH))).toEqual({ status: 409, candidates: [ALPHA, BETA] });
+      });
+
+      it('BETA disabled: a send with no package, omitted or null, sends the enabled holder\'s template', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        expect(await send(loader)).toEqual({ subject: 'alpha welcome' });
+        expect(await send(loader, null)).toEqual({ subject: 'alpha welcome' });
+      });
+
+      it('CONTROL — BETA disabled: the enabled holder\'s own send sends its own template', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        expect(await send(loader, ALPHA)).toEqual({ subject: 'alpha welcome' });
+      });
+
+      it('BETA disabled: a caller whose closure holds both sends the enabled holder\'s template', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        expect(await send(loader, BOTH)).toEqual({ subject: 'alpha welcome' });
+      });
+
+      it('BETA disabled: a caller whose closure reaches the name only through BETA is refused outside-closure, naming the enabled holder', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        const answer = await send(loader, VIA_BETA);
+        expect(refusalOf(answer)).toEqual({ status: 409, candidates: [ALPHA] });
+        expect(((answer as AnyRecord).error as EmailTemplateAmbiguousError).message).toContain('outside');
+      });
+
+      it('BETA disabled: a caller that reaches neither holder is refused naming the enabled holder only', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        expect(refusalOf(await send(loader, NEITHER))).toEqual({ status: 409, candidates: [ALPHA] });
+      });
+
+      it('BETA disabled: BETA\'s own send sends nothing, never the enabled holder\'s template', async () => {
+        const loader = loaderOver(registryShipping(order, [BETA]), read);
+        expect(await send(loader, BETA)).toEqual({ subject: null });
+      });
+
+      it('both disabled: a send with no package sends nothing', async () => {
+        const loader = loaderOver(registryShipping(order, [ALPHA, BETA]), read);
+        expect(await send(loader)).toEqual({ subject: null });
+        expect(await send(loader, null)).toEqual({ subject: null });
+      });
+    });
+  });
+});
