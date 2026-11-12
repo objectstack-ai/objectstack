@@ -66,7 +66,7 @@ function makeSource({ batch = true, refuse, refusal }: { batch?: boolean; refuse
     if (dataset === refuse) throw refusal;
     return answerFor(dataset, selection);
   });
-  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>, _options?: { packageId?: string }) =>
+  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>, _options?: { packageId?: string; callerPackage?: string }) =>
     queries.map(({ dataset, selection }) => (dataset === refuse
       ? { status: 'rejected' as const, reason: refusal }
       : { status: 'fulfilled' as const, value: answerFor(dataset, selection) })));
@@ -114,12 +114,35 @@ describe('one dashboard render sends its dataset queries as one batch (objectsta
     expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
   });
 
-  it('sends the dashboard package with the batch, the one every widget query is read from', async () => {
+  it('sends the dashboard package with the batch as the reader\'s package, the caller every widget query is resolved for', async () => {
     const { source, batchDoor } = makeSource();
     const served = { ...DASHBOARD, _packageId: 'crm' } as unknown as DashboardComponentSchema;
     render(<DashboardRenderer schema={served} dataSource={source} />);
     await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
-    expect(batchDoor.mock.calls[0][1]).toEqual({ packageId: 'crm' });
+    expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
+  });
+
+  it('the grid layout surface sends the dashboard package with its batch as the reader\'s package too', async () => {
+    const { source, batchDoor } = makeSource();
+    const served = { ...DASHBOARD, _packageId: 'crm' } as unknown as DashboardComponentSchema;
+    render(<DashboardGridLayout schema={served} dataSource={source} />);
+    await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
+    expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
+  });
+
+  it('control: a package-less dashboard sends its batch with no options at all', async () => {
+    const { source, batchDoor } = makeSource();
+    render(<DashboardRenderer schema={DASHBOARD} dataSource={source} />);
+    await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
+    expect(batchDoor.mock.calls[0][1]).toBeUndefined();
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
   });
 
   it('the grid layout surface batches the same way', async () => {

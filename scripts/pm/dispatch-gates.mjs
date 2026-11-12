@@ -12804,7 +12804,7 @@ export function residueLines(
  *
  * Rulebook: `.claude/skills/pm-dispatch/references/contract-review.md` — the review of record and its `Served-tier:` line.
  */
-export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-2';
 
 /**
  * The constant's NAME — the one token a GitHub artefact (a claim's `model:`

@@ -828,7 +828,10 @@ process.stdin.on('end', () => {
 });
 `;
 
-describe('the live driver against a stand-in `claude`: the prompt on stdin, and a turn that does not finish recorded', () => {
+// Subprocess stand-in under CI load: up to 19 sequential process starts a case (`--model`), cut off at 5049 ms on a merge-queue shard; 30 s is ~6x that.
+const STAND_IN_TEST_TIMEOUT_MS = 30_000;
+
+describe('the live driver against a stand-in `claude`: the prompt on stdin, and a turn that does not finish recorded', { timeout: STAND_IN_TEST_TIMEOUT_MS }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'scenario-stand-in-'));
   const bin = join(dir, 'claude');
   writeFileSync(bin, STAND_IN);

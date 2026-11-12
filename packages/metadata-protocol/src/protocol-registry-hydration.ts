@@ -1431,9 +1431,10 @@ export class ProtocolRegistryHydrationFacet {
      * (the environment's own item, which D3 reads bare) or the name is a
      * global literal (a `view`, ADR-0150 bucket 1), and
      * {@link HEAL_BINDING_UNKNOWN} when it never learns the binding (a peer
-     * converging on the cluster signal, whose payload carries an address and
-     * no binding). Both read with no package; only `null` retires on a
-     * refusal (below).
+     * converging on a cluster signal that names no package: one from a
+     * replica that predates the signal's `packageId`, #32451). Both read with
+     * no package; only `null` retires on a refusal (below). A peer whose
+     * signal names the package passes that package, as the writer did.
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway. Never silent:
@@ -1617,9 +1618,9 @@ export class ProtocolRegistryHydrationFacet {
                 // packaged artifact, as on tier 3. A row bound to a package keeps
                 // the logged stop ({@link readHealBaseline}); the ruling names
                 // the package-less heal only. So does a caller that does not know
-                // the binding ({@link HEAL_BINDING_UNKNOWN}, a peer on the
-                // cluster signal): it cannot tell the removed row was the
-                // package-less one.
+                // the binding ({@link HEAL_BINDING_UNKNOWN}, a peer on a
+                // cluster signal naming no package): it cannot tell the removed
+                // row was the package-less one.
                 if (packageId === HEAL_BINDING_UNKNOWN || boundPackageOf(packageId) !== undefined
                     || packageScopedRefusalOf(error) === undefined) throw error;
                 // What the verb answers is what the line says: an empty slot, or

@@ -194,3 +194,103 @@ describe('DatasetReportRenderer reads dateRange (objectstack-ai/objectstack#2587
     expect(src.selections[0]).not.toHaveProperty('timeDimensions');
   });
 });
+
+/*
+ * ADR-0150 D3 — the omitted-dimension read of the dataset definition is made
+ * as the report's reader (`?callerPackage=` = the report's served package), so
+ * it reads the dataset the report's queries resolve. A refusal is the read's
+ * error state, never retried bare.
+ */
+describe('DatasetReportRenderer reads the date dimension as the report\'s reader (ADR-0150 D3)', () => {
+  /** The server's answers: the D3 resolution for `com.acme.app` (its dependency's dataset), else another holder's. */
+  function makeResolvingApiFetch({ refuse = false } = {}) {
+    const urls: string[] = [];
+    const apiFetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      urls.push(url);
+      if (url === '/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.app') {
+        if (refuse) {
+          return new Response(JSON.stringify({ success: false, error: { code: 'RESOURCE_CONFLICT', message: 'held by 2 packages in the closure' } }), { status: 409 });
+        }
+        return new Response(JSON.stringify({ item: { name: 'opportunity_metrics', dimensions: [{ name: 'won_on', type: 'date' }] } }), { status: 200 });
+      }
+      if (url === '/api/v1/meta/dataset/opportunity_metrics') {
+        return new Response(JSON.stringify({ item: { name: 'opportunity_metrics', dimensions: [{ name: 'bare_date', type: 'date' }] } }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    });
+    return { apiFetch, urls };
+  }
+
+  it('a package report reads the definition with its package as the caller, and windows on that dataset\'s date dimension', async () => {
+    const src = makeSource();
+    const { apiFetch, urls } = makeResolvingApiFetch();
+    renderReport({ ...BASE, _packageId: 'com.acme.app', dateRange: { defaultRange: 'last_90_days' } }, src, apiFetch);
+    await waitFor(() => expect(src.selections).toHaveLength(1));
+    expect(urls).toEqual(['/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.app']);
+    expect(src.selections[0].timeDimensions).toEqual([{ dimension: 'won_on', dateRange: 'last_90_days' }]);
+  });
+
+  it('a 409 for the reader is the read\'s error state: no bare retry, no query', async () => {
+    const src = makeSource();
+    const { apiFetch, urls } = makeResolvingApiFetch({ refuse: true });
+    renderReport({ ...BASE, _packageId: 'com.acme.app', dateRange: { defaultRange: 'last_90_days' } }, src, apiFetch);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('HTTP 409');
+    expect(urls).toEqual(['/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.app']);
+    expect(src.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('the caller package is part of the read: the same report served from another package re-reads, and never windows on the first one\'s dimension', async () => {
+    const sent: Array<{ caller: unknown; timeDimensions: unknown }> = [];
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, selection: any, options?: { callerPackage?: string }) => {
+        sent.push({ caller: options?.callerPackage, timeDimensions: selection?.timeDimensions });
+        return { rows: [{ stage: 'Won', amount: 10 }] };
+      }),
+    };
+    const urls: string[] = [];
+    const apiFetch = vi.fn(async (input: unknown) => {
+      const url = String(input);
+      urls.push(url);
+      const dimension = url.endsWith('?callerPackage=com.acme.app') ? 'won_on'
+        : url.endsWith('?callerPackage=com.acme.other') ? 'closed_on' : undefined;
+      return dimension
+        ? new Response(JSON.stringify({ item: { name: 'opportunity_metrics', dimensions: [{ name: dimension, type: 'date' }] } }), { status: 200 })
+        : new Response('{}', { status: 404 });
+    });
+    const tree = (packageId: string) => {
+      // The served decoration rides the report as data, the way `renderReport` hands it.
+      const report: Record<string, unknown> = { ...BASE, _packageId: packageId, dateRange: { defaultRange: 'last_90_days' } };
+      return (
+        <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+          <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
+            <DatasetReportRenderer report={report} dataSource={src as any} />
+          </SchemaRendererProvider>
+        </I18nProvider>
+      );
+    };
+    const { rerender } = render(tree('com.acme.app'));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    rerender(tree('com.acme.other'));
+    await waitFor(() => expect(sent.some((s) => s.caller === 'com.acme.other')).toBe(true));
+    expect(urls).toEqual([
+      '/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.app',
+      '/api/v1/meta/dataset/opportunity_metrics?callerPackage=com.acme.other',
+    ]);
+    expect(sent.filter((s) => s.caller === 'com.acme.other').map((s) => s.timeDimensions))
+      .toEqual([[{ dimension: 'closed_on', dateRange: 'last_90_days' }]]);
+  });
+
+  it.each([
+    ['no _packageId', undefined],
+    ['the package-less sentinel', 'sys_metadata'],
+  ])('CONTROL: a report authored in the environment (%s) reads the definition with no caller', async (_label, packageId) => {
+    const src = makeSource();
+    const { apiFetch, urls } = makeResolvingApiFetch();
+    renderReport({ ...BASE, ...(packageId ? { _packageId: packageId } : {}), dateRange: { defaultRange: 'last_90_days' } }, src, apiFetch);
+    await waitFor(() => expect(src.selections).toHaveLength(1));
+    expect(urls).toEqual(['/api/v1/meta/dataset/opportunity_metrics']);
+    expect(src.selections[0].timeDimensions).toEqual([{ dimension: 'bare_date', dateRange: 'last_90_days' }]);
+  });
+});
