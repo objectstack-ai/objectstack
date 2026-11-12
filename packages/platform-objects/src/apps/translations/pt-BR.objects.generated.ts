@@ -3079,6 +3079,34 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Por tópico"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Enviar mensagem no aplicativo",
+        description: "Envie uma mensagem para todos da sua organização ou para os membros que você escolher. Ela aparece nas notificações de cada destinatário.",
+        successMessage: "Mensagem enviada. Destinatários: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Todos nesta organização",
+            helpText: "Enviar para todos os membros da sua organização atual. Deixe desativado para escolher os destinatários abaixo."
+          },
+          recipients: {
+            label: "Destinatários",
+            helpText: "Os membros da sua organização para quem enviar, quando a mensagem não for para todos."
+          },
+          title: {
+            label: "Título",
+            helpText: "A linha que cada destinatário vê nas notificações."
+          },
+          body: {
+            label: "Mensagem"
+          },
+          link: {
+            label: "Link",
+            helpText: "Opcional. Uma página deste aplicativo (começando com /) ou um endereço da web que a mensagem abre."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
