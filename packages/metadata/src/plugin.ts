@@ -1675,11 +1675,14 @@ export class MetadataPlugin implements Plugin {
                             // uses, so both load paths produce identical
                             // _packageId/_provenance state. No-op when the
                             // option is unset or the item is already stamped.
-                            // [#32521] Not a package-less item of a name two
-                            // packages hold: it stays the environment's own
-                            // item (`contestedNames`).
+                            // [#32521] Not a package-less stored row of a name
+                            // two packages hold: it stays the environment's own
+                            // item (`contestedNames`). The host's own file item
+                            // of such a name is stamped as before.
                             applyProtection(meta, {
-                                packageId: storedItemPackageId(meta) === undefined && contested.has(meta.name)
+                                packageId: storedItemPackageId(meta) === undefined
+                                    && contested.has(meta.name)
+                                    && this.manager.sourceLoaderOf(meta) === STORED_ROW_LOADER
                                     ? undefined
                                     : this.options.packageId,
                             });
@@ -1715,19 +1718,25 @@ export class MetadataPlugin implements Plugin {
     }
 }
 
+/** The loader whose items are stored rows: `DatabaseLoader`'s `contract.name`. */
+const STORED_ROW_LOADER = 'database';
+
 /**
- * [#32521; epic #31527 red lines 2 and 3, contract review F1] The names two or
- * more packages hold among a type's items, for an unbundled type stored per
- * `(package, name)`. The boot priming pass does not stamp a package-less item
- * of such a name with the host's declared package: ADR-0150 D4 makes a
- * package-less item a holder's customization only under a name ONE package
- * holds, so under a name two hold it is the environment's own item, and that
- * is what a read without the pass answers. Stamped, the store would file it
- * into the host's slot — over that holder's own item when the host is one of
- * the holders (a read naming it would answer the package-less body and `list`
- * would drop its item), or as a third holder when it is not. A name one
- * package holds is not here, so its package-less item is stamped as before.
- * Every other type: none.
+ * [#32521; epic #31527 red lines 2 and 3, contract reviews F1 and D1] The
+ * names two or more packages hold among a type's items, for an unbundled type
+ * stored per `(package, name)`. The boot priming pass does not stamp a
+ * package-less STORED ROW of such a name (an item `DatabaseLoader` handed on)
+ * with the host's declared package: ADR-0150 D4 makes a package-less row a
+ * holder's customization only under a name ONE package holds, so under a name
+ * two hold it is the environment's own item, and that is what a read without
+ * the pass answers. Stamped, the store would file it into the host's slot —
+ * over that holder's own item when the host is one of the holders (a read
+ * naming it would answer the package-less body and `list` would drop its
+ * item), or as a third holder when it is not. The host's own file item of such
+ * a name is the host package's item and keeps the stamp, so its edit still
+ * reaches the host's slot and row over a row an earlier boot seeded from it. A
+ * name one package holds is not here, so its package-less row is stamped as
+ * before. Every other type: none.
  */
 function contestedNames(type: string, items: unknown[]): ReadonlySet<string> {
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return new Set();

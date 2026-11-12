@@ -2362,6 +2362,16 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     });
   const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
   const HOST = 'com.host.app';
+  /** The real pass on a host declaring `hostPackage`, over its own file-system loader under `rootDir` and then a database loader. */
+  const bootOverFiles = async (rootDir: string, hostPackage: string) => {
+    const plugin = new MetadataPlugin({ rootDir, packageId: hostPackage, watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    const fileSystem = [...(m as any).loaders.values()];
+    (m as any).loaders.clear();
+    for (const loader of [...fileSystem, new DatabaseLoader({ driver })]) m.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
   /**
    * What the reads answer after the pass for one package's row and a
    * package-less row of a name, measured at `efd4ea3a` (before this change)
@@ -2463,6 +2473,49 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
         }
       });
     }
+
+    // [contract review D1] The host's own file item keeps the host's package
+    // stamp under a name other packages hold: only a package-less STORED row
+    // stays the environment's own item. Unstamped, the file item went to the
+    // bare slot and was saved as a new package-less row, and the host's edit
+    // stopped reaching its own slot.
+    it(`${type}, the host's own file of a name another package holds, edited after a boot seeded the host's row: after the next pass a read naming the host answers the edited file, the host's row holds it and no package-less row is written, as on main`, async () => {
+      const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
+      try {
+        mkdirSync(join(rootDir, type));
+        const file = join(rootDir, type, `helper.${type}.yml`);
+        writeFileSync(file, 'name: helper\nlabel: file v1\n');
+        await bootOverFiles(rootDir, HOST);
+        expect(await stored(type)).toEqual([[HOST, 'file v1', 1]]);
+        await seed(type, BETA, 1);
+        writeFileSync(file, 'name: helper\nlabel: file v2\n');
+        const m = await bootOverFiles(rootDir, HOST);
+        expect(await answer(m, type, 'helper', HOST)).toBe('file v2');
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect((await stored(type)).map(([packageId, label]) => [packageId, label])).toEqual([[BETA, BETA], [HOST, 'file v2']]);
+        expect(registryKeys(m, type)).toEqual([`${BETA}\u0000helper`, `${HOST}\u0000helper`]);
+      } finally {
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    });
+
+    it(`${type}, the host's own file of a name two other packages hold, no row of the host's: after the pass a read naming the host answers the file and the host's row is seeded from it, as on main`, async () => {
+      const rootDir = mkdtempSync(join(tmpdir(), 'i32521-d1-'));
+      try {
+        mkdirSync(join(rootDir, type));
+        writeFileSync(join(rootDir, type, `helper.${type}.yml`), 'name: helper\nlabel: file\n');
+        await seed(type, ALPHA, 1);
+        await seed(type, BETA, 2);
+        const m = await bootOverFiles(rootDir, HOST);
+        expect(await answer(m, type, 'helper', HOST)).toBe('file');
+        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect((await stored(type)).map(([packageId, label]) => [packageId, label])).toEqual([[ALPHA, ALPHA], [BETA, BETA], [HOST, 'file']]);
+        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, `${HOST}\u0000helper`]);
+      } finally {
+        rmSync(rootDir, { recursive: true, force: true });
+      }
+    });
   }
 
   it('agent, two holders of a name and another row\'s body that says the same name: no body of the name is stamped, so none takes a package its row is not bound to (contract review F3 of #32458)', async () => {
