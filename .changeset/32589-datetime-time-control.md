@@ -5,7 +5,7 @@
 
 fix(fields): the date-time picker's popover picks the hour and minute
 
-Clause-②: no
+Clause-②: yes (widening: fields.datePicker.time, fields.datePicker.hour, fields.datePicker.minute)
 Metadata-protocol: none
 
 A `datetime` field on a record form (and in the action-param, bulk-action and inline editors that draw the same picker) opened a popover with a day calendar and the Today / Tomorrow shortcuts only. Picking a day wrote that day at the value's old time, or at `00:00` when the field was empty, and the only way to set an hour was to type the whole value into the text box.
