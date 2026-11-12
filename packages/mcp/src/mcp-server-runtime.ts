@@ -1649,27 +1649,30 @@ export function registerAuthoringTools(
  * one that can (cloud#4329, ruled B: the hint only where a build door is
  * mounted). A host with no build door injects no registry, so it has no
  * injection to carry the text, and the default below never promises
- * building. Either host text omitted falls through to the configured or
- * default instructions.
+ * building. Either host text omitted or blank falls through to the
+ * configured or default instructions.
  */
 function hostInstructions(
   authoring: McpAuthoringInjection | undefined,
   grantedScopes: readonly string[] | undefined,
 ): string | undefined {
   if (!authoring) return undefined;
-  return grantsAuthoringTools(grantedScopes) ? authoring.instructions : authoring.dataOnlyInstructions;
+  const text = grantsAuthoringTools(grantedScopes) ? authoring.instructions : authoring.dataOnlyInstructions;
+  // Blank is absent: an empty answer would replace the configured or default
+  // text with nothing, which no host means by an empty string.
+  return text?.trim() ? text : undefined;
 }
 
 /**
  * [#32766] The `initialize` instructions an HTTP request gets when neither the
  * host's per-request text nor the runtime's configured text answers it. It
- * names what every request is served (data objects as tools) and that the
- * list follows the connection's grant — true with or without a build door
- * mounted, so it never promises building to a deployment that has none.
+ * says only that the tool list follows the connection's grant — true for
+ * every grant (a `metadata:write`-only or `actions:execute`-only token lists
+ * no data tool) and with or without a build door mounted, so it never
+ * promises building to a deployment that has none.
  */
 const DEFAULT_HTTP_INSTRUCTIONS =
-  'ObjectStack MCP Server — your app\'s data objects as tools. '
-  + 'Which tools this connection lists depends on what its credential was granted.';
+  'ObjectStack MCP Server. The tools this connection lists depend on what its credential was granted.';
 
 /**
  * [#31605] Who an HTTP request was admitted as, as the HOST resolved it — the

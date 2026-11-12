@@ -804,6 +804,25 @@ describe('[#32766] data-only instructions on the authoring injection — the com
     expect(noInjection).not.toMatch(/build|metadata|author|scope/i);
   });
 
+  it('a blank text on either side is absent: the configured or default text answers, never an empty one', async () => {
+    const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
+    expect(
+      await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], registry, dataOnlyInstructions: '  \n ' }),
+    ).toBe(defaultText);
+    expect(
+      await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry, instructions: '' }),
+    ).toBe(defaultText);
+  });
+
+  it('the data-only text changes the instructions alone: tools/list is identical with and without it', async () => {
+    for (const grantedScopes of [[MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE], [MCP_OAUTH_SCOPE_METADATA_WRITE]]) {
+      const without = await listTools(runtime, bridge, { grantedScopes, registry });
+      const withText = await listTools(runtime, bridge, { grantedScopes, registry, dataOnlyInstructions: DATA_ONLY_TEXT });
+      expect(without.length).toBeGreaterThan(0);
+      expect(withText).toEqual(without);
+    }
+  });
+
   it('the per-request data-only text wins over the runtime\'s configured text; without it the configured text stays', async () => {
     const CONFIGURED = 'Configured server-wide instructions.';
     const configured = new MCPServerRuntime({ name: 't', version: '1.0.0', instructions: CONFIGURED });

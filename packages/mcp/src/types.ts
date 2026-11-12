@@ -118,6 +118,9 @@ export interface McpAuthoringInjection {
    * The token principal the host resolved for this request — from the SAME
    * token whose scopes the host passes as `toolOptions.grantedScopes`, since
    * that list is what admits the registry. Copied and frozen per call.
+   * Read only under a grant that admits the registry: on an API-key or
+   * session request (or any other grant that does not admit it) it is never
+   * read, so a host passes the user the request was admitted as.
    */
   principal: McpTokenPrincipal;
   /** The environment the host dispatched this request for. */
@@ -128,9 +131,10 @@ export interface McpAuthoringInjection {
    * rules live, which ones exist). Read under the SAME grant that admits
    * {@link registry}: a request whose grant registers the authoring family
    * is answered with this text; any other request — a `data:read` token, an
-   * API key, a session — gets the runtime's configured or default
-   * instructions and never sees it. Omitted, the authoring request gets the
-   * configured or default instructions too.
+   * API key, a session — never sees it, and gets {@link dataOnlyInstructions}
+   * or, without them, the runtime's configured or default instructions.
+   * Omitted (or blank), the authoring request gets the configured or default
+   * instructions too.
    */
   instructions?: string;
   /**
@@ -146,8 +150,15 @@ export interface McpAuthoringInjection {
    * `metadata:write`). It rides this injection, and not `handleHttpRequest`'s
    * own options, so that only a host that injects an authoring registry can
    * serve it: a deployment with no build door has no injection and cannot
-   * promise building. Omitted, such a request gets the configured or default
-   * instructions, as before.
+   * promise building. Omitted (or blank), such a request gets the
+   * configured or default instructions, as before.
+   *
+   * To reach API-key and session requests, a host that mounts a build door
+   * passes this injection on EVERY request it serves, those included: the
+   * registry registers nothing for their grant, and {@link principal} is not
+   * read for it. The text is served whenever the injection is present, even
+   * when the registry holds no tool; the injection itself is the host's
+   * statement that a build door exists.
    */
   dataOnlyInstructions?: string;
 }

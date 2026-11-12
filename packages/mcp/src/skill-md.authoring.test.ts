@@ -148,6 +148,9 @@ describe('[#32766] renderSkillMarkdown — the host\'s data-only text renders on
     expect(
       renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], dataOnlyInstructions: DATA_ONLY }),
     ).toBe(baseline);
+    expect(
+      renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], authoringTools: [], dataOnlyInstructions: DATA_ONLY }),
+    ).toBe(baseline);
   });
 
   it('a grant that admits the family renders the authoring section and never the data-only text', () => {
