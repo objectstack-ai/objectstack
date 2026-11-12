@@ -406,6 +406,9 @@ const ko = {
       tomorrow: "내일",
       clear: "날짜 지우기",
       openCalendar: "달력 열기",
+      time: "시간",
+      hour: "시",
+      minute: "분",
       invalid:
         "저장되지 않음: “{{value}}”은(는) 날짜가 아닙니다. {{format}} 형식으로 입력하거나 달력에서 선택하세요.",
     },
