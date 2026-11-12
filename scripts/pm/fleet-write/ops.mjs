@@ -2370,6 +2370,11 @@ export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELA
   return half === relayPublicKey ? null : `${ADVISORY_NOTE_KEY_ENV}'s public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY — the secret and the constant were not made as one pair`;
 }
 
+/** The relay's note key as a `KeyObject`, from the secret's text — called only after `advisoryNoteKeyFailure` passed it. */
+export function advisoryNotePrivateKey(text) {
+  return createPrivateKey({ key: Buffer.from(text, 'base64'), format: 'der', type: 'pkcs8' });
+}
+
 /** The note's HKDF label and associated-data prefix: its own, so a note never opens as a read and a read never as a note. */
 const ADVISORY_NOTE_INFO = 'fleet-write:advisory_note:v1';
 /** The bytes of the seat's one-time digest key, sealed in front of the section. */
