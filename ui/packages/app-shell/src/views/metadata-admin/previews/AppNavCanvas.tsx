@@ -271,6 +271,163 @@ export function navPayloadOf(entries: readonly unknown[]): Array<Record<string, 
 }
 
 /**
+ * Whether the editor shows this entry as incomplete: a save leaves it out for
+ * want of a target ({@link navPayloadOf}). The rail and the canvas mark it by
+ * this one test, so the mark and the save cannot disagree.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure predicate beside navPayloadOf
+export function isIncompleteNavEntry(entry: unknown): boolean {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+  return namesNoTarget(entry as RawNav);
+}
+
+/**
+ * An entry a nav save left out for want of a target, and where the editor
+ * holds it: the `id` of the entry whose `children` list holds it (`null` at
+ * the top level) and its index in that list.
+ *
+ * The app document cannot carry such an entry (the spec's navigation item
+ * refuses a target-bearing `type` with no target, and the draft door judges
+ * the schema), so the editor keeps it in this browser instead and puts it
+ * back in its place when the app is read again ({@link withHeldNavEntries}).
+ * It stays there, marked incomplete, until a target is picked (the save then
+ * sends it) or it is removed.
+ */
+export interface HeldNavEntry {
+  parent: string | null;
+  index: number;
+  entry: Record<string, unknown>;
+}
+
+/**
+ * Every entry of `entries` a save leaves out, at every depth, with its place
+ * ({@link HeldNavEntry}). An entry with no `id` cannot be placed again and is
+ * not held; nor is anything inside an entry that is itself held (it is held
+ * whole, `children` and all).
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure function beside navPayloadOf
+export function heldNavEntriesOf(entries: readonly unknown[], parent: string | null = null): HeldNavEntry[] {
+  const held: HeldNavEntry[] = [];
+  entries.forEach((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+    const it = entry as RawNav;
+    const id = typeof it.id === 'string' && it.id ? it.id : null;
+    if (namesNoTarget(it)) {
+      if (id) held.push({ parent, index, entry: it as Record<string, unknown> });
+      return;
+    }
+    if (id && Array.isArray(it.children)) held.push(...heldNavEntriesOf(it.children, id));
+  });
+  return held;
+}
+
+/**
+ * `entries` with each held entry put back in its place: into the list of the
+ * entry whose `id` is its `parent`, at its index (clamped to the list's end),
+ * in index order, so a list the server still holds as it was sent comes back
+ * exactly as the editor held it. A held entry whose `id` the list already
+ * holds (it was bound elsewhere and saved), or whose parent is gone, is not
+ * put back. Nothing put back ⇒ `entries` itself is returned.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure function beside navPayloadOf
+export function withHeldNavEntries(entries: readonly unknown[], held: readonly HeldNavEntry[]): unknown[] {
+  if (held.length === 0) return entries as unknown[];
+  const ids = new Set<string>();
+  const collect = (list: readonly unknown[]) => {
+    for (const n of list) {
+      if (!n || typeof n !== 'object' || Array.isArray(n)) continue;
+      const it = n as RawNav;
+      if (typeof it.id === 'string') ids.add(it.id);
+      if (Array.isArray(it.children)) collect(it.children);
+    }
+  };
+  collect(entries);
+  const pending = held.filter((h) => typeof h.entry.id === 'string' && !ids.has(h.entry.id as string));
+  if (pending.length === 0) return entries as unknown[];
+  const place = (list: readonly unknown[], parent: string | null): readonly unknown[] => {
+    let out: unknown[] | null = null;
+    list.forEach((n, i) => {
+      if (!n || typeof n !== 'object' || Array.isArray(n)) return;
+      const it = n as RawNav;
+      if (typeof it.id !== 'string' || !Array.isArray(it.children)) return;
+      const kids = place(it.children, it.id);
+      if (kids === it.children) return;
+      out ??= [...list];
+      out[i] = { ...it, children: kids };
+    });
+    const mine = pending.filter((h) => h.parent === parent).sort((a, b) => a.index - b.index);
+    if (mine.length === 0) return out ?? list;
+    const placed = out ?? [...list];
+    for (const h of mine) placed.splice(Math.min(Math.max(h.index, 0), placed.length), 0, h.entry);
+    return placed;
+  };
+  return place(entries, null) as unknown[];
+}
+
+/** The browser-storage key prefix of {@link heldNavKey}. */
+const HELD_NAV_PREFIX = 'studio-held-nav';
+
+/**
+ * Where this browser keeps the held entries of one app's navigation: scoped by
+ * the active organization, the package the nav save writes to and the app.
+ * The signed-out and owner-change sweeps of `@object-ui/auth` drop every key
+ * but a short allowlist, so another user of this browser never reads them.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure function beside navPayloadOf
+export function heldNavKey(organization: string | null, packageId: string, appName: string): string {
+  return `${HELD_NAV_PREFIX}:${organization ?? '-'}:${packageId}:${appName}`;
+}
+
+function heldNavStore(): Storage | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The held entries stored at `key`, or none: an absent, unreadable or
+ * malformed value reads as none, so the editor shows the app as the server
+ * holds it.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure function beside navPayloadOf
+export function readHeldNav(key: string): HeldNavEntry[] {
+  try {
+    const raw = heldNavStore()?.getItem(key);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (h): h is HeldNavEntry =>
+        !!h &&
+        typeof h === 'object' &&
+        (h.parent === null || typeof h.parent === 'string') &&
+        Number.isInteger(h.index) &&
+        !!h.entry &&
+        typeof h.entry === 'object' &&
+        !Array.isArray(h.entry) &&
+        typeof h.entry.id === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Store `held` at `key`; none removes the key. Storage that refuses is left as it is. */
+// eslint-disable-next-line react-refresh/only-export-components -- a pure function beside navPayloadOf
+export function writeHeldNav(key: string, held: readonly HeldNavEntry[]): void {
+  try {
+    const store = heldNavStore();
+    if (!store) return;
+    if (held.length === 0) store.removeItem(key);
+    else store.setItem(key, JSON.stringify(held));
+  } catch {
+    /* quota / private browsing: the entry stays on screen until a reload */
+  }
+}
+
+/**
  * A level's entries in the order the running menu draws them, each with its
  * index in the authored array (objectstack#26979). The Studio's one reader of
  * that order: this canvas and the Interfaces rail (`NavTree`) both list a
@@ -750,6 +907,17 @@ function NavCard({
         <Badge variant="outline" className={cn('h-5 shrink-0 px-1.5 py-0 text-[10px] font-medium', tone.badge)}>
           {kind}
         </Badge>
+        {/* An entry with no target yet: kept in the editor, left out of the
+            save (`isIncompleteNavEntry`). */}
+        {isIncompleteNavEntry(item) && (
+          <Badge
+            variant="outline"
+            title={t('engine.appNav.incompleteHint', locale)}
+            className="h-5 shrink-0 border-amber-300 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-700 dark:text-amber-400"
+          >
+            {t('engine.appNav.incomplete', locale)}
+          </Badge>
+        )}
         {/* objectui#11776 — always in the tab order (it was mounted only while
             a mouse hovered the card, so no keyboard path could reach it).
             objectui#12519 — and always drawn: a fixed 24 px at reduced
