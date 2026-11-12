@@ -244,6 +244,13 @@ function redactStoredMetadataSnapshot(
 
 /** The rewrite reads and writes as the platform, never as a user. */
 const SYSTEM_CTX = { isSystem: true } as const;
+/**
+ * …and writes keeping each row's audit stamp, as the two sibling ledger-copy
+ * rewrites do (`mail-log-body-migration.ts`): redacting a copy is not an edit
+ * of the ledger row, and on a sealed row (ADR-0154 D7) a moved `updated_at`
+ * would read `modified` whatever its amendment says.
+ */
+const SYSTEM_PRESERVING_CTX = { isSystem: true, preserveAudit: true } as const;
 
 /**
  * Redact the metadata body nested inside one parsed ledger snapshot — a
@@ -498,8 +505,14 @@ export async function migrateStoredMetadataBodyCopies(
       try {
         // A single-id write: the engine reads the target from `data.id`. Run as
         // the platform — a system caller is exempt from the static-readonly
-        // strip every audit/activity field carries, so the rewrite is stored.
-        await engine.update(object, { ...patch, id }, { context: SYSTEM_CTX });
+        // strip every audit/activity field carries, so the rewrite is stored —
+        // keeping the row's stored `updated_at`.
+        const updatedAt = row.updated_at;
+        await engine.update(
+          object,
+          { ...patch, id, ...(updatedAt !== undefined && updatedAt !== null ? { updated_at: updatedAt } : {}) },
+          { context: SYSTEM_PRESERVING_CTX },
+        );
       } catch (e) {
         report.failures += 1;
         logger.warn(
