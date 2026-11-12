@@ -565,7 +565,7 @@ describe('[#32572] install-local refuses a package with two enabled jobs of one 
 
     it('a multi-package artifact: the name a package body declares and the residual carries is refused, naming the body and the residual', async () => {
         const { install, jobs, register } = await bootPlugin();
-        const SYNCED = { name: 'jobs_app_alpha_rec', label: 'Alpha record', fields: { name: { type: 'text', label: 'Name' } } };
+        const SYNCED = { name: 'jobs_alpha_rec', label: 'Alpha record', fields: { name: { type: 'text', label: 'Name' } } };
         const alpha = defineStack({
             manifest: { id: 'com.example.jobsalpha', namespace: 'jobs_alpha', name: 'Jobs Alpha', version: '0.1.0', type: 'module' },
             objects: [SYNCED],
@@ -573,7 +573,7 @@ describe('[#32572] install-local refuses a package with two enabled jobs of one 
         } as never);
         // No `manifest`: its jobs reach the artifact's top level and no package body — the residual.
         const host = defineStack({ objects: [{ ...SYNCED, name: 'jobs_app_host_rec', label: 'Host record' }], jobs: [TWIN_SLOW] } as never);
-        const bundle = JSON.parse(JSON.stringify(composeStacks([alpha, host, artifact(undefined)] as never[], { manifest: 'preserve' })));
+        const bundle = JSON.parse(JSON.stringify(composeStacks([alpha, host, defineStack(artifact(undefined) as never)] as never[], { manifest: 'preserve' })));
 
         const res = await install(bundle);
 
