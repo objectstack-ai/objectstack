@@ -550,6 +550,9 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     for (const [start, end] of [[1, 2], [3, 5], [10, 13]]) {
       await rig.engine.insert(OBJ, { title: `r${start}`, start_day: start, end_day: end }, { context: { isSystem: true } });
     }
+    // Each row as stored carries its stamp (this bare engine runs no audit writer that would stamp one).
+    let day = 0;
+    for (const row of rig.storeFor(OBJ).values()) row.updated_at = `2026-01-0${++day}T00:00:00.000Z`;
     rig.updates.length = 0;
     return rig;
   }
