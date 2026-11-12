@@ -807,6 +807,23 @@ describe('[#32700] a rollback or revert that makes a changed stored computed fie
     expect(RevertPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
   });
 
+  it('a revert whose storage sync is refused writes no row, and says so per field', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await rig.save(TIMES_EIGHT, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    rig.updates.length = 0;
+    (rig.engine as any).syncObjectSchema = async () => { throw new Error('the datasource is read-only'); };
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object', name: OBJ, action: 'restored' }]);
+    expect(rig.updates).toEqual([]);
+    expect(notices(res, 'object-storage-sync-refused')).toHaveLength(1);
+    expect(notices(res, 'stored-expression-fill-incomplete')[0].message).toContain('were NOT filled');
+    expect(RevertPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
   it('a package rollback through a commit that changed the expression carries the step\'s fill notice on its own answer', async () => {
     const rig = await populated();
     await rig.save(STORED, 'draft');
