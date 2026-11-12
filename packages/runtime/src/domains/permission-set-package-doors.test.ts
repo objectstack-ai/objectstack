@@ -353,6 +353,45 @@ describe('[E1] the activation door — CONTROL, the environment is the one holde
 });
 
 /**
+ * [Epic read 6817314015, S1] A package and the ENVIRONMENT hold one name: the name alone is the environment's set
+ * (D3, a caller with no package), so a row stamped with the overlay sentinel is the environment's own switch.
+ * BASE (ec39bd8e5): matched on its raw `package_id`, it was not; switching on answered 409 ("switches off every
+ * holder", false), and switching off wrote a second row.
+ */
+describe('[S1] the activation door — a package and the environment hold one name', () => {
+    describe.each(['plain', 'overlay'] as const)('the environment\'s set spelled %s', (spelling) => {
+        const h0 = () => boot({ environment: { [ONE]: spelling } });
+
+        it('a sentinel row is the environment\'s switch: switching the environment\'s set on takes it over, 200; the package\'s set is untouched', async () => {
+            const h = h0();
+            h.tables[LEDGER].push({ id: 'sentinel', metadata_type: 'permission', name: ONE, package_id: SENTINEL, active: false });
+            expect(answer(await flip(h, ONE, {}, { enabled: true })).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['sentinel', null, true]]);
+        });
+
+        it('switching it off over a sentinel row re-addresses that one row, never a second; the package\'s own row stays as it was', async () => {
+            const h = h0();
+            h.tables[LEDGER].push(
+                { id: 'sentinel', metadata_type: 'permission', name: ONE, package_id: SENTINEL, active: true },
+                { id: 'crm', metadata_type: 'permission', name: ONE, package_id: CRM, active: false },
+            );
+            expect(answer(await flip(h, ONE)).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['sentinel', null, false], ['crm', CRM, false]]);
+        });
+
+        it('CONTROL: ?package= the package switches its own row; the environment\'s sentinel row is untouched', async () => {
+            const h = h0();
+            h.tables[LEDGER].push({ id: 'sentinel', metadata_type: 'permission', name: ONE, package_id: SENTINEL, active: false });
+            expect(answer(await flip(h, ONE, { package: CRM }, { enabled: true })).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id ?? null, r.active])).toEqual([
+                ['sentinel', SENTINEL, false],
+                [expect.any(String), CRM, true],
+            ]);
+        });
+    });
+});
+
+/**
  * [Contract review 6813617327, should-fix 2] A package that holds the name but
  * is DISABLED: the catalog does not serve its set, and the D3 rule still counts
  * it as a holder. So the activation door counts it too: a row naming no
@@ -368,7 +407,7 @@ describe('[should-fix 2] a disabled package still holds the name, at the activat
         h.tables[LEDGER].push({ id: 'legacy', metadata_type: 'permission', name: TWO, package_id: null, active: false });
         const res = answer(await flip(h, TWO, { package: CRM }, { enabled: true }));
         expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
-        expect(res.message).toContain('one naming no package, which switches off every holder of the name while more than one holds it');
+        expect(res.message).toContain('one naming no package, which switches off every holder of the name while the name alone is refused (ADR-0150 D3: more than one package holds it, and the environment does not)');
         expect(h.writes).toEqual([]);
     });
 

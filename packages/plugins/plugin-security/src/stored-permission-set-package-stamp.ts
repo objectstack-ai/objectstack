@@ -101,10 +101,10 @@
  * packages' sets of one name, and the package-less guard keeps grants that
  * name no package to one per `(user_id, permission_set, organization_id)`.
  * Neither index sees a grant beside another of the same user, set and
- * organization when one of the two names no package, or a package that does
- * not hold the name, or the same package: the key the grant had before #32164,
+ * organization when one of the two names no package, or names a package that
+ * does not hold the name: the key the grant had before #32164,
  * `(user_id, permission_set, organization_id)`, refused every such second row.
- * So this seam refuses it, after the column is stamped: a grant write that
+ * So this seam refuses it, once the column is stamped: a grant write that
  * leaves a row of the same `(user_id, permission_set, organization_id)` beside
  * another is refused unless the two rows name two DIFFERENT packages that each
  * hold the name (the one pair the wider key exists to admit). The refusal is
@@ -120,14 +120,30 @@
  * driver fills the organization after this phase), and a write made below the
  * engine, two writes racing, or two rows of one batch insert, are held by the
  * two indexes alone.
+ *
+ * The check runs at priority 50, after every refusal of the grant table's
+ * hooks (30, 35, 40, 45), which keep their answer as while the store's key
+ * answered last; and it steps aside, as they do, on a holder a non-system
+ * write NAMES that the caller's own read door does not return, which the
+ * engine's reference check answers as a user that does not exist (#29029,
+ * `holderLeftToReferenceCheck`). Record validation runs after every hook, so a
+ * second grant it would also refuse is answered here (declared).
  */
 
 import { PackageScopedNameRefusedError, packageScopedRefusalMessage, type PackageScopedHolder } from '@objectstack/core';
 import { packageResolutionClosure } from '@objectstack/metadata-core';
 import { isPlainRecord } from '@objectstack/spec/data';
+import { holderLeftToReferenceCheck } from './grant-holder-membership-refusal.js';
 import {
+  GRANT_HOLDER_COLUMN as GRANT_HOLDER,
+  GRANT_OBJECT,
+  GRANT_ORGANIZATION_COLUMN as GRANT_ORGANIZATION,
+  grantKeyOf as keyOf,
   isPermissionSetHolderRegistry,
+  isSecondGrant,
+  otherGrantsOf,
   permissionSetHolderOf,
+  sealedPackageHoldersOf,
   STORED_PERMISSION_SET_REFERENCES,
   type StoredPermissionSetReference,
 } from './stored-permission-set-package-backfill.js';
@@ -137,6 +153,9 @@ export const PERMISSION_SET_PACKAGE_STAMP_HOOK_PACKAGE = 'plugin-security:permis
 
 /** After the grant-name refusals (priority 30): a refused write is never stamped. */
 const HOOK_PRIORITY = 40;
+
+/** The one-grant check: after the agent-account refusal (45), before the default-priority hooks (module doc). */
+const ONE_GRANT_HOOK_PRIORITY = 50;
 
 interface StampEngine {
   registry?: unknown;
@@ -240,17 +259,6 @@ function writerOf(reference: StoredPermissionSetReference, row: Record<string, u
   return reference.callerColumn ? named(row[reference.callerColumn]) : null;
 }
 
-/** The grant table (R1): the reference whose rows are authority, one per user, set and organization (module doc). */
-const GRANT_OBJECT = 'sys_user_permission_set';
-const GRANT_HOLDER = 'user_id';
-const GRANT_ORGANIZATION = 'organization_id';
-
-/** An id as a string key; anything else names nothing. */
-const keyOf = (value: unknown): string | null => {
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-  return named(value);
-};
-
 /**
  * The refusal the grant's key before #32164 answered for a second grant of
  * one user, set and organization: the engine's duplicate-record envelope
@@ -263,9 +271,8 @@ function secondGrantRefusal(object: string, label: string | null): Error {
   // caller that asks it of the refusal gets the answer the store's own
   // violation gave.
   const cause = new Error(
-    `Unique violation on \`${object}\` over (\`${GRANT_HOLDER}\`, \`permission_set\`, \`${GRANT_ORGANIZATION}\`): ` +
-      'this user already holds this permission set in this organization through another grant, and the two do not name ' +
-      'two different packages that each hold it.',
+    `Unique violation on \`${object}\`, refused by the one-grant check: this user already holds this permission set ` +
+      'in this organization through another grant, and the two do not name two different packages that each hold it.',
   );
   const err = new Error(
     `Duplicate record refused on '${label ?? object}': a unique constraint already holds these values. No record was written.`,
@@ -307,52 +314,47 @@ async function assertOneGrantPerSet(
   image: Record<string, unknown>,
   id: string | null,
 ): Promise<void> {
-  if (typeof engine.find !== 'function') return;
   const user = keyOf(image[GRANT_HOLDER]);
   const name = named(image[reference.nameColumn]);
   const organization = keyOf(image[GRANT_ORGANIZATION]) ?? keyOf(ctx?.session?.organizationId);
   if (user === null || name === null || organization === null) return;
-  const context: Record<string, unknown> = { isSystem: true };
-  if (ctx?.transaction !== undefined) context.transaction = ctx.transaction;
-  const found = await engine.find(reference.object, {
-    where: { [GRANT_HOLDER]: user, [reference.nameColumn]: name, [GRANT_ORGANIZATION]: organization },
-    fields: ['id', reference.packageColumn],
-    context,
-  });
-  const others = (Array.isArray(found) ? (found as Record<string, unknown>[]) : [])
-    .filter((row) => id === null || keyOf(row.id) !== id);
-  if (others.length === 0) return;
-  const mine = named(image[reference.packageColumn]);
-  const holders = sealedHolderRegistry(engine)?.packageScopedHoldersOf('permission', name, null) ?? [];
-  const twoHolders = (theirs: string | null): boolean =>
-    mine !== null && theirs !== null && mine !== theirs && holders.includes(mine) && holders.includes(theirs);
-  if (others.every((row) => twoHolders(named(row[reference.packageColumn])))) return;
+  const others = await otherGrantsOf(engine, reference, { user, name, organization, id }, ctx?.transaction);
+  if (!isSecondGrant(others, reference.packageColumn, image[reference.packageColumn], sealedPackageHoldersOf(engine.registry, name))) return;
   throw secondGrantRefusal(reference.object, labelOf(engine, reference.object));
 }
 
-/** `beforeInsert`: one dispatch per row (module doc, "What a write keeps"). */
-async function onInsert(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): Promise<void> {
-  stampInsert(engine, reference, ctx);
+/** A holder a non-system write names that the caller cannot read: the engine's reference check answers it (module doc). */
+async function holderLeftToEngine(engine: StampEngine, ctx: any, holder: unknown): Promise<boolean> {
+  if (ctx?.session?.isSystem === true) return false;
+  const user = keyOf(holder);
+  return user !== null && (await holderLeftToReferenceCheck(engine, ctx, holder, user));
+}
+
+/** The one-grant check of an insert (module doc, "One grant of a set per user and organization"). */
+async function oneGrantOnInsert(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): Promise<void> {
   if (ctx?.object !== GRANT_OBJECT || reference.object !== GRANT_OBJECT) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data) || !declaresColumn(engine, reference)) return;
+  if (await holderLeftToEngine(engine, ctx, data[GRANT_HOLDER])) return;
   // A row whose own id the store already holds is the store's own refusal, not a second grant.
   await assertOneGrantPerSet(engine, reference, ctx, data, keyOf(data.id));
 }
 
-/** `beforeUpdate`: one dispatch per matched row, `previous` bound (module doc). */
-async function onUpdate(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): Promise<void> {
-  stampUpdate(engine, reference, ctx);
+/** The one-grant check of an update (module doc). */
+async function oneGrantOnUpdate(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): Promise<void> {
   if (ctx?.object !== GRANT_OBJECT || reference.object !== GRANT_OBJECT) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data) || !declaresColumn(engine, reference)) return;
   const previous = isPlainRecord(ctx?.previous) ? ctx.previous : {};
   const system = ctx?.session?.isSystem === true;
+  // Only a holder the payload NAMES anew: the reference check forgives one the row already stores.
+  if (hasOwn(data, GRANT_HOLDER) && keyOf(data[GRANT_HOLDER]) !== keyOf(previous[GRANT_HOLDER])
+    && (await holderLeftToEngine(engine, ctx, data[GRANT_HOLDER]))) return;
   const renamed = hasOwn(data, reference.nameColumn)
     && named(data[reference.nameColumn]) !== named(previous[reference.nameColumn]);
   // The package the row stores after the write: a system writer's value; a
   // re-name's stamp; otherwise the stored one (a non-system caller's value of
-  // the readonly column is stripped after this phase).
+  // the readonly column is stripped after the before-phase).
   const pkg = (system || renamed) && hasOwn(data, reference.packageColumn)
     ? data[reference.packageColumn]
     : previous[reference.packageColumn];
@@ -364,8 +366,8 @@ async function onUpdate(engine: StampEngine, reference: StoredPermissionSetRefer
   await assertOneGrantPerSet(engine, reference, ctx, image, keyOf(previous.id) ?? keyOf(ctx?.input?.id));
 }
 
-/** The stamp of an insert (module doc, "What a write keeps"). */
-function stampInsert(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): void {
+/** `beforeInsert`: one dispatch per row (module doc, "What a write keeps"). */
+function onInsert(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): void {
   if (ctx?.object !== reference.object) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
@@ -383,8 +385,8 @@ function stampInsert(engine: StampEngine, reference: StoredPermissionSetReferenc
   stamp(data, reference.packageColumn, stampFor(engine, name, writer));
 }
 
-/** The stamp of an update (module doc, "What a write keeps"). */
-function stampUpdate(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): void {
+/** `beforeUpdate`: one dispatch per matched row, `previous` bound (module doc). */
+function onUpdate(engine: StampEngine, reference: StoredPermissionSetReference, ctx: any): void {
   if (ctx?.object !== reference.object) return;
   const data = ctx?.input?.data;
   if (!isPlainRecord(data)) return;
@@ -424,6 +426,11 @@ export function registerPermissionSetPackageStamp(engine: StampEngine | null | u
     const options = { object: reference.object, priority: HOOK_PRIORITY, packageId: PERMISSION_SET_PACKAGE_STAMP_HOOK_PACKAGE };
     engine.registerHook('beforeInsert', (ctx: any) => onInsert(engine, reference, ctx), options);
     engine.registerHook('beforeUpdate', (ctx: any) => onUpdate(engine, reference, ctx), options);
+    if (reference.object !== GRANT_OBJECT) continue;
+    // [#32164] The one-grant check, after the grant table's refusals (module doc).
+    const oneGrant = { ...options, priority: ONE_GRANT_HOOK_PRIORITY };
+    engine.registerHook('beforeInsert', (ctx: any) => oneGrantOnInsert(engine, reference, ctx), oneGrant);
+    engine.registerHook('beforeUpdate', (ctx: any) => oneGrantOnUpdate(engine, reference, ctx), oneGrant);
   }
   return true;
 }

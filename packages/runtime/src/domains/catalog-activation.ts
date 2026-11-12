@@ -474,7 +474,7 @@ async function planPermissionSetLedgerWrite(
     entry: { name: string; packageId?: string },
     enabled: boolean,
     context: HttpProtocolContext,
-): Promise<{ refusal?: HttpDispatcherResult; adoptPackageless: boolean; bindStale?: boolean }> {
+): Promise<{ refusal?: HttpDispatcherResult; adoptPackageless: boolean; bindStale?: boolean; rebindRowId?: unknown }> {
     const name = entry.name;
     const target = catalogEntryAddress(entry).packageId;
     // The holders the readers count: every holder the catalog serves, and every
@@ -515,9 +515,15 @@ async function planPermissionSetLedgerWrite(
     // no package.
     const bindStale = soleHolder && rows.length === 1 && storedPackageOf(rows[0]) !== null
         && storedPackageOf(rows[0]) !== target;
+    // A row is this holder's own when the readers read its package as this holder: for the environment's set, one
+    // stamped with the overlay sentinel too (epic read 6817314015, S1), which the write re-addresses by id.
     const own = rows.find((r) => storedPackageOf(r) === target)
+        ?? rows.find((r) => readPackageOf(r, name) === target)
         ?? (adoptPackageless ? rows.find((r) => storedPackageOf(r) === null) : undefined)
         ?? (bindStale ? rows[0] : undefined);
+    const rebindRowId = own && !bindStale && storedPackageOf(own) !== target && readPackageOf(own, name) === target
+        ? own.id
+        : undefined;
 
     if (own) {
         for (const other of holders) {
@@ -553,8 +559,8 @@ async function planPermissionSetLedgerWrite(
                         `Permission set '${name}' of ${target === null ? 'the environment' : `package "${target}"`} ` +
                             `stays switched off by another activation ledger row, ` +
                             (named === null
-                                ? (holders.length > 1
-                                    ? 'one naming no package, which switches off every holder of the name while more than one holds it'
+                                ? (ruled.status === 'refused'
+                                    ? 'one naming no package, which switches off every holder of the name while the name alone is refused (ADR-0150 D3: more than one package holds it, and the environment does not)'
                                     : 'one naming no package, which is read by the name alone (ADR-0150 D3)')
                                 : `one naming package "${named}", which no longer serves the name, so it is read by the name alone (ADR-0150 D3)`) +
                             `, so switching it on here would not take effect. Nothing was written. Delete that row from ` +
@@ -566,7 +572,7 @@ async function planPermissionSetLedgerWrite(
             };
         }
     }
-    return { adoptPackageless, bindStale };
+    return { adoptPackageless, bindStale, rebindRowId };
 }
 
 /**
@@ -868,13 +874,24 @@ export async function handleCatalogActivationWrite(
         // every other type's row is addressed by `(type, name)`, as before.
         let adoptPackageless = false;
         let bindStale = false;
+        let rebindRowId: unknown;
         if (type === 'permission' && reader) {
             const plan = await planPermissionSetLedgerWrite(deps, ql, reader, entry, enabled, context);
             if (plan.refusal) return plan.refusal;
             adoptPackageless = plan.adoptPackageless;
             bindStale = plan.bindStale === true;
+            rebindRowId = plan.rebindRowId;
         }
         const packageId = type === 'permission' ? catalogEntryAddress(entry).packageId ?? undefined : entry.packageId;
+        if (rebindRowId !== undefined) {
+            // The environment's sentinel-stamped row, re-addressed to name no package ({@link planPermissionSetLedgerWrite}).
+            await ql.update(
+                METADATA_ACTIVATION_TABLE,
+                { id: rebindRowId, active: enabled, package_id: null },
+                { context: activationWriteContext(context) },
+            );
+            return { handled: true, response: deps.success({ type, name: entry.name, enabled }) };
+        }
         // A stale row the one holder takes over is the name's only row, which the
         // name-addressed store writes (`bindStale`, {@link planPermissionSetLedgerWrite}).
         const store = type === 'permission' && !bindStale
