@@ -2794,6 +2794,7 @@ const fr = {
         invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
         invalidCredentialsNoMail: 'E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Demandez à votre administrateur de le réinitialiser.',
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
+        accountDeactivated: "Votre compte a été désactivé par votre organisation. Contactez votre administrateur.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.

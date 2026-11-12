@@ -9806,6 +9806,17 @@ export function AccessPillar({
   const navigate = useNavigate();
   const location = useLocation();
   const [newSimilarOpen, setNewSimilarOpen] = React.useState(false);
+  // objectstack#32774 — the package "New similar" clones the open set from,
+  // as the matrix read it: named only where the set's name has more than one
+  // holder (`onCloneSourceRead`), so a name with one holder is cloned by name.
+  const [newSimilarSource, setNewSimilarSource] = React.useState<{ name: string; sourcePackage: string | undefined } | null>(
+    null,
+  );
+  const onCloneSourceRead = React.useCallback((name: string, sourcePackage: string | undefined) => {
+    setNewSimilarSource((prev) =>
+      prev && prev.name === name && prev.sourcePackage === sourcePackage ? prev : { name, sourcePackage },
+    );
+  }, []);
   const [newSimilarStrip, setNewSimilarStrip] = React.useState<NewSimilarStrip | null>(() => {
     // objectstack#28572 — a copy that landed in the base's pair arrives on
     // the base's surface; matched by the spec's pairing rule (a read).
@@ -10502,6 +10513,7 @@ export function AccessPillar({
               studio={{
                 tab: accessTab,
                 onTabChange: setAccessTab,
+                onCloneSourceRead,
                 leading: accessRailToggleEl,
                 chips: currentAddedIn ? (
                   <>
@@ -10557,6 +10569,7 @@ export function AccessPillar({
       {newSimilarOpen && current && (
         <PermissionSetCloneDialog
           source={current}
+          sourcePackage={newSimilarSource?.name === current ? newSimilarSource.sourcePackage : undefined}
           locale={locale}
           onClose={() => setNewSimilarOpen(false)}
           onCloned={onNewSimilarSaved}

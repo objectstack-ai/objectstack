@@ -2873,6 +2873,7 @@ const ru = {
         invalidCredentials: "Неверный email или пароль. После нескольких неудачных попыток вход приостанавливается на некоторое время. Забыли пароль? Сбросьте его, чтобы сразу войти.",
         invalidCredentialsNoMail: 'Неверный email или пароль. После нескольких неудачных попыток вход приостанавливается на некоторое время. Забыли пароль? Попросите администратора сбросить его.',
         emailNotVerified: "Пожалуйста, подтвердите email перед входом.",
+        accountDeactivated: "Ваша организация деактивировала вашу учётную запись. Обратитесь к администратору.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
