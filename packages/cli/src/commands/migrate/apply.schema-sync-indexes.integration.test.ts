@@ -43,6 +43,13 @@ import MigrateApply from './apply.js';
 import '@objectstack/runtime';
 import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
+import '@objectstack/driver-sql';
+import '@objectstack/driver-turso';
+import '@objectstack/platform-objects/plugin';
+import '@objectstack/platform-objects/system';
+import '@objectstack/plugin-security';
+import '@objectstack/rest';
+import '@objectstack/service-datasource';
 
 /** Every line the run said, and every question it asked, in the order they reached the terminal. */
 const said: string[] = [];
