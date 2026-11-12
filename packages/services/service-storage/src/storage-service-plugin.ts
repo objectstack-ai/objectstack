@@ -45,6 +45,7 @@ import {
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
+  IApprovalService,
   IHttpServer,
   IDataEngine,
   II18nService,
@@ -420,6 +421,16 @@ export class StorageServicePlugin implements Plugin {
         getSecurity: () => {
           try {
             return ctx.getService<ISecurityService>('security');
+          } catch {
+            return null;
+          }
+        },
+        // [#32734] Whether a pending approval locks the record a field upload
+        // link would write, asked when the link is minted. No approvals
+        // plugin: no record is locked.
+        getApprovals: () => {
+          try {
+            return ctx.getService<IApprovalService>('approvals');
           } catch {
             return null;
           }
@@ -1336,8 +1347,9 @@ function resolveUploadLinkDoor(registry: StorageGateRegistry): () => UploadLinkD
  *  - `resolveUserContext`: the minting user, resolved now. Their grants are
  *    read fresh (`bypassGrantsCache`, the `runAs: 'user'` precedent: a link is
  *    not request-shaped), in the organization the link was minted in while a
- *    current membership backs it under a walled posture
- *    (`vetOrganizationClaim`, the session arm of `resolveAuthzContext`). A
+ *    current membership backs it — under every posture since ADR-0093 D8.1
+ *    was amended (`vetOrganizationClaim`, the session arm of
+ *    `resolveAuthzContext`). A
  *    claim that is no longer backed answers `null`: the user cannot act there
  *    now, so nothing lands. A posture read that fails throws the branded
  *    outage, never a verdict.

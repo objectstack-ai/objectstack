@@ -60,7 +60,16 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 // The engine's own by-id predicates, which `ObjectQL.update` / `.delete`
 // dispatch on — the cross-object batch's up-front id check asks them.
 import { resolveEngineDeleteDispatch, resolveEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { applyDroppedFieldsHeader, handleRouteError } from './error-response.js';
+import { applyDroppedFieldsHeader, handleRouteError, type RouteErrorOptions } from './error-response.js';
+
+/**
+ * [#32250, ADR-0150 D5] What the whole-request `/data` batch exits ask of the
+ * error door: a write hook's package-scoped refusal (`409 RESOURCE_CONFLICT`)
+ * carries its holders as `details.candidates`, as the single-record doors
+ * answer it. The per-row reports carry them on each row's error instead
+ * (`toRowApiError`, `@objectstack/metadata-protocol`).
+ */
+const PACKAGE_SCOPED_CANDIDATES: RouteErrorOptions = { packageScopedCandidates: true };
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import {
     apiAccessDenialFromEnable,
@@ -475,7 +484,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // UNRECOGNISED error to — a handler `TypeError` inside a
                 // batch transaction vanished here. The shared predicate
                 // keeps that one loud while staying quiet on the coded 4xx.
-                handleRouteError(res, error);
+                // [#32250] A package-scoped refusal names its candidates
+                // (`details.candidates`), as on every `/data` door.
+                handleRouteError(res, error, undefined, PACKAGE_SCOPED_CANDIDATES);
             }
         },
         metadata: {
@@ -594,7 +605,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     // with the header the success path sets.
                     const earned = earnedWriteDespiteStaleSummary(error, res, req.params?.object);
                     if (earned) { res.status(201).json(earned); return; }
-                    handleRouteError(res, error, req.params?.object);
+                    // [#32250] A hook's package-scoped refusal names its
+                    // candidates, as the single create does.
+                    handleRouteError(res, error, req.params?.object, PACKAGE_SCOPED_CANDIDATES);
                 }
             },
             metadata: {

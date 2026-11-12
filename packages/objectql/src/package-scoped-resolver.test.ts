@@ -485,7 +485,8 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
   it('a second package holder is still refused by phase 1, so no reader can meet two', () => {
     sealedWithHolder(false);
     install(B);
-    expect(() => ship('flow', NAME, B)).toThrow();
+    // A type whose rule has not narrowed to the namespace (`flow` has, #31696).
+    expect(() => ship('webhook', NAME, B)).toThrow();
   });
 });
 
@@ -616,10 +617,11 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     engine.registry.logLevel = 'silent';
   });
 
-  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare map still keeps the last', () => {
+  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare read refuses the name (#31700)', () => {
     engine.registerFunction('score', fn('alpha'), `app:${A}`);
     engine.registerFunction('score', fn('beta'), { packageId: B, effect: 'writes' });
-    expect((engine.resolveFunction('score') as unknown as { tag: string }).tag).toBe('beta');
+    // [#31700, epic seat ruling R2-C] The bare map keeps the last, and the bare read picks neither holder.
+    expect(() => engine.resolveFunction('score')).toThrow(/The function "score" is held by 2 packages/);
     const holders = engine.functionHoldersOf('score');
     expect(holders.packageHolders).toEqual([A, B]);
     expect((holders.packageItem(A)?.handler as unknown as { tag: string }).tag).toBe('alpha');

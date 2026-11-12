@@ -109,8 +109,16 @@ the metadata API (`PUT /meta/object/:name`), or publishing its draft
 (`POST /meta/object/:name/publish`), with the other already registered is refused with
 **`INVALID_METADATA` / 422** and the same message, whichever is saved second, and nothing
 is stored or published; a parent saved without the code field a registered child follows
-is refused the same way. A draft is judged when it is published. Objects registered while
-the server boots, or by a package install, are not judged this way.
+is refused the same way. A draft is judged when it is published. A table imported from an
+external datasource is one object, judged like a single save. A batch that writes several
+objects (a package duplicate, an unmanaged install, a package's draft publish, the
+stored-metadata migration pass) judges them together once all are written, so a child
+written before its parent in the same batch passes. An object the pair refuses is reported
+in the batch's own answer and is not left stored as written: the duplicate lists it as
+failed and takes its copy back, the migration pass lists it as failed and keeps the row as
+it was, and the unmanaged install and the publish are refused whole. Objects registered
+while the server boots, or by a code package installed or reloaded on a running server,
+are not judged this way.
 
 ### Writing a record
 

@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IDataEngine, IObjectQLEngine } from '@objectstack/core';
+import type { StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 
 /**
  * The engine surface the metadata protocol needs from its host (ADR-0076).
@@ -43,6 +44,15 @@ export interface MetadataHostEngine extends IDataEngine {
    * does not degrade: it is asked at every hop either way.
    */
   assertNoInternalFieldEvaluated?: IObjectQLEngine['assertNoInternalFieldEvaluated'];
+  /**
+   * [#32527] The engine's capture of an object's stored computed fields
+   * before a door makes a change to it live, and the fill that change owes
+   * (`@objectstack/objectql`'s `captureStoredExpressions`). Declared
+   * explicitly for the reason `transaction` is; optional because a host may
+   * be a test double or a metadata-only store, and degrading means no fill:
+   * see `protocol-stored-expression-fill.ts`.
+   */
+  captureStoredExpressions?(object: string): StoredExpressionFillCapture;
   // Protocol accesses additional engine members structurally; keep it permissive
   // for this relocation (behavior unchanged — the concrete engine is injected).
   [key: string]: any;

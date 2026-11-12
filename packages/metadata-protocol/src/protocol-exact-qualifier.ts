@@ -54,6 +54,7 @@ import {
     type PackageScopedHolder,
     type PackageScopedRefusalReason,
     type PackageScopedResolvableType,
+    type PackageScopedType,
 } from '@objectstack/core';
 import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@objectstack/spec/kernel';
 import { installedManifestsOfEngine } from './installed-manifests.js';
@@ -376,8 +377,9 @@ export function disabledExactAddressHolder(
  *
  * A package-less row (the environment's item, or a `sys_metadata` row bound to
  * no package) of a name two or more packages hold is no holder's own, for a
- * type whose by-name readers consult `(package, name)` ({@link
- * packageLessRowOwners}, epic ruling on #31699): refused naming every holder.
+ * type whose by-name readers consult `(package, name)` or whose one-holder
+ * rule has narrowed to the namespace ({@link packageLessRowOwners}, epic
+ * ruling on #31699, #32407): refused naming every holder.
  *
  * @returns the item to serve (unchanged when it is the address's).
  */
@@ -406,7 +408,10 @@ export function exactQualifierItem(
         }
         return item;
     }
-    if (served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32501] An item of one of TWO admitted bases (two modules of one App
+    // sharing its pair) is no more the address's than the other's: it falls
+    // through to the refusal naming both below, never the first registered.
+    if (served === address.packageId || (address.registryHolders.length === 1 && address.registryHolders[0] === served)) return item;
     // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
     // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
     const installed = installedManifestsOfEngine(host.engine);
@@ -519,9 +524,24 @@ export function resolveCallerPackageAddress(
 
 
 /**
+ * [ADR-0150 D4, epic ruling 6761802819 on #31699, #32407] Is a package-less
+ * row of `type` judged by {@link packageLessRowOwners}: a type ADR-0150
+ * addresses by `(package, name)` whose by-name readers consult `(package,
+ * name)` (the registry's `readsByPackage`), or whose one-holder rule has
+ * narrowed to the namespace (`NAMESPACE_SCOPED_BARE_NAME_TYPES`, core). A
+ * narrowed type lets two namespaces hold one name whether or not its readers
+ * are wired, so the refusal is in place from the change that narrows it
+ * (`action` since #31697, read through `getItem`), never one reader card later.
+ */
+export function judgesPackageLessRows(registry: { readsByPackage?(type: string): boolean }, type: string): type is PackageScopedType {
+    if (!isPackageScopedType(type)) return false;
+    return registry.readsByPackage?.(type) === true || isNamespaceScopedBareNameType(type);
+}
+
+/**
  * [ADR-0150 D4, epic ruling 6761802819 on #31699] The packages a package-less
  * row of `(type, name)` could be the customization of: every package holding
- * the name, for a type whose readers consult `(package, name)`. Two or more
+ * the name, for a type {@link judgesPackageLessRows} judges. Two or more
  * mean the row cannot say whose it is: each holder's exact read refuses it
  * naming every one, the list scoped to a holder leaves it out (so a send made
  * from a holder reads that holder's own), and `os migrate stored-references`
@@ -543,7 +563,7 @@ export function packageLessRowOwners(
     name: string,
     options?: { includeDisabledPackages?: boolean },
 ): string[] {
-    if (registry.readsByPackage?.(type) !== true || !isPackageScopedType(type)) return [];
+    if (!judgesPackageLessRows(registry, type)) return [];
     if (isPlatformRequestedBareName(type, name)) return [];
     // [#32183] The served holders: a read judges them, so a package-less row
     // of a name an enabled and a disabled package hold is the enabled one's.
