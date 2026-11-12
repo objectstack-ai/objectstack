@@ -269,7 +269,7 @@ describe('#32501 — a stored row at an exact address wears the envelope of the 
             state: 'active', version: 1,
             metadata: JSON.stringify({ ...dash(label), ...(overrides ? { overrides: { package: overrides, basedOn: '1.0.0' } } : {}) }),
         }, { context: { isSystem: true } } as any);
-        return { read, seed };
+        return { engine, read, seed };
     }
     const envelope = (body: any) => {
         const item = body?.data?.item ?? body?.item;
@@ -303,6 +303,16 @@ describe('#32501 — a stored row at an exact address wears the envelope of the 
                 .toEqual([200, null, 'gamma authored', undefined]);
         }, 60_000);
     }
+
+    it('a row bound only to a package that ships nothing, the only shipper disabled: its own stamp, served, never withheld by the shipper\'s stamp (BASE: 404)', async () => {
+        const { engine, read, seed } = await bootShippers([ALPHA]);
+        await seed(GAMMA, 'gamma authored');
+        engine.registry.disablePackage(ALPHA);
+        const plain = await read('/meta/dashboard/d', { package: GAMMA });
+        expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
+            .toEqual([200, 'gamma authored', GAMMA, undefined]);
+        expect(JSON.stringify(plain.body)).not.toContain(ALPHA);
+    }, 60_000);
 
     it.each([['one first', [ONE, TWO]], ['two first', [TWO, ONE]]] as const)('the App pair\'s row, two modules holding the name (%s): its own stamp; `/layers` refuses the ambiguous code layer naming both', async (_order, shippers) => {
         const { read, seed } = await bootShippers([ALPHA, ...shippers]);
