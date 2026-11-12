@@ -582,7 +582,9 @@ export interface ExplainEngineDeps {
    * asker explaining ANOTHER principal is asked the same caller-context by-id
    * read through the security service's own binding, where a declared refusal
    * counts as "cannot read" too (ruling C); this dependency keeps the write
-   * path's notion, which a principal explaining itself is asked.
+   * path's notion, which a principal explaining itself is asked when its
+   * caller hands no classified read of its own (`ExplainAsker.self`, through
+   * which a refused read is answered for every record id alike).
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -2557,12 +2559,40 @@ export interface ExplainAsker {
    * [#22851, ruling C] The asker's own caller-context by-id read, classified
    * for an asker who is NOT the explained principal: `true` when the read
    * leaves the asker without the row, by returning none OR by refusing (a
-   * declared 4xx); a store fault rejects. Asked only for such an asker. A
-   * principal explaining itself is asked the write path's question
-   * (`recordAbsentToCaller`: absent means no row) instead, so a
-   * self-explanation shows what that principal's own doors do.
+   * declared 4xx); a store fault rejects. Asked only for such an asker: a
+   * principal explaining itself is asked {@link ExplainAsker.self} when the
+   * caller hands it, and otherwise the write path's question
+   * (`recordAbsentToCaller`: absent means no row).
    */
   cannotRead: (object: string, recordId: string) => Promise<boolean>;
+  /**
+   * Present exactly when the asker IS the explained principal: a
+   * self-explanation, however its context was copied on the way here. `readOf`
+   * is the asker's own caller-context by-id read, classified three ways: a
+   * row, no row, or `refused` (a declared 4xx, such as no read grant on the
+   * object); a store fault rejects.
+   *
+   * [Ruling of record 6787890900] A principal whose read of the object is
+   * refused gets the same explanation for every record id: the answer an id no
+   * row carries gets, with the read's refusal named as the decider
+   * ({@link explainRecordOnPass}). Nothing in it tells a stored record from a
+   * missing one.
+   */
+  self?: { readOf: (object: string, recordId: string) => Promise<ExplainAskerRead> };
+}
+
+/** The asker's own by-id read, classified ({@link ExplainAsker.self}). */
+export type ExplainAskerRead = 'row' | 'no_row' | 'refused';
+
+/** The asker for one explanation, each of its read questions answered once per record. */
+function askedOncePerRecord(asker: ExplainAsker | undefined): ExplainAsker | undefined {
+  if (!asker) return undefined;
+  const self = asker.self;
+  return {
+    context: asker.context,
+    cannotRead: oncePerRecord(asker.cannotRead),
+    ...(self ? { self: { readOf: oncePerRecord(self.readOf) } } : {}),
+  };
 }
 
 /**
@@ -2578,10 +2608,15 @@ export interface ExplainAsker {
  * every layer's per-record attribution. An asker who can read it learns
  * nothing new about its existence, and gets the full record story.
  *
- * [#22851] Ruling C settles what "cannot read" means for each asker, on the
- * one caller-context by-id read: for an asker explaining ANOTHER principal,
- * no row or a declared refusal (`asker.cannotRead`); for a principal
- * explaining itself, no row (`recordAbsentToCaller`, the write path's notion).
+ * [#22851] Ruling C settles what "cannot read" means for an asker explaining
+ * ANOTHER principal, on the one caller-context by-id read: no row or a
+ * declared refusal (`asker.cannotRead`).
+ *
+ * [Ruling of record 6787890900] A principal explaining itself cannot read an
+ * id its own by-id read finds no row for, and one its read of the object
+ * refuses. The refused read is answered for every id alike: the missing
+ * record's answer, with the refusal of the read as its decider
+ * ({@link ExplainAsker.self}).
  *
  * Module-internal on purpose: the package publishes {@link explainAccess},
  * whose signature and self-explanation answer this leaves as they are. The
@@ -2597,7 +2632,7 @@ export async function explainAccessForAsker(
   // asker and the explained), from up to three places (the asker gate, the
   // by-id write guard, the master leg of a read), and the principal's READ
   // pass below asks it again: each (principal, record) pair is read once.
-  const askerOnce: ExplainAsker | undefined = asker && { context: asker.context, cannotRead: oncePerRecord(asker.cannotRead) };
+  const askerOnce = askedOncePerRecord(asker);
   return explainOnce({ ...deps, recordAbsentToCaller: askedOnce(deps.recordAbsentToCaller) }, input, askerOnce);
 }
 
@@ -2650,7 +2685,7 @@ export async function explainRecordsForAsker(
   const verdictById = new Map<string, NonNullable<ExplainDecision['record']>>();
   for (const recordId of new Set(recordIds)) {
     const recordDeps = depsForRecord(recordId);
-    const askerOnce: ExplainAsker | undefined = asker && { context: asker.context, cannotRead: oncePerRecord(asker.cannotRead) };
+    const askerOnce = askedOncePerRecord(asker);
     const out = await explainRecordOnPass(
       {
         ...recordDeps,
@@ -2667,10 +2702,10 @@ export async function explainRecordsForAsker(
 }
 
 /** One answer per (object, record) for the length of one explanation; a rejection stays the rejection it was. */
-function oncePerRecord(
-  question: (object: string, recordId: string) => Promise<boolean>,
-): (object: string, recordId: string) => Promise<boolean> {
-  const asked = new Map<string, Promise<boolean>>();
+function oncePerRecord<T>(
+  question: (object: string, recordId: string) => Promise<T>,
+): (object: string, recordId: string) => Promise<T> {
+  const asked = new Map<string, Promise<T>>();
   return (object, recordId) => {
     const key = JSON.stringify([object, recordId]);
     let answer = asked.get(key);
@@ -2726,6 +2761,22 @@ function attributeThePrincipalsRead(layers: ExplainLayer[], read: ExplainDecisio
     if (!layer.record || !readLayer?.record) continue;
     layer.record = { ...readLayer.record, detail: principalReadPreface(operation) + (readLayer.record.detail ?? '') };
     if (layer.layer === 'tenant_isolation') layer.verdict = readLayer.verdict;
+  }
+}
+
+/**
+ * [Ruling of record 6787890900] Name a refused read on every per-record
+ * attribution of a self-explanation whose principal's read of the object is
+ * refused. Each attribution is already the one an id no row carries gets; the
+ * preface says why, and names the layer that refused the read when the read
+ * pass names one. It reads no record, so every id gets the same words.
+ */
+function attributeTheRefusedRead(layers: ExplainLayer[], decider: string | undefined): void {
+  const preface = `The principal's own read of this object is refused${decider ? ` (the ${decider} layer)` : ''}, ` +
+    'so this explanation is the same for every record id: ';
+  for (const layer of layers) {
+    if (!layer.record) continue;
+    layer.record = { ...layer.record, detail: preface + (layer.record.detail ?? '') };
   }
 }
 
@@ -3418,17 +3469,25 @@ async function explainRecordOnPass(
   // context, and no exemption sits beside it: a system asker is asked too,
   // and the door returns it every row.
   //
-  // [#22851] Ruling C: what "cannot read" means differs by asker, on that one
-  // read. A principal explaining itself is asked the write path's question
-  // (`recordAbsentToCaller`: absent means no row), so its explanation shows
-  // what its own doors do; an asker explaining ANOTHER principal is asked
+  // [#22851] Ruling C: an asker explaining ANOTHER principal is asked
   // `asker.cannotRead`, where a declared refusal of its read counts as
-  // "cannot read" too. A store fault fails the explanation either way.
+  // "cannot read" too.
+  //
+  // [Ruling of record 6787890900] A principal explaining itself is asked its
+  // own read, classified three ways (`asker.self`): no row and a refusal are
+  // both "cannot read", and a refusal is answered for every record id alike,
+  // with the read's refusal as the decider (below). Without that question (the
+  // published `explainAccess`), the write path's (`recordAbsentToCaller`:
+  // absent means no row). A store fault fails the explanation either way.
   const askerContext = asker?.context ?? context;
-  const askerIsPrincipal = askerContext === context;
-  const askerCannotRead = askerIsPrincipal
-    ? readQuestion !== undefined && (await readQuestion(object, recordId, context))
-    : await asker!.cannotRead(object, recordId);
+  const askerIsPrincipal = asker?.self !== undefined || askerContext === context;
+  const askerRead = asker?.self ? await asker.self.readOf(object, recordId) : undefined;
+  const askerReadRefused = askerRead === 'refused';
+  const askerCannotRead = askerRead !== undefined
+    ? askerRead !== 'row'
+    : askerIsPrincipal
+      ? readQuestion !== undefined && (await readQuestion(object, recordId, context))
+      : await asker!.cannotRead(object, recordId);
   // [#21771] Ruling A on the write doors: a row the principal cannot READ is
   // a row that does not exist, so an update or delete of it answers what a
   // nonexistent id answers, wherever enforcement reaches that question: past
@@ -3485,6 +3544,22 @@ async function explainRecordOnPass(
     // A read story that reaches no refusal names no decider: the door's
     // answer stands, `visible: false`, and no layer is credited with it.
     const readDecider = read.record && read.record.visible === false ? read.record.decidedBy : undefined;
+    recordVerdict = { recordId, visible: false, ...(readDecider ? { decidedBy: readDecider } : {}) };
+  }
+  if (askerReadRefused) {
+    // [Ruling of record 6787890900] A principal whose own read of the object
+    // is refused is told, for every record id, the missing record's story
+    // (written above) and the refusal of that read as its decider. The decider
+    // is the read-operation pass's own: for a read, this pass; for any other
+    // verb, a read pass of the same record, whose asker is refused the same
+    // read, so it too reads no row. The refusal is a fact of the object, never
+    // of a record, so no stored row reaches either. A read pass that names no
+    // refusing layer leaves the decider out, for every id alike.
+    const read = operation === 'read'
+      ? recordVerdict
+      : (await explainOnce(deps, { object, operation: 'read', context, recordId }, asker)).record;
+    const readDecider = read && read.visible === false ? read.decidedBy : undefined;
+    attributeTheRefusedRead(layers, readDecider);
     recordVerdict = { recordId, visible: false, ...(readDecider ? { decidedBy: readDecider } : {}) };
   }
   return { record: recordVerdict, posture: out.posture };

@@ -31,7 +31,10 @@
  *     run really reached the stage whose boot writes the lines;
  *   - the diagnostics are moved, never destroyed: stderr carries the kernel
  *     logger's records, WARN among them, and the registry's `console.log`
- *     lines. Silencing the logger would make stdout parse too, and go red here;
+ *     lines. Silencing the logger would make stdout parse too, and go red here.
+ *     The run restates `OS_LOG_LEVEL=info` and `OS_REGISTRY_LOG=info` (the
+ *     harness boots at `warn` by default since #32154), and the WARN comes
+ *     from a plugin of the fixture's own (`WARN_PLUGIN_SOURCE`);
  *   - the text face is unchanged: without `--json`, the kernel logger's
  *     records still go to stdout beside the report.
  *
@@ -48,7 +51,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CLI, childEnv } from './helpers/serve-process.js';
-import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
+import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
 /** A stack the author-time rules pass, so `os verify` reaches the runtime stage. */
 const STACK = {
@@ -78,6 +81,21 @@ const STACK = {
 const LOGGER_RECORD = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+(DEBUG|INFO|WARN)\b/m;
 const LOGGER_WARN_RECORD = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z\s+WARN\b/m;
 
+/**
+ * [#32154] The WARN record the boot writes on purpose: a plugin of the stack's
+ * own, writing one through the kernel logger it is handed. A clean boot no
+ * longer writes any WARN of its own (the harness's short auth secret drew the
+ * last ones), and the routing of a WARN is what the stderr case pins, so the
+ * fixture supplies the record rather than the pin depending on a defect.
+ */
+const WARN_PLUGIN_SOURCE = `{
+  name: 'com.example.verify-json-stdout.warn',
+  version: '0.0.1',
+  async init(ctx) {
+    ctx.logger.warn('verify-json-stdout fixture: a WARN record this boot writes on purpose');
+  },
+}`;
+
 /** The second writer: a `console.log` in the ObjectQL registry, outside the kernel logger. */
 const REGISTRY_CONSOLE_LINE = '[Registry] Installed package';
 
@@ -100,8 +118,11 @@ function runCli(dir: string, args: string[]): Run {
     // workers and the child would inherit it: at `warn` the registry's
     // `console.log` — the writer a logger-level fix cannot reach — never speaks,
     // and the pin would hold over one writer instead of the three an operator's
-    // run has.
-    env: childEnv({ NO_COLOR: '1', OS_REGISTRY_LOG: 'info' }),
+    // run has. `OS_LOG_LEVEL: 'info'` restates the kernel writer the same way
+    // (#32154): `bootStack` boots at `warn` unless told otherwise, and at `warn`
+    // a clean stack's kernel logger has next to nothing to route. What this file
+    // pins is where each writer's lines GO, not how many there are by default.
+    env: childEnv({ NO_COLOR: '1', OS_REGISTRY_LOG: 'info', OS_LOG_LEVEL: 'info' }),
     maxBuffer: 64 * 1024 * 1024,
   });
   return { status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
@@ -114,7 +135,10 @@ describe('os verify --json on a stack that reaches the runtime stage (#21324)', 
 
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'os-verify-json-stdout-'));
-    writeFileSync(join(dir, 'objectstack.config.mjs'), defineStackSource(STACK));
+    writeFileSync(
+      join(dir, 'objectstack.config.mjs'),
+      defineStackSourceFromLiteral(`{ ...${JSON.stringify(STACK)}, plugins: [${WARN_PLUGIN_SOURCE}] }`),
+    );
     linkSpec(dir);
     json = runCli(dir, ['verify', '--json']);
     text = runCli(dir, ['verify']);
@@ -143,6 +167,7 @@ describe('os verify --json on a stack that reaches the runtime stage (#21324)', 
   it('moves the diagnostics to stderr instead of destroying them — WARN records included', () => {
     expect(json.stderr).toMatch(LOGGER_RECORD);
     expect(json.stderr).toMatch(LOGGER_WARN_RECORD);
+    expect(json.stderr).toContain('a WARN record this boot writes on purpose');
     expect(json.stderr).toContain(REGISTRY_CONSOLE_LINE);
   });
 

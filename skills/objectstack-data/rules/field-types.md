@@ -4,7 +4,6 @@
 - [Text & Content](#text--content) · [Numbers](#numbers) · [Date & Time](#date--time) · [Logic](#logic) · [Selection](#selection)
 - [Relational](#relational) · [Media](#media) · [Embedded](#embedded-json-sub-objects) · [Calculated](#calculated) · [Enhanced Types](#enhanced-types)
 - [Common Field Configurations](#common-field-configurations)
-- [Incorrect vs Correct](#incorrect-vs-correct)
 
 ## Two spellings: `Field.*` factory or object literal
 
@@ -94,7 +93,7 @@ options: [
 | `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
 | `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
-| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default — declared, deleting the user acts as on `lookup`: `cascade` deletes the holders, `set_null` clears the field or drops that member, `restrict` refuses with `409 DELETE_RESTRICTED`; undeclared, the field keeps the deleted user's id) |
+| `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'`, `deleteBehavior` (no default; declared, as on `lookup`: relationships.md → Delete Behaviors) |
 
 **`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
 `master_detail`): a pick copies the picked record's `source` into this object's
@@ -167,11 +166,8 @@ Stored as JSON on the parent row — no separate table / FK:
 `{ value, currency }`. Shown: `'fixed'`, `defaultCurrency`; `'dynamic'`
 (default), the tenant `localization.currency`, else a plain number (never
 `$`); `'record'`, each record's code in the `text` field `currencyField`
-names, with `valueDomain: 'iso_4217_currency'`. A
-dataset measure's own `currency` wins over a `'dynamic'` field; over a `'fixed'` one,
-or a derived sum/difference over one `'fixed'` code, it may only restate that code,
-else `DATASET_INVALID`: delete it, and the column takes the code (objectstack-ui →
-Dashboards). A `'fixed'` code is not judged against the tenant's. Switched a
+names, with `valueDomain: 'iso_4217_currency'`. A dataset measure's `currency`
+(refused `DATASET_INVALID`): objectstack-ui → Dashboards. Switched a
 stored field to `'record'`? Backfill: `os migrate record-currency-codes --org <id>`
 (or `--all-organizations` for every one); a multi-organization database refuses
 a run with neither.
@@ -180,6 +176,24 @@ a run with neither.
 home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
 `readonly: true`. Cross-currency totals sum `field`.
+
+**A line in its parent's currency.** On a `master_detail` child, `currencyField`
+may be `'<master_detail field>.<parent code field>'`: one hop (a `lookup` path
+is refused) to the parent's `iso_4217_currency` field. The line stores no code:
+a blank parent code refuses its amount (`ERR_CURRENCY_CODE_REQUIRED`), and the
+code backfill refuses a path (write the parents' codes).
+
+```typescript
+invoice: Field.masterDetail('invoice'),  // on invoice_line
+amount: Field.currency({ currencyConfig: { currencyMode: 'record', currencyField: 'invoice.currency_code' } }),
+// on invoice; required on a sum/min/max/avg through that master_detail:
+subtotal: Field.summary({ summaryOperations: { object: 'invoice_line', field: 'amount', function: 'sum' },
+  currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } }),
+```
+
+Once a line follows it, the invoice's `currency_code` cannot change
+(`VALIDATION_FAILED`; a first code over a blank one passes) until none does:
+delete the lines and purge the recycle bin, or move them to another invoice.
 
 ### Lookup (One-to-Many)
 
@@ -231,23 +245,3 @@ The `format` is literal text interleaved with `{...}` tokens:
 2. **Put a delimiter between adjacent variable tokens** — `{section}-{zone}{000}`, not `{section}{zone}{000}`. Without one, `('AB','C')` and `('A','BC')` both render prefix `ABC` and share a counter (to keep numbers unique).
 3. **Pad width is a MINIMUM, not a cap.** `{000}` → `001`…`999`, then `1000` (it grows, never wraps). Size it for readability, not as a ceiling.
 4. **Only known tokens are interpolated.** Date tokens are **case-sensitive** — `{yyyy}` parses as a `{field}` reference and renders **empty** (rule 1 applies). Only a spelling no field could have — `{ YYYY }`, `{YYYY-MM}` — is emitted **literally**.
-
-## Incorrect vs Correct
-
-### ❌ Incorrect — Autonumber interpolating an optional / adjacent field
-
-```typescript
-{
-  plan_no: { type: 'text' },  // ❌ not required — empty value throws at create
-  order_no: { type: 'autonumber', format: '{section}{plan_no}{000}' },  // ❌ no delimiter
-}
-```
-
-### ✅ Correct — Required field + delimiter between variable tokens
-
-```typescript
-{
-  plan_no: { type: 'text', required: true },  // ✅ always set before generation
-  order_no: { type: 'autonumber', format: '{section}-{plan_no}-{000}' },  // ✅ delimited
-}
-```

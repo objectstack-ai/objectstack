@@ -59,6 +59,15 @@
  *  (f) `DELETE /Users/{id}` leaves the tombstoned account disabled (the
  *      vendor no longer deletes the better-auth user on 1.7.2).
  *  (g) `POST /Users` with `active: false` provisions the account disabled.
+ *  (h) ADR-0135 D4: a SCIM-provisioned user reads `idp_provisioned` from its
+ *      create (and from a tombstone re-link), so `admin/set-user-manager`
+ *      refuses it as directory-owned; a local password still flips it to
+ *      `env_native` and a later sync leaves that; the boot backfill marks a
+ *      user provisioned before the mark existed, once. The mark fails closed
+ *      on a create (the request fails and nothing persists) and never undoes
+ *      a deprovision (a deactivation still bans when the mark is refused);
+ *      `admin/set-user-password` on a cloud-managed environment refuses the
+ *      SCIM user.
  *      And, under (d): a deactivation makes an administrator's EXPIRING ban
  *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
  *      principal.
@@ -76,6 +85,11 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
+import { runSetUserManager } from './admin-set-user-manager.js';
+import { runAdminSetUserPassword } from './admin-user-endpoints.js';
+import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_STATUS } from './cloud-managed.js';
+import { resetCloudManagedForTesting } from '@objectstack/core';
+import { backfillScimProvisionedIdentitySource, type ScimIdentitySourceEngine } from './scim-identity-source.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
 import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
 import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
@@ -828,5 +842,293 @@ describe('[#14360] DELETE /Users/{id} leaves the tombstoned account disabled', (
     expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
     expect(await sessionCount(h, gus.userId)).toBe(0);
     await expectSignInBanned(h, gus.email);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// (h) — ADR-0135 D4: a SCIM-provisioned identity is marked directory-managed
+// ---------------------------------------------------------------------------
+
+async function sourceOf(h: Harness, userId: string): Promise<unknown> {
+  const row = (await h.engine.findOne(
+    'sys_user',
+    { where: { id: userId }, fields: ['id', 'source'] },
+    SYSTEM,
+  )) as { source?: unknown } | null;
+  return row?.source;
+}
+
+/** A row a directory provisioned before the SCIM write path carried the mark. */
+async function unmark(h: Harness, userId: string): Promise<void> {
+  await h.engine.update('sys_user', { id: userId, source: 'env_native' }, SYSTEM);
+  expect(await sourceOf(h, userId)).toBe('env_native');
+}
+
+/** Count the `sys_user` writes a call makes, through the same real engine. */
+function countingUserWrites(h: Harness): { engine: ScimIdentitySourceEngine; writes: () => number } {
+  let writes = 0;
+  return {
+    engine: {
+      find: (object, query) => h.engine.find(object, query as never) as Promise<unknown[]>,
+      update: (object, data, options) => {
+        if (object === 'sys_user') writes += 1;
+        return h.engine.update(object, data as never, options as never);
+      },
+    },
+    writes: () => writes,
+  };
+}
+
+describe('[ADR-0135 D4] a user the directory provisions reads idp_provisioned from the moment SCIM creates it', () => {
+  it('(h) POST /Users marks the created user directory-managed, with no sys_account row to key on', async () => {
+    const h = await boot();
+    const hana = await provision(h, 'hana');
+
+    expect(await sourceOf(h, hana.userId)).toBe('idp_provisioned');
+    // The mark does not wait for an account link: the vendor writes none.
+    const accounts = await h.engine.find('sys_account', { where: { user_id: hana.userId } }, SYSTEM);
+    expect(accounts).toHaveLength(0);
+  }, 60_000);
+
+  it('(h) POST /Users that re-links a deleted user through its tombstone marks that user directory-managed', async () => {
+    const h = await boot();
+    const body = {
+      schemas: [USER_SCHEMA],
+      userName: 'iris@example.com',
+      externalId: 'ext-iris',
+      name: { givenName: 'iris', familyName: 'Example' },
+      displayName: 'iris Example',
+      emails: [{ value: 'iris@example.com', primary: true, type: 'work' }],
+      active: true,
+    };
+    const first = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(first.status, `SCIM POST /Users failed: ${await first.clone().text()}`).toBe(201);
+    const scimId = ((await first.json()) as { id: string }).id;
+    const userId = String((await userRow(h, 'iris@example.com'))!.id);
+
+    const del = await h.send(scimRequest(h, 'DELETE', `/Users/${scimId}`));
+    expect(del.status, `SCIM DELETE /Users/{id} failed: ${await del.clone().text()}`).toBe(204);
+    await unmark(h, userId);
+
+    const again = await h.send(scimRequest(h, 'POST', '/Users', body));
+    expect(again.status, `SCIM re-link POST /Users failed: ${await again.clone().text()}`).toBe(201);
+    expect(String((await userRow(h, 'iris@example.com'))!.id), 'the tombstone re-links the same user').toBe(userId);
+    expect(await sourceOf(h, userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(h) control: a directory-provisioned user who gains a local password reads env_native, and a later directory sync leaves it so', async () => {
+    const h = await boot();
+    const jo = await provision(h, 'jo');
+    expect(await sourceOf(h, jo.userId)).toBe('idp_provisioned');
+
+    // The credential branch of `stampIdentitySource` (ADR-0135 D4/D5.2): a
+    // local password flips the row back.
+    await attachPassword(h, jo);
+    expect(await sourceOf(h, jo.userId)).toBe('env_native');
+
+    // The SCIM mark holds the same exception, so a directory write after the
+    // flip does not undo it.
+    const res = await setDisplayName(h, jo.scimId, 'Jo Renamed');
+    expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+    expect(await sourceOf(h, jo.userId)).toBe('env_native');
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] set-user-manager refuses a SCIM-provisioned user as a directory-owned identity', () => {
+  it('(h) the refusal is 403 PERMISSION_DENIED with reason idp_provisioned, and manager_id is not written', async () => {
+    const h = await boot();
+    const kai = await provision(h, 'kai');
+    const lux = await provision(h, 'lux');
+
+    const res = await runSetUserManager(
+      { getDataEngine: () => h.engine as never },
+      { id: 'usr_admin_32113' },
+      new Request(`${AUTH}/admin/set-user-manager`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: kai.userId, managerId: lux.userId }),
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(res.body.error?.code).toBe('PERMISSION_DENIED');
+    expect(res.body.error?.details?.reason).toBe('idp_provisioned');
+    const row = (await h.engine.findOne(
+      'sys_user',
+      { where: { id: kai.userId }, fields: ['id', 'manager_id'] },
+      SYSTEM,
+    )) as { manager_id?: unknown } | null;
+    expect(row?.manager_id ?? null).toBeNull();
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] the boot backfill marks directory-provisioned users once, from their stored SCIM subject rows', () => {
+  it('(h) a pre-existing SCIM user is marked, a second pass writes nothing, a password holder and a non-SCIM user are untouched', async () => {
+    const h = await boot();
+    const mia = await provision(h, 'mia');
+    await unmark(h, mia.userId);
+    const ned = await provision(h, 'ned');
+    await attachPassword(h, ned);
+    expect(await sourceOf(h, ned.userId)).toBe('env_native');
+
+    // A user no directory provisioned and with no local password either, so
+    // the only thing keeping it out of the pass is the missing subject row.
+    const local = { id: 'usr_local_ola' };
+    await h.engine.insert(
+      'sys_user',
+      { id: local.id, email: 'ola@example.com', name: 'Ola Local', email_verified: false, source: 'env_native' },
+      SYSTEM,
+    );
+    expect(await sourceOf(h, local.id)).toBe('env_native');
+
+    const first = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(first.engine)).toEqual({ directoryProvisioned: 2, marked: 1 });
+    expect(first.writes()).toBe(1);
+    expect(await sourceOf(h, mia.userId)).toBe('idp_provisioned');
+    expect(await sourceOf(h, ned.userId)).toBe('env_native');
+    expect(await sourceOf(h, local.id)).toBe('env_native');
+
+    const second = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(second.engine)).toEqual({ directoryProvisioned: 2, marked: 0 });
+    expect(second.writes()).toBe(0);
+  }, 60_000);
+
+  it('(h) the backfill pages by subject id and reaches every page', async () => {
+    const h = await boot();
+    const users = [await provision(h, 'pia'), await provision(h, 'quin'), await provision(h, 'rae')];
+    for (const u of users) await unmark(h, u.userId);
+
+    const pass = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(pass.engine, 2)).toEqual({ directoryProvisioned: 3, marked: 3 });
+    for (const u of users) expect(await sourceOf(h, u.userId)).toBe('idp_provisioned');
+  }, 60_000);
+
+  it('(h) a subject row whose user row is gone is not counted as directory-provisioned', async () => {
+    const h = await boot();
+    const vic = await provision(h, 'vic');
+    await unmark(h, vic.userId);
+    await h.engine.insert(
+      'sys_scim_subject',
+      { id: 'zz_orphan_subject', user_id: 'usr_gone_32113', revision: 1, created_at: new Date(), updated_at: new Date() },
+      SYSTEM,
+    );
+    const pass = countingUserWrites(h);
+    expect(await backfillScimProvisionedIdentitySource(pass.engine)).toEqual({ directoryProvisioned: 1, marked: 1 });
+    expect(await sourceOf(h, vic.userId)).toBe('idp_provisioned');
+  }, 60_000);
+});
+
+/**
+ * The manager's data engine with the directory-managed mark write refused —
+ * a `sys_user` update carrying `source` throws, every other call reaches the
+ * real engine (and so the vendor's ambient transaction) unchanged.
+ */
+function refuseMarkWrites(h: Harness): () => number {
+  let refused = 0;
+  const real = h.engine;
+  const refusing = new Proxy(real, {
+    get(target, prop, receiver) {
+      if (prop === 'update') {
+        return (object: string, data: Record<string, unknown>, options?: unknown) => {
+          if (object === 'sys_user' && data && 'source' in data) {
+            refused += 1;
+            throw new Error('mark write refused (test)');
+          }
+          return target.update(object, data as never, options as never);
+        };
+      }
+      const value = Reflect.get(target, prop, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  vi.spyOn(h.manager, 'getDataEngine').mockReturnValue(refusing as never);
+  return () => refused;
+}
+
+describe('[ADR-0135 D4] the SCIM create fails closed on the directory-managed mark', () => {
+  it('(h) a mark that cannot be written fails POST /Users, and neither the user nor its SCIM source persists', async () => {
+    const h = await boot();
+    const refused = refuseMarkWrites(h);
+    const res = await h.send(
+      scimRequest(h, 'POST', '/Users', {
+        schemas: [USER_SCHEMA],
+        userName: 'sol@example.com',
+        name: { givenName: 'sol', familyName: 'Example' },
+        displayName: 'sol Example',
+        emails: [{ value: 'sol@example.com', primary: true, type: 'work' }],
+        active: true,
+      }),
+    );
+    expect(refused()).toBeGreaterThan(0);
+    expect(res.status, await res.clone().text()).toBe(500);
+    const body = (await res.json()) as { schemas?: string[]; status?: string };
+    expect(body.schemas).toContain(SCIM_ERROR_SCHEMA);
+    expect(body.status).toBe('500');
+    expect(await userRow(h, 'sol@example.com')).toBeNull();
+    expect(await h.engine.find('sys_scim_user', { where: { user_name: 'sol@example.com' } }, SYSTEM)).toHaveLength(0);
+    expect(await h.engine.find('sys_scim_subject', {}, SYSTEM)).toHaveLength(0);
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4] a SCIM deprovision lands even when the directory-managed mark cannot be written', () => {
+  it('(h) PATCH active:false with the mark refused still bans the account with the SCIM reason', async () => {
+    const h = await boot();
+    const tia = await provision(h, 'tia');
+    await unmark(h, tia.userId);
+    const refused = refuseMarkWrites(h);
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const res = await setActive(h, tia.scimId, false);
+      expect(res.status, `SCIM PATCH failed: ${await res.clone().text()}`).toBe(200);
+      expect(refused()).toBe(1);
+      const row = await userRow(h, tia.email);
+      expect(isBanned(row)).toBe(true);
+      expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+      // The mark stayed unwritten, and said so once.
+      expect(await sourceOf(h, tia.userId)).toBe('env_native');
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('identity-source mark was NOT written'))).toHaveLength(1);
+    } finally {
+      errors.mockRestore();
+    }
+  }, 60_000);
+});
+
+describe('[ADR-0135 D4/D5.2] admin/set-user-password refuses a SCIM-provisioned user on a cloud-managed environment', () => {
+  it('(h) the refusal is 409 RESOURCE_CONFLICT and no local credential is written', async () => {
+    const h = await boot();
+    const uma = await provision(h, 'uma');
+    const prev = process.env.OS_CLOUD_MANAGED;
+    process.env.OS_CLOUD_MANAGED = '1';
+    resetCloudManagedForTesting();
+    try {
+      const res = await runAdminSetUserPassword(
+        {
+          getAuthApi: () => h.manager.getApi() as never,
+          getAuthContext: () => h.manager.getAuthContext(),
+          getDataEngine: () => h.engine as never,
+          assertPasswordComplexity: async () => {},
+          noteMustChangePasswordIssued: () => {},
+        },
+        new Request(`${AUTH}/admin/set-user-password`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ userId: uma.userId, newPassword: PASSWORD }),
+        }),
+        { id: 'usr_admin_32113' },
+      );
+      expect(res.status).toBe(CLOUD_MANAGED_REFUSAL_STATUS);
+      expect(res.body.error?.code).toBe(CLOUD_MANAGED_REFUSAL_CODE);
+      const credentials = await h.engine.find(
+        'sys_account',
+        { where: { user_id: uma.userId, provider_id: 'credential' } },
+        SYSTEM,
+      );
+      expect(credentials).toHaveLength(0);
+      expect(await sourceOf(h, uma.userId)).toBe('idp_provisioned');
+    } finally {
+      if (prev === undefined) delete process.env.OS_CLOUD_MANAGED;
+      else process.env.OS_CLOUD_MANAGED = prev;
+      resetCloudManagedForTesting();
+    }
   }, 60_000);
 });

@@ -102,7 +102,9 @@ managed-update whitelist. SCIM provisioning and directory sync can populate it t
 through a provisioning path your own deployment supplies: this platform declares the SCIM
 `manager` attribute without projecting it onto the column. Where an identity carries
 `source: 'idp_provisioned'` the admin operation **refuses**, so that directory stays the one
-surface that authors its manager.
+surface that authors its manager. A user a SCIM connection provisions carries that value from its
+creation unless it holds a local password, so for such a user the column is written only by that
+deployment-supplied path, and a value the column already holds stays as it is.
 
 Setting the column is still something you have to *do*. Where `manager_id` is unset the rung
 expands to nobody, and under the default `onEmptyApprovers: 'admin_rescue'` the request opens on

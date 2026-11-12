@@ -90,6 +90,10 @@ describe('objectui#7715 — tripwire: the ListView calendar-visualization refusa
 // ── The Page site ────────────────────────────────────────────────────────────
 
 const specPage = (extra: Record<string, unknown>) => ({ name: 'home_page', label: 'Home', ...extra });
+// A control whose subject is not the page type parses on the spec as a `home` page, the kind the
+// page-kind node is given below: a `full` record page (the spec's default type) that places no
+// component is refused at `regions` since objectstack#32434.
+const specHomePage = (extra: Record<string, unknown>) => specPage({ type: 'home', ...extra });
 const pageNode = (extra: Record<string, unknown>) => ({ type: 'page', ...extra });
 
 describe('objectui#7715 — the Page source-completeness refusal reaches objectui', () => {
@@ -111,7 +115,7 @@ describe('objectui#7715 — the Page source-completeness refusal reaches objectu
 
   it('controls: a sourced page, and a page whose kind carries no source, pass on both doors', () => {
     for (const extra of [{ kind: 'html', source: '<section>x</section>' }, {}, { kind: 'full' }]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
     }
@@ -205,7 +209,7 @@ describe('objectui#12626 — the Page region-placement refusal reaches objectui'
       { template: 'dashboard', regions: regions('header', 'kpis', 'pipeline') },
       { kind: 'slotted', regions: regions('left_sidebar') },
     ]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
     }
@@ -227,7 +231,8 @@ describe('objectui#12626 — the Page `isDefault` placement refusal reaches the 
   });
 
   it('controls: a bound record page with `isDefault` passes on the spec and the kind node, and the `page` node does not judge it', () => {
-    const bound = { type: 'record', object: 'account', isDefault: true };
+    // It places a component: a `full` record page that places none is refused at `regions`.
+    const bound = { type: 'record', object: 'account', isDefault: true, regions: [{ name: 'main', components: [{ type: 'record:details' }] }] };
     expect(SpecPageSchema.safeParse(specPage(bound)).success).toBe(true);
     expect(safeValidateSchema(bound).success).toBe(true);
     // The `page` node's `type` is the discriminator, so the check is not attached there:
@@ -264,7 +269,7 @@ describe('objectui#12971 — the Page `main` region width refusal reaches object
       { regions: [region('main')] },
       { regions: [region('main'), region('aside', 'large')] },
     ]) {
-      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      expect(SpecPageSchema.safeParse(specHomePage(extra)).success).toBe(true);
       expect(PageNodeSchema.safeParse(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema(pageNode(extra)).success).toBe(true);
       expect(safeValidateSchema({ ...extra, type: 'home' }).success).toBe(true);
@@ -387,7 +392,11 @@ const SITES = [
     // `record` by the page's `type` the same way, so attached here it would refuse every `record`,
     // a `pageType: 'app'` page's included; `PageKindNodeSchema` attaches it (objectui#12971,
     // measured in its describe block above).
-    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement'],
+    // `checkPageRecordPlacesComponent` joined after 18.3.0 (objectstack#32434): a `full` record page
+    // that places no component is refused at `regions`. It judges by the page's `type` the same way,
+    // and on this node `type` is the component discriminator `'page'`, so attached here it would
+    // never fire; whether `PageKindNodeSchema` attaches it is objectui's own call, not made here.
+    notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement', 'checkPageRecordPlacesComponent'],
   },
   {
     site: 'ListViewSchema (objectql.zod.ts)',
