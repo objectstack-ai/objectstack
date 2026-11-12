@@ -63,6 +63,7 @@ import {
     isSandboxOrigin,
     isSandboxOwnFault,
     mapDataError,
+    packageScopedRefusalCandidates as sharedPackageScopedRefusalCandidates,
     resolveThrownHttpError,
     sandboxBusinessMessage,
     sandboxRefusalCodeFields,
@@ -76,7 +77,7 @@ import type { DroppedFieldsEvent } from '@objectstack/spec/data';
 import type { ErrorCode } from '@objectstack/spec/api';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { logError } from './log.js';
-import { PackageScopedNameRefusedError, type PackageScopedHolder } from '@objectstack/core';
+import type { PackageScopedHolder } from '@objectstack/core';
 
 export {
     sandboxBusinessMessage,
@@ -263,7 +264,10 @@ function logWithheldServerFault(
  * `error` and `code`, which stay as they are. The `/meta` by-name reads ask it
  * (`meta-item-read-routes.ts`, `meta-qualified-item-route.ts`), so their
  * answer lists the holders as the runtime dispatcher's `/meta`, `/automation`
- * and `/actions` doors do. Every other route's answer is unchanged.
+ * and `/actions` doors do; [#32250] so do the `/data` batch exits that answer a
+ * whole request (`createMany`, the cross-object `/batch`), as the single-record
+ * `/data` doors' classification answers it. Every other route's answer is
+ * unchanged.
  */
 export interface RouteErrorOptions {
     readonly packageScopedCandidates?: boolean;
@@ -271,17 +275,15 @@ export interface RouteErrorOptions {
 
 /**
  * The holders of a package-scoped refusal, or `undefined` for any other thrown
- * value. Recognised by class and, as `import-mapping.ts` and the runtime's
- * `/meta` door recognise it, by shape (`code === 'RESOURCE_CONFLICT'` with a
- * `refusal` whose `status` is `'refused'`), for an error that crossed a second
- * copy of `@objectstack/core`.
+ * value. [#32250] Asked of `@objectstack/types`' one recogniser — by shape
+ * (`code === 'RESOURCE_CONFLICT'` with a `refusal` whose `status` is
+ * `'refused'`), which core's `PackageScopedNameRefusedError` satisfies, and so
+ * does an error that crossed a second copy of `@objectstack/core` — the read
+ * `resolveThrownHttpError`, the `/data` classification and the batch row error
+ * make, so the doors cannot recognise two different sets.
  */
 function packageScopedRefusalCandidates(error: unknown): readonly PackageScopedHolder[] | undefined {
-    const thrown = error as { code?: unknown; refusal?: { status?: unknown; candidates?: unknown } } | null | undefined;
-    const recognised = error instanceof PackageScopedNameRefusedError
-        || (thrown?.code === 'RESOURCE_CONFLICT' && thrown.refusal?.status === 'refused');
-    const candidates = recognised ? thrown?.refusal?.candidates : undefined;
-    return Array.isArray(candidates) ? (candidates as readonly PackageScopedHolder[]) : undefined;
+    return sharedPackageScopedRefusalCandidates(error) as readonly PackageScopedHolder[] | undefined;
 }
 
 function resolveErrorResponse(error: any, object?: string, options?: RouteErrorOptions): { status: number; body: Record<string, unknown> } {
