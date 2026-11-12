@@ -30,6 +30,9 @@ import React, { useEffect } from 'react';
 import { render, cleanup, waitFor, screen, fireEvent, act, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useNavigate, type NavigateFunction } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
+// The console's draft bar loads the linter lazily: pay that load while the file
+// is collected, never inside a case's timeout (`check:test-source-alias`).
+import '@objectstack/lint';
 
 registerAllFields();
 

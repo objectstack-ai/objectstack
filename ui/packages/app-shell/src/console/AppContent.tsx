@@ -811,8 +811,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#32685 — the form opens over the record drawer the URL names,
   // after it, as it does from a click: on a reload the drawer is drawn a
   // moment after the form would be, and the layer opened last is on top. The
-  // form waits for the route's element (its skeleton, a suspended boundary)
-  // and for the drawers it mounts.
+  // form waits until the route's element is shown (not its skeleton, not a
+  // suspended boundary) and every drawer that element mounts is drawn.
   const [recordDrawersOpening, setRecordDrawersOpening] = useState<RecordDrawersOpening>(NO_RECORD_DRAWERS_OPENING);
   const [routeSlotShown, setRouteSlotShown] = useState(false);
   // objectui#12291 — a seeded create's values, carried by the history entry
