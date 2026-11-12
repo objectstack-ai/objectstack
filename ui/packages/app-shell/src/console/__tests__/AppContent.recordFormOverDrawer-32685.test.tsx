@@ -18,8 +18,9 @@
  *
  * The real `AppContent` and the real `ModalForm`, under the real
  * `RecordStackDrawer` the list mounts, opened the way the list opens it: from
- * an effect, after the list has mounted. A layer is later when its portal is
- * later in the document and when it answers `Esc` first.
+ * an effect, after the list has mounted — also when the route suspends
+ * before the list mounts. A layer is later when its portal is later in the
+ * document and when it answers `Esc` first.
  * CONTROL: the form a URL opens with no drawer opens at once.
  */
 
@@ -35,6 +36,8 @@ registerAllFields();
 const probe = vi.hoisted(() => ({
   /** Each `onOpenChange` the form's dialog called, and each close of the drawer. */
   events: [] as string[],
+  /** The list suspends once before it draws (a lazy chunk the route still loads). */
+  suspend: null as null | { promise: Promise<void>; done: boolean },
 }));
 
 vi.mock('@object-ui/plugin-form', async (importOriginal) => {
@@ -84,6 +87,7 @@ vi.mock('../../views/ObjectView', async () => {
   const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
   return {
     ObjectView: ({ objects }: { objects: any[] }) => {
+      if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
       const [searchParams] = useSearchParams();
       const recordId = searchParams.get('recordId');
       const root = useMemo(() => (recordId ? { objectName: 'crm_account', recordId } : null), [recordId]);
@@ -217,6 +221,7 @@ const RELATED_NEW = 'form=new&formObject=crm_contact&formLink=account%3Aa1';
 
 beforeEach(() => {
   probe.events.length = 0;
+  probe.suspend = null;
   vi.clearAllMocks();
 });
 afterEach(cleanup);
@@ -227,6 +232,20 @@ describe('#32685 — a related-record form the URL opens over a record drawer is
     const { form, drawer } = await bothLayers();
     expect(follows(form, drawer)).toBe(true);
     expect(within(form).getByRole('button', { name: 'Create' })).toBeEnabled();
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+    await waitFor(() => expect(probe.events).toContain('form:false'));
+    expect(probe.events).not.toContain('drawer:close');
+  });
+
+  it('the same when the route suspends before the list and its drawer mount', async () => {
+    const suspend = { done: false } as { promise: Promise<void>; done: boolean };
+    suspend.promise = new Promise<void>((resolve) => setTimeout(() => { suspend.done = true; resolve(); }, 60));
+    probe.suspend = suspend;
+    mountAt(`/apps/crm/crm_account?recordId=a1&${RELATED_NEW}`);
+    const { form, drawer } = await bothLayers();
+    expect(suspend.done).toBe(true);
+    expect(follows(form, drawer)).toBe(true);
 
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(probe.events).toContain('form:false'));
