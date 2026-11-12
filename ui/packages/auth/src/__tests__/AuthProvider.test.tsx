@@ -13,6 +13,7 @@ import type { AuthClient } from '../types';
 import { registerBeforeSignOut, resetBeforeSignOutForTests } from '../beforeSignOut';
 import { createAuthClient } from '../createAuthClient';
 import { createAuthenticatedFetch } from '../createAuthenticatedFetch';
+import { sessionEndEvents } from '../session-end-events';
 
 function createMockClient(overrides: Partial<AuthClient> = {}): AuthClient {
   return {
@@ -445,11 +446,38 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
    * commit, tens of ms on an idle box; the 1000 ms `waitFor` default was measured
    * too tight when a Test UI shard runs ~5000 tests alongside (one 1022 ms red).
    * It bounds only a failure's wait: a passing run returns as soon as the DOM says so.
+   * It is not what orders the chain: `signedIn()` and `sessionReads()` below do that.
    */
   const CHAIN_MS = 10_000;
 
   /** What `get-session` answers next. */
   let getSessionAnswer: () => Promise<Response>;
+
+  /**
+   * Resolves when the provider subscribes to the 401 reports, which it does only
+   * while it holds a session. That subscription is a passive effect of the commit
+   * that puts identity on screen, and React can run it in a later task than the
+   * commit's DOM write. A `waitFor` on the DOM can return inside that gap, and a
+   * 401 reported there reaches no listener: nothing re-checks, and the case waits
+   * out its whole budget (objectstack#32713: measured 1 in 40 iterations on a
+   * shared box, every failure with zero listeners at the report). So the test
+   * waits for the subscription itself, settled by the subscription and not by a poll.
+   */
+  let providerListening: Promise<void>;
+  let subscribeSpy: { mockRestore(): void };
+
+  beforeEach(() => {
+    let heard!: () => void;
+    providerListening = new Promise<void>((resolve) => {
+      heard = resolve;
+    });
+    const subscribe = sessionEndEvents.subscribe;
+    subscribeSpy = vi.spyOn(sessionEndEvents, 'subscribe').mockImplementation((listener) => {
+      const unsubscribe = subscribe(listener);
+      heard();
+      return unsubscribe;
+    });
+  });
 
   function liveSession() {
     return new Response(JSON.stringify({ user: ALICE, session: { id: 's1', userId: '1' } }), {
@@ -459,8 +487,20 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
   }
 
   function realClient() {
-    const fetchFn = vi.fn(async () => getSessionAnswer()) as unknown as typeof fetch;
+    const fetchFn = vi.fn(async (_input: RequestInfo | URL) => getSessionAnswer()) as unknown as typeof fetch;
     return { client: createAuthClient({ baseURL: AUTH_URL, fetchFn }), fetchFn };
+  }
+
+  /**
+   * The `get-session` reads that reached the server. Only these can be the
+   * re-check: the same client also sends `organization/list` once a session is
+   * held, and that request can land after the count is taken, so counting every
+   * request let it stand in for a re-check that never happened.
+   */
+  function sessionReads(fetchFn: typeof fetch): number {
+    return vi
+      .mocked(fetchFn)
+      .mock.calls.filter(([input]) => new URL(String(input)).pathname.endsWith('/get-session')).length;
   }
 
   async function signedIn() {
@@ -474,6 +514,8 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     await waitFor(() => expect(screen.getByTestId('user-name').textContent).toBe('Alice'), {
       timeout: CHAIN_MS,
     });
+    // Identity is on screen; the 401 subscription may still be pending.
+    await providerListening;
     return fetchFn;
   }
 
@@ -490,35 +532,40 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
   });
 
   afterEach(() => {
+    subscribeSpy.mockRestore();
     vi.unstubAllGlobals();
   });
 
   it('the server answers "no session": identity clears, so the guard can send the visitor to sign in', async () => {
     const fetchFn = await signedIn();
-    const reads = vi.mocked(fetchFn).mock.calls.length;
+    const reads = sessionReads(fetchFn);
 
     getSessionAnswer = async () => new Response('null', { status: 401 });
     await apiAnswers401();
 
     // Wait on the event first: the re-check read itself reaching the server.
-    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+    await waitFor(() => expect(sessionReads(fetchFn)).toBeGreaterThan(reads), {
       timeout: CHAIN_MS,
     });
     await waitFor(() => expect(screen.getByTestId('authenticated').textContent).toBe('false'), {
       timeout: CHAIN_MS,
     });
     expect(screen.getByTestId('user-name').textContent).toBe('none');
-    expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads);
+    expect(sessionReads(fetchFn)).toBeGreaterThan(reads);
   });
 
   it('the server says the session is live: nothing changes', async () => {
     const fetchFn = await signedIn();
-    const reads = vi.mocked(fetchFn).mock.calls.length;
+    const reads = sessionReads(fetchFn);
 
     await apiAnswers401();
 
-    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+    await waitFor(() => expect(sessionReads(fetchFn)).toBeGreaterThan(reads), {
       timeout: CHAIN_MS,
+    });
+    // Let the re-check's answer land before reading that nothing changed.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
     });
     expect(screen.getByTestId('authenticated').textContent).toBe('true');
     expect(screen.getByTestId('user-name').textContent).toBe('Alice');
@@ -526,14 +573,14 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
 
   it('the re-check is not answered (transport error): the session is kept, an unanswered read is not a sign-out', async () => {
     const fetchFn = await signedIn();
-    const reads = vi.mocked(fetchFn).mock.calls.length;
+    const reads = sessionReads(fetchFn);
 
     getSessionAnswer = async () => {
       throw new TypeError('Failed to fetch');
     };
     await apiAnswers401();
 
-    await waitFor(() => expect(vi.mocked(fetchFn).mock.calls.length).toBeGreaterThan(reads), {
+    await waitFor(() => expect(sessionReads(fetchFn)).toBeGreaterThan(reads), {
       timeout: CHAIN_MS,
     });
     await act(async () => {
