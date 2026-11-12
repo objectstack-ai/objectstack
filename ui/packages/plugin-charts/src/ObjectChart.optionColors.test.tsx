@@ -390,3 +390,77 @@ describe('ObjectChart — option-color probe routing (objectui#4114)', () => {
     expect(globalCalls).toEqual(['/api/v1/meta/object/opportunity']);
   });
 });
+
+/*
+ * ADR-0150 D3 — the dataset-definition probe is made as the host package's
+ * reader (`?callerPackage=`), the dataset the chart's query resolves. Best
+ * effort as before, but a refusal is never retried bare.
+ */
+describe('ObjectChart — the option-color probe reads the dataset as the host package\'s reader (ADR-0150 D3)', () => {
+  const TASK_DOC = {
+    item: {
+      name: 'task',
+      fields: { status: { type: 'select', options: [{ value: 'todo', label: 'To do' }] } },
+    },
+  };
+  const DATASET_SCHEMA = {
+    type: 'object-chart' as const,
+    chartType: 'bar' as const,
+    dataset: 'showcase_task_metrics',
+    dimensions: ['status'],
+    values: ['task_count'],
+  };
+  const datasetSource = () => ({
+    queryDataset: vi.fn().mockResolvedValue({
+      rows: [{ status: 'todo', task_count: 3 }],
+      fields: [{ name: 'status', label: 'Status' }, { name: 'task_count', label: 'Tasks' }],
+    }),
+  });
+
+  /** Answers the caller's resolution (a dependency's dataset over `task`) and, bare, another holder's over `other`. */
+  function installResolvingFetch({ refuse = false } = {}) {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      if (url === '/api/v1/meta/dataset/showcase_task_metrics?callerPackage=com.acme.app') {
+        return refuse
+          ? { ok: false, status: 409, json: async () => ({ success: false, error: { code: 'RESOURCE_CONFLICT', message: 'held by 2 packages' } }) }
+          : { ok: true, status: 200, json: async () => ({ item: { name: 'showcase_task_metrics', object: 'task', dimensions: [{ name: 'status', field: 'status' }] } }) };
+      }
+      if (url === '/api/v1/meta/dataset/showcase_task_metrics') {
+        return { ok: true, status: 200, json: async () => ({ item: { name: 'showcase_task_metrics', object: 'other', dimensions: [{ name: 'status', field: 'status' }] } }) };
+      }
+      if (url === '/api/v1/meta/object/task') return { ok: true, status: 200, json: async () => TASK_DOC };
+      return { ok: true, status: 200, json: async () => ({}) };
+    }));
+    return calls;
+  }
+
+  it('a host package reads the definition as its reader, then the object that definition names', async () => {
+    const calls = installResolvingFetch();
+    render(<ObjectChart schema={DATASET_SCHEMA} dataSource={datasetSource()} packageId="com.acme.app" />);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls).toEqual(['/api/v1/meta/dataset/showcase_task_metrics?callerPackage=com.acme.app', '/api/v1/meta/object/task']);
+    await waitFor(() => expect(lastSchema?.data?.[0]?.status).toBe('To do'));
+  });
+
+  it('a 409 for the reader keeps the theme palette: no bare retry, no object read', async () => {
+    const calls = installResolvingFetch({ refuse: true });
+    const source = datasetSource();
+    render(<ObjectChart schema={DATASET_SCHEMA} dataSource={source} packageId="com.acme.app" />);
+    await waitFor(() => expect(source.queryDataset).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(lastSchema?.data?.[0]?.status).toBe('todo'));
+    // Let the probe's effect settle, so a retry it made would be recorded.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual(['/api/v1/meta/dataset/showcase_task_metrics?callerPackage=com.acme.app']);
+    expect(lastSchema?.categoryColors ?? null).toBeNull();
+  });
+
+  it('CONTROL: a host with no package reads the definition with no caller', async () => {
+    const calls = installResolvingFetch();
+    render(<ObjectChart schema={DATASET_SCHEMA} dataSource={datasetSource()} />);
+    await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(1));
+    expect(calls[0]).toBe('/api/v1/meta/dataset/showcase_task_metrics');
+  });
+});
