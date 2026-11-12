@@ -2354,6 +2354,7 @@ const pt = {
       dismiss: "Ocultar lista",
       showDone: "Mostrar concluídos ({{done}})",
       hideDone: "Ocultar concluídos",
+      optional: "Opcional",
       set: "Definir",
       change: "Alterar",
       view: "Ver",

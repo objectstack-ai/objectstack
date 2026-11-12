@@ -59,7 +59,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useAdapter: () => SHELL.adapter,
 }));
 
-import { useHomeItemClaim, useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
+import { useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
 import { FirstRunChecklist } from '../FirstRunChecklist';
 import { __resetBootPainted } from '../../../loadLocales';
 import type { Specifier } from '../types';
@@ -292,7 +292,7 @@ describe('each row is read from the real setting', () => {
     expect(await screen.findByTestId('first-run-checklist-row-invite')).toBeTruthy();
     const ids = ['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite'];
     for (const id of ids) expect(row(id).getAttribute('data-done')).toBe('false');
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
     expect(screen.getByText('Not set yet, so amounts are shown without a currency symbol.')).toBeTruthy();
     expect(screen.getByTestId('first-run-checklist-link-organization_name').getAttribute('href')).toBe(
       '/apps/setup/sys_organization/record/org_1',
@@ -315,7 +315,7 @@ describe('each row is read from the real setting', () => {
     await showDone();
     for (const id of ['language_country', 'timezone', 'currency']) expect(row(id).getAttribute('data-done')).toBe('true');
     expect(row('organization_name').getAttribute('data-done')).toBe('false');
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 5 done');
     cleanup();
 
     AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
@@ -488,7 +488,7 @@ describe('Connect an AI assistant: done from a real record, never from a click',
     expect(screen.getByTestId('first-run-checklist-link-connect_assistant').getAttribute('href')).toBe(
       '/apps/account/page/connect_agent',
     );
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 7 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
     expect(find).toHaveBeenCalledWith('sys_api_key', expect.objectContaining({ $filter: { user_id: 'u_admin' } }));
   });
 
@@ -544,39 +544,12 @@ describe('Connect an AI assistant: done from a real record, never from a click',
   });
 });
 
-/** Another Home card saying it draws `item` (the deployment notice, for `mail`). */
-function Claim({ item }: { item: HomeItem }) {
-  useHomeItemClaim(item, true);
-  return null;
-}
-
 /** What Home's other cards read: whether some card draws `item`. */
 function Claimed({ item }: { item: HomeItem }) {
   return <span data-testid={`claimed-${item}`}>{String(useHomeItemClaimed(item))}</span>;
 }
 
 describe('one Home card per item (objectstack#32021 item 3)', () => {
-  it('while the deployment notice draws its email line, the checklist leaves the mail row out', async () => {
-    const notice = render(<Claim item="mail" />);
-    renderChecklist(ADMIN);
-    await screen.findByTestId('first-run-checklist-row-invite');
-    await settle();
-    expect(screen.queryByTestId('first-run-checklist-row-mail')).toBeNull();
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
-
-    // The notice hidden (or gone): the row comes back.
-    notice.unmount();
-    expect(await screen.findByTestId('first-run-checklist-row-mail')).toBeTruthy();
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
-  });
-
-  it('CONTROL: with no notice drawing it, the mail row is on the list', async () => {
-    render(<Claimed item="mail" />);
-    renderChecklist(ADMIN);
-    expect(await screen.findByTestId('first-run-checklist-row-mail')).toBeTruthy();
-    expect(screen.getByTestId('claimed-mail').textContent).toBe('false');
-  });
-
   describe('the assistant row, while open, is what Home says about connecting one', () => {
     const ACCOUNT_APP = {
       name: 'account',
@@ -679,7 +652,7 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
     expect(within(r).getByText('Set up the built-in AI')).toBeTruthy();
     expect(within(r).getByText('No AI provider is in use yet. Choose one and add its key.')).toBeTruthy();
     await screen.findByTestId('first-run-checklist-row-invite');
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 7 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
 
     fireEvent.click(within(r).getByRole('link', { name: 'Set up' }));
     expect(await screen.findByRole('heading', { name: 'AI settings page' })).toBeTruthy();
@@ -719,7 +692,7 @@ describe('the built-in AI: the provider the server runs, from live.provider (obj
     await settle();
     expect(calls('GET', '/api/settings/ai')).toHaveLength(1);
     expect(screen.queryByTestId('first-run-checklist-row-ai_provider')).toBeNull();
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
   });
 
   it('a session that may not write ai never reads it and draws no row', async () => {
@@ -789,7 +762,7 @@ describe('rows that are done are folded away, so the card keeps the screen for t
     renderChecklist(ADMIN);
     await screen.findByTestId('first-run-checklist-row-invite');
     expect(drawnRows()).toEqual(['organization_name', 'mail', 'invite']);
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 5 done');
     const toggle = screen.getByTestId('first-run-checklist-toggle-done');
     expect(toggle.textContent).toBe('Show completed (3)');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -812,7 +785,7 @@ describe('rows that are done are folded away, so the card keeps the screen for t
     const toggle = await screen.findByTestId('first-run-checklist-toggle-done');
     expect(toggle.textContent).toBe('Show completed (1)');
     expect(screen.queryByTestId('first-run-checklist-row-currency')).toBeNull();
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('1 of 6 done');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('1 of 5 done');
   });
 
   it('CONTROL: with nothing done every row is drawn and there is nothing to unfold', async () => {
@@ -830,4 +803,80 @@ describe('rows that are done are folded away, so the card keeps the screen for t
     fireEvent.click(toggle);
     expect(toggle.textContent).toBe('收起已完成的项');
   });
+});
+
+describe('email delivery is optional: shown, marked so, and never what keeps the checklist open (objectstack#32643)', () => {
+  // The maintainer's ruling on the card: 「环境的新手清单中要求设置邮箱。我觉得这个不应该是必须的设置」.
+  function setRequiredRows() {
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+    AUTH.activeOrganization = { id: 'org_1', name: 'Acme' };
+    AUTH.getMembers.mockResolvedValue([{ id: 'm_1' }, { id: 'm_2' }]);
+  }
+  const DELIVERING = () => ({
+    provider: resolved('smtp', 'global'),
+    smtp_host: resolved('mx', 'global'),
+    from_email: resolved('a@b.co', 'global'),
+  });
+
+  it('the mail row says it is optional and is left out of the progress count; no other row is marked', async () => {
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(row('mail').getAttribute('data-optional')).toBe('true');
+    expect(within(row('mail')).getByTestId('first-run-checklist-optional-mail').textContent).toBe('Optional');
+    for (const id of ['organization_name', 'language_country', 'timezone', 'currency', 'invite']) {
+      expect(row(id).getAttribute('data-optional')).toBeNull();
+      expect(screen.queryByTestId(`first-run-checklist-optional-${id}`)).toBeNull();
+    }
+    // Six rows drawn, five required.
+    expect(within(screen.getByTestId('first-run-checklist')).getAllByRole('listitem')).toHaveLength(6);
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
+  });
+
+  it('every required row done and mail never set up: the checklist draws nothing', async () => {
+    setRequiredRows();
+    renderChecklist(ADMIN);
+    await settle();
+    await waitFor(() => expect(AUTH.getMembers).toHaveBeenCalled());
+    await settle();
+    // The mail namespace was read, and still answers "not set up".
+    expect(calls('GET', '/api/settings/mail')).toHaveLength(1);
+    expect(screen.queryByTestId('first-run-checklist')).toBeNull();
+  });
+
+  it('CONTROL: one required row left, the checklist stays and the unset mail row is on it, not done', async () => {
+    setRequiredRows();
+    AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(drawnRowIds()).toEqual(['organization_name', 'mail']);
+    expect(row('mail').getAttribute('data-done')).toBe('false');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('4 of 5 done');
+  });
+
+  it('a mail setup that delivers still reads done; it folds with the done rows and moves no required count', async () => {
+    mailValues = DELIVERING();
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(screen.queryByTestId('first-run-checklist-row-mail')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
+    await showDone();
+    expect(row('mail').getAttribute('data-done')).toBe('true');
+    expect(screen.getByTestId('first-run-checklist-link-mail').textContent).toBe('Change');
+  });
+
+  it('zh: the optional mark reads in the reader language', async () => {
+    renderChecklist(ADMIN, 'zh');
+    expect((await screen.findByTestId('first-run-checklist-optional-mail')).textContent).toBe('可选');
+  });
+
+  function drawnRowIds() {
+    return within(screen.getByTestId('first-run-checklist'))
+      .getAllByRole('listitem')
+      .map((li) => li.getAttribute('data-testid')?.replace('first-run-checklist-row-', ''));
+  }
 });

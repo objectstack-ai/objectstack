@@ -2049,6 +2049,7 @@ const zhHant = {
       dismiss: '隱藏清單',
       showDone: '顯示已完成的項（{{done}}）',
       hideDone: '收起已完成的項',
+      optional: '選用',
       set: '設定',
       change: '修改',
       view: '檢視',

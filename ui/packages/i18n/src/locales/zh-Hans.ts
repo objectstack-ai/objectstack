@@ -2049,6 +2049,7 @@ const zh = {
       dismiss: '隐藏清单',
       showDone: '显示已完成的项（{{done}}）',
       hideDone: '收起已完成的项',
+      optional: '可选',
       set: '设置',
       change: '修改',
       view: '查看',

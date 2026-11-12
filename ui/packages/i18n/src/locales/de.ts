@@ -2293,6 +2293,7 @@ const de = {
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
+      optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
