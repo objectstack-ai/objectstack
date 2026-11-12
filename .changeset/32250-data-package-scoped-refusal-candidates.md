@@ -4,10 +4,17 @@
 '@objectstack/metadata-protocol': patch
 ---
 
-feat(types, rest, metadata-protocol): a package-scoped refusal names its candidates on every `/data` write door (`details.candidates`)
+feat(types, rest, metadata-protocol)!: a package-scoped refusal names its candidates on every `/data` write door (`details.candidates`)
 
-Clause-②: yes (widening)
+Clause-②: yes (narrowing) — widened on the wire: a package-scoped refusal's `409 RESOURCE_CONFLICT` gains `details.candidates` on every door listed below, beside an unchanged status, `code`, `error` and `object`; narrowed through `@objectstack/client`: that `409`'s `err.details` is now `{ candidates }` where it was the whole response body, so its `error`, `code` and `object` keys are no longer under `err.details`.
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) no key of any packages/spec schema, registered type or stored row is added, removed or re-shaped: the change is the members of one HTTP error answer and the object the client SDK hands its caller for it, which `objectstack migrate meta` has nothing to rewrite -->
+
+**BREAKING** for a caller of `@objectstack/client` that reads `err.details.error`, `err.details.code` or `err.details.object` off this `409`.
+
+- FROM `err.details` = the whole response body (`{ error, code, object }` on the flat bodies, `{ success: false, error }` on the wrapped ones) TO `err.details` = `{ candidates }`, on every door that now answers `details.candidates`: `POST`, `PATCH` and `DELETE` on `/data/:object`, `createMany`, the cross-object `POST /batch`, the public form submit, the record-page route, the data-action field projection and search (flat), and the dispatcher's `/data` on `@objectstack/hono`, `GET /meta/:type/:name/layers` and the bare action `/layers` and `/published` (wrapped).
+- The fix: read the code and the sentence from `err.code` and `err.message` (unchanged, as is `err.httpStatus`), and the holders from `err.details.candidates` (`addressCandidatesOf`).
 
 A write hook that refuses a by-name value two packages hold (ADR-0150 D5; the `sys_user_permission_set` grant hook's `409 RESOURCE_CONFLICT` when two packages ship a permission set of the name typed) now tells the caller which packages to choose between. The answer carries the refusal's holders as `details.candidates`, `[{ kind: 'package', packageId }, …]`, the shape the `/actions`, `/automation`, `/meta` and activation doors already answer. Status, `code`, `error` and `object` are unchanged on the wire; the member is added beside them.
 
