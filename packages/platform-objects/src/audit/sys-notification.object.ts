@@ -69,6 +69,81 @@ export const SysNotification = ObjectSchema.create({
     },
   },
 
+  // [#32445, ruling 6810324463 letter A, PR 2] The Setup action an
+  // organization administrator sends an in-app message with: to everyone in
+  // their current organization, or to the members they pick. It sits on this
+  // list (Setup → Diagnostics → Notification Events) because every message it
+  // sends is one of these events: the door it calls emits through the single
+  // ingress, never writes a row here itself.
+  //
+  // The door is `@objectstack/service-messaging`'s
+  // `POST /api/v1/messaging/in-app-messages` (`in-app-message-routes.ts`),
+  // which judges everything: the capability below in the caller's current
+  // organization, the organization itself, each picked recipient's
+  // membership of it, and the form. `requiredPermissions` is that door's own
+  // capability (`IN_APP_MESSAGE_CAPABILITY`), so the action is listed to
+  // exactly the callers the door admits — organization administrators and the
+  // platform administrator hold it, a plain member does not — and the action
+  // doors refuse anyone else before forwarding (ADR-0066 D4). The pair is
+  // pinned by service-messaging's `in-app-message-action.test.ts`.
+  //
+  // The form is the door's closed body set, one param per key, so the dialog
+  // draws exactly what the door reads. Either `everyone` or `recipients`, not
+  // both: a param's visibility cannot read a sibling param, so the door is
+  // where "exactly one" is judged, and its refusal names the fix.
+  actions: [
+    {
+      name: 'send_in_app_message',
+      label: 'Send In-App Message',
+      description:
+        'Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.',
+      icon: 'send',
+      variant: 'primary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/messaging/in-app-messages',
+      requiredPermissions: ['setup.write'],
+      // `recipients` is how many people the message went to, as the door counts them.
+      successMessage: 'Message sent. Recipients: {{ result.recipients }}',
+      refreshAfter: true,
+      params: [
+        {
+          name: 'everyone',
+          label: 'Everyone in this organization',
+          type: 'boolean',
+          helpText: 'Send to every member of your current organization. Leave it off to pick the recipients below.',
+        },
+        {
+          name: 'recipients',
+          label: 'Recipients',
+          type: 'user',
+          multiple: true,
+          helpText: 'The members of your organization to send to, when the message is not for everyone.',
+        },
+        { name: 'title', label: 'Title', type: 'text', required: true, helpText: 'The line each recipient sees in their notifications.' },
+        { name: 'body', label: 'Message', type: 'textarea', required: true },
+        // Field-backed: the severity options are this object's own field's.
+        { field: 'severity', defaultValue: 'info' },
+        {
+          name: 'link',
+          label: 'Link',
+          type: 'url',
+          helpText: 'Optional. A page in this app (starting with /) or a web address the message opens.',
+        },
+      ],
+      // Exposed, and an agent's call waits for a person to confirm it: the
+      // action is neither a delete nor `danger`, so the bridge's default would
+      // let an agent holding an administrator's credentials message the whole
+      // organization unasked.
+      ai: {
+        exposed: true,
+        description:
+          'Send an in-app message (params: title, body, optional severity info|warning|critical and link) to everyone in the current organization (everyone: true) or to picked members (recipients: user ids), not both. Organization administrators only; each recipient must be a member of the current organization. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
+      },
+    },
+  ],
+
   fields: {
     id: Field.text({
       label: 'Notification ID',

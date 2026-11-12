@@ -26,6 +26,7 @@ import { DevRowActions } from './dev/DevRowActions';
 import {
   ConsoleShell,
   RequireAiSurface,
+  RequireOrganization,
   SystemRedirect,
   ConsoleToaster,
   LoadingScreen,
@@ -379,38 +380,65 @@ export function App() {
               * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`).
               * `ConsolePermissionsRequest` asks for that answer as soon as the
               * session names the organization, in the `organization/list`
-              * wave; the scope takes it (objectstack#29114). */}
+              * wave; the scope takes it (objectstack#29114).
+              *
+              * objectstack#32633 — the landing route `/` is a child of this
+              * same layout, so its redirect keeps the one `ConnectedShell` the
+              * landing was resolved in (its adapter, its `/meta/app` answer and
+              * its user-state bridge with the boot `sys_user_preference` read):
+              * the destination never mounts a second shell that asks them
+              * again. The organization gate and the permissions scope sit one
+              * level down, over the destinations only: `/` only redirects, and
+              * the gate belongs to where it lands. */}
             <Route element={
               <>
                 <ConsolePermissionsRequest />
-                <ProtectedRoute>
-                  <ConsolePermissionsScope>
-                    <Outlet />
-                  </ConsolePermissionsScope>
+                <ProtectedRoute requireOrganization={false}>
+                  <Outlet />
                 </ProtectedRoute>
               </>
             }>
-              <Route path="/home" element={<HomeRoute />} />
-              <Route path="/apps/:appName/*" element={<AppContent />} />
-              {/* Internal authed form — same renderer as `/f/:slug`, different
-                * submit path, and (objectui#4109) rendered INSIDE the console
-                * shell instead of as a bare page. The URL is unchanged: per the
-                * 2026-08-10 ruling on objectstack#7245 the missing chrome was
-                * the defect, not the navigation, so deep links keep working.
-                * `InternalFormRoute` owns the chrome + the "land on the created
-                * record" target; the public `/f/:slug` above stays chrome-less
-                * and outside this layout on purpose (an anonymous visitor has
-                * no console to be in, and no permissions to ask about).
-                *
-                * Under this layout rather than beside it (objectstack#29187):
-                * `FormPage` refuses a form whose write the caller holds no
-                * grant for BEFORE drawing a field, and it reads that grant
-                * from this layout's `/auth/me/permissions` answer — the one
-                * its in-app twin `/apps/:appName/forms/:name` already reads.
-                * One answer for both URLs, so one form never behaves
-                * differently by URL; a hop from `/home` or an app keeps the
-                * layout, so the answer is not asked again. */}
-              <Route path="/forms/:name" element={<InternalFormRoute />} />
+              {/*
+                * The landing resolver reads App METADATA, so it needs the data
+                * layer — which needs a session. It used to mount `ConnectedShell`
+                * bare, with no AuthGuard above it, so an unauthenticated visitor
+                * opening `/_console/` mounted the whole metadata tree and fired
+                * `meta/object` + `meta/view` + `meta/app` straight into 401
+                * before the login form was drawn (objectui#4042). Guarding it
+                * sends those visitors to /login without a single doomed request;
+                * a signed-in visitor still lands exactly where `isDefault`
+                * resolves.
+                */}
+              <Route path="/" element={<RootLandingRedirect />} />
+              <Route element={
+                <RequireOrganization>
+                  <ConsolePermissionsScope>
+                    <Outlet />
+                  </ConsolePermissionsScope>
+                </RequireOrganization>
+              }>
+                <Route path="/home" element={<HomeRoute />} />
+                <Route path="/apps/:appName/*" element={<AppContent />} />
+                {/* Internal authed form — same renderer as `/f/:slug`, different
+                  * submit path, and (objectui#4109) rendered INSIDE the console
+                  * shell instead of as a bare page. The URL is unchanged: per the
+                  * 2026-08-10 ruling on objectstack#7245 the missing chrome was
+                  * the defect, not the navigation, so deep links keep working.
+                  * `InternalFormRoute` owns the chrome + the "land on the created
+                  * record" target; the public `/f/:slug` above stays chrome-less
+                  * and outside this layout on purpose (an anonymous visitor has
+                  * no console to be in, and no permissions to ask about).
+                  *
+                  * Under this layout rather than beside it (objectstack#29187):
+                  * `FormPage` refuses a form whose write the caller holds no
+                  * grant for BEFORE drawing a field, and it reads that grant
+                  * from this layout's `/auth/me/permissions` answer — the one
+                  * its in-app twin `/apps/:appName/forms/:name` already reads.
+                  * One answer for both URLs, so one form never behaves
+                  * differently by URL; a hop from `/home` or an app keeps the
+                  * layout, so the answer is not asked again. */}
+                <Route path="/forms/:name" element={<InternalFormRoute />} />
+              </Route>
             </Route>
             {/* Dev-only: ADR-0001 master-detail subform verification harness. */}
             <Route path="/dev/master-detail" element={
@@ -495,23 +523,6 @@ export function App() {
             <Route path="/ai/:agent/:conversationId" element={
               <ProtectedRoute>
                 <RequireAiSurface><Suspense fallback={<LoadingScreen />}><DefaultAiChatPage /></Suspense></RequireAiSurface>
-              </ProtectedRoute>
-            } />
-            {/*
-              * The landing resolver reads App METADATA, so it needs the data
-              * layer — which needs a session. It used to mount `ConnectedShell`
-              * bare, with no AuthGuard above it, so an unauthenticated visitor
-              * opening `/_console/` mounted the whole metadata tree and fired
-              * `meta/object` + `meta/view` + `meta/app` straight into 401
-              * before the login form was drawn (objectui#4042). Guarding it
-              * sends those visitors to /login without a single doomed request;
-              * a signed-in visitor still lands exactly where `isDefault`
-              * resolves. `requireOrganization={false}` because `/` only
-              * redirects — the org gate belongs to the destination route.
-              */}
-            <Route path="/" element={
-              <ProtectedRoute requireOrganization={false}>
-                <RootLandingRedirect />
               </ProtectedRoute>
             } />
             {/* `RedirectWithSplash`, not a bare `<Navigate>` (objectui#6378).
