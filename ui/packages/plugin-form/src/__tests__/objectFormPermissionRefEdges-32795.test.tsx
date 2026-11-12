@@ -30,6 +30,8 @@ import { PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { ObjectForm } from '../ObjectForm';
 import { TabbedForm } from '../TabbedForm';
 import { WizardForm } from '../WizardForm';
+import { ModalForm } from '../ModalForm';
+import { DrawerForm } from '../DrawerForm';
 import { formWritePayload } from '../writePayload';
 import { withoutSeededHolderPackage } from '../sanitize';
 import { seedCreateValues } from '../schemaDefaults';
@@ -213,5 +215,91 @@ describe('objectstack#32795 item 3 — a seeded package is not shown as a pick',
     expect(save({ permission_set_package: 'com.acme.crm' })).toStrictEqual({ permission_set: 'sales_user' });
     expect(save(null)).toStrictEqual({ permission_set: 'sales_user' });
     expect(save({})).toStrictEqual(values);
+  });
+});
+
+describe('objectstack#32833 item 6 — the modal and drawer record forms carry a picked holder the record form way', () => {
+  const SECTIONS = [{ name: 'main', label: 'Main', fields: ['permission_set', 'note'] }];
+  const CONTAINERS: Array<[string, React.ComponentType<any>, string]> = [
+    ['ModalForm', ModalForm as any, 'modal'],
+    ['DrawerForm', DrawerForm as any, 'drawer'],
+  ];
+  function mountContainer(
+    Container: React.ComponentType<any>,
+    formType: string,
+    schema: Record<string, unknown> = {},
+    items: Array<Record<string, unknown>> = PERMISSION_ITEMS,
+  ) {
+    const ds = { ...dataSourceFor(GRANT_SCHEMA), listMetadataItems: vi.fn(async (_type: string) => items) };
+    render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <Container
+          schema={{ type: 'object-form', formType, objectName: GRANT_SCHEMA.name, mode: 'create', open: true, sections: SECTIONS, ...schema } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererProvider>,
+    );
+    return ds;
+  }
+  const submitOpen = async () => {
+    await act(async () => {
+      fireEvent.submit(document.querySelector('form') as HTMLFormElement);
+    });
+  };
+
+  describe.each(CONTAINERS)('%s (create)', (_name, Container, formType) => {
+    it("a package holder is pickable, and the save writes the holder's package beside the name", async () => {
+      const ds = mountContainer(Container, formType);
+      const trigger = await openPicker();
+      const crm = await optionOf(CRM);
+      expect(crm).not.toHaveAttribute('aria-disabled', 'true');
+      await act(async () => {
+        fireEvent.click(crm);
+      });
+      await waitFor(() => expect(trigger).toHaveTextContent(CRM));
+      await submitOpen();
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({
+        permission_set: 'sales_user',
+        permission_set_package: 'com.acme.crm',
+      });
+    });
+
+    it("the environment's own set is written by its name alone", async () => {
+      const ds = mountContainer(Container, formType);
+      await openPicker();
+      await act(async () => {
+        fireEvent.click(await optionOf(ENV));
+      });
+      await submitOpen();
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user' });
+      expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+    });
+
+    it('a seeded package is not shown as a pick and not sent', async () => {
+      const ds = mountContainer(Container, formType, {
+        initialData: { permission_set: 'sales_user', permission_set_package: 'com.acme.crm', note: 'n' },
+      });
+      const trigger = await screen.findByRole('combobox');
+      await waitFor(() => expect(trigger).toHaveTextContent(ENV));
+      await submitOpen();
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', note: 'n' });
+      expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+    });
+
+    it('CONTROL — one holder: the pick writes the name alone, as before', async () => {
+      const ds = mountContainer(Container, formType, {}, [{ name: 'sales_user', label: 'Sales User', packageId: 'com.acme.crm' }]);
+      const trigger = await openPicker();
+      await act(async () => {
+        fireEvent.click(await optionOf('Sales User (sales_user)'));
+      });
+      await waitFor(() => expect(trigger).toHaveTextContent('Sales User (sales_user)'));
+      await submitOpen();
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user' });
+      expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+    });
   });
 });

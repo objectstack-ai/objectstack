@@ -12,6 +12,7 @@ import {
   dirtyEditPayload,
   createOwnerPayload,
   createHolderPackagePayload,
+  type EditOwnerSource,
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { isCreateFormMode, omitServerResolvedDefaults } from './schemaDefaults';
@@ -40,6 +41,14 @@ export interface FormWriteSources {
    * and one the form was seeded with and the user left alone is not. Ignored
    * on an edit.
    *
+   * It must be the very values the form opened with, from the same call
+   * (`seedCreateValues`, or `ObjectForm`'s `formOpeningValues` on the same
+   * inputs), never a second seed: a key judged as a pick is one that differs
+   * from this baseline, so a baseline built apart from the form's values turns
+   * every key the two disagree on into a pick. That is what keeps a grant's
+   * seeded package off the wire wherever the seed keeps it (a definition with
+   * no `name`): the form holds it, the baseline holds it, it is no change.
+   *
    * Required, so a layout cannot forget it and silently drop a pick again —
    * which is how every create writer behaved before. `null` says there is no
    * opening value to judge against: no pick can then be told from a seed, so
@@ -54,7 +63,8 @@ export interface FormWritePayloads {
    * a form never writes and, on a create, of the fields the producer owns. On
    * a create it also carries an owner the user picked (objectui#12359) and,
    * on a permission-set grant, the package of the holder the user picked
-   * (objectstack#32770), since a create writes `payload` itself.
+   * (objectstack#32770), since a create writes `payload` itself
+   * ({@link createWritePayload}).
    */
   payload: Record<string, unknown>;
   /**
@@ -121,12 +131,35 @@ export function formWritePayload(
   // A picked owner is added BEFORE that omission, so an owner the user emptied
   // over a runtime default is left to the producer like any other empty field.
   if (isCreateFormMode(form)) {
-    payload = createOwnerPayload(payload, createBaseline, owner);
-    payload = createHolderPackagePayload(payload, createBaseline, form.objectName, PERMISSION_SET_GRANT_COLUMNS, owner);
-    payload = omitServerResolvedDefaults(payload, definition);
+    payload = createWritePayload(payload, createBaseline, form.objectName, owner, definition);
   }
   return {
     payload,
     writePayload: dirtyEditPayload(payload, snapshot, form, owner),
   };
+}
+
+/**
+ * Step 2 of {@link formWritePayload}, a create's: `payload` (step 1's result)
+ * plus the owner the user picked against `createBaseline`, plus the package of
+ * the permission-set holder the user picked on a grant, less the empty fields
+ * whose runtime default the producer resolves, judged against `definition`
+ * (the definition `payload` was sanitized against, as `owner.objectSchema`).
+ *
+ * Its own export because the modal and drawer record forms write a create
+ * through it too: they keep their own create test (`mode === 'create'`) and
+ * their own definition, so they do not call {@link formWritePayload}, and a
+ * key this step adds back reaches their saves only by this function. ⛔ Do
+ * not spell any of its calls beside one to it.
+ */
+export function createWritePayload(
+  payload: Record<string, unknown>,
+  createBaseline: Record<string, unknown> | null,
+  objectName: string,
+  owner: EditOwnerSource,
+  definition: FormWriteSources['objectSchema'],
+): Record<string, unknown> {
+  let next = createOwnerPayload(payload, createBaseline, owner);
+  next = createHolderPackagePayload(next, createBaseline, objectName, PERMISSION_SET_GRANT_COLUMNS, owner);
+  return omitServerResolvedDefaults(next, definition);
 }
