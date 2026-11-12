@@ -3079,6 +3079,34 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "Por tema"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Enviar mensaje en la aplicación",
+        description: "Envía un mensaje a todos los miembros de tu organización o a los que elijas. Aparece en las notificaciones de cada destinatario.",
+        successMessage: "Mensaje enviado. Destinatarios: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Todos en esta organización",
+            helpText: "Envía a todos los miembros de tu organización actual. Déjalo desactivado para elegir los destinatarios abajo."
+          },
+          recipients: {
+            label: "Destinatarios",
+            helpText: "Los miembros de tu organización a los que enviar, cuando el mensaje no es para todos."
+          },
+          title: {
+            label: "Título",
+            helpText: "La línea que cada destinatario ve en sus notificaciones."
+          },
+          body: {
+            label: "Mensaje"
+          },
+          link: {
+            label: "Enlace",
+            helpText: "Opcional. Una página de esta aplicación (que empiece por /) o una dirección web que abre el mensaje."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Versión"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Tipo de operación",

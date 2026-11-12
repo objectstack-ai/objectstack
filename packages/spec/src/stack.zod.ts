@@ -2595,26 +2595,51 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
 }
 
 /**
- * Validate the "at most one App per package" rule — ADR-0019 (app-as-consumer-unit) D1/D3.
+ * The package types a suite is made of, each held to at most one app —
+ * ADR-0019 (app-as-consumer-unit) D3 as amended: a suite (one install of an
+ * app package plus the module packages it composes) may surface several apps,
+ * each defined by a different package of the suite, and no package of it
+ * defines more than one. Read per package, so the app package and every module
+ * package are judged alike. The reasons are the amendment's three: the Console
+ * addresses an app by its package id, an app names no object of another
+ * package where its own package defines objects, and disabling a module
+ * removes the app that module owns.
  *
- * A consumer package (`manifest.type === 'app'`) must not define **more than
- * one** app — that is the banned "suite contains apps" shape. Fold the apps
- * into a single app with multiple tabs, or split into separate packages. Zero
- * apps is allowed (a package may still be under authoring, or define its app
- * elsewhere); non-`app` package types are internal contributions and are not
- * constrained here.
+ * Every other package type is an internal contribution the amended D3 does not
+ * define a suite with, and is not constrained here.
+ */
+const SINGLE_APP_PACKAGE_TYPES: ReadonlySet<string> = new Set(['app', 'module']);
+
+/**
+ * Validate the "at most one app per package" rule — ADR-0019
+ * (app-as-consumer-unit) D3 as amended, on the package types of
+ * {@link SINGLE_APP_PACKAGE_TYPES}.
+ *
+ * An app package (`manifest.type === 'app'`) or a module package
+ * (`manifest.type === 'module'`) must not define **more than one** app: a
+ * package that holds N apps is the shape D3 removes. The finding names the
+ * package, every app found and the remedy: one app per package, so each further
+ * app moves into a module package of its own (an app package may instead fold
+ * its apps into one app with several tabs). Zero apps is allowed (a module may
+ * contribute objects and navigation to another package's app, and a package
+ * may still be under authoring).
  *
  * Mirrors {@link validateNamespacePrefix}: returns one error per violation;
  * `defineStack` aggregates and throws.
  */
 function validateSingleApp(config: ObjectStackDefinition): string[] {
-  if (config.manifest?.type !== 'app') return [];
+  const type = config.manifest?.type;
+  if (type === undefined || !SINGLE_APP_PACKAGE_TYPES.has(type)) return [];
   const apps = config.apps ?? [];
   if (apps.length <= 1) return [];
-  const names = apps.map((a) => a.name).join(', ');
+  const names = apps.map((a) => `'${a.name}'`).join(', ');
+  const kind = type === 'app' ? "An 'app' package" : "A 'module' package";
+  const fold = type === 'app' ? ', or fold them into one app with multiple tabs' : '';
   return [
-    `An 'app' package must define at most one app, but found ${apps.length} (${names}). ` +
-      `Fold them into one app with multiple tabs, or split into separate packages — ADR-0019 (app-as-consumer-unit) D3.`,
+    `${kind} must define at most one app, but package '${config.manifest?.id}' defines ` +
+      `${apps.length} (${names}). Keep one app per package: move each other app into a 'module' package ` +
+      `of its own${fold} — ADR-0019 (app-as-consumer-unit) D3 as amended (a suite may surface several apps, ` +
+      `one per package).`,
   ];
 }
 
@@ -3709,9 +3734,9 @@ class StackNamespacePrefixInvalidError extends StackRefusalError {
 }
 
 /**
- * [ADR-0112 · #15963] An `app` package declares more than one app — the banned
- * "suite contains apps" shape, ADR-0019 (app-as-consumer-unit) D3 —
- * {@link validateSingleApp}.
+ * [ADR-0112 · #15963] An `app` or `module` package declares more than one app —
+ * the shape ADR-0019 (app-as-consumer-unit) D3 as amended removes: a suite may
+ * surface several apps, one per package — {@link validateSingleApp}.
  * Spelled `_VIOLATION` like the ledger's other rule-violation refusals
  * (`UNIQUE_VIOLATION`, `EXTERNAL_SCHEMA_MODE_VIOLATION`).
  */

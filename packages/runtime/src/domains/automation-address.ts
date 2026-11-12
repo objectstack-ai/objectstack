@@ -226,8 +226,12 @@ function refused(
     return { status: 409, refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
-function holdersOf(registry: AutomationAddressRegistry, type: string, name: string): string[] {
-    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
+/** [#32183] The served holders, or every holder with `options.includeDisabledPackages`; `options` reaches the registry's read as given. */
+function holdersOf(
+    registry: AutomationAddressRegistry, type: string, name: string,
+    options?: { includeDisabledPackages?: boolean },
+): string[] {
+    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name, null, options) ?? [] : [];
 }
 
 function canResolve(registry: AutomationAddressRegistry): registry is AutomationAddressRegistry & PackageScopedRegistry {
@@ -248,7 +252,10 @@ export function bareNameRefusal(
     name: string,
 ): PackageScopedRefusal | undefined {
     if (!registry || !canResolve(registry)) return undefined;
-    const resolution = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
+    // [#32183, R4-G] Over every holder, a disabled package's included: it
+    // only refuses a name two packages hold, which a disable must not move
+    // (`main`'s answer). A one-holder name resolves either way.
+    const resolution = resolvePackageScopedName(registry, { type, name, callerPackageId: null, includeDisabledPackages: true });
     return resolution.status === 'refused' ? resolution : undefined;
 }
 
@@ -272,7 +279,14 @@ export function admitAutomationAddress(
             ? undefined
             : { status: 404, message: `${noun} '${name}' not found in namespace '${qualifier.namespace}'` };
     }
-    const holders = holdersOf(registry, type, name);
+    // [#32183, R4-G] A name two or more packages hold over every holder (the
+    // state #31696 opened for a flow, each holder's flow in its own engine
+    // slot) is judged over every holder, a disabled package's included, so a
+    // disable moves no address of it (`main`'s answer). A one-holder name is
+    // judged over the served holders, as every by-name door is.
+    const everyHolder = holdersOf(registry, type, name, { includeDisabledPackages: true });
+    const shared = everyHolder.length > 1;
+    const holders = shared ? everyHolder : holdersOf(registry, type, name);
     let holder: PackageScopedHolder;
     if (qualifier.kind === 'environment') {
         if (registry.getEnvironmentScopedItem(type, name) !== undefined || holders.length === 0) return undefined;
@@ -292,7 +306,9 @@ export function admitAutomationAddress(
     }
     // The bare door serves the bare name's item: the address is its bare path
     // only when that item is the addressed holder's.
-    const bare = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
+    const bare = resolvePackageScopedName(registry, {
+        type, name, callerPackageId: null, ...(shared ? { includeDisabledPackages: true } : {}),
+    });
     if (bare.status === 'refused') {
         // [#31696] A flow name two packages hold: each holder's flow is its own
         // slot, and the address names one holder of it.

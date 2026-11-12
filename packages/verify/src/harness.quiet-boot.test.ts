@@ -5,15 +5,24 @@
 //
 // `bootStack` is what a project's `pnpm test` and `os verify` boot. On the
 // blank starter a PASSING run printed hundreds of INFO records, 263
-// `[Registry] …` lines (`os verify`) and, outside a test runner, two
-// better-auth warnings per boot about the harness's own fixed secret. What
-// this file pins:
+// `[Registry] …` lines (`os verify`), a `DATABASE_ERROR … no such table:
+// _objectstack_sequences`, a WARN with a stack trace for the refusal the
+// starter's own test asserts and, outside a test runner, two better-auth
+// warnings per boot about the harness's own fixed secret. What this file pins:
 //
 //   1. at the default level (`OS_LOG_LEVEL` unset, `OS_REGISTRY_LOG` unset) a
-//      passing boot writes no `[Registry]` line and no INFO record of the
-//      kernel's;
-//   2. the control: the same boot at `OS_LOG_LEVEL=debug` writes that chatter,
-//      so (1) is a reading, not a capture that sees nothing;
+//      passing boot writes no `[Registry]` line, no INFO record (the metadata
+//      manager's `Registered metadata loader` included), no `DATABASE_ERROR`
+//      and no stack frame;
+//   1a. an expected refusal (the starter's: a memo with no title) writes
+//      exactly ONE `warn` line, with no stack, naming the object, the
+//      operation, the field and the reason, and the caller is still told
+//      (the maintainer's ruling D on #32154; the driver fault keeping its
+//      stack is pinned in objectql's `engine-write-failure-log-level.test.ts`);
+//   2. the control: the same boot at `OS_LOG_LEVEL=info` writes that chatter
+//      back, so (1) is a reading, not a capture that sees nothing; and still
+//      no `DATABASE_ERROR`, because the table probe asks the catalog at any
+//      level;
 //   3. a FAILING boot at the default level still prints its failure: the
 //      kernel's ERROR record naming the plugin, and the error reaches the
 //      caller;
@@ -118,15 +127,32 @@ async function withLevelEnv<T>(env: { OS_LOG_LEVEL?: string }, fn: () => Promise
 
 const KERNEL_RECORD = (level: string) => new RegExp(`^\\S+Z ${level} `);
 const isRegistryLine = (line: string) => line.startsWith('[Registry]');
+/** An INFO record of the kernel's logger (or of a logger that follows it). */
+const isKernelInfoRecord = (line: string) => KERNEL_RECORD('INFO').test(line);
 /**
- * An INFO record of the kernel's logger. `MetadataManager` builds its own
- * logger at a fixed `info` before any host can hand it a level, so its
- * `Registered metadata loader: …` line still prints at the default level; that
- * logger is outside this change (reported on #32154), so the line is left out
- * here by its exact text, and this case stays true once it is fixed.
+ * `MetadataManager`'s loader registration. The manager is built before the
+ * kernel and used to log it through its own logger fixed at `info`; it now
+ * holds the line and replays it through the kernel's logger, so it follows
+ * the boot's level.
  */
-const isKernelInfoRecord = (line: string) =>
-  KERNEL_RECORD('INFO').test(line) && !/^\S+Z INFO Registered metadata loader: /.test(line);
+const isLoaderRegistrationRecord = (line: string) => /^\S+Z INFO Registered metadata loader: /.test(line);
+
+const isDatabaseError = (line: string) => line.includes('DATABASE_ERROR');
+/** A stack frame, printed raw or escaped inside a JSON context. */
+const isStackFrame = (line: string) => /^\s+at \S/.test(line) || /\\n\s+at \S/.test(line);
+const REFUSAL_MESSAGE = 'Insert operation failed';
+const isRefusalLine = (line: string) => line.includes(REFUSAL_MESSAGE);
+
+/** Insert a memo with no title as the dev admin: the refusal the starter's own test asserts. */
+async function refuseMissingTitle(stack: VerifyStack): Promise<{ code?: string; fields?: unknown }> {
+  const token = await stack.signIn();
+  try {
+    await stack.hooks.run(OBJECT, 'insert', {}, { as: token });
+  } catch (e) {
+    return e as { code?: string; fields?: unknown };
+  }
+  throw new Error('the insert without a title was not refused');
+}
 
 const FAILING_PLUGIN = 'com.example.quietboot.failing';
 const FAILING_MESSAGE = 'quiet-boot pin: this plugin refuses to start';
@@ -183,12 +209,13 @@ async function withBoot<T>(opts: BootOptions, fn: (stack: VerifyStack) => Promis
 }
 
 describe('[#32154] a passing bootStack run reads as a passing run', () => {
-  // Boot A: the default level, the default secret.
+  // Boot A: the default level, the default secret, and the starter's refusal.
   let quietBoot: Captured;
+  let quietRefusal: Captured & { value: { code?: string; fields?: unknown } };
   let authPluginSecret: unknown;
 
-  // Boot B: the same app at `OS_LOG_LEVEL=debug` — the control.
-  let debugBoot: Captured;
+  // Boot B: the same app at `OS_LOG_LEVEL=info` — the control.
+  let infoBoot: Captured;
 
   // Boot F: the default level, a plugin that refuses to start.
   let failedBoot: Captured & { value: unknown };
@@ -201,7 +228,11 @@ describe('[#32154] a passing bootStack run reads as a passing run', () => {
       // The `AuthPlugin` instance this boot mounted, read for the secret it
       // was constructed with (a private field: there is no public reader).
       authPluginSecret = (stack.kernel as any).plugins?.get('com.objectstack.auth')?.options?.secret;
-      await captureOutput(() => stack.stop());
+      try {
+        quietRefusal = await captureOutput(() => refuseMissingTitle(stack));
+      } finally {
+        await captureOutput(() => stack.stop());
+      }
 
       failedBoot = await captureOutput(() =>
         bootStack(app(), { extraPlugins: [failingPlugin()] }).then(
@@ -214,9 +245,9 @@ describe('[#32154] a passing bootStack run reads as a passing run', () => {
       );
     });
 
-    await withLevelEnv({ OS_LOG_LEVEL: 'debug' }, async () => {
+    await withLevelEnv({ OS_LOG_LEVEL: 'info' }, async () => {
       const booted = await captureOutput(() => bootStack(app()));
-      debugBoot = booted;
+      infoBoot = booted;
       await captureOutput(() => booted.value.stop());
     });
   }, BOOT_TIMEOUT);
@@ -226,12 +257,48 @@ describe('[#32154] a passing bootStack run reads as a passing run', () => {
       expect(quietBoot.lines.filter(isRegistryLine)).toEqual([]);
       expect(quietBoot.lines.filter(isKernelInfoRecord)).toEqual([]);
     });
+
+    it('writes no `INFO Registered metadata loader` line: the metadata manager follows the boot level', () => {
+      expect(quietBoot.lines.filter(isLoaderRegistrationRecord)).toEqual([]);
+    });
+
+    it('writes no DATABASE_ERROR for a sequences table that is simply not there yet, and no stack', () => {
+      expect(quietBoot.lines.filter(isDatabaseError)).toEqual([]);
+      expect(quietBoot.lines.filter(isStackFrame)).toEqual([]);
+    });
+
+    it('an expected refusal reaches the caller as the engine`s own refusal', () => {
+      expect(quietRefusal.value.code).toBe('VALIDATION_FAILED');
+      expect(quietRefusal.value.fields).toEqual([expect.objectContaining({ field: 'title', code: 'required' })]);
+    });
+
+    it('an expected refusal logs exactly one WARN line, with no stack: object, operation, field, reason', () => {
+      const refusalLines = quietRefusal.lines.filter(isRefusalLine);
+      expect(refusalLines).toHaveLength(1);
+      const [line] = refusalLines;
+      expect(line).toMatch(KERNEL_RECORD('WARN'));
+      expect(line).toContain(`"object":"${OBJECT}"`);
+      expect(line).toContain('"operation":"insert"');
+      expect(line).toContain('"fields":[{"field":"title","code":"required"}]');
+      expect(line).toContain('"reason":');
+      expect(line).not.toContain('"stack"');
+      expect(quietRefusal.lines.filter(isStackFrame)).toEqual([]);
+      expect(quietRefusal.lines.filter(isDatabaseError)).toEqual([]);
+    });
   });
 
-  describe('the control: the same boot at OS_LOG_LEVEL=debug', () => {
+  describe('the control: the same boot at OS_LOG_LEVEL=info', () => {
     it('writes the INFO records and the [Registry] lines the default boot leaves out', () => {
-      expect(debugBoot.lines.filter(isKernelInfoRecord).length).toBeGreaterThan(0);
-      expect(debugBoot.lines.filter(isRegistryLine).length).toBeGreaterThan(0);
+      expect(infoBoot.lines.filter(isKernelInfoRecord).length).toBeGreaterThan(0);
+      expect(infoBoot.lines.filter(isRegistryLine).length).toBeGreaterThan(0);
+    });
+
+    it('writes the `INFO Registered metadata loader` line the default boot leaves out', () => {
+      expect(infoBoot.lines.filter(isLoaderRegistrationRecord).length).toBeGreaterThan(0);
+    });
+
+    it('still writes no DATABASE_ERROR: the table probe asks the catalog, at any level', () => {
+      expect(infoBoot.lines.filter(isDatabaseError)).toEqual([]);
     });
   });
 

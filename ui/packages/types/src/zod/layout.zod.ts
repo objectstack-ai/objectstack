@@ -25,6 +25,7 @@ import {
   checkPageDefaultPlacement,
   checkPageMainRegionWidth,
   checkPageRecordBindingPlacement,
+  checkPageRecordPlacesComponent,
   checkPageRegionPlacement,
   checkPageRequiresKind,
   checkPageSourceCompleteness,
@@ -1395,6 +1396,10 @@ export const PageNodeSchema = BaseSchema.extend(SpecPageFields.shape).extend({
   // `record` binding on any page whose `type` is not `app`. It reads `type` the
   // same way, so attached here it would refuse every `record`, a `pageType:
   // 'app'` page's included; it is attached on the kind node only (objectui#12971).
+  // `checkPageRecordPlacesComponent` (objectstack#32434) refuses a `full` record
+  // page that places no component. It judges the page by `type` too, which here
+  // is `'page'`, so attached here it would never fire; it is attached on the kind
+  // node only (objectstack#32478).
   // `__tests__/spec-object-refinements-7715.test.ts` re-derives the count, so a
   // check the spec adds to `PageSchema` later reddens there.
   .superRefine(checkPageSourceCompleteness)
@@ -1450,14 +1455,19 @@ const { type: _pageNodeTypeLiteral, ...PAGE_NODE_MEMBERS } = PageNodeSchema.shap
  * {@link SpecPageFields}. Its four refusals (`actions`, `breadcrumbs`,
  * `maxWidth`, `padding`), the `body` refusal and the spec's attachable
  * object-level checks (`source`, `requires` by `kind`, region placement by
- * `template`, and the `main` region's `width`) come with it. The spec's `isDefault` placement check and its
- * `record` binding placement check are attached here only: each reads the page
+ * `template`, and the `main` region's `width`) come with it. The spec's `isDefault` placement check, its
+ * `record` binding placement check and its record page body check are attached here only: each reads the page
  * kind from `type`, which this node carries and the `page` node does not. `regions` stays the node's own
  * {@link PageNodeRegionSchema}, so each region component is judged by this
  * union at every depth, as on `page`.
  *
  * ⛔ Which spelling of a page is canonical — `type: 'page'` + `pageType`, or
- * the spec's `type: KIND` — is not decided here. Both validate, as both render.
+ * the spec's `type: KIND` — is not decided here. Both validate, as both render,
+ * with one exception: a `full` `record` page that places no component in its
+ * `regions` but carries `children` validates only as `type: 'page'`. As
+ * `type: 'record'` it is refused at `regions`, as the spec refuses it (the
+ * spec's page declares no `children`), and the record view shows its
+ * explanation in place of the page instead of drawing those `children`.
  */
 export const PageKindNodeSchema: PageKindNodeSchemaType = BaseSchema.extend({
   ...PAGE_NODE_MEMBERS,
@@ -1471,7 +1481,13 @@ export const PageKindNodeSchema: PageKindNodeSchemaType = BaseSchema.extend({
   // of the three kinds is `app`, so a `record` binding is refused here, as the
   // spec refuses it.
   .superRefine(checkPageDefaultPlacement)
-  .superRefine(checkPageRecordBindingPlacement);
+  .superRefine(checkPageRecordBindingPlacement)
+  // A `full` `record` kind node that places no component in its `regions` is
+  // refused at `regions` with the spec's own sentence (objectstack#32478): the
+  // record view draws such a page as an explanation, not as a page. Attached
+  // as-is, so `children` is not read: the spec's page carries no `children`, and
+  // the record view judges a record page by this same check.
+  .superRefine(checkPageRecordPlacesComponent);
 
 /**
  * The TYPE of {@link PageKindNodeSchema}, written out BY REFERENCE to the

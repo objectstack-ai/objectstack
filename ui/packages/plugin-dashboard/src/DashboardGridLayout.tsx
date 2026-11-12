@@ -145,8 +145,8 @@ export const DashboardGridLayout: React.FC<DashboardGridLayoutProps> = ({
   onRefresh,
 }) => {
   const { width, containerRef, mounted } = useContainerWidth();
-  // ADR-0150 D5 — the package this dashboard is served from, which each
-  // dataset widget's query names.
+  // The package this dashboard is served from, which each dataset widget's
+  // query names as the reader's package (`callerPackage`, ADR-0150 D3).
   const dashboardPackageId = servedPackageId(schema);
   // objectstack#32165 — this render's dataset queries go out as one batch
   // request per package (see `DashboardRenderer`).

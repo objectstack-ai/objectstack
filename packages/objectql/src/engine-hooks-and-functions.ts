@@ -39,7 +39,14 @@ import { driverSupportsTransactions } from '@objectstack/spec/data';
 import type { HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
-import { createLogger, packageScopedHolderSource, type PackageScopedHolderSource } from '@objectstack/core';
+import {
+  createLogger,
+  ENGINE_FUNCTION_TYPE,
+  PackageScopedNameRefusedError,
+  packageScopedHolderSource,
+  resolvePackageScopedHolders,
+  type PackageScopedHolderSource,
+} from '@objectstack/core';
 import { hookStoppedRefusal } from './summary-errors.js';
 import { startSummaryRefreshOnEnable } from './summary-enable-refresh.js';
 import { HookTargetRebindError } from './hook-target-rebind-errors.js';
@@ -84,6 +91,35 @@ export interface HooksAndFunctionsHost {
 }
 
 /** The bodies of the "Class head: units, hooks, functions, body runners, hook dispatch" section of `ObjectQL`: a stateless facet, called by the class's stubs. */
+
+/**
+ * [ADR-0150 D3/D4, #31700; epic seat ruling R2-C, 6812862622] The bare
+ * function map's entry for `name` — the last registration of the name —
+ * unless two PACKAGES hold it, which two namespaces may since #31700: then no
+ * entry is picked, and the read is refused as the rule refuses a caller with
+ * no package (`resolvePackageScopedHolders`, `ambiguous-in-environment`),
+ * naming every holder. A name one package holds, and an owner-less (platform)
+ * registration, answer as before. A reader that knows its package resolves
+ * through `functionHoldersOf` (the flow `script` node, #32073).
+ *
+ * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`, every holder named.
+ */
+function bareFunctionEntry(
+  host: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>,
+  name: string,
+): Readonly<FunctionEntry> | undefined {
+  const holders = host.functionHolders.get(name);
+  if (holders && [...holders.keys()].filter((holder) => holder !== null).length > 1) {
+    const refused = resolvePackageScopedHolders(
+      { type: ENGINE_FUNCTION_TYPE, name, callerPackageId: null },
+      HooksAndFunctionsFacet.functionHoldersOf.call(host, name),
+      () => new Set<string>(),
+    );
+    if (refused.status === 'refused') throw new PackageScopedNameRefusedError(refused);
+  }
+  return host.functions.get(name);
+}
+
 export class HooksAndFunctionsFacet {
   /** The body of `ObjectQL#recordResidualOwner`; the method's docblock there is its contract. */
   static recordResidualOwner(this: Pick<HooksAndFunctionsHost, 'residualOwnerSources'>, ownerId: string, source: 'code' | 'marketplace'): void {
@@ -267,13 +303,13 @@ export class HooksAndFunctionsFacet {
   }
 
   /** The body of `ObjectQL#resolveFunction`; the method's docblock there is its contract. */
-  static resolveFunction(this: Pick<HooksAndFunctionsHost, 'functions'>, name: string): HookHandler | undefined {
-    return this.functions.get(name)?.handler;
+  static resolveFunction(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>, name: string): HookHandler | undefined {
+    return bareFunctionEntry(this, name)?.handler;
   }
 
   /** The body of `ObjectQL#resolveFunctionEntry`; the method's docblock there is its contract. */
-  static resolveFunctionEntry(this: Pick<HooksAndFunctionsHost, 'functions'>, name: string): Readonly<FunctionEntry> | undefined {
-    return this.functions.get(name);
+  static resolveFunctionEntry(this: Pick<HooksAndFunctionsHost, 'functions' | 'functionHolders'>, name: string): Readonly<FunctionEntry> | undefined {
+    return bareFunctionEntry(this, name);
   }
 
   /** The body of `ObjectQL#unregisterFunctionsByPackage`; the method's docblock there is its contract. */

@@ -3079,6 +3079,34 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "По теме"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Отправить сообщение в приложении",
+        description: "Отправьте сообщение всем участникам организации или выбранным участникам. Оно появится в уведомлениях каждого получателя.",
+        successMessage: "Сообщение отправлено. Получателей: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Все в этой организации",
+            helpText: "Отправить каждому участнику вашей текущей организации. Оставьте выключенным, чтобы выбрать получателей ниже."
+          },
+          recipients: {
+            label: "Получатели",
+            helpText: "Участники вашей организации, которым отправить сообщение, если оно не для всех."
+          },
+          title: {
+            label: "Заголовок",
+            helpText: "Строка, которую каждый получатель видит в своих уведомлениях."
+          },
+          body: {
+            label: "Сообщение"
+          },
+          link: {
+            label: "Ссылка",
+            helpText: "Необязательно. Страница этого приложения (начинается с /) или веб-адрес, который открывает сообщение."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
@@ -3724,6 +3752,9 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Версия"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Тип операции",

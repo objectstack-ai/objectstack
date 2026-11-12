@@ -763,7 +763,8 @@ write failed). It never prints a value, a ciphertext or a row id.
 Checks the sealed audit ledger (ADR-0154). An object that declares `lifecycle.seal` has
 its rows sealed, one window at a time, into signed checkpoints. This command recomputes
 every checkpoint from the rows the database holds now, in the hot store and in the
-`archive` datasource, and judges each row. **It is read-only: it writes no row.**
+`archive` datasource, and judges each row. **It is read-only: it writes no row**, and
+starts no sealer.
 
 ```bash
 os audit verify                                     # every chain, the deployment chain included
@@ -1449,7 +1450,7 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
-| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on the rows stored before the field was declared, which hold `NULL` until each is next written; the boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
+| `os migrate stored-expressions` | Fill a stored computed field (a non-formula field declaring `expression`) on rows no write has computed since the field was declared or its expression changed. A field added, turned from a formula or given a new expression through a save in publish mode or a publish (`PUT /api/v1/meta/:type/:name`, `POST /api/v1/meta/:type/:name/publish`, `POST /api/v1/packages/:id/publish-drafts`) is filled at that change, and the answer reports the rows per field; this command is for a definition changed in a repository and booted, which holds `NULL` (or the old expression's value) on existing rows until each is next written, and for a rollback or revert, which does not fill. The boot warns, naming the field, when a sample of rows holds such a `NULL`. `--changed` also recomputes values an edited expression no longer gives. Rows an expression cannot compute while they hold a value are listed, never written. No flag; idempotent |
 | `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate blank-multi-values` | Rewrite the empty lists (`[]`) and empty strings (`''`) still stored on optional multi-value columns to `null`, the form a cleared value is stored in today, so rows cleared before and after read alike. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-multi-values) |
 | `os migrate option-codes` | Rewrite option values still stored as a number, a boolean or SQLite `"N.0"` text (rows written before option fields stored the code string) to that code string, so filters, reads and unique keys see one value. Values it cannot decide are listed, never rewritten. No flag; idempotent. See [below](#os-migrate-option-codes) |
@@ -2092,6 +2093,40 @@ archives to, in the same dry-run or `--apply` mode, and its `--json` document
 carries the same `archive` entries with the same `status` values and exit
 codes. A declared archive this boot does not connect, or an active runtime
 datasource row of that name, reads `not-connected` and exits `1`.
+
+#### Sealed audit rows (`os migrate audit-*`)
+
+`os migrate audit-metadata-bodies`, `os migrate audit-mail-bodies` and
+`os migrate audit-key-material` rewrite value columns of ledger rows, which an
+object can seal (`lifecycle.seal`, ADR-0154). Before a row that a checkpoint
+seals is rewritten, the command writes a signed **redaction amendment**
+(`sys_audit_amendment`): the checkpoint, the row and column, the commitment the
+checkpoint sealed and that of the rewritten value. `os audit verify` then reads
+the row `redacted`. A row no checkpoint lists yet is rewritten as before, and
+the sealer seals the rewritten value.
+
+The commands open the checkpoints' seeds and sign with the crypto provider
+`os serve` seals with, composed as `os audit verify` composes it. A sealed row
+whose amendment cannot be written is **refused**: it is left as it is, counted
+in `refused` (per table in `byObject` too), and the run exits `1`. That happens
+when:
+
+- the run has no crypto provider (no data key here, or the provider a plugin
+  declares does not load), or the signer cannot sign;
+- a checkpoint that lists the row does not verify under a trusted signing key.
+  A stored checkpoint or amendment counts only when it verifies, by the rule
+  `os audit verify` applies;
+- the row no longer matches the checkpoint that sealed it. What was sealed
+  cannot be shown, so it is never amended, and `os audit verify` reads it
+  `modified`;
+- the rewrite would change a column the object seals in clear.
+
+The dry run decides each row the same way and writes nothing. Re-run where the
+crypto provider `os serve` seals with is available.
+
+**Run them with the server stopped.** A running server's sealer seals each hour
+ten minutes after it ends, and it can seal a row between the command's decision
+and its write; that row then reads `modified`.
 
 #### `os migrate organization-ownership`
 
