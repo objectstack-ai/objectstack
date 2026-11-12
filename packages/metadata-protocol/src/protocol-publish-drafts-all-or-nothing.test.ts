@@ -430,8 +430,16 @@ describe('publishPackageDrafts keeps ADR-0067 D2 on a runtime that cannot roll b
             return (real as any).call(protocol, req);
         });
 
+        const heal = vi.spyOn(protocol as any, 'restoreArtifactRegistryView');
+
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
+        // [#32366] Each undo's registry heal names the package the restored or
+        // removed row is bound to, the package published (ADR-0150 D3): its
+        // baseline read is never bare.
+        const healed = heal.mock.calls as unknown[][];
+        expect(healed.length).toBeGreaterThan(0);
+        expect(healed.map((call) => call[3])).toEqual(healed.map(() => PKG));
         expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0, published: [] });
         expect(res.failed.find((f) => f.name === OBJ)).toMatchObject({ code: 'METADATA_CONFLICT' });
         expect(res.failed.filter((f) => f.name !== OBJ).map((f) => f.code)).toEqual(Array(10).fill('BATCH_ABORTED'));
