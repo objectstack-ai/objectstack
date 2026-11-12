@@ -292,8 +292,13 @@ export const ExplainRequestSchema = lazySchema(() => z.object({
    *   gives for that id. An asker explaining another principal cannot read an
    *   id its own by-id read finds no row for or refuses (a declared 4xx); a
    *   principal explaining itself cannot read an id its own by-id read finds no
-   *   row for, and a refused read leaves its explanation as its own doors
-   *   answer.
+   *   row for or refuses. A principal whose own read of the object is refused
+   *   gets the same verdict for every id, the stored and the missing alike:
+   *   `visible: false`, with `decidedBy` naming the layer that refused the
+   *   read (omitted when no layer names it). This is the security service's
+   *   explain; the plugin-security engine export `explainAccess(deps, input)`,
+   *   handed no asker, keeps answering a refused read by its own read
+   *   question, as before.
    * - **Mutually exclusive** with `recordId`: a request carrying both is
    *   refused loudly rather than silently preferring either spelling.
    * - Batch responses carry the per-layer trace at OBJECT level only (no
@@ -340,7 +345,10 @@ const ExplainRecordVerdictSchema = lazySchema(() => z.object({
   /**
    * The pipeline layer that decided the outcome (excluded the record, or last
    * admitted it). Omitted when no layer answered — notably for a missing
-   * record, whose fail-closed verdict is `visible: false` with no decider.
+   * record, whose fail-closed verdict is `visible: false` with no decider. For
+   * a principal explaining itself whose own read of the object is refused, it
+   * is the layer that refused that read, for every record id alike, and it is
+   * omitted, for every id alike, when no read layer names the refusal.
    */
   decidedBy: z.enum([
     'tenant_isolation',
@@ -353,7 +361,7 @@ const ExplainRecordVerdictSchema = lazySchema(() => z.object({
     'sharing',
     'vama_bypass',
     'rls',
-  ]).optional().describe('The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record.'),
+  ]).optional().describe('The pipeline layer that decided the record-level outcome (excluded it, or last admitted it); omitted for a missing record. For a principal explaining itself whose own read of the object is refused, the layer that refused that read, for every record id alike; omitted for every id when no read layer names the refusal.'),
 }));
 
 /** The full decision report. */
@@ -412,11 +420,16 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
    * explained. An asker explaining another principal cannot read an id its own
    * by-id read finds no row for or refuses (a declared 4xx, such as no read
    * grant on the object). A principal explaining itself cannot read an id its
-   * own by-id read finds no row for; a refused read does not count, so its
-   * explanation shows what its own doors answer.
+   * own by-id read finds no row for or refuses. A principal whose own read of
+   * the object is refused gets the same explanation for every record id: it
+   * never tells a stored record from a missing one, and it names the read's
+   * refusal, with `decidedBy` the layer that refused the read (omitted when no
+   * layer names it). This is the security service's explain; the
+   * plugin-security engine export `explainAccess(deps, input)`, handed no
+   * asker, keeps answering a refused read by its own read question, as before.
    */
   record: ExplainRecordVerdictSchema.optional()
-    .describe('Row-level verdict for the specific record; set only for singular record-grained requests. An id the asker (the caller of explain) cannot read answers as missing, like a filtered, deleted or never-existed id: visible false, decidedBy omitted. Explaining another principal, the asker cannot read an id its own by-id read finds no row for or refuses; a principal explaining itself cannot read an id its read finds no row for.'),
+    .describe('Row-level verdict for the specific record; set only for singular record-grained requests. An id the asker (the caller of explain) cannot read answers as missing, like a filtered, deleted or never-existed id: visible false, decidedBy omitted. Explaining another principal, the asker cannot read an id its own by-id read finds no row for or refuses; a principal explaining itself cannot read an id its own read finds no row for. A principal explaining itself whose own read of the object is refused gets the same explanation for every id, stored or missing: visible false, decidedBy the layer that refused the read, omitted when no read layer names the refusal. The engine export explainAccess(deps, input), handed no asker, keeps its own read question for a refused read.'),
   /**
    * [#8326] Batch record-grained verdicts — present only when the request
    * carried `recordIds`. `records[i]` answers `recordIds[i]` (same order, same

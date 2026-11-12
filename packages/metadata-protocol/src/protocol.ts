@@ -9673,6 +9673,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
+        /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
+        judgeOnly?: boolean;
     }): Promise<{
         singularType: string;
         /**
@@ -9687,7 +9689,10 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
+        promotedDraft?: { body: unknown; hash: string };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
@@ -9957,8 +9962,13 @@ export class ObjectStackProtocolImplementation implements
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
      * lock guards and refreshes the runtime registry), so this needs NO
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
-     * the in-memory registry and 503s when that service is absent). Per-item
-     * failures are collected and do NOT abort the rest.
+     * the in-memory registry and 503s when that service is absent).
+     *
+     * All-or-nothing (ADR-0067 D2): a refusal of any draft refuses the whole
+     * batch, and nothing it promoted stays live. [#32396] That holds on a
+     * runtime that cannot roll a transaction back too — there the whole batch
+     * is judged before any draft is promoted, and a failure only the writes
+     * meet undoes the promotions already made — see the body's Phase 0.
      *
      * [#9406] The wire face of this return is DECLARED:
      * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the
