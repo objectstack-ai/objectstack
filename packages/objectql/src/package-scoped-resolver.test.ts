@@ -608,7 +608,7 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
       });
     }
 
-    it(`UNCHANGED at the door (contract review F2), ${door} — an undeclared row of the App's pair, X its one owner, of the very locale the arriving package on X ships: the arrival is counted as the seal counts it (it would co-own the row, which then binds to no package), so it is an addition to X, refused or reported as before, and X keeps the row`, () => {
+    it(`UNCHANGED at the door (contract review F2), ${door} — an undeclared row of the App's pair, X its one owner, of the very locale the arriving package of the App ships: the gate lends the row's locale to no holder (epic ruling B), so the arrival is an addition to X, refused or reported as before, and X keeps the row`, () => {
       ship('email_template', 'welcome', X);
       pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
       const answer = arrive(door);

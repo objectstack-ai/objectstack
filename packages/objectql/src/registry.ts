@@ -52,8 +52,6 @@ import {
   appOf,
   isPairOf,
   pairOf,
-  type AppLookupManifest,
-  type InstalledManifestLookup,
   // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
   // under a dependency's name is no holder of that name for a bare read.
   packageDependencyClosure,
@@ -3722,14 +3720,13 @@ function bundleBaseKey(key: string): string {
 type BundleEntry = { key: string; item: any };
 
 /**
- * [#32408, contract review F2] What a door's registration brings to a bundled
- * name: the package, the members it adds to its composite slot, and — at the
- * package door, before the package is installed — its manifest.
+ * [#32408, contract review F2, delta review N1] What a door's registration
+ * brings to a bundled name: the package and the members it adds to its
+ * composite slot.
  */
 interface BundleArrival {
   readonly packageId: string;
   readonly members: ReadonlySet<string>;
-  readonly manifest?: unknown;
 }
 
 /**
@@ -4951,15 +4948,6 @@ export class SchemaRegistry {
    */
   private bareNameHoldersSealed = false;
 
-  /**
-   * [#32408, contract review F2] The manifest of a package the package door
-   * judges before it is installed, read as installed by the pair-row binding
-   * ({@link installedManifestLookup}) for the one synchronous read of a
-   * holder's members a door makes ({@link registeredBundleHolding} with an
-   * arrival). `undefined` outside that read.
-   */
-  private arrivingManifest: { readonly packageId: string; readonly manifest: unknown } | undefined;
-
   /** The packages already warned that their namespace spells an address literal. */
   private readonly addressLiteralNamespaceWarned = new Set<string>();
 
@@ -5051,10 +5039,9 @@ export class SchemaRegistry {
    * (`incomingNamespace`, the namespace the incoming package declares) —
    * unless one holding is an addition to the other's bundle
    * ({@link bareNameBundleAdditionMeets}; `incomingHolding`, read only then).
-   * `incomingArrival` is what the registration brings (the members it adds,
-   * and the manifest at the package door): a holder's members are read as if
-   * it were registered, so the door judges the state the cold boot's seal
-   * would judge (#32408, contract review F2).
+   * `incomingArrival` is what the registration brings (the members it adds):
+   * a holder's members are read as if it were registered, so the door judges
+   * the state the cold boot's seal would judge (#32408, delta review N1).
    */
   private bareNameHoldersOtherThan(
     type: BareNameOneHolderType,
@@ -5064,7 +5051,7 @@ export class SchemaRegistry {
       builtIns: boolean;
       incomingNamespace: string | undefined;
       incomingHolding?: () => BundleHolding | undefined;
-      incomingArrival?: { readonly members: ReadonlySet<string>; readonly manifest?: unknown };
+      incomingArrival?: { readonly members: ReadonlySet<string> };
     },
   ): BareNameHolder[] {
     if (!this.bareNameHoldersSealed) return [];
@@ -5093,48 +5080,21 @@ export class SchemaRegistry {
    * seal read a holding here, and nothing else does.
    *
    * With an `arrival` (a door judging a registration), the members are read
-   * as if the arrival were registered: its members in its composite slot, and
-   * its manifest installed when it is not yet. A package-less row binds to
+   * as if the arrival were registered: its members in its composite slot. A
+   * package-less row binds to
    * the one package holding the name only while there is one
    * ({@link overlaySlotBinding}), so beside the arrival it binds to neither.
    * Read without the arrival, the row would be the holder's member, the
    * arrival no addition to the holder, and the door would admit what the seal
-   * then reports (#32408, contract review F2, delta review N1).
+   * then reports (#32408, delta review N1).
    */
   private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string, arrival?: BundleArrival): BundleHolding | undefined {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || !isBareNameRegistryType(type)) return undefined;
     const registered = this.metadata.get(type) ?? new Map<string, any>();
     const collection = arrival === undefined ? registered : withArrivingMembers(registered, name, disc, arrival);
-    const read = () => this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc, true);
-    let members: Set<string>;
-    if (arrival?.manifest === undefined) {
-      members = read();
-    } else {
-      const outer = this.arrivingManifest;
-      this.arrivingManifest = { packageId: arrival.packageId, manifest: arrival.manifest };
-      try {
-        members = read();
-      } finally {
-        this.arrivingManifest = outer;
-      }
-    }
+    const members = this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc, true);
     return { packageId, members, reach: new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []) };
-  }
-
-  /**
-   * [#32408, contract review F2] The installed manifests the pair-row binding
-   * reads ({@link settledPairRowBinding}): this registry's, and while a door
-   * reads a holder's members for a package not installed yet, that package's
-   * incoming manifest ({@link arrivingManifest}), so the binding places it in
-   * its App as it will once installed.
-   */
-  private installedManifestLookup(): InstalledManifestLookup {
-    const installed = installedManifestsOf(this);
-    const arriving = this.arrivingManifest;
-    if (arriving === undefined || typeof arriving.manifest !== 'object' || arriving.manifest === null) return installed;
-    const manifest = arriving.manifest as AppLookupManifest;
-    return (id) => installed(id) ?? (id === arriving.packageId ? manifest : undefined);
   }
 
   /**
@@ -5201,7 +5161,7 @@ export class SchemaRegistry {
         builtIns: true,
         incomingNamespace,
         incomingHolding: () => this.declaredBundleHolding(manifest, selfId, type, name),
-        incomingArrival: { members: declaredBundleMembers(manifest, type, name), manifest },
+        incomingArrival: { members: declaredBundleMembers(manifest, type, name) },
       })) {
         conflicts.push({
           type,
@@ -8263,7 +8223,7 @@ export class SchemaRegistry {
           if (!held || arriving === undefined) return held;
           return { ...held, members: new Set([...held.members, ...arriving]) };
         },
-        // [#32408, contract review F2] …and a holder's members read as if this
+        // [#32408, delta review N1] …and a holder's members read as if this
         // member were registered.
         incomingArrival: arriving === undefined ? undefined : { members: arriving },
       });
@@ -8950,7 +8910,7 @@ export class SchemaRegistry {
   private settledPairRowBinding(pairId: string, item: unknown, composite: ReadonlySet<string>):
     string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER | readonly string[] {
     if (customizationBasePackageId(pairId) === null) return NOT_A_PAIR_ROW_OF_A_HOLDER;
-    const installed = this.installedManifestLookup();
+    const installed = installedManifestsOf(this);
     const owners = [...composite].filter((holder) => isPairOf(pairId, holder, installed));
     if (owners.length === 0) return NOT_A_PAIR_ROW_OF_A_HOLDER;
     const declared = declaredOverrideBase(item);
