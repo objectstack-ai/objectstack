@@ -227,12 +227,12 @@ describe('[#32451] two replicas converge to the same per-package answer for a sl
 
             await save(c, 'dashboard', BETA, 'beta-1');
 
-            // The signal is stamped for every type…
-            expect(c.events[c.events.length - 1]).toMatchObject({ packageId: BETA });
-            // …and a by-name type is read by name, as at 45f80780: the first
-            // stored row (alpha's), not the row the writer wrote.
+            // A by-name type is read by name, as at 45f80780: the first stored
+            // row (alpha's), not the row the writer wrote…
             expect(c.a.serves()[2]).toBe('beta-1');
             expect(c.b.serves()[2]).toBe('alpha-1');
+            // …though the signal is stamped for every type.
+            expect(c.events[c.events.length - 1]).toMatchObject({ packageId: BETA });
         });
     });
 });
