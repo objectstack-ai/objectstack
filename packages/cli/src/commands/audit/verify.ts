@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { chmod, readFile, writeFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { AUDIT_CHECKPOINT_SIGNER_SERVICE } from '@objectstack/spec/contracts';
-import type { AuditVerifyReport } from '@objectstack/plugin-audit';
+import type { AuditProofBundle, AuditVerifyReport } from '@objectstack/plugin-audit';
 import {
   printHeader,
   printSuccess,
@@ -33,6 +35,9 @@ const ROWS_SHOWN = 100;
 /** ISO-8601: a date, or a date and time with a zone. */
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:\d{2}))?$/;
 
+/** A signing key fingerprint: lowercase hex SHA-256 of the raw public key, as the check prints it. */
+const FINGERPRINT = /^[0-9a-f]{64}$/;
+
 /**
  * `os audit verify` — the live check of ADR-0154 D9: every chain of every
  * sealed object, recomputed from the hot store and the archive datasource and
@@ -50,6 +55,20 @@ const ISO_8601 = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{
  * `late`, `redacted` or `expired`; a row of a sealed window no trusted
  * checkpoint holds reads `late` and unsealed. It prints the fingerprints of
  * the keys it trusted, to publish out of band.
+ *
+ * `--out FILE` also writes the run's proof bundle
+ * (`objectstack.audit.proof-bundle.v1`): the trusted public keys, the
+ * checkpoints and amendments, and each judged row's leaf input — its value
+ * columns as salted commitments only, never a value, salt or seed. It still
+ * carries personal data: the clear columns (`user_id`, `actor`, `ip_address`,
+ * `user_agent`, `tenant_id`) identify people, so a bundle is an export of the
+ * ledger, handled as one and narrowed with `--org` / `--from` / `--to` (D9).
+ * `--bundle FILE` re-judges such a bundle offline, with no boot and no
+ * database, trusting only the keys named by `--trusted-key` fingerprints
+ * (learnt out of band, at least one): never a key because the bundle carries
+ * it. `--bundle` takes no `--out`, no boot flag and no scope flag (the bundle
+ * keeps the scope of the run that wrote it); `--trusted-key` is for
+ * `--bundle` only.
  *
  * Exit codes (D9): 0 when every chain, link and signature verifies and every
  * row is `unmodified`, `late` (sealed), `redacted` or `expired` — and when
@@ -69,6 +88,8 @@ export default class AuditVerify extends Command {
     '$ os audit verify',
     '$ os audit verify --org org_123 --org org_456',
     '$ os audit verify --from 2026-11-01 --to 2026-11-08 --json',
+    '$ os audit verify --out ledger-proof.json',
+    '$ os audit verify --bundle ledger-proof.json --trusted-key <fingerprint>',
   ];
 
   static override flags = {
@@ -84,6 +105,19 @@ export default class AuditVerify extends Command {
     from: Flags.string({ description: 'Judge only rows of the windows from this ISO-8601 instant on' }),
     to: Flags.string({ description: 'Judge only rows of the windows before this ISO-8601 instant' }),
     json: Flags.boolean({ description: 'Print the machine-readable report' }),
+    out: Flags.string({
+      description:
+        'Also write the proof bundle to this file. It is an export of the ledger and carries personal data (its clear columns ' +
+        'identify people): handle it as the ledger, and narrow it with --org / --from / --to. Value columns appear only as ' +
+        'commitments; no salt or seed',
+    }),
+    bundle: Flags.string({
+      description: 'Verify this proof bundle offline instead of the live ledger: no boot, no database (requires --trusted-key)',
+    }),
+    'trusted-key': Flags.string({
+      description: "A signing key fingerprint --bundle trusts (repeatable); the bundle's own keys are trusted only through these",
+      multiple: true,
+    }),
   };
 
   /**
@@ -96,17 +130,42 @@ export default class AuditVerify extends Command {
     await exitOneShotCommand(typeof process.exitCode === 'number' ? process.exitCode : 0);
   }
 
-  /** Report a refusal that ends the run with 2: no verdict was given. */
-  private async refuse(json: boolean, error: string, message: string): Promise<never> {
-    if (json) await emitJson({ error, message }, 0, { compact: true });
-    else printError(message);
-    return this.exit(2);
-  }
-
   private async verify(): Promise<void> {
     const { flags } = await this.parse(AuditVerify);
     const json = flags.json === true;
     const timer = createTimer();
+
+    // `--bundle` is the offline check: exclusive with booting and with `--out`,
+    // and the only mode `--trusted-key` belongs to. `--database-url` counts only
+    // when given on the command line: `$OS_DATABASE_URL` also fills it.
+    const given = (flag: string) => this.argv.some((arg) => arg === `--${flag}` || arg.startsWith(`--${flag}=`));
+    if (flags.bundle !== undefined) {
+      if (flags.out !== undefined) await this.refuse(json, 'usage', '--bundle verifies a bundle offline; it cannot also write one (--out).');
+      if (given('database-url')) await this.refuse(json, 'usage', '--bundle verifies offline and boots nothing: --database-url does not apply.');
+      const scoped = (['org', 'from', 'to'] as const).filter((flag) => flags[flag] !== undefined);
+      if (scoped.length > 0) {
+        await this.refuse(
+          json,
+          'usage',
+          `--bundle judges the scope of the run that wrote it: ${scoped.map((f) => `--${f}`).join(', ')} apply when it is written (--out).`,
+        );
+      }
+      const keys = (flags['trusted-key'] ?? []).map((key) => key.trim().toLowerCase());
+      if (keys.length === 0) {
+        await this.refuse(
+          json,
+          'usage',
+          '--bundle requires at least one --trusted-key FINGERPRINT, learnt out of band: the keys a bundle carries are never trusted on its word.',
+        );
+      }
+      const bad = keys.find((key) => !FINGERPRINT.test(key));
+      if (bad !== undefined) await this.refuse(json, 'usage', `--trusted-key '${bad}' is not a signing key fingerprint (64 hex digits).`);
+      await this.verifyBundle(flags.bundle, keys, json, timer);
+      return;
+    }
+    if (flags['trusted-key'] !== undefined) {
+      await this.refuse(json, 'usage', '--trusted-key applies to --bundle only: the live check trusts the keys this deployment vouches for.');
+    }
 
     const from = flags.from === undefined ? undefined : instant(flags.from);
     const to = flags.to === undefined ? undefined : instant(flags.to);
@@ -234,6 +293,7 @@ export default class AuditVerify extends Command {
         trust = undefined;
       }
 
+      let bundle: AuditProofBundle | undefined;
       const report = await verifyAuditLedger({
         engine: view,
         crypto: crypto.provider,
@@ -242,11 +302,25 @@ export default class AuditVerify extends Command {
         ...(from ? { from } : {}),
         ...(to ? { to } : {}),
         archive: (datasource, object) => archiveDrivers.get(object) ?? (noArchive.has(datasource) ? 'none' : undefined),
+        ...(flags.out !== undefined ? { onProofBundle: (written: AuditProofBundle) => { bundle = written; } } : {}),
       });
+
+      // The bundle is written whatever the verdict: offline, it shows the same.
+      const out = flags.out === undefined ? undefined : resolve(flags.out);
+      if (out !== undefined) {
+        try {
+          await writeFile(out, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600 });
+          // `mode` applies only when the file is created: an overwritten one is narrowed too.
+          await chmod(out, 0o600);
+        } catch (error) {
+          await this.refuse(json, 'bundle_write_failed', `The proof bundle could not be written to ${out}: ${error instanceof Error ? error.message : String(error)}`);
+          return;
+        }
+      }
 
       if (json) {
         reads.notice(true);
-        await emitJson({ database: stack.dbLabel, report, duration: timer.elapsed() });
+        await emitJson({ database: stack.dbLabel, report, ...(out !== undefined ? { out } : {}), duration: timer.elapsed() });
         if (!report.ok) this.exit(1);
         return;
       }
@@ -254,6 +328,13 @@ export default class AuditVerify extends Command {
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       reads.notice(false);
       this.render(report);
+      if (out !== undefined) {
+        printSuccess(`Proof bundle written to ${out}. Check it offline with: os audit verify --bundle ${flags.out} --trusted-key <fingerprint>`);
+        printWarning(
+          'The bundle carries personal data: its clear columns (user, actor, IP address, user agent, organization) identify ' +
+            'people. Keep and pass it on under the rules for the ledger it came from.',
+        );
+      }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
       if (!report.ok) this.exit(1);
@@ -268,7 +349,57 @@ export default class AuditVerify extends Command {
     }
   }
 
-  private render(report: AuditVerifyReport): void {
+  /**
+   * Report a refusal that ends the run with 2: no verdict was given.
+   *
+   * Declared below `verify()` on purpose: `diff-usage-error-stream.e2e.test.ts`
+   * judges by line position, and a print call between `run()` and the first
+   * read of the `--json` flag is the shape it refuses, whatever branch guards it.
+   */
+  private async refuse(json: boolean, error: string, message: string): Promise<never> {
+    if (json) await emitJson({ error, message }, 0, { compact: true });
+    else printError(message);
+    return this.exit(2);
+  }
+
+  /** The offline check of a proof bundle: no boot, no database, trust only through `keys`. */
+  private async verifyBundle(path: string, keys: string[], json: boolean, timer: ReturnType<typeof createTimer>): Promise<void> {
+    const file = resolve(path);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(file, 'utf8'));
+    } catch (error) {
+      const unreadable = !(error instanceof SyntaxError);
+      await this.refuse(
+        json,
+        unreadable ? 'bundle_unreadable' : 'bundle_invalid',
+        `${unreadable ? 'The proof bundle could not be read' : 'The proof bundle is not JSON'} (${file}): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    const { AuditProofBundleError, verifyAuditProofBundle } = await import('@objectstack/plugin-audit');
+    let report: AuditVerifyReport;
+    try {
+      report = await verifyAuditProofBundle(parsed, { trustedKeys: keys });
+    } catch (error) {
+      if (error instanceof AuditProofBundleError) await this.refuse(json, 'bundle_invalid', `${file}: ${error.message}`);
+      await this.refuse(json, 'verify_failed', error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (json) {
+      await emitJson({ bundle: file, report, duration: timer.elapsed() });
+      if (!report.ok) this.exit(1);
+      return;
+    }
+    printHeader('Audit · verify (offline proof bundle)');
+    printInfo(`Bundle: ${chalk.white(file)}, written by the check of ${(parsed as AuditProofBundle).checked_at}`);
+    this.render(report, true);
+    console.log(chalk.dim(`  ${timer.display()}`));
+    console.log('');
+    if (!report.ok) this.exit(1);
+  }
+
+  private render(report: AuditVerifyReport, offline = false): void {
     console.log('');
     if (!report.sealed) {
       printSuccess('Nothing is sealed: no object declares lifecycle.seal and no checkpoint is stored, so there is nothing to verify.');
@@ -281,13 +412,15 @@ export default class AuditVerify extends Command {
     console.log(`  Sealed object(s): ${report.objects.join(', ')}`);
     console.log(`  Scope: ${scope}`);
     console.log('');
-    console.log('  Trusted signing keys (publish these fingerprints out of band):');
+    console.log(offline ? '  Signing keys trusted (--trusted-key):' : '  Trusted signing keys (publish these fingerprints out of band):');
     if (report.keys.trusted.length === 0) console.log(chalk.dim('    none'));
     for (const key of report.keys.trusted) console.log(`    ${chalk.white(key)}`);
     if (report.keys.untrusted.length > 0) {
       console.log(chalk.red('  Keys records name that no trusted key matches:'));
       for (const key of report.keys.untrusted) console.log(`    ${chalk.red(key)}`);
-      if (report.keys.trusted.length === 0) {
+      if (report.keys.trusted.length === 0 && offline) {
+        printWarning('No --trusted-key fingerprint names a key this bundle\'s records were signed with.');
+      } else if (report.keys.trusted.length === 0) {
         printWarning(
           'No signing key opened with this run\'s crypto provider. If it is not the provider `os serve` seals with, ' +
             'the faults below say so, not that the ledger was changed.',

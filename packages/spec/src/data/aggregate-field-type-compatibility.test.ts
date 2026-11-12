@@ -249,18 +249,31 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
 });
 
 describe('virtualFieldAggregateRemedy — the one prescription for a total over a virtual field', () => {
-  it('names the stored-number remedy for sum / avg / min / max over a formula, and a count only as another question', () => {
+  it('names the stored computed field for sum / avg / min / max over a formula, and a count only as another question', () => {
     for (const aggregate of ['sum', 'avg', 'min', 'max']) {
-      // Not vacuous: the table refuses every one of these pairs.
+      // Not vacuous: the table refuses every one of these pairs…
       expect(isAggregateCompatibleWithFieldType(aggregate, 'formula'), aggregate).toBe(false);
       expect(virtualFieldAggregateRemedy(aggregate, 'formula'), aggregate).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      // …and accepts it over the type a numeric formula's prescription names, so following it is a way to the total.
+      expect(isAggregateCompatibleWithFieldType(aggregate, 'number'), aggregate).toBe(true);
     }
-    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('store the value as a number field');
+    // A date formula's stored answer is a `date` field, which `min` / `max` (a group order's pair) accept.
+    expect(isAggregateCompatibleWithFieldType('min', 'date')).toBe(true);
+    expect(isAggregateCompatibleWithFieldType('max', 'date')).toBe(true);
+    // The mechanism every tier can author: a field of the formula's RETURN type carrying the same
+    // `expression`, which the engine computes and stores on every write. Not `number` for every
+    // formula (a date expression on a number field is refused at each write), and never a hook,
+    // which a hosted tier may not run.
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('a field of its return type with the same `expression`');
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).not.toContain('number field');
     expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('and aggregate that');
-    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('answer a different question: how many records');
-    // The remedy comes FIRST: the count is named only after it.
-    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('number field'))
-      .toBeLessThan(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('`count`'));
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).not.toMatch(/hook/i);
+    // Surface-neutral: no count is named by an aggregate spelling, because the surfaces that print the
+    // sentence spell their counts apart (a dataset's `count_distinct` is a list-view summary's `count_unique`).
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).not.toMatch(/count_distinct|count_unique|`count`/);
+    // The remedy comes FIRST: counting is named only after it, as a different question.
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('its return type'))
+      .toBeLessThan(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('Counting records is a different question'));
   });
 
   it('is one line of at most 200 characters — the lint prints it whole as its `fix:` line', () => {

@@ -41,6 +41,7 @@ import type { Expression } from '@objectstack/spec';
 import { deriveViewContainerObject } from '@objectstack/metadata/view-container';
 import { viewContainerNameRefusal } from './view-container-name-refusal.js';
 import { ValidationError } from './validation/record-validator.js';
+import { NotNullRefusalError } from './not-null-refusal-error.js';
 import type { FieldValidationError } from './validation/record-validator.js';
 import { collectReferenceTraversals, referenceTraversalConflicts, staticReadonlyInsertSubject, stripReadonlyFields } from './validation/rule-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
@@ -521,6 +522,44 @@ export function writeFailureLogMeta(
   return logged instanceof Error
     ? { ...meta, error: { message: logged.message, stack: logged.stack } }
     : { ...(logged as Record<string, unknown> | undefined), ...meta };
+}
+
+/**
+ * [#32154] The insert and update doors' `… operation failed` META for a
+ * caller-input refusal, or `undefined` when `error` is not one (the door then
+ * logs {@link writeFailureLogMeta}, unchanged).
+ *
+ * A caller-input refusal is the engine's own {@link ValidationError}: a
+ * `required` field left out, a value out of range, a validation rule's
+ * message. Every `new ValidationError` in this package sits ahead of the
+ * driver call in both doors, so it carries nothing the DATABASE said, and its
+ * stack is the engine's own frames. (A hook may throw the exported class too;
+ * its refusal carries nothing the database said either.) The line stays at `warn` (the maintainer's ruling D on this
+ * card), as ONE line with no stack, naming the object, the operation, the
+ * failing field(s) and the reason. Before, every refused form submission wrote
+ * a WARN with a stack trace into the server's log, and every test asserting a
+ * refusal wrote one into a passing run.
+ *
+ * ⛔ A {@link NotNullRefusalError} is not one, though it IS a `ValidationError`:
+ * it is the database's NOT NULL refusal under the validator's envelope
+ * (#24768), and its line carries the driver's own error and stack. So does
+ * every other failure (a driver fault, a duplicate, a hook's or a permission
+ * refusal): this answers `undefined` for each.
+ *
+ * The reason is the error's `message`, the same text the `error.message` of
+ * the line before carried; the fields are their API names and constraint
+ * codes, never the refused values.
+ */
+export function callerInputRefusalLogMeta(
+  error: unknown,
+  meta: { object: string; operation: 'insert' | 'update' },
+): Record<string, unknown> | undefined {
+  if (!(error instanceof ValidationError) || error instanceof NotNullRefusalError) return undefined;
+  return {
+    ...meta,
+    fields: error.fields.map((f) => ({ field: f.field, code: f.code })),
+    reason: error.message,
+  };
 }
 
 /**

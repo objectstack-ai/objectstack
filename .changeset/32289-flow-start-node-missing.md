@@ -8,7 +8,7 @@ Clause-②: yes (narrowing) — `os validate`, `os build`, `os lint` and the flo
 Metadata-protocol: narrowed
 Skills-docs: none — no page in `skills/**` or `content/docs/**` says a flow with no start node is refused at the parse or stored; every flow they teach opens with a start node. The trigger tables that still promise `422 FLOW_NO_START_NODE` for a stored start-less flow are follow-up #32288's. The reasoning ships as the `os explain flow-start-node-missing` entry.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: FlowSchema keeps its shape and meaning, and lint now refuses a flow whose top-level nodes hold no start node. Such a flow never ran (a run begins at the start node, and the engine already refuses to register it), and no rewrite keeps what the author meant: the start node carries the trigger, which only the author knows. -->
+<!-- adr-0087: registered flow-start-node-missing-refused -->
 
 **BREAKING** accept-set narrowing in `os validate` / `os build` / `os lint` and at the flow doors (`PUT /api/v1/meta/flow/NAME` live save, the per-item and package publish; Studio, REST and MCP authors), through the gating `lintFlowPatterns` rule.
 

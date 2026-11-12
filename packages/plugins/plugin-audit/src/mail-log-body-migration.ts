@@ -55,11 +55,23 @@
  * before the Archiver moves it is archived masked, so the hot run and the
  * archive run together cover the copies already archived and the ones still
  * to be.
+ *
+ * ## A sealed row is amended first, or not rewritten (ADR-0154 D7)
+ *
+ * Given `seal`, a row of an object that declares `lifecycle.seal` goes through
+ * the one redaction amendment writer (`audit-seal/amendment-writer.ts`) before
+ * it is rewritten: a row a checkpoint seals is rewritten only once its signed
+ * amendment is stored, and a row whose amendment cannot be written (no crypto
+ * provider, a row that no longer matches its checkpoint) is left as it is and
+ * counted `refused`. A row no checkpoint lists yet is rewritten as before; the
+ * sealer seals the rewritten value. The dry run decides the same, and writes
+ * nothing.
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
 import { MAIL_LOG_OBJECTS } from '@objectstack/platform-objects/audit';
+import { RedactionAmender, type AuditRedactionSeal, type RedactionDecision, type SealedRowReader } from './audit-seal/amendment-writer.js';
 import { maskMailLogBodyCopy } from './mail-log-body-mask.js';
 import type { MigrationLogger } from './stored-metadata-body-migration.js';
 
@@ -155,6 +167,12 @@ export interface MailLogBodyMigrationOptions {
   pageSize?: number;
   /** The copy tables to walk — both by default. */
   objects?: readonly MailLogBodyCopyObject[];
+  /**
+   * [ADR-0154 D7] What amending a sealed row takes. Every shipped caller
+   * passes it; without it a row is rewritten with no amendment, and a sealed
+   * one then reads `modified` in `os audit verify`.
+   */
+  seal?: AuditRedactionSeal;
 }
 
 /**
@@ -170,17 +188,24 @@ export interface MailLogBodyMigrationOptions {
 export interface LedgerCopyStore {
   readPage(object: string, query: { where: Record<string, unknown>; fields: string[]; orderBy: Array<{ field: string; order: 'asc' }>; limit: number }): Promise<unknown>;
   write(object: string, id: string, patch: Record<string, unknown>, updatedAt: unknown): Promise<void>;
+  /** [ADR-0154 D7] Where a sealed row is read whole: the archive's driver; absent, the hot store's driver. */
+  readonly sealedRows?: SealedRowReader;
 }
 
 /** What one migration run did (or would do in dry-run). Counts only. */
 export interface MailLogBodyMigrationReport {
   apply: boolean;
-  /** Per copy table: mail-log copy rows read, and rows rewritten (or that would be). */
-  readonly byObject: Record<string, { scanned: number; rewritten: number }>;
+  /** Per copy table: mail-log copy rows read, rows rewritten (or that would be), and sealed rows refused. */
+  readonly byObject: Record<string, { scanned: number; rewritten: number; refused: number }>;
   /** Mail-log copy rows read, total. */
   scanned: number;
   /** Rows holding a clear body, total — rewritten under `apply`. */
   rewritten: number;
+  /**
+   * [ADR-0154 D7] Sealed rows left as they are because their redaction
+   * amendment cannot be written — not counted in `rewritten`.
+   */
+  refused: number;
   /** A failed read, or a row an `update` threw on (apply mode) — re-run to finish. */
   failures: number;
 }
@@ -191,6 +216,8 @@ export interface LedgerCopyRewriteSpec {
   objectNames: readonly string[];
   planAudit: (row: Record<string, unknown>) => Record<string, unknown> | null;
   planActivity: (row: Record<string, unknown>) => Record<string, unknown> | null;
+  /** The migration, as a redaction amendment names it (`rewritten_by`, ADR-0154 D7). */
+  migration: string;
   /** The bracketed prefix of every log line. */
   tag: string;
   /** The run's one closing line. */
@@ -234,6 +261,7 @@ export function ledgerCopyStoreOverEngine(engine: MailLogBodyMigrationEngine): L
  */
 export function ledgerCopyStoreOverArchiveDriver(driver: MailLogBodyArchiveDriver): LedgerCopyStore {
   return {
+    sealedRows: { find: (object, query) => driver.find(object, query as Parameters<MailLogBodyArchiveDriver['find']>[1]) },
     readPage: async (object, query) => {
       try {
         return await driver.find(object, query as Parameters<MailLogBodyArchiveDriver['find']>[1]);
@@ -254,10 +282,12 @@ const MAIL_LOG_BODY_REWRITE: LedgerCopyRewriteSpec = {
   objectNames: MAIL_LOG_OBJECTS,
   planAudit: planMailLogBodyAuditRowPatch,
   planActivity: planMailLogBodyActivityRowPatch,
+  migration: 'os migrate audit-mail-bodies',
   tag: '[mail-log-body-migration]',
   summary: (report, label) =>
     `[mail-log-body-migration] ${report.apply ? 'masked' : 'would mask'} the mail body in ${report.rewritten} of ` +
     `${report.scanned} ${label} cop(ies) of a mail-log row` +
+    (report.refused > 0 ? ` (${report.refused} sealed row(s) refused: no amendment could be written)` : '') +
     (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
 };
 
@@ -296,14 +326,15 @@ export async function migrateArchivedMailLogBodyCopies(
 export async function runLedgerCopyRewrite(
   store: LedgerCopyStore,
   logger: MigrationLogger,
-  options: { apply?: boolean; pageSize?: number; objects?: readonly MailLogBodyCopyObject[] },
+  options: { apply?: boolean; pageSize?: number; objects?: readonly MailLogBodyCopyObject[]; seal?: AuditRedactionSeal },
   label: string,
   spec: LedgerCopyRewriteSpec,
 ): Promise<MailLogBodyMigrationReport> {
   const apply = options.apply === true;
   const pageSize = options.pageSize && options.pageSize > 0 ? options.pageSize : MAIL_LOG_BODY_MIGRATION_PAGE_SIZE;
   const only = options.objects ? new Set<string>(options.objects) : undefined;
-  const report: MailLogBodyMigrationReport = { apply, byObject: {}, scanned: 0, rewritten: 0, failures: 0 };
+  const report: MailLogBodyMigrationReport = { apply, byObject: {}, scanned: 0, rewritten: 0, refused: 0, failures: 0 };
+  const amender = options.seal ? new RedactionAmender(options.seal, spec.migration, logger) : undefined;
 
   const tables: ReadonlyArray<{
     object: MailLogBodyCopyObject;
@@ -315,7 +346,8 @@ export async function runLedgerCopyRewrite(
   ].filter((t) => !only || only.has(t.object));
 
   for (const { object, fields, plan } of tables) {
-    const stats = (report.byObject[object] = { scanned: 0, rewritten: 0 });
+    const stats = (report.byObject[object] = { scanned: 0, rewritten: 0, refused: 0 });
+    const sealed = amender?.isSealed(object) === true;
     // Keyset paging on `id`: a rewritten row keeps its id and is never read
     // twice in one run.
     let after: string | undefined;
@@ -344,6 +376,14 @@ export async function runLedgerCopyRewrite(
         stats.scanned += 1;
         const patch = plan(row);
         if (!patch) continue;
+        // [ADR-0154 D7] A sealed row: its amendment is decided before anything else.
+        const decision: RedactionDecision = sealed ? await amender!.decide(object, row.id, patch, store.sealedRows) : { kind: 'none' };
+        if (decision.kind === 'refused') {
+          report.refused += 1;
+          stats.refused += 1;
+          logger.warn(`${spec.tag} refused to rewrite ${object}/${String(row.id)}, a sealed row: ${decision.reason}. It is left as it is.`);
+          continue;
+        }
         report.rewritten += 1;
         stats.rewritten += 1;
         if (!apply) continue;
@@ -351,6 +391,17 @@ export async function runLedgerCopyRewrite(
         if (typeof id !== 'string' || id === '') {
           report.failures += 1;
           logger.warn(`${spec.tag} ${object} row has no id — cannot rewrite it`);
+          continue;
+        }
+        try {
+          await amender?.write(object, decision);
+        } catch (e) {
+          // The amendment is written before the row, or the row is not rewritten (D7).
+          report.rewritten -= 1;
+          stats.rewritten -= 1;
+          report.refused += 1;
+          stats.refused += 1;
+          logger.warn(`${spec.tag} refused to rewrite ${object}/${id}, a sealed row: its amendment could not be written (${(e as Error)?.message ?? String(e)}). It is left as it is.`);
           continue;
         }
         try {

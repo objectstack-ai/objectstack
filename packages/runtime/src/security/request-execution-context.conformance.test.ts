@@ -59,7 +59,8 @@
  * | a session cookie, a gated user, a session bearer, `Accept-Language` | `session`, `authGate`, `accessToken`, `requestLocale`, `localization` |
  * | the same session while no gate is active | `authGate` (`'resolved'` against `'reread-when-active'`) |
  * | an API key | `credentials` |
- * | an ex-member's organization-stamped key under a walled posture | `tenancy` |
+ * | an ex-member's organization-stamped key under a walled posture | none since ADR-0093 D8.1 was amended: the membership rule reads no posture, so the key is refused whatever `tenancy` a door passes |
+ * | an organization-less key under a walled posture | `tenancy` (its `organization_required` refusal is the posture-conditional one) |
  * | a session read naming its user by `session.userId` alone | none: it holds every door to the one reading of who a session names (ruling record 6257816853 item 1), which a door re-reading the session its own way would break |
  * | an API key on a host with no auth service | `sessionApi` |
  *
@@ -67,11 +68,13 @@
  * `sessionApi` is told apart in its CONTROL instead, on a host whose auth
  * service exposes no session read.
  *
- * The `/auth/me` door reads only the session and no tenancy posture, so no
- * request above tells its `tenancy` apart (the ex-member's key never reaches
- * a session-only door): its CONTROL adds a session claiming an organization
- * its user is not a member of, under the walled posture. Its `sessionApi` is
- * not observable at all, and its CONTROL says why.
+ * The `/auth/me` door reads only the session and no tenancy posture, and no
+ * request tells its `tenancy` apart (a key never reaches a session-only door,
+ * and the session arm's one membership check reads no posture since ADR-0093
+ * D8.1 was amended): its CONTROL drives a session claiming an organization its
+ * user is not a member of with and without the walled posture, and the claim
+ * is dropped both ways. Its `sessionApi` is not observable at all, and its
+ * CONTROL says why.
  *
  * The runtime door's `/mcp` face (an OAuth access token) is not a row: its
  * verification and scope interpretation are the door's own, ahead of the call,
@@ -126,6 +129,7 @@ const NON_MEMBER_COOKIE = 'better-auth.session_token=tok3n_non_member.c2ln';
 const NON_MEMBER_ORG = 'org_beta';
 const KEY = 'osk_conformance_key';
 const EX_MEMBER_KEY = 'osk_conformance_ex_member';
+const ORGLESS_KEY = 'osk_conformance_orgless';
 const FUTURE = '2999-01-01T00:00:00Z';
 
 /** The private field-owned file the storage drive downloads, and the record that owns it. */
@@ -147,13 +151,16 @@ function world(opts: { auth: boolean; gateActive?: boolean; sessionApi?: boolean
     sys_api_key: [
       { id: 'k_live', key: hashApiKey(KEY), revoked: false, user_id: 'u_key', active_organization_id: ORG, expires_at: FUTURE },
       { id: 'k_ex', key: hashApiKey(EX_MEMBER_KEY), revoked: false, user_id: 'u_ex', active_organization_id: ORG, expires_at: FUTURE },
+      // No organization at all; its owner is a current member of ORG.
+      { id: 'k_orgless', key: hashApiKey(ORGLESS_KEY), revoked: false, user_id: 'u_orgless', expires_at: FUTURE },
     ],
     sys_member: [
       { user_id: 'u_key', organization_id: ORG, role: 'member' },
       { user_id: 'u_ses', organization_id: ORG, role: 'admin' },
+      { user_id: 'u_orgless', organization_id: ORG, role: 'member' },
     ],
     // The key's owner exists: an API key authenticates only as an owner who exists.
-    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_ses' }],
+    sys_user: [{ id: 'u_key' }, { id: 'u_ex' }, { id: 'u_ses' }, { id: 'u_orgless' }],
     sys_user_position: [{ user_id: 'u_ses', position: 'sales_rep', organization_id: ORG }],
     sys_user_permission_set: [{ user_id: 'u_key', permission_set: 'contact_reader', organization_id: ORG }],
     sys_permission_set: [
@@ -262,6 +269,7 @@ const REQUESTS: Request[] = [
   { name: 'an API key', headers: { 'x-api-key': KEY }, auth: true, principal: 'u_key' },
   { name: "an ex-member's organization-stamped key under the walled posture", headers: { 'x-api-key': EX_MEMBER_KEY }, auth: true, principal: undefined },
   { name: 'a session read naming its user by session.userId alone', headers: { cookie: SESSION_USER_ID_COOKIE }, auth: true, principal: 'u_ses' },
+  { name: 'an organization-less key under the walled posture', headers: { 'x-api-key': ORGLESS_KEY }, auth: true, principal: undefined },
   // Last, as the CONTROLs below read it.
   { name: 'an API key on a host with no auth service', headers: { 'x-api-key': KEY }, auth: false, principal: 'u_key' },
 ];
@@ -791,10 +799,13 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     const reread = await viaFunction(inactive, new Headers(REQUESTS[2]!.headers), { authGate: 'reread-when-active' });
     expect(reread?.userId).toBe('u_ses');
     expect(reread?.authGate).toBeUndefined();
-    // `tenancy`: the ex-member's key is refused under the walled posture, and
-    // a door reading no posture would admit it.
+    // `tenancy`: the organization-less key is refused under the walled
+    // posture, and a door reading no posture would admit it. The ex-member's
+    // key is refused either way (ADR-0093 D8.1, as amended).
+    expect(await settings.drive(w, REQUESTS[6]!.headers)).toEqual({ enforced: true });
+    expect((await viaFunction(w, new Headers(REQUESTS[6]!.headers), { tenancy: undefined }))?.userId).toBe('u_orgless');
     expect(await settings.drive(w, REQUESTS[4]!.headers)).toEqual({ enforced: true });
-    expect((await viaFunction(w, new Headers(REQUESTS[4]!.headers), { tenancy: undefined }))?.userId).toBe('u_ex');
+    expect((await viaFunction(w, new Headers(REQUESTS[4]!.headers), { tenancy: undefined }))?.userId).toBeUndefined();
     // `sessionApi: 'optional'`: a key on a host with no auth service is
     // admitted, and `'required'` would admit nobody.
     const noAuth = world({ auth: false });
@@ -843,10 +854,13 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     // `credentials: 'api-key-and-session'`: a door reading no key admits nobody here.
     expect(principalOf((await storageDownload(w, REQUESTS[3]!.headers)).handedOn)).toBe('u_key');
     expect(await viaFunction(w, new Headers(REQUESTS[3]!.headers), { credentials: 'session-only' })).toBeUndefined();
-    // `tenancy`: the ex-member's key is refused under the walled posture, and
-    // a door reading no posture would admit it.
+    // `tenancy`: the organization-less key is refused under the walled
+    // posture, and a door reading no posture would admit it. The ex-member's
+    // key is refused either way (ADR-0093 D8.1, as amended).
+    expect(await storageDownload(w, REQUESTS[6]!.headers)).toMatchObject({ status: 401, handedOn: undefined });
+    expect((await viaFunction(w, new Headers(REQUESTS[6]!.headers), { tenancy: undefined }))?.userId).toBe('u_orgless');
     expect(await storageDownload(w, REQUESTS[4]!.headers)).toMatchObject({ status: 401, handedOn: undefined });
-    expect((await viaFunction(w, new Headers(REQUESTS[4]!.headers), { tenancy: undefined }))?.userId).toBe('u_ex');
+    expect((await viaFunction(w, new Headers(REQUESTS[4]!.headers), { tenancy: undefined }))?.userId).toBeUndefined();
     // `sessionApi: 'optional'`: a key on a host whose auth service exposes no
     // session read is admitted, and `'required'` would admit nobody.
     const noSessionApi = world({ auth: true, sessionApi: false });
@@ -905,11 +919,13 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     // a door reading keys would admit its owner.
     expect(await authMePermissions(w, REQUESTS[3]!.headers)).toEqual({ status: 200, body: { authenticated: false }, handedOn: undefined });
     expect((await viaFunction(w, new Headers(REQUESTS[3]!.headers), { credentials: 'api-key-and-session' }))?.userId).toBe('u_key');
-    // `tenancy: undefined`: a session claiming an organization its user is not
-    // a member of keeps its claim here, and a door reading the walled posture
-    // drops the claim and keeps the caller.
+    // `tenancy: undefined` is declared, and no request tells it apart at a
+    // session-only door: a session claiming an organization its user is not a
+    // member of has the claim dropped and keeps the caller, with the walled
+    // posture or without one (ADR-0093 D8.1, as amended).
     const claim = await authMePermissions(w, { cookie: NON_MEMBER_COOKIE });
-    expect(claim.handedOn).toMatchObject({ userId: 'u_ses', tenantId: NON_MEMBER_ORG });
+    expect(claim.handedOn?.userId).toBe('u_ses');
+    expect(claim.handedOn?.tenantId).toBeUndefined();
     const walled = await viaFunction(w, new Headers({ cookie: NON_MEMBER_COOKIE }), { tenancy: () => w.services.tenancy as never });
     expect(walled?.userId).toBe('u_ses');
     expect(walled?.tenantId).toBeUndefined();

@@ -116,7 +116,13 @@ function sitesOf(source: string, header: RegExp): Site[] {
     return sites;
 }
 
-type Disposition = 'definition' | 'served-package envelope' | 'no';
+/**
+ * [#32501] `exact-address envelope`: the by-name read at an admitted exact
+ * address looks its envelope up at the one package that address reads, and
+ * keeps the artifact only when it is that package's own
+ * (`exactAddressArtifact`), so no first-registered fallback reaches it.
+ */
+type Disposition = 'definition' | 'served-package envelope' | 'exact-address envelope' | 'no';
 
 /**
  * The recorded disposition of every site. `noPackage`: it passes no package,
@@ -130,14 +136,16 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
+    { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, packageId, bundleMemberOf(request.type, item)', noPackage: false, disposition: 'exact-address envelope',
+        why: '[#32501] the by-name read\'s envelope at an admitted exact address: the package the address reads, its own artifact only (`exactAddressArtifact` drops another package\'s), never the pair id\'s first-registered fallback' },
     { file: LIST_READS_FILE, member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
     { file: ITEM_READS_FILE, member: 'readMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
-    { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
-        why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one)' },
+    { file: LAYERED_READS_FILE, member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId || judgedPackageId, wantedMember', noPackage: true, disposition: 'no',
+        why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer; [#26699] at the addressed member (the selector\'s, else the canonical one); [#32365] a bare action read at the one enabled holder its judge answered' },
     { file: 'protocol-discovery-and-bases.ts', member: 'packagedArtifactBase', args: 'type, name', noPackage: true, disposition: 'no',
         why: 'the packaged base the translators compare a served body against: nothing of it is grafted onto the body' },
     { file: 'protocol-discovery-and-bases.ts', member: 'readCodeLayerForCarryForward', args: 'type, name, pkg', noPackage: true, disposition: 'no',

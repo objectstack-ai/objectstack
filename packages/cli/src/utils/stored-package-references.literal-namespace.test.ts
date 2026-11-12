@@ -254,6 +254,31 @@ describe('[#31699] the upgrade report lists a package-less row two holders could
       .toEqual([[X, Y]]);
   });
 
+  it('[#32407] a narrowed type its readers do not read by package (`action`) is listed too', async () => {
+    for (const id of [X, Y]) {
+      registry.registerItem('action', { name: 'approve', label: 'Approve', type: 'url', target: 'https://example.com' }, 'name' as never, id);
+    }
+    envRow('row_act', 'action', 'approve');
+    expect(registry.readsByPackage('action')).toBe(false);
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows).toEqual([{
+      table: 'sys_metadata', id: 'row_act', type: 'action', name: 'approve', member: null,
+      candidates: [
+        { holder: 'package', packageId: X, address: 'alphax/approve' },
+        { holder: 'package', packageId: Y, address: 'betay/approve' },
+      ],
+    }]);
+  });
+
+  it('[#32183 × #32407] one of two holders of a narrowed type (`action`) disabled: the package-less row is still listed naming both', async () => {
+    for (const id of [X, Y]) {
+      registry.registerItem('action', { name: 'approve', label: 'Approve', type: 'url', target: 'https://example.com' }, 'name' as never, id);
+    }
+    envRow('row_act', 'action', 'approve');
+    registry.disablePackage(Y);
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
+      .toEqual([[X, Y]]);
+  });
+
   it('CONTROL: one holder, or a row bound to a package, is not listed', async () => {
     tpl(X);
     envRow('row_fr', 'email_template', 'welcome', 'fr-FR');

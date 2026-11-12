@@ -613,6 +613,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
 import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
@@ -8366,6 +8367,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /** [#32366] The package the removed row was bound to; `null` for none; `HEAL_BINDING_UNKNOWN` when the caller does not know it. */
+        packageId: HealPackageBinding,
         /**
          * [#22877] The bundle member whose row was removed, as the door's
          * selector named it; omitted, the canonical member. For a type whose
@@ -8377,7 +8380,7 @@ export class ObjectStackProtocolImplementation implements
         member?: string,
     ): Promise<void> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, member);
+        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, packageId, member);
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */
@@ -9694,6 +9697,8 @@ export class ObjectStackProtocolImplementation implements
         result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
+        /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
+        judged?: { body: unknown; packageId: string | null };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);

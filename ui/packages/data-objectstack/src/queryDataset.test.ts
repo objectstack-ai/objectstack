@@ -1177,3 +1177,86 @@ describe('queryDatasetBatch: a batch refused whole (objectstack#32165)', () => {
     expect(outcomes).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }]);
   });
 });
+
+/* -------------------------------------------------------------------------- */
+/* The caller arm (ADR-0150 D3): the referencing item's package is sent as     */
+/* `?callerPackage=`, and the server resolves the name for that reader.        */
+/* -------------------------------------------------------------------------- */
+
+describe('queryDataset and queryDatasetBatch send the reader\'s package as ?callerPackage= (ADR-0150 D3)', () => {
+  beforeEach(() => clearSharedDiscoveryCache());
+
+  /** A server that resolves `sales` by D3: alpha depends on core, which holds it; beta holds its own. */
+  const resolvingServer = (callerPackage: string | null): WireAnswer => {
+    if (callerPackage === 'com.acme.alpha') return { status: 200, body: { rows: [{ from: 'com.acme.core' }], fields: [] } };
+    if (callerPackage === 'com.acme.beta') return { status: 200, body: { rows: [{ from: 'com.acme.beta' }], fields: [] } };
+    return {
+      status: 409,
+      body: { success: false, error: { code: 'RESOURCE_CONFLICT', message: 'dataset "sales" is held by 2 packages: package "com.acme.beta", package "com.acme.core".' } },
+    };
+  };
+
+  it('the single door sends the caller arm, never the exact qualifier, and a dependency\'s dataset is answered', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ single: (_body, url) => resolvingServer(url.searchParams.get('callerPackage')) });
+    const answer = await batchAdapter(fetchImpl).queryDataset('sales', selection, { callerPackage: 'com.acme.alpha' });
+    const [sent] = singleCalls(calls);
+    expect(new URL(sent.url).searchParams.getAll('callerPackage')).toEqual(['com.acme.alpha']);
+    expect(new URL(sent.url).searchParams.getAll('package')).toEqual([]);
+    expect(sent.body.datasetName).toBe('sales');
+    expect(answer.rows).toEqual([{ from: 'com.acme.core' }]);
+  });
+
+  it('CONTROL: no caller package, an empty one, or an inline draft sends no package parameter at all', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({});
+    const adapter = batchAdapter(fetchImpl);
+    await adapter.queryDataset('sales', selection);
+    await adapter.queryDataset('sales', selection, { callerPackage: '' });
+    await adapter.queryDataset(inlineDataset as any, selection, { callerPackage: 'com.acme.alpha' });
+    expect(singleCalls(calls).map((c) => new URL(c.url).search)).toEqual(['', '', '']);
+  });
+
+  it('a 409 for the caller is thrown with the server\'s sentence and never retried bare', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ single: () => resolvingServer(null) });
+    const thrown = await batchAdapter(fetchImpl).queryDataset('sales', selection, { callerPackage: 'com.acme.gamma' })
+      .then(() => null, (e: unknown) => e as Error);
+    expect(thrown?.message).toContain('409');
+    expect(thrown?.message).toContain('com.acme.core');
+    expect(singleCalls(calls).map((c) => new URL(c.url).searchParams.get('callerPackage'))).toEqual(['com.acme.gamma']);
+  });
+
+  it('the batch door carries the caller on its URL; an inline draft goes in its own request without it', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch([
+      { dataset: 'sales', selection },
+      { dataset: inlineDataset as any, selection },
+      { dataset: 'pipeline', selection },
+      { dataset: { ...inlineDataset, name: 'other' } as any, selection },
+    ], { callerPackage: 'com.acme.alpha' });
+    const sent = batchCalls(calls).map((c) => {
+      const params = new URL(c.url).searchParams;
+      return { callerPackage: params.getAll('callerPackage'), package: params.getAll('package'), queries: c.body.queries.length };
+    });
+    expect(sent).toEqual([
+      { callerPackage: ['com.acme.alpha'], package: [], queries: 2 },
+      { callerPackage: [], package: [], queries: 2 },
+    ]);
+    expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled', 'fulfilled', 'fulfilled']);
+  });
+
+  it('a batch query alone in its request goes through the single door with the caller arm', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ batch: answerAll });
+    await batchAdapter(fetchImpl).queryDatasetBatch([{ dataset: 'sales', selection }], { callerPackage: 'com.acme.alpha' });
+    expect(batchCalls(calls)).toHaveLength(0);
+    expect(singleCalls(calls).map((c) => c.url)).toEqual(['http://localhost:3000/api/v1/analytics/dataset/query?callerPackage=com.acme.alpha']);
+  });
+
+  it('a server without the batch door answers each query by the single door, still with the caller arm', async () => {
+    const { fetchImpl, calls } = makeBatchFetch({ single: (_body, url) => resolvingServer(url.searchParams.get('callerPackage')) });
+    const outcomes = await batchAdapter(fetchImpl).queryDatasetBatch(
+      [{ dataset: 'sales', selection }, { dataset: 'sales', selection }],
+      { callerPackage: 'com.acme.beta' },
+    );
+    expect(singleCalls(calls).map((c) => new URL(c.url).searchParams.get('callerPackage'))).toEqual(['com.acme.beta', 'com.acme.beta']);
+    expect(outcomes.map((o) => (o.status === 'fulfilled' ? o.value.rows[0].from : null))).toEqual(['com.acme.beta', 'com.acme.beta']);
+  });
+});

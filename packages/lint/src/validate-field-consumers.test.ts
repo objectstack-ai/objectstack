@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { CubeSchema } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
+import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
   CARRIER_ROOTS,
   CONSUMER_ROOTS,
@@ -134,7 +135,12 @@ function corpus(): AnyRec {
       { en: { objects: { inv_product: { fields: { tax_rate: { label: 'Tax Rate' }, is_active: { label: 'x' } } } } } },
     ],
     data: [{ object: 'inv_product', records: [{ name: 'Widget', tax_rate: 0.2 }] }],
-    permissions: [{ name: 'ps', objects: { inv_product: { allowRead: true, fields: { color: 'read' } } } }],
+    // The spec's shape: a field-level grant is keyed `"<object>.<field>"` on
+    // the set's `fields` (`PermissionSetSchema.fields`), never nested under
+    // an object grant, whose schema is strict and has no `fields` key.
+    permissions: [
+      { name: 'ps', objects: { inv_product: { allowRead: true } }, fields: { 'inv_product.color': { readable: true, editable: false } } },
+    ],
   };
 }
 
@@ -165,6 +171,10 @@ describe('validateFieldConsumers (#15922)', () => {
     expect(f['objects[1].fields.tax_rate']).toBeUndefined();
   });
 
+  it("the corpus's permission set is one the spec accepts, field grant and all", () => {
+    expect(PermissionSetSchema.safeParse((corpus().permissions as AnyRec[])[0]).success).toBe(true);
+  });
+
   it('lists the carrier sites a removal must clean, with their config paths', () => {
     const f = byPath(validateFieldConsumers(corpus()));
     expect(f['objects[0].fields.tax_rate'].carriers).toEqual([
@@ -176,7 +186,7 @@ describe('validateFieldConsumers (#15922)', () => {
     expect(f['objects[0].fields.weight'].carriers).toEqual(['flows[0].nodes[2].config.fields.weight']);
     // A field-level permission grant carries it.
     expect(f['objects[0].fields.color'].verdict).toBe('carrier-only');
-    expect(f['objects[0].fields.color'].carriers).toEqual(['permissions[0].objects.inv_product.fields.color']);
+    expect(f['objects[0].fields.color'].carriers).toEqual(['permissions[0].fields["inv_product.color"]']);
     // Nothing at all.
     const inert = f['objects[0].fields.is_taxable'];
     expect(inert.verdict).toBe('inert');
@@ -209,7 +219,7 @@ describe('validateFieldConsumers (#15922)', () => {
       );
       expect(color.hint).toBe(
         'add it to a view column or a form section, or remove the declaration together with its ' +
-          '1 carrier site(s): permissions[0].objects.inv_product.fields.color',
+          '1 carrier site(s): permissions[0].fields["inv_product.color"]',
       );
     });
 
@@ -377,7 +387,7 @@ describe('validateFieldConsumers (#15922)', () => {
       expect(one({ translations: [{ en: { objects: { o: { fields: { x: { label: 'X' } } } } } }] })).toEqual(['o.x']);
       expect(one({ data: [{ object: 'o', records: [{ x: 1 }] }] })).toEqual(['o.x']);
       expect(one({ mappings: [{ name: 'm', targetObject: 'o', fieldMapping: [{ source: 'X', target: 'x' }] }] })).toEqual(['o.x']);
-      expect(one({ permissions: [{ name: 'p', objects: { o: { fields: { x: 'read' } } } }] })).toEqual(['o.x']);
+      expect(one({ permissions: [{ name: 'p', objects: { o: { allowRead: true } }, fields: { 'o.x': { readable: true } } }] })).toEqual(['o.x']);
       expect(one({ flows: [{ name: 'f', nodes: [{ id: 'u', type: 'update_record', config: { objectName: 'o', fields: { x: '1' } } }] }] })).toEqual(['o.x']);
     });
 
@@ -1583,10 +1593,11 @@ describe('[#32256] validateFieldConsumers — a row-level security predicate rea
   });
 
   it('⛔ a field-level grant beside the policy stays a carrier', () => {
-    const s = stack({ objects: { inv: { allowRead: true, fields: { region: 'read' } } }, rowLevelSecurity: [OWN_ROWS] });
+    const s = stack({ fields: { 'inv.region': { readable: true, editable: false } }, rowLevelSecurity: [OWN_ROWS] });
+    expect(PermissionSetSchema.safeParse((s.permissions as AnyRec[])[0]).success).toBe(true);
     const region = validateFieldConsumers(s).find((f) => f.object === 'inv' && f.field === 'region');
     expect(region?.verdict).toBe('carrier-only');
-    expect(region?.carriers).toEqual(['permissions[0].objects.inv.fields.region']);
+    expect(region?.carriers).toEqual(['permissions[0].fields["inv.region"]']);
   });
 
   it('⛔ a predicate credits only the object it filters, never another declaring the same name', () => {
@@ -1669,6 +1680,119 @@ describe('[#32256] validateFieldConsumers — an inline grid reads its line-posi
     (s.objects as AnyRec[])[0].fields = { name: { type: 'text' }, position: { type: 'number' } };
     expect(reported(s)).toEqual(['sort_order']);
     expect(reported(s, 'ord')).toEqual(['position']);
+  });
+});
+
+describe('[#32282] validateFieldConsumers — a field permission\'s row condition reads the fields it names', () => {
+  /** `status` is what the conditions below read; `region` is the field each entry grants on. */
+  const stack = (fields: AnyRec, permissions?: unknown): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, status: { type: 'text' }, owner: { type: 'text' }, region: { type: 'text' } } },
+      { name: 'other', fields: { name: { type: 'text' }, status: { type: 'text' } } },
+    ],
+    views: [{ list: { data: { object: 'inv' }, columns: [] } }, { list: { data: { object: 'other' }, columns: [] } }],
+    permissions: permissions ?? [{ name: 'approver', objects: { inv: { allowRead: true, allowEdit: true } }, fields }],
+  });
+  const LOCKED = { editable: true, when: "status in ['draft', 'submitted']" };
+
+  /** The `object.field` of every finding, sorted. */
+  const reported = (s: AnyRec): string[] =>
+    validateFieldConsumers(s).map((f) => `${f.object}.${f.field}`).sort();
+
+  it('the fixture is a field permission the spec accepts, `when` and all', () => {
+    const set = (stack({ 'inv.region': LOCKED }).permissions as AnyRec[])[0];
+    expect(PermissionSetSchema.safeParse(set).success).toBe(true);
+  });
+
+  it('baseline: with no condition, `status` is reported', () => {
+    expect(reported(stack({ 'inv.region': { editable: true } }))).toEqual(
+      ['inv.owner', 'inv.region', 'inv.status', 'other.status'],
+    );
+  });
+
+  it('a field read only by a `when` is not reported', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).not.toContain('inv.status');
+  });
+
+  it('⛔ a field named only as the grant target still is', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).toEqual(['inv.owner', 'inv.region', 'other.status']);
+  });
+
+  it('every field a compound condition names is read', () => {
+    const both = { editable: true, when: "status == 'draft' && owner == current_user.email" };
+    expect(reported(stack({ 'inv.region': both }))).toEqual(['inv.region', 'other.status']);
+  });
+
+  it('a name-keyed permission set map reads the same way', () => {
+    const s = stack({}, { approver: { name: 'approver', objects: { inv: { allowRead: true } }, fields: { 'inv.region': LOCKED } } });
+    expect(reported(s)).toEqual(['inv.owner', 'inv.region', 'other.status']);
+  });
+
+  it('a condition that names its own grant target reads it', () => {
+    expect(reported(stack({ 'inv.status': { editable: true, when: "status == 'draft'" } }))).toEqual(
+      ['inv.owner', 'inv.region', 'other.status'],
+    );
+  });
+
+  it('⛔ a condition credits only the object its key names, never another declaring the same name', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).toContain('other.status');
+  });
+
+  it('⛔ an unqualified key names no object, so its condition is read against none', () => {
+    // `getFieldPermissions` keeps only `"<object>.<field>"` keys, so this entry votes nowhere.
+    expect(reported(stack({ region: LOCKED }))).toContain('inv.status');
+  });
+});
+
+describe('[#32628] validateFieldConsumers — a field permission\'s key is a carrier of the field it grants on', () => {
+  /** `region` is named by nothing but the grant each case adds; `status` is a same-name field on another object. */
+  const stack = (fields: AnyRec, permissions?: unknown): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, status: { type: 'text' }, region: { type: 'text' } } },
+      { name: 'other', fields: { name: { type: 'text' }, status: { type: 'text' }, region: { type: 'text' } } },
+    ],
+    views: [{ list: { data: { object: 'inv' }, columns: [] } }, { list: { data: { object: 'other' }, columns: [] } }],
+    permissions: permissions ?? [{ name: 'reader', objects: { inv: { allowRead: true } }, fields }],
+  });
+  const GRANT = { readable: true, editable: false };
+  const find = (s: AnyRec, object: string, field: string) =>
+    validateFieldConsumers(s).find((f) => f.object === object && f.field === field);
+
+  it('the fixture is a field permission the spec accepts', () => {
+    const set = (stack({ 'inv.region': GRANT }).permissions as AnyRec[])[0];
+    expect(PermissionSetSchema.safeParse(set).success).toBe(true);
+  });
+
+  it('a field named only by a grant reads `carrier-only`, and the `fix:` line names the grant', () => {
+    const region = find(stack({ 'inv.region': GRANT }), 'inv', 'region');
+    expect(region?.verdict).toBe('carrier-only');
+    expect(region?.carriers).toEqual(['permissions[0].fields["inv.region"]']);
+    expect(region?.hint).toBe(
+      'add it to a view column or a form section, or remove the declaration together with its ' +
+        '1 carrier site(s): permissions[0].fields["inv.region"]',
+    );
+  });
+
+  it('a name-keyed permission set map carries the same way', () => {
+    const s = stack({}, { reader: { name: 'reader', objects: { inv: { allowRead: true } }, fields: { 'inv.region': GRANT } } });
+    expect(find(s, 'inv', 'region')?.carriers).toEqual(['permissions.reader.fields["inv.region"]']);
+  });
+
+  it('a grant whose `when` reads another field carries its own target and credits the other', () => {
+    const s = stack({ 'inv.region': { editable: true, when: "status == 'draft'" } });
+    expect(find(s, 'inv', 'region')?.carriers).toEqual(['permissions[0].fields["inv.region"]']);
+    expect(find(s, 'inv', 'status')).toBeUndefined();
+  });
+
+  it('⛔ a grant carries only the object its key names, never another declaring the same name', () => {
+    const s = stack({ 'inv.region': GRANT });
+    expect(find(s, 'other', 'region')?.verdict).toBe('inert');
+  });
+
+  it('⛔ a key that names no declared field is no site: an unqualified key, a dotted remainder, an unknown object', () => {
+    for (const key of ['region', 'inv.region.code', 'inv.nope', 'ghost.region']) {
+      expect(find(stack({ [key]: GRANT }), 'inv', 'region')?.verdict, key).toBe('inert');
+    }
   });
 });
 

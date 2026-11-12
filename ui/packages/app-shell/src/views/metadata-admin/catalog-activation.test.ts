@@ -12,10 +12,13 @@ import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';
 import {
   audienceAnchorsOf,
   hasCatalogActivation,
+  isCatalogHolderActive,
   isCatalogItemActive,
   readCatalogActivation,
+  readCatalogLedger,
   writeCatalogActivation,
 } from './catalog-activation';
+import { PermissionSetHolderConflict } from './permission-set-holder';
 
 interface Call {
   url: string;
@@ -111,5 +114,101 @@ describe('catalog-activation (objectui#7611)', () => {
     expect([...(await audienceAnchorsOf('position'))].sort()).toEqual([...AUDIENCE_ANCHOR_POSITIONS].sort());
     expect((await audienceAnchorsOf('position')).has('everyone')).toBe(true);
     expect((await audienceAnchorsOf('permission')).size).toBe(0);
+  });
+});
+
+describe('catalog-activation: a permission set more than one package holds (objectstack#32537)', () => {
+  const TWO = ['com.acme.crm', 'com.acme.sales'];
+
+  it('CONTROL: a write that names no package is the name alone, as before', async () => {
+    const calls = stubFetch(200, { success: true, data: { enabled: false } });
+    await writeCatalogActivation('permission', 'sales_rep', false);
+    await writeCatalogActivation('permission', 'sales_rep', false, undefined);
+    expect(calls.map((c) => c.url)).toEqual([
+      '/api/v1/security/_activation/permission/sales_rep',
+      '/api/v1/security/_activation/permission/sales_rep',
+    ]);
+  });
+
+  it("names the holder's package as ?package=, with the body unchanged, for permission sets only", async () => {
+    const calls = stubFetch(200, { success: true, data: { enabled: false } });
+    await writeCatalogActivation('permission', 'sales_rep', false, 'com.acme.sales');
+    // The door refuses any query for another type (400), so none is sent.
+    await writeCatalogActivation('position', 'auditor', false, 'com.acme.sales');
+    expect(calls).toEqual([
+      {
+        url: '/api/v1/security/_activation/permission/sales_rep?package=com.acme.sales',
+        method: 'POST',
+        body: '{"enabled":false}',
+      },
+      { url: '/api/v1/security/_activation/position/auditor', method: 'POST', body: '{"enabled":false}' },
+    ]);
+  });
+
+  it("rejects a 409 naming the holders with the server's sentence and every candidate, choosing none", async () => {
+    const message = 'Permission set "sales_rep" is held by more than one package; name one with ?package=.';
+    const candidates = [
+      { kind: 'package', packageId: 'com.acme.crm' },
+      { kind: 'package', packageId: 'com.acme.sales' },
+    ];
+    const calls = stubFetch(409, { success: false, error: { code: 'RESOURCE_CONFLICT', message, details: { candidates } } });
+    const refusal = await writeCatalogActivation('permission', 'sales_rep', false).catch((err: unknown) => err);
+    expect(refusal).toBeInstanceOf(PermissionSetHolderConflict);
+    expect((refusal as PermissionSetHolderConflict).message).toBe(message);
+    expect((refusal as PermissionSetHolderConflict).candidates).toEqual(candidates);
+    // One request: nothing is retried with a holder picked here.
+    expect(calls).toHaveLength(1);
+
+    // A 409 that names nobody is the server's sentence alone.
+    stubFetch(409, { success: false, error: { code: 'RESOURCE_CONFLICT', message: 'Another row keeps it off.' } });
+    const plain = await writeCatalogActivation('permission', 'sales_rep', true).catch((err: unknown) => err);
+    expect(plain).not.toBeInstanceOf(PermissionSetHolderConflict);
+    expect((plain as Error).message).toBe('Another row keeps it off.');
+  });
+
+  it("keeps each permission row with its package beside the by-name states, from the one ledger read", async () => {
+    const calls = stubFetch(200, {
+      records: [
+        { metadata_type: 'permission', name: 'sales_rep', package_id: 'com.acme.crm', active: false },
+        { metadata_type: 'permission', name: 'sales_rep', package_id: 'sys_metadata', active: 0 },
+        { metadata_type: 'permission', name: 'auditor', package_id: '', active: true },
+        { metadata_type: 'position', name: 'sales_rep', package_id: 'com.acme.crm', active: false },
+      ],
+    });
+    const read = await readCatalogLedger('permission');
+    expect(calls.map((c) => c.url)).toEqual(['/api/v1/data/sys_metadata_activation?top=1000']);
+    expect(read.permissionRows).toEqual([
+      { name: 'sales_rep', packageId: 'com.acme.crm', active: false },
+      { name: 'sales_rep', packageId: null, active: false },
+      { name: 'auditor', packageId: null, active: true },
+    ]);
+    expect(read.states).toEqual(await readCatalogActivation('permission'));
+    expect((await readCatalogLedger('position')).permissionRows).toEqual([]);
+  });
+
+  it("reads one holder's state by core's ledger rule; one holder is read by the name", () => {
+    const ledger = (rows: Array<{ name: string; packageId: string | null; active: boolean }>, states = new Map<string, boolean>()) => ({
+      states,
+      permissionRows: rows,
+    });
+    const crmOff = ledger([{ name: 'sales_rep', packageId: 'com.acme.crm', active: false }], new Map([['sales_rep', false]]));
+    expect(isCatalogHolderActive(crmOff, 'sales_rep', { packageId: 'com.acme.crm', holders: TWO })).toBe(false);
+    // The other package's set of the name is not switched off by that row.
+    expect(isCatalogHolderActive(crmOff, 'sales_rep', { packageId: 'com.acme.sales', holders: TWO })).toBe(true);
+    // CONTROL: no holding, or one holder, is the by-name reading.
+    expect(isCatalogHolderActive(crmOff, 'sales_rep', undefined)).toBe(isCatalogItemActive(crmOff.states, 'sales_rep'));
+    expect(isCatalogHolderActive(crmOff, 'sales_rep', { packageId: 'com.acme.sales', holders: ['com.acme.sales'] })).toBe(false);
+
+    // A row naming no package under two package holders keeps both off.
+    const legacy = ledger([{ name: 'sales_rep', packageId: null, active: false }]);
+    expect(isCatalogHolderActive(legacy, 'sales_rep', { packageId: 'com.acme.crm', holders: TWO })).toBe(false);
+    expect(isCatalogHolderActive(legacy, 'sales_rep', { packageId: 'com.acme.sales', holders: TWO })).toBe(false);
+    // …and is the environment's own switch where the environment holds the name.
+    const envAndCrm = [null, 'com.acme.crm'];
+    expect(isCatalogHolderActive(legacy, 'sales_rep', { packageId: null, holders: envAndCrm })).toBe(false);
+    expect(isCatalogHolderActive(legacy, 'sales_rep', { packageId: 'com.acme.crm', holders: envAndCrm })).toBe(true);
+    // A row switched back on switches nothing off.
+    const on = ledger([{ name: 'sales_rep', packageId: 'com.acme.crm', active: true }]);
+    expect(isCatalogHolderActive(on, 'sales_rep', { packageId: 'com.acme.crm', holders: TWO })).toBe(true);
   });
 });

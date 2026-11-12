@@ -45,8 +45,10 @@ import { computeMetadataDiagnostics } from './metadata-diagnostics.js';
 import { hasMetadataRedactor, redactMetadataItem } from './metadata-redaction.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { boundPackageOf } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import {
     carryCatalogedErrorCode,
     carryDeclaredUserMessage,
@@ -715,7 +717,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     // `sys_metadata`. A gate applied only to the delete-ful
                     // branch below would have left this door standing open.
                     if (targetState === 'active') {
-                        await host.restoreArtifactRegistryView(request.type, request.name, null, member);
+                        // [#32366] At the address the delete resolved.
+                        await host.restoreArtifactRegistryView(request.type, request.name, null, packageId, member);
                     }
                     return {
                         success: true,
@@ -804,7 +807,8 @@ export class ProtocolDiffDeleteLoadFacet {
                 // ENV-WIDE row, i.e. one tenant's "reset to default" blanked
                 // the item for every other tenant and the control plane.
                 if (targetState === 'active') {
-                    await host.restoreArtifactRegistryView(request.type, request.name, null, member);
+                    // [#32366] For the package of the row it deleted.
+                    await host.restoreArtifactRegistryView(request.type, request.name, null, packageId, member);
                 }
 
                 // Storage teardown (opt-in): drop the now-orphaned physical table
@@ -843,6 +847,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     state: 'deleted',
                     organizationId: null,
                     ...mutationEventMember(singularTypeForRepo, member),
+                    // [#32451] The package of the row it deleted, as the heal above.
+                    ...mutationEventPackage(packageId),
                 });
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
@@ -1019,6 +1025,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     request.type,
                     request.name,
                     null,
+                    // [#32366] The package the deleted row was bound to.
+                    boundPackageOf(existing.package_id) ?? null,
                 );
             }
 
@@ -1050,6 +1058,8 @@ export class ProtocolDiffDeleteLoadFacet {
                 name: request.name,
                 state: 'deleted',
                 organizationId: null,
+                // [#32451] The package the deleted row was bound to, as the heal above.
+                ...mutationEventPackage(existing.package_id),
             });
 
             return {

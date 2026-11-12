@@ -224,6 +224,10 @@ const STUDIO_ZH: Record<string, string> = {
     '副本已保存在软件包 {package} 中，与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
   'perm.clone.notice.inCreatedPackage':
     '副本已保存在软件包 {package} 中：这个软件包是为存放你对原权限集所在软件包的修改而创建的。副本与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
+  'perm.holder.pick.title': '哪个软件包的 {name}？',
+  'perm.holder.pick.hint': '请选择本次操作针对哪个软件包的权限集。',
+  'perm.holder.pick.package': '软件包 {package}',
+  'perm.holder.pick.environment': '本环境自己的权限集',
   'perm.save.locked':
     '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改用「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，升级会继续流向这个基线。',
   // Designer wrapper
@@ -290,6 +294,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.section.basic': '基础',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
+  'designer.field.section.computed': '计算值',
   'designer.field.apiName': 'API 名称',
   'designer.field.label': '显示名',
   // objectui#11782.
@@ -384,6 +389,14 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.relatedList.filterHelp': '只列出符合这些条件的子记录（在匹配父记录之外再加这些条件）；标签计数与列表一致。',
   'designer.field.relatedList.filterAdvanced': '此筛选使用了构建器无法显示的嵌套或 OR 条件，将原样保留。',
   'designer.field.formula': '公式 (CEL)',
+  'designer.field.formula.storedHint':
+    '公式在读取时计算，不存储值，因此不能求和或求平均。要汇总它，请把类型改为它的返回类型（数字、日期等）：表达式会保留，值在每次写入时计算并存储。',
+  // A stored field's `expression` (objectstack#32576): computed and stored on every write.
+  'designer.field.storedExpression': '计算表达式 (CEL)',
+  'designer.field.storedExpression.hint':
+    '留空表示由用户填写的值。设置表达式后，值会在每次写入时根据记录计算并存储，因此可以求和、求平均和排序。',
+  'designer.field.storedExpression.computed':
+    '已计算且只读：任何表单、表格或导入都不能设置此值，它在每次写入时计算并存储。设置表达式之前保存的记录会保持为空，直到各自再次保存。表达式在写入时求值，因此 now()、today() 和当前用户保持写入时的值。',
   // 汇总字段(summaryOperations)
   'designer.field.summary.object': '子对象',
   'designer.field.summary.function': '汇总方式',
@@ -3996,6 +4009,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.appNav.empty': '还没有导航项 — 点「添加导航项」开始',
   'engine.appNav.emptyReadonly': '还没有顶层导航项',
   'engine.appNav.item': '导航项 {n}',
+  'engine.appNav.incomplete': '未完成',
+  'engine.appNav.incompleteHint': '尚未选择目标。当前浏览器会保留此项，选定目标前它不会写入已保存的导航。',
   'engine.appNav.itemOne': '项',
   'engine.appNav.itemOther': '项',
   // The translation preview, the designer table's last family: held out of S6

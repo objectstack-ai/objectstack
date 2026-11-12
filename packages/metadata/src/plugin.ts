@@ -14,6 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { bundleEntryKey } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -801,7 +802,11 @@ export class MetadataPlugin implements Plugin {
         this.manager = new NodeMetadataManager({
             rootDir,
             watch: effectiveWatch,
-            formats: ['yaml', 'json', 'typescript', 'javascript']
+            formats: ['yaml', 'json', 'typescript', 'javascript'],
+            // [#32154] The kernel's logger arrives in `init()`; until then the
+            // manager holds its debug/info lines and replays them through it,
+            // so they follow the boot's level.
+            awaitHostLogger: true,
         });
 
         // Initialize with default type registry
@@ -812,6 +817,9 @@ export class MetadataPlugin implements Plugin {
         // [#10772] Retained for `destroy()`, which the kernel calls with no
         // context. Assigned before anything that can throw.
         this.initCtx = ctx;
+        // [#32154] Every line of the manager follows the kernel's level from
+        // here, the lines it held since construction included.
+        this.manager.useHostLogger(ctx.logger);
         ctx.logger.info('Initializing Metadata Manager', {
             root: this.options.rootDir || process.cwd(),
             watch: this.options.watch,
@@ -1656,6 +1664,14 @@ export class MetadataPlugin implements Plugin {
                 });
 
                 if (items.length > 0) {
+                    // [#32488 R7-C] The loader that first registered each bundle
+                    // identity in this pass. `loadMany` keeps the earlier loader's
+                    // item of one `(package, name, member)`, but it keys an unstamped
+                    // item (a file's) package-less, so a row of the host's package
+                    // the file once seeded passes it. Keyed after the host's stamp,
+                    // the earlier loader's item keeps the entry — the file over its
+                    // own stale seed. One loader's own items never shadow each other.
+                    const primedBy = new Map<string, string | undefined>();
                     for (const item of items) {
                         const meta = item as any;
                         if (meta?.name) {
@@ -1668,6 +1684,12 @@ export class MetadataPlugin implements Plugin {
                             applyProtection(meta, {
                                 packageId: this.options.packageId,
                             });
+                            const identity = bundleEntryKey(entry.type, meta.name, meta);
+                            if (identity !== undefined) {
+                                const from = this.manager.sourceLoaderOf(meta);
+                                if (!primedBy.has(identity)) primedBy.set(identity, from);
+                                else if (primedBy.get(identity) !== from) continue;
+                            }
                             // Silent: boot-time priming, before any consumer
                             // has cached a definition to go stale. Post-boot
                             // edits to these files reach watchers through the
