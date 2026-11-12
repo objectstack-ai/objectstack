@@ -562,6 +562,13 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
   const total = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
     (await stored(rig)).reduce<number>((n, v) => n + (typeof v === 'number' ? v : 0), 0);
   const notices = (res: any, rule: string) => (res.advisories ?? []).filter((a: any) => a.rule === rule);
+  /**
+   * [#32732] A write that bypasses the engine: it replaces the stored row (never mutates the object a page read
+   * handed out) and computes nothing.
+   */
+  const rawWrite = (rig: Awaited<ReturnType<typeof makeRig>>, id: string, data: Record<string, unknown>) => {
+    rig.storeFor(OBJ).set(id, { ...rig.storeFor(OBJ).get(id)!, ...data });
+  };
 
   it('the card: a formula turned into a stored number with the same expression — the save fills the rows, the total reads 6', async () => {
     const rig = await populated();
@@ -691,7 +698,7 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     const EDITED = '2099-01-01T00:00:00.000Z';
     // A raw driver write: it moves the row and its stamp, and computes nothing.
     rig.afterFirstPage(async () => {
-      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+      rawWrite(rig, second!, { end_day: 13, updated_at: EDITED });
     });
 
     const res = await rig.save(STORED);
@@ -713,7 +720,7 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     const EDITED = '2099-01-01T00:00:00.000Z';
     // A peer that has not applied the change yet: its write stores the OLD expression's value (13 - 3).
     rig.afterFirstPage(async () => {
-      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, days: 10, updated_at: EDITED });
+      rawWrite(rig, second!, { end_day: 13, days: 10, updated_at: EDITED });
     });
 
     const res = await rig.save({ type: 'number', expression: cel('(record.end_day - record.start_day) * 8') });
@@ -733,13 +740,13 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     const EDITED = '2099-01-01T00:00:00.000Z';
     const AGAIN = '2099-02-01T00:00:00.000Z';
     rig.afterFirstPage(async () => {
-      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+      rawWrite(rig, second!, { end_day: 13, updated_at: EDITED });
     });
     // A second raw write lands just before the fill's write under the new stamp.
     const updateMany = rig.driver.updateMany;
     rig.driver.updateMany = async function (object: string, ast: any, data: Record<string, unknown>) {
       if (object === OBJ && ast?.where?.id === second && ast?.where?.updated_at === EDITED) {
-        Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 14, updated_at: AGAIN });
+        rawWrite(rig, second!, { end_day: 14, updated_at: AGAIN });
       }
       return updateMany.call(this, object, ast, data);
     };
@@ -762,12 +769,12 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     for (const row of rig.storeFor(OBJ).values()) row.days = null;
     const EDITED = '2099-01-01T00:00:00.000Z';
     rig.afterFirstPage(async () => {
-      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+      rawWrite(rig, second!, { end_day: 13, updated_at: EDITED });
     });
     const updateMany = rig.driver.updateMany;
     rig.driver.updateMany = async function (object: string, ast: any, data: Record<string, unknown>) {
       if (object === OBJ && ast?.where?.id === second && ast?.where?.updated_at === EDITED) {
-        Object.assign(rig.storeFor(OBJ).get(second!)!, { updated_at: '2099-02-01T00:00:00.000Z' });
+        rawWrite(rig, second!, { updated_at: '2099-02-01T00:00:00.000Z' });
       }
       return updateMany.call(this, object, ast, data);
     };
