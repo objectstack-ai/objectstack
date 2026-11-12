@@ -250,9 +250,12 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     const coOwner = inline('alphamod', { flows: [flow('alphamod')] }, {
       id: 'com.qa.ns.alphamod', namespace: 'alpha', dependencies: { [ALPHA]: '^1.0.0' }, objects: [item('alpha_alphamod')],
     });
+    // A co-owner reaches this door by depending on alpha (ADR-0141 D5), so the
+    // ADR-0146 D2 override write gate refuses its same-named flow before the
+    // bare-name rule is asked: 403 NOT_OVERRIDABLE, never an install.
     const answer = await call('POST', '/marketplace/install-local', coOwner);
-    expect(answer.status, JSON.stringify(answer.body)).toBeGreaterThanOrEqual(400);
-    expect(answer.status).toBeLessThan(500);
+    expect([answer.status, answer.code], JSON.stringify(answer.body)).toEqual([403, 'NOT_OVERRIDABLE']);
+    expect(answer.message).toContain(`flow/${FLOW}`);
     expect(answer.message).toContain(ALPHA);
     expect(answer.message).not.toContain(BETA);
     expect(await packageIds()).toEqual(before);
