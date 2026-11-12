@@ -8828,6 +8828,12 @@ export class SchemaRegistry {
    * row binds to no package (epic seat 1's ruling; #32561 carries the shapes
    * where the exact read answers otherwise).
    *
+   * Every holder is counted, a disabled one included (`composite` is the
+   * holder set before {@link packageScopedHoldersOf} filters the served
+   * ones): a binding never moves with a reversible disable (ADR-0150 D3,
+   * #32183). The exact read counts the served holders, so with one of two
+   * owners disabled it serves a row this binds to no package (#32561).
+   *
    * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
    * `pairId` customizes: the row keeps the per-package reading of
    * {@link overlaySlotBinding}.
