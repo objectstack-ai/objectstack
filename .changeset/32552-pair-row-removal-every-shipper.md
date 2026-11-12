@@ -15,6 +15,8 @@ Every row below is the `widening` arm, is pinned in both registration orders in 
 | `revertCommit` of a commit into `<B>.custom` (the restore limb; the per-item rollback shares the derivation) | the item in `failed[]`, `NOT_OVERRIDABLE` "sealed against in-place edits"; nothing restored | restored, judged by the override write gate as the pair's declared override | unchanged: restored |
 | boot census `[metadata_sealed_overlay_unserved]` (`loadMetaFromDb`) | named B's live declared override as an unserved row to delete | not named | unchanged: the override not named |
 
+With one of the two holders disabled (ADR-0150 D3), the bare-name answer is still the first-registered holder, disabled or not, so the same three answers moved the same way whichever holder is disabled: each holder's pair removal and commit revert are admitted now, the disabled holder's pair included, and the census names neither override. A binding never moves with a reversible disable. Pinned in both registration orders with each holder disabled in turn, beside a one-holder disabled CONTROL (its removal and revert admitted, as before).
+
 Unchanged in both: a row of a package that is no shipper's pair keeps its removal `403` and is still named by the census.
 
 No shipper is picked: the row judged is always the one its own `package_id` names, and the judgement asks only whether that package is a pair of SOME package that ships the name. A name one package ships answers exactly as before (the bare-name answer is read first and alone while it holds).
