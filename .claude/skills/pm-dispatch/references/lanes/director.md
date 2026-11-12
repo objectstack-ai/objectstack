@@ -79,4 +79,4 @@
 - 每张板恰好一个生产者;鲜度节奏、清板三选一见 `../seat-post-protocol.md`。
 - 见新 tag 族发布 ⇒ 在 cloud 与每个应用仓立平台版本 bump 单;单张封顶,已有则追评刷新。
 - bump 单等待卡清单 = hold 索引(`Restart-when:`/`Blocked-by:` 点名该发布的 open 卡),查询落正文。
-- 车队总表随本摘要重生成,坐席/接管/收班同笔;一席一行,⛔ 不手改;见 `../project-forms.md`。
+- 车队总表由坐席/接管/收班同笔重生成;一席一行,⛔ 不手改;见 `../project-forms.md`。
