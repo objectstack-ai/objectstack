@@ -296,6 +296,13 @@ describe('#32529 / #32554 — the object door judges a stored expression\'s inpu
     expect(errs[0]).toMatchObject({ severity: 'error', where: LEAVE_WHERE, path: LEAVE_WHERE });
   });
 
+  it('⭐ LIT — a re-save of an object STORED with the hop is refused too: the parse is not narrowed, the next save is judged', () => {
+    const stored = leave('record.days * record.employee.daily_hours');
+    const result = runRuntimeAuthoringRules({ type: 'object', item: stored, context: { objects: [employee, stored] } });
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.errors), dump(result)).toHaveLength(1);
+  });
+
   it('⭐ LIT — a stored expression reading the clock is an ADVISORY at the door, never a refusal', () => {
     const result = gateLeave('today()', 'date');
 
