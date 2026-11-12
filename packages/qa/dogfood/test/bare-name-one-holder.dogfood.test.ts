@@ -3,22 +3,28 @@
 // [#30803] One name, one package holder for a picklist, a mapping and a
 // dataset (maintainer ruling C on #30798, phase 1; ADR-0048 §3.4 narrowed;
 // `packages/objectql/src/bare-name-one-holder.ts`), on a booted showcase.
+// [ADR-0150 D2/D9, child B, #31700] The three have narrowed from the
+// environment to the namespace: two packages of two namespaces may each hold
+// the name, and a co-owner of one namespace is still refused.
 //
 // The registry's own pins (`registry-bare-name-one-holder.test.ts`) drive the
 // engine's package door and item seam in-process. This file drives the rule at
 // the doors a deployment reaches:
 //
-//   - the cold boot of a deployment that already holds a clash — two
-//     `AppPlugin` packages, `alpha` and `beta`, shipping one picklist, mapping
-//     and dataset under the same bare names — boots, and logs ONE warning line
-//     naming both holders and the rename for every name (the switch's default,
-//     `'warn'`, until the maintainer rules);
-//   - `POST /marketplace/install-local` of a third package declaring one of
-//     those names after the boot is 422 PLUGIN_REGISTER_FAILED, naming both
-//     holders and the rename, and installs nothing;
-//   - the same door refusing a package that redeclares the showcase's own
-//     mapping and dataset names, naming the showcase;
+//   - the cold boot of two `AppPlugin` packages of two namespaces, `alpha`
+//     and `beta`, shipping one picklist, mapping and dataset under the same
+//     bare names, boots with no bare-name warning naming them (#31700; it
+//     warned once, naming both holders, before);
+//   - `POST /marketplace/install-local` of a co-owner of `alpha`'s namespace
+//     declaring one of those names after the boot is 422
+//     PLUGIN_REGISTER_FAILED, naming the holder and the rename, and installs
+//     nothing;
 //   - CONTROL: a package declaring fresh names installs;
+//   - [#31700] a package of a THIRD namespace declaring the held names
+//     installs, and so does one of another namespace redeclaring the
+//     showcase's own mapping and dataset names (both were refused before);
+//     the bare read then names every holder, and each holder's address still
+//     serves its own;
 //   - [#32070] the picklist's by-name read on that clash answers by ADR-0150
 //     D3: the bare `GET /meta/picklist/NAME` is 409 naming both holders, each
 //     qualified address reaches its own list, a qualifier that does not hold
@@ -103,11 +109,16 @@ function zetaPackage() {
   } as never);
 }
 
-/** An inline install-local manifest. */
-const inline = (p: string, collections: Record<string, unknown[]>) => ({
+/**
+ * An inline install-local manifest of package `p`, in namespace `ns` (its own
+ * by default). A package of another package's namespace is its co-owner: it
+ * declares the dependency the namespace gate requires.
+ */
+const inline = (p: string, collections: Record<string, unknown[]>, ns = p) => ({
   manifest: {
-    id: `com.qa.bare.${p}`, namespace: p, name: `qa_bare_${p}`, version: '1.0.0', type: 'app', scope: 'project',
+    id: `com.qa.bare.${p}`, namespace: ns, name: `qa_bare_${p}`, version: '1.0.0', type: 'app', scope: 'project',
     engines: { protocol: `^${PROTOCOL_MAJOR}` },
+    ...(ns === p ? {} : { dependencies: { [`com.qa.bare.${ns}`]: '^1.0.0' } }),
     ...collections,
   },
 });
@@ -129,11 +140,6 @@ async function captureOutput<T>(run: () => Promise<T>): Promise<{ value: T; line
     (process.stderr as any).write = stderr;
     console.warn = warn;
   }
-}
-
-/** The level of one kernel-logger line (`<ISO time> <LEVEL> <message> …`), or `undefined`. */
-function levelOf(line: string): string | undefined {
-  return /^(?:\S+Z\s+)?(DEBUG|INFO|WARN|ERROR|FATAL)\b/.exec(line.trim())?.[1];
 }
 
 const codeOf = (body: any) =>
@@ -178,45 +184,30 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming both holders and the rename for every name', async () => {
-    const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
-    expect(warnings, 'one warning line').toHaveLength(1);
-    const line = warnings[0]!;
-    expect(levelOf(line)).toBe('WARN');
-    for (const name of [PICKLIST, MAPPING, DATASET]) {
-      expect(line, `names ${name}`).toContain(`"${name}"`);
-      expect(line, `and its rename`).toContain(`"beta_${name}"`);
-    }
-    expect(line).toContain('com.qa.bare.alpha');
-    expect(line).toContain('com.qa.bare.beta');
+  it('[#31700] the cold boot of two namespaces\' packages holding one picklist, mapping and dataset name boots with no bare-name warning naming them', async () => {
+    const named = bootLines
+      .filter((l) => l.includes('Bare-name conflict at boot'))
+      .filter((l) => [PICKLIST, MAPPING, DATASET].some((name) => l.includes(`"${name}"`)));
+    expect(named, 'two namespaces\' holders are no clash').toEqual([]);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
   });
 
-  it('install-local of a third package declaring a held picklist name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed', async () => {
-    const before = await packageIds();
-    const { status, body } = await installLocal(inline('gamma', { picklists: [picklist('gamma')] }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    expect(message).toContain(`"${PICKLIST}"`);
-    expect(message).toContain('com.qa.bare.alpha');
-    expect(message).toContain('com.qa.bare.beta');
-    expect(message).toContain(`"gamma_${PICKLIST}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-  });
-
-  it('install-local of a package redeclaring the showcase\'s mapping and dataset names is refused, naming the showcase', async () => {
-    const before = await packageIds();
-    const { status, body } = await installLocal(inline('delta', {
-      mappings: [mapping('delta', SHOWCASE_MAPPING, 'showcase_task')],
-      datasets: [dataset('delta', SHOWCASE_DATASET, 'showcase_task')],
-    }));
-    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
-    const message = String(body?.error?.message ?? '');
-    expect(message).toContain(`"${SHOWCASE_MAPPING}"`);
-    expect(message).toContain(`"${SHOWCASE_DATASET}"`);
-    expect(message).toContain(SHOWCASE_PKG);
-    expect(message).toContain(`"delta_${SHOWCASE_MAPPING}"`);
-    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held picklist, mapping or dataset name is 422 PLUGIN_REGISTER_FAILED naming the holder and the rename; nothing is installed', async () => {
+    for (const [p, collections, type, name] of [
+      ['alphalist', { picklists: [picklist('alphalist')] }, 'picklist', PICKLIST],
+      ['alphamap', { mappings: [mapping('alphamap', MAPPING, 'alpha_item')] }, 'mapping', MAPPING],
+      ['alphaset', { datasets: [dataset('alphaset', DATASET, 'alpha_item')] }, 'dataset', DATASET],
+    ] as const) {
+      const before = await packageIds();
+      const { status, body } = await installLocal(inline(p, collections as never, 'alpha'));
+      expect([status, codeOf(body)], `${type} ${JSON.stringify(body)}`).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+      const message = String(body?.error?.message ?? '');
+      expect(message).toContain('Bare-name conflict');
+      expect(message).toContain(`the ${type} "${name}", already held by package "com.qa.bare.alpha"`);
+      expect(message).toContain(`"alpha_${name}"`);
+      expect(message, 'another namespace\'s holder is no rival').not.toContain('com.qa.bare.beta');
+      expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+    }
   });
 
   // ── [#32071] mapping's by-name readers, on the clash this boot holds ──
@@ -342,5 +333,48 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     }));
     expect(status, JSON.stringify(body)).toBeLessThan(300);
     expect(await packageIds()).toContain('com.qa.bare.epsilon');
+  });
+
+  // ── [#31700] Last, because each install adds a holder the readers above
+  // would then name: a package of another namespace is no rival. ──
+
+  const holdersNamed = async (type: string, name: string, holders: string[]) => {
+    const { status, body } = await metaRead(`/meta/${type}/${name}`);
+    expect([status, codeOf(body)], `${type} ${name} ${JSON.stringify(body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+    for (const holder of holders) expect(JSON.stringify(body), `${type} ${name}`).toContain(holder);
+  };
+
+  it('[#31700] install-local of a package of a THIRD namespace declaring the held picklist, mapping and dataset names installs; the bare read names all three, each address serves its own', async () => {
+    const { status, body } = await installLocal(inline('gamma', {
+      picklists: [picklist('gamma')],
+      mappings: [mapping('gamma', MAPPING, 'showcase_task')],
+      datasets: [dataset('gamma', DATASET, 'showcase_task')],
+    }));
+    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    expect(await packageIds()).toContain('com.qa.bare.gamma');
+    const all = ['com.qa.bare.alpha', 'com.qa.bare.beta', 'com.qa.bare.gamma'];
+    for (const [type, name] of [['picklist', PICKLIST], ['mapping', MAPPING], ['dataset', DATASET]] as const) {
+      await holdersNamed(type, name, all);
+      for (const p of ['alpha', 'gamma']) {
+        const own = await metaRead(`/meta/${type}/${name}?package=com.qa.bare.${p}`);
+        expect([own.status, labelIn(own.body)], `${type} ${p} ${JSON.stringify(own.body)}`).toEqual([200, `${p} ${type === 'picklist' ? 'status' : type}`]);
+      }
+    }
+  });
+
+  it('[#31700] install-local of a package of another namespace redeclaring the showcase\'s mapping and dataset names installs; the showcase\'s own are still served at its address', async () => {
+    const { status, body } = await installLocal(inline('delta', {
+      mappings: [mapping('delta', SHOWCASE_MAPPING, 'showcase_task')],
+      datasets: [dataset('delta', SHOWCASE_DATASET, 'showcase_task')],
+    }));
+    expect(status, JSON.stringify(body)).toBeLessThan(300);
+    for (const [type, name] of [['mapping', SHOWCASE_MAPPING], ['dataset', SHOWCASE_DATASET]] as const) {
+      await holdersNamed(type, name, [SHOWCASE_PKG, 'com.qa.bare.delta']);
+      const own = await metaRead(`/meta/${type}/${name}?package=${SHOWCASE_PKG}`);
+      expect([own.status, own.body?.item?._packageId ?? own.body?.data?.item?._packageId], `${type} ${JSON.stringify(own.body)}`)
+        .toEqual([200, SHOWCASE_PKG]);
+      const theirs = await metaRead(`/meta/${type}/${name}?package=com.qa.bare.delta`);
+      expect([theirs.status, labelIn(theirs.body)], `${type} ${JSON.stringify(theirs.body)}`).toEqual([200, `delta ${type}`]);
+    }
   });
 });
