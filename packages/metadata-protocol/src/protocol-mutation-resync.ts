@@ -66,6 +66,8 @@
 
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
 import type { MetadataMutationEvent } from './protocol-mutation-events.js';
+import { boundPackageOf } from './protocol-package-bindings.js';
+import { inboundMutationPackage } from './protocol-mutation-package.js';
 
 /** What one {@link MetadataMutationResyncLedger.resync} did. */
 export interface MetadataMutationResyncReport {
@@ -91,26 +93,44 @@ export interface MetadataMutationResyncIo {
     converge(evt: MetadataMutationEvent): Promise<void>;
 }
 
-/** The columns the active-row read asks for: the address and the checksum, never the body. */
-export const RESYNC_ROW_FIELDS: readonly string[] = ['id', 'type', 'name', 'bundle_member', 'checksum'];
+/**
+ * The columns the active-row read asks for: the address and the checksum, never
+ * the body. [#32451, ADR-0150 D4] The address includes the row's package.
+ */
+export const RESYNC_ROW_FIELDS: readonly string[] = ['id', 'type', 'name', 'bundle_member', 'package_id', 'checksum'];
 
 interface ItemAddress {
     readonly type: string;
     readonly name: string;
     readonly member?: string;
+    /**
+     * [#32451] The package the row is bound to, `null` for none. Two packages'
+     * rows of one name are two items here, as they are two rows.
+     */
+    readonly packageId: string | null;
 }
 
 /** `undefined` = marked: re-converge on the next resync whatever the row's checksum says. */
 type ConvergedChecksum = string | null | undefined;
 
 function keyOf(address: ItemAddress): string {
+    return JSON.stringify([address.type, address.name, address.member ?? null, address.packageId]);
+}
+
+/** The `(type, name, member)` half of a key: what a touch naming no package marks. */
+function itemOf(address: Pick<ItemAddress, 'type' | 'name' | 'member'>): string {
     return JSON.stringify([address.type, address.name, address.member ?? null]);
 }
 
 function addressOfRow(row: Record<string, unknown>): ItemAddress | undefined {
     if (typeof row.type !== 'string' || typeof row.name !== 'string' || row.name === '') return undefined;
     const member = typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : undefined;
-    return { type: canonicalMetaType(row.type), name: row.name, ...(member !== undefined ? { member } : {}) };
+    return {
+        type: canonicalMetaType(row.type),
+        name: row.name,
+        ...(member !== undefined ? { member } : {}),
+        packageId: boundPackageOf(row.package_id) ?? null,
+    };
 }
 
 function checksumOfRow(row: Record<string, unknown>): string | null {
@@ -163,14 +183,29 @@ export class MetadataMutationResyncLedger {
         })();
     }
 
-    /** A hint was received or a local write was announced: re-converge this item on the next resync. */
-    touch(evt: Pick<MetadataMutationEvent, 'type' | 'name' | 'member'>): void {
+    /**
+     * A hint was received or a local write was announced: re-converge this item
+     * on the next resync. [#32451] A hint naming no package (a writer that
+     * predates `packageId`) marks every package's entry of `(type, name, member)`.
+     */
+    touch(evt: Pick<MetadataMutationEvent, 'type' | 'name' | 'member' | 'packageId'>): void {
         if (typeof evt.type !== 'string' || typeof evt.name !== 'string' || evt.name === '') return;
-        const address: ItemAddress = {
+        const item = {
             type: canonicalMetaType(evt.type),
             name: evt.name,
             ...(evt.member !== undefined ? { member: evt.member } : {}),
         };
+        const packageId = inboundMutationPackage(evt);
+        if (packageId === undefined) {
+            const wanted = itemOf(item);
+            for (const [key, address] of this.addresses) {
+                if (itemOf(address) !== wanted) continue;
+                this.converged.set(key, undefined);
+                this.touchedDuringResync?.add(key);
+            }
+            return;
+        }
+        const address: ItemAddress = { ...item, packageId };
         const key = keyOf(address);
         this.converged.set(key, undefined);
         this.addresses.set(key, address);
@@ -223,7 +258,7 @@ export class MetadataMutationResyncLedger {
             const failures: string[] = [];
             let firstFailure: unknown;
             for (const item of due) {
-                const { type, name, member } = item.address;
+                const { type, name, member, packageId } = item.address;
                 try {
                     await io.converge({
                         type,
@@ -231,11 +266,14 @@ export class MetadataMutationResyncLedger {
                         state: item.gone ? 'deleted' : 'active',
                         organizationId: null,
                         ...(member !== undefined ? { member } : {}),
+                        // [#32451] The row's package, or for a gone item the
+                        // package it was converged on.
+                        packageId,
                     });
                 } catch (err) {
                     // Not a delete: the entry stays as this replica holds it, marked for the next resync.
                     this.converged.set(item.key, undefined);
-                    failures.push(`${type}/${name}${member !== undefined ? `[${member}]` : ''}`);
+                    failures.push(`${type}/${name}${member !== undefined ? `[${member}]` : ''}${packageId !== null ? ` (package '${packageId}')` : ''}`);
                     if (firstFailure === undefined) firstFailure = err;
                     continue;
                 }

@@ -47,6 +47,8 @@ import type { ObjectExtensionRegistry } from './protocol-object-extension-item.j
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import { HEAL_BINDING_UNKNOWN } from './protocol-heal-binding.js';
+import { PACKAGE_SLOTTED_STORE_TYPES } from '@objectstack/metadata';
+import { activeRowBindings, inboundMutationPackage, unstampedSignalStoppedMessage } from './protocol-mutation-package.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import type {
@@ -430,6 +432,16 @@ export class ProtocolClassHeadFacet {
      * runs). That makes out-of-order and duplicate delivery converge to the
      * row's current state by construction.
      *
+     * [#32451, ADR-0150 D4] For a type stored per `(package, name)`
+     * (`PACKAGE_SLOTTED_STORE_TYPES`), the event's `packageId` is part of the
+     * address: this replica reads THAT package's row (`null`: the row bound to
+     * no package) and registers it with that binding, or, with no row there,
+     * runs the writer's own heal for that package. A signal naming no package
+     * (a writer that predates the field) converges by name where the stored
+     * rows leave one binding, and is a logged stop that keeps the entry where
+     * they leave several — never the first row the store returns. Every other
+     * type converges by name, as it always has.
+     *
      * The write-through call makes this the FIFTH caller of
      * `applyRegistryWriteThrough` — traced, with the fold discipline the
      * other four follow, in
@@ -484,7 +496,7 @@ export class ProtocolClassHeadFacet {
      * listener that re-reads through `getMetaItems` sees a cold cache too, not
      * only a healed registry.
      */
-    static async applyRemoteMetadataMutation(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'engine' | 'ensureObjectStorage' | 'getOverlayRepo' | 'notifyMutationListenersLocal' | 'resolveOverlayPackageBinding' | 'restoreArtifactRegistryView'>, evt: MetadataMutationEvent): Promise<void> {
+    static async applyRemoteMetadataMutation(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'engine' | 'ensureObjectStorage' | 'getOverlayRepo' | 'notifyMutationListenersLocal' | 'resolveOverlayPackageBinding' | 'restoreArtifactRegistryView' | 'findEnvironmentRows'>, evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
         // [ADR-0131 D6] The registry reflects the ENVIRONMENT row, whatever
         // organization the event names: no write lands organization-scoped
@@ -503,29 +515,69 @@ export class ProtocolClassHeadFacet {
         // registry without the member that changed (and a reset of it
         // unhealed). A member the event names but this type does not have is
         // read as the canonical one, as every repository read reads it.
-        const current = await repo.get(ref, { state: 'active', ...memberOption(evt.member) });
-        if (current) {
-            // The row's OWN package binding, read from this replica's DB the
-            // way the recovery callers derive it (#4867 / #4636) — the wire
-            // carries no binding, and must not.
-            const packageId = await host.resolveOverlayPackageBinding(type, evt.name, evt.member);
-            await host.applyRegistryWriteThrough({
-                type,
-                name: evt.name,
-                item: current.body,
-                packageId,
-                organizationId: null,
-            });
-            // [#32145] The writer's save ran this right after its own
-            // write-through; see the docblock.
-            await host.ensureObjectStorage(type, evt.name);
+        // [#32451, ADR-0150 D4] For a type stored per `(package, name)`, the
+        // package is part of the row's address, as the member is: the event
+        // names it, and this replica reads THAT package's row. Every other
+        // type converges by name, as before (the ruled control).
+        const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+        const named = slotted ? inboundMutationPackage(evt) : undefined;
+        if (named !== undefined) {
+            // `named` is a package id or `null` (a row bound to no package,
+            // read as `package_id IS NULL`); never an `undefined` key, which
+            // the repository would read as `IS NULL` too.
+            const current = await repo.get(ref, { state: 'active', packageId: named, ...memberOption(evt.member) });
+            if (current) {
+                // Registered with the binding of the row it read: the read
+                // above is scoped to that binding.
+                await host.applyRegistryWriteThrough({
+                    type,
+                    name: evt.name,
+                    item: current.body,
+                    packageId: named,
+                    organizationId: null,
+                });
+                await host.ensureObjectStorage(type, evt.name);
+            } else {
+                // No row at the address: the writer's own heal, for the package
+                // of the row it removed (`null` takes the package-less path).
+                await host.restoreArtifactRegistryView(type, evt.name, null, named, evt.member);
+            }
         } else {
-            // [#32366] The binding is UNKNOWN, not package-less: the removed
-            // row's binding went with it, and the signal carries an address,
-            // never a binding (see above). The heal reads with no package, and
-            // a refusal of that read is a logged stop that keeps the entry,
-            // never the package-less row's retirement (HEAL_BINDING_UNKNOWN).
-            await host.restoreArtifactRegistryView(type, evt.name, null, HEAL_BINDING_UNKNOWN, evt.member);
+            if (slotted) {
+                // [#32451, ruling Q2-A] An unstamped signal (a writer that
+                // predates `packageId`) on a slotted type: never a guess. One
+                // binding among the address's active rows converges on it, as
+                // before; several are a logged stop that keeps the entry.
+                const bindings = await activeRowBindings(host, type, evt.name, evt.member);
+                if (bindings.length > 1) {
+                    console.error(unstampedSignalStoppedMessage(type, evt.name, evt.member, bindings));
+                    return;
+                }
+            }
+            const current = await repo.get(ref, { state: 'active', ...memberOption(evt.member) });
+            if (current) {
+                // The row's OWN package binding, read from this replica's DB the
+                // way the recovery callers derive it (#4867 / #4636): an
+                // unstamped signal, or a type converged by name.
+                const packageId = await host.resolveOverlayPackageBinding(type, evt.name, evt.member);
+                await host.applyRegistryWriteThrough({
+                    type,
+                    name: evt.name,
+                    item: current.body,
+                    packageId,
+                    organizationId: null,
+                });
+                // [#32145] The writer's save ran this right after its own
+                // write-through; see the docblock.
+                await host.ensureObjectStorage(type, evt.name);
+            } else {
+                // [#32366] The binding is UNKNOWN, not package-less: the removed
+                // row's binding went with it, and this signal names none. The
+                // heal reads with no package, and a refusal of that read is a
+                // logged stop that keeps the entry, never the package-less
+                // row's retirement (HEAL_BINDING_UNKNOWN).
+                await host.restoreArtifactRegistryView(type, evt.name, null, HEAL_BINDING_UNKNOWN, evt.member);
+            }
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see
