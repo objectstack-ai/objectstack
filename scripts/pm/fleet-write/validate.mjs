@@ -46,9 +46,11 @@
  *     (the row's `alone`): its token carries `actions: write`, and that grant
  *     serves one request and nothing beside it. `workflow` is judged against
  *     the closed allowlist and `ref` against the one ref, as enums — an
- *     off-list file, a path, a glob or another ref is refused by name — and
- *     `inputs` against the file's closed entry (the row's `closedInputs`,
- *     `WORKFLOW_DISPATCH_INPUTS` in `ops.mjs`): exactly that object, every key
+ *     off-list file, a path, a glob or another ref is refused by name — then
+ *     against the stroke's OWN repository (the row's `closedInputs`,
+ *     `WORKFLOW_DISPATCH_BY_REPO` in `ops.mjs`): a file another repository
+ *     lists is refused by name; and `inputs` against that repository's entry
+ *     for the file: exactly that object, every key
  *     and value, or no `inputs` key where the entry is `null`. A missing
  *     input, another value (`refresh_version_pr: false` on `release.yml`, the
  *     publish-repair lane) or any other input (`force`) is refused by name;
@@ -296,12 +298,15 @@ import {
   TARGET_REPO_SHAPE,
   TRANSFER_TARGETS,
   WORKFLOW_DISPATCH_ALLOWLIST,
+  WORKFLOW_DISPATCH_BY_REPO,
+  CLOUD_WORKFLOW_DISPATCH_INPUTS,
   WORKFLOW_DISPATCH_INPUTS,
   WORKFLOW_DISPATCH_PATH_SHAPE,
   WORKFLOW_DISPATCH_REF,
   GOVERNED_REVIEW_OPS,
   answerPlaceholder,
   dispatchInputsOnTheWire,
+  workflowDispatchEntry,
   failedJobNames,
   governedReviewRequests,
   rerunFailedFenceFailures,
@@ -423,19 +428,25 @@ export function validateField(name, value, spec, where) {
     return null;
   }
   if (spec.kind === 'inputs') {
-    if (!isPlainObject(value)) return `${at} must be a JSON object of input name → boolean, got ${Array.isArray(value) ? 'an array' : quote(value)}`;
+    if (!isPlainObject(value)) return `${at} must be a JSON object of input name → boolean or string, got ${Array.isArray(value) ? 'an array' : quote(value)}`;
     const names = Object.keys(value);
     if (names.length === 0) return `${at} must name at least one input — a workflow started with none carries no inputs key`;
+    // A scalar of the two kinds a closed entry spells; WHICH kind an input takes is its entry's (`closedInputsErrors`).
     for (const name of names) {
-      if (typeof value[name] !== 'boolean') return `${at}.${name} must be a JSON boolean, got ${quote(value[name])}`;
+      if (typeof value[name] !== 'boolean' && typeof value[name] !== 'string') return `${at}.${name} must be a JSON boolean or string, got ${quote(value[name])}`;
     }
     return null;
   }
   return `${at}: unknown field kind ${quote(spec.kind)} — a bug in ops.mjs, not in the payload`;
 }
 
-/** One action against the op table. Returns the errors for it (possibly none). */
-export function validateAction(action, index) {
+/**
+ * One action against the op table, on the stroke's repository `repo` (the
+ * rows that judge a value against a per-repository table — `closedInputs` —
+ * read it; a repository with no entry there lists nothing). Returns the errors
+ * for it (possibly none).
+ */
+export function validateAction(action, index, repo) {
   const where = `actions[${index}]`;
   const errors = [];
   if (!isPlainObject(action)) return [`${where} must be an object, got ${Array.isArray(action) ? 'an array' : typeof action}`];
@@ -463,8 +474,16 @@ export function validateAction(action, index) {
       refusedKeys.add(key);
     }
   }
-  if (spec.closedInputs && !refusedKeys.has('inputs') && typeof action.workflow === 'string' && Object.hasOwn(spec.closedInputs, action.workflow)) {
-    errors.push(...closedInputsErrors(action, spec.closedInputs[action.workflow], where));
+  // The file against the stroke's OWN repository, then its inputs against that repository's entry — judged only on a
+  // `workflow` the field enum admitted, so an off-list name is refused once, by the enum.
+  if (spec.closedInputs && 'workflow' in action && !refusedKeys.has('workflow') && typeof action.workflow === 'string') {
+    const table = typeof repo === 'string' && Object.hasOwn(spec.closedInputs, repo) ? spec.closedInputs[repo] : null;
+    if (table === null || !Object.hasOwn(table, action.workflow)) {
+      const there = table === null ? 'it starts no workflow there' : `there it starts ${Object.keys(table).map((f) => quote(f)).join(', ')}`;
+      errors.push(`${where}.workflow ${quote(action.workflow)} is not a workflow the relay starts on ${quote(repo ?? null)} — ${there}; each file is dispatchable only on the repository whose entry lists it`);
+    } else if (!refusedKeys.has('inputs')) {
+      errors.push(...closedInputsErrors(action, table[action.workflow], where));
+    }
   }
   // Two keys the row needs DIFFERENT (`distinct`, ops.mjs): judged only on values the field kinds admitted.
   if (spec.distinct) {
@@ -499,6 +518,7 @@ export function closedInputsErrors(action, declared, where) {
   }
   for (const [name, value] of Object.entries(declared)) {
     if (!Object.hasOwn(sent, name)) errors.push(`${where}.inputs.${name} is required when workflow is ${quote(workflow)}: ${exactly}`);
+    else if (typeof sent[name] !== typeof value) errors.push(`${where}.inputs.${name} must be a JSON ${typeof value}, got ${quote(sent[name])}`);
     else if (sent[name] !== value) errors.push(`${where}.inputs.${name} must be ${quote(value)} when workflow is ${quote(workflow)}, got ${quote(sent[name])} — the relay sends ${exactly}`);
   }
   return errors;
@@ -556,7 +576,7 @@ export function strokeErrors(repo, actions) {
  * envelope, for a door that plans one before it knows its transport.
  */
 export function validateStroke(repo, actions) {
-  const errors = actions.flatMap((a, i) => validateAction(a, i));
+  const errors = actions.flatMap((a, i) => validateAction(a, i, repo));
   return errors.length ? errors : strokeErrors(repo, actions);
 }
 
@@ -1060,6 +1080,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
   'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches': 18,
   "the release.yml entry: refresh_version_pr true and nothing beside it — force, false, absent, a string or any other input refused by name; the wire spells the table's value as a string; every entry's inputs declared on disk; and the file's own guards, evaluated, start the bookkeeping lane alone": 22,
+  "the workflow table keyed by repository: cloud's deploy-staging.yml dispatchable on cloud alone with apps affected alone, on main alone; a file judged against the stroke's own repository, so a name one repository lists is refused on every other and a repository with no entry starts nothing; the token minted for that ONE repository; and this repository's entries unchanged": 18,
   "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 36,
   "the pr_enqueue_front row: pull and expected_head_sha, a full sha, and nothing that widens them; ONE enqueuePullRequest mutation with jump true and the expected head, the pull's node id read first; a stroke of exactly that one action; merge-queues write minted for that stroke and EMPTY for every other, through the workflow's own input; contents and workflows its literal alsoSpends; the fences on the pull and its queue named and left to the executor": 10,
   "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
@@ -1070,8 +1091,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
-// 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
+// table's repository key.
+const SELF_TEST_BATTERY_FLOOR = 20;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1446,14 +1468,14 @@ export async function selfTest() {
     const start = (extra = {}) => ({ op: 'workflow_dispatch', workflow: FILE, ref: WORKFLOW_DISPATCH_REF, ...extra });
     const one = (action) => fixturePayload({ actions: [action] });
     const spec = OPS.workflow_dispatch;
-    t('the row: workflow and ref required, inputs the one optional key and judged against the closed table, spending actions, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.closedInputs === WORKFLOW_DISPATCH_INPUTS, spec.permission, spec.alone, spec.secondRepo ?? null], [['workflow', 'ref'], ['inputs'], true, 'actions', true, null]);
-    t('the allowlist is exactly the keys of WORKFLOW_DISPATCH_INPUTS — the shard-timings refresh and the release workflow — and the ref is exactly main', [[...WORKFLOW_DISPATCH_ALLOWLIST], Object.keys(WORKFLOW_DISPATCH_INPUTS), WORKFLOW_DISPATCH_REF, FIELDS.workflow.values, FIELDS.ref.values], [['shard-timings-refresh.yml', 'release.yml'], ['shard-timings-refresh.yml', 'release.yml'], 'main', ['shard-timings-refresh.yml', 'release.yml'], ['main']]);
+    t('the row: workflow and ref required, inputs the one optional key and judged against the per-repository closed table, spending actions, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.closedInputs === WORKFLOW_DISPATCH_BY_REPO, spec.permission, spec.alone, spec.secondRepo ?? null], [['workflow', 'ref'], ['inputs'], true, 'actions', true, null]);
+    t('this repository\'s entry is exactly the shard-timings refresh and the release workflow, the allowlist (the field enum) every file any repository lists, and the ref is exactly main', [Object.keys(WORKFLOW_DISPATCH_INPUTS), [...WORKFLOW_DISPATCH_ALLOWLIST], WORKFLOW_DISPATCH_REF, FIELDS.workflow.values, FIELDS.ref.values], [['shard-timings-refresh.yml', 'release.yml'], ['shard-timings-refresh.yml', 'release.yml', 'deploy-staging.yml'], 'main', ['shard-timings-refresh.yml', 'release.yml', 'deploy-staging.yml'], ['main']]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
-    const onDisk = WORKFLOW_DISPATCH_ALLOWLIST.map((f) => {
+    const onDisk = Object.keys(WORKFLOW_DISPATCH_INPUTS).map((f) => {
       const p = resolve(repoRoot, '.github/workflows', f);
       return [f, existsSync(p) && /^\s*workflow_dispatch:/m.test(readFileSync(p, 'utf8')), /^[A-Za-z0-9._-]+\.ya?ml$/.test(f)];
     });
-    t('every allowlisted entry is a bare file name of a workflow on disk under .github/workflows/ that declares a workflow_dispatch trigger', onDisk, WORKFLOW_DISPATCH_ALLOWLIST.map((f) => [f, true, true]));
+    t('every entry this repository lists is a bare file name of a workflow on disk under .github/workflows/ that declares a workflow_dispatch trigger', onDisk, Object.keys(WORKFLOW_DISPATCH_INPUTS).map((f) => [f, true, true]));
     const req = spec.requests(start(), REPO);
     t('its one request is POST /repos/{repo}/actions/workflows/{file}/dispatches with the body { ref: main } and NO inputs for a file whose entry is null', [WORKFLOW_DISPATCH_INPUTS[FILE], req.length, req[0].verb, req[0].path, req[0].body, 'inputs' in req[0].body], [null, 1, 'POST', `/repos/${REPO}/actions/workflows/${FILE}/dispatches`, { ref: 'main' }, false]);
     t('…a path the dispatch shape names, and the only actions path the whole table reaches', [WORKFLOW_DISPATCH_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.some((re) => re.test(req[0].path))], [true, false]);
@@ -1521,12 +1543,12 @@ export async function selfTest() {
     const releaseText = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
     const declared = declaredDispatchInputs(releaseText);
     t('the reader reads release.yml\'s dispatch inputs off disk — force, refresh_version_pr and snapshot_next, all boolean, all defaulting to false — so force and snapshot_next are declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' }, snapshot_next: { type: 'boolean', default: 'false' } });
-    t('every input an entry names is declared by its file with the type its value has, and a null entry\'s file declares none', WORKFLOW_DISPATCH_ALLOWLIST.map((file) => {
+    t('every input an entry of this repository names is declared by its file with the type its value has, and a null entry\'s file declares none', Object.keys(WORKFLOW_DISPATCH_INPUTS).map((file) => {
       const onDisk = declaredDispatchInputs(readFileSync(resolve(repoRoot, '.github/workflows', file), 'utf8'));
       const entry = WORKFLOW_DISPATCH_INPUTS[file];
       if (entry === null) return [file, onDisk !== null && Object.keys(onDisk).length === 0];
       return [file, onDisk !== null && Object.entries(entry).every(([name, value]) => onDisk[name]?.type === typeof value)];
-    }), WORKFLOW_DISPATCH_ALLOWLIST.map((file) => [file, true]));
+    }), Object.keys(WORKFLOW_DISPATCH_INPUTS).map((file) => [file, true]));
     // The lane claim, measured: release.yml's own job guards evaluated for the relay's dispatch. The reader is pinned to
     // read all ten jobs and to tell the lanes apart (the two schedules, push and the repair dispatch are its controls),
     // and a guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its
@@ -1552,6 +1574,42 @@ export async function selfTest() {
     const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr && !inputs.snapshot_next)");
     const added = `${releaseText.replace(/\n+$/u, '')}\n\n  extra-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`;
     t('⛔ the pin can fail: a release-integrity guard that lost its negation, or an eleventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
+  }
+
+  // ── the workflow table keyed by repository ───────────────────────────────
+  battery("the workflow table keyed by repository: cloud's deploy-staging.yml dispatchable on cloud alone with apps affected alone, on main alone; a file judged against the stroke's own repository, so a name one repository lists is refused on every other and a repository with no entry starts nothing; the token minted for that ONE repository; and this repository's entries unchanged");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const CLOUD = `${TARGET_OWNER}/cloud`;
+    const UI = `${TARGET_OWNER}/objectui`;
+    const STAGING = 'deploy-staging.yml';
+    const AFFECTED = { apps: 'affected' };
+    const on = (repo, action) => fixturePayload({ repo, actions: [action] });
+    const deploy = (extra = {}) => ({ op: 'workflow_dispatch', workflow: STAGING, ref: WORKFLOW_DISPATCH_REF, inputs: { ...AFFECTED }, ...extra });
+    const reasons = (payload) => validatePayload(payload).errors;
+    t('the table: exactly this repository and cloud, each in the fleet\'s governed roster; cloud lists deploy-staging.yml alone, with apps affected alone', [Object.keys(WORKFLOW_DISPATCH_BY_REPO), Object.keys(WORKFLOW_DISPATCH_BY_REPO).every((r) => TRANSFER_TARGETS.includes(r)), WORKFLOW_DISPATCH_BY_REPO[REPO] === WORKFLOW_DISPATCH_INPUTS, JSON.parse(JSON.stringify(CLOUD_WORKFLOW_DISPATCH_INPUTS)), WORKFLOW_DISPATCH_BY_REPO[CLOUD] === CLOUD_WORKFLOW_DISPATCH_INPUTS], [[REPO, CLOUD], true, true, { [STAGING]: AFFECTED }, true]);
+    const repoRoot = resolve(SELF_PATH, '../../../..');
+    const names = Object.values(WORKFLOW_DISPATCH_BY_REPO).flatMap((table) => Object.keys(table));
+    t('no file name is listed by two repositories, and this repository has no deploy-staging.yml of its own — the name collides with nothing here', [names.length === new Set(names).size, existsSync(resolve(repoRoot, '.github/workflows', STAGING))], [true, false]);
+    t('workflowDispatchEntry: listed with its inputs only on the repository that lists it — unlisted on another, on a repository with no entry, and for a name no one lists', [workflowDispatchEntry(CLOUD, STAGING), workflowDispatchEntry(REPO, STAGING), workflowDispatchEntry(UI, STAGING), workflowDispatchEntry(CLOUD, 'release.yml'), workflowDispatchEntry(REPO, 'release.yml').listed], [{ listed: true, inputs: AFFECTED }, { listed: false, inputs: null }, { listed: false, inputs: null }, { listed: false, inputs: null }, true]);
+    const v = validatePayload(on(CLOUD, deploy()));
+    t('⭐ the cloud staging deploy is accepted on cloud, on main, with apps affected, and its normalised action carries exactly that', [v.ok, v.payload?.repo, v.payload?.actions[0]], [true, CLOUD, { op: 'workflow_dispatch', workflow: STAGING, ref: 'main', inputs: AFFECTED }], v.errors.join(' | '));
+    const req = OPS.workflow_dispatch.requests(deploy(), CLOUD);
+    t('its one request is the dispatch call on CLOUD\'s deploy-staging.yml with { ref: main, inputs: { apps: "affected" } }, a path the dispatch shape names and no refused family reaches', [req.length, req[0].verb, req[0].path, req[0].body, WORKFLOW_DISPATCH_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.some((re) => re.test(req[0].path))], [1, 'POST', `/repos/${CLOUD}/actions/workflows/${STAGING}/dispatches`, { ref: 'main', inputs: { apps: 'affected' } }, true, false]);
+    t('⛔ the wire is built from the TABLE: an unjudged action naming apps all still sends apps affected alone', OPS.workflow_dispatch.requests(deploy({ inputs: { apps: 'all', force: true } }), CLOUD)[0].body, { ref: 'main', inputs: { apps: 'affected' } });
+    t('its stroke mints actions write for ONE repository — cloud, the payload\'s own, no second repository', v.payload ? [tokenRepositoriesOf(v.payload), tokenPermissionsOf(v.payload).actions, outputLine(v.payload, 'repositories'), outputLine(v.payload, 'permission_actions')] : 'refused', [[CLOUD], 'write', 'repositories=cloud', 'permission_actions=write']);
+    t('⛔ a non-default apps — all, a named app list, the empty string — is refused by name, naming the one value', ['all', 'web,api', ''].map((apps) => reasons(on(CLOUD, deploy({ inputs: { apps } })))), ['all', 'web,api', ''].map((apps) => [`actions[0].inputs.apps must be "affected" when workflow is "deploy-staging.yml", got ${JSON.stringify(apps)} — the relay sends exactly {"apps":"affected"}`]));
+    t('⛔ absent inputs, another input beside apps, and apps as a JSON boolean are each refused by name', [reasons(on(CLOUD, { op: 'workflow_dispatch', workflow: STAGING, ref: 'main' })), reasons(on(CLOUD, deploy({ inputs: { apps: 'affected', environment: 'production' } }))), reasons(on(CLOUD, deploy({ inputs: { apps: true } })))], [['actions[0].inputs is required when workflow is "deploy-staging.yml": exactly {"apps":"affected"} — the one lane the relay may start there'], ['actions[0].inputs.environment is not an input the relay sends to deploy-staging.yml — it sends exactly {"apps":"affected"}'], ['actions[0].inputs.apps must be a JSON string, got true']]);
+    t('⛔ a ref other than main is refused on cloud too, naming main', ['develop', 'staging', 'refs/heads/main'].every((ref) => refuses(on(CLOUD, deploy({ ref })), 'actions[0].ref must be one of "main"')));
+    t('⛔ a file outside the allowlist is refused on cloud by the enum, naming the list', [refuses(on(CLOUD, deploy({ workflow: 'deploy-cloud-prod.yml' })), 'actions[0].workflow must be one of'), refuses(on(CLOUD, deploy({ workflow: '.github/workflows/deploy-staging.yml' })), 'actions[0].workflow must be one of')], [true, true]);
+    t('⛔ the wrong repository: deploy-staging.yml on THIS repository is refused by name, naming what this repository starts', reasons(on(REPO, deploy())), ['actions[0].workflow "deploy-staging.yml" is not a workflow the relay starts on "objectstack-ai/objectstack" — there it starts "shard-timings-refresh.yml", "release.yml"; each file is dispatchable only on the repository whose entry lists it']);
+    t('⛔ …and on a repository with no entry it is refused, naming that it starts nothing there', reasons(on(UI, deploy())), ['actions[0].workflow "deploy-staging.yml" is not a workflow the relay starts on "objectstack-ai/objectui" — it starts no workflow there; each file is dispatchable only on the repository whose entry lists it']);
+    t('⛔ the hole the key closes: release.yml\'s refresh and the shard-timings refresh — each accepted on this repository — are refused on cloud and on objectui', [[CLOUD, UI].every((r) => refuses(on(r, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: true } }), 'is not a workflow the relay starts on')), [CLOUD, UI].every((r) => refuses(on(r, { op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main' }), 'is not a workflow the relay starts on'))], [true, true]);
+    t('…each refused ONCE — the inputs of a file the repository does not list are not judged beside it', reasons(on(CLOUD, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: false } })).length, 1);
+    t('⛔ the cloud deploy beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ repo: CLOUD, actions: [deploy(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
+    const keep = [{ op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main' }, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: true } }];
+    t('this repository\'s two entries are unchanged: each accepted on this repository, its one request the body it sent before the key', keep.map((a) => [validatePayload(on(REPO, a)).ok, OPS.workflow_dispatch.requests(a, REPO)[0].body]), [[true, { ref: 'main' }], [true, { ref: 'main', inputs: { refresh_version_pr: 'true' } }]]);
+    t('…and their refusals word as before: the string "true" on release.yml names the JSON boolean, once', reasons(on(REPO, { ...keep[1], inputs: { refresh_version_pr: 'true' } })), ['actions[0].inputs.refresh_version_pr must be a JSON boolean, got "true"']);
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────
