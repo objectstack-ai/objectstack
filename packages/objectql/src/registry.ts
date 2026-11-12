@@ -8787,7 +8787,7 @@ export class SchemaRegistry {
     composite: ReadonlySet<string>): string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER {
     const settled = this.settledPairRowBinding(pairId, item, composite);
     if (!Array.isArray(settled)) return settled as string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER;
-    const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite);
+    const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite, pairId);
     return named.length === 1 ? named[0] : undefined;
   }
 
@@ -8824,25 +8824,58 @@ export class SchemaRegistry {
    * included, so an owner that adds to it is an addition), each holder's
    * members being its composite members and the bare-slot rows that bind to
    * it ({@link bundleMembersHeldBy}) — a pair row declaring the holder, a
-   * per-package pair's row, the holder's own stored row. Only the rows this
-   * very arm decides (an undeclared row of a pair several holders share) are
-   * left out of the count, since the members they add are what it answers.
-   * An addition that ships the member `row` is ITS member too, so it stays an
-   * owner: the row may customize that package's member, and two owners bind
-   * it to no package (never a guess). `owners` unchanged for a type that is
-   * no bundle, or with fewer than two.
+   * per-package pair's row, the holder's own stored row, and an undeclared
+   * row of ANOTHER shared pair, bound by that pair's own count. Only the
+   * undeclared rows of `pairId`, the pair this arm decides, are left out,
+   * since the members they add are what it answers (the accepted residual,
+   * #32561). Another pair's count reads the rows of the pairs already being
+   * decided (`deciding`: A's count reads B's row, whose count reads A's), whose
+   * bindings are not known yet: it is made twice, with those rows counted as
+   * members of every owner they could bind to (`max`) and with them left out
+   * (`min`). Owners only grow with members, so when both counts give the same
+   * owners the row's binding does not depend on them and it is counted as it
+   * binds. When they differ, the row counts as a member of every owner it
+   * could bind to (and the caller is told, `cycle`, so it does the same one
+   * level up): more shared members, fewer additions, so the answer only ever
+   * leans to no package (never a guess). An addition that ships the member `row` is ITS member
+   * too, so it stays an owner: the row may customize that package's member,
+   * and two owners bind it to no package. `owners` unchanged for a type that
+   * is no bundle, or with fewer than two.
    */
   private ownersHoldingAName(type: string, name: string, collection: Map<string, any>, owners: readonly string[],
-    row: unknown, composite: ReadonlySet<string>): readonly string[] {
+    row: unknown, composite: ReadonlySet<string>, pairId: string, deciding: ReadonlySet<string> = new Set(),
+    mode: 'max' | 'min' = 'min', cycle: { met: boolean } = { met: false }): readonly string[] {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || owners.length < 2) return owners;
+    const within = new Set([...deciding, pairId]);
     const bound = new Map<string, unknown[]>();
+    const bind = (holder: string, item: unknown) => bound.set(holder, [...(bound.get(holder) ?? []), item]);
     for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
       const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
-      if (typeof stamped === 'string' && !composite.has(stamped)
-        && Array.isArray(this.settledPairRowBinding(stamped, item, composite))) continue;
-      const holder = this.overlaySlotBinding(type, item, name, collection, composite);
-      if (typeof holder === 'string') bound.set(holder, [...(bound.get(holder) ?? []), item]);
+      const settled = typeof stamped === 'string' && !composite.has(stamped)
+        ? this.settledPairRowBinding(stamped, item, composite)
+        : NOT_A_PAIR_ROW_OF_A_HOLDER;
+      if (!Array.isArray(settled)) {
+        const holder = settled !== NOT_A_PAIR_ROW_OF_A_HOLDER
+          ? settled as string | undefined
+          : this.overlaySlotBinding(type, item, name, collection, composite);
+        if (typeof holder === 'string') bind(holder, item);
+        continue;
+      }
+      const others = settled as readonly string[];
+      if (stamped === pairId) continue;
+      if (deciding.has(stamped as string)) {
+        if (mode === 'max') for (const owner of others) bind(owner, item);
+        continue;
+      }
+      const hi = { met: false };
+      const lo = { met: false };
+      const most = this.ownersHoldingAName(type, name, collection, others, item, composite, stamped as string, within, 'max', hi);
+      const least = this.ownersHoldingAName(type, name, collection, others, item, composite, stamped as string, within, 'min', lo);
+      if (hi.met || lo.met || most.length !== least.length || most.some((id) => !least.includes(id))) {
+        cycle.met = true;
+        for (const owner of others) bind(owner, item);
+      } else if (most.length === 1) bind(most[0], item);
     }
     const memberOf = (item: unknown) => discriminatorValue(item, disc.field) || disc.canonical;
     const membersOf = new Map<string, Set<string>>();

@@ -592,6 +592,31 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect([templateOf(Z, 'de-DE'), templateOf(W, 'de-DE')]).toEqual([undefined, undefined]);
   });
 
+  it('unbound, beside an owner that another App\'s pair row makes a holder → no package, as `?package=Y` refuses it naming both (contract review F6; BASE at a8b63c29: Y)', () => {
+    // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row, which binds to P (Q is an addition).
+    // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
+    // Both undeclared rows are admitted at the save door (measured).
+    const B = 'com.beta.base';
+    const P = 'com.beta.basep';
+    const Q = 'com.beta.baseq';
+    const U = 'com.acme.suiteu';
+    install(B);
+    registry.installPackage({ ...(manifest(P, [B]) as object), type: 'module' } as never, 'code');
+    registry.installPackage({ ...(manifest(Q, [B, P]) as object), type: 'module' } as never, 'code');
+    registry.installPackage({ ...(manifest(U, [APP, P], 'suite') as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', P);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'baseq'), locale: 'de-DE' }, 'name' as never, Q);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suiteu'), locale: 'fr-FR' }, 'name' as never, U);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitey'), locale: 'it-IT' }, 'name' as never, Y);
+    registry.registerItem('email_template', {
+      ...body('email_template', 'welcome', 'bpair'), locale: 'fr-FR', _packageId: `${B}.custom`, _provenance: 'org',
+    }, 'name' as never);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'es-ES');
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', P, 'fr-FR')?.label).toBe('bpair template');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([P, U, Y]);
+    expect([templateOf(U, 'es-ES'), templateOf(Y, 'es-ES')]).toEqual([undefined, undefined]);
+  });
+
   it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
     ship('page', 'home', X);
     pairRow('page', 'home', 'pair');
