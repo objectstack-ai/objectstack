@@ -3084,7 +3084,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       send_in_app_message: {
         label: "Send In-App Message",
         description: "Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.",
-        successMessage: "Message sent to {{ result.recipients }} people",
+        successMessage: "Message sent. Recipients: {{ result.recipients }}",
         params: {
           everyone: {
             label: "Everyone in this organization",

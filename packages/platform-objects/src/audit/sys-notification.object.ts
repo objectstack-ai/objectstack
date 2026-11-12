@@ -104,7 +104,7 @@ export const SysNotification = ObjectSchema.create({
       target: '/api/v1/messaging/in-app-messages',
       requiredPermissions: ['setup.write'],
       // `recipients` is how many people the message went to, as the door counts them.
-      successMessage: 'Message sent to {{ result.recipients }} people',
+      successMessage: 'Message sent. Recipients: {{ result.recipients }}',
       refreshAfter: true,
       params: [
         {

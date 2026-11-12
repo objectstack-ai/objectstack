@@ -3084,7 +3084,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       send_in_app_message: {
         label: "In-App-Nachricht senden",
         description: "Senden Sie eine Nachricht an alle in Ihrer Organisation oder an die Mitglieder, die Sie auswählen. Sie erscheint in den Benachrichtigungen jedes Empfängers.",
-        successMessage: "Nachricht an {{ result.recipients }} Personen gesendet",
+        successMessage: "Nachricht gesendet. Empfänger: {{ result.recipients }}",
         params: {
           everyone: {
             label: "Alle in dieser Organisation",

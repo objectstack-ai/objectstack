@@ -3084,7 +3084,7 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       send_in_app_message: {
         label: "Отправить сообщение в приложении",
         description: "Отправьте сообщение всем участникам организации или выбранным участникам. Оно появится в уведомлениях каждого получателя.",
-        successMessage: "Сообщение отправлено, получателей: {{ result.recipients }}",
+        successMessage: "Сообщение отправлено. Получателей: {{ result.recipients }}",
         params: {
           everyone: {
             label: "Все в этой организации",

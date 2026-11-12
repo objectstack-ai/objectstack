@@ -3084,7 +3084,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       send_in_app_message: {
         label: "إرسال رسالة داخل التطبيق",
         description: "أرسل رسالة إلى جميع أعضاء مؤسستك أو إلى الأعضاء الذين تختارهم. تظهر في إشعارات كل مستلم.",
-        successMessage: "تم إرسال الرسالة إلى {{ result.recipients }} شخص",
+        successMessage: "تم إرسال الرسالة. عدد المستلمين: {{ result.recipients }}",
         params: {
           everyone: {
             label: "جميع أعضاء هذه المؤسسة",

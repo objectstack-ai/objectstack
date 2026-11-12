@@ -3084,7 +3084,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       send_in_app_message: {
         label: "Enviar mensagem no aplicativo",
         description: "Envie uma mensagem para todos da sua organização ou para os membros que você escolher. Ela aparece nas notificações de cada destinatário.",
-        successMessage: "Mensagem enviada para {{ result.recipients }} pessoas",
+        successMessage: "Mensagem enviada. Destinatários: {{ result.recipients }}",
         params: {
           everyone: {
             label: "Todos nesta organização",
