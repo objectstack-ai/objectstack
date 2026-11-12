@@ -10,7 +10,13 @@
  *
  * A MOVE, not a redesign. The function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
- * re-indented one level and otherwise unedited.
+ * re-indented one level and otherwise unedited. Since then, [#32183] added
+ * two arms: a name only disabled packages hold reads as their withheld item,
+ * and so does an exact address that reads only disabled packages (a disabled
+ * package named, or a pair whose every base is disabled), judged by
+ * `disabledExactAddressHolder` (`protocol-exact-qualifier.ts`). Any other
+ * exact address of such a name serves only a row stored under its own
+ * package (epic ruling R4-B).
  *
  * ## How the moved body reaches the class
  *
@@ -29,6 +35,7 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { disabledExactAddressHolder } from './protocol-exact-qualifier.js';
 import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
@@ -48,6 +55,76 @@ export interface MetaItemFaceHost {
     readonly readMetaItem: ObjectStackProtocolImplementation['readMetaItem'];
 }
 
+/**
+ * [#32183] The package holding `(type, name)` when every package that holds
+ * it is disabled; `undefined` when none holds it or an enabled one does.
+ * Read over every holder (`includeDisabledPackages`). Optional-called, as
+ * {@link isItemOfDisabledPackage} is: a registry without the two reads hides
+ * nothing more.
+ */
+function disabledOnlyHolderOf(registry: any, type: string, name: string): string | undefined {
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry?.isPackageDisabled !== 'function') {
+        return undefined;
+    }
+    const holders: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    return holders.length > 0 && holders.every((id) => registry.isPackageDisabled(id) === true) ? holders[0] : undefined;
+}
+
+/** [#32183, epic ruling R4-B] Whether `item` is stamped (`_packageId`) with `packageId`: a row stored under that package. */
+function isStoredUnder(item: unknown, packageId: string): boolean {
+    return (item as { _packageId?: unknown } | null | undefined)?._packageId === packageId;
+}
+
+/**
+ * [#32183] The package whose stack a read naming no package takes, for a
+ * name a disabled package also holds: the one holder ADR-0150 D3 resolves
+ * over the served set. `undefined` leaves the read as it was: a type the
+ * registry does not read by package, a name no disabled package holds (the
+ * read is `main`'s, untouched), the environment's own item (D3 (a) serves
+ * it), no served holder (the withheld arm of the face) or two or more (the
+ * read's own refusal).
+ *
+ * Without it, the reads that pick a layer by name alone (the layered read's
+ * code layer, the first composite in registration order, and the package-less
+ * overlay row's address, which counts every shipper) reached the disabled
+ * holder's body while the by-name read served the enabled one. Shared by
+ * the face and the layered read, so both read one stack. Optional-called:
+ * a registry without these reads leaves every read as it was.
+ */
+export function servedHolderAddressOf(registry: any, type: string, name: string): string | undefined {
+    if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
+    if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    if (!every.some((id) => registry.isPackageDisabled(id) === true)) return undefined;
+    const served: readonly string[] = registry.packageScopedHoldersOf(type, name, null) ?? [];
+    if (served.length !== 1) return undefined;
+    if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name) !== undefined) {
+        return undefined;
+    }
+    return served[0];
+}
+
+/**
+ * [#32183, contract review M4] Whether `copy`, the metadata service's copy of
+ * a name read at `address` (the served holder {@link servedHolderAddressOf}
+ * answers), is another holder's: stamped (`_packageId`) with a package that
+ * holds the name in the registry, a disabled one included, other than
+ * `address`. The metadata manager keys most types by name alone, so for a
+ * name two packages ship it keeps the body registered last, which can be the
+ * disabled holder's. The plain read replaces such a copy with the addressed
+ * holder's item (`exactQualifierItem`). The layered read's code layer and the
+ * bare `/published` exit ask this, so neither serves it. A copy stamped with
+ * no holder of the name (a provenance sentinel, a customization pair) is not
+ * another holder's.
+ */
+export function isAnotherHoldersCopy(registry: any, type: string, name: string, address: string, copy: unknown): boolean {
+    const stamp = (copy as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamp !== 'string' || stamp === '' || stamp === address) return false;
+    if (typeof registry?.packageScopedHoldersOf !== 'function') return false;
+    const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+    return every.includes(stamp);
+}
+
 /** The body of `ObjectStackProtocolImplementation#readMetaItemFace`; the method's docblock there is its contract. */
 export async function readMetaItemFace(
     this: Pick<MetaItemFaceHost, 'engine' | 'readMetaItem'>,
@@ -60,16 +137,43 @@ export async function readMetaItemFace(
     if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
         throw objectPackageDisabledError(request.name);
     }
-    const answer = await this.readMetaItem(request, { face });
+    // [#32183] A name a disabled package also holds is read at the served
+    // holder's address ({@link servedHolderAddressOf}), so no layer of the
+    // read can be the disabled holder's.
+    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(this.engine?.registry, request.type, request.name);
+    const answer = await this.readMetaItem(servedAddress === undefined ? request : { ...request, packageId: servedAddress }, { face });
     // [#28877] The served read of an `action` also withholds one that launches
     // into a disabled package, as the served list does.
     const withheldAction = request.type === 'action' && face === 'served'
         && isActionWithheldByDisabledPackage(this.engine?.registry, answer?.item);
-    if (request.type === 'object' || request.type === 'package'
-        || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item))) {
+    // [#32183] A name only disabled packages hold resolves to nothing: the
+    // read judges a name's holders over the served set. Its answer is that
+    // package's withheld item, the shape a disabled holder's read had, so
+    // every door that asks the envelope whether a disable withheld the item
+    // (the layered view's step 1b, `/published`) keeps answering the missing
+    // name and never serves that package's layers.
+    // [#32183, ruling (c)] …and an address naming a disabled package, or a
+    // pair whose every base is disabled, is that package's withheld item,
+    // whichever envelope a layer of the read reached: the disabled body is
+    // never served under another package's envelope.
+    // [#32183, epic ruling R4-B] …and so is any other exact address of a name
+    // only disabled packages hold, unless the read reached a row stored under
+    // that address's own package: a sibling module's address must not serve a
+    // disabled holder's pair row (row 17).
+    const withheldHolder = request.type === 'object' || request.type === 'package'
+        ? undefined
+        : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
+            ?? (answer?.item == null || (request.packageId && !isStoredUnder(answer.item, request.packageId))
+                ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
+                : undefined);
+    if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
+        || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;
     }
     if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
     const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
-    return { ...envelope, item: undefined };
+    const withheld = { ...envelope, item: undefined };
+    // Not every arm of the read's envelope declares `packageId`; each may carry it.
+    if (withheldHolder !== undefined) (withheld as { packageId?: string }).packageId = withheldHolder;
+    return withheld;
 }

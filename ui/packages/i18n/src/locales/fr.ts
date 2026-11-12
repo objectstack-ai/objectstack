@@ -2355,6 +2355,7 @@ const fr = {
       dismiss: "Masquer la liste",
       showDone: "Afficher les étapes terminées ({{done}})",
       hideDone: "Masquer les étapes terminées",
+      optional: "Facultatif",
       set: "Définir",
       change: "Modifier",
       view: "Voir",

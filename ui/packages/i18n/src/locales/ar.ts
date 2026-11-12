@@ -2548,6 +2548,7 @@ const ar = {
       dismiss: "إخفاء القائمة",
       showDone: "عرض العناصر المكتملة ({{done}})",
       hideDone: "إخفاء العناصر المكتملة",
+      optional: "اختياري",
       set: "تعيين",
       change: "تغيير",
       view: "عرض",

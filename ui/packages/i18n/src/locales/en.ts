@@ -2469,6 +2469,7 @@ const en = {
       dismiss: 'Hide checklist',
       showDone: 'Show completed ({{done}})',
       hideDone: 'Hide completed',
+      optional: 'Optional',
       set: 'Set',
       change: 'Change',
       view: 'View',

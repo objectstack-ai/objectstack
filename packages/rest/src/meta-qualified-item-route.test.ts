@@ -16,7 +16,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { SchemaRegistry } from '@objectstack/objectql';
+import { PACKAGE_SCOPED_READ_TYPES, SchemaRegistry } from '@objectstack/objectql';
 import { RestServer } from './rest-server.js';
 
 const A = 'com.acme.alpha';
@@ -252,6 +252,187 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
         asCaller(['manage_platform_settings', 'manage_metadata']);
         const answer = await drive(QUALIFIED, { type: 'datasource', ns: 'sys', name: 'warehouse' });
         expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+});
+
+/**
+ * [#32183, ADR-0150 D3] A disabled package holds no name: every by-name read
+ * on this transport judges the holders the list serves, as the runtime
+ * dispatcher's `/meta` domain does. Iterates the live
+ * `PACKAGE_SCOPED_READ_TYPES`, so a type added there is pinned here.
+ *
+ * BASE (main de141e32, measured on this fixture for all 13 types): two
+ * holders with one disabled answered the bare read, `?package=gamma`,
+ * `/:type/gamma/:name` and `_env` with 409 naming both packages; a name only a
+ * disabled package holds answered `_env` and `?package=gamma` with 409 naming
+ * it.
+ *
+ * Contract review M1 (branch head 340f7cbc, measured): with the disabled holder
+ * registered first, bare `/layers` served its code layer as `code` and
+ * `effective`, while the plain read served the enabled holder.
+ */
+describe('#32183 — a disabled package holds no name: the by-name read judges the served holders', () => {
+    /**
+     * `permission` joined the live list (#32162), and the security catalog's
+     * item seam refuses a second package holder of a set at registration.
+     * Lift that one seam, as the objectql exact-qualifier pins do, so the
+     * two-holder state (the one #31698 PR-2 opens) is reached.
+     */
+    const admitSecondPermissionHolder = (type: string) => {
+        if (type === 'permission') {
+            vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+                .mockReturnValue([]);
+        }
+    };
+    const LIST = '/api/v1/meta/:type';
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
+    // A signed-in caller: a `book` read asks for one (`meta-item-read-gate.ts`, the docs sign-in gate).
+    // The engine is wired, so the layered view's disabled-package step (1b) can ask its registry.
+    beforeEach(() => {
+        (rest as any).resolveExecCtx = async () => ({ isSystem: true, userId: 'u1' });
+        (rest as any).objectQLProvider = async () => ({ registry });
+    });
+    const listedHolders = async (type: string, name: string): Promise<unknown[]> => {
+        const { body } = await drive(LIST, { type });
+        const items = body?.data?.items ?? body?.items ?? (Array.isArray(body?.data) ? body.data : []);
+        return (items as any[]).filter((i) => i?.name === name).map((i) => i?._packageId ?? i?.packageId ?? null);
+    };
+    const refusedNaming = (answer: { status: number; body?: any }, named: string[], unnamed: string[]) => {
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        for (const id of named) expect(messageOf(answer)).toContain(`package "${id}"`);
+        for (const id of unnamed) expect(JSON.stringify(answer.body)).not.toContain(id);
+    };
+
+    for (const type of PACKAGE_SCOPED_READ_TYPES) {
+        // [contract review M1, S2] Both registration orders: a reader that takes
+        // the first registered holder serves the disabled one's body when it
+        // registered first.
+        it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)(`${type}: two holders, one disabled (%s) — the enabled holder answers, its layers too; the disabled one is named nowhere`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            registry.disablePackage(B);
+            const bare = await drive(ITEM, { type, name: 'shared' });
+            expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+            expect(labelOf(bare)).toBe(`alpha ${type}`);
+            // The bare layered view reads the served holder's stack, never the first registered one's.
+            const layers = await drive(LAYERS, { type, name: 'shared' });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layers.body?.code?.label, layers.body?.effective?.label]).toEqual([`alpha ${type}`, `alpha ${type}`]);
+            expect(JSON.stringify(layers.body)).not.toContain(`beta ${type}`);
+            expect(labelOf(await drive(ITEM, { type, name: 'shared' }, { package: A }))).toBe(`alpha ${type}`);
+            expect(labelOf(await drive(QUALIFIED, { type, ns: 'alpha', name: 'shared' }))).toBe(`alpha ${type}`);
+            refusedNaming(await drive(ITEM, { type, name: 'shared' }, { package: C }), [A], [B]);
+            refusedNaming(await drive(QUALIFIED, { type, ns: 'gamma', name: 'shared' }), [A], [B]);
+            refusedNaming(await drive(QUALIFIED, { type, ns: '_env', name: 'shared' }), [A], [B]);
+        });
+
+        // [ruling (c), the owed exact-qualifier hunk] The disabled holder's own
+        // address, its namespace and its pair are admitted (admission asks every
+        // holder) and answer the withheld item's 404: never its body, never a
+        // refusal naming the enabled holder. BASE (main f0f729e7): 404; the
+        // interim head (#32327's source change alone): 409 naming alpha.
+        it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)(`${type}: two holders, one disabled (%s) — the disabled holder's address, namespace and pair answer 404, naming no package`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
+            for (const id of order) ship(type, 'shared', id);
+            registry.disablePackage(B);
+            for (const [path, params, query] of [
+                [ITEM, { type, name: 'shared' }, { package: B }],
+                [QUALIFIED, { type, ns: 'beta', name: 'shared' }, {}],
+                [ITEM, { type, name: 'shared' }, { package: `${B}.custom` }],
+            ] as const) {
+                const answer = await drive(path, params as never, query as never);
+                const at = `${path} ${JSON.stringify(params)} ${JSON.stringify(query)}`;
+                expect([answer.status, at], JSON.stringify(answer.body)).toEqual([404, at]);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(A);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(`beta ${type}`);
+            }
+            // CONTROL — the enabled holder's pair serves its item. Enabled first
+            // only: registered second, the pair address's envelope is looked up
+            // at the pair id and falls back to the first holder that ships the
+            // name, the disabled one (a separate defect, reported on the card).
+            if (order[0] === A) expect(labelOf(await drive(ITEM, { type, name: 'shared' }, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
+        });
+
+        // [epic ruling R4-B2] `_env` is held at `main`'s answer: with no served
+        // holder it judges every holder, so it refuses naming the disabled one.
+        it(`${type}: only a disabled holder — no holder: 404 on every package address, never a 409 naming it; \`_env\` refuses naming it, as on main`, async () => {
+            ship(type, 'solo', B);
+            registry.disablePackage(B);
+            for (const [path, params, query] of [
+                [ITEM, { type, name: 'solo' }, {}],
+                [ITEM, { type, name: 'solo' }, { package: C }],
+                [QUALIFIED, { type, ns: 'gamma', name: 'solo' }, {}],
+            ] as const) {
+                const answer = await drive(path, params, query);
+                expect([answer.status, params, query], JSON.stringify(answer.body)).toEqual([404, params, query]);
+                expect(JSON.stringify(answer.body ?? null)).not.toContain(B);
+            }
+            refusedNaming(await drive(QUALIFIED, { type, ns: '_env', name: 'solo' }), [B], [A]);
+        });
+
+        it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
+            admitSecondPermissionHolder(type);
+            ship(type, 'solo', B);
+            ship(type, 'pair', B);
+            ship(type, 'pair', C);
+            registry.disablePackage(B);
+            registry.disablePackage(C);
+            for (const [name, query] of [['solo', {}], ['solo', { package: C }], ['solo', { package: A }], ['pair', {}]] as const) {
+                const layers = await drive(LAYERS, { type, name }, query);
+                expect([layers.status, name, query], JSON.stringify(layers.body)).toEqual([404, name, query]);
+                for (const label of [`beta ${type}`, `gamma ${type}`]) expect(JSON.stringify(layers.body ?? null)).not.toContain(label);
+                const plain = await drive(ITEM, { type, name }, query);
+                expect([plain.status, name, query], JSON.stringify(plain.body)).toEqual([404, name, query]);
+                for (const id of [B, C]) expect(JSON.stringify(plain.body ?? null)).not.toContain(id);
+            }
+            // CONTROL: enabled, the same layered read serves the holder's code layer.
+            registry.enablePackage(B);
+            const served = await drive(LAYERS, { type, name: 'solo' });
+            expect(served.status, JSON.stringify(served.body)).toBe(200);
+        });
+
+        it(`${type}: parity — the bare read and the list agree on the holders, through disable and enable`, async () => {
+            admitSecondPermissionHolder(type);
+            ship(type, 'shared', A);
+            ship(type, 'shared', B);
+            ship(type, 'solo', B);
+            const agree = async (name: string) => {
+                const listed = await listedHolders(type, name);
+                const bare = await drive(ITEM, { type, name });
+                if (listed.length === 0) expect([bare.status, name], JSON.stringify(bare.body)).toEqual([404, name]);
+                else if (listed.length === 1) {
+                    expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+                    expect(labelOf(bare)).toBe(`${String(listed[0]).split('.').pop()} ${type}`);
+                } else refusedNaming(bare, listed as string[], []);
+                return listed;
+            };
+            expect(await agree('shared')).toEqual([A, B]);
+            expect(await agree('solo')).toEqual([B]);
+            registry.disablePackage(B);
+            expect(await agree('shared')).toEqual([A]);
+            expect(await agree('solo')).toEqual([]);
+            registry.enablePackage(B);
+            expect(await agree('shared')).toEqual([A, B]);
+            expect(await agree('solo')).toEqual([B]);
+        });
+    }
+
+    it('two co-owners of a shareable namespace, one disabled: the enabled co-owner answers its address and the bare read', async () => {
+        const SYS_ONE = 'com.acme.sys_one';
+        const SYS_TWO = 'com.acme.sys_two';
+        for (const id of [SYS_ONE, SYS_TWO]) {
+            registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: 'sys' } as never, 'code');
+        }
+        ship('page', 'home', SYS_ONE);
+        ship('page', 'home', SYS_TWO);
+        registry.disablePackage(SYS_TWO);
+        for (const answer of [
+            await drive(QUALIFIED, { type: 'page', ns: 'sys', name: 'home' }),
+            await drive(ITEM, { type: 'page', name: 'home' }),
+        ]) {
+            expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+            expect(labelOf(answer)).toBe('sys_one page');
+        }
     });
 });
 
@@ -555,6 +736,67 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => 
         ship('dataset', 'pipeline', A);
         expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }))).toBe('alpha dataset');
         expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: A }))).toBe('alpha dataset');
+    });
+});
+
+/**
+ * [#32183 × #32310, ADR-0150 D3] The caller arm on this transport judges the
+ * served holders, as the bare read does: a disabled package holds no name
+ * for `?callerPackage=` either. The move comes from the source
+ * (`packageScopedHoldersOf`); the exact qualifier's module is not edited.
+ *
+ * BASE (main f0f729e7): two closure holders, one disabled, were refused
+ * naming both; a name the closure reached only through a disabled package
+ * resolved to it and answered that package's withheld 404.
+ */
+describe('#32183 × #32310 — the caller arm judges the served holders', () => {
+    const P = 'com.acme.app';
+    beforeEach(() => {
+        registry.installPackage({
+            id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app',
+            dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+        } as never, 'code');
+    });
+
+    it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)('two holders in the closure, one disabled (%s): the enabled holder\'s dataset; re-enabled, 409 naming both', async (_order, order) => {
+        for (const id of order) ship('dataset', 'twin', id);
+        registry.disablePackage(B);
+        const served = await drive(ITEM, { type: 'dataset', name: 'twin' }, { callerPackage: P });
+        expect(served.status, JSON.stringify(served.body)).toBe(200);
+        expect(labelOf(served)).toBe('alpha dataset');
+        expect(JSON.stringify(served.body)).not.toContain('beta dataset');
+        registry.enablePackage(B);
+        const refused = await drive(ITEM, { type: 'dataset', name: 'twin' }, { callerPackage: P });
+        expect([refused.status, codeOf(refused)], JSON.stringify(refused.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect((refused.body?.details?.candidates ?? []).map((c: any) => c.packageId).sort()).toEqual([A, B]);
+    });
+
+    it('the closure reaches the name only through a disabled package, an enabled one outside holds it: 409 outside-closure naming the enabled holder only', async () => {
+        ship('dataset', 'far', B);
+        ship('dataset', 'far', C);
+        registry.disablePackage(B);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'far' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(answer)).toContain(`held outside the declared dependency closure of package "${P}"`);
+        expect(answer.body?.details?.candidates).toEqual([{ kind: 'package', packageId: C }]);
+        expect(JSON.stringify(answer.body)).not.toContain(B);
+    });
+
+    it('[ruling (c)] P\'s own holding, disabled, beside an enabled dependency: P\'s withheld 404, never the dependency\'s dataset (interim: 409 naming alpha)', async () => {
+        ship('dataset', 'own', A);
+        ship('dataset', 'own', P);
+        registry.disablePackage(P);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'own' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect(JSON.stringify(answer.body)).not.toContain(A);
+    });
+
+    it('a name only a disabled closure package holds: 404, naming no package', async () => {
+        ship('dataset', 'gone', B);
+        registry.disablePackage(B);
+        const answer = await drive(ITEM, { type: 'dataset', name: 'gone' }, { callerPackage: P });
+        expect([answer.status, codeOf(answer)], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect(JSON.stringify(answer.body)).not.toContain(B);
     });
 });
 

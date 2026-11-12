@@ -2295,6 +2295,7 @@ const ja = {
       dismiss: "チェックリストを非表示",
       showDone: "完了した項目を表示（{{done}}）",
       hideDone: "完了した項目を折りたたむ",
+      optional: "任意",
       set: "設定",
       change: "変更",
       view: "表示",
