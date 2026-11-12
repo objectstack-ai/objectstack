@@ -792,3 +792,184 @@ describe('ObjectFieldInspector — delete behavior (objectstack#29807)', () => {
     expect(second.saved().deleteBehavior).toBe('cascade');
   });
 });
+
+/* ─────────── Stored expression editor (objectstack#32576) ─────────── */
+
+/**
+ * `FieldSchema.expression` on a field that is not a `formula` makes it computed
+ * from the row each write stores, and stored: the remedy a refused `sum` / `avg`
+ * over a formula prescribes. The inspector offers that editor on every type a
+ * client otherwise writes (the complement of the spec's `COMPUTED_VALUE_TYPES`),
+ * and reads the field as computed and read-only once it carries one.
+ */
+describe('ObjectFieldInspector — stored expression editor (objectstack#32576)', () => {
+  const EDITOR = () => t('designer.field.storedExpression', 'en-US');
+
+  function StoredHost({
+    initialFields,
+    selected,
+    patches,
+  }: {
+    initialFields: Record<string, Record<string, unknown>>;
+    selected: string;
+    patches: Array<Record<string, any>>;
+  }) {
+    const [fields, setFields] = React.useState(initialFields);
+    return (
+      <ObjectFieldInspector
+        type="object"
+        name="account"
+        draft={{ name: 'account', fields }}
+        selection={{ kind: 'field', id: selected }}
+        onPatch={(patch: any) => {
+          patches.push(patch);
+          setFields(patch.fields);
+        }}
+        onClearSelection={() => {}}
+        onSelectionChange={() => {}}
+        readOnly={false}
+        locale={'en-US'}
+      />
+    );
+  }
+
+  it('offers the editor on a number field, with the hint and no formula editor', () => {
+    renderField({ amount: { type: 'number' }, fee: { type: 'number', label: 'Fee' } }, 'fee');
+    expect((controlFor(EDITOR()) as HTMLTextAreaElement).value).toBe('');
+    expect(screen.getByTestId('field-stored-expression-hint')).toHaveTextContent(
+      t('designer.field.storedExpression.hint', 'en-US'),
+    );
+    expect(screen.queryByTestId('field-stored-expression-computed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Formula (CEL)')).not.toBeInTheDocument();
+    // Not yet computed: a person enters the value, so a default still applies.
+    expect(screen.getByText('Default value')).toBeInTheDocument();
+  });
+
+  it('a number field with an expression saves, round-trips and reads as computed and read-only', () => {
+    const patches: Array<Record<string, any>> = [];
+    render(
+      <StoredHost
+        initialFields={{ amount: { type: 'number' }, fee: { type: 'number', label: 'Fee' } }}
+        selected="fee"
+        patches={patches}
+      />,
+    );
+    fireEvent.change(controlFor(EDITOR()), { target: { value: 'record.amount * 0.2' } });
+
+    const saved = patches.at(-1)!.fields.fee;
+    expect(saved).toEqual({ type: 'number', label: 'Fee', expression: 'record.amount * 0.2' });
+    // The spec accepts what the inspector wrote, whole.
+    expect(FieldSchema.safeParse({ name: 'fee', ...saved }).success).toBe(true);
+
+    // Round-trip: the re-rendered inspector reads the stored key back.
+    expect((controlFor(EDITOR()) as HTMLTextAreaElement).value).toBe('record.amount * 0.2');
+    expect(screen.getByTestId('field-stored-expression-computed')).toHaveTextContent(
+      t('designer.field.storedExpression.computed', 'en-US'),
+    );
+    expect(screen.queryByText('Default value')).not.toBeInTheDocument();
+    const readonlyBox = controlFor(t('designer.field.readonly', 'en-US'));
+    expect(readonlyBox).toBeDisabled();
+    expect(readonlyBox).toBeChecked();
+    // Nothing was written for the read-only reading.
+    expect(patches.at(-1)!.fields.fee).not.toHaveProperty('readonly');
+  });
+
+  it('emptying the editor removes the key outright and the field reads as entered again', () => {
+    const patches: Array<Record<string, any>> = [];
+    render(
+      <StoredHost
+        initialFields={{ amount: { type: 'number' }, fee: { type: 'number', expression: 'record.amount' } }}
+        selected="fee"
+        patches={patches}
+      />,
+    );
+    fireEvent.change(controlFor(EDITOR()), { target: { value: '' } });
+    expect(patches.at(-1)!.fields.fee).not.toHaveProperty('expression');
+    expect(screen.getByTestId('field-stored-expression-hint')).toBeInTheDocument();
+    expect(controlFor(t('designer.field.readonly', 'en-US'))).not.toBeDisabled();
+  });
+
+  it('preserves an expression envelope when editing over it', () => {
+    const { onPatch } = renderField(
+      {
+        amount: { type: 'number' },
+        fee: { type: 'number', expression: { dialect: 'cel', source: 'record.amount', meta: { rationale: 'ai' } } },
+      },
+      'fee',
+    );
+    fireEvent.change(controlFor(EDITOR()), { target: { value: 'record.amount * 2.0' } });
+    expect(onPatch.mock.calls.at(-1)![0].fields.fee.expression).toEqual({
+      dialect: 'cel',
+      source: 'record.amount * 2.0',
+      meta: { rationale: 'ai' },
+    });
+  });
+
+  it('a formula keeps its own editor, says it stores nothing, and gets no stored editor', () => {
+    renderField({ amount: { type: 'number' }, total: { type: 'formula', expression: 'record.amount' } }, 'total');
+    expect(controlFor('Formula (CEL)')).toBeTruthy();
+    expect(screen.getByTestId('field-formula-stored-hint')).toBeInTheDocument();
+    expect(screen.queryByText(EDITOR())).not.toBeInTheDocument();
+  });
+
+  it.each(['summary', 'autonumber'])('a %s field, whose value has its producer, is not offered one', (type) => {
+    renderField({ total: { type } }, 'total');
+    expect(screen.queryByText(EDITOR())).not.toBeInTheDocument();
+  });
+
+  it('an expression a summary already carries is still shown, never invisible', () => {
+    renderField({ total: { type: 'summary', expression: 'record.amount' } }, 'total');
+    expect((controlFor(EDITOR()) as HTMLTextAreaElement).value).toBe('record.amount');
+  });
+
+  it('the remedy: retyping a formula to number keeps its expression in the stored editor', async () => {
+    const patches: Array<Record<string, any>> = [];
+    render(
+      <StoredHost
+        initialFields={{ amount: { type: 'number' }, total: { type: 'formula', expression: 'record.amount * 2.0' } }}
+        selected="total"
+        patches={patches}
+      />,
+    );
+    await userEvent.click(screen.getByRole('combobox', { name: t('designer.field.type', 'en-US') }));
+    const list = await screen.findByRole('listbox', { name: t('designer.field.type', 'en-US') });
+    await userEvent.click(within(list).getByRole('option', { name: t('engine.fieldType.number', 'en-US') }));
+    expect(patches.at(-1)!.fields.total).toMatchObject({ type: 'number', expression: 'record.amount * 2.0' });
+    expect((controlFor(EDITOR()) as HTMLTextAreaElement).value).toBe('record.amount * 2.0');
+    expect(screen.getByTestId('field-stored-expression-computed')).toBeInTheDocument();
+  });
+
+  it('a lint error in the stored editor gates Save, and stops gating once the editor is gone', async () => {
+    __setCelFormulaLoader(() =>
+      Promise.resolve({
+        validateExpression: (_role: string, input: unknown) =>
+          /\*\s*$/.test(String(typeof input === 'string' ? input : (input as { source?: string })?.source ?? ''))
+            ? { ok: false, errors: [{ message: 'Parse error' }], warnings: [] }
+            : { ok: true, errors: [], warnings: [] },
+        introspectScope: () => ({ fields: ['amount'], roots: ['record'], functions: [] }),
+        inferExpressionType: () => 'number' as const,
+      }),
+    );
+    const onBlocking = vi.fn();
+    const fields = { amount: { type: 'number' }, fee: { type: 'number', expression: 'record.amount *' } };
+    const { rerender } = renderField(fields, 'fee', { onBlockingIssuesChange: onBlocking });
+    await waitFor(() => expect(onBlocking).toHaveBeenLastCalledWith(1), { timeout: 3000 });
+    rerender(
+      <ObjectFieldInspector
+        type="object"
+        name="account"
+        draft={{ name: 'account', fields: { ...fields, fee: { type: 'formula', expression: 'record.amount' } } }}
+        selection={{ kind: 'field', id: 'fee' }}
+        onPatch={vi.fn()}
+        onClearSelection={vi.fn()}
+        onSelectionChange={vi.fn()}
+        onBlockingIssuesChange={onBlocking}
+        readOnly={false}
+        locale={'en-US'}
+      />,
+    );
+    // The stored editor is gone, so the error it reported no longer counts:
+    // only the formula editor's clean verdict is left.
+    await waitFor(() => expect(onBlocking).toHaveBeenLastCalledWith(0), { timeout: 3000 });
+  });
+});
