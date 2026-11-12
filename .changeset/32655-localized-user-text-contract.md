@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/lint': patch
 ---
 
 feat(spec, lint): user-facing refusal and advisory text is declared to be in the request's locale, and the security-posture advisories carry a user sentence in every platform locale
 
 Clause-②: yes
-Metadata-protocol: none
+Metadata-protocol: added
 
 The two error envelopes' `userMessage` (`ApiErrorSchema`, `EnhancedApiErrorSchema`) now state their language: the producer composes the text in the request's locale (the locale the request names, else the workspace default, else `en`, each read against the platform locale table), and consumers render it as received. The field's meaning is unchanged: producer-marked user-facing text, verbatim, present only when the producer opted in.
 
