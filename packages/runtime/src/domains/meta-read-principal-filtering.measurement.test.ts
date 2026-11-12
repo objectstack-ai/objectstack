@@ -166,7 +166,13 @@ function boot(options: { security: 'none' | 'per-principal' }) {
         getServiceAsync: async (n: string) => get(n),
     } as any;
 
-    const dispatcher = new HttpDispatcher(kernel);
+    // This boot registers no data engine, so it holds no environment
+    // membership to judge: it is a host that does not enforce the
+    // environment-membership check, and says so. (Left on, a signed-in caller
+    // on the scoped context below is refused as the outage the check answers
+    // when its read cannot be made — that check is not what this file
+    // measures.)
+    const dispatcher = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
 
     /** Drive one request as `principal`, or anonymously when it is undefined. */
     const read = (path: string, principal?: string) => dispatcher.dispatch(
