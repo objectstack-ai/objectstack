@@ -8,7 +8,7 @@ Clause-②: no (narrowing) — `composeStacks` refuses, `422 STACK_COMPOSE_OBJEC
 Metadata-protocol: narrowed
 Skills-docs: none — `skills/**` names `composeStacks` only as an existence pointer (`skills/objectstack-platform/references/bootstrap.md`) and teaches no object-conflict rule; the prescription ships in the refusal text.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes: composeStacks keeps its signature and its refusal envelope, and now judges every object declaration the composed artifact carries in a package body, the copy the boot registers. Which of the two packages keeps the object name, and whether the other extends it instead, is a judgement about the app, so there is nothing for a migration to rewrite. -->
+<!-- adr-0087: registered compose-stacks-package-body-object-conflict-refused -->
 
 **BREAKING** accept-set narrowing in `composeStacks` (`@objectstack/spec`, the root export), under `objectConflict: 'override'` or `'merge'`, for a composition in which one object name sits in a package body and is declared again beside it.
 
