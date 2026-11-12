@@ -7823,7 +7823,9 @@ function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[
       `'override' cannot replace a declaration inside a body and 'merge' cannot fold one, and installing the ` +
       `same packages one by one refuses the second package's claim on the name. Rename one of the objects, ` +
       `contribute to the other package's object through 'objectExtensions' instead of declaring it again, or ` +
-      `compose the packages as flat inputs (each a stack of its own) so the objectConflict strategy can reconcile them.`,
+      `compose the packages as flat inputs (each a stack of its own) under the default manifest with ` +
+      `{ objectConflict: 'override' } or { objectConflict: 'merge' }, which fold the two into one object. ` +
+      `Under { manifest: 'preserve' } each package keeps its own body, so there only the first two remedies apply.`,
     issues,
   );
 }
@@ -8664,8 +8666,8 @@ function collectArtifactCrossReferenceErrors(
  * multiple applications (e.g., CRM + Todo + BI) into a single project.
  *
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
- * **Objects** are merged according to the `objectConflict` strategy. An input
- * that is itself a multi-package artifact keeps its objects in its package
+ * **Objects** are merged according to the `objectConflict` strategy. Any input
+ * carrying `packages[]` (a nested artifact) keeps its objects in its package
  * bodies, which are composed as they are: an object name one of those bodies
  * declares and another input declares too is refused under every strategy,
  * since no strategy can replace or fold a declaration inside a body (#32477).

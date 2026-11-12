@@ -718,6 +718,28 @@ describe('composeStacks - a nested artifact\'s package bodies are read for objec
     ]);
   });
 
+  it('refuses the same holder on both sides: a flat package beside an artifact that carries that package', () => {
+    const err = thrown(() => composeStacks([nested(), p1()]));
+    expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+    expect(err?.issues).toEqual([
+      issueFor('nested-first').replace("'com.example.q' (stack #1)", "'com.example.p1' (stack #1)"),
+      `object 'alpha_p1_item' is defined in multiple stacks: 'com.example.p2' (stack #0) at packages[0].objects['alpha_p1_item'] ` +
+        `(package 'com.example.p1', namespace 'alpha') and 'com.example.p1' (stack #1) at stack.objects[1].`,
+    ]);
+  });
+
+  it("CONTROL — an input whose own top level also carries the body's object is judged by the top-level walk, as before", () => {
+    const loose = defineStack({ objects: [obj('loose_item', 'loose')] } as never);
+    // A manifest-less input keeps the flattened copy, so this artifact carries
+    // `alpha_shared` at its top level AND in p1's body: the top level claims it.
+    const additive = composeStacks([p1(), loose], { manifest: 'preserve' });
+    expect((additive.objects ?? []).map((o) => o.name)).toContain(X);
+    expect((additive.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual(['com.example.p1']);
+    const err = thrown(() => composeStacks([additive, q()]));
+    expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+    expect(err?.issues).toEqual([`object '${X}' is defined in multiple stacks.`]);
+  });
+
   it('CONTROL — the flat pair is judged as before: refused under error with its own issue, reconciled under override', () => {
     const err = thrown(() => composeStacks([p1(), q()]));
     expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
