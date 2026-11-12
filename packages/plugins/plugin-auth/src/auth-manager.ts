@@ -2298,6 +2298,7 @@ export class AuthManager {
       emailLocaleArg: (...a) => this.emailLocaleArg(...a),
       enforceSessionControls: (...a) => this.enforceSessionControls(...a),
       getAppName: (...a) => this.getAppName(...a),
+      getAudience: (...a) => this.getAudience(...a),
       getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       getEmailService: (...a) => this.getEmailService(...a),
@@ -5872,7 +5873,8 @@ export class AuthManager {
     // [#25224 cut 1] The body moved to `auth-manager-actor-guards.ts` (see `ActorGuardHost`).
     const readOrgRolesMap = () => this.orgRolesMap;
     const readOrganizationDeleteStandingJudge = () => this.organizationDeleteStandingJudge;
-    const host: Pick<ActorGuardHost, 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+    const host: Pick<ActorGuardHost, 'getAudience' | 'getDataEngine' | 'orgRolesMap' | 'organizationDeleteStandingJudge' | 'resolveActor'> = {
+      getAudience: (...a) => this.getAudience(...a),
       getDataEngine: (...a) => this.getDataEngine(...a),
       get orgRolesMap() { return readOrgRolesMap(); },
       get organizationDeleteStandingJudge() { return readOrganizationDeleteStandingJudge(); },

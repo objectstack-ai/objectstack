@@ -72,7 +72,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, permissionSetHoldersMeet, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -4359,11 +4359,12 @@ export class SchemaRegistry {
   private noteSecurityCatalogClaim(type: SecurityCatalogType, name: string): void {
     this.restorePoint?.note(`catalogClaim\u0000${type}\u0000${name}`, () => {
       const saved = this.securityCatalogClaims.get(type)?.get(name);
+      const copy = saved ? new Set(saved) : undefined;
       return () => {
         let byName = this.securityCatalogClaims.get(type);
-        if (saved !== undefined) {
+        if (copy !== undefined) {
           if (!byName) this.securityCatalogClaims.set(type, byName = new Map());
-          byName.set(name, saved);
+          byName.set(name, copy);
         } else {
           byName?.delete(name);
         }
@@ -4661,8 +4662,12 @@ export class SchemaRegistry {
    * through a bare `installPackage`. The claim is how the package door
    * remembers every name a package declared, so a second package declaring one
    * of them is refused like any other second holder.
+   *
+   * [ADR-0150 D2/D9, #31698] A SET of claimants: two packages of two
+   * namespaces may each hold a permission set of one name
+   * ({@link permissionSetHoldersMeet}), and both are remembered.
    */
-  private securityCatalogClaims = new Map<SecurityCatalogType, Map<string, string>>();
+  private securityCatalogClaims = new Map<SecurityCatalogType, Map<string, Set<string>>>();
 
   /**
    * Every holder of `(type, name)` other than `exceptPackageId` — the ONE
@@ -4676,16 +4681,24 @@ export class SchemaRegistry {
    * composite `<packageId>:<name>` slot; the package claims. A package that
    * holds the name more than one way is one holder. A disabled package is still
    * installed, and still holds its names.
+   *
+   * [ADR-0150 D2/D9, #31698] For a permission set, a package holder counts only
+   * when it meets the incoming package under {@link permissionSetHoldersMeet}
+   * (`incomingNamespace`, the namespace the incoming package declares): two
+   * packages of two namespaces each hold their own set of the name. Positions
+   * and capabilities keep one holder per name.
    */
   private securityCatalogHoldersOtherThan(
     type: SecurityCatalogType,
     name: string,
     exceptPackageId: string | undefined,
-    opts: { builtIns: boolean; environment: boolean },
+    opts: { builtIns: boolean; environment: boolean; incomingNamespace: string | undefined },
   ): SecurityCatalogHolder[] {
     const found = new Map<string, SecurityCatalogHolder>();
     const add = (holder: SecurityCatalogHolder) => {
       if (holder.kind === 'package' && holder.packageId === exceptPackageId) return;
+      if (holder.kind === 'package' && type === 'permission'
+        && !permissionSetHoldersMeet(opts.incomingNamespace, this.bareNameHolderNamespace(holder.packageId), name)) return;
       found.set(securityCatalogHolderKey(holder), holder);
     };
     if (opts.builtIns && BUILT_IN_SECURITY_CATALOG_NAMES[type].has(name)) add({ kind: 'built-in' });
@@ -4702,8 +4715,7 @@ export class SchemaRegistry {
         });
       }
     }
-    const claimant = this.securityCatalogClaims.get(type)?.get(name);
-    if (claimant !== undefined) add({ kind: 'package', packageId: claimant });
+    for (const claimant of this.securityCatalogClaims.get(type)?.get(name) ?? []) add({ kind: 'package', packageId: claimant });
     return [...found.values()];
   }
 
@@ -4725,13 +4737,14 @@ export class SchemaRegistry {
     if (selfId === undefined) return;
     const conflicts: SecurityCatalogNameConflict[] = [];
     const seen = new Set<string>();
+    const incomingNamespace = typeof manifest.namespace === 'string' && manifest.namespace !== '' ? manifest.namespace : undefined;
     for (const { type, name } of declaredSecurityCatalogNames(manifest)) {
       // One package declaring one name twice is one holder (an in-package
       // repeat is the package's own business, and not this rule's).
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const existingHolder of this.securityCatalogHoldersOtherThan(type, name, selfId, { builtIns: true, environment: true })) {
+      for (const existingHolder of this.securityCatalogHoldersOtherThan(type, name, selfId, { builtIns: true, environment: true, incomingNamespace })) {
         conflicts.push({ catalogType: type, name, incomingPackageId: selfId, existingHolder });
       }
     }
@@ -4755,14 +4768,19 @@ export class SchemaRegistry {
         this.securityCatalogClaims.set(type, byName);
       }
       this.noteSecurityCatalogClaim(type, name);
-      byName.set(name, packageId);
+      let claimants = byName.get(name);
+      if (!claimants) byName.set(name, claimants = new Set());
+      claimants.add(packageId);
     }
   }
 
   /** Drop every claim `packageId` holds. */
   private forgetSecurityCatalogClaims(packageId: string): void {
     for (const byName of this.securityCatalogClaims.values()) {
-      for (const [name, claimant] of byName) if (claimant === packageId) byName.delete(name);
+      for (const [name, claimants] of byName) {
+        claimants.delete(packageId);
+        if (claimants.size === 0) byName.delete(name);
+      }
     }
   }
 
@@ -4778,8 +4796,8 @@ export class SchemaRegistry {
    */
   securityCatalogNamesHeldBy(packageId: string, type: SecurityCatalogType): string[] {
     const names = new Set<string>();
-    for (const [name, claimant] of this.securityCatalogClaims.get(type) ?? []) {
-      if (claimant === packageId) names.add(name);
+    for (const [name, claimants] of this.securityCatalogClaims.get(type) ?? []) {
+      if (claimants.has(packageId)) names.add(name);
     }
     const prefix = `${packageId}:`;
     for (const [key, item] of this.metadata.get(type) ?? []) {
@@ -4890,8 +4908,7 @@ export class SchemaRegistry {
       const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
       holders.add(typeof stamped === 'string' && stamped !== '' ? stamped : key.slice(0, -suffix.length));
     }
-    const claimant = this.securityCatalogClaims.get(type)?.get(name);
-    if (claimant !== undefined) holders.add(claimant);
+    for (const claimant of this.securityCatalogClaims.get(type)?.get(name) ?? []) holders.add(claimant);
     return [...holders];
   }
 
@@ -8140,6 +8157,7 @@ export class SchemaRegistry {
       const holders = this.securityCatalogHoldersOtherThan(type, baseName, packageId, {
         builtIns: false,
         environment: !BUILT_IN_SECURITY_CATALOG_NAMES[type].has(baseName),
+        incomingNamespace: this.bareNameHolderNamespace(packageId),
       });
       if (holders.length > 0) {
         throw new SecurityCatalogNameConflictError(

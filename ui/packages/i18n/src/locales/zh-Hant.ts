@@ -345,6 +345,10 @@ const zhHant = {
     registryRef: {
       loadFailed: '列表載入失敗。仍可直接輸入名稱。',
       notFound: '{{name}}（未找到）',
+      holderPackage: '{{item}} · 包 {{package}}',
+      holderEnvironment: '{{item}} · 本環境定義',
+      holderUnresolved: '{{name}}（多個包提供此名稱，未指明包）',
+      holderNeedsPackage: '此表單只能按名稱指定權限集。多個包提供同名權限集時，這裡只能選擇本環境定義的那一個。',
     },
     preferenceOption: {
       allTopics: '全部主題（{{value}}）',
@@ -2049,6 +2053,7 @@ const zhHant = {
       dismiss: '隱藏清單',
       showDone: '顯示已完成的項（{{done}}）',
       hideDone: '收起已完成的項',
+      optional: '可選',
       set: '設定',
       change: '修改',
       view: '檢視',

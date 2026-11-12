@@ -468,15 +468,21 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return () => controller.abort();
   }, [activation, type, refreshKey]);
 
-  const recordSwitched = React.useCallback((itemName: string, now: boolean, holder?: PermissionSetHolder) => {
-    setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, itemName, now, holder)));
+  const recordSwitched = React.useCallback((itemName: string, now: boolean, holding?: PermissionSetHolding) => {
+    setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, itemName, now, holding)));
   }, []);
 
   // The item's label for the confirm and the toast, read through a ref so the
-  // callbacks below do not re-key on every list load.
+  // callbacks below do not re-key on every list load. objectstack#32774 — the
+  // label of the holder switched, where the page lists more than one holder of
+  // the name: ⛔ never the first row of the name, which can be another holder's.
   const itemsRef = React.useRef<ItemRow[]>([]);
-  const labelOf = React.useCallback((itemName: string): string => {
-    const row = itemsRef.current.find((r) => String(r.item.name ?? '') === itemName);
+  const labelOf = React.useCallback((itemName: string, holding?: PermissionSetHolding): string => {
+    const row = itemsRef.current.find(
+      (r) =>
+        String(r.item.name ?? '') === itemName &&
+        (!holding || holding.holders.length <= 1 || servedHolderOf(r.item) === holding.packageId),
+    );
     const label = row?.item.label;
     return typeof label === 'string' && label ? label : itemName;
   }, []);
@@ -487,18 +493,18 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       setSwitchError(null);
       try {
         const now = await writeCatalogActivation(type, itemName, !enabled, holdingPackage(holding));
-        recordSwitched(itemName, now, holding && holding.holders.length > 1 ? holding.packageId : undefined);
+        recordSwitched(itemName, now, holding);
         // objectui#13338 — a toast confirms the change either way.
         if (countsCatalogHolders(type)) {
           toast.success(
             tFormat(now ? 'engine.catalog.active.switchedOn' : 'engine.catalog.active.switchedOff', locale, {
-              name: labelOf(itemName),
+              name: labelOf(itemName, holding),
             }),
           );
         }
       } catch (err: any) {
         if (err instanceof PermissionSetHolderConflict) {
-          setPendingPick({ name: itemName, label: labelOf(itemName), conflict: err, enabled });
+          setPendingPick({ name: itemName, label: labelOf(itemName, holding), conflict: err, enabled });
         } else {
           setSwitchError(err?.message ?? String(err));
         }
@@ -530,7 +536,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         return;
       }
       const read = ++holderReadRef.current;
-      setPendingOff({ name: itemName, label: labelOf(itemName), holders: null, holding });
+      setPendingOff({ name: itemName, label: labelOf(itemName, holding), holders: null, holding });
       readCatalogHolderCount(adapter, metadataStoreRef.current, type, itemName, holding)
         .then((holders) => {
           if (holderReadRef.current !== read) return;
@@ -1027,9 +1033,12 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                   // workspace suffix for runtime/overlay-only rows (no real
                   // package, or the `sys_metadata` rehydration sentinel).
                   const rowPkg = (row.item as any)._packageId as string | undefined;
-                  // The environment scope keeps its own scope instead: a
-                  // catalog name has ONE holder per deployment (ADR-0131), so
-                  // the editor resolves it by name alone.
+                  // The environment scope keeps its own scope instead: the
+                  // editor reads the name as a caller with no package does
+                  // (ADR-0150 D5, `holdingOfRead`) — the name's one holder, or
+                  // the environment's own set where it holds the name; a name
+                  // two packages hold is refused by name alone, and the editor
+                  // then draws no holder's sections (objectstack#32774).
                   const rowEditSuffix = envScope
                     ? pkgSuffix
                     : rowPkg && rowPkg !== 'sys_metadata'

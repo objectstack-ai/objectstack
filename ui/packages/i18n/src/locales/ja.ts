@@ -335,6 +335,10 @@ const ja = {
     registryRef: {
       loadFailed: "一覧を読み込めませんでした。名前を直接入力できます。",
       notFound: "{{name}}（見つかりません）",
+      holderPackage: "{{item}} · パッケージ {{package}}",
+      holderEnvironment: "{{item}} · この環境で定義",
+      holderUnresolved: "{{name}}（複数のパッケージが提供しており、パッケージが指定されていません）",
+      holderNeedsPackage: "このフォームでは権限セットを名前でのみ指定できます。同じ名前の権限セットを複数のパッケージが提供している場合、ここで選べるのはこの環境で定義されたものだけです。",
     },
     preferenceOption: {
       allTopics: "すべてのトピック（{{value}}）",
@@ -2295,6 +2299,7 @@ const ja = {
       dismiss: "チェックリストを非表示",
       showDone: "完了した項目を表示（{{done}}）",
       hideDone: "完了した項目を折りたたむ",
+      optional: "任意",
       set: "設定",
       change: "変更",
       view: "表示",
