@@ -65,9 +65,14 @@ function makeAdapter(docs: Record<string, Record<string, unknown>>, itemCalls: s
         // The list path serves nothing: every test here starts from a COLD
         // by-name cache, which is exactly the state the bug needed.
         getItems: (type: string) => Promise.resolve({ type, items: [] }),
-        getItem: (type: string, name: string) => {
-          itemCalls.push(`${type}/${name}`);
-          const doc = docs[`${type}/${name}`];
+        // objectstack#32367 — a read naming its package (`?package=`) is
+        // recorded and served under that address; a doc that is an Error is
+        // the door's refusal, thrown as the client throws it.
+        getItem: (type: string, name: string, options?: { packageId?: string }) => {
+          const address = `${type}/${name}${options?.packageId ? `?package=${options.packageId}` : ''}`;
+          itemCalls.push(address);
+          const doc = docs[address];
+          if (doc instanceof Error) return Promise.reject(doc);
           // Fresh clone per call — the provider normalizes IN PLACE, and a
           // shared fixture object would let one test's stamp leak into the next
           // assertion and turn a red into a green.
@@ -192,5 +197,60 @@ describe('MetadataProvider.getItem canonicalizes object schemas (objectui#7650)'
     // have stuck to the cached object, not to a throwaway copy).
     expect(itemCalls.filter((c) => c === 'object/account')).toHaveLength(1);
     expect(second.fields.owner.reference).toBe('user');
+  });
+});
+
+/**
+ * objectstack#32367 — [ADR-0150 D5] `getItem` with `{ packageId }` reads the
+ * exact qualifier (`?package=`): the item that package holds, where the bare
+ * read of a name two enabled packages hold is refused `409 RESOURCE_CONFLICT`.
+ * The packaged answer is never the bare name's: `byName` holds the bare read,
+ * so a later bare read asks again and gets the bare answer.
+ */
+describe('MetadataProvider.getItem with the holding package (ADR-0150 D5)', () => {
+  const conflict = () =>
+    Object.assign(new Error("Action 'approve' is held by two packages"), {
+      code: 'RESOURCE_CONFLICT',
+      status: 409,
+      httpStatus: 409,
+    });
+  const docs = (): Record<string, Record<string, unknown>> => ({
+    'action/approve': conflict() as unknown as Record<string, unknown>,
+    'action/approve?package=com.acme.alpha': { name: 'approve', target: '/alpha', _packageId: 'com.acme.alpha' },
+    'action/approve?package=com.acme.beta': { name: 'approve', target: '/beta', _packageId: 'com.acme.beta' },
+  });
+
+  it("reads each package's own item where the bare name is refused", async () => {
+    const itemCalls: string[] = [];
+    const ctx = await withProvider(docs(), itemCalls);
+
+    const alpha = await ctx.getItem('action', 'approve', { packageId: 'com.acme.alpha' });
+    const beta = await ctx.getItem('action', 'approve', { packageId: 'com.acme.beta' });
+
+    expect(alpha).toMatchObject({ target: '/alpha', _packageId: 'com.acme.alpha' });
+    expect(beta).toMatchObject({ target: '/beta', _packageId: 'com.acme.beta' });
+    expect(itemCalls).toEqual(['action/approve?package=com.acme.alpha', 'action/approve?package=com.acme.beta']);
+  });
+
+  it("a package's answer never answers the bare read", async () => {
+    const itemCalls: string[] = [];
+    const ctx = await withProvider(docs(), itemCalls);
+
+    await ctx.getItem('action', 'approve', { packageId: 'com.acme.alpha' });
+    const bare = await ctx.getItem('action', 'approve');
+
+    expect(bare).toBeNull();
+    expect(itemCalls).toEqual(['action/approve?package=com.acme.alpha', 'action/approve']);
+  });
+
+  it('CONTROL: a read with no package is the bare read, cached as before', async () => {
+    const itemCalls: string[] = [];
+    const ctx = await withProvider({ 'action/export_data': { name: 'export_data', target: '/exports' } }, itemCalls);
+
+    await ctx.getItem('action', 'export_data');
+    const second = await ctx.getItem('action', 'export_data');
+
+    expect(second).toMatchObject({ target: '/exports' });
+    expect(itemCalls).toEqual(['action/export_data']);
   });
 });

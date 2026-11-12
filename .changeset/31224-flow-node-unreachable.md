@@ -8,7 +8,7 @@ Clause-②: yes (narrowing) — `os validate`, `os build`, `os lint` and the flo
 Metadata-protocol: narrowed
 Skills-docs: none — `skills/**` and `content/docs/**` teach only wired top-level flows; the edgeless examples in `content/docs/automation/flows.mdx` are region bodies, which this rule does not judge. The reasoning ships as the `os explain flow-node-unreachable` entry.
 
-<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed or renamed: FlowSchema keeps its shape and meaning, and lint now refuses a graph whose node no edge from the start node reaches. Such a node never ran (a run starts at the start node and follows edges), so there is no rewrite that keeps what the author meant: the author wires the node in or deletes it, and the finding says which node. -->
+<!-- adr-0087: registered flow-node-unreachable-refused -->
 
 **BREAKING** accept-set narrowing in `os validate` / `os build` / `os lint` and at the flow publish doors (`PUT /api/v1/meta/flow/NAME` live save, the per-item and package publish; Studio, REST and MCP authors), through the gating `lintFlowPatterns` rule.
 

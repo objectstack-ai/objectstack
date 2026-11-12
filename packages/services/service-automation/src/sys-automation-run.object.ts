@@ -154,9 +154,9 @@ export const SysAutomationRun = ObjectSchema.create({
     // [ADR-0150 D8 row R8] The package that holds the flow `flow_name` names,
     // beside the name (ADR-0126 §4: two facts, two columns). A paused run
     // resumes by it once the flow's reader moves onto it. Backfilled at boot
-    // on paused rows from the flow's one package holder
-    // (`stored-reference-package-backfill.ts`); terminal history stays as
-    // written. Empty for an environment-authored flow and for a name no
+    // on every row naming none, terminal history included, from the flow's
+    // one package holder (`stored-reference-package-backfill.ts`).
+    // Empty for an environment-authored flow and for a name no
     // single package holds. Nothing reads it yet and no writer stamps it.
     // Width: the package-id class (`sys_metadata.package_id`).
     flow_package: Field.text({

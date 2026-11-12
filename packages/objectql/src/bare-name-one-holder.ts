@@ -23,29 +23,33 @@
  * resolve the name, so with two holders every caller is served the same one —
  * measured on a booted showcase with two packages sharing one bare name:
  *
- *  - `picklist` — a field's `picklist: NAME` resolves the FIRST-registered
- *    package's list for every object, so the second package's object is served
- *    the other package's options and refuses its own values;
- *  - `mapping` — an import's `mappingName` resolves the first-registered
- *    package's mapping, and the other package's import answers
+ *  - `picklist` — a field's `picklist: NAME` resolved the FIRST-registered
+ *    package's list for every object, so the second package's object was
+ *    served the other package's options and refused its own values;
+ *  - `mapping` — an import's `mappingName` resolved the first-registered
+ *    package's mapping, and the other package's import answered
  *    `MAPPING_TARGET_MISMATCH`;
- *  - `dataset` — a dashboard's `datasetName` query runs the first-registered
+ *  - `dataset` — a dashboard's `datasetName` query ran the first-registered
  *    package's dataset;
- *  - `api` — the endpoint matcher keeps ONE api per name, the last-registered,
- *    so the other package's declared path answers `404`;
+ *  - `api` — the endpoint matcher kept ONE api per name, the last-registered,
+ *    so the other package's declared path answered `404` (the picklist
+ *    family, these four and `function`, since narrowed to the namespace:
+ *    "The narrowing");
  *  - `action`, object-less only — `/actions/global/NAME` ran the
  *    last-registered package's handler while `/meta/action/NAME` served the
  *    first-registered package's declaration, so the button a client drew and
  *    the code that ran came from two packages (since narrowed to the
  *    namespace: "The narrowing");
- *  - `function` — the engine's function registry keeps one function per name,
- *    the last-registered, and a flow `script` node's `function` and an
- *    action's `target` resolve it with no package;
+ *  - `function` — the engine's function registry kept one function per name,
+ *    the last-registered, and a flow `script` node's `function` resolved it
+ *    with no package (an action's `target` names a handler key, never a
+ *    registered function);
  *  - `flow` — the automation engine keys its flow map by the bare name and
  *    arms ONE flow per name, the lexicographically-first package's, whichever
  *    registered first (it warns, naming both); `/meta/flow/NAME` serves the
  *    FIRST-registered package's declaration, so the body the designer opens
- *    and the body that runs can come from two packages;
+ *    and the body that runs can come from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `webhook` — the dispatcher's declared-webhook reader keeps the
  *    FIRST-registered package's declaration per name and never subscribes
  *    the other, and `/meta/webhook/NAME` serves the same one;
@@ -148,7 +152,13 @@
  * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
  * `run_action` with `namespace`) reaches each. The same 409 answers two
  * packages' same-named action bound to ONE object (epic ruling record
- * 6729825528, letter A), which this rule never covered.
+ * 6729825528, letter A), which this rule never covered. `flow` followed
+ * (#31696): the automation engine holds and arms one flow per
+ * `(package, name)` slot and refuses a bare name two packages hold, naming
+ * both; `/meta/flow/NAME` reads through `readPackageScopedItem`; the
+ * namespace-qualified `/automation/NS/NAME` doors serve each holder's own
+ * slot; and a flow action or a flow endpoint runs the flow its own package
+ * names (D3).
  *
  * `email_template` followed (#31699): `/meta/email_template/NAME` reads
  * through `readPackageScopedItem` member by member, and a send resolves the
@@ -157,6 +167,26 @@
  * refusal names every holder). A name two packages hold is read at the
  * resolved holder's own address, so the bundle is that holder's alone
  * (plugin-email's template loader).
+ *
+ * The picklist family followed (#31700): `picklist`, `mapping`, `dataset`,
+ * `api` and the engine's `function`. Each by-name reader resolves by
+ * `(package, name)`: a field's `picklist:` from the package that wrote the
+ * reference (E6) and the bare `/meta/picklist/NAME` (#32070); an import's
+ * `mappingName` and a connector pull (#32071); the dataset query door, the
+ * dataset AI tools and a chart's `?callerPackage=` (#32072, #32310); the
+ * `api` store and its qualified read (#32069), whose endpoint matcher keys
+ * routes by METHOD + path, a path the publish gate puts under the declaring
+ * namespace (`/api/v1/apps/NS/…`, ADR-0121 D1), so two namespaces' same-named
+ * APIs never claim one route; a flow `script` node's function, from the
+ * calling flow's package (#32073). A bare read of a name two packages hold
+ * answers `409 RESOURCE_CONFLICT` naming both — the engine's own bare function
+ * read (`resolveFunction` / `resolveFunctionEntry`) included (epic seat ruling
+ * R2-C, 6812862622) — and the metadata service's
+ * in-memory store keeps a slot per `(package, name)` for the three metadata
+ * types besides `api` (`PACKAGE_SLOTTED_STORE_TYPES`). An owner-less function
+ * a plugin or the host registers is the platform's holder: never judged at
+ * the bind, and refused beside a package holder at the read (ADR-0150 D2,
+ * epic seat ruling 6729484996).
  *
  * Two holdings still meet under a narrowed type, whatever the namespaces:
  *
@@ -179,6 +209,9 @@
  *    ("The narrowing").
  *  - `picklistExtensions` — an extension adds values to another package's list
  *    by design; its own refusal (a repeated value) is the picklist module's.
+ *    Its target resolves caller-less (epic ruling X on #31678), so once two
+ *    namespaces hold the name, an extension of it adds to neither list and
+ *    is refused naming both (the registry's picklist audit), never a pick.
  *  - An action bound to an object, and a hook's `handler` (above).
  *  - A direct `ObjectQL.registerFunction` call: the imperative registration a
  *    host's own code makes, outside any package's bind.
