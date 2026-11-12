@@ -132,10 +132,10 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
- * `skill` first (#31701), then the object-less `action` (#31697), then the
- * picklist family (#31700): `picklist`, `mapping` and `dataset`, the `api`
- * and the engine's `function` registry. A type not listed here keeps one
- * package holder per deployment.
+ * `skill` first (#31701), then the object-less `action` (#31697), then
+ * `email_template` (#31699), then the picklist family (#31700): `picklist`,
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
+ * type not listed here keeps one package holder per deployment.
  *
  * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
  * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
@@ -153,6 +153,7 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'agent',
   'skill',
   'action',
+  'email_template',
   // the picklist family (#31700)
   'picklist',
   'mapping',
@@ -282,13 +283,34 @@ export function isPackageScopedResolvableType(type: unknown): type is PackageSco
 /**
  * Names the PLATFORM requests by spelling, per type (ADR-0150 D3 Exceptions):
  * they resolve environment-wide whatever the caller's package, and keep one
- * holder. The same list as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
- * keyed by registry type instead of stack collection: the public form doors'
- * submit context requests the permission set `guest_portal` by name
- * (`packages/rest/src/form-routes.ts`).
+ * holder.
+ *
+ *  - `permission` — the public form doors' submit context requests the
+ *    permission set `guest_portal` by name (`packages/rest/src/form-routes.ts`);
+ *    the same entry as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
+ *    keyed by registry type instead of stack collection.
+ *  - `email_template` — the auth mails the platform sends by name with no
+ *    package (plugin-auth through `IEmailService.sendTemplate`): the
+ *    `auth.*` templates the email service code-declares as its overridable
+ *    baseline (`BUILTIN_AUTH_TEMPLATES`, plugin-email). An app overrides one by
+ *    declaring its name (ADR-0131 D10), and a deployment keeps one overriding
+ *    package per name even once the type's one-holder rule narrows to the
+ *    namespace (ADR-0150 D9, #31699): two would leave every password reset
+ *    refused as ambiguous. The CLI's prefix rule judges no email template, so
+ *    its list carries none.
  */
 export const PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE: Readonly<Partial<Record<PackageScopedType, readonly string[]>>> = Object.freeze({
   permission: Object.freeze(['guest_portal']),
+  email_template: Object.freeze([
+    'auth.password_reset',
+    'auth.verify_email',
+    'auth.magic_link',
+    'auth.invitation',
+    'auth.account_invitation',
+    'auth.two_factor_otp',
+    'auth.email_change_notice',
+    'auth.existing_account_sign_up',
+  ]),
 });
 
 /** Is `(type, name)` one the platform requests by spelling? */

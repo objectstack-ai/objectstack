@@ -25,7 +25,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
-import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from './package-slotted-store.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
@@ -958,6 +958,11 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
  */
 describe('per-package loader storage for every type stored per package (ADR-0150 D3/D4, #32246)', () => {
   const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+  // [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`)
+  // keeps one entry per `(package, name, member)` in every unscoped read, so
+  // the one-item-per-name answers below are the unbundled types' only.
+  const UNBUNDLED = SLOTTED.filter((type) => !isBundledStoreType(type));
+  const BUNDLED = SLOTTED.filter(isBundledStoreType);
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const nameOf = (type: string) => `shared_${type}`;
@@ -1035,7 +1040,9 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     await loader.save(type, nameOf(type), doorItem(type, B));
     await loader.save(type, nameOf(type), { ...doorItem(type, A), label: 'alpha again' });
     expect(rows(type).map((row) => [row.package_id, row.version])).toEqual([[A, 3], [B, 2]]);
-    expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label)).toEqual(['alpha again']);
+    // A bundled type keeps each package's member (#31699 R3-B); every other type, the row saved last.
+    expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label).sort())
+      .toEqual(isBundledStoreType(type) ? ['alpha again', label(type, B)] : ['alpha again']);
   });
 
   describe.each([
@@ -1081,7 +1088,17 @@ describe('per-package loader storage for every type stored per package (ADR-0150
    * router's third rung and objectql's action audit call — still answer one
    * item per name, the one saved last, as when each loader kept one entry.
    */
-  it.each(SLOTTED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+  it.each(BUNDLED)('%s: the loaders\' unscoped reads keep each package\'s member; the by-name read still answers the one saved last (#31699 R3-B)', async (type) => {
+    const ctx = await boot(type);
+    for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
+      expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
+      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label]).sort())
+        .toEqual([[nameOf(type), label(type, A)], [nameOf(type), label(type, B)]]);
+    }
+  });
+
+  it.each(UNBUNDLED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));

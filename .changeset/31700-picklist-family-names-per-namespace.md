@@ -36,7 +36,7 @@ The bare-name one-holder rule (`bare-name-one-holder.ts`) narrows for `picklist`
 | A publish's runtime probe of a dashboard widget's dataset | read by its bare name | resolved FROM the publishing package (`?callerPackage=`, #32310) and read at the holder's address; a refusal's fix now names that package. A dataset held only outside the publishing package's declared closure goes FROM probed TO a `widget_not_probed` warning whose fix is the dependency |
 | Two namespaces' APIs of one name | (unreachable) | both indexed, each on its own path (the publish gate puts every path under `/api/v1/apps/<namespace>/`); no duplicate-claim error |
 
-**The store's moves for `picklist`, `mapping` and `dataset`** (`PACKAGE_SLOTTED_STORE_TYPES`; the rule `api`, `agent`, `skill`, `action` and `permission` already follow):
+**The store's moves for `picklist`, `mapping` and `dataset`** (`PACKAGE_SLOTTED_STORE_TYPES`; the rule `api`, `agent`, `skill`, `action`, `email_template` and `permission` already follow):
 
 | # | What | FROM | TO | Clause-② arm |
 | --- | --- | --- | --- | --- |
@@ -51,7 +51,7 @@ The fix for every refusal is the address that names the holder: `?package=<id>`,
 
 The unresolved-picklist refusal (`describeUnresolvedPicklistReferences`) keeps "that no loaded package declares" when no line carries a refusal; a refused name now reads "A picklist name resolves to no one list: …", with a remedy for both kinds (declare the list, or make exactly one holder reachable).
 
-Every other covered type (flow, webhook, connector, email template, tool) keeps one package holder per deployment.
+Every other covered type (flow, webhook, connector, tool) keeps one package holder per deployment; `email_template` narrowed in #31699.
 
 `os migrate stored-references` no longer lists two namespaces' holders of a picklist, mapping, dataset, API or function name among the sealed clashes: they are not a clash.
 

@@ -50,9 +50,11 @@
  * ## Which types
  *
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
- * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`: `agent` and
- * `skill` (#31701) first, every one of them since. Two packages of two namespaces may each install such a
- * name, so a store keyed by bare name would keep whichever registered last:
+ * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent`,
+ * `skill` (#31701), `action` (#31697, below), `email_template` (#31699) and
+ * the picklist family's `picklist`, `mapping` and `dataset` (#31700). Two
+ * packages of two namespaces may each install such a name, so a store keyed
+ * by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
  * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
@@ -100,16 +102,19 @@ import {
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
- * then every namespace-scoped type (#32151, #31697; see "Which types" above),
- * then `permission` (#32162), then the picklist family's `picklist`,
- * `mapping` and `dataset` (#31700).
+ * then every namespace-scoped type (#32151, #31697; see "Which types" above):
+ * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
+ * ADR-0150 child B), which joins in the same change that adds it to
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then the
+ * picklist family's `picklist`, `mapping` and `dataset` (#31700).
  */
 export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
-  'api', 'agent', 'skill', 'action', 'permission', 'picklist', 'mapping', 'dataset',
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'picklist', 'mapping', 'dataset',
 ]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
@@ -267,6 +272,48 @@ export function storedItemPackageId(item: unknown): string | undefined {
     if (typeof candidate === 'string' && candidate !== '' && candidate !== OVERLAY_SENTINEL) return candidate;
   }
   return undefined;
+}
+
+/**
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type — one that declares an
+ * item-key discriminator (`ITEM_KEY_DISCRIMINATORS`, `@objectstack/metadata-core`:
+ * `email_template`'s `locale`) — holds several members under one
+ * `(package, name)`, each its own stored row. A loader's unscoped read of
+ * such a type keeps one entry per `(package, name, member)`, never one per
+ * name or per slot, so no member of a bundle is dropped.
+ */
+export function isBundledStoreType(type: string): boolean {
+  return ITEM_KEY_DISCRIMINATORS[type] !== undefined;
+}
+
+/**
+ * The bundle member a stored item of `type` holds, spelled as the store's
+ * `bundle_member` column spells it (`overlayMemberValue`, metadata-protocol's
+ * `migrations/overlay-index.ts`): `null` for the canonical member, the trimmed
+ * value for any other, `undefined` for a type that declares no discriminator.
+ * A non-empty `column` (the row's `bundle_member`) is read first; else the
+ * body declares it (`itemDiscriminator`), a body that declares none being the
+ * canonical member.
+ */
+export function storedBundleMemberOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (!disc) return undefined;
+  const declared = typeof column === 'string' && column.trim() !== ''
+    ? column.trim()
+    : itemDiscriminator(type, peelStoredEnvelope(item).body) ?? '';
+  return declared === '' || declared === disc.canonical ? null : declared;
+}
+
+/**
+ * [#31699 R3-B] The identity an unscoped plural read keeps one entry per, for
+ * a bundled type stored per `(package, name)`: `(package, name, member)`, the
+ * package being `packageId` else the one the item carries
+ * ({@link storedItemPackageId}). `undefined` for every other type, whose
+ * unscoped reads keep their own identity.
+ */
+export function bundleEntryKey(type: string, name: string, data: unknown, packageId?: string): string | undefined {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return undefined;
+  return JSON.stringify([packageId ?? storedItemPackageId(data) ?? null, name, storedBundleMemberOf(type, data) ?? null]);
 }
 
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */

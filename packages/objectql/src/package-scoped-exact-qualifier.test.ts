@@ -215,6 +215,74 @@ describe('CONTROL — what the exact qualifier keeps serving', () => {
   });
 });
 
+describe('[#31699] a bundled type (email_template): the exact qualifier reads a member addition and a pair\'s member as the package\'s own', () => {
+  const D = 'com.acme.alphaaddon';
+  /** One member of `packageId`'s bundle `welcome` (its composite slot). */
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const read = (packageId: string, member?: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, ...(member !== undefined ? { member } : {}),
+  } as never);
+
+  beforeEach(() => {
+    registry.installPackage({ ...(manifest(D) as object), dependencies: { [A]: '^1.0.0' } } as never, 'code');
+  });
+
+  it('a dependent\'s added member (a locale its base does not ship): naming the dependent is admitted, with or without a member', async () => {
+    tpl('en-US', A);
+    tpl('fr-FR', D);
+    // R2: the addition holds no name for a bare read, so a caller with no package reads alpha's.
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
+    expect(labelOf(await read(D, 'fr-FR'))).toBe('alphaaddon fr-FR');
+    // The read that names no member (the layered door's disabled-package probe
+    // asks it) is the dependent's own holding, never `not-held-by-qualifier`.
+    expect(labelOf(await read(D))).toBe('alphaaddon fr-FR');
+  });
+
+  it.each(['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'])(
+    'CONTROL — %s (no bundle member): the holders the qualifier asks with itself as caller are the holders it asked before',
+    (type) => {
+      ship(type, 'home', A);
+      ship(type, 'home', B);
+      expect(registry.packageScopedHoldersOf(type, 'home', C)).toEqual(registry.packageScopedHoldersOf(type, 'home'));
+      expect(registry.packageScopedHoldersOf(type, 'home', C)).toEqual([A, B]);
+    },
+  );
+
+  it('CONTROL — the addition is still the dependent\'s only: naming the base does not serve it, naming a third package is refused naming the base', async () => {
+    tpl('en-US', A);
+    tpl('fr-FR', D);
+    expect((await read(A, 'fr-FR'))?.item).toBeUndefined();
+    const err = await refusalOf(() => read(C, 'fr-FR'));
+    expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+  });
+
+  it('the pair\'s added member is served on its base\'s address, stamped with the pair (#28802 ruling A), when the pair is installed', async () => {
+    registry.installPackage(manifest(PAIR_A), 'code');
+    tpl('en-US', A);
+    rows.push({
+      type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+    const answer = await read(A, 'fr-FR');
+    expect(labelOf(answer)).toBe('pair fr-FR');
+    expect((answer as { item?: { _packageId?: string } }).item?._packageId).toBe(PAIR_A);
+    // CONTROL: the base's own member.
+    expect(labelOf(await read(A, 'en-US'))).toBe('alpha en-US');
+  });
+
+  it('CONTROL — another package\'s stored member is never served on the base\'s address', async () => {
+    tpl('en-US', A);
+    rows.push({
+      type: 'email_template', name: 'welcome', state: 'active', package_id: B, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'beta fr-FR', locale: 'fr-FR', subject: 'beta fr-FR', bodyHtml: '<p>b</p>' }),
+    });
+    expect((await read(A, 'fr-FR'))?.item).toBeUndefined();
+  });
+});
+
 /**
  * ADR-0150 D3/D5, epic #31527 (#32076): on an engine whose registry has no
  * package-scoped resolver slice, a by-name read of a type ADR-0150 addresses by
@@ -553,8 +621,8 @@ describe('[#32076] a pair row two holders could own is refused on both exact rea
     registry.installPackage(manifest(PAIR), 'code');
   });
 
-  it('the premise: the registry reads an email template through `getItem`, so the 409 below is the pair line\'s, under (c)', () => {
-    expect(registry.readsByPackage('email_template')).toBe(false);
+  it('the premise: since #31699 the registry reads an email template by package; the 409 below is still the pair line\'s (one owner check, `pairRowOnAddress`)', () => {
+    expect(registry.readsByPackage('email_template')).toBe(true);
   });
 
   it('two holders share the pair: both exact reads of the pair\'s member refuse 409, naming both (BASE: each served the pair\'s)', async () => {
@@ -672,6 +740,221 @@ describe('the exact read serves the holder\'s own body under the holder\'s own s
       expect([item?.label, item?._packageId], `${type} at ${packageId}`).toEqual([label, packageId]);
     }
     expect(metadata.get.mock.calls.length + metadata.getDiagnosed.mock.calls.length, 'the service layer was read').toBeGreaterThan(0);
+  });
+});
+
+/**
+ * [#31699 F2, the epic's ruling on the contract review] Two packages of one
+ * App share the App's customization pair, so a locale Studio added there with
+ * no `overrides` cannot say whose template it extends. Serving it on both
+ * holders' exact addresses would give one package's member to the other.
+ */
+describe('[#31699 F2] a pair member row two holders could own is refused on both exact reads, naming both', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  /** A package of the App: its own namespace, depending on the App. */
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!,
+    dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never);
+  const pairRow = (over: Record<string, unknown> = {}) => rows.push({
+    id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', ...over }),
+  });
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+  });
+
+  it('two holders share the pair: both exact reads of the member refuse 409, naming both, and both lists leave it out', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, Y]);
+    for (const at of [X, Y]) {
+      const err = await refusalOf(() => read(at, 'fr-FR'));
+      expect([err.code, err.status], at).toEqual(['RESOURCE_CONFLICT', 409]);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: X }, { kind: 'package', packageId: Y }]);
+      expect(await listed(at), at).not.toContain('pair fr-FR');
+    }
+    // CONTROL: each holder's own member is still its own.
+    expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+    expect(labelOf(await read(Y, 'en-US'))).toBe('suitey en-US');
+  });
+
+  it('one holder of the pair: the member is served on its address and listed there (#28390 ruling A)', async () => {
+    tpl('en-US', X);
+    pairRow();
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+  });
+
+  it('the App\'s own address keeps ruling A: its pair\'s added member is served there', async () => {
+    tpl('en-US', APP);
+    pairRow();
+    expect(labelOf(await read(APP, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(APP)).toContain('pair fr-FR');
+  });
+
+  it('a row that declares the base it customizes (the bind) is served on that base only', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    pairRow({ overrides: { package: X } });
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect((await read(Y, 'fr-FR'))?.item).toBeUndefined();
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+
+  it('a bound row is served on its base only, even when the App itself holds the name beside it (contract review F-B)', async () => {
+    tpl('en-US', APP);
+    tpl('en-US', X);
+    pairRow({ overrides: { package: X } });
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect((await read(APP, 'fr-FR'))?.item, 'the App\'s own address').toBeUndefined();
+    expect(await listed(APP)).not.toContain('pair fr-FR');
+  });
+
+  it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
+    tpl('en-US', X);
+    pairRow();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+    expect(labelOf(await read(X, 'fr-FR')), 'the owner').toBe('pair fr-FR');
+    let served: unknown;
+    try { served = labelOf(await read(Y, 'fr-FR')); } catch (e) { served = (e as { code?: string }).code; }
+    expect(served, 'Y shares the pair but holds no template of the name').toBe('RESOURCE_CONFLICT');
+    expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+});
+
+/**
+ * [#31699, epic ruling 6761802819] A package-less row of a name two or more
+ * packages hold is the customization of one holder and cannot say which
+ * (ADR-0150 D4). Once a second namespace may install a name one package held,
+ * serving it on both holders' exact addresses would give one package's
+ * customization to the other: each exact read refuses it naming every holder,
+ * and the list scoped to a holder (which the send reads) leaves it out.
+ */
+describe('[#31699] a package-less row of a name two packages hold is no holder\'s own', () => {
+  const tpl = (locale: string, packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} ${locale}`, locale,
+    subject: `${packageId.split('.').pop()} ${locale}`, bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  // The row as the store writes it: the canonical member (`en-US`) is
+  // `bundle_member: null`, never its value (`overlayMemberValue`,
+  // metadata-protocol `migrations/overlay-index.ts`); any other member, its value.
+  const envRow = (locale: string) => rows.push({
+    id: `env_${locale}`, type: 'email_template', name: 'welcome', state: 'active', package_id: null,
+    bundle_member: locale === 'en-US' ? null : locale,
+    metadata: JSON.stringify({ name: 'welcome', label: `env ${locale}`, locale, subject: `env ${locale}`, bodyHtml: '<p>e</p>' }),
+  });
+  const read = (packageId: string, member: string) => protocol.getMetaItem({
+    type: 'email_template', name: 'welcome', packageId, member,
+  } as never);
+  const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+  const forSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
+
+  beforeEach(() => {
+    registry.installPackage(manifest(A), 'code');
+    registry.installPackage(manifest(B), 'code');
+  });
+
+  it('two holders: both exact reads of the package-less member refuse 409 naming both; each list, and the send\'s read, serves the holder\'s own', async () => {
+    tpl('en-US', A);
+    tpl('en-US', B);
+    envRow('en-US');
+    envRow('fr-FR');
+    for (const at of [A, B]) {
+      const err = await refusalOf(() => read(at, 'fr-FR'));
+      expect([err.code, err.status, err.refusal.reason], at).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    }
+    expect(await listed(A)).toEqual(['alpha en-US']);
+    expect(await listed(B)).toEqual(['beta en-US']);
+    expect(await forSend(A)).toEqual(['alpha en-US']);
+    expect(await forSend(B)).toEqual(['beta en-US']);
+  });
+
+  it('CONTROL — one holder: the package-less row is that holder\'s customization, on its exact address and in its list', async () => {
+    tpl('en-US', A);
+    envRow('en-US');
+    envRow('fr-FR');
+    expect(labelOf(await read(A, 'fr-FR'))).toBe('env fr-FR');
+    expect(await listed(A)).toEqual(['env en-US']);
+    expect(await forSend(A)).toEqual(['env en-US']);
+  });
+
+  for (const type of ['agent', 'skill', 'app', 'dashboard']) {
+    it(`${type}: the environment's item of a name two packages hold is refused on both exact addresses naming both; with one holder it is served`, async () => {
+      envItem(type, 'dup');
+      ship(type, 'dup', A);
+      expect(labelOf(await protocol.getMetaItem({ type, name: 'dup', packageId: A } as never)), 'one holder').toBe(`env ${type}`);
+      ship(type, 'dup', B);
+      for (const at of [A, B]) {
+        const err = await refusalOf(() => protocol.getMetaItem({ type, name: 'dup', packageId: at } as never));
+        expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+        expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      }
+    });
+  }
+
+  for (const stamp of ['sys_metadata', '']) {
+    it(`a package-less row hydrated into the registry (stamped ${JSON.stringify(stamp)}) is refused at both holders' exact addresses; with one holder it is served (contract review R2-A)`, async () => {
+      registry.registerItem('agent', { name: 'dup', label: 'hydrated agent', _packageId: stamp, _provenance: 'org' }, 'name' as never);
+      ship('agent', 'dup', A);
+      expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: A } as never)), 'one holder').toBe('hydrated agent');
+      ship('agent', 'dup', B);
+      for (const at of [A, B]) {
+        const err = await refusalOf(() => protocol.getMetaItem({ type: 'agent', name: 'dup', packageId: at } as never));
+        expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+        expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      }
+    });
+  }
+
+  // [contract review R3-A; epic ruling 6792134290, answer 2 as first given]
+  // The package-less canonical row, stored as the store stores it, is the
+  // member the exact read of the holder's own shipped member reaches: it is
+  // refused, as at a member the holder does not ship. The list and the send
+  // keep serving the holder's own, the row withheld (the ruled split).
+  it('a member the holder itself ships, beside a package-less row of a name two packages hold: the exact read refuses 409 naming both; the holder\'s list and the send\'s read serve its own shipped member, the row withheld (R3-A)', async () => {
+    tpl('en-US', A);
+    tpl('en-US', B);
+    envRow('en-US');
+    for (const [at, own] of [[A, 'alpha en-US'], [B, 'beta en-US']] as const) {
+      const err = await refusalOf(() => read(at, 'en-US'));
+      expect([err.code, err.status, err.refusal.reason], at).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates, at).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+      expect(await listed(at), at).toEqual([own]);
+      expect(await forSend(at), at).toEqual([own]);
+    }
+  });
+
+  it('CONTROL — the `_env` address is untouched: it serves the environment\'s own item, and a package-less row of a held name is not that (D4), as on main', async () => {
+    envItem('agent', 'local');
+    expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'local' })).not.toThrow();
+    expect(labelOf(await protocol.getMetaItem({ type: 'agent', name: 'local' } as never))).toBe('env agent');
+    envItem('agent', 'dup');
+    ship('agent', 'dup', A);
+    ship('agent', 'dup', B);
+    expect(() => protocol.admitEnvironmentQualifier({ type: 'agent', name: 'dup' })).toThrow(PackageScopedNameRefusedError);
   });
 });
 
