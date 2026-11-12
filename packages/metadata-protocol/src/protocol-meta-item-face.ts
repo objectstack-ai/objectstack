@@ -14,7 +14,9 @@
  * two arms: a name only disabled packages hold reads as their withheld item,
  * and so does an exact address that reads only disabled packages (a disabled
  * package named, or a pair whose every base is disabled), judged by
- * `disabledExactAddressHolder` (`protocol-exact-qualifier.ts`).
+ * `disabledExactAddressHolder` (`protocol-exact-qualifier.ts`). Any other
+ * exact address of such a name serves only a row stored under its own
+ * package (epic ruling R4-B).
  *
  * ## How the moved body reaches the class
  *
@@ -74,6 +76,11 @@ function disabledOnlyHolderOf(registry: any, type: string, name: string): string
     }
     const holders: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
     return holders.length > 0 && holders.every((id) => registry.isPackageDisabled(id) === true) ? holders[0] : undefined;
+}
+
+/** [#32183, epic ruling R4-B] Whether `item` is stamped (`_packageId`) with `packageId`: a row stored under that package. */
+function isStoredUnder(item: unknown, packageId: string): boolean {
+    return (item as { _packageId?: unknown } | null | undefined)?._packageId === packageId;
 }
 
 /**
@@ -242,10 +249,16 @@ export async function readMetaItemFace(
     // pair whose every base is disabled, is that package's withheld item,
     // whichever envelope a layer of the read reached: the disabled body is
     // never served under another package's envelope.
+    // [#32183, epic ruling R4-B] …and so is any other exact address of a name
+    // only disabled packages hold, unless the read reached a row stored under
+    // that address's own package: a sibling module's address must not serve a
+    // disabled holder's pair row (row 17).
     const withheldHolder = request.type === 'object' || request.type === 'package'
         ? undefined
         : (request.packageId ? disabledExactAddressHolder(this, { type: request.type, name: request.name, packageId: request.packageId }) : undefined)
-            ?? (answer?.item == null ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name) : undefined);
+            ?? (answer?.item == null || (request.packageId && !isStoredUnder(answer.item, request.packageId))
+                ? disabledOnlyHolderOf(this.engine?.registry, request.type, request.name)
+                : undefined);
     if (withheldHolder === undefined && (request.type === 'object' || request.type === 'package'
         || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item)))) {
         return answer;
