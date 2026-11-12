@@ -20,6 +20,7 @@ import {
   defaultOrganizationDeleteRefusal,
   isDefaultOrganizationTarget,
   organizationDeleteRefusal,
+  organizationAuthStructureSetNames,
   organizationNotEmptyBody,
   removeOrganizationAuthStructure,
 } from './organization-delete.js';
@@ -27,6 +28,8 @@ import {
 type Row = Record<string, any>;
 
 const ORG = 'org_1';
+/** The deployment's declared `audience.selfRegistrationPermissionSet`. */
+const SELF_REGISTRATION_SET = 'self_registrant';
 
 /** A data engine over in-memory tables that records every call. */
 function makeEngine(tables: Record<string, Row[]>, owned: Array<{ object: string; count: number }> = []) {
@@ -104,6 +107,61 @@ describe('[#24948] organizationDeleteRefusal: the records the organization still
     const fault = new Error('connection lost');
     engine.organizationOwnedRowCounts = async () => { throw fault; };
     await expect(organizationDeleteRefusal(engine, ORG)).rejects.toBe(fault);
+  });
+});
+
+describe('[#32787] the self-registration grant is the organization\'s own auth structure', () => {
+  const grants = () => ({
+    sys_user_permission_set: [
+      { id: 'g_admin', organization_id: ORG, permission_set: ORGANIZATION_ADMIN_NO_BYPASS },
+      { id: 'g_self', organization_id: ORG, permission_set: SELF_REGISTRATION_SET },
+      { id: 'g_business', organization_id: ORG, permission_set: 'sales_rep' },
+      { id: 'g_unnamed', organization_id: ORG, permission_set: null },
+      { id: 'g_self_other', organization_id: 'org_other', permission_set: SELF_REGISTRATION_SET },
+    ],
+  });
+
+  it('names the organization-admin sets, plus the declared self-registration set when there is one, each once', () => {
+    expect(organizationAuthStructureSetNames(undefined)).toEqual([ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS]);
+    expect(organizationAuthStructureSetNames(SELF_REGISTRATION_SET)).toEqual(
+      [ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS, SELF_REGISTRATION_SET],
+    );
+    expect(organizationAuthStructureSetNames(ORGANIZATION_ADMIN)).toEqual([ORGANIZATION_ADMIN, ORGANIZATION_ADMIN_NO_BYPASS]);
+  });
+
+  it('is not counted as a record; every grant of any other set still is, NULL-named grants included', async () => {
+    const { engine } = makeEngine(grants());
+    expect(await organizationDeleteRefusal(engine, ORG, { selfRegistrationSet: SELF_REGISTRATION_SET })).toEqual(
+      [{ object: 'sys_user_permission_set', count: 2 }],
+    );
+  });
+
+  it('CONTROL: with no self-registration set declared, the same grant is counted like any other', async () => {
+    const { engine } = makeEngine(grants());
+    expect(await organizationDeleteRefusal(engine, ORG)).toEqual([{ object: 'sys_user_permission_set', count: 3 }]);
+    expect(await organizationDeleteRefusal(engine, ORG, {})).toEqual([{ object: 'sys_user_permission_set', count: 3 }]);
+  });
+
+  it('an organization holding only its organization-admin and self-registration grants owns no records', async () => {
+    const { engine } = makeEngine({
+      sys_user_permission_set: [
+        { organization_id: ORG, permission_set: ORGANIZATION_ADMIN_NO_BYPASS },
+        { organization_id: ORG, permission_set: SELF_REGISTRATION_SET },
+      ],
+    });
+    expect(await organizationDeleteRefusal(engine, ORG, { selfRegistrationSet: SELF_REGISTRATION_SET })).toEqual([]);
+  });
+
+  it('goes with the organization; a grant of another set, and the same set in another organization, stay', async () => {
+    const { engine, tables } = makeEngine(grants());
+    await removeOrganizationAuthStructure(engine, ORG, { selfRegistrationSet: SELF_REGISTRATION_SET });
+    expect(tables.sys_user_permission_set.map((r) => r.id)).toEqual(['g_business', 'g_unnamed', 'g_self_other']);
+  });
+
+  it('CONTROL: with no self-registration set declared, only the organization-admin grants go', async () => {
+    const { engine, tables } = makeEngine(grants());
+    await removeOrganizationAuthStructure(engine, ORG);
+    expect(tables.sys_user_permission_set.map((r) => r.id)).toEqual(['g_self', 'g_business', 'g_unnamed', 'g_self_other']);
   });
 });
 
