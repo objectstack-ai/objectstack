@@ -1099,14 +1099,37 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     }
   });
 
-  it.each(UNBUNDLED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+  it.each(BUNDLED)('%s: [#32517] a read the registry cannot answer, over the database\'s rows of one package\'s two members, answers what it answered before members had keys (BASE: the same)', async (type) => {
+    const { driver } = rowDriver();
+    const db = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    const body = (locale: string, subject: string) => ({ name: nameOf(type), label: subject, locale, subject, _packageId: A, _provenance: 'package' });
+    await db.save(type, nameOf(type), body('en-US', 'en'));
+    await db.save(type, nameOf(type), body('fr-FR', 'fr'));
+    await db.save(type, nameOf(type), body('en-US', 'en again'));
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    expect(((await manager.get(type, nameOf(type))) as any)?.subject).toBe('en again');
+    expect(((await manager.get(type, nameOf(type), A)) as any)?.subject).toBe('en again');
+    expect(((await manager.list(type))[0] as any)?.subject).toBe('en again');
+  });
+
+  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the door\'s plural reads answer every package\'s item [#32517], the database\'s one row per name (unchanged)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
       expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
-      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, B)]);
-      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
     }
+    const database = ctx.peer(['database']);
+    expect(labelsOf(await database.loadMany(type))).toEqual([label(type, B)]);
+    expect((await database.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
+    // [#32517] BASE: the door's plural reads folded the two packages' slots
+    // into the one saved last, `[label(type, B)]`.
+    const door = ctx.peer(['door']);
+    expect(labelsOf(await door.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+    expect((await door.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([
+      [nameOf(type), label(type, A)],
+      [nameOf(type), label(type, B)],
+    ]);
   });
 
   it.each(SLOTTED)('%s: with one package\'s slot in the registry, `list` adds the other package\'s stored item, and no second copy of the first (BASE: the registry\'s item only)', async (type) => {
@@ -1748,6 +1771,23 @@ describe('[#32540] one package\'s action name bound to several objects keeps a r
     const ctx = await boot([['o1'], ['o2']]);
     await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
     expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored', 'com.acme.alpha|o2:alpha@o2']);
+  });
+
+  // [#32517 location 2, after #32651] The unscoped plural reads keep one entry
+  // per (package, name): one package's bindings answer the one saved last, on
+  // the door, the database and the service alike (main the same); `list`
+  // answers every binding. Two packages' items of one name are two entries.
+  it('[#32517] the unscoped plural reads keep one package\'s bindings as one entry, the one saved last; `list` serves every binding', async () => {
+    const ctx = await boot([['o1'], ['o2']]);
+    const cold = new MetadataManager({ formats: ['json'], loaders: [] });
+    cold.registerLoader(new DatabaseLoader({ driver: ctx.driver, tableName: 'sys_metadata' }));
+    const labels = (items: unknown[]) => (items as any[]).map((entry) => entry.label).sort();
+    for (const reader of [ctx.loader, cold]) {
+      expect(labels(await reader.loadMany('action'))).toEqual(['alpha@o2']);
+      expect((await reader.loadManyKeyed!('action')).map((entry) => (entry.data as any).label)).toEqual(['alpha@o2']);
+    }
+    expect(labels(await ctx.manager.loadMany('action'))).toEqual(['alpha@o2']);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1', 'alpha@o2']);
   });
 });
 
