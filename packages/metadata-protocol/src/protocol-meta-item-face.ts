@@ -121,8 +121,8 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
  * was the last one written or hydrated; the rows themselves name every
  * package that holds the name ({@link packagelessAddress}'s candidates).
  *
- * Asked only when a package is disabled, of a type the registry reads by
- * package, when an enabled package ships no code item of the name (otherwise
+ * Asked of a type the registry reads by package, when an enabled package
+ * ships no code item of the name (otherwise
  * the shipped item is the name's, ADR-0048 §3.3, and a row of another package
  * never stands in for it: {@link servedHolderAddressOf} and
  * `packagelessContentPackage` judge it), and when no package-less row and no
@@ -135,7 +135,12 @@ export function servedHolderAddressOf(registry: any, type: string, name: string)
  *  - two or more → `{ kind: 'refused' }`, the by-name read's own refusal
  *    (`ambiguous-in-environment`), naming only the served holders (epic ruling
  *    on #32354, Q2): a disabled package is never named;
- *  - none, or no disabled package among them → `undefined`, the read as it was.
+ *  - none → `undefined`, the read as it was.
+ *
+ * [#32607] With no disabled package among the holders, one served holder is
+ * `undefined` too (the read already reads there), and two or more are refused
+ * the same way, naming each: the read served the row saved first while
+ * `/layers` refused naming both.
  *
  * Every holder is judged by save order no more: the disabled package's row
  * read first answered the missing name, the enabled one's served it.
@@ -148,13 +153,6 @@ export async function servedRowHolderOf(
     if (typeof registry?.readsByPackage !== 'function' || registry.readsByPackage(type) !== true) return undefined;
     if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
     const disabled = (id: string): boolean => registry.isPackageDisabled(id) === true;
-    // No disabled package at all: no read moves, and no row is read for it.
-    // The predicate `isPackageDisabled` reads, asked of each installed record.
-    if (typeof registry.getAllPackages === 'function'
-        && !(registry.getAllPackages() as ReadonlyArray<{ enabled?: unknown; status?: unknown } | undefined>)
-            .some((pkg) => pkg?.enabled === false || pkg?.status === 'disabled')) {
-        return undefined;
-    }
     if ([...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].some((id) => !disabled(id))) return undefined;
     if (typeof registry.getEnvironmentScopedItem === 'function' && registry.getEnvironmentScopedItem(type, name, member) !== undefined) {
         return undefined;
@@ -162,9 +160,10 @@ export async function servedRowHolderOf(
     const rows = await host.packagelessAddress(type, name, member);
     if (rows.unbound) return undefined;
     const every: readonly string[] = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
-    if (![...every, ...rows.candidates].some(disabled)) return undefined;
     const served = [...new Set([...(registry.packageScopedHoldersOf(type, name, null) ?? []), ...rows.candidates])]
         .filter((id) => !disabled(id));
+    // [#32607] No disabled holder: only an ambiguity moves the read.
+    if (served.length < 2 && ![...every, ...rows.candidates].some(disabled)) return undefined;
     if (served.length === 1) return { kind: 'served', packageId: served[0] };
     if (served.length === 0) return undefined;
     const base = {
@@ -180,7 +179,8 @@ export async function servedRowHolderOf(
 
 /**
  * [#32183, #32354] The address a read naming no package takes for a name a
- * disabled package also holds: the registry's served holder
+ * disabled package also holds ([#32607] or two packages hold only as stored
+ * rows): the registry's served holder
  * ({@link servedHolderAddressOf}), else the stored rows' ({@link
  * servedRowHolderOf}). Throws the rows' refusal when two or more served
  * packages hold the name; `undefined` leaves the read as it was.
