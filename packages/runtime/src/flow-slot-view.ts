@@ -29,11 +29,27 @@
  *
  * ⛔ No slot entries, no view: a door then keeps the bare service, whose bare
  * entries refuse the shared name. Never a guess at which holder was meant.
+ *
+ * [#32183, ADR-0150 D3; epic ruling R4-G] Every answer here is judged over
+ * EVERY holder of the name, a disabled package's included, so each is the
+ * answer `main` gives: a disable moves none of them. The engine keeps a
+ * disabled package's slot armed (a runtime disable unregisters nothing from
+ * it), so a read over the served holders alone would move these doors both
+ * ways: an enabled holder's own flow action would reach the bare entries,
+ * which still refuse the name two slots hold, and a closure holding both
+ * would run the enabled holder's flow. The served judgment of the send and
+ * run doors is #32670's.
  */
 
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import type { FlowWalkReads } from './flow-start-admission.js';
+
+/**
+ * [#32183, R4-G] Every resolution in this module reads every holder, a
+ * disabled package's included (see the module note).
+ */
+const EVERY_HOLDER = { includeDisabledPackages: true } as const;
 
 /** The engine-local slot entries (service-automation's `AutomationEngine`). */
 interface FlowSlotEntries {
@@ -155,9 +171,9 @@ export function flowServiceForCaller<T extends object>(
     callerPackageId: string | undefined,
 ): T {
     if (!callerPackageId || typeof name !== 'string' || name === '' || !registry || !canResolveForCaller(registry)) return service;
-    const bare = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: null });
+    const bare = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: null, ...EVERY_HOLDER });
     if (bare.status !== 'refused') return service;
-    const own = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
+    const own = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId, ...EVERY_HOLDER });
     if (own.status === 'refused') throw new PackageScopedNameRefusedError(own);
     if (own.status !== 'resolved' || own.holder.kind !== 'package') return service;
     return flowSlotView(service, own.holder.packageId, name) ?? service;
@@ -171,7 +187,7 @@ export function flowServiceForCaller<T extends object>(
  */
 export function endpointPackageOf(registry: Partial<PackageScopedRegistry> | undefined, endpointName: unknown): string | undefined {
     if (!registry || typeof endpointName !== 'string' || endpointName === '' || !canResolveForCaller(registry)) return undefined;
-    const held = resolvePackageScopedName(registry, { type: 'api', name: endpointName, callerPackageId: null });
+    const held = resolvePackageScopedName(registry, { type: 'api', name: endpointName, callerPackageId: null, ...EVERY_HOLDER });
     return held.status === 'resolved' && held.holder.kind === 'package' ? held.holder.packageId : undefined;
 }
 
@@ -210,15 +226,15 @@ export function flowWalkReads(
             const bound = boundSlotOf(service);
             if (bound && bound.name === flowName) return bound.packageId;
             const table = await resolver();
-            return table ? packageOf(resolvePackageScopedName(table, { type: 'flow', name: flowName, callerPackageId: null })) : null;
+            return table ? packageOf(resolvePackageScopedName(table, { type: 'flow', name: flowName, callerPackageId: null, ...EVERY_HOLDER })) : null;
         },
         async callee(name, callerPackageId) {
             const table = await resolver();
             const slots = slotEntriesOf(service);
             if (!table || !slots) return { flow: await bareRead(name), packageId: null };
-            const bare = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId: null });
+            const bare = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId: null, ...EVERY_HOLDER });
             if (bare.status !== 'refused') return { flow: await bareRead(name), packageId: packageOf(bare) };
-            const own = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId });
+            const own = resolvePackageScopedName(table, { type: 'flow', name, callerPackageId, ...EVERY_HOLDER });
             if (own.status === 'refused') throw new PackageScopedNameRefusedError(own);
             const holder = packageOf(own);
             if (holder === null) return { flow: await bareRead(name), packageId: null };
@@ -255,7 +271,7 @@ export function flowHolderForCaller(
     callerPackageId: string | undefined,
 ): string | undefined {
     if (!registry || !canResolveForCaller(registry)) return undefined;
-    const resolution = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: callerPackageId ?? null });
+    const resolution = resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId: callerPackageId ?? null, ...EVERY_HOLDER });
     return resolution.status === 'resolved' && resolution.holder.kind === 'package' ? resolution.holder.packageId : undefined;
 }
 
