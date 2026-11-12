@@ -48,14 +48,32 @@ function makeHarness(opts: { composite: boolean; row: boolean }) {
     const rows: Array<Record<string, unknown>> = opts.row
         ? [{ id: 'row_digest', type: 'action', name: NAME, organization_id: null, package_id: null, state: 'active', checksum: 'sha256:head', metadata: JSON.stringify(body('stale')) }]
         : [];
-    const matches = (row: Record<string, unknown>, where: Record<string, unknown> = {}) =>
-        Object.entries(where).every(([k, v]) => (row[k] ?? null) === v);
+    // The engine double: equality and `$in`, and nothing else — any other
+    // operator or combinator is refused loudly rather than read as a field
+    // (the matcher of `package-scoped-exact-qualifier.test.ts`).
+    const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
+        Object.entries(where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`engine double: logical operator ${k} is not implemented`);
+            if (v !== null && typeof v === 'object') {
+                const ops = Object.keys(v);
+                if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((v as { $in?: unknown }).$in)) {
+                    throw new Error(`engine double: operator ${ops.join(', ')} is not implemented`);
+                }
+                return (v as { $in: unknown[] }).$in.includes(row[k]);
+            }
+            return (row[k] ?? null) === v;
+        });
+    const pick = (table: string, opts?: { where?: Record<string, unknown>; limit?: number }) => {
+        if (table !== 'sys_metadata') return [];
+        const hits = rows.filter((r) => matches(r, opts?.where));
+        return typeof opts?.limit === 'number' ? hits.slice(0, opts.limit) : hits;
+    };
     const engine: Record<string, unknown> = {
         registry,
-        async find(table: string, q: { where?: Record<string, unknown> } = {}) { return table === 'sys_metadata' ? rows.filter((r) => matches(r, q.where)) : []; },
-        async findOne(table: string, q: { where?: Record<string, unknown> } = {}) {
-            assertEngineFindOnePredicate(table, q as never);
-            return table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) ?? null : null;
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) { return pick(table, opts); },
+        async findOne(table: string, opts?: { where?: Record<string, unknown> }) {
+            assertEngineFindOnePredicate(table, opts as never);
+            return pick(table, opts)[0] ?? null;
         },
         async insert(_t: string, data: Record<string, unknown>) { return { id: 'inserted', ...data }; },
         async update(_t: string, data: Record<string, unknown>, options?: Record<string, unknown>) { assertEngineUpdateDispatch(data, options); return { id: null }; },
