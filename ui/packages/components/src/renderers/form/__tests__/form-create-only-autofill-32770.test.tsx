@@ -25,6 +25,10 @@ import { SchemaRendererContext } from '@object-ui/react';
 // Registers the renderers at module scope, NOT inside a `beforeAll` — see
 // object-ui/no-dynamic-import-in-test-hook (objectui#3010/#3021).
 import '../../../renderers';
+// The renderers reach a dynamic `@object-ui/react-runtime` import; its first
+// load is paid here, during collection, not inside a case's clock
+// (`check:test-source-alias`).
+import '@object-ui/react-runtime';
 
 /** Props each stub widget saw on its last render, keyed by registry type. */
 const seen: Record<string, any> = {};
