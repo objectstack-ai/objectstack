@@ -794,6 +794,24 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(labelOf(await read(Y, 'en-US'))).toBe('suitey en-US');
   });
 
+  // [#32183, contract review M2 should-fix] The owner check judges the served
+  // holders (`pairMemberWithheldAt`, `pairRowOnAddress`): with one of the two
+  // holders disabled, the member is the enabled holder's, served on its exact
+  // address and in its list (FROM: refused naming both and left out), and the
+  // disabled holder's address answers its withheld item. Re-enabled, as FROM.
+  it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('[#32183] one of the two holders disabled (%s): the member is the enabled holder\'s, on its exact address and in its list; re-enabled, refused naming both and left out', async (_order, order) => {
+    for (const id of order) tpl('en-US', id);
+    pairRow();
+    registry.disablePackage(Y);
+    expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+    expect(await listed(X)).toContain('pair fr-FR');
+    expect((await read(Y, 'fr-FR'))?.item, 'the disabled holder\'s address').toBeUndefined();
+    registry.enablePackage(Y);
+    const err = await refusalOf(() => read(X, 'fr-FR'));
+    expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+    expect(await listed(X)).not.toContain('pair fr-FR');
+  });
+
   it('one holder of the pair: the member is served on its address and listed there (#28390 ruling A)', async () => {
     tpl('en-US', X);
     pairRow();
@@ -930,6 +948,61 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
       expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
     });
   }
+
+  // [#32183, contract review M2] The same row, read where the disabled holder
+  // is addressed and where the enabled holder lists. The disabled holder's
+  // exact address and its pair answer its withheld item (FROM: refused naming
+  // both, the row counting two owners); the list scoped to the enabled holder
+  // serves the row as its customization (FROM: its own item, the row left
+  // out). Re-enabled, each answers as FROM. Both registration orders.
+  const dashboardsListed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'dashboard', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'dup').map((i) => i.label);
+  const sortedCandidates = (err: PackageScopedNameRefusedError) => err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort();
+  const HOLDER_ORDERS = [['disabled holder first', [A, B]], ['enabled holder first', [B, A]]] as const;
+
+  const storedPackageLessDashboard = () => rows.push({
+    id: 'row_dup', type: 'dashboard', name: 'dup', state: 'active', package_id: null,
+    metadata: JSON.stringify({ name: 'dup', label: 'stored dashboard' }),
+  });
+  const PACKAGE_LESS_ROWS = [
+    ['the environment\'s item', () => envItem('dashboard', 'dup')],
+    ['a package-less stored row', () => storedPackageLessDashboard()],
+  ] as const;
+
+  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): the disabled holder\'s address and its pair answer its withheld item; re-enabled, both refused naming both', async (_order, _row, order, addRow) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    addRow();
+    registry.disablePackage(A);
+    for (const at of [A, PAIR_A]) {
+      const answer = await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: at } as never);
+      expect(labelOf(answer), at).toBeUndefined();
+      expect(JSON.stringify(answer ?? null), at).not.toMatch(/(env|stored|alpha|beta) dashboard/);
+    }
+    registry.enablePackage(A);
+    for (const at of [A, PAIR_A]) {
+      const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: at } as never));
+      expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+      expect(sortedCandidates(err), at).toEqual([A, B]);
+    }
+  });
+
+  it.each(HOLDER_ORDERS)('[#32183] dashboard (%s): the list scoped to the enabled holder serves the package-less stored row as its customization while the other holder is disabled; re-enabled, its own item', async (_order, order) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    storedPackageLessDashboard();
+    registry.disablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['stored dashboard']);
+    registry.enablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+  });
+
+  it.each(HOLDER_ORDERS)('[#32183] CONTROL — dashboard (%s): the environment\'s item in the registry is not in the list scoped to a holder, the other holder disabled or not', async (_order, order) => {
+    envItem('dashboard', 'dup');
+    for (const id of order) ship('dashboard', 'dup', id);
+    registry.disablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+    registry.enablePackage(A);
+    expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+  });
 
   for (const stamp of ['sys_metadata', '']) {
     it(`a package-less row hydrated into the registry (stamped ${JSON.stringify(stamp)}) is refused at both holders' exact addresses; with one holder it is served (contract review R2-A)`, async () => {
