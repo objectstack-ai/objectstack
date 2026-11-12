@@ -13,7 +13,7 @@ Metadata-protocol: none
 
 **BREAKING** — under every tenancy posture, a person's data access requires a current membership in the organization, judged on each request (ADR-0093 D8.1, as amended 2026-11-11).
 
-**Migration note.** After the upgrade, a person without a current membership no longer reads or writes the organization's data in any posture, `single` included. Their reads of the organization's records resolve to nothing, and their writes are refused with `403 PERMISSION_DENIED` naming the missing active organization — the answers the `isolated` and `group` postures already gave. To restore someone's access, add them back as a member of the organization; a person removed from the member roster has had their access revoked, and that is now true in every posture.
+**Migration note.** After the upgrade, a person without a current membership no longer reads or writes the organization's data in any posture, `single` included. Their reads of the organization's records resolve to nothing, and their writes are refused with `403 PERMISSION_DENIED` naming the missing active organization — the answers the `isolated` and `group` postures already gave. To give someone access, make them a member of the organization.
 
 - Single-organization deployments that keep the default membership backfill (ADR-0093 D6) need no action: every user is bound to the default organization when they are created and when seed data settles. A deployment that turned it off (`OS_SKIP_MEMBERSHIP_BACKFILL=1`, or `membershipPolicy: 'invite-only'`) gives each person who should reach the data a membership through the member admin screens.
 - An API key is its owner's credential: it follows its owner's membership in the key's organization, under every posture.

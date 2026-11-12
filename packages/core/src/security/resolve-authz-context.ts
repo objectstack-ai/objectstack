@@ -748,12 +748,10 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // test on data already in hand — zero additional queries.
   //
   // [ADR-0093 D8.1, as amended] Asked under EVERY tenancy posture, `single`
-  // included. It used to be scoped to the walled postures ("under `single`
-  // there is no organization boundary to cross"); the amended rule is that a
-  // person's data access requires a current membership in the organization,
-  // judged on each request, and an API key is its owner's credential
-  // (ADR-0090 D10, the 2026-09-16 note) — the principal it admits is the owner,
-  // so the owner's membership rule is the key's rule.
+  // included: a person's data access requires a current membership in the
+  // organization, judged on each request, and an API key is its owner's
+  // credential (ADR-0090 D10, the 2026-09-16 note) — the principal it admits is
+  // the owner, so the owner's membership rule is the key's rule.
   //
   // The result is NO PRINCIPAL, not a degrade to a user-only principal.
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
@@ -850,9 +848,9 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // [#20580] The check itself is {@link vetOrganizationClaim}, so the
   // permission explainer asks the same question about the user it explains.
   //
-  // [ADR-0093 D8.1, as amended] Asked under EVERY tenancy posture: a person's
-  // data access requires a current membership in the organization, judged on
-  // each request — `single` included, where the claim used to stand as made.
+  // [ADR-0093 D8.1, as amended] Asked under EVERY tenancy posture, `single`
+  // included: a person's data access requires a current membership in the
+  // organization, judged on each request.
   if (
     !keyPrincipal
     && tenantId
@@ -902,13 +900,11 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
  * organization the grants were resolved in) is dropped, and the principal
  * resolves with NO active organization.
  *
- * [ADR-0093 D8.1, as amended] Under EVERY tenancy posture: a person's data
- * access requires a current membership in the organization, judged on each
- * request. Until the amendment this rule was asked under the wall-enforcing
- * postures only, and under `single` (or with no posture supplied) a claim
- * stood as made. The posture no longer decides it, so the third parameter is
- * no longer read; it stays in the signature only so a caller that still
- * passes it keeps compiling.
+ * [ADR-0093 D8.1, as amended] Under EVERY tenancy posture, and with no posture
+ * supplied: a person's data access requires a current membership in the
+ * organization, judged on each request. The posture does not decide it, so the
+ * third parameter is not read; it stays in the signature only so a caller that
+ * still passes it keeps compiling.
  *
  * [#20580] A second reader asks it: the permission explainer, about the user
  * it explains in the caller's organization. That is how `security/explain`
