@@ -717,7 +717,7 @@ describe('[#32071] a pull job names the package that declares it', () => {
         // No `packages[]`: every job is the app's.
         expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
     });
-    it('two bodies each declaring job `sync`, loaded as top-level copies: neither run pulls as the other — each is refused 409 naming both', async () => {
+    it('two bodies each declaring job `sync`, loaded as top-level copies: attributed to neither — and, both enabled, refused at bind naming both', async () => {
         // A JSON-loaded artifact binds the flattened top-level copies, so the
         // job is met by name, and the name is the two bodies'.
         const h = harness();
@@ -734,19 +734,19 @@ describe('[#32071] a pull job names the package that declares it', () => {
         }));
         const of = jobDeclaringPackages(bundle, 'com.example.top');
         expect(typeof of({ ...sync }), 'never the first body').toBe('object');
-        await scheduleAppArtifactJobs(
+        const out = await scheduleAppArtifactJobs(
             { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
             bundle,
             { appId: 'com.example.top', ql: undefined, source: 'Test' },
         );
-        expect(runs.length).toBeGreaterThan(0);
-        for (const run of runs) {
-            const err = await run({ jobId: 'sync' }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
-            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
-            expect(err?.message).toContain('com.example.alpha');
-            expect(err?.message).toContain('com.example.beta');
-        }
-        // Before any call or write: no pull was asked for, as any package or as none.
+        // [#32411] Two enabled jobs of one name: the job service would keep one, so neither is scheduled.
+        expect(out.refused).toEqual(['sync', 'sync']);
+        expect(runs).toEqual([]);
+        const refused = h.logger.error.mock.calls.find(([, err]) => err instanceof Error)?.[1] as { code?: string; status?: number; message?: string };
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(refused?.message).toContain('com.example.alpha');
+        expect(refused?.message).toContain('com.example.beta');
+        // No pull was asked for, as any package or as none.
         expect(h.pulls).toEqual([]);
     });
 
@@ -842,7 +842,9 @@ async function scheduleAndRun(bundle: unknown, appId: string, makeAdapter: () =>
  * the name is attributed to neither: each run is refused before any call or
  * write, naming the declaring body and the residual. The job service keys both
  * under the one name and keeps the later; when that is the residual's job, it
- * was pulled as the body before.
+ * was pulled as the body before. [#32411] With both jobs enabled the binder now
+ * refuses the name at bind and schedules neither; a run meets the attribution
+ * refusal when the name's twin is disabled (the fail-closed pin below).
  */
 describe('[#32355] a job name a package body declares and the residual carries is attributed to neither', () => {
     withPosture(undefined);
@@ -855,18 +857,16 @@ describe('[#32355] a job name a package body declares and the residual carries i
             .toEqual([['com.example.alpha', ['sync']], ['com.example.beta', []]]);
     });
 
-    it('JSON-loaded, on a real job service: the run of the name is refused 409 naming the body and the residual — never pulled as the body', async () => {
+    it('JSON-loaded, on a real job service: the name is attributed to neither, and both enabled jobs are refused at bind — never pulled as the body', async () => {
         const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
         const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
-        // Both are scheduled, under one key: the later (the residual's, `host_map`) replaces the body's copy.
-        expect(out.pulls).toEqual(['sync', 'sync']);
-        // Before any call or write: no pull was asked for, as any package or as none —
+        // [#32411] Neither is scheduled: one key would have held only the later (the residual's, `host_map`).
+        expect(out.pulls).toEqual([]);
+        expect(out.refused).toEqual(['sync', 'sync']);
+        // No pull was asked for, as any package or as none —
         // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
         expect(pulls).toEqual([]);
-        expect(answers.map((a) => [a.key, a.run])).toEqual([['sync', 'failed']]);
-        expect({ code: answers[0].code, status: answers[0].status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
-        expect(answers[0].message).toContain('package "com.example.alpha"');
-        expect(answers[0].message).toContain('package "com.example.beta"');
+        expect(answers).toEqual([]);
         // Every job of the name, by name: the refusal, with both packages its candidates.
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
@@ -885,14 +885,18 @@ describe('[#32355] a job name a package body declares and the residual carries i
         expect(noPackage.message).toContain('names no package');
     });
 
-    it('control: the residual\'s owner IS the one declaring body — one holder, that body', async () => {
+    it('control: the residual\'s owner IS the one declaring body — one holder, that body; both enabled, refused at bind', async () => {
         // `alpha` last: the artifact's id is alpha's, so the residual runs as alpha, the body that declares `sync`.
         const bundle = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
         expect(bundle.manifest.id).toBe('com.example.alpha');
-        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.alpha');
-        expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([['sync', 'success', undefined]]);
-        // One key for the pair: the later (the body's copy, `alpha_map`) replaces the residual's, and runs as alpha.
-        expect(pulls.map((p: any) => [p.mapping, p.callerPackageId])).toEqual([['alpha_map', 'com.example.alpha']]);
+        // Attribution: one holder, alpha, for every job of the name — as before.
+        const of = jobDeclaringPackages(bundle, 'com.example.alpha');
+        for (const job of bundle.jobs) expect(of(job)).toBe('com.example.alpha');
+        // [#32411] Scheduling: one key would have held only the later (the body's copy), and `host_map` never ran. Neither is scheduled.
+        const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.alpha');
+        expect(out.refused).toEqual(['sync', 'sync']);
+        expect(answers).toEqual([]);
+        expect(pulls).toEqual([]);
     });
 
     it('controls: a residual job with a name of its own binds as today, and a body job with no residual twin binds to its body', async () => {
@@ -912,11 +916,12 @@ describe('[#32355] a job name a package body declares and the residual carries i
         // Only the shared name is refused.
         expect(typeof of(byName('sync'))).toBe('object');
 
-        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        // [#32411] The shared name, both enabled, is refused at bind; the other two bind and run as today.
+        expect(out.refused).toEqual(['sync', 'sync']);
         expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([
             ['alpha_only', 'success', undefined],
             ['host_sync', 'success', undefined],
-            ['sync', 'failed', 'RESOURCE_CONFLICT'],
         ]);
         // `CronJobAdapter.trigger()` hands `trigger: 'manual'` and the binder forwards it; that adapter writes
         // no run row, so no `jobRunId` rides along.
