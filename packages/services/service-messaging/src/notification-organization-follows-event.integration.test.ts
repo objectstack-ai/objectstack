@@ -257,14 +257,15 @@ async function receiptState(ql: ObjectQL, notificationId: string): Promise<strin
  *
  * `sys_inbox_message` (and its receipt and event siblings) is engine-owned, so
  * an organization delete keeps its rows (`ObjectQL.outlivesOrganization`) and
- * they live out their 90-day TTL. The inbox readers — the list, its
- * `unreadCount`, `markRead` and `markAllRead` — serve no row whose
- * organization no longer exists. Retention is untouched: every row is still
- * stored afterwards. The organization is removed by the engine's own
- * `sys_organization` delete, the path the organization delete door ends in.
+ * they live out their 90-day TTL. The inbox list and its `unreadCount` serve
+ * no row whose organization no longer exists; mark-read still clears one, since
+ * the Console bell lists the inbox through the data API. Retention is
+ * untouched: every row is still stored afterwards. The organization is
+ * removed by the engine's own `sys_organization` delete, the path the
+ * organization delete door ends in.
  */
-describe('[#32512] the inbox readers serve no row of a deleted organization', () => {
-    it('lists and counts only the live organization\'s and the organization-less rows, and keeps every row stored', async () => {
+describe('[#32512] the inbox list and its unread count serve no row of a deleted organization', () => {
+    it('lists and counts only the live organization\'s rows, and keeps every row stored', async () => {
         const { ql, messaging, warnings } = await bootInbox();
 
         const listed = await messaging.listInbox('user_1');
@@ -290,32 +291,12 @@ describe('[#32512] the inbox readers serve no row of a deleted organization', ()
         expect(listed.unreadCount).toBe(3);
     });
 
-    it('markAllRead flips and counts only the rows the user can see', async () => {
+    it('mark-read is not narrowed: the deleted organization\'s rows can still be cleared by a client that lists them elsewhere', async () => {
         const { ql, messaging, ids } = await bootInbox();
 
-        const swept = await messaging.markAllRead('user_1');
-
-        expect(swept).toEqual({ success: true, readCount: 3 });
-        for (const title of ['live-1', 'live-2', 'live-3']) expect(await receiptState(ql, ids[title]!)).toBe('read');
-        for (const title of ['gone-1', 'gone-2', 'gone-3']) expect(await receiptState(ql, ids[title]!)).toBe('delivered');
-        expect((await messaging.listInbox('user_1')).unreadCount).toBe(0);
-    });
-
-    it('markRead of a deleted organization\'s message marks and counts nothing; a live one is marked', async () => {
-        const { ql, messaging, ids } = await bootInbox();
-
-        expect(await messaging.markRead('user_1', [ids['gone-1']!])).toEqual({ success: true, readCount: 0 });
-        expect(await receiptState(ql, ids['gone-1']!)).toBe('delivered');
-
-        expect(await messaging.markRead('user_1', [ids['live-1']!])).toEqual({ success: true, readCount: 1 });
-        expect(await receiptState(ql, ids['live-1']!)).toBe('read');
-    });
-
-    it('markRead of a deleted organization\'s message whose delivered receipt never landed inserts no receipt', async () => {
-        const { ql, messaging, ids } = await bootInbox();
-        await ql.delete(RECEIPT_OBJECT, { where: { notification_id: ids['gone-2']! }, multi: true, ...SYSTEM } as any);
-
-        expect(await messaging.markRead('user_1', [ids['gone-2']!])).toEqual({ success: true, readCount: 0 });
-        expect(await receiptState(ql, ids['gone-2']!)).toBeUndefined();
+        expect(await messaging.markRead('user_1', [ids['gone-1']!])).toEqual({ success: true, readCount: 1 });
+        expect(await receiptState(ql, ids['gone-1']!)).toBe('read');
+        expect(await messaging.markAllRead('user_1')).toEqual({ success: true, readCount: 5 });
+        for (const title of ['live-1', 'live-2', 'live-3', 'gone-1', 'gone-2', 'gone-3']) expect(await receiptState(ql, ids[title]!)).toBe('read');
     });
 });

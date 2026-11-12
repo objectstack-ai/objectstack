@@ -62,9 +62,15 @@ function organizationOf(row: Record<string, unknown> | null | undefined): string
  * An organization delete keeps every engine-owned row (`ObjectQL.outlivesOrganization`,
  * seat decisions 6305179819 and 6307135388), and `sys_inbox_message` is one, so
  * a deleted organization's messages stay stored until their 90-day TTL. They
- * are kept, never shown: the inbox readers ask this which of the organizations
- * they are about to serve still has its `sys_organization` row, and serve no
- * row of one that does not. Retention is untouched, and nothing is deleted.
+ * are kept, never shown: the inbox list and its `unreadCount` ask this which
+ * of the organizations they are about to serve still has its
+ * `sys_organization` row, and serve no row of one that does not. Retention is
+ * untouched, and nothing is deleted.
+ *
+ * Mark-read is deliberately NOT narrowed: it writes only the caller's own
+ * receipt and shows nothing, and a client that lists the inbox through another
+ * door (the Console bell reads `sys_inbox_message` through the data API) must
+ * still be able to clear a row it shows.
  *
  * One memo per reader call: each organization is asked about at most once, in
  * one `id $in` read projecting `id` alone, and only when a row the call read
@@ -118,20 +124,17 @@ class DeletedOrganizations {
 
 /**
  * `where` narrowed to leave out rows of the `excluded` organizations. An
- * organization-less row stays in: `$nin` alone would drop it too, since a NULL
- * is in no list and in no complement of one on a SQL store. No exclusion ⇒ the
- * very same `where`, so a reader that finds no deleted organization asks the
- * engine exactly what it asked before.
+ * organization-less row stays in: the platform's `$nin` is NULL-safe (a value
+ * that is not there is "not among this list", #5298, on SQL and in memory
+ * alike). No exclusion ⇒ the very same `where`, so a reader that finds no
+ * deleted organization asks the engine exactly what it asked before.
  */
 function excludingOrganizations(
     where: Record<string, unknown>,
     excluded: ReadonlySet<string>,
 ): Record<string, unknown> {
     if (excluded.size === 0) return where;
-    return {
-        ...where,
-        $or: [{ [ORGANIZATION_COLUMN]: null }, { [ORGANIZATION_COLUMN]: { $nin: [...excluded] } }],
-    };
+    return { ...where, [ORGANIZATION_COLUMN]: { $nin: [...excluded] } };
 }
 
 /**
@@ -773,8 +776,7 @@ export class MessagingService {
      *
      * [#32512] A row whose organization no longer exists is kept (the inbox
      * is engine-owned, so an organization delete leaves its rows to their TTL)
-     * and never served: not listed, not counted in `unreadCount`, and not
-     * marked by {@link markRead} / {@link markAllRead}. See
+     * and never served: not listed and not counted in `unreadCount`. See
      * {@link DeletedOrganizations}.
      *
      * Returns the REST contract shape: `{ notifications, unreadCount }`.
@@ -992,26 +994,13 @@ export class MessagingService {
     async markRead(userId: string, ids: readonly string[]): Promise<{ success: boolean; readCount: number }> {
         const data = this.ctx.getData?.();
         if (!data || !userId || !ids?.length) return { success: true, readCount: 0 };
-        return this.markReadIn(data, userId, ids, this.deletedOrganizations(data));
-    }
-
-    /**
-     * {@link markRead}'s loop, with the caller's {@link DeletedOrganizations}
-     * memo so {@link markAllRead} asks about each organization once per sweep.
-     */
-    private async markReadIn(
-        data: IDataEngine,
-        userId: string,
-        ids: readonly string[],
-        deleted: DeletedOrganizations,
-    ): Promise<{ success: boolean; readCount: number }> {
         const at = this.now();
         let readCount = 0;
         for (const id of ids) {
             const nid = String(id ?? '');
             if (!nid) continue;
             try {
-                readCount += await this.upsertReadReceipt(data, userId, nid, at, deleted);
+                readCount += await this.upsertReadReceipt(data, userId, nid, at);
             } catch (err) {
                 this.ctx.logger.warn(`[messaging] markRead failed for '${nid}': ${(err as Error).message}`);
             }
@@ -1065,10 +1054,7 @@ export class MessagingService {
     async markAllRead(userId: string): Promise<{ success: boolean; readCount: number }> {
         const data = this.ctx.getData?.();
         if (!data || !userId) return { success: true, readCount: 0 };
-        const deleted = this.deletedOrganizations(data);
-        const ids = await this.unreadNotificationIds(data, userId, deleted);
-        if (ids.length === 0) return { success: true, readCount: 0 };
-        return this.markReadIn(data, userId, ids, deleted);
+        return this.markRead(userId, await this.unreadNotificationIds(data, userId));
     }
 
     /* ------------------------------------------------------------------ */
@@ -1153,26 +1139,18 @@ export class MessagingService {
      * not in this sweep: filed as #6448 (dormant — the single `emit()` ingress
      * always carries an event id, so only data written around it can be null).
      */
-    private async unreadNotificationIds(
-        data: IDataEngine,
-        userId: string,
-        deleted: DeletedOrganizations,
-    ): Promise<string[]> {
+    private async unreadNotificationIds(data: IDataEngine, userId: string): Promise<string[]> {
         const [rows, stateByNotif] = await Promise.all([
             data.find(INBOX_OBJECT, {
                 where: { user_id: userId },
-                fields: ['notification_id', ORGANIZATION_COLUMN],
+                fields: ['notification_id'],
             }, { context: INBOX_SYSTEM_CONTEXT }) as Promise<Array<Record<string, unknown>>>,
             this.readReceiptStates(data, userId),
         ]);
 
-        // [#32512] A deleted organization's rows are not in the inbox the
-        // user sees, so the sweep neither flips nor counts them.
-        await deleted.among(rows);
         const ids: string[] = [];
         const seen = new Set<string>();
         for (const row of rows) {
-            if (deleted.names(row)) continue;
             const nid = row?.notification_id != null ? String(row.notification_id) : '';
             if (!nid || seen.has(nid)) continue;
             const state = stateByNotif.get(nid);
@@ -1208,40 +1186,27 @@ export class MessagingService {
         userId: string,
         notificationId: string,
         at: string,
-        deleted: DeletedOrganizations,
     ): Promise<number> {
         const where = { notification_id: notificationId, user_id: userId, channel: 'inbox' };
-        // 'read' = flipped; 'absent' = no receipt keyed on this user;
-        // 'withheld' = [#32512] the receipt's organization was deleted, so the
-        // message is not in the inbox the user sees and is not marked.
-        const flipToRead = async (): Promise<'read' | 'absent' | 'withheld'> => {
+        const flipToRead = async (): Promise<boolean> => {
             // Under INBOX_SYSTEM_CONTEXT: the read is keyed on `user_id`, and the
             // update addresses only the id that read returned.
-            const existing = await data.findOne(
-                RECEIPT_OBJECT,
-                { where, fields: ['id', ORGANIZATION_COLUMN] },
-                { context: INBOX_SYSTEM_CONTEXT },
-            );
-            if (!existing?.id) return 'absent';
-            await deleted.among([existing]);
-            if (deleted.names(existing)) return 'withheld';
+            const existing = await data.findOne(RECEIPT_OBJECT, { where, fields: ['id'] }, { context: INBOX_SYSTEM_CONTEXT });
+            if (!existing?.id) return false;
             await data.update(
                 RECEIPT_OBJECT,
                 { state: 'read', at },
                 { where: { id: existing.id }, context: INBOX_SYSTEM_CONTEXT } as never,
             );
-            return 'read';
+            return true;
         };
 
-        const flipped = await flipToRead();
-        if (flipped === 'read') return 1;
-        if (flipped === 'withheld') return 0;
+        if (await flipToRead()) return 1;
 
         // No receipt keyed on this user, so no `delivered` one either: the
         // inbox message is the only delivery evidence left. Without it the id
         // was never delivered to this user — write nothing, count nothing.
-        // [#32512] Nor when the message is of a deleted organization.
-        if (!(await this.inboxMessageNames(data, userId, notificationId, deleted))) return 0;
+        if (!(await this.inboxMessageNames(data, userId, notificationId))) return 0;
 
         // Delivered, and no receipt yet — insert one. findOne→insert is
         // check-then-act, so a concurrent mark-read (or the best-effort `delivered` write still in
@@ -1283,7 +1248,7 @@ export class MessagingService {
             }, { context: INBOX_SYSTEM_CONTEXT });
             return 1;
         } catch (err) {
-            if (isUniqueViolationError(err) && (await flipToRead()) === 'read') return 1;
+            if (isUniqueViolationError(err) && (await flipToRead())) return 1;
             throw err;
         }
     }
@@ -1301,16 +1266,12 @@ export class MessagingService {
         data: IDataEngine,
         userId: string,
         notificationId: string,
-        deleted: DeletedOrganizations,
     ): Promise<boolean> {
         const message = await data.findOne(INBOX_OBJECT, {
             where: { user_id: userId, notification_id: notificationId },
-            fields: ['id', ORGANIZATION_COLUMN],
+            fields: ['id'],
         }, { context: INBOX_SYSTEM_CONTEXT });
-        if (message == null) return false;
-        // [#32512] A message of a deleted organization is kept, not served.
-        await deleted.among([message]);
-        return !deleted.names(message);
+        return message != null;
     }
 
     /**
