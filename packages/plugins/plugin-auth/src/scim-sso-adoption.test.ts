@@ -468,6 +468,34 @@ describe('[#32148] SCIM still refuses with 409 when any condition fails', () => 
     expect(verdict).toEqual({ adopt: false, reason: 'held_by_scim' });
   });
 
+  it('409 — the account a directory deleted stays that directory\'s (a second one cannot revive the leaver)', async () => {
+    const h = await boot();
+    const facts = adoptFacts('leaver');
+    const first = await h.send(scimRequest(h.otherToken, 'POST', '/Users', createBody(facts.email, 'ext-leaver')));
+    expect(first.status, `first directory's create failed: ${await first.clone().text()}`).toBe(201);
+    const { id: firstId } = (await first.json()) as { id: string };
+    const deleted = await h.send(scimRequest(h.otherToken, 'DELETE', `/Users/${firstId}`));
+    expect(deleted.status, `first directory's delete failed: ${await deleted.clone().text()}`).toBe(204);
+    const [user] = await usersWithEmail(h, facts.email);
+    await h.engine.insert(
+      'sys_sso_provider',
+      { id: 'ssop_leaver', provider_id: PROVIDER, issuer: 'https://idp.example/leaver', domain: DOMAIN, domain_verified: true, organization_id: ORG },
+      SYSTEM,
+    );
+    await linkAccount(h, user.id, PROVIDER);
+    // The deleted source no longer manages the profile, so nothing in the
+    // vendor's transaction would refuse a second link: the subject is the guard.
+    await expectRefused(h, user.id, facts.email, await h.send(scimRequest(h.token, 'POST', '/Users', createBody(facts.email))));
+    const after = (await h.engine.findOne('sys_user', { where: { id: user.id }, fields: ['banned'] }, SYSTEM)) as {
+      banned?: unknown;
+    };
+    expect(after.banned === true || after.banned === 1).toBe(true);
+    expect(await judgeScimSsoAdoption(h.engine as never, { email: facts.email, organizationId: ORG })).toEqual({
+      adopt: false,
+      reason: 'held_by_scim',
+    });
+  });
+
   it('a create for an address no account holds still creates (the rule only ever links or refuses)', async () => {
     const h = await boot();
     const created = await h.send(scimRequest(h.token, 'POST', '/Users', createBody(`fresh@${DOMAIN}`)));
