@@ -131,6 +131,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { InterfacesPillar } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` with a function-body `import()`: paid
+// here, at collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';

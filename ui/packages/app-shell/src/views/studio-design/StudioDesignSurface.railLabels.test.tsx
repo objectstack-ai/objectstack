@@ -64,6 +64,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { InterfacesPillar, StudioNavItemInspector } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` with a function-body `import()`: paid
+// here, at collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { AppNavCanvas } from '../metadata-admin/previews/AppNavCanvas';
 import { t } from '../metadata-admin/i18n';
 import { listStudioCanvasPreviewTypes } from './studio-canvas-preview';
