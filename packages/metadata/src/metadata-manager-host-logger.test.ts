@@ -17,7 +17,7 @@ import { createLogger } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 
-const REGISTERED = 'Registered metadata loader: memory';
+const REGISTERED = 'Registered metadata loader: memory (memory:)';
 
 /** Every line written to the process streams while `fn` runs, printing nothing. */
 function captureStreams(fn: () => void): string[] {
