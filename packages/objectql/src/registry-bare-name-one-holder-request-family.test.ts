@@ -830,7 +830,7 @@ describe('[#32534] the bare engine function read after a holder leaves', () => {
     ql.registerFunction('platform_fn', fn('beta'), { packageId: 'app:com.acme.beta' });
     ql.unregisterFunctionsByPackage('app:com.acme.beta');
     expect(ql.functionHoldersOf('platform_fn').packageHolders).toEqual(['com.acme.alpha']);
-    expect(ql.functionHoldersOf('platform_fn').platformItem()).toBeDefined();
+    expect(ql.functionHoldersOf('platform_fn').platformItem?.()).toBeDefined();
     expect(ql.resolveFunctionEntry('platform_fn')).toBeUndefined();
   });
 });
