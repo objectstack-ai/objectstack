@@ -87,6 +87,8 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  bundleEntryKey,
+  isBundledStoreType,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
@@ -111,6 +113,22 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * [#31699 R5-A; epic ruling 6801410166] {@link MetadataManager.register}'s
+ * options: the spec's {@link MetadataWriteOptions}, plus `skipSourceLoader`.
+ * With it, an item {@link MetadataManager.loadMany} read from a loader is not
+ * persisted back into that same loader; every other loader's write is
+ * unchanged. The boot priming pass sets it, so a boot never writes back a row
+ * it read from the store it read it from. [R7-A] That loader still binds the
+ * empty `package_id` column of the legacy row the item was read from, the
+ * column only (`MetadataLoader.bindReadRowPackage`). Class-level, as
+ * {@link MetadataUnregisterOptions} is.
+ */
+export interface MetadataRegisterOptions extends MetadataWriteOptions {
+  /** Skip the write-through to the loader `loadMany` read this very item from. */
+  skipSourceLoader?: boolean;
+}
 
 /**
  * [ADR-0150 D3/D4, #32198] {@link MetadataManager.unregister}'s options: the
@@ -158,15 +176,20 @@ function isPackageMember(item: unknown, packageId: string): boolean {
 }
 
 /**
- * [#5276, #32246] Whether {@link MetadataManager.unregister}'s storage half
- * deletes from `loader`: a `datasource:` loader that declares write
- * capability, for every type; and for a type stored per `(package, name)`,
- * also a `memory:` loader that can delete (the artifact door's store). ⛔ Not
- * the `memory:` loaders for any other type: their residue is a separate card.
+ * [#5276, #32246, #32353] Whether {@link MetadataManager.unregister}'s storage
+ * half deletes from `loader`: a `datasource:` loader that declares write
+ * capability, and a `memory:` loader that can delete (the artifact door's
+ * store), for every type. A `memory:` loader's copy of a removed item would
+ * otherwise keep answering every read once the registry's entry is gone, and
+ * a customization removed over a door item would bring the door's body back:
+ * a removal removes the item, and the artifact's next load (a reload or a
+ * restart) is what restores a door item. For a type stored per
+ * `(package, name)` the loader deletes by that key, for every other type by
+ * name.
  */
-function isRemovalTarget(loader: MetadataLoader, type: string): boolean {
+function isRemovalTarget(loader: MetadataLoader): boolean {
   if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
-  return loader.contract.protocol === 'memory:' && PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.delete === 'function';
+  return loader.contract.protocol === 'memory:' && typeof loader.delete === 'function';
 }
 
 /**
@@ -261,12 +284,14 @@ export function buildWritableLoaderMissingMethodsMessage(
  * same shape one direction over — and leaving it open meant one declaration was
  * binding at one end of an item's life and decorative at the other.
  *
- * Scope is deliberately exactly the combination `register()`/`unregister()` act
- * on. Other protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to
- * by the manager at runtime — both loops filter on `datasource:` too — so they
- * have neither a write nor a deletion of their own to lose and are not gated. A
- * `datasource:` loader with `capabilities.write: false` is likewise untouched by
- * both paths.
+ * Scope is deliberately exactly the combination `register()` writes to. Other
+ * protocols (`file:`, `memory:`, `http:`, `s3:`) are never saved to by the
+ * manager at runtime — `register()`'s loop filters on `datasource:` — so they
+ * have no write of their own to lose and are not gated. `unregister()` also
+ * deletes from a `memory:` loader that implements `delete()`, for every type
+ * ({@link isRemovalTarget}, #32246, #32353); one without `delete()` is
+ * skipped, which loses nothing the manager wrote. A `datasource:` loader with
+ * `capabilities.write: false` is untouched by both paths.
  */
 function assertWritableLoaderContract(loader: MetadataLoader): void {
   const { name, protocol, capabilities } = loader.contract;
@@ -442,6 +467,8 @@ function redactServedDocument(
  */
 export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
+  /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
+  private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -896,7 +923,7 @@ export class MetadataManager implements IMetadataService {
     type: string,
     name: string,
     data: unknown,
-    options?: MetadataWriteOptions,
+    options?: MetadataRegisterOptions,
   ): Promise<void> {
     // [#7378] The ruled register contract, before anything is touched: refuse
     // a data.name that disagrees with the name argument and refuse a
@@ -941,6 +968,12 @@ export class MetadataManager implements IMetadataService {
       // and because `save?` stays optional on the interface for the protocols
       // the gate does not cover. Mirrors the same guard in `unregister()`.
       if (typeof loader.save !== 'function') continue;
+      // [#31699 R5-A] Never back into the loader this item was read from; [R7-A] only the
+      // column-only bind of the legacy row it was read from reaches that loader.
+      if (options?.skipSourceLoader && data !== null && typeof data === 'object' && this.loadedFrom.get(data) === loader) {
+        await loader.bindReadRowPackage?.(type, name, data);
+        continue;
+      }
       await loader.save(type, name, data);
     }
 
@@ -1872,13 +1905,12 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     const { keys, packageId } = removal ?? (await this.removalOf(type, name, options?.packageId));
     // ── 1. Storage first ────────────────────────────────────────────────
-    // Delete only from database-backed loaders that declare write capability.
-    // [ADR-0150 D4, #32246] For a type stored per `(package, name)`, also from
-    // the in-memory loaders (the artifact door's store): its copy of the
-    // removed item would otherwise keep answering every read once the
-    // registry's slots are gone.
+    // Delete from database-backed loaders that declare write capability, and
+    // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
+    // door's store), for every type: their copy of the removed item would
+    // otherwise keep answering every read once the registry's entry is gone.
     for (const loader of this.loaders.values()) {
-      if (!isRemovalTarget(loader, type)) continue;
+      if (!isRemovalTarget(loader)) continue;
       // [#5276] Defensive only — unreachable for a registered loader. This exact
       // combination (`datasource:` + `capabilities.write`, no `delete`) is
       // rejected by `registerLoader()`, the sole writer of `this.loaders`, so
@@ -3331,17 +3363,41 @@ export class MetadataManager implements IMetadataService {
     options?: MetadataLoadOptions
   ): Promise<T[]> {
     const results: T[] = [];
+    // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
+    // per `(package, name, member)` (`bundleEntryKey`), never one per name.
+    const bundleEntries = new Set<string>();
 
     for (const loader of this.loaders.values()) {
         try {
-            const items = await loader.loadMany<T>(type, options);
+            // [#31699 R4-B; epic ruling 6799056319] A bundled type stored per
+            // `(package, name)` reads the loader's keyed entries where it has
+            // them: a row bound to its package by the `package_id` column alone
+            // (as the metadata protocol writes it) carries no stamp in its body,
+            // so only the entry's `packageId` keeps two packages' same member
+            // apart. Such a body is handed on stamped with that package
+            // (`_packageId`, the column's package and only the column's, as the
+            // protocol's own read binds a row), so a caller that registers it
+            // back — the boot priming pass — fills that package's slot and its
+            // member's row, never a package-less one.
+            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
+                ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
+                : await loader.loadMany<T>(type, options);
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
+                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
+                    if (bundleKey !== undefined) {
+                        if (bundleEntries.has(bundleKey)) continue;
+                        bundleEntries.add(bundleKey);
+                        results.push(item);
+                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+                        continue;
+                    }
                     const exists = results.some((r: any) => r && r.name === itemAny.name);
                     if (exists) continue;
                 }
                 results.push(item);
+                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
             }
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
@@ -3409,7 +3465,9 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    const items = new Map<string, T>();
+    // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
+    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
+    const items = new Map<string, MetadataKeyedItem<T>>();
 
     for (const loader of this.loaders.values()) {
       try {
@@ -3421,7 +3479,7 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return Array.from(items, ([name, data]) => ({ name, data }));
+    return Array.from(items.values());
   }
 
   /**
@@ -3441,15 +3499,16 @@ export class MetadataManager implements IMetadataService {
   private async admitKeyedLoaderItems<T = any>(
     loader: MetadataLoader,
     type: string,
-    items: Map<string, T>,
+    items: Map<string, MetadataKeyedItem<T>>,
     options?: MetadataLoadOptions
   ): Promise<void> {
     if (typeof loader.loadManyKeyed === 'function') {
       const keyed = await loader.loadManyKeyed<T>(type, options);
       for (const entry of keyed) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        if (items.has(entry.name)) continue;
-        items.set(entry.name, entry.data);
+        const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
+        if (items.has(key)) continue;
+        items.set(key, { name: entry.name, data: entry.data });
       }
       return;
     }
@@ -3458,7 +3517,9 @@ export class MetadataManager implements IMetadataService {
       if (typeof name !== 'string' || name === '' || items.has(name)) continue;
       const result = await loader.load(type, name, options);
       if (result?.data == null) continue;
-      items.set(name, result.data as T);
+      const key = bundleEntryKey(type, name, result.data) ?? name;
+      if (items.has(key)) continue;
+      items.set(key, { name, data: result.data as T });
     }
   }
 
@@ -4011,3 +4072,13 @@ export class MetadataManager implements IMetadataService {
   }
 }
 
+/**
+ * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
+ * body names none itself; the body unchanged otherwise.
+ */
+function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
+  const data = entry.data as unknown;
+  if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
+  return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+}

@@ -25,7 +25,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
-import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from './package-slotted-store.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { DatabaseLoader } from './loaders/database-loader.js';
 import type { MetadataLoader } from './loaders/loader-interface.js';
@@ -906,6 +906,11 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
  */
 describe('per-package loader storage for every type stored per package (ADR-0150 D3/D4, #32246)', () => {
   const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+  // [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`)
+  // keeps one entry per `(package, name, member)` in every unscoped read, so
+  // the one-item-per-name answers below are the unbundled types' only.
+  const UNBUNDLED = SLOTTED.filter((type) => !isBundledStoreType(type));
+  const BUNDLED = SLOTTED.filter(isBundledStoreType);
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const nameOf = (type: string) => `shared_${type}`;
@@ -982,7 +987,9 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     await loader.save(type, nameOf(type), doorItem(type, B));
     await loader.save(type, nameOf(type), { ...doorItem(type, A), label: 'alpha again' });
     expect(rows(type).map((row) => [row.package_id, row.version])).toEqual([[A, 3], [B, 2]]);
-    expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label)).toEqual(['alpha again']);
+    // A bundled type keeps each package's member (#31699 R3-B); every other type, the row saved last.
+    expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label).sort())
+      .toEqual(isBundledStoreType(type) ? ['alpha again', label(type, B)] : ['alpha again']);
   });
 
   describe.each([
@@ -1028,7 +1035,17 @@ describe('per-package loader storage for every type stored per package (ADR-0150
    * router's third rung and objectql's action audit call — still answer one
    * item per name, the one saved last, as when each loader kept one entry.
    */
-  it.each(SLOTTED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+  it.each(BUNDLED)('%s: the loaders\' unscoped reads keep each package\'s member; the by-name read still answers the one saved last (#31699 R3-B)', async (type) => {
+    const ctx = await boot(type);
+    for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
+      expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
+      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label]).sort())
+        .toEqual([[nameOf(type), label(type, A)], [nameOf(type), label(type, B)]]);
+    }
+  });
+
+  it.each(UNBUNDLED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
@@ -1305,11 +1322,14 @@ describe('per-package loader storage for every type stored per package (ADR-0150
       expect(labelsOf(await peer.list(CONTROL_TYPE))).toEqual([label(CONTROL_TYPE, B)]);
     });
 
-    it('a removal still never deletes from the door\'s store: its copy keeps answering (a separate card)', async () => {
+    it('a removal deletes from the door\'s store too: nothing answers (#32353; BASE: its copy kept answering)', async () => {
       const ctx = await boot(CONTROL_TYPE, [A]);
       await ctx.manager.unregisterPackage(A);
       expect(ctx.rows()).toEqual([]);
-      expect(((await ctx.manager.get(CONTROL_TYPE, ctx.name)) as any)?.label).toBe(label(CONTROL_TYPE, A));
+      expect(await ctx.door.loadManyKeyed(CONTROL_TYPE)).toEqual([]);
+      expect(await ctx.manager.get(CONTROL_TYPE, ctx.name)).toBeUndefined();
+      expect(await ctx.manager.exists(CONTROL_TYPE, ctx.name)).toBe(false);
+      expect(await ctx.manager.list(CONTROL_TYPE)).toEqual([]);
     });
   });
 });
@@ -1409,5 +1429,104 @@ describe('[#32352] an action\'s removal: the manager\'s holder count agrees with
     expect(await ctx.doorHolders()).toEqual([]);
     expect(ctx.rowHolders()).toEqual([]);
     expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * [#32353] The non-slotted half of #32246: a removal of a type outside
+ * `PACKAGE_SLOTTED_STORE_TYPES` deletes the artifact door's in-memory copy
+ * too, by name, so the removed item stops answering. Pinned per first-party
+ * call shape (step 0 census, read at 2513e3ad):
+ *
+ *  - objectql `settleRuntimeObjectCopy` and install-local's
+ *    `withdrawObjectCopies`: `unregister('object', name, { notify: false })`;
+ *  - the datasource admin's delete and its `/meta` door follower:
+ *    `unregister('datasource', name)`; the runtime's package-datasource
+ *    withdraw: `unregister('datasource', name, { notify: false })`;
+ *  - plugin-security's `dropEcho` of a `position`: `unregister('position',
+ *    name)`, and with the echo slot's `{ packageId }`; its stale echo-slot
+ *    drop: `{ packageId, notify: false }`;
+ *  - `view`, the CONTROL type of the #32246 pins.
+ *
+ * Each over the door boot (the door's `MemoryLoader` saved first, then
+ * `register(…, { notify: false })`, one writable `DatabaseLoader`), read on
+ * the live manager and on a manager with an empty registry over the same door
+ * and rows. BASE: every read answered the door's body after the removal; with
+ * a customization registered over the door item, the removal brought the
+ * door's body back.
+ */
+describe('a removal of a type outside the set deletes the door\'s copy too (#32353)', () => {
+  const P = 'com.acme.alpha';
+  const nameOf = (type: string) => `door_${type}`;
+  const doorItem = (type: string, name = nameOf(type)) => ({ name, label: `door ${type}`, _packageId: P, _provenance: 'package' });
+
+  const SHAPES: ReadonlyArray<readonly [string, string, Record<string, unknown> | undefined]> = [
+    ['objectql settleRuntimeObjectCopy / install-local withdrawObjectCopies', 'object', { notify: false }],
+    ['datasource admin delete / its /meta door follower', 'datasource', undefined],
+    ['runtime package-datasource withdraw', 'datasource', { notify: false }],
+    ['plugin-security dropEcho, by name', 'position', undefined],
+    ['plugin-security dropEcho, naming the echo slot\'s package', 'position', { packageId: P }],
+    ['plugin-security stale echo-slot drop, silent', 'position', { packageId: P, notify: false }],
+    ['CONTROL type', 'view', undefined],
+  ];
+
+  async function boot(type: string, opts: { customize?: boolean } = {}) {
+    const { driver, rows } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    const door = new MemoryLoader();
+    for (const item of [doorItem(type), doorItem(type, `kept_${type}`)]) {
+      await door.save(type, item.name, item);
+      await manager.register(type, item.name, item, { notify: false });
+    }
+    if (opts.customize) {
+      await manager.register(type, nameOf(type), { name: nameOf(type), label: `edited ${type}`, _packageId: P }, { notify: false });
+    }
+    manager.registerLoader(door);
+    const peer = () => {
+      const fresh = new MetadataManager({ formats: ['json'], loaders: [] });
+      fresh.registerLoader(door);
+      fresh.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+      return fresh;
+    };
+    return { manager, door, peer, rows: () => rows(type), name: nameOf(type) };
+  }
+
+  /** What a read answers for the removed name: its `list` labels, bare `get`, `exists`. */
+  async function readsOf(manager: MetadataManager, type: string, name: string) {
+    const listed = ((await manager.list(type)) as any[]).filter((item) => item?.name === name).map((item) => item.label);
+    return { listed, get: ((await manager.get(type, name)) as any)?.label, exists: await manager.exists(type, name) };
+  }
+  const GONE = { listed: [], get: undefined, exists: false };
+
+  it('every shape\'s type is outside the set (the set\'s own removal is pinned above)', () => {
+    for (const [, type] of SHAPES) expect(PACKAGE_SLOTTED_STORE_TYPES.has(type), type).toBe(false);
+  });
+
+  it.each(SHAPES)('%s (%s): after the removal no read answers the door item, live or over an empty registry (BASE: the door body)', async (_, type, options) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregister(type, ctx.name, options as any);
+    expect(await readsOf(ctx.manager, type, ctx.name)).toEqual(GONE);
+    expect(await readsOf(ctx.peer(), type, ctx.name)).toEqual(GONE);
+    expect((await ctx.door.load(type, ctx.name)).data).toBeNull();
+    expect(ctx.rows().map((row) => row.name)).toEqual([`kept_${type}`]);
+  });
+
+  it.each(SHAPES)('%s (%s): a customization removed over the door item does not bring the door body back (BASE: it did)', async (_, type, options) => {
+    const ctx = await boot(type, { customize: true });
+    expect((await readsOf(ctx.manager, type, ctx.name)).get).toBe(`edited ${type}`);
+    await ctx.manager.unregister(type, ctx.name, options as any);
+    expect(await readsOf(ctx.manager, type, ctx.name)).toEqual(GONE);
+    expect(await readsOf(ctx.peer(), type, ctx.name)).toEqual(GONE);
+  });
+
+  it.each(SHAPES)('%s (%s): CONTROL — another name\'s door item keeps answering, and a re-register of the removed one serves it again', async (_, type, options) => {
+    const ctx = await boot(type);
+    await ctx.manager.unregister(type, ctx.name, options as any);
+    const kept = `kept_${type}`;
+    expect(await readsOf(ctx.manager, type, kept)).toEqual({ listed: [`door ${type}`], get: `door ${type}`, exists: true });
+    expect(await readsOf(ctx.peer(), type, kept)).toEqual({ listed: [`door ${type}`], get: `door ${type}`, exists: true });
+    await ctx.manager.register(type, ctx.name, doorItem(type), { notify: false });
+    expect(await readsOf(ctx.manager, type, ctx.name)).toEqual({ listed: [`door ${type}`], get: `door ${type}`, exists: true });
   });
 });
