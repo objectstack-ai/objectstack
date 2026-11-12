@@ -134,7 +134,10 @@ describe('ADR-0150 D3 exceptions over a supplied holder set', () => {
 
   it('an overridable baseline yields to another holder of the step, and answers when it is the only one', () => {
     expect(resolve([[EMAIL, 'builtin']], [EMAIL], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', via: 'baseline' });
-    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // The step-2 yield, on a name the platform does not request with no package.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'welcome')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // [#31699] A platform-requested name (`auth.*`) resolves environment-wide whatever the caller: the override still wins.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
     expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [], undefined, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
   });
 
