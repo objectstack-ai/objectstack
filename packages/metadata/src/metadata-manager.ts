@@ -266,12 +266,14 @@ export function buildWritableLoaderMissingMethodsMessage(
  * same shape one direction over — and leaving it open meant one declaration was
  * binding at one end of an item's life and decorative at the other.
  *
- * Scope is deliberately exactly the combination `register()`/`unregister()` act
- * on. Other protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to
- * by the manager at runtime — both loops filter on `datasource:` too — so they
- * have neither a write nor a deletion of their own to lose and are not gated. A
- * `datasource:` loader with `capabilities.write: false` is likewise untouched by
- * both paths.
+ * Scope is deliberately exactly the combination `register()` writes to. Other
+ * protocols (`file:`, `memory:`, `http:`, `s3:`) are never saved to by the
+ * manager at runtime — `register()`'s loop filters on `datasource:` — so they
+ * have no write of their own to lose and are not gated. `unregister()` also
+ * deletes from a `memory:` loader that implements `delete()`, for every type
+ * ({@link isRemovalTarget}, #32246, #32353); one without `delete()` is
+ * skipped, which loses nothing the manager wrote. A `datasource:` loader with
+ * `capabilities.write: false` is untouched by both paths.
  */
 function assertWritableLoaderContract(loader: MetadataLoader): void {
   const { name, protocol, capabilities } = loader.contract;

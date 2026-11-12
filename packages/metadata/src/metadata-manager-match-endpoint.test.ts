@@ -1329,7 +1329,8 @@ describe('per-package loader storage for every type stored per package (ADR-0150
  *    `unregister('datasource', name)`; the runtime's package-datasource
  *    withdraw: `unregister('datasource', name, { notify: false })`;
  *  - plugin-security's `dropEcho` of a `position`: `unregister('position',
- *    name)`, and with the echo slot's `{ packageId }`;
+ *    name)`, and with the echo slot's `{ packageId }`; its stale echo-slot
+ *    drop: `{ packageId, notify: false }`;
  *  - `view`, the CONTROL type of the #32246 pins.
  *
  * Each over the door boot (the door's `MemoryLoader` saved first, then
@@ -1349,7 +1350,8 @@ describe('a removal of a type outside the set deletes the door\'s copy too (#323
     ['datasource admin delete / its /meta door follower', 'datasource', undefined],
     ['runtime package-datasource withdraw', 'datasource', { notify: false }],
     ['plugin-security dropEcho, by name', 'position', undefined],
-    ['plugin-security dropEcho, naming the slot\'s package', 'position', { packageId: P, notify: false }],
+    ['plugin-security dropEcho, naming the echo slot\'s package', 'position', { packageId: P }],
+    ['plugin-security stale echo-slot drop, silent', 'position', { packageId: P, notify: false }],
     ['CONTROL type', 'view', undefined],
   ];
 
