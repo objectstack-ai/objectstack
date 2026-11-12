@@ -33,6 +33,18 @@
  *
  * The projection is **narrow on purpose**: a skill with no `instructions` has
  * nothing to serve, so it is not listed at all rather than listed empty.
+ *
+ * ## The binding still decides WHETHER a skill is offered (#32767)
+ *
+ * The binding is not projected, but it is read: a skill's instructions teach
+ * the model to call the tools it binds, so a connection that does not serve
+ * one of them is handed a playbook it cannot run. A `data:read` token was
+ * offered `metadata_authoring` and eight more skills naming eighteen tools its
+ * own `tools/list` never listed. So {@link registerSkillPrompts} offers a skill
+ * only when THIS connection serves every tool its binding names
+ * ({@link skillBindingServed}); a skill that binds no tool is offered as
+ * before, and a withheld skill is unknown to `prompts/get`, exactly like a
+ * name no skill derives.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -154,6 +166,18 @@ export function projectSkillPrompt(
  * once, so this only guards a malformed store).
  */
 export async function listSkillPrompts(bridge: McpSkillBridge): Promise<SkillPrompt[]> {
+  return listSkillPromptsServedBy(bridge, undefined);
+}
+
+/**
+ * [#32767] {@link listSkillPrompts}, keeping only the skills whose tool
+ * binding `served` serves ({@link skillBindingServed}). `undefined` = the
+ * served tool list is unknown, and every skill is kept, as before.
+ */
+async function listSkillPromptsServedBy(
+  bridge: McpSkillBridge,
+  served: ReadonlySet<string> | undefined,
+): Promise<SkillPrompt[]> {
   const rows = (await bridge.listSkills()) ?? [];
   const namespaceOf = typeof bridge.packageNamespace === 'function'
     ? (packageId: string) => bridge.packageNamespace!(packageId)
@@ -161,6 +185,7 @@ export async function listSkillPrompts(bridge: McpSkillBridge): Promise<SkillPro
   const out: SkillPrompt[] = [];
   const seen = new Set<string>();
   for (const row of rows) {
+    if (served && !skillBindingServed(row, served)) continue;
     const prompt = projectSkillPrompt(row, namespaceOf);
     if (!prompt) continue;
     const holding = `${prompt.packageId ?? ''}\u0000${prompt.name}`;
@@ -169,6 +194,61 @@ export async function listSkillPrompts(bridge: McpSkillBridge): Promise<SkillPro
     out.push(prompt);
   }
   return out;
+}
+
+/**
+ * [#32767] The MCP door of each platform tool family
+ * (`PLATFORM_TOOL_FAMILY_PREFIXES` in `@objectstack/spec/system`). The MCP
+ * server registers no `action_<name>` tool: an AI-exposed action reaches the
+ * client through `run_action` (the skill schema's own JSDoc says so), so a
+ * binding naming one is served exactly when `run_action` is.
+ */
+const TOOL_FAMILY_DOORS: ReadonlyArray<readonly [prefix: string, door: string]> = [['action_', 'run_action']];
+
+/** Whether one entry of a skill's `tools` binding names a tool `served` serves. */
+function bindingEntryServed(entry: string, served: ReadonlySet<string>): boolean {
+  const wildcard = entry.endsWith('*');
+  const stem = wildcard ? entry.slice(0, -1) : entry;
+  for (const [prefix, door] of TOOL_FAMILY_DOORS) {
+    if (stem.startsWith(prefix)) return served.has(door);
+  }
+  if (!wildcard) return served.has(entry);
+  // A trailing wildcard (`SkillSchema.tools`) is served by any tool it matches.
+  for (const name of served) if (name.startsWith(stem)) return true;
+  return false;
+}
+
+/**
+ * [#32767] Whether a connection serving `served` serves every tool a raw
+ * skill row binds (`SkillSchema.tools`). A row that binds no tool binds
+ * nothing this connection could lack, so it is served.
+ */
+export function skillBindingServed(raw: unknown, served: ReadonlySet<string>): boolean {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return true;
+  const binding = (raw as Record<string, unknown>).tools;
+  if (!Array.isArray(binding)) return true;
+  return binding.every((entry) => typeof entry !== 'string' || bindingEntryServed(entry, served));
+}
+
+/**
+ * [#32767] The tools this server serves: the names its `tools/list` answers,
+ * which is the SDK registry's enabled entries. Read when a prompt request is
+ * answered — every tool family is registered on the per-request server before
+ * it connects, so the answer is the connection's whole tool list.
+ *
+ * `undefined` when this SDK's registry cannot be read: the served list is then
+ * unknown and every skill is offered, as before this filter. The pins in
+ * `skill-prompts.test.ts` go red on such an SDK in both directions.
+ */
+function servedToolNames(server: McpServer): ReadonlySet<string> | undefined {
+  const tools = (server as unknown as { _registeredTools?: unknown })._registeredTools;
+  if (tools === null || typeof tools !== 'object') return undefined;
+  const served = new Set<string>();
+  for (const [name, tool] of Object.entries(tools as Record<string, unknown>)) {
+    // The filter the SDK's own `tools/list` applies: a disabled tool is not served.
+    if ((tool as { enabled?: unknown } | null)?.enabled) served.add(name);
+  }
+  return served;
 }
 
 /**
@@ -310,7 +390,9 @@ export function skillPromptResult(prompt: SkillPrompt) {
 
 /**
  * Register `prompts/list` + `prompts/get` on a server, served live from skill
- * metadata.
+ * metadata. [#32767] Only the skills whose tool binding this server serves
+ * ({@link skillBindingServed} over {@link servedToolNames}): a withheld skill
+ * is not listed, and `prompts/get` answers it as it answers an unknown name.
  *
  * Uses the low-level request handlers rather than `McpServer.registerPrompt`
  * because the projection must be **read at call time**: the HTTP transport
@@ -329,14 +411,16 @@ export function skillPromptResult(prompt: SkillPrompt) {
 export function registerSkillPrompts(server: McpServer, bridge: McpSkillBridge): void {
   // [ADR-0150 D6] Listed by face, each face once ({@link skillPromptListEntry}).
   server.server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-    prompts: skillPromptFaces(await listSkillPrompts(bridge)).map(skillPromptListEntry),
+    prompts: skillPromptFaces(await listSkillPromptsServedBy(bridge, servedToolNames(server))).map(
+      skillPromptListEntry,
+    ),
   }));
 
   // [ADR-0150 D5/D6] Got by face, or by the bare skill name while one holder
   // has it ({@link lookupSkillPrompt}); a refusal names every candidate.
   server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
     const wanted = request.params.name;
-    const lookup = lookupSkillPrompt(await listSkillPrompts(bridge), wanted);
+    const lookup = lookupSkillPrompt(await listSkillPromptsServedBy(bridge, servedToolNames(server)), wanted);
     if (lookup.status === 'refused') throw skillPromptRefusalError(lookup);
     if (lookup.status === 'not-found') {
       throw new McpError(ErrorCode.InvalidParams, `Prompt "${wanted}" not found`);

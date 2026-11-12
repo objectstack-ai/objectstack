@@ -2,10 +2,19 @@
 
 import { describe, it, expect } from 'vitest';
 
+import {
+  MCP_OAUTH_SCOPE_ACTIONS,
+  MCP_OAUTH_SCOPE_DATA_READ,
+  MCP_OAUTH_SCOPE_DATA_WRITE,
+  MCP_OAUTH_SCOPE_METADATA_WRITE,
+} from '@objectstack/spec/ai';
+import type { AIToolDefinition } from '@objectstack/spec/contracts';
+
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import { lookupSkillPrompt, projectSkillPrompt } from './skill-prompts.js';
+import { lookupSkillPrompt, projectSkillPrompt, skillBindingServed } from './skill-prompts.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
 import type { McpSkillBridge } from './skill-prompts.js';
+import type { McpAuthoringInjection } from './types.js';
 
 /**
  * `skill` metadata → MCP `prompts` primitive (#3905).
@@ -17,9 +26,20 @@ import type { McpSkillBridge } from './skill-prompts.js';
  * validated and linted while no client could ever reach it.
  */
 
-/** Minimal object bridge; the skill half is layered per test. */
+/**
+ * Minimal object + action bridge; the skill half is layered per test. The
+ * action half is what serves `run_action`, the door of the `action_<name>`
+ * tools {@link CASE_SKILL} binds (#32767: a skill is offered only where its
+ * bound tools are served).
+ */
 function makeDataBridge(): McpDataBridge & Partial<McpActionBridge> {
   return {
+    async listActions() {
+      return [];
+    },
+    async runAction() {
+      return {};
+    },
     async listObjects() {
       return [];
     },
@@ -48,10 +68,17 @@ function withSkills(rows: unknown[]): McpDataBridge & McpSkillBridge {
   return { ...makeDataBridge(), listSkills: async () => rows };
 }
 
+/** [#32767] The token's grant and the host's authoring family, when a test serves less (or more) than every native tool. */
+interface RpcConnection {
+  grantedScopes?: string[];
+  authoring?: McpAuthoringInjection;
+}
+
 async function rpc(
   bridge: McpDataBridge & Partial<McpSkillBridge>,
   method: string,
   params?: Record<string, unknown>,
+  connection: RpcConnection = {},
 ): Promise<any> {
   const runtime = new MCPServerRuntime({ name: 'skill-prompts', version: '0.0.0' });
   const body = { jsonrpc: '2.0', id: 1, method, ...(params ? { params } : {}) };
@@ -64,7 +91,12 @@ async function rpc(
       },
       body: JSON.stringify(body),
     }),
-    { bridge, parsedBody: body },
+    {
+      bridge,
+      parsedBody: body,
+      ...(connection.grantedScopes ? { toolOptions: { grantedScopes: connection.grantedScopes } } : {}),
+      ...(connection.authoring ? { authoring: connection.authoring } : {}),
+    },
   );
   return await res.json();
 }
@@ -284,5 +316,113 @@ describe('skill prompts are named by their AI face (ADR-0150 D6)', () => {
     const face = found.status === 'found' ? found.prompt.face : '';
     expect(face).toHaveLength(64);
     expect(face.startsWith(`crm-${'a'.repeat(51)}-`)).toBe(true);
+  });
+});
+
+/**
+ * [#32767] A skill's instructions teach the model to call the tools it binds,
+ * so a connection is offered a skill only when it serves every one of them. A
+ * `data:read` token was offered `metadata_authoring` and eight more skills
+ * naming tools its own `tools/list` never listed. Driven through the HTTP wire
+ * path above, with the grant and the host's authoring family the hosted
+ * platform injects.
+ */
+describe('a skill is offered only where the connection serves the tools it binds (#32767)', () => {
+  const AUTHORING_TOOLS: AIToolDefinition[] = [
+    { name: 'create_object', description: 'Create a draft object.', parameters: { type: 'object', properties: {} } },
+    { name: 'verify_build', description: 'Validate the drafts.', parameters: { type: 'object', properties: {} } },
+  ];
+  const authoring: McpAuthoringInjection = {
+    registry: {
+      getAll: () => AUTHORING_TOOLS,
+      async execute() {
+        throw new Error('not called by these pins');
+      },
+    },
+    principal: { userId: 'usr_1', organizationId: 'org_1', clientId: 'claude-code', scopes: [] },
+    environmentId: 'env_1',
+  };
+  const DATA_ONLY: RpcConnection = { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], authoring };
+  const FULL: RpcConnection = {
+    grantedScopes: [
+      MCP_OAUTH_SCOPE_DATA_READ,
+      MCP_OAUTH_SCOPE_DATA_WRITE,
+      MCP_OAUTH_SCOPE_ACTIONS,
+      MCP_OAUTH_SCOPE_METADATA_WRITE,
+    ],
+    authoring,
+  };
+
+  const skill = (name: string, tools?: string[]) => ({
+    name,
+    instructions: `The ${name} playbook.`,
+    ...(tools ? { tools } : {}),
+  });
+  const SKILLS = [
+    skill('metadata_authoring', ['create_object', 'verify_build']),
+    skill('record_lookup', ['query_records', 'get_record']),
+    skill('half_served', ['query_records', 'create_record']),
+    skill('schema_reader', ['describe_*']),
+    skill('object_drafting', ['create_*', 'verify_build']),
+    skill('case_resolution', ['action_resolve_case']),
+    skill('free_text'),
+  ];
+  const ALL_NAMES = SKILLS.map((s) => s.name);
+
+  const listed = async (connection: RpcConnection): Promise<string[]> => {
+    const json = await rpc(withSkills(SKILLS), 'prompts/list', undefined, connection);
+    expect(json.error).toBeUndefined();
+    return json.result.prompts.map((p: any) => p.name);
+  };
+  const servedTools = async (connection: RpcConnection): Promise<string[]> => {
+    const json = await rpc(withSkills(SKILLS), 'tools/list', undefined, connection);
+    return json.result.tools.map((t: any) => t.name);
+  };
+
+  it('a data-only connection lists no skill naming a tool it does not serve', async () => {
+    expect(await listed(DATA_ONLY)).toEqual(['record_lookup', 'schema_reader', 'free_text']);
+
+    // The rule itself, read against the connection's own tools/list: every
+    // plain tool a listed skill binds is a tool this connection lists.
+    const served = new Set(await servedTools(DATA_ONLY));
+    expect(served.has('create_object')).toBe(false);
+    for (const name of await listed(DATA_ONLY)) {
+      const bound = (SKILLS.find((s) => s.name === name)!.tools ?? []).filter((t) => !t.endsWith('*'));
+      for (const tool of bound) expect(served.has(tool)).toBe(true);
+    }
+  });
+
+  it('CONTROL: a connection that serves every bound tool still lists every skill', async () => {
+    const served = await servedTools(FULL);
+    expect(served).toEqual(expect.arrayContaining(['create_object', 'verify_build', 'create_record', 'run_action']));
+    expect(await listed(FULL)).toEqual(ALL_NAMES);
+  });
+
+  it('prompts/get answers a withheld skill exactly as it answers an unknown name', async () => {
+    const withheld = await rpc(withSkills(SKILLS), 'prompts/get', { name: 'metadata_authoring' }, DATA_ONLY);
+    const unknown = await rpc(withSkills(SKILLS), 'prompts/get', { name: 'no_such_skill' }, DATA_ONLY);
+    expect(withheld.result).toBeUndefined();
+    expect(withheld.error.code).toBe(-32602);
+    expect(withheld.error.data).toBeUndefined();
+    expect(withheld.error.message).toBe(unknown.error.message.replace('no_such_skill', 'metadata_authoring'));
+  });
+
+  it('CONTROL: the same get serves the skill on a connection that serves its tools', async () => {
+    const json = await rpc(withSkills(SKILLS), 'prompts/get', { name: 'metadata_authoring' }, FULL);
+    expect(json.error).toBeUndefined();
+    expect(json.result.messages[0].content.text).toBe('The metadata_authoring playbook.');
+  });
+
+  it('an action binding is served by run_action, the door the MCP server serves actions through', () => {
+    const binding = { tools: ['action_resolve_case', 'action_*'] };
+    expect(skillBindingServed(binding, new Set(['run_action']))).toBe(true);
+    expect(skillBindingServed(binding, new Set(['list_actions', 'query_records']))).toBe(false);
+  });
+
+  it('a trailing wildcard is served by any tool it matches; a skill binding nothing is always served', () => {
+    expect(skillBindingServed({ tools: ['describe_*'] }, new Set(['describe_object']))).toBe(true);
+    expect(skillBindingServed({ tools: ['describe_*'] }, new Set(['query_records']))).toBe(false);
+    expect(skillBindingServed({ tools: [] }, new Set())).toBe(true);
+    expect(skillBindingServed({ name: 'free_text' }, new Set())).toBe(true);
   });
 });
