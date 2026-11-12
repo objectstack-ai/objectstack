@@ -680,6 +680,123 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
     const [notice] = notices(res, 'stored-expression-filled');
     expect(notice.message).toContain('2 rows of 3 written');
     expect(notice.message).toContain('1 row written by another write while the fill ran');
+    // [#32732] CONTROL: read again, the moved row holds what the live expression computes, so the fill writes nothing over it.
+    expect(rig.updates.filter((u) => u.id === second)).toHaveLength(1);
+  });
+
+  // [#32732] The write that moves a row mid-walk is not trusted to have computed the field under the live definition.
+  it('[#32732] a row moved mid-walk by a write that did not go through the engine is filled under its new stamp', async () => {
+    const rig = await populated();
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    // A raw driver write: it moves the row and its stamp, and computes nothing.
+    rig.afterFirstPage(async () => {
+      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+    });
+
+    const res = await rig.save(STORED);
+
+    const moved = rig.storeFor(OBJ).get(second!)!;
+    expect(moved.updated_at).toBe(EDITED);
+    expect(moved.days).toBe(10);
+    expect(await stored(rig)).toEqual([1, 10, 3]);
+    const [notice] = notices(res, 'stored-expression-filled');
+    expect(notice.message).toContain('3 rows of 3 written');
+    expect(notice.message).not.toContain('another write');
+    expect(notices(res, 'stored-expression-fill-incomplete')).toEqual([]);
+  });
+
+  it('[#32732] a row moved mid-walk by a node still serving the old expression is rewritten with the new one', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    // A peer that has not applied the change yet: its write stores the OLD expression's value (13 - 3).
+    rig.afterFirstPage(async () => {
+      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, days: 10, updated_at: EDITED });
+    });
+
+    const res = await rig.save({ type: 'number', expression: cel('(record.end_day - record.start_day) * 8') });
+
+    const moved = rig.storeFor(OBJ).get(second!)!;
+    expect(moved.updated_at).toBe(EDITED);
+    expect(moved.days).toBe(80);
+    expect(await stored(rig)).toEqual([8, 80, 24]);
+    const [notice] = notices(res, 'stored-expression-filled');
+    expect(notice.message).toContain('3 rows of 3 written');
+    expect(notice.message).not.toContain('another write');
+  });
+
+  it('[#32732] a moved row that moves again before the re-judged write lands is reported as left, never as computed', async () => {
+    const rig = await populated();
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    const AGAIN = '2099-02-01T00:00:00.000Z';
+    rig.afterFirstPage(async () => {
+      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+    });
+    // A second raw write lands just before the fill's write under the new stamp.
+    const updateMany = rig.driver.updateMany;
+    rig.driver.updateMany = async function (object: string, ast: any, data: Record<string, unknown>) {
+      if (object === OBJ && ast?.where?.id === second && ast?.where?.updated_at === EDITED) {
+        Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 14, updated_at: AGAIN });
+      }
+      return updateMany.call(this, object, ast, data);
+    };
+
+    const res = await rig.save(STORED);
+
+    const moved = rig.storeFor(OBJ).get(second!)!;
+    expect(moved.updated_at).toBe(AGAIN);
+    expect(moved.days ?? null).toBeNull();
+    expect(notices(res, 'stored-expression-filled')).toEqual([]);
+    const [warning] = notices(res, 'stored-expression-fill-incomplete');
+    expect(warning).toMatchObject({ severity: 'warning', path: `objects.${OBJ}.fields.days` });
+    expect(warning.message).toContain('2 rows written, 1 row not');
+  });
+
+  it('[#32732] the command reports a twice-moved row as a failure naming why, and the run as incomplete', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    for (const row of rig.storeFor(OBJ).values()) row.days = null;
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    rig.afterFirstPage(async () => {
+      Object.assign(rig.storeFor(OBJ).get(second!)!, { end_day: 13, updated_at: EDITED });
+    });
+    const updateMany = rig.driver.updateMany;
+    rig.driver.updateMany = async function (object: string, ast: any, data: Record<string, unknown>) {
+      if (object === OBJ && ast?.where?.id === second && ast?.where?.updated_at === EDITED) {
+        Object.assign(rig.storeFor(OBJ).get(second!)!, { updated_at: '2099-02-01T00:00:00.000Z' });
+      }
+      return updateMany.call(this, object, ast, data);
+    };
+
+    const report = await backfillStoredExpressions(rig.engine as any, quietLogger, { objects: [OBJ], apply: true });
+
+    expect(report).toMatchObject({ nullRows: 3, writtenRows: 2, concurrentRows: 0 });
+    expect(report.fields[0]).toMatchObject({ field: 'days', nullRows: 3, written: 2, concurrentRows: 0 });
+    expect(report.failures).toEqual([expect.objectContaining({ object: OBJ, recordId: second })]);
+    expect(report.failures[0].error).toContain('changed the row twice while the fill ran');
+    expect(storedExpressionBackfillComplete(report)).toBe(false);
+  });
+
+  it('[#32732] a driver whose conditional write never matches its own read stamp is written unconditionally, and said once', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    for (const row of rig.storeFor(OBJ).values()) row.days = null;
+    rig.driver.updateMany = async () => 0;
+    const warns: string[] = [];
+
+    const report = await backfillStoredExpressions(
+      rig.engine as any,
+      { info: () => {}, warn: (msg: string) => { warns.push(msg); } },
+      { objects: [OBJ], apply: true },
+    );
+
+    expect(report).toMatchObject({ writtenRows: 3, concurrentRows: 0, failures: [] });
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(warns.filter((w) => w.includes('conditional write did not match'))).toHaveLength(1);
   });
 
   it('a refused storage sync is not followed by a fill: no row is written, and each field is reported unfilled', async () => {
