@@ -979,8 +979,11 @@ export async function dispatchActionRequest(
     // answered the caller 401. The environment the host's resolver placed the
     // call in is written as the declared environment header, so the forward is
     // placed where the call ran. It is the resolver's answer, never the
-    // caller's: it replaces any spelling the credential headers carried.
-    const placedEnvironment = deps.isMultiTenantHost() ? context.environmentId : undefined;
+    // caller's: it replaces any spelling the credential headers carried. Read
+    // before the no-resolver fallbacks below write an environment, so a host
+    // that placed nothing (a single kernel) routes nothing; `platform` is the
+    // control plane, not an environment.
+    const placedEnvironment = context.environmentId;
     if (typeof placedEnvironment === 'string' && placedEnvironment !== '' && placedEnvironment !== 'platform') {
         headers[FORWARD_ENVIRONMENT_HEADER] = placedEnvironment;
     }

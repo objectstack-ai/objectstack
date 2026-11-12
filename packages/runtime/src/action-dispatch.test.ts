@@ -561,10 +561,18 @@ describe('a same-origin api action on a hosted environment kernel forwards as th
         expect(h.forwards).toEqual([]);
     });
 
-    it('on a single kernel the forward carries no environment header: nothing placed the call, so there is nothing to route', async () => {
+    // Nothing placed the call in an environment, so there is nothing to route:
+    // a single kernel (the named environment is the scope of the call's
+    // lookups, not a placement), and a resolver that answers the control plane.
+    it.each([
+        ['a single kernel', {}],
+        ['a resolver that places the call in the control plane', {
+            'kernel-resolver': { resolveKernel: async (ctx: any) => { ctx.environmentId = 'platform'; return undefined; } },
+        }],
+    ])('on %s the forward carries no environment header', async (_label, services: Record<string, unknown>) => {
         const request = vi.fn(async (_url: string, _init: RequestInit) =>
             new Response(JSON.stringify({ success: true, data: { ok: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } }));
-        const single = makeRig([probe], { services: { 'http.server': { getRawApp: () => ({ request }) } } });
+        const single = makeRig([probe], { services: { ...services, 'http.server': { getRawApp: () => ({ request }) } } });
 
         const answer = await single.viaHost(MEMBER_EC, probe.name, { environmentId: 'env_named' });
 
