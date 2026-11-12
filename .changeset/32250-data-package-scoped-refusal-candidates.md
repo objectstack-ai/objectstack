@@ -15,4 +15,6 @@ A write hook that refuses a by-name value two packages hold (ADR-0150 D5; the `s
 - **`@objectstack/rest`**: `createMany` and the cross-object `POST /batch` answer them on a whole-request refusal; the `/meta` door's reader now asks the shared recogniser.
 - **`@objectstack/metadata-protocol`**: a batch row's error (`updateMany`, `deleteMany`, `POST /data/:object/batch` create, update, upsert and delete) carries them as `results[i].errors[0].details.candidates`.
 
+**`@objectstack/client` reads this as a change to `err.details`.** On the flat `/data` doors that answer such a refusal whole (`POST`, `PATCH` and `DELETE` on `/data/:object`, and `createMany`), the body now carries a top-level `details`, which the client reads before it falls back to the whole body. So `err.details` for that `409` is now `{ candidates }` where it was the entire body `{ error, code, object }`. `err.code`, `err.message` and `err.httpStatus` are unchanged.
+
 Every other `409` (unique violation, stale version, a `RESOURCE_CONFLICT` thrown with no refusal) answers exactly as before.
