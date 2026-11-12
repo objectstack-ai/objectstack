@@ -1212,9 +1212,9 @@ export class ProtocolPackageCommitsFacet {
         // [#22877] The members of what `reverted` reports, in its order, for
         // the revert's own plan below; the response keeps its declared keys.
         const revertedMembers: Array<string | undefined> = [];
-        // [#32700] Each object whose stored computed fields a restore changes,
-        // captured as served BEFORE the revert's first write-through of it, and
-        // filled once after the loop (one walk an object, as the package
+        // [#32700] Each object whose stored computed fields an item changes,
+        // captured as served BEFORE the revert's first registry change of it, and
+        // filled once after the loop and the commit row (one walk an object, as the package
         // publish door fills its batch); the objects whose storage sync was
         // refused; and what the answer reports on `advisories`.
         const storedExpressions = new Map<string, StoredExpressionFillCapture>();
@@ -1467,6 +1467,14 @@ export class ProtocolPackageCommitsFacet {
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
                     // [#32366] For the package whose commit is reverted.
+                    // [#32700] The capture the fill after the commit row diffs
+                    // against, taken before this object's first registry change:
+                    // removing an `object_extension` the commit created hands the
+                    // extended object back its owner's fields, which can give a
+                    // stored computed field another expression. A removed
+                    // `object` serves no field afterwards, so it changes none.
+                    const removedCapture = captureStoredExpressionChange(host.engine, PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
+                    if (removedCapture && !storedExpressions.has(removedCapture.object)) storedExpressions.set(removedCapture.object, removedCapture);
                     await host.restoreArtifactRegistryView(it.type, it.name, null, commitPackageId, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
@@ -1721,16 +1729,6 @@ export class ProtocolPackageCommitsFacet {
             }
         }
 
-        // [#32700] A stored computed field a restore added back, turned from a
-        // formula, or gave another expression is filled over the object's
-        // existing rows, as the save and publish doors fill it after #32527
-        // (`protocol-stored-expression-fill.ts`, the one fill path), and
-        // reported per field on the omitted-when-empty `advisories`. After every
-        // item's write-through, storage sync and event; before the answer.
-        for (const capture of storedExpressions.values()) {
-            advisories.push(...await fillStoredExpressionChange(capture, { storageRefused: storageRefusedObjects.has(capture.object) }));
-        }
-
         // Record the revert as its own commit (append-only history),
         // environment-wide like the commit it reverts (ADR-0131 D6/D7).
         const revertCommit = await host.recordPackageCommit({
@@ -1747,6 +1745,20 @@ export class ProtocolPackageCommitsFacet {
                 ...(revertedMembers[index] !== undefined ? { member: revertedMembers[index] } : {}),
             })),
         });
+
+        // [#32700] A stored computed field the revert made compute something new
+        // (a restore added it back, turned it from a formula or gave it another
+        // expression; a removed extension handed its owner's expression back)
+        // is filled over the object's existing rows, as the save and publish
+        // doors fill it after #32527 (`protocol-stored-expression-fill.ts`, the
+        // one fill path), and reported per field on the omitted-when-empty
+        // `advisories`. AFTER the revert's own commit row, as the save door
+        // writes its audit row before its fill: the walk is unbounded, and a
+        // process that stops during it must not leave a live revert missing
+        // from the commit timeline.
+        for (const capture of storedExpressions.values()) {
+            advisories.push(...await fillStoredExpressionChange(capture, { storageRefused: storageRefusedObjects.has(capture.object) }));
+        }
 
         return {
             success: failed.length === 0 && reverted.length > 0,

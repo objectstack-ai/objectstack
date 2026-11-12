@@ -807,6 +807,23 @@ describe('[#32700] a rollback or revert that makes a changed stored computed fie
     expect(RevertPackageCommitResponseSchema.parse(res).advisories).toEqual(res.advisories);
   });
 
+  it('a revert records its own commit row before the fill walks the rows', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    await rig.save(TIMES_EIGHT, 'draft');
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    const revertRows = () => Array.from(rig.storeFor('sys_metadata_commit').values())
+      .filter((r) => r.operation === 'revert' && r.parent_commit_id === published.commitId);
+    let recordedWhenTheFillRead: number | undefined;
+    rig.afterFirstPage(async () => { recordedWhenTheFillRead = revertRows().length; });
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(recordedWhenTheFillRead, 'the revert commit row, when the fill read its first page').toBe(1);
+    expect(res.revertCommitId).toBeTruthy();
+  });
+
   it('a revert whose storage sync is refused writes no row, and says so per field', async () => {
     const rig = await populated();
     await rig.save(STORED);
@@ -859,6 +876,27 @@ describe('[#32700] a rollback or revert that makes a changed stored computed fie
 
     expect(await stored(rig)).toEqual([1, 2, 3, 4]);
     expect(notices(res, 'stored-expression-filled')[0].message).toContain('1 row of 4 written');
+  });
+
+  it('a revert that removes the package\'s own object extension hands the owner\'s expression back, and fills it', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    // An extension of the package's own object re-declaring `days` with another expression (ADR-0146 D10 judges
+    // only another package's extension): its fields are merged over the owner's.
+    await (rig.protocol as any).saveMetaItem({
+      type: 'object_extension', name: OBJ, packageId: PKG, mode: 'draft',
+      item: { extend: OBJ, fields: { days: { name: 'days', label: 'Days', ...TIMES_EIGHT } } },
+    });
+    const published = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    rig.updates.length = 0;
+
+    const res: any = await rig.protocol.revertCommit({ commitId: published.commitId!, packageId: PKG });
+
+    expect(res.reverted).toEqual([{ type: 'object_extension', name: OBJ, action: 'removed' }]);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
   });
 
   it('a revert of a commit that added the stored field computes nothing new: no row written, no advisories key', async () => {

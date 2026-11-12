@@ -10802,6 +10802,14 @@ export class ObjectStackProtocolImplementation implements
      * by the override write gate as {@link rollbackMetaItem} judges it
      * ({@link restoreWriteFor}): a version declaring no override is refused
      * into `failed[]`.
+     *
+     * [#32700] A restored object's storage is synced as the save door syncs
+     * it, and once the revert's own commit row is written, every object whose
+     * stored computed fields the revert made compute something new (a
+     * restore, or a removed `object_extension` handing its owner's field back)
+     * is filled over its existing rows by the save door's fill
+     * (`protocol-stored-expression-fill.ts`), each field reported on
+     * `advisories`, omitted when empty.
      */
     async revertCommit(request: {
         commitId: string;
@@ -10839,6 +10847,10 @@ export class ObjectStackProtocolImplementation implements
      * failed". A refused item stops neither its commit nor the rollback: the
      * step still reverts the item's neighbours and records its revert commit,
      * so that commit is also listed in `revertedCommits`.
+     *
+     * [#32700] `advisories` carries every step's own `advisories` (its storage
+     * sync refusals and stored-expression fill notices), in step order;
+     * omitted when no step raised one.
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
@@ -10870,6 +10882,13 @@ export class ObjectStackProtocolImplementation implements
      * [#29848, ADR-0146 D8 item 2] The door names no package: it restores
      * into the row the by-name read naming no package serves, a `.custom`
      * pair's declared override over a row bound to its read-only base.
+     *
+     * [#32700] Then, as the save door does: the restored object's storage is
+     * synced, and every stored computed field the restore makes compute
+     * something new is filled over the object's existing rows
+     * (`protocol-stored-expression-fill.ts`), each reported on `advisories`,
+     * omitted when empty. A refused sync or an unfinished fill never fails
+     * the rollback.
      */
     async rollbackMetaItem(request: RollbackMetaItemRequest): Promise<{
         success: boolean;

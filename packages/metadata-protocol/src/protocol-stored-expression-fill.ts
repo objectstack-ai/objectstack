@@ -44,8 +44,8 @@
  * writes are the engine's (`@objectstack/objectql`'s
  * `captureStoredExpressions`, the walk `os migrate stored-expressions` runs):
  * every row, every organization, under `preserveAudit`. Each changed field is
- * reported on the door's existing `advisories` — the key a refused storage
- * sync rides (`object-storage-sync-refused`), with the same element shape:
+ * reported on the door's `advisories` (declared on each of these doors'
+ * answers) — the key a refused storage sync rides (`object-storage-sync-refused`), with the same element shape:
  *
  * - `stored-expression-filled` (`info`): the rows written for that field, and
  *   how many the object holds;
@@ -53,8 +53,8 @@
  *   write, an object it could not read, or a storage sync that was refused,
  *   with what is left and how to fill it.
  *
- * The save or publish itself is never failed by its fill: the definition is
- * live and stays live, and the answer says what the rows hold.
+ * The save, publish, rollback or revert itself is never failed by its fill:
+ * the definition is live and stays live, and the answer says what the rows hold.
  */
 
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
@@ -151,7 +151,7 @@ export async function fillStoredExpressionChange(
             where: where(object, field),
             path: path(object, field),
             message: `'${object}.${field}' computes a new value at this change, and the object's existing rows were NOT `
-                + 'filled with it: the storage sync this change needed was refused (the notice before this one). Until '
+                + `filled with it: the storage sync this change needed was refused (this answer's \`object-storage-sync-refused\` notice for '${object}'). Until `
                 + 'they are written, those rows hold NULL or the old value, and every reader of the column reads it.',
             hint: `Resolve the storage refusal first. ${fillRemedy(object, field)}`,
         }));
