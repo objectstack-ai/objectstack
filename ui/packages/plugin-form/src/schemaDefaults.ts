@@ -91,6 +91,8 @@
 
 import { isMissingForRequired, isRuntimeDefault } from '@object-ui/core';
 import { isCurrentUserDefaultToken, isMultiValueField } from '@objectstack/spec/data';
+import { PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
+import { withoutSeededHolderPackage } from './sanitize';
 
 // Re-exported (not re-implemented) so this package's long-standing import site
 // keeps working while there is exactly ONE classifier in the workspace. It
@@ -170,6 +172,8 @@ export interface OptionListFieldLike {
 
 /** An object schema as the seeding half reads it — see {@link SeedFieldLike}. */
 interface SeedSchemaLike {
+  /** The object's name: the one object whose create seed drops a key (`seedCreateValues`). */
+  name?: string;
   fields?: Record<string, SeedFieldLike | undefined>;
 }
 
@@ -428,13 +432,23 @@ function isCurrentUserSeedField(
  * instruction (a lookup prefill, a "duplicate this record" seed, a wizard
  * carrying state forward), and an explicit `null` from a caller is a real
  * "leave this blank", not an absence.
+ *
+ * A permission-set grant's package column is never seeded, whoever supplied it
+ * (objectstack#32795, `withoutSeededHolderPackage`): the create payload writes
+ * that column only when the user changed it, so a seeded package would be shown
+ * as a pick the save does not write. The object is read off the definition's
+ * `name`.
  */
 export function seedCreateValues(
   objectSchema: SeedSchemaLike | null | undefined,
   initial?: Record<string, unknown> | null,
   ctx?: SeedContext,
 ): Record<string, unknown> {
-  return { ...schemaDefaultValues(objectSchema, ctx), ...(initial ?? {}) };
+  return withoutSeededHolderPackage(
+    { ...schemaDefaultValues(objectSchema, ctx), ...(initial ?? {}) },
+    objectSchema?.name,
+    PERMISSION_SET_GRANT_COLUMNS,
+  );
 }
 
 /**
