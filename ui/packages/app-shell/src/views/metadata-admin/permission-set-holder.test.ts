@@ -17,6 +17,7 @@ import {
   holdersOfName,
   holdingFromPick,
   holdingOf,
+  holdingOfRead,
   holdingPackage,
   ledgerRowHolders,
   packageQuery,
@@ -141,5 +142,38 @@ describe('permission-set-holder (objectstack#32537)', () => {
     // `everyone` is the environment's reference whatever package served it.
     expect(positionReach({ name: 'everyone', _packageId: 'com.acme.crm' }, two)).toEqual([]);
     expect(positionReach({ name: 'everyone', _packageId: 'com.acme.crm' }, ['com.acme.sales'])).toEqual(['com.acme.sales']);
+    // A package's position may be an overlay or `.custom` override served under
+    // the package's id, which the server reads as the environment's reference:
+    // it reaches both, beside the environment's own set.
+    expect(positionReach({ name: 'rep', _packageId: 'com.acme.crm' }, [null, 'com.acme.crm'])).toEqual(['com.acme.crm', null]);
+  });
+
+  it('reads which holder an item read shows: the package it named, else the set the name alone addresses', () => {
+    const items = [
+      { name: 'sales_rep', _packageId: 'com.acme.crm' },
+      { name: 'sales_rep', _packageId: 'com.acme.sales' },
+      { name: 'env_rep', _packageId: 'sys_metadata' },
+      { name: 'env_rep', _packageId: 'com.acme.crm' },
+      { name: 'auditor', _packageId: 'com.acme.crm' },
+    ];
+    // CONTROL: one holder is read by the name.
+    expect(holdingOfRead(items, 'auditor', undefined)).toBeUndefined();
+    expect(holdingOfRead(items, 'auditor', 'com.acme.crm')).toBeUndefined();
+    expect(holdingOfRead(items, 'nobody', undefined)).toBeUndefined();
+    // The package the read named.
+    expect(holdingOfRead(items, 'sales_rep', 'com.acme.sales')).toEqual({
+      packageId: 'com.acme.sales',
+      holders: ['com.acme.crm', 'com.acme.sales'],
+    });
+    // Two package holders read by the name alone, or a package that holds no
+    // set of it: the read addresses none of them.
+    expect(holdingOfRead(items, 'sales_rep', undefined)).toBeNull();
+    expect(holdingOfRead(items, 'sales_rep', 'com.gone')).toBeNull();
+    // The name alone addresses the environment's own set.
+    expect(holdingOfRead(items, 'env_rep', undefined)).toEqual({ packageId: null, holders: [null, 'com.acme.crm'] });
+    expect(holdingOfRead(items, 'env_rep', 'com.acme.crm')).toEqual({
+      packageId: 'com.acme.crm',
+      holders: [null, 'com.acme.crm'],
+    });
   });
 });

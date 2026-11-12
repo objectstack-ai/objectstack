@@ -51,8 +51,14 @@ export function positionHoldersPagePath(position?: string): string {
   return pagePath(POSITION_HOLDERS_REF, POSITION_PARAM, position);
 }
 
-export function permissionSetAssignmentPagePath(set?: string): string {
-  return pagePath(PERMISSION_SET_ASSIGNMENT_REF, PERMISSION_SET_PARAM, set);
+/**
+ * The Permission set assignment page, optionally opened on one set. objectstack#32537 —
+ * `packageId` names the holder where more than one package holds the set's
+ * name (`holdingPackage`); absent, the link is by the name, as before.
+ */
+export function permissionSetAssignmentPagePath(set?: string, packageId?: string): string {
+  const path = pagePath(PERMISSION_SET_ASSIGNMENT_REF, PERMISSION_SET_PARAM, set);
+  return set && packageId ? `${path}&${PERMISSION_SET_PACKAGE_PARAM}=${encodeURIComponent(packageId)}` : path;
 }
 
 /** One pickable catalog item: its machine name and what the list shows. */

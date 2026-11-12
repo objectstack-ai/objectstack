@@ -102,3 +102,44 @@ describe('readCatalogHolderCount: one holder of a name more than one package hol
     });
   });
 });
+
+describe("readCatalogHolderCount: the environment's set, beside a package holder of its name (objectstack#32537)", () => {
+  const HOLDERS = [null, 'com.acme.crm'];
+  // A position served under a package that holds the name may be that
+  // package's shipped position, or an overlay or `.custom` override of it,
+  // which the server reads as the environment's reference. The served item
+  // does not say which, so it counts for both holders.
+  const positions = {
+    ensureType: async () => [
+      { name: 'crm_lead', _packageId: 'com.acme.crm', permissionSets: ['sales_rep'] },
+      { name: 'env_lead', permissionSets: ['sales_rep'] },
+    ],
+  };
+  function source() {
+    const calls: Array<{ object: string; params: unknown }> = [];
+    return {
+      calls,
+      find: async (object: string, params?: Record<string, unknown>) => {
+        calls.push({ object, params });
+        if (object === 'sys_user_permission_set') return { data: [] };
+        return { data: [{ user_id: 'u-pos' }] };
+      },
+    };
+  }
+
+  it("counts a package's position for the environment's set, so the confirm never says fewer people than lose access", async () => {
+    const env = source();
+    await readCatalogHolderCount(env, positions, 'permission', 'sales_rep', { packageId: null, holders: HOLDERS });
+    expect(env.calls[1]).toEqual({
+      object: 'sys_user_position',
+      params: { $filter: { position: { $in: ['crm_lead', 'env_lead'] } }, $top: 1000 },
+    });
+    // The package's own set: its position, never the environment's.
+    const crm = source();
+    await readCatalogHolderCount(crm, positions, 'permission', 'sales_rep', { packageId: 'com.acme.crm', holders: HOLDERS });
+    expect(crm.calls[1]).toEqual({
+      object: 'sys_user_position',
+      params: { $filter: { position: { $in: ['crm_lead'] } }, $top: 1000 },
+    });
+  });
+});

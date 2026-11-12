@@ -224,11 +224,19 @@ export function CatalogItemActiveSwitch({
   type,
   name,
   label,
+  holding: holdingProp,
 }: {
   type: string;
   name: string;
   /** The item's label for the confirm and the toast; the name when it has none. */
   label?: string;
+  /**
+   * objectstack#32537 — which holder of the name the host shows, where more
+   * than one holds it (`holdingOfRead`). The switch reads and writes that
+   * holder's state. Read by its value, so a host may pass a new object each
+   * render. Absent, the switch is by the name, as before.
+   */
+  holding?: PermissionSetHolding;
 }): React.ReactElement {
   const locale = useMetadataLocale();
   const canAuthor = useCanAuthorMetadata();
@@ -249,14 +257,20 @@ export function CatalogItemActiveSwitch({
   // objectstack#32537 — a refused write waiting on the administrator's pick,
   // with the state it asked for; and the holder picked, once one was.
   const [pendingPick, setPendingPick] = React.useState<(PendingHolderPick & { enabled: boolean }) | null>(null);
-  const [holding, setHolding] = React.useState<PermissionSetHolding | undefined>(undefined);
+  const hostHoldingKey = holdingProp ? JSON.stringify([holdingProp.packageId, holdingProp.holders]) : '';
+  const hostHolding = React.useMemo<PermissionSetHolding | undefined>(() => {
+    if (!hostHoldingKey) return undefined;
+    const [packageId, holders] = JSON.parse(hostHoldingKey) as [PermissionSetHolding['packageId'], PermissionSetHolding['holders']];
+    return { packageId, holders };
+  }, [hostHoldingKey]);
+  const [holding, setHolding] = React.useState<PermissionSetHolding | undefined>(hostHolding);
   const shownLabel = label || name;
 
   React.useEffect(() => {
     const controller = new AbortController();
     setLedger(null);
     setRefusal(null);
-    setHolding(undefined);
+    setHolding(hostHolding);
     Promise.all([readCatalogLedger(type, controller.signal), audienceAnchorsOf(type)])
       .then(([read, anchors]) => {
         if (!controller.signal.aborted) setLedger({ states: read.states, permissionRows: read.permissionRows, anchors });
@@ -267,7 +281,7 @@ export function CatalogItemActiveSwitch({
         setRefusal(err instanceof Error ? err.message : String(err));
       });
     return () => controller.abort();
-  }, [type, name]);
+  }, [type, name, hostHolding]);
 
   const write = React.useCallback(
     async (enabled: boolean, writeHolding: PermissionSetHolding | undefined) => {

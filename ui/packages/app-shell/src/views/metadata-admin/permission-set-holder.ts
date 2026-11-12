@@ -107,6 +107,32 @@ export function holdingOf(items: readonly unknown[], item: unknown): PermissionS
 }
 
 /**
+ * The holding a page that reads ONE set of `name` shows (the item editor),
+ * from the served `items` and the package its read named (`readPackage`):
+ * that package's set, else the set the name alone addresses, which is the
+ * environment's own set when it holds the name.
+ *
+ * - `undefined`: the name has one holder or none. The page reads by the name,
+ *   as before.
+ * - `null`: more than one holder serves the name and the read addresses none
+ *   of them. Two package holders read by the name alone are refused, and a
+ *   named package that does not hold the name is refused too. So no holder's
+ *   grants are this page's to list or remove.
+ */
+export function holdingOfRead(
+  items: readonly unknown[],
+  name: string,
+  readPackage: string | undefined,
+): PermissionSetHolding | undefined | null {
+  const holders = holdersOfName(items, name);
+  if (holders.length <= 1) return undefined;
+  const shown: PermissionSetHolder | undefined =
+    readPackage !== undefined && readPackage !== '' ? holderPackageOf(readPackage) : holders.includes(null) ? null : undefined;
+  if (shown === undefined || !holders.includes(shown)) return null;
+  return { packageId: shown, holders };
+}
+
+/**
  * The package a request must name to address `holder`'s set of a name held by
  * `holders`: `undefined` when the name alone addresses it (one holder, or the
  * environment's own set), else `holder`.
@@ -242,13 +268,24 @@ const ANCHOR_POSITIONS: ReadonlySet<string> = new Set(['everyone', 'guest']);
  * `'closure'` when the declaring package holds no set of the name: the server
  * judges it by that package's declared dependencies, which this page does not
  * read.
+ *
+ * A position served under a package that holds the name reaches that
+ * package's set AND the environment's reference. The server reads an ADR-0005
+ * overlay, or a `.custom` override, of a package's position as the
+ * environment's reference (core `security-catalog.ts`, `referenceCaller`). It
+ * serves that item under the package's `_packageId`, and the served item does
+ * not say whether it is the shipped position or an override. So both readings
+ * are listed and counted: a deactivation confirm never says fewer people than
+ * lose access.
  */
 export function positionReach(
   position: unknown,
   holders: readonly PermissionSetHolder[],
 ): PermissionSetHolder[] | 'closure' {
   const p = position as { name?: unknown } | null;
+  const environmentReference = storedGrantHolders(null, holders);
   const caller = typeof p?.name === 'string' && ANCHOR_POSITIONS.has(p.name) ? null : servedHolderOf(position);
-  if (caller === null) return storedGrantHolders(null, holders);
-  return holders.includes(caller) ? [caller] : 'closure';
+  if (caller === null) return environmentReference;
+  if (!holders.includes(caller)) return 'closure';
+  return environmentReference.includes(caller) ? [caller] : [caller, ...environmentReference];
 }

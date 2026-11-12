@@ -195,7 +195,8 @@ describe('where the area item pages mount it (source pin)', () => {
     expect(areaSections).toMatch(/position: \[catalogActiveSection\('position'\)/);
     expect(areaSections).toMatch(/sharing_rule: \[catalogActiveSection\('sharing_rule'\)\]/);
     const matrix = readFileSync(path.join(here, 'PermissionMatrixEditor.tsx'), 'utf8');
-    expect(matrix).toContain('<CatalogItemActiveSwitch type="permission" name={name} />');
+    // objectstack#32537 — with the holder the editor shows (`assignmentsHolding`).
+    expect(matrix).toContain('<CatalogItemActiveSwitch type="permission" name={name} holding={assignmentsHolding} />');
   });
 });
 
@@ -246,6 +247,30 @@ describe('a permission set more than one package holds (objectstack#32537)', () 
     await waitFor(() => expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull());
     expect(posts).toHaveLength(1);
     await switchOf('sales_rep', 'false');
+  });
+
+  it("takes the host's holding: reads that holder's row and writes its package, with no pick", async () => {
+    // The other holder's row is on; the shown holder's (com.acme.crm) is off.
+    ledgerRows = [
+      ...ledgerRows,
+      { metadata_type: 'permission', name: 'sales_rep', package_id: 'com.acme.sales', active: true },
+    ];
+    render(
+      <CatalogItemActiveSwitch
+        type="permission"
+        name="sales_rep"
+        label="Sales Rep"
+        holding={{ packageId: 'com.acme.crm', holders: ['com.acme.crm', 'com.acme.sales'] }}
+      />,
+    );
+    fireEvent.click(await switchOf('sales_rep@com.acme.crm', 'false'));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      url: '/api/v1/security/_activation/permission/sales_rep?package=com.acme.crm',
+      body: '{"enabled":true}',
+    });
+    await switchOf('sales_rep@com.acme.crm', 'true');
+    expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull();
   });
 
   it('CONTROL: a name the door addresses by itself is switched by the name alone, with no pick', async () => {
