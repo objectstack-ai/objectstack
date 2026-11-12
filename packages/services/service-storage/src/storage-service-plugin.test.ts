@@ -577,6 +577,88 @@ describe('StorageServicePlugin: sys_file orphan lifecycle wiring (#2755)', () =>
     expect(contribute.calls).toBe(0);
   });
 
+  // Every member's attachment grant (read and create on sys_attachment) is
+  // contributed only once ALL THREE attachment row gates are in place — the
+  // write rule, the read-visibility middleware and the download door's
+  // parent-record check — after the last of them, and never on a kernel that
+  // lacks one (maintainer ruling; `attachment-member-grant.ts`).
+  describe("the members' attachment grant, contributed beside the three row gates", () => {
+    const MEMBER_SET = {
+      name: 'storage_attachment_member',
+      objects: { sys_attachment: { allowRead: true, allowCreate: true } },
+    };
+
+    async function bootWith(engine: Record<string, unknown>, opts: { auth?: boolean } = {}) {
+      const dir = await fs.mkdtemp(join(tmpdir(), 'oss-member-grant-'));
+      const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });
+      const ctx = makeCtx();
+      const order: string[] = [];
+      const contributions: unknown[][] = [];
+      ctx.registerService('objectql', {
+        find: async () => [],
+        findOne: async () => null,
+        update: async () => ({}),
+        getObject: () => undefined,
+        ...engine,
+      });
+      if (opts.auth !== false) ctx.registerService('auth', { api: {} });
+      ctx.registerService('security', {
+        contributeOwnershipFloorAlternates: () => {},
+        contributePlatformBaselineSet: (...args: unknown[]) => {
+          order.push('grant');
+          contributions.push(args);
+          return { name: 'storage_attachment_member', joined: true };
+        },
+      });
+      await plugin.init(ctx);
+      await plugin.start(ctx);
+      await ctx._flushReady();
+      return { ctx, order, contributions };
+    }
+
+    const gateHook = (order: string[]) => (event: string, _fn: unknown, opts: any) => {
+      if (opts?.object === 'sys_attachment' && event === 'beforeInsert') order.push('write rule');
+    };
+
+    it('contributes the set exactly once, after the write rule and the read-visibility middleware', async () => {
+      const order: string[] = [];
+      const booted = await bootWith({
+        registerHook: gateHook(order),
+        registerMiddleware: (_fn: unknown, opts: any) => {
+          if (opts?.object === 'sys_attachment') order.push('read visibility');
+        },
+      });
+      expect(booted.contributions).toEqual([['com.objectstack.service.storage', expect.objectContaining(MEMBER_SET)]]);
+      // The grant comes last; it never exists without the gates before it.
+      expect([...order, ...booted.order]).toEqual(['write rule', 'write rule', 'read visibility', 'grant']);
+      expect(booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'))).toEqual([]);
+    });
+
+    it('an engine without the middleware seam: no read-visibility gate, so no grant — said at warn', async () => {
+      const booted = await bootWith({ registerHook: () => {} });
+      expect(booted.contributions).toEqual([]);
+      const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('read-visibility');
+    });
+
+    it('a kernel without an auth service: no download check binds, so no grant — said at warn', async () => {
+      const booted = await bootWith({ registerHook: () => {}, registerMiddleware: () => {} }, { auth: false });
+      expect(booted.contributions).toEqual([]);
+      const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain("download door's parent-record check");
+    });
+
+    it('an engine without the hook seam: no write rule, so no grant — said at warn', async () => {
+      const booted = await bootWith({ registerMiddleware: () => {} });
+      expect(booted.contributions).toEqual([]);
+      const warned = booted.ctx._logs.warn.filter((w: string) => w.includes('NOT granted attachments'));
+      expect(warned).toHaveLength(1);
+      expect(warned[0]).toContain('write rule');
+    });
+  });
+
   it('degrades silently on a bare kernel (no engine, no lifecycle service)', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'oss-bare-'));
     const plugin = new StorageServicePlugin({ adapter: 'local', local: { rootDir: dir }, registerRoutes: false });

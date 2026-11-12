@@ -25,6 +25,37 @@ attachment to it. Enforcement is layered, and every gate is fail-closed.
 stored) and never create a `sys_attachment` row, so nothing on this page
 applies to them.
 
+## Who holds the object grant
+
+The gates on this page decide the rows. The object grant on `sys_attachment`
+only opens the door to them, and every member holds its **read and create**
+half with no grant from the app: the storage service
+(`@objectstack/service-storage`) contributes a set of its own,
+`storage_attachment_member`, to the member baseline that every signed-in member
+holds through the `everyone` anchor. It contributes the set beside the gates,
+and only once all three are installed: the write rule, the read-visibility gate
+and the download door's parent-record check. So a member attaches a file to a
+record they can edit, and sees the files of a record they can read, and
+`security/explain` names `storage_attachment_member` as the baseline that grants
+it.
+
+The set reaches no one else:
+
+- an external member (`org_external`) resolves its own baseline instead, and an
+  agent principal resolves no member baseline; an agent acting for a member
+  gets no more than that member;
+- a deployment that declares no member baseline (`fallbackPermissionSet: null`)
+  hands it to no one;
+- a host that registers `sys_attachment` without the storage service, or runs
+  it on an engine that cannot install one of the three gates, gets no set, and
+  a member's attach is refused `PERMISSION_DENIED` (403); on such an engine the
+  boot log names the missing gate.
+
+The set carries **no edit and no delete** (ADR-0090 D5: a set every member holds
+carries no delete bit). Editing or deleting attachments still needs an explicit
+grant on `sys_attachment` (see Delete below). An app can also grant read and
+create explicitly, as before; the baseline set adds nothing to such a grant.
+
 ## The opt-in gate — `enable.files`
 
 Attachments are **opt-in per object** (spec default `false`). A `sys_attachment`
@@ -164,12 +195,14 @@ floor binds still cannot edit another user's attachment row
 (`PERMISSION_DENIED`), even as a parent editor.
 
 <Callout type="info">
-The platform baseline permission set (`member_default`, the `everyone`
-anchor) grants **no delete** on `sys_attachment` (ADR-0090 D5 — delete is not a
-baseline right). Attachment management is therefore enabled by an ordinary,
-position-distributed permission set that grants `sys_attachment` CRUD. Until a
-member holds such a set, a delete is refused by RBAC (`PERMISSION_DENIED`)
-before the attachment-level gate above is even consulted.
+The member baseline (the `everyone` anchor: `member_default` and the storage
+service's `storage_attachment_member`) grants **read and create** on
+`sys_attachment` and **no edit or delete** (ADR-0090 D5 — delete is not a
+baseline right). Managing attachments — editing or deleting them — is therefore
+enabled by an ordinary, position-distributed permission set that grants edit
+and delete on `sys_attachment`. Until a member holds such a set, a delete is
+refused by RBAC (`PERMISSION_DENIED`) before the attachment-level gate above is
+even consulted.
 </Callout>
 
 ## Download — authenticated & parent-scoped
@@ -254,13 +287,18 @@ can be shared across records). Reclamation is handled by the platform LifecycleS
 
 ## Enforcement summary
 
+Every operation also needs its object grant on `sys_attachment`, refused
+`PERMISSION_DENIED` (403) without it. Read and create come with the member
+baseline (`storage_attachment_member`, where the storage service installs its
+gates); edit and delete need an explicit grant.
+
 | Operation | Requirement | Deny code |
 | --- | --- | --- |
 | Attach (create) | parent object opts in (`enable.files`) | `FILES_DISABLED` (403) |
 | Attach on upload completion (`attachTo`) | the caller's own pending, unattached `attachments`-scope upload, then every create check | `PERMISSION_DENIED` (403) / `RESOURCE_CONFLICT` (409), then the create codes |
 | Attach (create), re-point | a by-id update of the parent record by the caller would be admitted | `ATTACHMENT_PARENT_ACCESS` (403); `OBJECT_NOT_FOUND` (404) when the parent object is not registered |
 | List / read | inherits parent read visibility | *(filtered out)* |
-| Delete | uploader or parent editor (+ RBAC delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
+| Delete | uploader or parent editor (+ an explicit delete grant) | `ATTACHMENT_DELETE_DENIED` (403); `PERMISSION_DENIED` (403) when the parent is not readable or no delete grant is held |
 | Download | session + owner-or-parent-read (attachments scope); session only for a file with no parent; none for `acl: 'public_read'` | `AUTH_REQUIRED` (401) / `ATTACHMENT_DOWNLOAD_DENIED` (403) |
 
 ## See also
