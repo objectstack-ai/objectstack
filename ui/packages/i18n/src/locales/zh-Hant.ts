@@ -4974,6 +4974,8 @@ const zhHant = {
     setsEmptyBody: '此環境尚未定義任何權限集。',
     setsPick: '選擇一個權限集以檢視其使用者。',
     setsLoadFailed: '無法讀取權限集。',
+    setsHolderPackage: '軟體包 {{package}}',
+    setsHolderEnvironment: '本環境自己的權限集',
     noMatch: '沒有與篩選條件匹配的項。',
     notFound: '“{{name}}”不在此列表中。',
     retry: '重試',
