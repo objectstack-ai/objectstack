@@ -2468,14 +2468,14 @@ export class ProtocolHistoryAndPublishFacet {
         let probes: import('./build-probes.js').BuildProbeReport | undefined;
         if (published.length > 0) {
             try {
-                const { runBuildProbes } = await import('./build-probes.js');
+                const { publishedItemReader, runBuildProbes } = await import('./build-probes.js');
                 const analytics = this.getServicesRegistry?.().get('analytics');
                 probes = await runBuildProbes({
                     engine: this.engine as any,
-                    getItem: async (type, name) => {
-                        const wrapper: any = await (this.facade as any).getMetaItem({ type, name });
-                        return wrapper?.item ?? wrapper ?? undefined;
-                    },
+                    // [ADR-0150 D3, #31700] A widget's dataset is resolved FROM
+                    // the publishing package, so each namespace's publish
+                    // probes its own dataset of a name two namespaces hold.
+                    getItem: publishedItemReader(this.facade as any, request.packageId),
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,

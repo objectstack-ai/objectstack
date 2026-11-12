@@ -340,11 +340,12 @@ export {
   seedLoadPartialWrites,
   type SeedLoadPartialWrites,
 } from './seed-loader.js';
-export { runBuildProbes } from './build-probes.js';
+export { publishedItemReader, runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,
   BuildProbeReport,
   RunBuildProbesOptions,
   ProbeEngine,
   ProbeAnalytics,
+  ProbeItemProtocol,
 } from './build-probes.js';
