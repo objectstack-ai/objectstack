@@ -423,9 +423,19 @@ describe('[#32072] dataset: the by-name read is the package-scoped resolver\'s',
 describe('#32183 — a disabled package holds no name at the library readers', () => {
   // [contract review S2] Both registration orders of every two-holder pin.
   const ORDERS = [['enabled first', [A, B]], ['disabled first', [B, A]]] as const;
+  /**
+   * `permission` joined the live list (#32162), and the security catalog's
+   * item seam refuses a second package holder of a set at registration.
+   * Lift that one seam, as the exact-qualifier pins do, so the two-holder
+   * state (the one #31698 PR-2 opens) is reached; nothing else changes.
+   */
+  const admitSecondPermissionHolder = () =>
+    vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+      .mockReturnValue([]);
 
   for (const type of PACKAGE_SCOPED_READ_TYPES) {
     it.each(ORDERS)(`${type}: two holders, one disabled (%s) — every reader serves the enabled holder's item`, async (_order, order) => {
+      if (type === 'permission') admitSecondPermissionHolder();
       for (const id of order) ship(type, 'shared', id);
       registry.disablePackage(B);
       expect(labelOf(registry.resolveItem(type, 'shared'))).toBe(`alpha ${type}`);

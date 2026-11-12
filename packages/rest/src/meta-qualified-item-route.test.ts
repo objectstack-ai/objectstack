@@ -272,6 +272,18 @@ describe('a shareable namespace two packages share (ADR-0150 D2)', () => {
  * `effective`, while the plain read served the enabled holder.
  */
 describe('#32183 — a disabled package holds no name: the by-name read judges the served holders', () => {
+    /**
+     * `permission` joined the live list (#32162), and the security catalog's
+     * item seam refuses a second package holder of a set at registration.
+     * Lift that one seam, as the objectql exact-qualifier pins do, so the
+     * two-holder state (the one #31698 PR-2 opens) is reached.
+     */
+    const admitSecondPermissionHolder = (type: string) => {
+        if (type === 'permission') {
+            vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+                .mockReturnValue([]);
+        }
+    };
     const LIST = '/api/v1/meta/:type';
     const LAYERS = '/api/v1/meta/:type/:name/layers';
     // A signed-in caller: a `book` read asks for one (`meta-item-read-gate.ts`, the docs sign-in gate).
@@ -296,6 +308,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         // the first registered holder serves the disabled one's body when it
         // registered first.
         it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)(`${type}: two holders, one disabled (%s) — the enabled holder answers, its layers too; the disabled one is named nowhere`, async (_order, order) => {
+            admitSecondPermissionHolder(type);
             for (const id of order) ship(type, 'shared', id);
             registry.disablePackage(B);
             const bare = await drive(ITEM, { type, name: 'shared' });
@@ -329,6 +342,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         });
 
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
+            admitSecondPermissionHolder(type);
             ship(type, 'solo', B);
             ship(type, 'pair', B);
             ship(type, 'pair', C);
@@ -349,6 +363,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
         });
 
         it(`${type}: parity — the bare read and the list agree on the holders, through disable and enable`, async () => {
+            admitSecondPermissionHolder(type);
             ship(type, 'shared', A);
             ship(type, 'shared', B);
             ship(type, 'solo', B);
