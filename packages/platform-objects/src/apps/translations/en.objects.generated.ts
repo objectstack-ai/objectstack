@@ -3079,6 +3079,34 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "By Topic"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "Send In-App Message",
+        description: "Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.",
+        successMessage: "Message sent. Recipients: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "Everyone in this organization",
+            helpText: "Send to every member of your current organization. Leave it off to pick the recipients below."
+          },
+          recipients: {
+            label: "Recipients",
+            helpText: "The members of your organization to send to, when the message is not for everyone."
+          },
+          title: {
+            label: "Title",
+            helpText: "The line each recipient sees in their notifications."
+          },
+          body: {
+            label: "Message"
+          },
+          link: {
+            label: "Link",
+            helpText: "Optional. A page in this app (starting with /) or a web address the message opens."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
