@@ -23,7 +23,10 @@
  *
  * What X holds (the census of ui carry-in 1, comment 6727995849 on #31691):
  *  - X's own item: a registry holder of the name (its composite, or a bare-slot
- *    row bound to it);
+ *    row bound to it). A bundle ADDITION is X's own item too: a dependent's
+ *    member its base does not ship holds no name for a bare read (R2), but X
+ *    named is X's holding, as the resolver keeps a caller's own addition
+ *    (#31699, the first bundled type the exact qualifier reads);
  *  - an item of a package X is a customization pair of (ADR-0146): the base's
  *    item, which X's declared override customizes. Studio reads a base-held
  *    item's override and draft at the pair (`?package=PAIR`), before and after
@@ -45,6 +48,7 @@ import {
     isNamespaceScopedBareNameType,
     isPackageScopedType,
     PackageScopedNameRefusedError,
+    isPlatformRequestedBareName,
     packageScopedRefusalMessage,
     resolvePackageScopedHolders,
     type PackageScopedHolder,
@@ -263,7 +267,9 @@ export async function admitExactQualifier(
     const registry = exactQualifierRegistry(host);
     if (!registry) throw unjudgeableRefusal(request, { kind: 'package', packageId }, 'no-resolver');
 
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    // X named is X's holding even when it is a bundle addition (R2 drops one
+    // only for OTHER readers): the qualifier asks as the caller it names.
+    const holders = registry.packageScopedHoldersOf(request.type, request.name, packageId) ?? [];
     if (holders.includes(packageId)) return { packageId, registryHolders: [packageId] };
 
     const installed = installedManifestsOfEngine(host.engine);
@@ -307,6 +313,16 @@ export async function admitExactQualifier(
  * only. The App's own address keeps #28390 ruling A for a row that declares
  * nothing or declares the App.
  *
+ * The owner check is one function, {@link pairRowOnAddress}, which the list
+ * scoped to a package asks too ({@link pairMemberWithheldAt}); a row whose sole
+ * owner is not one of the address's bases is that owner's, not this
+ * address's (#32277 delta review S2).
+ *
+ * A package-less row (the environment's item, or a `sys_metadata` row bound to
+ * no package) of a name two or more packages hold is no holder's own, for a
+ * type whose by-name readers consult `(package, name)` ({@link
+ * packageLessRowOwners}, epic ruling on #31699): refused naming every holder.
+ *
  * @returns the item to serve (unchanged when it is the address's).
  */
 export function exactQualifierItem(
@@ -320,23 +336,33 @@ export function exactQualifierItem(
     const registry = exactQualifierRegistry(host);
     if (!registry) return item;
     const served = (item as { _packageId?: unknown })._packageId;
-    if (typeof served !== 'string' || served === address.packageId || address.registryHolders.includes(served)) return item;
-    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
-    // when the row is that base's: one owner among the name's holders (epic ruling on #31699 F2).
-    const installed = installedManifestsOfEngine(host.engine);
-    const bases = [address.packageId, ...address.registryHolders];
-    if (bases.some((base) => isPairOf(served, base, installed))) {
-        const declared = declaredOverrideBase(item);
-        // The App's own pair on the App's address, unless the row declares another base (#28390 ruling A).
-        if (isAppPairOf(served, address.packageId, installed) && (declared === undefined || declared === address.packageId)) return item;
-        const owners = pairMemberOwners(served, registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed, item);
+    // A row hydrated into the registry carries `''` or the provenance sentinel
+    // `sys_metadata` where a stored row carries no package: both are no package.
+    if (typeof served !== 'string' || served === '' || served === 'sys_metadata') {
+        // [epic ruling 6761802819 on #31699] A package-less row of a name two
+        // or more packages hold is no package's own (D4: it is the
+        // customization of one holder and cannot say which), so no holder's
+        // exact address serves it. The `_env` address never reaches here.
+        const owners = packageLessRowOwners(registry, request.type, request.name);
         if (owners.length > 1) {
             throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
                 owners.map((owner) => ({ kind: 'package' as const, packageId: owner })));
         }
-        // One owner: kept only when it is the address's package or a base it admitted. No owner: kept
-        // unless the row declares a base the address does not name.
-        if (owners.length === 1 ? bases.includes(owners[0]) : (declared === undefined || bases.includes(declared))) return item;
+        return item;
+    }
+    if (served === address.packageId || address.registryHolders.includes(served)) return item;
+    // [#32076] A pair of the package the address names, or of a base it admitted, serves on that base's address
+    // when the row is that base's (epic ruling on #31699 F2; {@link pairRowOnAddress}, the one owner check).
+    const installed = installedManifestsOfEngine(host.engine);
+    const bases = [address.packageId, ...address.registryHolders];
+    if (bases.some((base) => isPairOf(served, base, installed))) {
+        const verdict = pairRowOnAddress(served, item, address.packageId, bases,
+            registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed);
+        if (verdict === 'serve') return item;
+        if (verdict !== 'not-member') {
+            throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+                verdict.refuse.map((owner) => ({ kind: 'package' as const, packageId: owner })));
+        }
         // Another holder's row: not this address's item, so the admitted holder's is served below.
     } else if (typeof registry.getPackage === 'function' && registry.getPackage(served) === undefined) {
         // A provenance sentinel or a package this registry does not hold is not another package's item.
@@ -436,7 +462,40 @@ export function resolveCallerPackageAddress(
 }
 
 
-/** The base a pair's row declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
+/**
+ * [ADR-0150 D4, epic ruling 6761802819 on #31699] The packages a package-less
+ * row of `(type, name)` could be the customization of: every package holding
+ * the name, for a type whose readers consult `(package, name)`. Two or more
+ * mean the row cannot say whose it is: each holder's exact read refuses it
+ * naming every one, the list scoped to a holder leaves it out (so a send made
+ * from a holder reads that holder's own), and `os migrate stored-references`
+ * lists it, until it is saved under one package. With one holder it is that
+ * holder's customization, as before. A name the platform requests by
+ * spelling (the `auth.*` mails) resolves environment-wide, so its
+ * package-less row stays the environment's: an empty answer. ⛔ Never a pick
+ * between two.
+ */
+export function packageLessRowOwners(
+    registry: { readsByPackage?(type: string): boolean; packageScopedHoldersOf(type: string, name: string): readonly string[] | undefined },
+    type: string,
+    name: string,
+): string[] {
+    if (registry.readsByPackage?.(type) !== true || !isPackageScopedType(type)) return [];
+    if (isPlatformRequestedBareName(type, name)) return [];
+    return [...(registry.packageScopedHoldersOf(type, name) ?? [])];
+}
+
+/**
+ * Whether a list scoped to a package leaves out the package-less stand-in
+ * row `name` ({@link packageLessRowOwners}: two or more holders could own it).
+ */
+export function packageLessRowWithheld(host: Pick<ProtocolHost, 'engine'>, type: string, name: unknown): boolean {
+    if (typeof name !== 'string' || name === '') return false;
+    const registry = exactQualifierRegistry(host);
+    return registry !== undefined && packageLessRowOwners(registry, type, name).length > 1;
+}
+
+/** The base a member row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
 function declaredOverrideBase(item: unknown): string | undefined {
     const declaration = (item as { overrides?: unknown } | null | undefined)?.overrides;
     if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
@@ -446,7 +505,8 @@ function declaredOverrideBase(item: unknown): string | undefined {
 
 /**
  * [#28390 ruling A] Whether `pairId` is the pair of the App `base` itself (not
- * the pair `base` shares as a member of an App): a row there is the App's own.
+ * the pair `base` shares as a member of an App): a member row there is the
+ * App's own added member on the App's own address.
  */
 function isAppPairOf(pairId: string, base: string, installed: InstalledManifestLookup): boolean {
     if (appOf(base, installed) !== base) return false;
@@ -455,15 +515,19 @@ function isAppPairOf(pairId: string, base: string, installed: InstalledManifestL
 }
 
 /**
- * [ADR-0150 D3, epic ruling on #31699 F2] The holders of a name that a row
- * stored in the customization package `pairId` could belong to: every holder
- * `pairId` is a pair of (ADR-0146 D3: the App's pair is shared by every package
- * of the App), narrowed to the one the row declares it customizes
- * (`overrides.package`) when it declares one. Two or more mean the row cannot
- * say whose it is, and each such holder's exact read refuses it naming every
- * one. ⛔ Never a pick between two.
+ * [ADR-0150 D3/D4, epic ruling on #31699 F2] The holders of a bundle's name
+ * that a member row stored in the customization package `pairId` could be the
+ * added member of: every holder `pairId` is a pair of (ADR-0146 D3: the App's
+ * pair is shared by every package of the App), narrowed to the one the row's
+ * body declares it customizes (`overrides.package`) when it declares one.
+ *
+ * Two or more answers mean the row cannot say whose member it is: each such
+ * holder's exact read refuses it naming every one, the list scoped to a holder
+ * leaves it out, and `os migrate stored-references` lists it, until the row
+ * declares the base it customizes. One answer is that holder's member (#28390
+ * ruling A). ⛔ Never a pick between two.
  */
-function pairMemberOwners(
+export function pairMemberOwners(
     pairId: string,
     holders: readonly string[],
     installed: InstalledManifestLookup,
@@ -474,6 +538,62 @@ function pairMemberOwners(
     return declared === undefined ? owners : owners.filter((holder) => holder === declared);
 }
 
+/**
+ * [Epic ruling on #31699 F2] Whether the list scoped to `base` leaves out the
+ * member row `item` its pair `pairId` stores: the row could be the added
+ * member of two or more holders of the name ({@link pairMemberOwners}) and
+ * `base` is not the App whose own pair it is, or the row declares another
+ * base. Only for a type whose readers consult `(package, name)`; every other
+ * type keeps the list as it was.
+ */
+export function pairMemberWithheldAt(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+    name: string,
+    base: string,
+    pairId: string,
+    item: unknown,
+): boolean {
+    const registry = exactQualifierRegistry(host);
+    if (!registry || (registry as { readsByPackage?(type: string): boolean }).readsByPackage?.(type) !== true) return false;
+    return pairRowOnAddress(pairId, item, base, [base], registry.packageScopedHoldersOf(type, name) ?? [],
+        installedManifestsOfEngine(host.engine)) !== 'serve';
+}
+
+/**
+ * [#31699 F2, contract review F-B, delta review S2] The one owner check for a
+ * customization pair's member row `item` (stored under `pairId`) met on the
+ * exact address of `addressPackageId`, whose admitted bases are `bases` (the
+ * address's package and the holders it admitted), given every package
+ * `holders` holding the name. Self-contained, so a generic pair line (#32277)
+ * can hoist it to the top of {@link exactQualifierItem}; the scoped list asks
+ * the same question ({@link pairMemberWithheldAt}).
+ *
+ * - A row that declares the base it customizes (`overrides.package`) is that
+ *   base's member only, the App's own address included: read first (F-B).
+ * - Else the App's own pair keeps its added member on the App's address
+ *   (#28390 ruling A).
+ * - Else two or more holders could own it: refuse, naming every one (F2).
+ * - Else a sole owner that is not one of the address's bases owns it: not
+ *   this address's member (S2).
+ * - Else (the sole owner is a base, or no holder pairs it) it is served.
+ */
+export function pairRowOnAddress(
+    pairId: string,
+    item: unknown,
+    addressPackageId: string,
+    bases: readonly string[],
+    holders: readonly string[],
+    installed: InstalledManifestLookup,
+): 'serve' | 'not-member' | { refuse: string[] } {
+    const declared = declaredOverrideBase(item);
+    if (declared !== undefined) return bases.includes(declared) ? 'serve' : 'not-member';
+    if (isAppPairOf(pairId, addressPackageId, installed)) return 'serve';
+    const owners = pairMemberOwners(pairId, holders, installed, item);
+    if (owners.length > 1) return { refuse: owners };
+    if (owners.length === 1 && !bases.includes(owners[0]!)) return 'not-member';
+    return 'serve';
+}
 
 /**
  * [ADR-0150 D5, child G1] The literal segments a by-name metadata read serves

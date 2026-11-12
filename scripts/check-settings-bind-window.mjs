@@ -170,7 +170,8 @@ const READY_HOOK = 'kernel:ready';
  * the derivation found, so a reader can check the row without re-running it.
  * The first eight were derived from Phase 1/2 bodies at `4e4111ca0`, and
  * `objectql:drivers-ready` joined when `ObjectQLPlugin.start()` began firing it
- * before its first schema sync (#23649); a hook fired
+ * before its first schema sync (#23649), and `objectql:schema-synced` when each
+ * of its schema-sync passes began firing it after its DDL (#32164); a hook fired
  * from a `kernel:ready` handler would be derived too and is judged the same
  * way — conservatively, since it precedes the bind only when its emitter's
  * handler does.
@@ -194,6 +195,8 @@ const PRE_BIND_HOOKS = Object.freeze({
     'packages/mcp/src/plugin.ts — MCPServerPlugin.start() → ctx.trigger(\'mcp:ready\', this.runtime)',
   'objectql:drivers-ready':
     'packages/objectql/src/plugin.ts — ObjectQLPlugin.start() → ctx.trigger(\'objectql:drivers-ready\', this.ql)',
+  'objectql:schema-synced':
+    'packages/objectql/src/plugin.ts — ObjectQLPlugin.start() → installRegisteredSchemas → syncRegisteredSchemas → ctx.trigger(\'objectql:schema-synced\', this.ql)',
 });
 
 /** The method a plugin context fires a hook through. */
