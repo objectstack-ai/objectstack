@@ -569,6 +569,22 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
         expect(templateOf(X, 'de-DE')).toBe('pair template');
       }
     });
+
+    it(`NARROWING (delta review N1), ${door} — a package-less row of locale L over a name X alone holds is X's member only while X is the one package holding it: the arriving package on X shipping only L makes two, so the row binds to neither and the arrival is an addition to X, refused or reported, and X keeps the row (BASE: admitted at the doors, after which the row bound to neither and the seal reported the arrival)`, () => {
+      ship('email_template', 'welcome', X);
+      registry.registerItem('email_template', { ...body('email_template', 'welcome', 'env'), locale: 'de-DE', _provenance: 'org' }, 'name' as never);
+      expect(templateOf(X, 'de-DE')).toBe('env template');
+      const answer = arrive(door);
+      if (door === 'cold boot') {
+        expect(answer.conflicts).toEqual([expect.objectContaining({
+          type: 'email_template', name: 'welcome', incomingPackageId: W, existingHolder: { kind: 'package', packageId: X },
+        })]);
+      } else {
+        expect(answer.refusal).toContain(`already held by package "${X}"`);
+        expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+        expect(templateOf(X, 'de-DE')).toBe('env template');
+      }
+    });
   }
 
   it('unbound with two packages of the App holding the name → neither, and the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
