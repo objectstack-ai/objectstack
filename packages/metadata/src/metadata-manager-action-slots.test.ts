@@ -230,3 +230,89 @@ describe('[#32365] the bare action read weighs the environment\'s own item', () 
     expect(((await manager.get('action', 'digest')) as any)?.label).toBe('custom');
   });
 });
+
+/**
+ * [#32352, ADR-0150 D3/D4] A removal of an action counts its holders by
+ * PACKAGE over every slot of the name — the object-less one and each
+ * object-bound one — as the by-name read (#32244) and `DatabaseLoader`'s row
+ * key `(package, name)` count them.
+ *
+ * BASE (main 89d815c5): a removal naming a package took only its object-less
+ * slot, so its bound action stayed in the registry and kept answering `get`
+ * and `list`; a removal naming none counted only the object-less slot's
+ * holders, so a name two packages bind (one object or two) was not refused and
+ * every package's slot was taken.
+ */
+describe('[#32352] removing an action counts its holders by package over every slot of the name (ADR-0150 D3/D4)', () => {
+  const bound = (packageId: string, label: string, objectName: string) => ({ ...shipped(packageId, label), objectName });
+  const labels = async (manager: MetadataManager) => ((await manager.list('action')) as any[]).map((item) => item.label);
+  const refusalOf = (manager: MetadataManager) =>
+    manager.unregister('action', 'digest').then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+
+  it('a removal naming a package takes its object-bound slot too, and keeps the other package\'s (BASE: the bound slot stayed and was served)', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'alpha_item'));
+    manager.registerInMemory('action', 'digest', bound(BETA, 'beta', 'beta_item'));
+    await manager.unregister('action', 'digest', { packageId: ALPHA });
+    expect(await manager.get('action', 'digest', ALPHA), 'the removed package\'s action is gone').toBeUndefined();
+    expect(await labels(manager)).toEqual(['beta']);
+    expect(((await manager.get('action', 'digest')) as any)?.label, 'one holder left: the bare read serves it').toBe('beta');
+  });
+
+  it('a removal naming a package takes every slot it holds of the name — object-less and each object — in one call', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha on one', 'one_item'));
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha on two', 'two_item'));
+    manager.registerInMemory('action', 'digest', shipped(ALPHA, 'alpha'));
+    manager.registerInMemory('action', 'digest', shipped(BETA, 'beta'));
+    await manager.unregister('action', 'digest', { packageId: ALPHA });
+    expect(await labels(manager)).toEqual(['beta']);
+  });
+
+  it.each([
+    ['on ONE object', 'shared_item', 'shared_item'],
+    ['on two different objects', 'alpha_item', 'beta_item'],
+  ])('a removal naming none of a name two packages bind %s is the D3 refusal (409) naming each package with its object; nothing is removed (BASE: both were taken)', async (_shape, alphaObject, betaObject) => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', alphaObject));
+    manager.registerInMemory('action', 'digest', bound(BETA, 'beta', betaObject));
+    const err = await refusalOf(manager);
+    expect(err, 'the removal refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason, err!.refusal.callerPackageId])
+      .toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', null]);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA },
+      { kind: 'package', packageId: BETA },
+    ]);
+    // The sentence's first owner is capitalized when it opens it (one object).
+    expect(err!.message.toLowerCase()).toContain(`package "${ALPHA}" binds it to object "${alphaObject}"`);
+    expect(err!.message.toLowerCase()).toContain(`package "${BETA}" binds it to object "${betaObject}"`);
+    expect(await labels(manager)).toEqual(['alpha', 'beta']);
+  });
+
+  it('a removal naming none of a name one package binds and another holds object-less is refused, naming the object-less one as such', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'alpha', 'alpha_item'));
+    manager.registerInMemory('action', 'digest', shipped(BETA, 'beta'));
+    const err = await refusalOf(manager);
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates.map((candidate: any) => candidate.packageId)).toEqual([ALPHA, BETA]);
+    expect(err!.message).toContain(`package "${BETA}" binds it to no object`);
+    expect(await labels(manager)).toEqual(['alpha', 'beta']);
+  });
+
+  it('CONTROL — two packages\' object-less name: the refusal and its message are unchanged (no object sentence)', async () => {
+    const err = await refusalOf(twoHolders());
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates.map((candidate: any) => candidate.packageId)).toEqual([ALPHA, BETA]);
+    expect(err!.message).not.toContain('binds it to');
+  });
+
+  it('CONTROL — one package binding the name to two objects is one holder: a removal naming none takes both', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'on one', 'one_item'));
+    manager.registerInMemory('action', 'digest', bound(ALPHA, 'on two', 'two_item'));
+    await manager.unregister('action', 'digest');
+    expect(await labels(manager)).toEqual([]);
+  });
+});

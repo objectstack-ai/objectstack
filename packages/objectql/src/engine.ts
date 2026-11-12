@@ -6375,17 +6375,24 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    *    verbatim, so a narrowed ceiling is never re-broadened; only a context
    *    with no `permissions` takes the resolved ones;
    *  - a context that already carries a peer list keeps it;
+   *  - a context that already carries a membership set
+   *    (`accessible_org_ids`) keeps it, and one that carries none takes the
+   *    resolver's, so the organization wall judges the hook as it judges the
+   *    user's request (ADR-0093 D8.1, as amended);
    *  - a context that already carries an email keeps it verbatim (the
    *    session's, on a request-resolved context); only a context with none
    *    takes the resolved one;
-   *  - a context that needs none of the three resolves nothing and is
+   *  - a context that needs none of the four resolves nothing and is
    *    returned as is. One that lacks only the email is NOT that context: it
    *    resolves, and takes the email alone.
    *
    * The peer list is the members of the context's `tenantId`, the user
    * included; a context with no `tenantId` gets the user alone, as an
    * organisation-less request does. A resolver failure (an unreadable
-   * permission store) is thrown to the caller, which keeps the unseeded api.
+   * permission store) is thrown to the caller, which then asks again with
+   * `membershipUnread`: that call resolves nothing, and a context that carries
+   * no membership set takes an empty one — a membership the hook could not
+   * read is not a current one (ADR-0093 D8.1, as amended).
    *
    * Called on the api {@link withRunAs}`('user')` derived, which is never
    * elevated, so it does not re-judge the elevation flag.
@@ -6394,9 +6401,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * export, so it is no nameable member of this class's published face (see
    * the symbol's docblock in `hook-run-as.ts`).
    */
-  [SEED_USER_GRANTS](): Promise<ScopedContext> {
+  [SEED_USER_GRANTS](opts?: { membershipUnread?: true }): Promise<ScopedContext> {
     // [#30052 codemod] The body moved to `engine-scoped-context.ts` (see `ScopedContextHost`).
-    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this));
+    return ScopedContextFacet.seedUserGrants.call(scopedContextHost.of(this), opts);
   }
 
   /**
