@@ -246,6 +246,23 @@ describe('R1 — a grant gains the package that holds its permission set', () =>
     expect((await packagesById(engine, GRANTS.object)).g1).toBeNull();
   });
 
+  // [#32164, contract review 6817263634 nit] BASE (ec39bd8e5): the dry run
+  // counted the row the write reports as `duplicated` as `bound`.
+  it('a dry run reports a row whose bind would be a second grant as duplicated, as the write does, and writes nothing', async () => {
+    const engine = await boot();
+    await rawGrant(engine, { id: 'a0', user_id: 'u_a', permission_set: ONE_HOLDER });
+    await rawGrant(engine, { id: 'a1', user_id: 'u_a', permission_set: ONE_HOLDER, permission_set_package: CRM });
+    await rawGrant(engine, { id: 'b0', user_id: 'u_b', permission_set: ONE_HOLDER });
+    const update = vi.spyOn(engine, 'update');
+
+    const report = await backfillStoredPermissionSetPackages(engine, GRANTS, permissionSetHolderOf(standInRegistry()), { dryRun: true });
+
+    expect(update).not.toHaveBeenCalled();
+    expect(report.duplicated).toEqual([{ id: 'a0', name: ONE_HOLDER, packageId: CRM }]);
+    expect(report.bound).toEqual([{ name: ONE_HOLDER, rows: 1, packageId: CRM }]);
+    expect(await packagesById(engine, GRANTS.object)).toEqual({ a0: null, a1: CRM, b0: null });
+  });
+
   it('writes only the package column: the grant\'s other columns are untouched', async () => {
     const engine = await boot();
     await seedGrants(engine);

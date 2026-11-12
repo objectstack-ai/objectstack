@@ -206,6 +206,23 @@ describe('[ADR-0151 D3] a set above the agent ceiling is refused for an AI servi
     expect((await rows(h, 'sys_user_position', { user_id: 'u_bot' })).map((r) => r.position)).toEqual([SAFE_POSITION]);
   });
 
+  // [#32164, contract review 6817263634 should-fix A] The one-grant check runs after this refusal.
+  // BASE (ec39bd8e5): it answered first, 409 DUPLICATE_RECORD. CONTROL: within the ceiling it is the check's 409.
+  it('[#32164] the account already holds the breaching set: a second grant of it is refused for the ceiling (400), not as a second grant', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_user_permission_set', { id: 'held', user_id: 'u_bot', permission_set: BREACHING_SET, organization_id: ORG }, { context: SYS });
+    expectAccountRefusal(await refusalOf(() => grant(h, 'u_bot', BREACHING_SET)), 'permission_set', BREACHING_SET);
+    const person: any = await grant(h, 'u_person', BREACHING_SET);
+    expectAccountRefusal(await refusalOf(() => h.engine.update(
+      'sys_user_permission_set', { id: person.id, user_id: 'u_bot' }, { context: PLATFORM_ADMIN } as any,
+    )), 'permission_set', BREACHING_SET);
+    expect((await rows(h, 'sys_user_permission_set', { user_id: 'u_bot' })).map((r) => r.id)).toEqual(['held']);
+
+    // CONTROL: within the ceiling, the second grant is the one-grant check's refusal.
+    await h.engine.insert('sys_user_permission_set', { id: 'held_safe', user_id: 'u_bot', permission_set: SAFE_SET, organization_id: ORG }, { context: SYS });
+    expect(envelopeOf(await refusalOf(() => grant(h, 'u_bot', SAFE_SET)))).toMatchObject({ status: 409, code: 'DUPLICATE_RECORD' });
+  });
+
   it('CONTROL: a person is assigned the breaching set and the breaching position, as before', async () => {
     const h = await boot();
     await grant(h, 'u_person', BREACHING_SET);

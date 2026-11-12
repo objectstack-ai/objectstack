@@ -11,7 +11,7 @@
  * `label(record.first)` on a text field is refused there as
  * `label-field-no-options`. The MCP tool judged the same expression with the
  * same validator, but its hint carried only field names and types: both
- * bridges project fields to name/type/label/required. So the tool answered
+ * bridges projected fields to name/type/label/required. So the tool answered
  * `ok: true` for a formula the door then refused at save.
  *
  * ## The fix, and what is pinned here
@@ -177,10 +177,18 @@ describe('validate_expression judges label() targets as the object door does (#2
     expect(r.ok).toBe(true);
   });
 
-  it('describe_object serves the same projection as before: no options reading on its answer', async () => {
+  it('[#32435] describe_object serves the options of exactly the fields optionFieldsOf names, a picklist-bound one with its list\'s', async () => {
     const answer = await callTool(stdioBridge(), 'describe_object', { objectName: OBJECT });
-    expect(Object.keys(answer).sort()).toEqual(['enableFeatures', 'fields', 'label', 'name']);
-    for (const field of answer.fields) expect(Object.keys(field).sort()).toEqual(['label', 'name', 'required', 'type']);
+    const optionsOf = Object.fromEntries(
+      answer.fields.filter((f: any) => 'options' in f).map((f: any) => [f.name, f.options]),
+    );
+    expect(optionsOf).toEqual({
+      kind: [{ value: 'clean', label: 'Clean' }],
+      stage: [{ value: 'draft', label: 'Draft' }],
+      tier: [{ value: 'gold', label: 'Gold' }],
+    });
+    // One reading of "declares options" on the served object, for both members.
+    expect(Object.keys(optionsOf).sort()).toEqual([...((await stdioBridge().optionFieldsOf!(OBJECT)) ?? [])].sort());
   });
 
   it('PARITY — the tool and the object door give one verdict, in one sentence, for each expression', async () => {

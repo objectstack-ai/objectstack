@@ -14,6 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
+import { bundleEntryKey } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -1656,6 +1657,14 @@ export class MetadataPlugin implements Plugin {
                 });
 
                 if (items.length > 0) {
+                    // [#32488 R7-C] The loader that first registered each bundle
+                    // identity in this pass. `loadMany` keeps the earlier loader's
+                    // item of one `(package, name, member)`, but it keys an unstamped
+                    // item (a file's) package-less, so a row of the host's package
+                    // the file once seeded passes it. Keyed after the host's stamp,
+                    // the earlier loader's item keeps the entry — the file over its
+                    // own stale seed. One loader's own items never shadow each other.
+                    const primedBy = new Map<string, string | undefined>();
                     for (const item of items) {
                         const meta = item as any;
                         if (meta?.name) {
@@ -1668,11 +1677,21 @@ export class MetadataPlugin implements Plugin {
                             applyProtection(meta, {
                                 packageId: this.options.packageId,
                             });
+                            const identity = bundleEntryKey(entry.type, meta.name, meta);
+                            if (identity !== undefined) {
+                                const from = this.manager.sourceLoaderOf(meta);
+                                if (!primedBy.has(identity)) primedBy.set(identity, from);
+                                else if (primedBy.get(identity) !== from) continue;
+                            }
                             // Silent: boot-time priming, before any consumer
                             // has cached a definition to go stale. Post-boot
                             // edits to these files reach watchers through the
                             // FileSystemRepository attached by onEnable.
-                            await this.manager.register(entry.type, meta.name, item, { notify: false });
+                            // [#31699 R5-A] Never written back into the loader it was read from
+                            // (a stored row stays as stored, but for a legacy row's empty package
+                            // column, bound from its own stored body: R7-A); every other loader still receives it,
+                            // so a file-system item still seeds the database loader.
+                            await this.manager.register(entry.type, meta.name, item, { notify: false, skipSourceLoader: true });
                         }
                     }
                     ctx.logger.info(`Loaded ${items.length} ${entry.type} from file system`);
