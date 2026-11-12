@@ -416,6 +416,9 @@ const zh = {
       tomorrow: '明天',
       clear: '清除日期',
       openCalendar: '打开日历',
+      time: '时间',
+      hour: '小时',
+      minute: '分钟',
       invalid:
         '未保存：“{{value}}”不是有效日期。请按 {{format}} 格式输入，或从日历中选择。',
     },

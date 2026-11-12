@@ -15,7 +15,13 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { formatLocaleDateText, localeDatePattern, parseLocaleDateText } from './localeDateText';
+import {
+  formatLocaleDateText,
+  localeDatePattern,
+  localeHourLabel,
+  minuteOptions,
+  parseLocaleDateText,
+} from './localeDateText';
 
 describe('formatLocaleDateText — the display locale spells the day (objectui#12622)', () => {
   it('en: month / day / year', () => {
@@ -74,5 +80,23 @@ describe('parseLocaleDateText — typed text lands on the native value shape (ob
       expect(parseLocaleDateText(formatLocaleDateText('2026-10-16', locale, false), locale, false), locale).toBe('2026-10-16');
       expect(parseLocaleDateText(formatLocaleDateText('2026-10-16T14:30', locale, true), locale, true), locale).toBe('2026-10-16T14:30');
     }
+  });
+});
+
+describe('the date-time picker time control labels (objectstack#32589)', () => {
+  it('hours on the clock the text box shows, in the display locale', () => {
+    expect(localeHourLabel(14, 'en')).toBe('02 PM');
+    expect(localeHourLabel(0, 'en')).toBe('12 AM');
+    expect(localeHourLabel(14, 'zh')).toBe('14时');
+    expect(localeHourLabel(9, 'de')).toBe('09 Uhr');
+  });
+
+  it('minutes on the step grid, with an off-grid value minute kept in order', () => {
+    expect(minuteOptions(5)).toEqual(['00', '05', '10', '15', '20', '25', '30', '35', '40', '45', '50', '55']);
+    expect(minuteOptions(5, '15')).toHaveLength(12);
+    const withOffGrid = minuteOptions(5, '17');
+    expect(withOffGrid).toHaveLength(13);
+    expect(withOffGrid.slice(3, 6)).toEqual(['15', '17', '20']);
+    expect(minuteOptions(5, '')).toHaveLength(12);
   });
 });

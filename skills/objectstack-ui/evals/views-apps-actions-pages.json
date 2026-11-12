@@ -13,8 +13,8 @@
     },
     {
       "id": 2,
-      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team.",
-      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and `requiresObject: 'sys_approval_request'` on the approvals item. Exactly one App per `type: 'app'` package: the support audience is a `requiredPermissions`-gated group inside it, not a second `App.create`. Registered under `defineStack({ apps })`.",
+      "prompt": "Build `src/apps/crm.app.ts`: a Sales group with Leads, Opportunities, the pipeline kanban, a 'My open deals' entry and the sales dashboard; an Approvals group that only shows when approvals are installed; and a second app for the support team, who work the same objects.",
+      "expected_output": "`App.create({...})` with a `navigation` tree of `group` items: `type: 'object'` entries with `objectName`, a `viewName: 'pipeline_kanban'` shortcut, a bare `filters: { owner_id: '{current_user_id}', status: 'open' }` slice for 'My open deals' (no view authored for a one-off), `type: 'dashboard'` with `dashboardName`, and `requiresObject: 'sys_approval_request'` on the approvals item. At most one app per package, so not a second `App.create` here: the support team shares this product and its objects, so it is a `requiredPermissions`-gated group inside the app. (A support product with objects of its own would carry its app in its own `type: 'module'` package of the suite.) Registered under `defineStack({ apps })`.",
       "files": [],
       "assertions": {
         "must_contain": ["App.create", "navigation", "objectName", "viewName", "filters", "requiresObject", "requiredPermissions"],

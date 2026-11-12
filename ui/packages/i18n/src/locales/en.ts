@@ -629,6 +629,9 @@ const en = {
       tomorrow: 'Tomorrow',
       clear: 'Clear date',
       openCalendar: 'Open calendar',
+      time: 'Time',
+      hour: 'Hour',
+      minute: 'Minute',
       invalid:
         'Not saved: "{{value}}" is not a date. Type it as {{format}}, or pick one from the calendar.',
     },
