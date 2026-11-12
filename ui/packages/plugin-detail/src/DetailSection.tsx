@@ -442,7 +442,9 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // Apply auto-layout: infer columns and auto-span wide fields
   const { fields: layoutFields, columns: rawColumns } = applyDetailAutoLayout(
     visibleFields,
-    section.columns
+    section.columns,
+    undefined,
+    objectSchema?.fields,
   );
   // Never render more columns than there are visible fields — the object-wide
   // column count (objectui#2578) can exceed a section's visible count when
