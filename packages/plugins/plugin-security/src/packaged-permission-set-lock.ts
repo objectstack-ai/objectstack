@@ -126,8 +126,13 @@ const RUNTIME_SHADOW_PACKAGE_ID = 'sys_metadata';
 
 /** Provenance verdict for one permission-set name. THREE outcomes, not two. */
 export type PackagedSetVerdict =
-  /** An installed package declares this name — the base is locked. */
-  | { status: 'packaged'; packageId: string }
+  /**
+   * An installed package declares this name — the base is locked.
+   * [ADR-0150 D2, #31698] `packageIds`: every package that declares it, in
+   * the order found (`packageId` is the first); a name two packages hold is
+   * one name per package.
+   */
+  | { status: 'packaged'; packageId: string; packageIds: readonly string[] }
   /** No package declares it: an ordinary org-owned set, freely editable. */
   | { status: 'org' }
   /** Nothing could answer. The write door refuses; see the module header. */
@@ -143,6 +148,8 @@ export type PackagedSetVerdict =
  */
 export type LayeredProbe =
   | { status: 'read'; envelope: unknown }
+  /** [ADR-0150 D3, #31698] One envelope per holder: the read naming no package was refused, naming each. */
+  | { status: 'read'; envelopes: readonly unknown[] }
   | { status: 'failed'; reason: string };
 
 /**
@@ -204,6 +211,12 @@ export function classifyPackagedPermissionSet(
 
   let anySourceAnswered = false;
   const failures: string[] = [];
+  // [ADR-0150 D2, #31698] Every declaring package, never the first found alone.
+  const declarers: string[] = [];
+  const packaged = (): PackagedSetVerdict => ({ status: 'packaged', packageId: declarers[0]!, packageIds: [...declarers] });
+  const declare = (packageId: string | null): void => {
+    if (packageId && !declarers.includes(packageId)) declarers.push(packageId);
+  };
 
   // ── source 1: the engine SchemaRegistry ──────────────────────────────────
   if (typeof ql?.registry?.listItems === 'function') {
@@ -218,10 +231,8 @@ export function classifyPackagedPermissionSet(
     if (!threw) {
       if (Array.isArray(items)) {
         anySourceAnswered = true;
-        for (const item of items) {
-          const packageId = declaredPackageIdOf(item, name);
-          if (packageId) return { status: 'packaged', packageId };
-        }
+        for (const item of items) declare(declaredPackageIdOf(item, name));
+        if (declarers.length > 0) return packaged();
       } else {
         // ⛔ NOT "nothing is declared". `readDeclared` normalizes a missing
         // list to `[]` because its callers are seeders that can safely do
@@ -236,13 +247,13 @@ export function classifyPackagedPermissionSet(
     if (layered.status === 'failed') {
       failures.push(`layered metadata read failed (${layered.reason})`);
     } else {
-      const envelope: any = layered.envelope;
-      const isEnvelope = envelope && typeof envelope === 'object'
+      const envelopes: readonly any[] = 'envelopes' in layered ? layered.envelopes : [layered.envelope];
+      const isEnvelope = (envelope: any) => envelope && typeof envelope === 'object'
         && ('effective' in envelope || 'overlay' in envelope || 'code' in envelope);
-      if (isEnvelope) {
+      if (envelopes.length > 0 && envelopes.every(isEnvelope)) {
         anySourceAnswered = true;
-        const packageId = declaredPackageIdOf(envelope.code, name);
-        if (packageId) return { status: 'packaged', packageId };
+        for (const envelope of envelopes) declare(declaredPackageIdOf(envelope.code, name));
+        if (declarers.length > 0) return packaged();
       } else {
         failures.push('layered metadata read returned no layer envelope');
       }
@@ -332,9 +343,15 @@ export class PackagedPermissionSetLockedError extends Error {
   readonly statusCode = 403;
   /** The guidance addressed to the end user; `message` stays the diagnostic. */
   readonly userMessage: string;
-  constructor(name: string, packageId: string, _operation: 'insert' | 'update') {
+  /**
+   * [ADR-0150 D2, #31698] `packageId`: the package that declares the set, or
+   * every one that does, each named — never the first found alone.
+   */
+  constructor(name: string, packageId: string | readonly string[], _operation: 'insert' | 'update') {
+    const declarers = (typeof packageId === 'string' ? [packageId] : packageId).map((id) => `'${id}'`);
+    const by = declarers.length > 1 ? `packages ${declarers.slice(0, -1).join(', ')} and ${declarers[declarers.length - 1]}` : `package ${declarers[0]}`;
     super(
-      `[Security] Permission set '${name}' is declared by package '${packageId}' and is locked — `
+      `[Security] Permission set '${name}' is declared by ${by} and is locked — `
       + `editing it here would silently fork it from the package, and the fork would win over `
       + `every future upgrade with no signal. `
       + `Clone it instead (the "Clone" action on the permission set, or POST `
@@ -384,7 +401,7 @@ export function assertPermissionSetNotPackageDeclared(
 ): PackagedSetVerdict {
   const verdict = classifyPackagedPermissionSet(name, ql, layered);
   if (verdict.status === 'packaged') {
-    throw new PackagedPermissionSetLockedError(name, verdict.packageId, operation);
+    throw new PackagedPermissionSetLockedError(name, verdict.packageIds, operation);
   }
   if (verdict.status === 'unknown') {
     throw new PackagedPermissionSetProvenanceUnknownError(name, verdict.reason);

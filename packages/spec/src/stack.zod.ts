@@ -2595,26 +2595,51 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
 }
 
 /**
- * Validate the "at most one App per package" rule — ADR-0019 (app-as-consumer-unit) D1/D3.
+ * The package types a suite is made of, each held to at most one app —
+ * ADR-0019 (app-as-consumer-unit) D3 as amended: a suite (one install of an
+ * app package plus the module packages it composes) may surface several apps,
+ * each defined by a different package of the suite, and no package of it
+ * defines more than one. Read per package, so the app package and every module
+ * package are judged alike. The reasons are the amendment's three: the Console
+ * addresses an app by its package id, an app names no object of another
+ * package where its own package defines objects, and disabling a module
+ * removes the app that module owns.
  *
- * A consumer package (`manifest.type === 'app'`) must not define **more than
- * one** app — that is the banned "suite contains apps" shape. Fold the apps
- * into a single app with multiple tabs, or split into separate packages. Zero
- * apps is allowed (a package may still be under authoring, or define its app
- * elsewhere); non-`app` package types are internal contributions and are not
- * constrained here.
+ * Every other package type is an internal contribution the amended D3 does not
+ * define a suite with, and is not constrained here.
+ */
+const SINGLE_APP_PACKAGE_TYPES: ReadonlySet<string> = new Set(['app', 'module']);
+
+/**
+ * Validate the "at most one app per package" rule — ADR-0019
+ * (app-as-consumer-unit) D3 as amended, on the package types of
+ * {@link SINGLE_APP_PACKAGE_TYPES}.
+ *
+ * An app package (`manifest.type === 'app'`) or a module package
+ * (`manifest.type === 'module'`) must not define **more than one** app: a
+ * package that holds N apps is the shape D3 removes. The finding names the
+ * package, every app found and the remedy: one app per package, so each further
+ * app moves into a module package of its own (an app package may instead fold
+ * its apps into one app with several tabs). Zero apps is allowed (a module may
+ * contribute objects and navigation to another package's app, and a package
+ * may still be under authoring).
  *
  * Mirrors {@link validateNamespacePrefix}: returns one error per violation;
  * `defineStack` aggregates and throws.
  */
 function validateSingleApp(config: ObjectStackDefinition): string[] {
-  if (config.manifest?.type !== 'app') return [];
+  const type = config.manifest?.type;
+  if (type === undefined || !SINGLE_APP_PACKAGE_TYPES.has(type)) return [];
   const apps = config.apps ?? [];
   if (apps.length <= 1) return [];
-  const names = apps.map((a) => a.name).join(', ');
+  const names = apps.map((a) => `'${a.name}'`).join(', ');
+  const kind = type === 'app' ? "An 'app' package" : "A 'module' package";
+  const fold = type === 'app' ? ', or fold them into one app with multiple tabs' : '';
   return [
-    `An 'app' package must define at most one app, but found ${apps.length} (${names}). ` +
-      `Fold them into one app with multiple tabs, or split into separate packages — ADR-0019 (app-as-consumer-unit) D3.`,
+    `${kind} must define at most one app, but package '${config.manifest?.id}' defines ` +
+      `${apps.length} (${names}). Keep one app per package: move each other app into a 'module' package ` +
+      `of its own${fold} — ADR-0019 (app-as-consumer-unit) D3 as amended (a suite may surface several apps, ` +
+      `one per package).`,
   ];
 }
 
@@ -3709,9 +3734,9 @@ class StackNamespacePrefixInvalidError extends StackRefusalError {
 }
 
 /**
- * [ADR-0112 · #15963] An `app` package declares more than one app — the banned
- * "suite contains apps" shape, ADR-0019 (app-as-consumer-unit) D3 —
- * {@link validateSingleApp}.
+ * [ADR-0112 · #15963] An `app` or `module` package declares more than one app —
+ * the shape ADR-0019 (app-as-consumer-unit) D3 as amended removes: a suite may
+ * surface several apps, one per package — {@link validateSingleApp}.
  * Spelled `_VIOLATION` like the ledger's other rule-violation refusals
  * (`UNIQUE_VIOLATION`, `EXTERNAL_SCHEMA_MODE_VIOLATION`).
  */
@@ -7039,11 +7064,13 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    *    `manifest` has no package that could own its collections;
    * 3. the bodies REPRODUCE the flattened collections, item for item
    *    ({@link packagesReproduceComposedCollections}) — composition sometimes
-   *    RECONCILES (`objectConflict: 'merge'` / `'override'` fold two packages'
-   *    same-named objects into one; a standalone action binds onto a sibling
-   *    package's object), and the reconciled copy lives in the flattened half
-   *    alone. Condition 2 cannot see that: it reads the INPUT stacks, and what
-   *    the strip deletes is the COMPOSED result.
+   *    RECONCILES (a standalone action binds onto a sibling package's object),
+   *    and the reconciled copy lives in the flattened half alone. Condition 2
+   *    cannot see that: it reads the INPUT stacks, and what the strip deletes
+   *    is the COMPOSED result. Two packages declaring one object name are not
+   *    such a case: under `'preserve'` each keeps its own body, so the pair is
+   *    refused under every `objectConflict` strategy before anything is
+   *    emitted (`STACK_COMPOSE_OBJECT_CONFLICT`).
    *
    * @default 'last'
    */
@@ -7625,15 +7652,17 @@ function refuseUnmergeableCollections(
  * matter, and an identical pair is one declaration whichever stack it is
  * attributed to.
  *
- * [ADR-0150 D4 · #32477] After the walk, the objects a nested artifact's
- * package bodies declare are judged against every other input's, under every
- * strategy — {@link refuseNestedBodyObjectConflicts}. They are never merged
+ * [ADR-0150 D4 · #32477 · #32516] After the walk, every object name a package
+ * body of the composed artifact declares is judged against every other
+ * input's declarations, under every strategy —
+ * {@link refuseNestedBodyObjectConflicts}. Body declarations are never merged
  * into the list this returns.
  * @internal
  */
 function mergeObjects(
   stacks: ObjectStackDefinition[],
   strategy: ConflictStrategy,
+  preserve: boolean,
 ): { objects: ObjectStackDefinition['objects']; actionsOwner: Map<string, number> } {
   type Obj = NonNullable<ObjectStackDefinition['objects']>[number];
   const map = new Map<string, Obj>();
@@ -7716,7 +7745,7 @@ function mergeObjects(
     }
   }
 
-  refuseNestedBodyObjectConflicts(stacks);
+  refuseNestedBodyObjectConflicts(stacks, preserve);
 
   return { objects: result.length > 0 ? result : undefined, actionsOwner };
 }
@@ -7725,49 +7754,66 @@ function mergeObjects(
  * One declaration of an object name by one input stack, as
  * {@link refuseNestedBodyObjectConflicts} judges it: at the input's own top
  * level, or inside one package body of a nested artifact (`holder`).
+ * `inBody` says whether the composed artifact carries it in a package body —
+ * always for a nested artifact's body, and under `manifest: 'preserve'` also
+ * for the top level of an input that has a manifest and no `packages[]`
+ * ({@link preservePackageEntries} assembles that body from it).
  * @internal
  */
 interface ComposedObjectDeclaration {
   stackIndex: number;
   site: string;
+  inBody: boolean;
   holder?: ComposedBodyHolder;
 }
 
 /**
- * [ADR-0150 D4 · #32477] Refuse two inputs that declare one object name when
- * either declaration sits inside a nested artifact's package body — under
- * EVERY `objectConflict` strategy.
+ * [ADR-0150 D4 · #32477 · #32516] Refuse two inputs that declare one object
+ * name when either declaration sits in a package body of the composed
+ * artifact — under EVERY `objectConflict` strategy.
  *
- * A nested artifact — an input that already carries `packages[]`, such as one
- * `composeStacks` built under `manifest: 'preserve'` — keeps its objects in its
- * package bodies, and a multi-package one carries no flattened copy at all, so
- * the walk in {@link mergeObjects} saw none of them: a nested artifact whose
- * body declares object `X`, beside an input that also declares `X`, composed
- * under `'error'`, where the same pair of flat inputs is refused. The boot then
- * refused the artifact (`DUPLICATE_ARTIFACT_OBJECT_NAME`, under `'preserve'`)
- * or kept one body's `X` and silently dropped the other declaration with its
- * fields and embedded actions (the default manifest) — and installing the same
- * packages one by one refuses the second package's claim on `X`.
+ * A declaration sits in a package body when it is
  *
- * The strategy does not rescue the pair: composition carries a nested input's
- * bodies as they are ({@link preservePackageEntries}), so `'override'` cannot
- * replace a declaration inside one and `'merge'` cannot fold it. Measured,
- * both left the body's `X` to the boot exactly as `'error'` would have, so the
- * refusal is the same under all three (seat ruling on #32477, option A).
+ * - inside a nested artifact's body: an input that already carries
+ *   `packages[]`, such as one `composeStacks` built under
+ *   `manifest: 'preserve'`, keeps its objects there (a multi-package one
+ *   carries no flattened copy at all, an additive one carries one beside
+ *   them), or
+ * - under `manifest: 'preserve'`, at the top level of an input that has a
+ *   manifest and no `packages[]`: {@link preservePackageEntries} assembles
+ *   that input's body from exactly those objects.
  *
- * Read as the boot reads the artifact (`resolveArtifactCollections` in
- * `@objectstack/runtime`): an input's own top-level `objects` claim a name
- * over its bodies, so a body declaration counts only for a name its input's
- * top level does not carry, and the first body per name stands for the input.
- * Body declarations are judged here and never lifted into the composed top
- * level, so the composed output is unchanged; an input with no `packages[]`
- * contributes nothing new, so flat inputs are judged by {@link mergeObjects}
- * alone, exactly as before. Runs at step 2, before step 6 reads the action
- * keys an object embeds ({@link collectComposedActionKeyCollisions} skips a
- * body object on the premise that this door already judged it).
+ * The walk in {@link mergeObjects} reconciles top-level declarations only, so
+ * such a pair composed under `'override'` / `'merge'` (and a body the walk
+ * never saw, under `'error'` too) and then failed at boot. The boot registers
+ * each package body's objects (`resolveArtifactPackageOrder` in
+ * `@objectstack/core`) and a body's declaration stands over the artifact's
+ * top-level one, so a second body declaring the name was refused
+ * (`DUPLICATE_ARTIFACT_OBJECT_NAME`), and a top-level declaration beside a
+ * body's — `'override'`'s replacement, `'merge'`'s fold, a manifest-less
+ * input's object — was silently dropped with its fields and embedded actions.
+ * Installing the same packages one by one refuses the second package's claim
+ * on the name.
+ *
+ * The strategy does not rescue the pair: composition carries a body as it is,
+ * so `'override'` cannot replace a declaration inside one and `'merge'` cannot
+ * fold it. Measured, both left the body's declaration to the boot exactly as
+ * `'error'` would have, so the refusal is the same under all three (seat
+ * ruling on #32477, option A, applied to these shapes on #32516).
+ *
+ * A body declaration is noted even when its own input's top level carries the
+ * name too (the additive artifact): at boot the body's copy is the one that
+ * counts. Within one input nothing is judged — the first body per name stands
+ * for the input. Body declarations are judged here and never lifted into the
+ * composed top level, so the composed output is unchanged; a composition with
+ * no package body (flat inputs under the default manifest) contributes no
+ * body declaration, so it is judged by {@link mergeObjects} alone, exactly as
+ * before. Runs at step 2, before step 6 reads the action keys an object
+ * embeds ({@link collectComposedActionKeyCollisions} skips a body object on
+ * the premise that this door already judged it).
  * @internal
  */
-function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[]): void {
+function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[], preserve: boolean): void {
   const declarations = new Map<string, ComposedObjectDeclaration[]>();
   const note = (name: string, declaration: ComposedObjectDeclaration): void => {
     const list = declarations.get(name) ?? [];
@@ -7777,18 +7823,22 @@ function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[
   const bodyNames = new Set<string>();
 
   for (const [i, stack] of stacks.entries()) {
+    const packages = (stack as Record<string, unknown>).packages;
+    // Under 'preserve' this input's own objects become its assembled body —
+    // the same test `preservePackageEntries` applies.
+    const topLevelInBody = preserve && !Array.isArray(packages) && Boolean(stack.manifest);
     const own = (stack as { objects?: unknown }).objects;
     const topLevel = new Set<string>();
     if (Array.isArray(own)) {
       for (const [j, obj] of own.entries()) {
         if (!isRecord(obj) || typeof obj.name !== 'string' || topLevel.has(obj.name)) continue;
         topLevel.add(obj.name);
-        note(obj.name, { stackIndex: i, site: `stack.objects[${j}]` });
+        if (topLevelInBody) bodyNames.add(obj.name);
+        note(obj.name, { stackIndex: i, site: `stack.objects[${j}]`, inBody: topLevelInBody });
       }
     }
-    const packages = (stack as Record<string, unknown>).packages;
     if (!Array.isArray(packages)) continue;
-    const claimed = new Set(topLevel);
+    const claimed = new Set<string>();
     for (const [k, entry] of packages.entries()) {
       const body: unknown = isRecord(entry) ? entry.manifest : undefined;
       if (!isRecord(body) || !Array.isArray(body.objects)) continue;
@@ -7796,7 +7846,12 @@ function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[
         if (!isRecord(obj) || typeof obj.name !== 'string' || claimed.has(obj.name)) continue;
         claimed.add(obj.name);
         bodyNames.add(obj.name);
-        note(obj.name, { stackIndex: i, site: `packages[${k}].objects['${obj.name}']`, holder: composedBodyHolder(body) });
+        note(obj.name, {
+          stackIndex: i,
+          site: `packages[${k}].objects['${obj.name}']`,
+          inBody: true,
+          holder: composedBodyHolder(body),
+        });
       }
     }
   }
@@ -7817,11 +7872,13 @@ function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[
 
   const count = issues.length;
   throw new StackComposeObjectConflictError(
-    `composeStacks conflict (${count} object${count === 1 ? '' : 's'} declared inside a nested artifact's package body ` +
-      `and by another input):\n\n${issues.map((issue) => `  ✗ ${issue}`).join('\n')}\n\n` +
-      `A nested artifact's package bodies are composed as they are, so no objectConflict strategy resolves this: ` +
-      `'override' cannot replace a declaration inside a body and 'merge' cannot fold one, and installing the ` +
-      `same packages one by one refuses the second package's claim on the name. Rename one of the objects, ` +
+    `composeStacks conflict (${count} object${count === 1 ? '' : 's'} declared in a package body of the composed ` +
+      `artifact and by another input):\n\n${issues.map((issue) => `  ✗ ${issue}`).join('\n')}\n\n` +
+      `Package bodies are composed as they are (a nested artifact's bodies, and under { manifest: 'preserve' } ` +
+      `the body each package is assembled into), so no objectConflict strategy resolves this: 'override' cannot ` +
+      `replace a declaration inside a body and 'merge' cannot fold one. At boot a body's declaration stands over ` +
+      `any other: a second body declaring the name is refused, and a declaration beside it is dropped. ` +
+      `Installing the same packages one by one refuses the second package's claim on the name. Rename one of the objects, ` +
       `contribute to the other package's object through 'objectExtensions' instead of declaring it again, or ` +
       `compose the packages as flat inputs (each a stack of its own) under the default manifest with ` +
       `{ objectConflict: 'override' } or { objectConflict: 'merge' }, which fold the two into one object. ` +
@@ -8339,18 +8396,19 @@ function stableCollectionIdentity(value: unknown): string {
  * flattened top level holds the **composed** result, and composition is not
  * always a concatenation:
  *
- * - `objectConflict: 'merge'` / `'override'` RECONCILE two packages'
- *   same-named objects into one. The copy this strip would delete is the
- *   reconciled one; the bodies hold the two unreconciled halves. Measured on a
- *   two-package `merge` composition: the artifact's registration-path reader
- *   answers ONE object carrying both packages' fields with the flattened copy
- *   present, and TWO conflicting partial objects with it gone.
  * - {@link mergeActionsIntoObjects} binds a standalone action onto the object
  *   it names, INCLUDING an object a sibling package owns. The composed object
  *   carries that echo; the owning package's body does not.
+ * - `objectConflict: 'merge'` / `'override'` reconciled two packages'
+ *   same-named objects into one, leaving the two unreconciled halves in the
+ *   bodies. That pair no longer reaches this point: measured through a real
+ *   boot, the two bodies were refused (`DUPLICATE_ARTIFACT_OBJECT_NAME`)
+ *   whatever the flattened copy carried, so composition now refuses it under
+ *   every strategy ({@link refuseNestedBodyObjectConflicts}). The comparison
+ *   below still answers no for it, so nothing depends on that refusal here.
  *
- * Neither is a shape difference — the collections' declarations are identical
- * on both sides — and neither is refused: both compose legally today. So the
+ * The binding is not a shape difference — the collections' declarations are
+ * identical on both sides — and it is not refused: it composes legally. So the
  * emitter asks the question it actually depends on, per collection, and keeps
  * the additive shape whenever the answer is no.
  *
@@ -8443,9 +8501,8 @@ function packagesReproduceComposedCollections(
  * whenever the bodies reproduce what the flattened half would have held
  * (#14512, ADR-0130 D4 addendum 2026-09-22): the flattened top level is then
  * not emitted beside it, and a consumer reads the definitions here or not at
- * all. Where composition RECONCILED something the bodies do not carry — a
- * merged or overridden object, an action bound onto a sibling package's object
- * — the flattened half stays and this body is one of two copies, exactly as
+ * all. Where composition RECONCILED something the bodies do not carry — an
+ * action bound onto a sibling package's object — the flattened half stays and this body is one of two copies, exactly as
  * before {@link composeStacks} learned to drop it. Every reader in the platform resolves
  * `packages[]` — the reader half of the same ruling — and D4's read-both rule
  * still reads an artifact already on disk that carries both halves. What
@@ -8666,11 +8723,13 @@ function collectArtifactCrossReferenceErrors(
  * multiple applications (e.g., CRM + Todo + BI) into a single project.
  *
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
- * **Objects** are merged according to the `objectConflict` strategy. Any input
- * carrying `packages[]` (a nested artifact) keeps its objects in its package
- * bodies, which are composed as they are: an object name one of those bodies
- * declares and another input declares too is refused under every strategy,
- * since no strategy can replace or fold a declaration inside a body (#32477).
+ * **Objects** are merged according to the `objectConflict` strategy. A package
+ * body is composed as it is — the bodies of any input carrying `packages[]` (a
+ * nested artifact), and under `manifest: 'preserve'` the body each input with
+ * a manifest is assembled into — so an object name a body declares and another
+ * input declares too is refused under every strategy, since no strategy can
+ * replace or fold a declaration inside a body (#32477, #32516). The strategies
+ * reconcile flat inputs under the other manifest options.
  * **Manifest** is selected based on the `manifest` option — or, with
  * `manifest: 'preserve'`, every input's package identity is additionally folded
  * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded, and a
@@ -8806,7 +8865,7 @@ function composeBuiltStacks(
 
   // 2. Objects — use conflict strategy (and remember, per composed object,
   //    which stack's `actions` array it carries — step 6 reads that).
-  const { objects, actionsOwner } = mergeObjects(stacks, opts.objectConflict);
+  const { objects, actionsOwner } = mergeObjects(stacks, opts.objectConflict, opts.manifest === 'preserve');
   if (objects) {
     composed.objects = objects;
   }

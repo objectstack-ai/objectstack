@@ -135,8 +135,16 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `skill` first (#31701), then the object-less `action` (#31697), then
  * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
- * name by package). A type not listed here keeps one package holder per
- * deployment.
+ * name by package), then the picklist family (#31700): `picklist`,
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
+ * type not listed here keeps one package holder per deployment.
+ *
+ * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
+ * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
+ * is the engine's: it keeps every holder per package itself (ADR-0150 D4's
+ * last row) and has no by-name metadata read, so the stores and the reads
+ * keyed on this list (`@objectstack/metadata`'s slotted store, the metadata
+ * protocol's fail-closed read) never meet it.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -149,6 +157,12 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'action',
   'email_template',
   'flow',
+  // the picklist family (#31700)
+  'picklist',
+  'mapping',
+  'dataset',
+  'api',
+  'function',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -534,12 +548,16 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
   const subject = `The ${typeLabel(refusal.type)} "${refusal.name}"`;
   const named = refusal.candidates.map(describePackageScopedHolder).join('; ');
   const platform = refusal.candidates.some((c) => c.kind === 'platform');
+  // A count of candidates is a count of PACKAGES only when every candidate
+  // is one: the environment's own item, the platform's or a stack's
+  // residual beside them makes it a count of holders.
+  const counted = refusal.candidates.every((c) => c.kind === 'package') ? 'packages' : 'holders';
   switch (refusal.reason) {
     case 'ambiguous-in-closure':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in the declared dependency closure of ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in the declared dependency closure of ` +
         `package "${refusal.callerPackageId}"${platform ? ' and the platform' : ''}: ${named}. Nothing picks one of them: address it by its package.`;
     case 'ambiguous-in-environment':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in this environment and the caller names ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
     case 'outside-closure':
       return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +

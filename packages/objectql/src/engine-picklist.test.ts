@@ -22,7 +22,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from './engine.js';
 import { ValidationError } from './validation/record-validator.js';
-import { describeUnresolvedPicklistReferences } from './picklist-resolution.js';
+import { describeDisagreeingPicklistReference, describeUnresolvedPicklistReferences } from './picklist-resolution.js';
 
 function makeStubDriver() {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
@@ -473,11 +473,99 @@ describe('picklist — resolved from the package that writes the reference (ADR-
     expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
   });
 
+  // [#31700] Two namespaces may each hold one name now: an owner and an
+  // extender that each reach THEIR OWN list disagree. Every referrer
+  // resolves, so neither half of the audit names it; the boot's third check
+  // does (`findDisagreeingPicklistReferences`), and the field stays unserved.
+  const SILVER = { name: 'tier', label: 'Tier', options: [{ label: 'Silver', value: 'silver' }] };
+  const TIER_EXTENSION = { extend: 'pk_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'tier' } } };
+
+  it('[#31700] an owner and an extender each reaching its own namespace\'s list: served no options, named as disagreeing', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({
+      id: 'com.acme.alpha', name: 'alpha', namespace: 'alpha', picklists: [{ ...ENV_LIST, name: 'tier' }], objects: [member('tier')],
+    });
+    engine.registerApp({
+      id: 'com.beta.ext', name: 'ext', namespace: 'beta', picklists: [SILVER], objectExtensions: [TIER_EXTENSION],
+    });
+
+    expect((engine.registry.getObject('pk_member')!.fields.tier as any).options).toBeUndefined();
+    const err = await refusal(engine.insert('pk_member', { name: 'M', tier: 'gold' }, sys));
+    expect(err.fields[0]).toMatchObject({ field: 'tier' });
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([]);
+    const disagreeing = engine.registry.findDisagreeingPicklistReferences();
+    expect(disagreeing).toEqual([{
+      object: 'pk_member',
+      field: 'tier',
+      picklist: 'tier',
+      referrers: [
+        { packageId: 'com.acme.alpha', holder: { kind: 'package', packageId: 'com.acme.alpha' } },
+        { packageId: 'com.beta.ext', holder: { kind: 'package', packageId: 'com.beta.ext' } },
+      ],
+    }]);
+    const warning = describeDisagreeingPicklistReference(disagreeing[0]);
+    expect(warning).toContain("Field 'pk_member.tier' is served with no options and refuses every value");
+    expect(warning).toContain('package \'com.acme.alpha\' reaches the list of package "com.acme.alpha"');
+    expect(warning).toContain('package \'com.beta.ext\' reaches the list of package "com.beta.ext"');
+  });
+
+  it('CONTROL — the extender depending on the owner and holding no list of its own: served the list, nothing disagrees', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({
+      id: 'com.acme.alpha', name: 'alpha', namespace: 'alpha', picklists: [{ ...ENV_LIST, name: 'tier' }], objects: [member('tier')],
+    });
+    engine.registerApp({
+      id: 'com.beta.ext', name: 'ext', namespace: 'beta', dependencies: { 'com.acme.alpha': '^1.0.0' },
+      objectExtensions: [TIER_EXTENSION],
+    });
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findDisagreeingPicklistReferences()).toEqual([]);
+  });
+
   it('a package\'s `picklistExtensions` target resolves caller-less: it extends the one holder\'s list, dependency or not', async () => {
     const engine = await bootEngine();
     engine.registerApp(CORE);
     engine.registerApp({ id: 'com.test.addon', name: 'addon', picklistExtensions: [HEALTHCARE_EXTENSION] });
     expect(values(engine.registry.getObject('pk_account')!.fields.industry)).toEqual(['technology', 'finance', 'healthcare']);
     expect(engine.registry.findOrphanPicklistExtensions()).toEqual([]);
+  });
+});
+
+/**
+ * [#32183] A field's vocabulary is judged over every holder: the by-name
+ * `picklist` read judges the served holders (a disabled package holds no
+ * name), but a reversible disable of the package holding the list a live
+ * field names neither refuses the next boot — the disabled state is seeded
+ * before the load audit runs — nor empties the field's options. BASE (main
+ * de141e32): the field and the audit answered the same; `resolveItem` served
+ * the disabled package's list, and now serves none.
+ */
+describe('#32183 — a disabled dependency still supplies the vocabulary of a live field', () => {
+  const LIST = { name: 'dep_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] };
+  const member = {
+    name: 'pk_member',
+    label: 'Member',
+    fields: {
+      name: { name: 'name', label: 'Name', type: 'text' as const },
+      tier: { name: 'tier', label: 'Tier', type: 'select' as const, picklist: 'dep_tier' },
+    },
+  };
+
+  it('the field keeps its options and the load audit stays clear; the by-name read withholds the list', async () => {
+    const engine = await bootEngine();
+    engine.registerApp({ id: 'com.test.lists', name: 'lists', picklists: [{ ...LIST }] });
+    engine.registerApp({ id: 'com.test.pkg', name: 'pkg', dependencies: { 'com.test.lists': '^1.0.0' }, objects: [member] });
+    engine.registry.disablePackage('com.test.lists');
+
+    expect(values(engine.registry.getObject('pk_member')!.fields.tier)).toEqual(['gold']);
+    expect(engine.registry.findUnresolvedPicklistReferences()).toEqual([]);
+    expect(engine.registry.findOutsideClosurePicklistReferences()).toEqual([]);
+    expect(engine.registry.picklistReferenceVerdict('dep_tier', 'com.test.pkg')).toMatchObject({
+      status: 'resolved', holder: { kind: 'package', packageId: 'com.test.lists' },
+    });
+    // The door: a disabled package holds no name.
+    expect(engine.registry.packageScopedHoldersOf('picklist', 'dep_tier')).toEqual([]);
+    expect(engine.registry.resolveItem('picklist', 'dep_tier')).toBeUndefined();
   });
 });

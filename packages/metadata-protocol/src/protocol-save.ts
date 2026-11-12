@@ -69,6 +69,7 @@ import {
 } from './protocol-view-normalization.js';
 import { isShippedViewItem, stripDerivedProvenance } from './protocol-package-bindings.js';
 import { mutationEventMemberOfBody } from './protocol-bundle-members.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import {
     destructiveChangeRemedy,
@@ -78,6 +79,7 @@ import {
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+import { captureStoredExpressionChange, fillStoredExpressionChange } from './protocol-stored-expression-fill.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -2121,6 +2123,12 @@ export class ProtocolSaveFacet {
             // `object`: the runtime dispatch path reads this registry,
             // so an item that is already listable must be dispatchable
             // in the same breath. See {@link applyRegistryWriteThrough}.
+            // [#32527] The object's stored computed fields as served BEFORE this
+            // save goes live: what the fill after the event below diffs against.
+            const storedExpressions = mode === 'publish'
+                ? captureStoredExpressionChange(host.engine, singularTypeForRepo, request.name)
+                : undefined;
+            let storageSyncRefused = false;
             if (mode === 'publish') {
                 await host.applyRegistryWriteThrough({
                     type: singularTypeForRepo,
@@ -2136,6 +2144,7 @@ export class ProtocolSaveFacet {
                 // failed (the row is written, registered and served).
                 const storageRefused = await host.ensureObjectStorage(request.type, request.name);
                 if (storageRefused) saveNotices.push(storageRefused);
+                storageSyncRefused = storageRefused !== undefined;
             }
             // ADR-0010 — success audit (best-effort).
             await host.recordMetadataAudit({
@@ -2158,6 +2167,8 @@ export class ProtocolSaveFacet {
                 state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: null,
                 body: request.item,
+                // [#31698] The row a set's save landed in (ADR-0150 D4).
+                ...projectorEventPackage(singularType, permissionLandsIn),
             });
             host.emitMetadataMutation({
                 type: singularTypeForRepo,
@@ -2166,7 +2177,18 @@ export class ProtocolSaveFacet {
                 organizationId: null,
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
+                // [#32451] …and its package: the binding `put` wrote under (a
+                // draft naming none inherits the active rows' package).
+                ...mutationEventPackage(mode === 'draft' && request.packageId == null ? inheritedDraftPackageId : request.packageId),
             });
+            // [#32527] Ruling 6816429574, letter A: a stored computed field this
+            // save added, turned from a formula, or gave a new expression is
+            // filled over the object's existing rows now, with the write's own
+            // computation, and each such field is reported on `advisories`
+            // (`protocol-stored-expression-fill.ts`). After the event, so the
+            // other nodes serve the change while the rows are written; before
+            // the answer, which reports the counts.
+            saveNotices.push(...await fillStoredExpressionChange(storedExpressions, { storageRefused: storageSyncRefused }));
             const receiptPackageId = typeof request.packageId === 'string' && request.packageId !== ''
                 ? request.packageId
                 : inheritedDraftPackageId;

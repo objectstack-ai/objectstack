@@ -362,6 +362,16 @@
  * plus `isMultiValueField` for `count_distinct`) — ⛔ no second type list, so
  * `sum` over a `boolean` and `min` over a `date` pass, as they pass the door.
  *
+ * [#32503] The same entry has a second carrier: an `object-grid` page
+ * component's `properties.columns` declares this union by reference
+ * (`ObjectGridPropsSchema.columns`), and the grid's footer asks the same
+ * whole-set query of its summaries (`useObjectGridSummaries` →
+ * `useWholeSetSummary`, `@object-ui/plugin-grid`). That carrier is walked by
+ * `validateSortableFields` (`validate-sortable-fields.ts`), the member that
+ * binds a page's `object-grid` to its object and reaches the page publish
+ * door, and judged by this module's {@link columnSummaryRefusal}, under this
+ * rule id.
+ *
  * Not judged: `none`; `count` (fieldless, `COUNT(*)`); the four DERIVED
  * members (`count_filled` / `count_empty` / `percent_filled` /
  * `percent_empty`), which ride one `COUNT(field)` node and so compare no
@@ -880,6 +890,49 @@ function summaryMemberOf(fn: string): string {
   return SUMMARY_MEMBER_BY_FUNCTION.get(fn) ?? fn;
 }
 
+/**
+ * [#32449, #32503] The refusal ONE `ListColumn` entry's `summary` earns over
+ * the field it aggregates on `object`, or `undefined` when nothing is judged
+ * or the aggregate door accepts the pair — see the section `columns[].summary`
+ * on this module for what is judged and what is skipped.
+ *
+ * One verdict for every carrier of the entry: a list view's `columns`
+ * ({@link validateListViewFieldRefs}) and an `object-grid` page component's
+ * `properties.columns` (`validate-sortable-fields.ts`), which declares the
+ * same union (`ObjectGridPropsSchema.columns` is `ListViewSchema.shape.columns`)
+ * and whose footer asks the same whole-set query. Each caller places the
+ * finding (rule {@link LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED}, `error`); the
+ * words are this function's, so the two carriers cannot word one refusal two
+ * ways.
+ */
+export function columnSummaryRefusal(
+  column: Record<string, unknown>,
+  graph: ObjectGraph,
+  object: string,
+): { message: string; hint: string } | undefined {
+  const summary = column.summary;
+  const member = typeof summary === 'string' ? summary : isRec(summary) ? summary.type : undefined;
+  if (typeof member !== 'string' || !Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_AGGREGATION, member)) return undefined;
+  const mapping = COLUMN_SUMMARY_AGGREGATION[member as ColumnSummary];
+  // `none`, the fieldless `count` and the derived `COUNT(field)` members compare no value.
+  if (mapping.kind !== 'aggregate' || mapping.fieldless) return undefined;
+  const fn = mapping.function;
+  const field = strName(isRec(summary) && summary.field !== undefined ? summary.field : column.field);
+  if (!field || field.includes('.')) return undefined;
+  const verdict = resolveFieldPath(graph, object, field);
+  if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return undefined;
+  const fieldType = verdict.meta?.type;
+  if (!isJudgeableAggregateType(fieldType)) return undefined;
+  const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
+  if (aggregateAcceptsDeclaration(fn, shape)) return undefined;
+  return {
+    message:
+      `summary "${member}" over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
+      '(400 INVALID_FIELD); a one-page browser footer is no exception',
+    hint: refusedAggregateRemedy(fn, field, shape, summaryMemberOf),
+  };
+}
+
 /** The nested field positions inside one `columns[]` entry record. */
 const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev }> = [
   // `summary` aggregates a column; a stale name aggregates nothing and the
@@ -1352,31 +1405,9 @@ export function validateListViewFieldRefs(
    * declaration, asked of the aggregate door's own verdict.
    */
   const checkColumnSummary = (column: AnyRec, object: string, where: string, path: string): void => {
-    const summary = column.summary;
-    const member = typeof summary === 'string' ? summary : isRec(summary) ? summary.type : undefined;
-    if (typeof member !== 'string' || !Object.prototype.hasOwnProperty.call(COLUMN_SUMMARY_AGGREGATION, member)) return;
-    const mapping = COLUMN_SUMMARY_AGGREGATION[member as ColumnSummary];
-    // `none`, the fieldless `count` and the derived `COUNT(field)` members compare no value.
-    if (mapping.kind !== 'aggregate' || mapping.fieldless) return;
-    const fn = mapping.function;
-    const field = strName(isRec(summary) && summary.field !== undefined ? summary.field : column.field);
-    if (!field || field.includes('.')) return;
-    const verdict = resolveFieldPath(graph, object, field);
-    if (!verdict || isUnjudgeable(verdict) || verdict.kind !== 'ok') return;
-    const fieldType = verdict.meta?.type;
-    if (!isJudgeableAggregateType(fieldType)) return;
-    const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
-    if (aggregateAcceptsDeclaration(fn, shape)) return;
-    findings.push({
-      severity: 'error',
-      rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
-      where,
-      path,
-      message:
-        `summary "${member}" over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
-        '(400 INVALID_FIELD); a one-page browser footer is no exception',
-      hint: refusedAggregateRemedy(fn, field, shape, summaryMemberOf),
-    });
+    const refusal = columnSummaryRefusal(column, graph, object);
+    if (refusal === undefined) return;
+    findings.push({ severity: 'error', rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, where, path, ...refusal });
   };
 
   /**

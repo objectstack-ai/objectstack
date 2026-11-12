@@ -36,6 +36,7 @@ export {
     USER_OBJECT,
     MEMBER_OBJECT,
     TEAM_MEMBER_OBJECT,
+    ORGANIZATION_MEMBERS_AUDIENCE,
 } from './recipient-resolver.js';
 export type {
     RecipientResolverOptions,
