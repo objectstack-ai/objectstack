@@ -68,6 +68,7 @@
 - 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
+- carry note 指 `docs/adr/**`、`skills/**`、`SKILL.md`、`os-dev.md`:落地席合并后立卡,⛔ 不挂实施卡。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
@@ -97,5 +98,4 @@
 - 例外一:`platform-readings.md` 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。
 - 例外二:AGENTS.md 报告态翻转,须①不删门不跳测;②同笔附两红 run 入下批待决;③否即翻回。
 - 条件:席位验收评论逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排。
-- 回翻条款:实施中发现契约终究要动 ⇒ dev 停手,卡回决策箱,⛔ 永不静默重裁。
 - 请示纪律:方向性授权覆盖整条执行链一并做完,⛔ 不逐项回问。

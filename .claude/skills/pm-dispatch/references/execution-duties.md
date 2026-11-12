@@ -109,6 +109,8 @@
 - `skills/**`(随 `npx skills add` 发运)与 `docs/adr/**` ⛔ 无一行级豁免,逐行判机械不作数。
 - 纯机械一行 PM 酌定可至下限档;降档施工的补偿控制 = 复核席跑契约复审档。
 - 降档施工只经契约复审档复核到达维护者,⛔ 不新增标签不新增链。
+- 实施卡文件面 ⛔ 不含 `docs/adr/**`、`skills/**`、`SKILL.md`、`os-dev.md`:各立 `domain:skills` 卡。
+- ADR 记账行(resolved by/修订注记)归落地席:ACCEPT 记 `carrier:` 注,合并后同轮立卡引合并 commit。
 - 强制条款②:放宽接受集或扩大公开面的卡默认判断档施工;命中即 spec 车道的活。
 - 负边界:运行时权限/安全行为变更不是条款②,归人工地板安全/权限边界类。
 - 条款②只指已发布契约面,拉回已声明契约不触它;卡面复述仍是条款②。
@@ -131,8 +133,7 @@
 - 凡我觉得可以这样的一律降到第三区,第三区 ⛔ 不与裁决区相左;⛔ 不把假设写成裁决。
 - 认为裁决该动 ⇒ 令中写明,派发前送复核线程,⛔ 不经 dev 转。
 - 须复述所载裁决的 spec 散文 ⇒ 栅栏点名 `packages/spec/src/**` 散文在范围,⛔ 不整片禁。
-- 标准非协商条款 ⛔ 不抄进派发词:hook 已机械强制段与 os-dev.md 已载通用段砍掉。
-- ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
+- 卡类特有约束恒随派发词:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
 - 派发令恒带 `Writes:` 行:PR 只经中继 `pr_create`;评论/标签/正文只经中继写工具;两数都报。
 - ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
@@ -145,7 +146,6 @@
 - 已认领、别动 assignee 收窄到 assignee 字段本身;认领协议已满足是另一句话且可能是假的。
 - 触 `skills/**` 的卡,派发词必带 PM 定的净增行数预算(按 feature 大小定,小功能给小数)。
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
-- 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 申报文件面写 `packages/spec/src/**` 且至少另一包 ⇒ build 重,派 `mode:cloud`,一卡一容器。
