@@ -316,6 +316,25 @@ const done = await fetch('http://localhost:3000/api/v1/auth/admin/sso/verify-dom
 // → { success: true, data: { providerId, verified: true, message } }
 ```
 
+What verification decides, with it on:
+
+- **A provider signs nobody in until its domain is verified.** Step 2 proves
+  every domain the provider lists, and one verified flag covers the whole list.
+  Editing a provider's domain list clears the flag until every listed domain is
+  proven again.
+- **A provider creates an account only for an email address at a domain it has
+  proven.** The address's domain must equal one of the provider's listed,
+  verified domains. A subdomain counts only when it is itself listed and
+  verified, and a parent never counts for a listed subdomain. Case, a trailing
+  dot, and the Unicode and punycode forms of a name are one domain. Any other
+  new account is refused with `error=EMAIL_DOMAIN_NOT_ALLOWED`, and nothing is
+  created. No audience posture, invitation or `allowJit` setting relaxes this.
+- **Accounts that already exist are not re-checked.** A person who already has
+  an account signs in as before.
+
+So if your people first sign in with addresses at a subdomain or at another
+domain, list each such domain on the provider and verify it.
+
 Both take `providerId` and refuse with **400 `INVALID_REQUEST`** when it is
 missing. Step 2 reports `NO_PENDING_VERIFICATION` if you call it before step 1,
 and `DOMAIN_VERIFICATION_FAILED` when the TXT record is not visible yet — retry
@@ -573,7 +592,10 @@ and no user is created. These sign-ins are unchanged:
 - every sign-in under the `email_domain` or `open` posture.
 
 To let a provider create accounts for everyone its IdP authenticates, as it did
-before this rule, turn on `allowJit` for that provider.
+before this rule, turn on `allowJit` for that provider. With
+[domain verification](#domain-verification-opt-in) on, a provider still creates
+an account only for an email address at a domain it has proven, under every
+posture, with or without an invitation and with or without `allowJit`.
 
 ---
 
