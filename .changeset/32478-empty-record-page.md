@@ -6,7 +6,7 @@
 
 fix(types, app-shell): a record page that places no component is refused by objectui's page-kind node and explains itself in the record view instead of opening a blank panel, and Studio creates a full record page it cannot copy as slotted, so the first save is accepted
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing) — widening: the two empty.recordPagePlacesNoComponent* keys; narrowing: the PageKindNodeSchema attach
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (already-registered page-record-no-component-refused) the entry already prescribes this exact narrowing: a kind full record page that places no component, refused through the spec's own checkPageRecordPlacesComponent, with the same three rewrites; this change runs that same check on objectui's page-kind node, so the accept set it narrows is the one the entry already records, and no key, value, export or stored shape moves -->
