@@ -387,8 +387,9 @@ export function exactQualifierItem(
  * package-less row of `(type, name)` met at a holder's exact address declined
  * there: a type ADR-0150 addresses by `(package, name)` whose stored row of
  * the name the reads decline ({@link ProtocolHost.declinesStoredRow}: a sealed
- * managed item, or a shipped flow name, unless the row is the shipping
- * package's declared override)?
+ * managed item, unless the row is the shipping package's declared override)?
+ * ⛔ Not a flow: its reads keep their own Regime C rule (#20946, #21002), which
+ * reports a declined row as a shadowed `overlay` layer.
  *
  * Such a row customizes nothing: it is no holder's customization, so D4 has
  * no ambiguity to report for it, and the address serves its holder's own
@@ -404,7 +405,7 @@ export function declinesPackageLessRowAt(
     name: string,
     row?: ServedOverrideRow,
 ): boolean {
-    return isPackageScopedType(type) && host.declinesStoredRow(type, name, row);
+    return isPackageScopedType(type) && type !== 'flow' && host.declinesStoredRow(type, name, row);
 }
 
 /** Is `row` a stored row bound to no package (its `package_id` column empty)? */
@@ -436,7 +437,8 @@ export function declinedCopyReplaced(
     const served = (item as { _packageId?: unknown })._packageId;
     // Package-less only: `''` and the provenance sentinel `sys_metadata` are no package, as in {@link exactQualifierItem}.
     if (typeof served === 'string' && served !== '' && served !== 'sys_metadata') return item;
-    if (!isPackageScopedType(request.type) || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
+    // A flow's copy is its own read's ({@link ProtocolHost.isStoredFlowEntryOfShippedName}).
+    if (!isPackageScopedType(request.type) || request.type === 'flow' || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));

@@ -484,20 +484,17 @@ export class ProtocolRegistryHydrationFacet {
             await host.hydrateExpandedViewItems(type, data, options);
             return true;
         }
-        // [#32568, ADR-0126 Regime C, epic ruling 6817768147] A row the reads
-        // decline, of a type ADR-0150 addresses by `(package, name)` (a sealed
-        // managed item's stored row that is not its shipping package's
-        // declared override), is not registered. Registered, it took a
-        // holder's slot under that holder's envelope, so one stored row was
-        // served as the holder's own item after a hydration and declined
-        // before it. ⛔ Not a flow: its tenant row registers as it is, without
-        // the envelope (below), so the boot pull reports it (#20913).
+        // [#32568, ADR-0126 Regime C, epic ruling 6817768147] A package-less
+        // row the reads decline, of a type ADR-0150 addresses by `(package,
+        // name)` (a sealed managed item's stored row), is not registered.
+        // Registered, it took the first holder's slot under that holder's
+        // envelope, so one stored row was served as that holder's own item
+        // after a hydration and declined before it. ⛔ Not a flow: its tenant
+        // row registers as it is, without the envelope (below), so the boot
+        // pull reports it (#20913).
         const rowName = String((data as any).name);
         const scoped = isPackageScopedType(canonicalType);
-        if (scoped && canonicalType !== 'flow'
-            && host.declinesStoredRow(type, rowName, { type, package_id: options.packageId ?? null, metadata: data })) {
-            return true;
-        }
+        if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) return false;
         // [#23074] The artifact of the row's OWN bundle member: an overlay of
         // a member the package does not ship has none, so it registers as the
         // tenant row it is ({@link mergeArtifactProtection}). It used to take
