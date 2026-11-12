@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_ORGANIZATION_NAME,
   browserRegion,
+  checklistCompletion,
   dismissRecordKey,
   hasInvitedColleagues,
   isKeySet,
@@ -198,5 +199,32 @@ describe('hiding the checklist is a per-device record, per workspace and user', 
     expect(wasDismissed(broken, 'k')).toBe(false);
     expect(wasDismissed(undefined, 'k')).toBe(false);
     expect(markDismissed(broken, 'k')).toBe(false);
+  });
+});
+
+describe('completion counts the required rows; email delivery is optional (objectstack#32643)', () => {
+  const required = ['organization_name', 'language_country', 'timezone', 'currency', 'invite'].map((id) => ({ id, done: true }));
+
+  it('every required row done and mail not: complete, and mail is in neither count', () => {
+    expect(checklistCompletion([...required, { id: 'mail', done: false }])).toEqual({ done: 5, total: 5, complete: true });
+  });
+
+  it('mail done moves neither count', () => {
+    expect(checklistCompletion([...required, { id: 'mail', done: true }])).toEqual({ done: 5, total: 5, complete: true });
+  });
+
+  it('CONTROL: a required row not done keeps it open, mail done or not', () => {
+    const open = required.map((r) => (r.id === 'invite' ? { ...r, done: false } : r));
+    expect(checklistCompletion([...open, { id: 'mail', done: true }])).toEqual({ done: 4, total: 5, complete: false });
+    expect(checklistCompletion([...open, { id: 'mail', done: false }]).complete).toBe(false);
+  });
+
+  it('the rows outside the localization set count as required too (the AI rows)', () => {
+    expect(checklistCompletion([{ id: 'ai_provider', done: false }, { id: 'mail', done: false }])).toEqual({
+      done: 0,
+      total: 1,
+      complete: false,
+    });
+    expect(checklistCompletion([{ id: 'connect_assistant', done: false }]).complete).toBe(false);
   });
 });

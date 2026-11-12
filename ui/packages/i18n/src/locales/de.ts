@@ -335,6 +335,10 @@ const de = {
     registryRef: {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
+      holderPackage: "{{item}} · Paket {{package}}",
+      holderEnvironment: "{{item}} · in dieser Umgebung definiert",
+      holderUnresolved: "{{name}} (von mehreren Paketen bereitgestellt; kein Paket angegeben)",
+      holderNeedsPackage: "Dieses Formular gibt einen Berechtigungssatz nur über seinen Namen an. Stellen mehrere Pakete einen Satz mit demselben Namen bereit, kann hier nur der in dieser Umgebung definierte ausgewählt werden.",
     },
     preferenceOption: {
       allTopics: "Alle Themen ({{value}})",
@@ -2293,6 +2297,7 @@ const de = {
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
+      optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",

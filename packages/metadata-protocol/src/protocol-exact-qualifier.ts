@@ -72,8 +72,15 @@ interface ExactQualifierRegistry {
      * [#32310] `callerPackageId` counts the caller's own holding for the caller
      * arm's step 1 ({@link resolveCallerPackageAddress}), as objectql's
      * resolver reads it; the exact qualifier passes none.
+     *
+     * [#32183] The SERVED holders: a disabled package holds no name.
+     * `options.includeDisabledPackages` reads every holder, the read the
+     * exact qualifier's admission takes ({@link admitExactQualifier}).
      */
-    packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[];
+    packageScopedHoldersOf(
+        type: string, name: string, callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
@@ -270,12 +277,28 @@ export async function admitExactQualifier(
 
     // X named is X's holding even when it is a bundle addition (R2 drops one
     // only for OTHER readers): the qualifier asks as the caller it names.
-    const holders = registry.packageScopedHoldersOf(request.type, request.name, packageId) ?? [];
-    if (holders.includes(packageId)) return { packageId, registryHolders: [packageId] };
+    // [#32183, ruling (c)] Admission asks every holder, a disabled package's
+    // included: X named is X's holding, or a base X is a pair of, whether or
+    // not that package is disabled. So `?package=DISABLED` and its pair are
+    // admitted and the item face answers the disabled item's 404, never a
+    // refusal naming the enabled holder; the qualifier never serves the
+    // disabled body (the face withholds it).
+    const every = registry.packageScopedHoldersOf(request.type, request.name, packageId, { includeDisabledPackages: true }) ?? [];
+    if (every.includes(packageId)) return { packageId, registryHolders: [packageId] };
 
+    // [#32183] The candidates a refusal names, and the bases a pair is read
+    // at, are the served holders: a disabled package holds no name, so it is
+    // never named beside an enabled one. A pair whose every base is disabled
+    // is still admitted at those bases, and the item face withholds it
+    // ({@link disabledExactAddressHolder}).
+    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
     const installed = installedManifestsOfEngine(host.engine);
-    const pairedBases = holders.filter((holder) => pairsOf(holder, installed).includes(packageId));
-    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases };
+    const servedBases = holders.filter((holder) => pairsOf(holder, installed).includes(packageId));
+    if (servedBases.length > 0) return { packageId, registryHolders: servedBases };
+    // Every base disabled: the address reads one of them, which the face
+    // withholds, so no refusal names a disabled base.
+    const pairedBases = every.filter((holder) => pairsOf(holder, installed).includes(packageId));
+    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases.slice(0, 1) };
 
     for (const state of ['active', 'draft'] as const) {
         const served = await host.findServedOverlayRow({
@@ -294,6 +317,32 @@ export async function admitExactQualifier(
     // No holder anywhere: nothing to name, and the read answers its own miss.
     if (candidates.length === 0) return { packageId, registryHolders: [] };
     throw refusal(request.type, request.name, packageId, 'not-held-by-qualifier', candidates);
+}
+
+/**
+ * [#32183, ruling (c)] The disabled package an exact address reads, when every
+ * package it reads is disabled: the package `packageId` names when it holds the
+ * name, else the bases it is a pair of when none of them is enabled (the
+ * bases {@link admitExactQualifier} admits it at). `undefined` when the
+ * address reads an enabled package, reads no holder, or the type is not
+ * package-scoped. The item face answers such an address as that package's
+ * withheld item, whichever package's envelope a layer of the read reached:
+ * the disabled body is never served, and no enabled holder is named.
+ * Optional-called: a registry without `isPackageDisabled` withholds nothing more.
+ */
+export function disabledExactAddressHolder(
+    host: Pick<ProtocolHost, 'engine'>,
+    request: { type: string; name: string; packageId: string },
+): string | undefined {
+    if (!isPackageScopedType(request.type)) return undefined;
+    const registry = registryOf(host) as (Partial<ExactQualifierRegistry> & { isPackageDisabled?(id: string): boolean }) | undefined;
+    if (typeof registry?.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
+    const disabled = (id: string) => registry.isPackageDisabled!(id) === true;
+    const every = registry.packageScopedHoldersOf(request.type, request.name, request.packageId, { includeDisabledPackages: true }) ?? [];
+    if (every.includes(request.packageId)) return disabled(request.packageId) ? request.packageId : undefined;
+    const installed = installedManifestsOfEngine(host.engine);
+    const bases = every.filter((holder) => pairsOf(holder, installed).includes(request.packageId));
+    return bases.length > 0 && bases.every(disabled) ? bases[0] : undefined;
 }
 
 /**
@@ -493,13 +542,27 @@ export function judgesPackageLessRows(registry: { readsByPackage?(type: string):
  * between two.
  */
 export function packageLessRowOwners(
-    registry: { readsByPackage?(type: string): boolean; packageScopedHoldersOf(type: string, name: string): readonly string[] | undefined },
+    registry: {
+        readsByPackage?(type: string): boolean;
+        packageScopedHoldersOf(
+            type: string, name: string, callerPackageId?: string | null,
+            options?: { includeDisabledPackages?: boolean },
+        ): readonly string[] | undefined;
+    },
     type: string,
     name: string,
+    options?: { includeDisabledPackages?: boolean },
 ): string[] {
     if (!judgesPackageLessRows(registry, type)) return [];
     if (isPlatformRequestedBareName(type, name)) return [];
-    return [...(registry.packageScopedHoldersOf(type, name) ?? [])];
+    // [#32183] The served holders: a read judges them, so a package-less row
+    // of a name an enabled and a disabled package hold is the enabled one's.
+    // A durable report (`os migrate stored-references`) asks every holder
+    // (`includeDisabledPackages`), so its listing never moves with a
+    // reversible disable.
+    return [...((options === undefined
+        ? registry.packageScopedHoldersOf(type, name)
+        : registry.packageScopedHoldersOf(type, name, null, options)) ?? [])];
 }
 
 /**
@@ -638,7 +701,10 @@ export type MetaItemAddress =
 /** The registry's namespace catalogue, as the qualified path reads it. */
 interface NamespaceCatalogue {
     getNamespaceOwners(namespace: string): string[];
-    packageScopedHoldersOf?(type: string, name: string): string[];
+    packageScopedHoldersOf?(
+        type: string, name: string, callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
 }
 
 /**
@@ -676,7 +742,15 @@ export function resolveMetaItemAddress(
     const holders = typeof registry.packageScopedHoldersOf === 'function'
         ? new Set(registry.packageScopedHoldersOf(request.type, request.name) ?? [])
         : new Set<string>();
+    // [#32183] The served holders judge the namespace; a disabled package
+    // holds no name, so a co-owner it shares the namespace with answers alone.
     const holding = owners.filter((owner) => holders.has(owner));
+    // …and when no served owner holds the name, an owner that holds it while
+    // disabled is still the address (its read answers the withheld 404, never
+    // a refusal naming another package).
+    const every = holding.length === 0 && typeof registry.packageScopedHoldersOf === 'function'
+        ? new Set(registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [])
+        : new Set<string>();
     // A shareable namespace (`base`, `system`, `sys`) can have several owners
     // holding one name: the address names no one item, so it is refused naming
     // each, never picked (ADR-0150 D2) — as the bare read of the name is.
@@ -691,7 +765,7 @@ export function resolveMetaItemAddress(
         };
         throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
     }
-    const packageId = holding[0] ?? owners[0];
+    const packageId = holding[0] ?? owners.find((owner) => every.has(owner)) ?? owners[0];
     return { kind: 'namespace', namespace: reading.namespace, packageId };
 }
 
@@ -726,7 +800,14 @@ export function admitEnvironmentQualifier(
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
     }
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    // [#32183, epic ruling R4-B2] The served holders, or every holder when no
+    // package serves the name: a name only disabled packages hold is refused
+    // naming them, as before, never read as a caller with no package (that
+    // read can reach a disabled holder's customization pair row).
+    const served = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    const holders = served.length > 0
+        ? served
+        : registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [];
     if (holders.length === 0) {
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
