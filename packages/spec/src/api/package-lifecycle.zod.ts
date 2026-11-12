@@ -43,6 +43,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataLockSchema } from '../kernel/metadata-protection.zod';
 import { ManifestSchema } from '../kernel/manifest.zod';
+import { RuntimeAuthoringIssueSchema } from './protocol.zod';
 
 // Ruling 5A — the `/api` re-export of the one existing declaration. The
 // schema (and its type) stay declared in `system/metadata-persistence.zod.ts`
@@ -146,6 +147,22 @@ export const RevertPackageCommitResponseSchema = lazySchema(() => z.object({
   revertCommitId: z.string().optional().describe(
     'Id of the commit the revert itself created, when one was written.',
   ),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the revert did beyond restoring its items, for each object an item '
+    + 'restored, in '
+    + 'the same element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. Two rules ride it: `object-storage-sync-refused` (`warning`), '
+    + 'the restored object\'s storage sync was refused; and, per stored computed '
+    + 'field (a non-`formula` field declaring `expression`) the restored body '
+    + 'adds, turns from a formula, or gives another expression, the fill of '
+    + 'the object\'s existing rows the save door also runs: '
+    + '`stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The items it names reverted either way.',
+  ),
 }));
 
 /**
@@ -166,6 +183,14 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
     commitId: z.string().describe('The commit that could not be reverted.'),
     error: z.string().describe('Why reverting it failed.'),
   })).describe('Every commit the rollback could not revert.'),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'Every reverted commit\'s own `advisories` '
+    + '(`RevertPackageCommitResponseSchema.advisories`: a refused storage sync, '
+    + 'and the fill of each restored object\'s changed stored computed fields), '
+    + 'in the order the commits were reverted. Present ONLY when at least one '
+    + 'step raised one: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged.',
+  ),
 }));
 
 /**

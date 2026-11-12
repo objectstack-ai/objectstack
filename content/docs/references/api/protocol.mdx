@@ -2826,6 +2826,18 @@ Answer to a device registration: the device id the client keeps
 | **seq** | `number` | ✅ | The new live row's history sequence number. |
 | **restoredFromVersion** | `number` | ✅ | Which history version was restored. |
 | **message** | `string` | optional | Rollback note, when one was recorded. |
+| **advisories** | `{ rule: string; path: string; where: string; message: string; … }[]` | optional | What the rollback did beyond restoring the row, in the same element shape and omitted-when-empty discipline as `SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one entry was raised: an empty array is never emitted, so a clean answer's bytes are unchanged and a caller that ignores this key behaves exactly as before. Two rules ride it: `object-storage-sync-refused` (`warning`), the restored object's storage sync was refused; and, per stored computed field (a non-`formula` field declaring `expression`) the restored body adds, turns from a formula, or gives another expression, the fill of the object's existing rows the save door also runs: `stored-expression-filled` (`info`, the rows written) or `stored-expression-fill-incomplete` (`warning`, what is left and how to fill it). The restore itself SUCCEEDED either way. |
+
+### Nested Shape: `RollbackMetaItemResponse.advisories[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **rule** | `string` | ✅ | Stable diagnostic rule id (`flow-multi-write-unfiltered`, `approval-expression-invalid`, …). Machine-readable and stable across releases — the key a renderer groups or suppresses by. |
+| **path** | `string` | ✅ | Config path inside the SUBMITTED body (`flows[0].nodes[1].config.multi`), so an editor can jump to the offending key. May be empty when the finding is about the item as a whole. The TOP-LEVEL collection entry follows one rule. The gate evaluates against a private per-write snapshot whose indexes no caller can resolve; a collection-resident write type is one whose collection that snapshot fills with the tenant's other stored items beside the written one, and there the entry is keyed by NAME, never by an array index — for example `objects.acme_invoice.sharingModel` (an `object` write) or `datasets.acme_invoice_metrics.dimensions[0].field` (a `dataset` write). Every other write type is the sole member of its own collection in that snapshot, so its `[0]` IS the written item and stays positional (for example `flows[0]...`). Which write types are collection-resident is derived, never listed: `@objectstack/lint`'s runtime gate computes the set (`NAME_KEYED_STACK_KEYS`) as the collections it carries as resolution context that a gated write type also lands in, so it changes with the gate, not with this text. An entry whose name cannot be spliced into a dotted path keeps its index. Nested positions inside one named item stay positional (`objects.acme_invoice.indexes[1]`): they index the author's own document. |
+| **where** | `string` | ✅ | Human-readable location — `flow "leave_approval" · node "approve"`. Prose for a person; use `path` for anything mechanical. |
+| **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
+| **hint** | `string` | ✅ | How to fix it. |
+| **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
 
 
 ---

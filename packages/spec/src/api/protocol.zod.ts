@@ -2570,6 +2570,21 @@ export const RollbackMetaItemResponseSchema = lazySchema(() => z.object({
   seq: z.number().describe('The new live row\'s history sequence number.'),
   restoredFromVersion: z.number().describe('Which history version was restored.'),
   message: z.string().optional().describe('Rollback note, when one was recorded.'),
+  advisories: z.array(RuntimeAuthoringIssueSchema).optional().describe(
+    'What the rollback did beyond restoring the row, in '
+    + 'the same element shape and omitted-when-empty discipline as '
+    + '`SaveMetaItemResponseSchema.advisories`. Present ONLY when at least one '
+    + 'entry was raised: an empty array is never emitted, so a clean answer\'s '
+    + 'bytes are unchanged and a caller that ignores this key behaves exactly '
+    + 'as before. Two rules ride it: `object-storage-sync-refused` (`warning`), '
+    + 'the restored object\'s storage sync was refused; and, per stored computed '
+    + 'field (a non-`formula` field declaring `expression`) the restored body '
+    + 'adds, turns from a formula, or gives another expression, the fill of '
+    + 'the object\'s existing rows the save door also runs: '
+    + '`stored-expression-filled` (`info`, the rows written) or '
+    + '`stored-expression-fill-incomplete` (`warning`, what is left and how to '
+    + 'fill it). The restore itself SUCCEEDED either way.',
+  ),
 }));
 
 /**
