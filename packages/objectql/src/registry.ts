@@ -154,6 +154,7 @@ import {
   resolvePicklistFieldsOnto,
   type PicklistContribution,
   type PicklistOptionLike,
+  type DisagreeingPicklistReference,
   type UnresolvedPicklistExtension,
   type UnresolvedPicklistReference,
 } from './picklist-resolution.js';
@@ -10467,6 +10468,47 @@ export class SchemaRegistry {
    */
   findOutsideClosurePicklistReferences(): UnresolvedPicklistReference[] {
     return this.auditPicklistReferences().outsideClosure;
+  }
+
+  /**
+   * [ADR-0150 D3, child E6; #31700] The fields whose picklist reference
+   * several packaged layers write (the object's owner and an extension of
+   * it), each RESOLVING the name from its own package, but to DIFFERENT
+   * lists. {@link resolveFieldPicklistOptions} serves such a field no options
+   * — no referrer is preferred over another — and the record validator
+   * refuses its values; neither half of the audit above names it, since
+   * every referrer's own resolution succeeds. Reachable once two namespaces
+   * may each hold the name: the owner's package reaches its list, the
+   * extension's package reaches its own. The boot names each one (a warning,
+   * every referrer and the holder it reaches) and carries on, as it does for
+   * an outside-closure reference (ruling N2 on the E6 card).
+   */
+  findDisagreeingPicklistReferences(): DisagreeingPicklistReference[] {
+    const disagreeing: DisagreeingPicklistReference[] = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      const referrerOf = picklistReferrerOf(contributors);
+      const seen = new Set<string>();
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          const key = `${ref.field}\u0000${ref.picklist}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const referrers = referrerOf(ref.field, ref.picklist);
+          if (referrers.length < 2) continue;
+          const reached: { packageId: string | undefined; holder: PackageScopedHolder }[] = [];
+          for (const referrer of referrers) {
+            const verdict = this.picklistReferenceVerdict(ref.picklist, referrer);
+            if (verdict.status !== 'resolved') break;
+            reached.push({ packageId: referrer ?? undefined, holder: verdict.holder });
+          }
+          if (reached.length < referrers.length) continue;
+          if (reached.every((r) => sameHolder(r.holder, reached[0].holder))) continue;
+          disagreeing.push({ object: fqn, field: ref.field, picklist: ref.picklist, referrers: reached });
+        }
+      }
+    }
+    return disagreeing;
   }
 
   /** The field half of the audit, split by the resolver's verdict (above). */

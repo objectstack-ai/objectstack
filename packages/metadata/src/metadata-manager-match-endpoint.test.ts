@@ -348,6 +348,31 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
     expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
   });
 
+  // [#31700] The API narrowed to one holder per namespace: two namespaces may
+  // each publish an api of one name. The publish gate puts each path under
+  // `/api/v1/apps/<namespace>/` (`apis-publish-gates.test.ts`: "rejects a path
+  // under ANOTHER package's namespace"), so their routes differ and the
+  // matcher's duplicate-claim rule is never reached between them.
+  const duplicateClaims = (manager: MetadataManager) =>
+    (manager as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes('duplicate endpoint claim'));
+
+  it('[#31700] two namespaces\' same-named apis are both indexed, each on its own path, with no duplicate claim', async () => {
+    const manager = twoHolders();
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+    expect(duplicateClaims(manager)).toEqual([]);
+  });
+
+  it('CONTROL — the same two items on ONE path is a duplicate claim, announced at error', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('api', 'feed', shipped('com.acme.alpha', A_PATH.path, 'a'));
+    manager.registerInMemory('api', 'feed', shipped('com.acme.beta', A_PATH.path, 'b'));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBeDefined();
+    expect(duplicateClaims(manager)).toHaveLength(1);
+  });
+
   it('a read naming a package answers that package\'s item, both faces alike; a package holding no slot answers nothing', async () => {
     const manager = twoHolders();
     expect(((await manager.get('api', 'feed', 'com.acme.alpha')) as any)?.target).toBe('a');

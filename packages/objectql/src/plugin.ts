@@ -66,6 +66,7 @@ import {
   collectManifestPicklistExtensions,
   collectManifestPicklistNames,
   collectManifestPicklistReferences,
+  describeDisagreeingPicklistReference,
   describeUnresolvedPicklistReferences,
   picklistMetadataError,
   type PicklistMetadataError,
@@ -1264,6 +1265,21 @@ export class ObjectQLPlugin implements Plugin {
                 + `options and refuses every value: ${ref.refusal}`,
                 { object: ref.object, field: ref.field, packageId: ref.packageId, picklist: ref.picklist },
             );
+        }
+        // [ADR-0150 D3, child E6; #31700] A field whose reference several
+        // packaged layers write (the owner and an extension), each reaching a
+        // DIFFERENT list from its own package — reachable once two namespaces
+        // may each hold the name — is served no options, since no referrer is
+        // preferred over another. Every referrer resolves, so neither check
+        // above names it; this one does, every referrer with the list it
+        // reaches, and the boot goes on (the same ruling N2).
+        for (const ref of this.ql?.registry.findDisagreeingPicklistReferences() ?? []) {
+            ctx.logger.warn(`[ObjectQLPlugin] ${describeDisagreeingPicklistReference(ref)}`, {
+                object: ref.object,
+                field: ref.field,
+                picklist: ref.picklist,
+                referrers: ref.referrers.map((r) => r.packageId ?? null),
+            });
         }
 
         this.picklistVocabularySealed = true;

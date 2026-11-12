@@ -35,6 +35,7 @@
 // here, not authored: they judge what the author wrote, and the field schema
 // refuses `picklist` and `options` together.
 import { isResolvedPicklistOptions, markResolvedPicklistOptions } from '@objectstack/metadata-core';
+import { describePackageScopedHolder, type PackageScopedHolder } from '@objectstack/core';
 // The walk — which picklists a manifest's fields name, which lists it declares
 // and extends — is `@objectstack/metadata`'s, the one spelling the
 // residual-picklist refusal (`unreferencedResidualPicklists`) and the
@@ -217,6 +218,38 @@ export type UnresolvedPicklistReference = PicklistReference & { readonly refusal
 
 /** A `picklistExtensions` entry whose target resolves to no list from its package (as above). */
 export type UnresolvedPicklistExtension = OrphanPicklistExtension & { readonly refusal?: string };
+
+/**
+ * [ADR-0150 D3, child E6; #31700] A field whose picklist reference two or more
+ * packaged layers write (the object's owner and an extension of it), each
+ * resolving the name — from its own package — to a DIFFERENT list. The field
+ * is served no options and its values are refused, since no referrer is
+ * preferred over another (`SchemaRegistry.resolvePicklistFields`); this names
+ * the disagreement itself. Reachable once two namespaces may each hold the
+ * name.
+ */
+export interface DisagreeingPicklistReference {
+  readonly object: string;
+  readonly field: string;
+  readonly picklist: string;
+  /** Each package that writes the reference, with the list's holder it reaches from there. */
+  readonly referrers: ReadonlyArray<{ readonly packageId: string | undefined; readonly holder: PackageScopedHolder }>;
+}
+
+/**
+ * The boot's warning for one {@link DisagreeingPicklistReference}: the field,
+ * every referrer and the holder it reaches, and the fix.
+ */
+export function describeDisagreeingPicklistReference(ref: DisagreeingPicklistReference): string {
+  const reaches = ref.referrers
+    .map((r) => `${describePackage(r.packageId)} reaches the list of ${describePackageScopedHolder(r.holder)}`)
+    .join('; ');
+  return `Field '${ref.object}.${ref.field}' is served with no options and refuses every value: the packages that `
+    + `write its reference to picklist '${ref.picklist}' resolve that name to different lists (${reaches}), and `
+    + 'none of them is preferred over another. Make every package that writes the reference reach the same list: '
+    + 'name a picklist only one of them holds, or have each depend on the package whose list is meant and hold '
+    + 'none of its own under the name.';
+}
 
 function refusalSuffix(refusal: string | undefined): string {
   return refusal ? ` (${refusal})` : '';
