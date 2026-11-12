@@ -2542,9 +2542,15 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
     // the compile leg's remedy, for this pair — by `validate-dataset-measure-aggregates.test.ts`.
     'A `formula` field stores no value, whatever its `returnType` says, so `sum`, `avg`, `min` and `max` ' +
       'over one have no column to read, and a count substituted for the total is a plausible wrong ' +
-      'number. Its fix line reads: The field is computed on read and stores no value: store the value as ' +
-      'a number field (kept by a hook) and aggregate that. `count` / `count_distinct` answer a different ' +
-      'question: how many records.',
+      'number. A field of the formula\'s return type (`number` for a day count) carrying the same ' +
+      '`expression` is stored: the engine computes it from the row every write stores and stores the ' +
+      'result, so it aggregates like any field of that type. Two limits: rows stored before the field ' +
+      'gained its `expression` hold no value until each is written again or `os migrate stored-expressions ' +
+      '--apply` fills them, so a total over them reads low; and the expression is evaluated at the write, ' +
+      'so one reading the clock or the current user keeps the value it had then. Its fix line reads: ' +
+      'Computed on read, the field stores no value: make it a field of its return type with the same ' +
+      '`expression` (computed and stored on write) and aggregate that. Counting records is a different ' +
+      'question.',
     JSON_STORED_COLUMN,
     'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
       'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
@@ -2593,8 +2599,10 @@ const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'own object with `400 DATASET_INVALID`, so no report, dashboard or query is ever served from it. ' +
       'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
       'engine that aggregates in memory put every row into one null group while the answer looked served.',
-    'Denormalise the value: store it in a field of its own on the object (written by a hook or a flow ' +
-      'when its source changes), and point the dimension at that stored field. This rule makes the same ' +
+    'Denormalise the value: make it a stored field of its own on the object, of the formula\'s ' +
+      '`returnType` (`number`, `text`, `boolean`, `date` or `currency`) and carrying the same `expression`, ' +
+      'which the engine computes and stores on every write, and point the dimension at that stored field. ' +
+      'This rule makes the same ' +
       'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
   ],
@@ -2853,8 +2861,10 @@ const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'cannot mean, `0` for a text sum; the declaration is refused either way.',
     AGGREGATE_PAIR_ROWS,
     'The fix is a field of a type the function accepts, or a function the field accepts. A `formula` ' +
-      'field stores no value, whatever its `returnType`, so a total over it has to be STORED as a number ' +
-      'field (kept by a hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      'field stores no value, whatever its `returnType`, so a total over it has to be STORED, and its fix ' +
+      'line reads: Computed on read, the field stores no value: make it a field of its return type with the ' +
+      'same `expression` (computed and stored on write) and aggregate that. Counting records is a ' +
+      'different question. The block is bound by its `dataSource.object`, else ' +
       '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
       'dotted path, a field two packages define at the same priority, and a field with no declared ' +
       'type (or one outside `FieldType`) are not judged here.',
@@ -4053,7 +4063,11 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
       'stores no column, and the file, structured and vector types. The engine\'s aggregate door (`engine.aggregate`) asks ' +
       'the same table, so such an `orderBy` gets the grouped view\'s header query refused ' +
       '(`400 INVALID_FIELD`) and no group renders. To order text labels, store each label\'s rank in a ' +
-      'number field and order by that.',
+      'number field and order by that. Over a `formula`, order by a stored field of its return type ' +
+      'carrying the same `expression` (a `date` field for a date formula), and the fix line reads: ' +
+      'Computed on read, the field stores no value: make it a field of its return type with the same ' +
+      '`expression` (computed and stored on write) and aggregate that. Counting records is a different ' +
+      'question.',
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
@@ -4080,7 +4094,9 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
       'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
       'A `formula` field stores no value, whatever its `returnType`, so a total over it has to be ' +
-      'STORED as a number field (kept by a hook). Not judged: ' +
+      'STORED, and its fix line reads: Computed on read, the field stores no value: make it a field of its ' +
+      'return type with the same `expression` (computed and stored on write) and aggregate that. Counting ' +
+      'records is a different question. Not judged: ' +
       '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
       'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +
       'outside `FieldType`, which the door does not judge either.',
@@ -4602,9 +4618,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
       'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
     // The three sources are held to the rule by its test, each one silencing it.
-    'A capability is known when it is a built-in platform capability, when the stack declares it ' +
-      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), or when a permission set in the ' +
-      'stack grants it through `systemPermissions` (granting declares it). A seed row is no source: ' +
+    'A capability is known when it is a built-in platform capability, when the stack or any package ' +
+      'of the artifact it is built into declares it with `defineCapability` (`stack.capabilities`, ' +
+      'ADR-0066 D1), or when a permission set there grants it through `systemPermissions` (granting ' +
+      'declares it). A sibling package\'s grant counts because the runtime counts it: a caller holds ' +
+      'the grants of every set it holds, whichever package declared the set. A seed row is no source: ' +
       'no runtime reader consults one, so ship the capability with `defineCapability` instead. ' +
       '`systemPermissions` itself is never reported: it is the declaration side.',
     // The positions are held to the rule by its test, each fired.
@@ -4613,10 +4631,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
-    'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
-      'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
-      'certainly a typo to surface, not a build to break. If another installed package declares the ' +
-      'capability, the warning is expected: leave the reference as it is.',
+    'A warning, not an error: the lint reads every package of the artifact being built, but it ' +
+      'cannot see the capabilities other installed packages declare, and the reference fails closed ' +
+      'anyway, so a dangling one is almost certainly a typo to surface, not a build to break. If ' +
+      'another installed package declares the capability, the warning is expected: leave the ' +
+      'reference as it is.',
   ],
 };
 

@@ -1272,6 +1272,8 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     for (const fact of ['`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'STORED', 'collation', '`multiple: true`']) {
       expect(text, fact).toContain(fact);
     }
+    // The `fix:` line over a formula, verbatim: the spec's one virtual-field sentence.
+    expect(text).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
   });
 });
 

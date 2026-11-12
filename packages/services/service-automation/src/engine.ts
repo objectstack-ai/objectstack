@@ -839,6 +839,16 @@ export interface FlowUserGrants {
    */
   org_user_ids?: string[];
   /**
+   * [ADR-0093 D8.1, as amended] Every organization the user holds a current
+   * membership in (`resolveUserAuthzGrants`' own field, under its own name):
+   * what the organization wall reads, under every posture. Run setup seeds it
+   * on the run context ({@link SeededRunContext.accessible_org_ids}); a
+   * resolution that throws seeds an empty one. A resolver that answers but
+   * omits it leaves the run without one, and the wall then judges the run as
+   * it judges any context that carries none.
+   */
+  accessible_org_ids?: string[];
+  /**
    * The user's unique email, the value RLS reads as `current_user.email`
    * (`resolveUserAuthzGrants`' own field, under its own name). Run setup
    * seeds it on the run context as {@link AutomationContext.email}. A
