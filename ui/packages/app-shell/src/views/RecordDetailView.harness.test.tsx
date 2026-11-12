@@ -2676,13 +2676,14 @@ describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
   });
 
   it('a `full` page that carries `children` and places no region component: the spec refuses it, and the record view explains it instead of drawing the children', async () => {
-    // Off-spec twice: the spec's strict page declares no `children`, and its
-    // regions place nothing. The page layout would draw `children` when a page
-    // has no regions; the record view explains the page instead.
+    // Off-spec: the spec's strict page declares no `children` (and without them
+    // it is `NO_REGIONS`, refused at `regions` above). The page layout would draw
+    // `children` when a page has no regions; the record view explains the page instead.
     const page = invoicePage({ children: [{ type: 'text', properties: { content: 'CHILD BODY' } }] });
     const spec = SpecPageSchema.safeParse(page);
     expect(spec.success).toBe(false);
-    expect(spec.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.') }))).toContainEqual({ code: 'custom', path: 'regions' });
+    expect(spec.error!.issues.map((i) => ({ code: i.code, keys: (i as { keys?: string[] }).keys })))
+      .toContainEqual({ code: 'unrecognized_keys', keys: ['children'] });
 
     const { container } = await mount([page]);
     expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
