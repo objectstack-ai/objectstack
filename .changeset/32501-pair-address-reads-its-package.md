@@ -1,0 +1,19 @@
+---
+'@objectstack/metadata-protocol': minor
+---
+
+fix(metadata-protocol)!: a pair address (`?package=<base>.custom`) reads the package it names, so its envelope and its `/layers` code layer are that package's, never the first registered holder's (ADR-0150 D5, #32501)
+
+Clause-②: yes (narrowing) — `GET /meta/:type/:name?package=<App>.custom` and its `/layers`, on both transports, when two enabled modules of the App hold the name, are refused `409 RESOURCE_CONFLICT` naming both modules where they served the first registered module's item; `/layers` at an App pair whose stored row two modules' items could be the code layer of is refused the same way where it reported the first registered shipper's body. The other moved answers keep their status and name the package the address reads in place of the first registered holder: the envelope (`_packageId`, `_packageVersion`, `_provenance`) of `?package=<base>.custom` and of a stored row read at an exact address, and the `/layers` code layer at a pair address. One widens: the pair of an enabled base, beside a disabled holder registered first, serves its item where it answered 404.
+Metadata-protocol: narrowed
+Skills-docs: none — `skills/**` and `content/docs/**` teach no read at a customization pair address of a name two packages hold; the prescription ships in the refusal text and the before → after list below.
+
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of registered items and stored rows at an address, so there is nothing for a migration to rewrite and no tombstone. -->
+
+**BREAKING** answer narrowing at the `/meta` exact read (`@objectstack/metadata-protocol`), for the pair address of an App two of whose modules hold the name.
+
+- **Before → after, served → refused.** `GET /meta/:type/:name?package=<App>.custom` and `GET /meta/:type/:name/layers?package=<App>.custom`, two enabled modules of the App holding the name, measured on the `SchemaRegistry` composition the transport pins drive: 200 with the first registered module's item → `409 RESOURCE_CONFLICT`, `ambiguous-in-closure`, naming both modules. The real ObjectQL engine already refused the plain read. `/layers` at the App pair when the pair holds a stored row and two modules hold the name: 200 with the first registered shipper's body as `code` → the same 409; the plain read keeps serving the row, which is the pair's own and unambiguous, while the code layer has two holders. First-party callers: 0.
+- **Before → after, same status, another package named.** `?package=<base>.custom`, another enabled holder of the name registered first: the base's body under the other holder's `_packageId`, `_packageVersion` and `_provenance` → under the base's. A stored row at an exact address: the base's override row at its pair, the same; a row bound only to a package that ships nothing, under the first registered shipper's envelope → its own stamp, no artifact envelope; the App pair's own row beside two module holders, under the first registered shipper's envelope → its own stamp. `/layers?package=<base>.custom`: `code`, `effective` and `packageId` were the first registered holder's → the base's; at a package that ships nothing, the first registered shipper's body → `code: null`. First-party callers: 0.
+- **Before → after, widening.** `?package=<base>.custom`, the base enabled and another holder of the name disabled and registered first: 404 → 200 with the base's item. First-party callers: 0.
+
+**The remedy.** Read an item two modules of an App hold at the module's own address (`?package=<module>`), as the refusal names.
