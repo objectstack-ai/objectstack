@@ -54,6 +54,15 @@
  * second run finds nothing to fill. No `sys_migration` flag is recorded:
  * nothing gates on the run (the `summary-nulls` reasoning).
  *
+ * ## At the change
+ *
+ * [#32527] A definition changed through the metadata doors — a save in
+ * publish mode, a publish — is filled by the door itself: it captures the
+ * object's stored computed fields before the change goes live
+ * ({@link captureStoredExpressions}) and, once it is served, runs this walk
+ * over the fields that compute something new, written. The command stays for
+ * a definition changed in a repository and booted, which no door sees.
+ *
  * ## The boot advisory
  *
  * {@link announceStoredExpressionHoles} reads the first page of each object
@@ -96,6 +105,13 @@ export interface StoredExpressionBackfillOptions {
   objects?: string[];
   /** One stored computed field of the ONE object named in `objects` (default: every one it declares). */
   field?: string;
+  /**
+   * [#32527] Several stored computed fields of the ONE object named in
+   * `objects`, walked in ONE pass — the fields a change made live. One walk,
+   * because a row's write computes every stored field: a second walk would
+   * find the first one's writes and count them under no field.
+   */
+  fields?: string[];
   /** Also rewrite rows whose stored (non-NULL) value differs from the expression — after an expression changed. */
   changed?: boolean;
   /** Write the computed values. Omit for a read-only dry run. */
@@ -201,6 +217,7 @@ function storedExpressionFields(engine: Pick<StoredExpressionBackfillEngine, 'ge
 function resolveScope(engine: StoredExpressionBackfillEngine, options: StoredExpressionBackfillOptions): Map<string, string[]> {
   const scope = new Map<string, string[]>();
   const named = options.objects;
+  if (options.fields !== undefined) return resolveFieldsScope(engine, options.fields, named);
   if (options.field !== undefined && named?.length !== 1) {
     throw invalidField(
       `[stored-expression-backfill] field '${options.field}' names a field of ONE object: give exactly one object with it. `
@@ -236,6 +253,39 @@ function resolveScope(engine: StoredExpressionBackfillEngine, options: StoredExp
     scope.set(object, options.field !== undefined ? [options.field] : fields);
   }
   return scope;
+}
+
+/**
+ * [#32527] The scope of `fields`: the same judgement as `field`, for several —
+ * exactly one object, which exists, and every name one of its stored computed
+ * fields — refused as a whole before any row is read.
+ */
+function resolveFieldsScope(
+  engine: StoredExpressionBackfillEngine,
+  fields: string[],
+  named: string[] | undefined,
+): Map<string, string[]> {
+  if (named?.length !== 1 || fields.length === 0) {
+    throw invalidField(
+      '[stored-expression-backfill] `fields` names one or more fields of ONE object: give exactly one object '
+        + 'and at least one field with it. Refused before the walk read or wrote any row.',
+    );
+  }
+  const object = named[0];
+  if (!engine.getObject(object)) throw objectNotFoundError(object);
+  const declared = storedExpressionFields(engine, object);
+  const unknown = fields.filter((field) => !declared.includes(field));
+  if (unknown.length > 0) {
+    throw invalidField(
+      `[stored-expression-backfill] ${unknown.map((f) => `'${object}.${f}'`).join(', ')} `
+        + `${unknown.length === 1 ? 'is not a stored computed field' : 'are not stored computed fields'}. The ones `
+        + `'${object}' declares: ${declared.length > 0 ? declared.map((f) => `'${f}'`).join(', ') : 'none'}. `
+        + 'Refused before the walk read or wrote any row.',
+      unknown[0],
+    );
+  }
+  // Declaration order, each once: the report's order whatever the caller's.
+  return new Map([[object, declared.filter((field) => fields.includes(field))]]);
 }
 
 const isBlank = (value: unknown): boolean => value === null || value === undefined;
@@ -510,6 +560,115 @@ export function formatStoredExpressionBackfillReport(report: StoredExpressionBac
   // which can switch a SQLite file's journal mode (its header, no row). The command appends that note on SQLite.
   if (!report.applied && pending.length > 0) lines.push('Dry run — no row or table was written. Re-run with --apply to write.');
   return lines;
+}
+
+/**
+ * [#32527] What a stored computed field computes, as one comparable string:
+ * the keys its value depends on — the expression, the type it is stored as
+ * and the scale it is rounded to — in a key order that does not depend on
+ * how the definition was spelled.
+ */
+function storedExpressionSignature(def: Record<string, unknown>): string {
+  const canonical = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object' && !(value instanceof Date)) {
+      return Object.fromEntries(
+        Object.keys(value as Record<string, unknown>).sort().map((k) => [k, canonical((value as Record<string, unknown>)[k])]),
+      );
+    }
+    return value;
+  };
+  return JSON.stringify(canonical({ type: def.type, expression: def.expression, scale: def.scale }) ?? null);
+}
+
+/** `object`'s stored computed fields, each with its {@link storedExpressionSignature}. */
+function storedExpressionSignatures(schema: { fields?: Record<string, unknown> } | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const { name } of planStoredExpressions(schema)) {
+    out.set(name, storedExpressionSignature((schema?.fields?.[name] ?? {}) as Record<string, unknown>));
+  }
+  return out;
+}
+
+/**
+ * [#32527] The stored computed fields of `after` that compute something new
+ * relative to `before`: each one `before` did not have as a stored computed
+ * field (added, or turned from a `formula` or from a plain field into one),
+ * and each one whose expression, stored type or scale changed. In `after`'s
+ * declaration order.
+ */
+export function changedStoredExpressionFields(
+  before: { fields?: Record<string, unknown> } | undefined,
+  after: { fields?: Record<string, unknown> } | undefined,
+): string[] {
+  return changedSince(storedExpressionSignatures(before), after);
+}
+
+function changedSince(before: ReadonlyMap<string, string>, after: { fields?: Record<string, unknown> } | undefined): string[] {
+  return [...storedExpressionSignatures(after)].filter(([name, signature]) => before.get(name) !== signature).map(([name]) => name);
+}
+
+/**
+ * [#32527] One object's stored computed fields, taken by a metadata door
+ * before its change goes live, and the fill that change owes.
+ */
+export interface StoredExpressionCapture {
+  readonly object: string;
+  /** The stored computed fields the object serves NOW that compute something new relative to the capture; reads no row. */
+  changedFields(): string[];
+  /**
+   * Fill what the change made live: every stored computed field the object
+   * serves NOW that computes something new relative to the capture
+   * ({@link changedStoredExpressionFields}), over EVERY stored row, written.
+   * `undefined` when the change made no such field live — nothing was read.
+   */
+  fillChanged(): Promise<StoredExpressionBackfillReport | undefined>;
+}
+
+/**
+ * [#32527] Ruling 6816429574, letter A: the save or publish that
+ * adds a stored computed field, changes its expression, or turns a formula
+ * into one fills the object's existing rows with the write's own computation,
+ * and reports the count per field. Not opt-in: a row the change left NULL, or
+ * holding what the old expression computed, never holds the value the field
+ * declares.
+ *
+ * The door captures BEFORE the change goes live (before its registry
+ * write-through) and calls {@link StoredExpressionCapture.fillChanged} after
+ * the object is served and its storage synced. The fill IS
+ * {@link backfillStoredExpressions} — the walk `os migrate stored-expressions
+ * --changed --apply` runs, scoped to the changed fields — so it writes what
+ * the command writes, the way the command writes it: unscoped (every
+ * organization's rows, the value is the expression's and not the caller's),
+ * under `preserveAudit`, every row's failure listed and the walk continued.
+ * Unbounded: the change is live for every row, so the fill reads every row;
+ * the answer waits for it.
+ *
+ * A boot never calls this: rewriting data at a boot fires hooks and audit
+ * rows nobody ordered (the module header). The save or publish is the order.
+ */
+export function captureStoredExpressions(
+  engine: StoredExpressionBackfillEngine,
+  logger: StoredExpressionBackfillLogger,
+  object: string,
+): StoredExpressionCapture {
+  const before = storedExpressionSignatures(engine.getObject(object));
+  const changedFields = (): string[] => changedSince(before, engine.getObject(object));
+  return {
+    object,
+    changedFields,
+    async fillChanged() {
+      const fields = changedFields();
+      if (fields.length === 0) return undefined;
+      return backfillStoredExpressions(engine, logger, {
+        objects: [object],
+        fields,
+        changed: true,
+        apply: true,
+        maxRecordsPerObject: Number.POSITIVE_INFINITY,
+      });
+    },
+  };
 }
 
 /** One object's holes in the advisory's sample. */

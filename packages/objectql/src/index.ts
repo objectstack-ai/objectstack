@@ -630,6 +630,9 @@ export {
     storedExpressionBackfillComplete,
     announceStoredExpressionHoles,
     sampleStoredExpressionHoles,
+    // [#32527] The metadata doors' fill at the change.
+    captureStoredExpressions,
+    changedStoredExpressionFields,
 } from './stored-expression-backfill.js';
 export type {
     StoredExpressionBackfillReport,
@@ -640,6 +643,7 @@ export type {
     StoredExpressionBackfillLogger,
     StoredExpressionBackfillOptions,
     StoredExpressionHoleSample,
+    StoredExpressionCapture,
 } from './stored-expression-backfill.js';
 // [ADR-0144, ruling 6492000994] The explicit code backfill behind
 // `os migrate record-currency-codes`: rows stored before an amount switched to
