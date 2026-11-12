@@ -91,10 +91,11 @@ describe('buildMcpBridge.optionFieldsOf reads the served object describeObject r
       const bridge = await bridgeFor(makeKernel({ withProtocol }));
       expect(await bridge.optionFieldsOf('qaformula_p4')).toEqual(['kind', 'stage', 'tier']);
       expect(await bridge.optionFieldsOf('qa_absent')).toBeNull();
-      // The same object `describe_object` describes, whose answer carries no options reading.
+      // The same object `describe_object` describes: [#32435] its answer carries
+      // the options of exactly the fields named above, by the same reading.
       const described = await bridge.describeObject('qaformula_p4');
       expect(described.fields.map((f: any) => f.name)).toEqual(['first', 'kind', 'stage', 'tier']);
-      for (const f of described.fields) expect(Object.keys(f).sort()).toEqual(['label', 'name', 'required', 'type']);
+      expect(described.fields.filter((f: any) => 'options' in f).map((f: any) => f.name)).toEqual(['kind', 'stage', 'tier']);
     });
   }
 });

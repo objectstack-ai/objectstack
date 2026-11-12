@@ -12,4 +12,6 @@ The MCP `describe_object` tool answered each field as `{ name, type, label, requ
 
 Each field now also carries `readonly` and `system` (always, as booleans), `options` as `{ value, label }` on a field that declares options (a picklist-bound field included, with its list's resolved options), and `defaultValue` when the field declares one. The answer gains `validations`: each ACTIVE rule's `name`, `type`, `message`, `severity`, `events` and the `fields` it names, a `conditional` rule's `then` / `otherwise` described the same way. A rule's condition, pattern or transition table is never served.
 
+The stdio transport's `objectstack://objects/{objectName}` resource serves the same projection, so it widens the same way and stays equal to `describe_object`.
+
 Everything is read from the object as the caller is served it, on both transports (HTTP and stdio): a field the caller cannot read is still absent, and a rule that names such a field anywhere — its fields, its condition or its message — is not described to that caller. The answer only gains keys; every key it carried before is unchanged, so a client reading the old four keys reads them as before.

@@ -596,10 +596,11 @@ async function warnIfSkillListIncomplete(
  * ⛔ never its condition, pattern or transition table: the rule's message is
  * what a refused write answers with, and its expression is server policy.
  *
- * The stdio bridge's twin is `describeServedObject` in
- * `packages/mcp/src/stdio-data-bridge.ts` (this package does not depend on
- * `@objectstack/mcp`): the two transports answer one shape, and the
- * `describe_object` description (`mcp-http-tools.ts`) states it.
+ * The twin is `describeServedObject` in `packages/mcp/src/mcp-server-runtime.ts`,
+ * which the stdio bridge and the `objectstack://objects/{name}` resource serve
+ * (this package does not depend on `@objectstack/mcp`): the transports answer
+ * one shape, and the `describe_object` description (`mcp-http-tools.ts`)
+ * states it.
  */
 function describeServedObject(def: any): Record<string, unknown> {
     return {
@@ -627,8 +628,12 @@ function describedOptions(options: unknown[]): Array<{ value: unknown; label: un
         .map((o) => ({ value: o.value, label: o.label ?? o.value }));
 }
 
-/** The nesting a `conditional` rule's `then` / `otherwise` is described to, as the engine's own message index walks it. */
-const MAX_DESCRIBED_RULE_DEPTH = 8;
+/**
+ * How deep a `conditional` rule's `then` / `otherwise` is described: the depth
+ * the engine's own rule-message index walks (`MAX_VALIDATION_DEPTH`,
+ * `@objectstack/objectql`'s `engine-validation-messages.ts`).
+ */
+const MAX_DESCRIBED_RULE_DEPTH = 10;
 
 /** The object's ACTIVE validation rules, described without their expressions ({@link describeServedObject}). */
 function describedRules(rules: unknown): Array<Record<string, unknown>> {

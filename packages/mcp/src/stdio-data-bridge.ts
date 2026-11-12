@@ -145,7 +145,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
-import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
+import { describeServedObject, metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
@@ -269,107 +269,8 @@ export type StoredHashDigest = (plain: string) => Promise<string>;
 interface ObjectDef {
   name: string;
   label?: string;
-  fields?: Record<string, ServedFieldDef>;
-  validations?: unknown[];
+  fields?: Record<string, { type?: string; label?: string; required?: boolean }>;
   enable?: Record<string, unknown>;
-}
-
-/** One field of a served object definition: the keys `describe_object` reads. */
-interface ServedFieldDef {
-  type?: string;
-  label?: string;
-  required?: boolean;
-  readonly?: boolean;
-  system?: boolean;
-  options?: unknown[];
-  defaultValue?: unknown;
-}
-
-/**
- * [#32435] `describe_object`'s answer: what an agent needs to WRITE a record,
- * read off the object as the caller is served it — so a field, an option or a
- * rule the caller's view withholds (ADR-0106 D1: the served view drops a rule
- * that names a denied field anywhere, its message included) is not described.
- *
- * Per field: `required`, `readonly` and `system` (an auto-injected column such
- * as `created_at` is `readonly` and `system`), the allowed `options` as value +
- * label for a field that declares them (a picklist-bound field carries its
- * list's resolved options on the served object, {@link declaresOptions}), and
- * the `defaultValue` an INSERT applies. Per active validation rule: its name,
- * kind, message, severity, the write events it runs on, and the fields it names
- * — ⛔ never its condition, pattern or transition table: the rule's message is
- * what a refused write answers with, and its expression is server policy.
- *
- * The HTTP bridge's twin is `describeServedObject` in
- * `packages/runtime/src/domains/mcp.ts`: the two transports answer one shape,
- * and the `describe_object` description (`mcp-http-tools.ts`) states it.
- */
-function describeServedObject(def: ObjectDef): Record<string, unknown> {
-  return {
-    name: def.name,
-    label: def.label ?? def.name,
-    fields: Object.entries(def.fields ?? {}).map(([key, f]) => ({
-      name: key,
-      type: f?.type,
-      label: f?.label ?? key,
-      required: f?.required ?? false,
-      readonly: f?.readonly === true,
-      system: f?.system === true,
-      ...(declaresOptions(f) ? { options: describedOptions(f.options as unknown[]) } : {}),
-      ...(f?.defaultValue !== undefined ? { defaultValue: f.defaultValue } : {}),
-    })),
-    validations: describedRules(def.validations),
-    enableFeatures: def.enable ?? {},
-  };
-}
-
-/** A field's options as value + label: the stored value a write sends, and what a person reads. */
-function describedOptions(options: unknown[]): Array<{ value: unknown; label: unknown }> {
-  return options
-    .filter((o): o is { value: unknown; label?: unknown } => !!o && typeof o === 'object' && 'value' in o)
-    .map((o) => ({ value: o.value, label: o.label ?? o.value }));
-}
-
-/** The nesting a `conditional` rule's `then` / `otherwise` is described to, as the engine's own message index walks it. */
-const MAX_DESCRIBED_RULE_DEPTH = 8;
-
-/** The object's ACTIVE validation rules, described without their expressions ({@link describeServedObject}). */
-function describedRules(rules: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(rules)) return [];
-  const out: Array<Record<string, unknown>> = [];
-  for (const rule of rules) {
-    const described = describedRule(rule, 0);
-    if (described) out.push(described);
-  }
-  return out;
-}
-
-function describedRule(raw: unknown, depth: number): Record<string, unknown> | undefined {
-  if (!raw || typeof raw !== 'object' || depth >= MAX_DESCRIBED_RULE_DEPTH) return undefined;
-  const rule = raw as Record<string, unknown>;
-  // An inactive rule never runs on a write, so it is not part of what a write needs.
-  if (rule.active === false) return undefined;
-  const fields: string[] = [];
-  if (typeof rule.field === 'string') fields.push(rule.field);
-  if (Array.isArray(rule.fields)) {
-    for (const name of rule.fields) if (typeof name === 'string' && !fields.includes(name)) fields.push(name);
-  }
-  const described: Record<string, unknown> = {
-    name: rule.name,
-    type: rule.type,
-    message: rule.message,
-    // The spec's defaults (`ValidationRuleSchema`), stated so a reader need not know them.
-    severity: rule.severity ?? 'error',
-    events: Array.isArray(rule.events) ? rule.events : ['insert', 'update'],
-    fields,
-  };
-  if (rule.type === 'conditional') {
-    const then = describedRule(rule.then, depth + 1);
-    const otherwise = describedRule(rule.otherwise, depth + 1);
-    if (then) described.then = then;
-    if (otherwise) described.otherwise = otherwise;
-  }
-  return described;
 }
 
 /**
