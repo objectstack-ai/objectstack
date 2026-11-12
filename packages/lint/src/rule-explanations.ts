@@ -4618,9 +4618,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'a typo (`mange_users` for `manage_users`) parses and fails CLOSED at run time: the gate denies ' +
       'its callers, the safe direction, and nothing tells the author the capability exists nowhere.',
     // The three sources are held to the rule by its test, each one silencing it.
-    'A capability is known when it is a built-in platform capability, when the stack declares it ' +
-      'with `defineCapability` (`stack.capabilities`, ADR-0066 D1), or when a permission set in the ' +
-      'stack grants it through `systemPermissions` (granting declares it). A seed row is no source: ' +
+    'A capability is known when it is a built-in platform capability, when the stack or any package ' +
+      'of the artifact it is built into declares it with `defineCapability` (`stack.capabilities`, ' +
+      'ADR-0066 D1), or when a permission set there grants it through `systemPermissions` (granting ' +
+      'declares it). A sibling package\'s grant counts because the runtime counts it: a caller holds ' +
+      'the grants of every set it holds, whichever package declared the set. A seed row is no source: ' +
       'no runtime reader consults one, so ship the capability with `defineCapability` instead. ' +
       '`systemPermissions` itself is never reported: it is the declaration side.',
     // The positions are held to the rule by its test, each fired.
@@ -4629,10 +4631,11 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       'each top-level action\'s, each flow\'s, an app\'s and each of its nav entries (through `navigation`, ' +
       '`areas`, `tabs`, `children` and `items`), a view\'s (its own, its `config`\'s, its default ' +
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
-    'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
-      'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
-      'certainly a typo to surface, not a build to break. If another installed package declares the ' +
-      'capability, the warning is expected: leave the reference as it is.',
+    'A warning, not an error: the lint reads every package of the artifact being built, but it ' +
+      'cannot see the capabilities other installed packages declare, and the reference fails closed ' +
+      'anyway, so a dangling one is almost certainly a typo to surface, not a build to break. If ' +
+      'another installed package declares the capability, the warning is expected: leave the ' +
+      'reference as it is.',
   ],
 };
 
