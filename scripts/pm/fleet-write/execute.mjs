@@ -3847,7 +3847,7 @@ export async function selfTest() {
         const k = generateKeyPairSync('x25519');
         return { text: k.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'), spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
       };
-      // The relay's pair, made here: the committed half is null until the maintainer makes the real one.
+      // A synthetic relay pair, made here and injected: ⛔ never the committed half, whose private half the secret alone holds.
       const RELAY = pair();
       const SECTION = `domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ\n2026-11-12T04:00:00Z\n\n${MARKER}\nline two — 漢字 and 🎉, a quote " and a backslash \\`;
       const DIGEST_KEY = Buffer.alloc(32, 5);

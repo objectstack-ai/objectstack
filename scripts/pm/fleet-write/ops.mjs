@@ -2334,11 +2334,12 @@ export const ADVISORY_LIST_LANDED =
 
 /**
  * The PUBLIC half of the relay's note key, committed here — base64 SPKI DER in `public_key`'s one spelling
- * (`ADVISORY_READ_PUBLIC_KEY_SHAPE`). ⛔ null until the maintainer makes the pair (header): while it is null the seat
- * seals no note (a prerequisite, exit 3, nothing sent) and the executor opens none (FAILED before its first GET). It is
- * never invented: the private half exists only where the maintainer put it.
+ * (`ADVISORY_READ_PUBLIC_KEY_SHAPE`). The maintainer made the pair and handed over this half (header); the private half
+ * is the repository secret `ADVISORY_NOTE_KEY_SECRET` alone. A rotation changes both as one, or the executor refuses
+ * before any request (`advisoryNoteKeyFailure`). Were it ever null again, the seat would seal no note (a prerequisite,
+ * exit 3, nothing sent) and the executor would open none (FAILED before its first GET). ⛔ Never invented here.
  */
-export const ADVISORY_NOTE_RELAY_PUBLIC_KEY = null;
+export const ADVISORY_NOTE_RELAY_PUBLIC_KEY = 'MCowBQYDK2VuAyEATb8KEpCy9BkGdbYXst7rafDRXylL96RBAt+7l5gpmFQ=';
 /** The repository secret that holds the private half — set by the maintainer, by the ruling in the header. */
 export const ADVISORY_NOTE_KEY_SECRET = 'OS_FLEET_ADVISORY_NOTE_KEY';
 /** The variable the execute step hands the private half through — for a stroke the validator marks as a note's alone. */
@@ -2355,7 +2356,7 @@ export const ADVISORY_NOTE_PRIVATE_KEY_SHAPE = /^MC4CAQAwBQYDK2VuBCIEI[A-P][A-Za
  * never carries the value. Never throws.
  */
 export function advisoryNoteKeyFailure(text, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY) {
-  if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null until the maintainer makes the pair and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}`;
+  if (relayPublicKey === null) return `the relay's note key is not committed — ADVISORY_NOTE_RELAY_PUBLIC_KEY is null; the maintainer makes the pair, sets the repository secret ${ADVISORY_NOTE_KEY_SECRET} and commits its public half`;
   if (advisoryReadKeyFailure(relayPublicKey) !== null) return 'the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY is not an X25519 public key in its one spelling';
   if (typeof text !== 'string' || text === '') return `the execute step carries no ${ADVISORY_NOTE_KEY_ENV} — the repository secret ${ADVISORY_NOTE_KEY_SECRET} is unset, or the stroke was not marked a note's`;
   if (!ADVISORY_NOTE_PRIVATE_KEY_SHAPE.test(text)) return `${ADVISORY_NOTE_KEY_ENV} is not an X25519 private key in base64 PKCS#8 DER, its one spelling`;

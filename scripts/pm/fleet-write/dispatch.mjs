@@ -1546,7 +1546,7 @@ export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY
     }
     if (relayPublicKey === null) {
       prerequisite.push(
-        `fleet-write/dispatch: PREREQUISITE NOT MET — actions[${i}] (${a.op}): the note file passes, but the relay's note key is not committed yet (ADVISORY_NOTE_RELAY_PUBLIC_KEY in scripts/pm/fleet-write/ops.mjs is null until the maintainer makes the pair and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}), so there is nothing to seal it to. ⛔ The key is never invented.`,
+        `fleet-write/dispatch: PREREQUISITE NOT MET — actions[${i}] (${a.op}): the note file passes, but the relay's note key is not committed yet (ADVISORY_NOTE_RELAY_PUBLIC_KEY in scripts/pm/fleet-write/ops.mjs is null; the maintainer makes the pair, commits its public half and sets the repository secret ${ADVISORY_NOTE_KEY_SECRET}), so there is nothing to seal it to. ⛔ The key is never invented.`,
       );
       return a;
     }
@@ -3590,7 +3590,7 @@ export async function selfTest() {
       const unkeyed = arm([NOTE], { relayPublicKey: null });
       const unkeyedBad = arm([{ op: 'advisory_note', ghsa_id: GHSA, note_file: join(dir, 'advisory-note-unsigned.md') }], { relayPublicKey: null });
       t('⛔ a null committed half is a PREREQUISITE for a note that passes — nothing sealed — and the file is judged FIRST, so a note that fails says so while the key is still pending', [unkeyed.prerequisite.length, unkeyed.refused.length, unkeyed.notes.size, unkeyed.prerequisite[0]?.includes('ADVISORY_NOTE_RELAY_PUBLIC_KEY'), unkeyedBad.refused.length, unkeyedBad.prerequisite.length], [1, 0, 0, true, 1, 0]);
-      t('the committed half is null until the maintainer makes the pair — the door\'s default — or one X25519 public key', ADVISORY_NOTE_RELAY_PUBLIC_KEY === null || /^MCowBQYDK2VuAyEA[A-Za-z0-9+/]{43}=$/.test(ADVISORY_NOTE_RELAY_PUBLIC_KEY), true);
+      t('⛔ the committed half is the maintainer\'s one X25519 public key in its one spelling — never null, so the null cases above inject it', typeof ADVISORY_NOTE_RELAY_PUBLIC_KEY === 'string' && /^MCowBQYDK2VuAyEA[A-Za-z0-9+/]{43}=$/.test(ADVISORY_NOTE_RELAY_PUBLIC_KEY), true);
       // The notice: one spelling, read back exactly.
       const DIGEST = 'a'.repeat(64);
       const NOTICE = relayAdvisoryNoteAnnotationMessage({ action: 1, op: 'advisory_note', noteBytes: 120, noteDigest: DIGEST });
@@ -4359,9 +4359,10 @@ const USAGE = [
   '  the sealed answer with the private half, which never leaves memory. --reveal prints the opened text to stdout, and',
   '  nothing else ever prints it; a public_key in the actions file is refused (2). An advisory_list names nothing at all',
   '  and is sealed and opened the same way: the triage, draft and closed advisories, five fields each.',
-  '  An advisory_note names ghsa_id and note_file: the file opens with your signature line, this process adds the UTC',
-  "  stamp, and seals the section to the relay's committed key; the note's text never enters the payload. A sealed_note",
-  '  in the actions file is refused (2); no committed relay key is a prerequisite (3). The run\'s notice confirms it.',
+  '  An advisory_note names ghsa_id and note_file: the file lies outside every git repository and opens with your',
+  "  signature line; this process adds the UTC stamp and seals the section to the relay's committed key, so the note's",
+  '  text never enters the payload. A sealed_note in the actions file, or a note file inside a repository, is refused',
+  '  (2); no committed relay key is a prerequisite (3). The run\'s notice confirms it.',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
