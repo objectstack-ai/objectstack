@@ -76,6 +76,15 @@ interface ExactQualifierRegistry {
     getEnvironmentScopedItem(type: string, name: string, member?: string): unknown;
     getPackageScopedItem(type: string, name: string, packageId: string, member?: string): unknown;
     getPackage?(id: string): unknown;
+    /**
+     * [#32561] The package the registry binds a stored row of `(type, name)`
+     * to (objectql's `overlayRowBinding`, the one owner rule every registry
+     * reader asks): a package id, `null` for the environment's own item, or
+     * `undefined` for no package. The exact read adopts it for an undeclared
+     * pair row ({@link pairRowOnAddress}); a registry without it keeps the
+     * exact read's own count.
+     */
+    overlayRowBinding?(type: string, name: string, item: unknown): string | null | undefined;
 }
 
 /**
@@ -357,7 +366,8 @@ export function exactQualifierItem(
     const bases = [address.packageId, ...address.registryHolders];
     if (bases.some((base) => isPairOf(served, base, installed))) {
         const verdict = pairRowOnAddress(served, item, address.packageId, bases,
-            registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed);
+            registry.packageScopedHoldersOf(request.type, request.name) ?? [], installed,
+            registryRowBinding(registry, request.type, request.name, item));
         if (verdict === 'serve') return item;
         if (verdict !== 'not-member') {
             throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
@@ -557,7 +567,22 @@ export function pairMemberWithheldAt(
     const registry = exactQualifierRegistry(host);
     if (!registry || (registry as { readsByPackage?(type: string): boolean }).readsByPackage?.(type) !== true) return false;
     return pairRowOnAddress(pairId, item, base, [base], registry.packageScopedHoldersOf(type, name) ?? [],
-        installedManifestsOfEngine(host.engine)) !== 'serve';
+        installedManifestsOfEngine(host.engine), registryRowBinding(registry, type, name, item)) !== 'serve';
+}
+
+/**
+ * [#32561] The registry's binding of the stored row `item`, read lazily
+ * ({@link ExactQualifierRegistry.overlayRowBinding}), or `undefined` when the
+ * registry does not answer it (the exact read then keeps its own count).
+ */
+function registryRowBinding(
+    registry: ExactQualifierRegistry,
+    type: string,
+    name: string,
+    item: unknown,
+): (() => string | null | undefined) | undefined {
+    const read = registry.overlayRowBinding;
+    return typeof read === 'function' ? () => read.call(registry, type, name, item) : undefined;
 }
 
 /**
@@ -576,6 +601,13 @@ export function pairMemberWithheldAt(
  * - Else two or more holders could own it: refuse, naming every one (F2).
  * - Else a sole owner that is not one of the address's bases owns it: not
  *   this address's member (S2).
+ * - [#32561] Else a sole owner the registry does not bind the row to
+ *   (`registryBinding`, the registry's one owner rule: `pairRowBinding`
+ *   counts a bundle addition that ships the row's member as an owner, and
+ *   binds a row whose count would read another shared pair's undeclared row
+ *   to no package) is no owner of it: not this address's member, so the
+ *   address answers its own shipped item (epic ruling, red line 2). The
+ *   exact read adopts the registry's count rather than counting again.
  * - Else (the sole owner is a base, or no holder pairs it) it is served.
  */
 export function pairRowOnAddress(
@@ -585,6 +617,7 @@ export function pairRowOnAddress(
     bases: readonly string[],
     holders: readonly string[],
     installed: InstalledManifestLookup,
+    registryBinding?: () => string | null | undefined,
 ): 'serve' | 'not-member' | { refuse: string[] } {
     const declared = declaredOverrideBase(item);
     if (declared !== undefined) return bases.includes(declared) ? 'serve' : 'not-member';
@@ -592,6 +625,7 @@ export function pairRowOnAddress(
     const owners = pairMemberOwners(pairId, holders, installed, item);
     if (owners.length > 1) return { refuse: owners };
     if (owners.length === 1 && !bases.includes(owners[0]!)) return 'not-member';
+    if (owners.length === 1 && registryBinding !== undefined && registryBinding() !== owners[0]) return 'not-member';
     return 'serve';
 }
 

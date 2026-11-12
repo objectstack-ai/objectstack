@@ -8748,6 +8748,21 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#32561] The package a stored row `item` of `(type, name)` binds to, read
+   * by the one rule every overlay-slot reader asks ({@link overlaySlotBinding},
+   * {@link pairRowBinding} for a customization pair's row): a package id,
+   * `null` for the environment's own item, or `undefined` for no package. The
+   * exact read (`pairRowOnAddress`, `@objectstack/metadata-protocol`) adopts
+   * it for an undeclared pair row, so `?package=X` never serves a row the
+   * registry binds to no package (epic ruling on #32561, red line 2). Read-only.
+   */
+  overlayRowBinding(type: string, name: string, item: unknown): string | null | undefined {
+    const collection = this.metadata.get(type);
+    if (!collection) return undefined;
+    return this.overlaySlotBinding(type, item, name, collection);
+  }
+
+  /**
    * [ADR-0150 D4, epic ruling 6761802819 on #31699 F2, #32408] The holder a
    * customization pair's row `item` (stored under `pairId`, which holds no
    * composite slot of the name) binds to, read as the exact read's one owner
