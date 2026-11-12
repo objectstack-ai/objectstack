@@ -8,7 +8,7 @@ import { RestServer } from './rest-server';
 // module-top import pays it during collection instead.
 import '@objectstack/objectql';
 import { SchemaRegistry } from '@objectstack/objectql';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, publishedItemReader } from '@objectstack/metadata-protocol';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -653,5 +653,137 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
     expect(bare.status).toBe(200);
     expect(bare.body.object).toBe('alpha_item');
     expect(exact.body).toEqual(bare.body);
+  });
+});
+
+// ── [#32501, ADR-0150 D5] the dataset doors at an exact pair address ────────
+// The single door and the batch door read a saved dataset through the protocol's
+// exact read (`?package=`, and `?callerPackage=` naming a package the registry
+// does not hold, which reads as `?package=` naming it), so they move with it:
+// the App pair two of whose modules hold the dataset is refused naming both,
+// and a disabled holder registered first no longer hides the named address's
+// own enabled dataset. The publish probes' dataset read (`publishedItemReader`)
+// moves only for a publishing package the registry does not hold.
+//
+// BASE (main 2f80f2897, measured on this harness by the contract review of
+// #32808 and again here):
+//  - two enabled modules of the App the only shippers, `?package=` the App pair:
+//    200, the first registered module's dataset was run; with another package
+//    registered ahead of the modules, already 409;
+//  - `?package=A.custom`, the other holder disabled and registered first: 404;
+//  - `?package=` the App pair, one module disabled and registered first: 404;
+//  - `?callerPackage=` the App pair with the pair installed: already 409.
+describe('#32501 — the dataset doors at an exact pair address read the package it names', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const P = 'com.acme.suite';
+  const M1 = 'com.acme.one';
+  const M2 = 'com.acme.two';
+  let registry: InstanceType<typeof SchemaRegistry>;
+  let protocol: InstanceType<typeof ObjectStackProtocolImplementation>;
+
+  const boot = (order: readonly string[], pairInstalled = false) => {
+    registry = new SchemaRegistry({ multiTenant: false });
+    registry.installPackage({ id: P, name: P, version: '1.0.0', type: 'app', namespace: 'suite' } as never, 'code');
+    for (const id of order) {
+      const module = id === M1 || id === M2;
+      registry.installPackage({
+        id, name: id, version: '1.0.0', type: module ? 'module' : 'app', namespace: id.split('.').pop()!,
+        ...(module ? { dependencies: { [P]: '^1.0.0' } } : {}),
+      } as never, 'code');
+    }
+    if (pairInstalled) {
+      registry.installPackage({
+        id: `${P}.custom`, name: 'suite (custom)', version: '0.1.0', type: 'module', namespace: 'suite_custom', dependencies: { [P]: '^1' },
+      } as never, 'authored');
+    }
+    const engine = {
+      registry,
+      find: vi.fn().mockResolvedValue([]), findOne: vi.fn().mockResolvedValue(null),
+      insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+      count: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockResolvedValue([]),
+    };
+    protocol = new ObjectStackProtocolImplementation(engine as never);
+    for (const id of order) {
+      registry.registerItem('dataset', {
+        name: 'sales', label: `${id.split('.').pop()} sales`, object: `${id.split('.').pop()}_item`,
+        dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+        measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+      }, 'name' as never, id);
+    }
+  };
+  /** One dataset query on the single door and the same query as a one-entry batch: status, code, message, the dataset run. */
+  const both = async (query: Record<string, unknown>) => {
+    const queryDataset = vi.fn(async (dataset: any) => ({ rows: [], fields: [], object: dataset.object }));
+    const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, query, headers: {}, body: { datasetName: 'sales', selection: { measures: ['revenue'] } } } as any, res);
+    const single = {
+      status: res.statusCode as number, code: res.body?.code ?? res.body?.error?.code ?? null,
+      message: String(res.body?.message ?? res.body?.error?.message ?? ''),
+      ran: queryDataset.mock.calls.map((call: any[]) => call[0]?.label),
+    };
+    queryDataset.mockClear();
+    const batchRoute = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'));
+    const batchRes = mockRes();
+    await batchRoute!.handler({
+      method: 'POST', params: {}, query, headers: {}, body: { queries: [{ datasetName: 'sales', selection: { measures: ['revenue'] } }] },
+    } as any, batchRes);
+    const entry = batchRes.body?.data?.results?.[0];
+    const batch = {
+      status: batchRes.statusCode as number, entry: entry?.status ?? 200, code: entry?.error?.code ?? null,
+      message: String(entry?.error?.message ?? ''), ran: queryDataset.mock.calls.map((call: any[]) => call[0]?.label),
+    };
+    return { single, batch };
+  };
+  const refusedNamingModules = (answer: Awaited<ReturnType<typeof both>>, what: string) => {
+    expect([answer.single.status, answer.single.code, answer.single.ran], what).toEqual([409, 'RESOURCE_CONFLICT', []]);
+    expect([answer.batch.status, answer.batch.entry, answer.batch.code, answer.batch.ran], what).toEqual([200, 409, 'RESOURCE_CONFLICT', []]);
+    for (const id of [M1, M2]) {
+      expect(answer.single.message, what).toContain(`package "${id}"`);
+      expect(answer.batch.message, what).toContain(`package "${id}"`);
+    }
+  };
+  const ran = (answer: Awaited<ReturnType<typeof both>>, label: string, what: string) => {
+    expect([answer.single.status, answer.single.ran], what).toEqual([200, [label]]);
+    expect([answer.batch.status, answer.batch.entry, answer.batch.ran], what).toEqual([200, 200, [label]]);
+  };
+
+  for (const pairInstalled of [false, true]) {
+    it.each([['one first', [M1, M2]], ['two first', [M2, M1]]] as const)(`two enabled modules of the App the only holders (%s, pair installed: ${pairInstalled}): the App pair is refused naming both, nothing run (BASE: the first registered module's dataset ran)`, async (_order, order) => {
+      boot(order, pairInstalled);
+      refusedNamingModules(await both({ package: `${P}.custom` }), '?package= the App pair');
+      // `?callerPackage=` the App pair: installed, the caller arm already refused it; not installed, it reads as `?package=`.
+      refusedNamingModules(await both({ callerPackage: `${P}.custom` }), '?callerPackage= the App pair');
+      // CONTROL — a module's own address runs its own dataset.
+      ran(await both({ package: M1 }), 'one sales', '?package= a module');
+    });
+  }
+
+  it.each([['alpha, then one', [A, M1, M2]], ['alpha, then two', [A, M2, M1]]] as const)('CONTROL — another package registered ahead of the modules (%s): the App pair was already refused, and still is', async (_order, order) => {
+    boot(order);
+    refusedNamingModules(await both({ package: `${P}.custom` }), '?package= the App pair');
+  });
+
+  it.each([['disabled first', [B, A]], ['enabled first (order control)', [A, B]]] as const)('the other holder disabled (%s): `?package=A.custom` runs A\'s dataset (BASE, disabled first: 404)', async (_order, order) => {
+    boot(order);
+    registry.disablePackage(B);
+    ran(await both({ package: `${A}.custom` }), 'alpha sales', '?package=A.custom');
+    ran(await both({ callerPackage: `${A}.custom` }), 'alpha sales', '?callerPackage=A.custom, not installed');
+  });
+
+  it.each([['disabled first', [M2, M1]], ['disabled second (order control)', [M1, M2]]] as const)('one module of the App disabled (%s): the App pair runs the enabled module\'s dataset (BASE, disabled first: 404)', async (_order, order) => {
+    boot(order);
+    registry.disablePackage(M2);
+    ran(await both({ package: `${P}.custom` }), 'one sales', '?package= the App pair');
+  });
+
+  it.each([['one first', [M1, M2]], ['two first', [M2, M1]]] as const)('the publish probes\' dataset read (%s): a publish of the App pair the registry does not hold is refused naming both modules (BASE: the first registered module\'s dataset); registered, it was already refused', async (_order, order) => {
+    boot(order);
+    await expect(publishedItemReader(protocol as never, `${P}.custom`)('dataset', 'sales')).rejects.toThrow(PackageScopedNameRefusedError);
+    boot(order, true);
+    await expect(publishedItemReader(protocol as never, `${P}.custom`)('dataset', 'sales')).rejects.toThrow(PackageScopedNameRefusedError);
+    // CONTROL — a module's publish reads its own dataset.
+    expect(await publishedItemReader(protocol as never, M1)('dataset', 'sales')).toMatchObject({ label: 'one sales', _packageId: M1 });
   });
 });
