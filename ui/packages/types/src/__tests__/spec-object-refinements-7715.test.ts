@@ -308,6 +308,52 @@ describe('objectui#12971 — the Page `record` binding placement refusal reaches
   });
 });
 
+describe('objectstack#32478 — the Page record-places-component refusal reaches the page-kind node, and only there', () => {
+  const places = [{ name: 'main', components: [{ type: 'record:details' }] }];
+
+  it.each([
+    ['a bound `record` page with no `regions`', { type: 'record', object: 'account' }],
+    ['a bound `record` page whose region places nothing', { type: 'record', object: 'account', regions: [{ name: 'main', components: [] }] }],
+    ['a `record` page that binds no object', { type: 'record', regions: [] }],
+  ])('%s: the spec refuses at `regions`, and the kind node refuses with the spec\'s own issue', (_label, extra) => {
+    const spec = SpecPageSchema.safeParse(specPage(extra));
+    expect(spec.success).toBe(false);
+    const specIssue = spec.error!.issues.find((i) => i.path.join('.') === 'regions');
+    expect(specIssue?.code).toBe('custom');
+
+    const r = safeValidateSchema(extra);
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toContainEqual({ code: 'custom', path: 'regions', message: specIssue!.message });
+  });
+
+  it('attached as-is: a bound `record` kind node carrying only `children` is refused at `regions` too, and the spec refuses that document', () => {
+    const extra = { type: 'record', object: 'account' };
+    const specIssue = SpecPageSchema.safeParse(specPage(extra)).error!.issues.find((i) => i.path.join('.') === 'regions')!;
+    const r = safeValidateSchema({ ...extra, children: [{ type: 'text', content: 'x' }] });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+      .toContainEqual({ code: 'custom', path: 'regions', message: specIssue.message });
+    // The spec's page declares no `children`, so the same document never reaches its check.
+    expect(SpecPageSchema.safeParse(specPage({ ...extra, children: [] })).success).toBe(false);
+  });
+
+  it('controls: a `record` kind node that places a component, a `slotted` one, and a `home` one without regions pass the spec and the kind node; the `page` node does not judge it', () => {
+    for (const extra of [
+      { type: 'record', object: 'account', regions: places },
+      { type: 'record', object: 'account', kind: 'slotted' },
+      { type: 'home' },
+    ]) {
+      expect(SpecPageSchema.safeParse(specPage(extra)).success).toBe(true);
+      const r = safeValidateSchema(extra);
+      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    }
+    // The `page` node's `type` is the discriminator, so the check is not attached there.
+    const r = PageNodeSchema.safeParse(pageNode({ object: 'account' }));
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+  });
+});
+
 // ── The census: every object-level check the spec runs is accounted for ─────
 
 /**
@@ -395,7 +441,8 @@ const SITES = [
     // `checkPageRecordPlacesComponent` joined after 18.3.0 (objectstack#32434): a `full` record page
     // that places no component is refused at `regions`. It judges by the page's `type` the same way,
     // and on this node `type` is the component discriminator `'page'`, so attached here it would
-    // never fire; whether `PageKindNodeSchema` attaches it is objectui's own call, not made here.
+    // never fire; `PageKindNodeSchema` attaches it as-is (objectstack#32478, measured in its describe
+    // block above).
     notAttachable: ['checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRecordBindingPlacement', 'checkPageRecordPlacesComponent'],
   },
   {
