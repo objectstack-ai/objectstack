@@ -69,7 +69,7 @@ import {
 } from './protocol-view-normalization.js';
 import { isShippedViewItem, stripDerivedProvenance } from './protocol-package-bindings.js';
 import { mutationEventMemberOfBody } from './protocol-bundle-members.js';
-import { mutationEventPackage } from './protocol-mutation-package.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import {
     destructiveChangeRemedy,
@@ -2167,6 +2167,8 @@ export class ProtocolSaveFacet {
                 state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: null,
                 body: request.item,
+                // [#31698] The row a set's save landed in (ADR-0150 D4).
+                ...projectorEventPackage(singularType, permissionLandsIn),
             });
             host.emitMetadataMutation({
                 type: singularTypeForRepo,

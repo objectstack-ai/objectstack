@@ -423,8 +423,89 @@ export function createOwnerPayload(
 }
 
 /**
+ * A pair of columns that names one item by its name and, beside it, the
+ * package that holds it, where the package column is declared `readonly`
+ * (objectstack#32770). `@object-ui/fields`' `PERMISSION_SET_GRANT_COLUMNS` is
+ * the one pair a form writes today: a permission-set grant's
+ * `permission_set` / `permission_set_package`.
+ */
+export interface HolderPackageColumns {
+  /** The object whose create form writes the pair. */
+  object: string;
+  /** The column that names the item. */
+  nameField: string;
+  /** The `readonly` column that names the package holding it. */
+  packageField: string;
+}
+
+/**
+ * The payload a CREATE save writes for `columns.object`: `payload`, plus the
+ * holder's package when the user picked a package's item on this New form
+ * (objectstack#32770).
+ *
+ * The object declares the package column `readonly`, so {@link
+ * sanitizeFormData} drops it from every payload. The server takes it from an
+ * insert alone: a non-system insert that names a package which holds the name
+ * keeps it, and one that names a package which does not is refused with a
+ * `409`. An update's value is stripped and the column re-stamped by the
+ * server's rule. So where more than one package holds a name, a New form can
+ * only grant the set the user picked by writing that package beside the name.
+ *
+ * ⛔ This is not "readonly is writable on a create". It keeps exactly one key —
+ * `columns.packageField`, on `columns.object` — and only when ALL of these
+ * hold:
+ *
+ * - the form is a create (the caller calls this on a create only);
+ * - the caller hands a `seed`, and the value differs from it — with no seed,
+ *   or a value the form opened with and the user left alone, nothing proves
+ *   the user picked it, so it stays off the wire;
+ * - the value is a non-blank string, and `payload` carries the name it sits
+ *   beside — a cleared package (`null`) is never sent, and the server then
+ *   stamps the column by its rule exactly as before;
+ * - the object definition declares the column — an inline form, which passes
+ *   no definition, never writes it;
+ * - every other branch of {@link sanitizeFormData} still allows it: the
+ *   server-owned roster and `system` flag, the computed branches and the
+ *   caller's field-level security. Only the `readonly` branch is lifted, for
+ *   this one column.
+ *
+ * The server stays the judge of the value. The client does not check that the
+ * package holds the name; the insert does, and the form shows its refusal as
+ * its error. Every other `readonly` column, every other object, and every edit
+ * are stripped exactly as before.
+ */
+export function createHolderPackagePayload(
+  payload: Record<string, unknown>,
+  seed: Record<string, unknown> | null | undefined,
+  objectName: string,
+  columns: HolderPackageColumns,
+  source?: EditOwnerSource | null,
+): Record<string, unknown> {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (objectName !== columns.object) return payload;
+  if (!seed || typeof seed !== 'object') return payload;
+  if (typeof payload[columns.nameField] !== 'string') return payload;
+  const value = source?.values?.[columns.packageField];
+  if (typeof value !== 'string' || value.trim() === '') return payload;
+  const declared = source?.objectSchema?.fields?.[columns.packageField];
+  if (!declared || typeof declared !== 'object') return payload;
+  // Every branch but `readonly` judges it, on a copy of its definition with
+  // only that flag lifted.
+  const lifted = { ...(declared as Record<string, unknown>), readonly: false, readOnly: false };
+  const writable = stripUnwritable(
+    { [columns.packageField]: value },
+    { fields: { [columns.packageField]: lifted } },
+    source?.canEdit,
+    false,
+  );
+  const picked = changedFields(writable, seed);
+  return Object.keys(picked).length > 0 ? { ...payload, ...picked } : payload;
+}
+
+/**
  * What a save hands {@link dirtyEditPayload} (an edit) or
- * {@link createOwnerPayload} (a create) so it can judge the owner.
+ * {@link createOwnerPayload} (a create) so it can judge the owner, and
+ * {@link createHolderPackagePayload} (a create) the holder's package.
  */
 export interface EditOwnerSource {
   /** The values the form holds — BEFORE `sanitizeFormData`, which drops the owner. */

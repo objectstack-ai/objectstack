@@ -345,6 +345,10 @@ const zh = {
     registryRef: {
       loadFailed: '列表加载失败。仍可直接输入名称。',
       notFound: '{{name}}（未找到）',
+      holderPackage: '{{item}} · 包 {{package}}',
+      holderEnvironment: '{{item}} · 本环境定义',
+      holderUnresolved: '{{name}}（多个包提供此名称，未指明包）',
+      holderNeedsPackage: '此表单只能按名称指定权限集。多个包提供同名权限集时，这里只能选择本环境定义的那一个。',
     },
     preferenceOption: {
       allTopics: '全部主题（{{value}}）',
