@@ -1,0 +1,32 @@
+{
+  "number": 32574,
+  "kind": "issue",
+  "title": "An app cannot say who sees it: a fully gated app still shows in every launcher, and the only hide (hidden) is global",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T06:07:35Z",
+  "updated_at": "2026-11-12T06:18:57Z",
+  "closed_at": "2026-11-12T06:18:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32574",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.3.0** (hotcrm `main` `235106f`, local `pnpm dev`, throwaway apps in a scratch copy) while planning hotcrm#2417, which splits HotCRM into function apps: Sales, Service, and Marketing when enabled. The plan, with every reading, is [hotcrm#2417 comment 6814732293](https://github.com/objectstack-ai/hotcrm/issues/2417#issuecomment-6814732293), rows M7–M10. The maintainer approved it on 2026-11-12. Each function app lives in its own module package, which 18.3.0 allows (one app per `type: app` package, ADR-0019 D3).\n\n| # | Observed on 18.3.0 | Wanted |\n|---|---|---|\n| M10 | Every entry of the Service app is gated away from a sales rep, yet the app **still** shows in the rep's launcher. Opening it says \"Nothing in … is available to you yet\". | An app can say who sees it: an app-level `visible` predicate (CEL over positions or permissions, like `AppSchema.landing`'s), **or** an app whose every entry the viewer cannot see drops out of their launcher and `/meta/app`. |\n| M9 | `hidden: true` takes the app off \"Your apps\" for **everyone**, and its URL still opens. The platform's comment says it is navigation only. | Not a substitute: it is global, not per audience. Listed so the card does not ask for a permission gate. A URL that opens to an empty shell is acceptable. |\n| M7/M8 | `/_console/` with two or more visible apps stops on the launcher home, and `isDefault: true` is global. | **Out of scope.** The maintainer set the per-position default app aside (see below). |\n\n**Scope, per the maintainer (2026-11-12, verbatim):** 「平台现在没法按岗位决定谁看到哪个应用（需要）、默认进哪个应用（isDefault 是全局的）（暂时不考虑）」. Who sees which app is **needed**. The per-position default app is **set aside**.\n\n**HotCRM's interim:** every position lands on the launcher home and picks an app. A rep sees a Service tile that opens to an empty shell. hotcrm#2417's acceptance line \"a sales rep does not see the service app\" waits on this card. Everything else in the split ships without it.\n\nFiling gate **③ maintainer-directed**: the maintainer's 2026-11-12 ruling on hotcrm#2417 (Q2) names this as the platform half. Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p1`** (suggested by the decision thread). It is the only platform gap in a 6.2 card the maintainer put first. Any multi-app product hits it: a user is shown apps they cannot use, with no per-role front door. **Size: S–M** (spec key or launcher rule, plus the console launcher and `/meta/app` filter).\n\n**Dedupe:** I searched objectstack issues for `isDefault app`, `app launcher audience`, `per-position default app`, `app visible audience launcher` and `navigationContributions areas`. #28022 (closed) gave **one app** a landing per audience (`AppSchema.landing`). This card is the step above it: **which apps a person sees**. The other hits are page-level `isDefault` cards (#23015, #28979, #29592) and QA run logs.\n\n<sub>Filed by the `repo:hotcrm` lane seat from hotcrm#2417's out-of-scope findings.</sub>\n"
+}

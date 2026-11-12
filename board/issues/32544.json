@@ -1,0 +1,35 @@
+{
+  "number": 32544,
+  "kind": "pull_request",
+  "title": "fix(metadata): the boot pass keeps a file's body over its stale seed, and binds a package column only on the loader's own rows",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T04:04:01Z",
+  "updated_at": "2026-11-12T05:16:16Z",
+  "closed_at": "2026-11-12T05:16:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T05:16:14Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32544",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgE8wDQhxH7oenD9Q9iWyWLs)_\n\ndomain:server#5 · os-bill · session_01Utp6CbRSM31EZv5zDEyqER\n\n## 维护者速读\n\n- 改什么：宿主接了数据库加载器时，启动预载在盖上宿主包之后再按 (包, 名, 语言) 去重，先读到的加载器（文件）保住注册表那一项；启动补绑空 package_id 列只认数据库加载器自己写的行。\n- 为什么：文件改过之后第一次启动，注册表里是库里的旧正文，要再启动一次才恢复（R7-C）；别的写入者存的行只因正文里抄来一个 `_packageId` 就在启动时被绑到那个包（R8-A）。\n- 风险：第一方接数据库加载器的宿主 0 处；库里的行不丢、不改正文。R7-C 恢复 main 上“文件胜”的答案；R8-A 只是少绑一类行。回滚即 revert。\n- 先看：`packages/metadata/src/plugin.ts` 的 `_loadFromFileSystem`，`DatabaseLoader.bindReadRowPackage` 新增的一行 `source` 判断。\n- 两分钟验证：`pnpm --filter @objectstack/metadata exec vitest run src/loaders/database-loader.test.ts`，\"[#31699 R5-A]\" 一节末尾两条 `[#32488 …]` 钉子应绿。\n- 需要你做的：无，归座位复核落地。N9（注册表不区分语言）已另立 #32517。\n\nFixes #32488\n\nClause-②: yes (widening) — new public method `MetadataManager.sourceLoaderOf(item)`; no accept set changes and nothing is refused; two boot answers move, declared below.\nMetadata-protocol: none\nSkills-docs: none — no skill or doc describes the boot priming pass's keying or the legacy column bind.\n\n## What changes\n\n1. **R7-C (item 1), `MetadataPlugin._loadFromFileSystem`.** The pass keys each item after the host's `applyProtection` stamp (`bundleEntryKey`). Of two loaders' items of one `(package, name, member)`, the earlier loader's keeps the registry entry; one loader's own items never shadow each other (so the R5-A same-loader states do not move). `MetadataManager.loadMany` already keeps the earlier loader's item of one key, but it keys an unstamped file item package-less, so the row of the host's package that the file seeded at an earlier boot passed it and registered last. New: `MetadataManager.sourceLoaderOf(item)`, the name of the loader `loadMany` read an item from.\n2. **R8-A (item 3), `DatabaseLoader.bindReadRowPackage`.** Returns unless the row's `source` is `'database'`, as `migrateDatabaseLoaderRowPackages` reads it. The one-line fix contract record 6811135944 and epic read 6811168620 named.\n\n## Moved answers\n\n| # | Surface | FROM | TO | Clause-② arm | Pin |\n|---|---|---|---|---|---|\n| 1 | Host with `packageId` + `DatabaseLoader`, a file item edited v1 → v2: the next boot's registry entry and `metadata.get` | the row's previous body `v1` (the file's `v2` one boot later); row updated to `v2`, version 2 | the file's `v2`; row updated to `v2`, version 2 (as on `main` before #32214) | — (restores `main`'s answer) | `[#32488 R7-C] a file edited from v1 to v2 …` |\n| 2 | Boot column bind of a row with an empty `package_id`, a copied `_packageId` in its body and `source` other than `'database'` | bound to the copied package | left package-less, no update, as the column readers already read it (a body stamp binds nothing) | — (no refusal; a backfill narrows to the loader's own rows) | `[#32488 item 3] another writer's row …` |\n\nMeasured at 27abd458a8 (PR #32214's final head) through the real `MetadataPlugin._loadFromFileSystem` over a `DatabaseLoader`: (1) boot 2 registry `v1` / row `v2`, boot 3 `v2`; (2) `source` `api`, `studio` and NULL rows all bound, `database` bound. `main` 463b8ea5d: (1) boot 2 `v2`; (2) all four bound, by the save (body rewritten, version 2).\n\n## Tests\n\n- Two pins at the end of `[#31699 R5-A]` in `packages/metadata/src/loaders/database-loader.test.ts` (the shared harness), through the real pass.\n- Ablations, each committed-then-restored with an empty `git diff HEAD`: A1 the cross-loader skip in the pass replaced by `void 0` → 1 red (R7-C pin), 113 green; A2 the `source` test removed → 1 red (item 3 pin), 113 green.\n- The R7-A pin (a `source = 'database'` legacy row is bound) and R5-A pins (1), (2), CONTROL stay green.\n- `@objectstack/metadata`: 74 files, 1358/1358 passed and `tsc --noEmit` exit 0, on the final tree (main merged, full workspace build).\n\n## Gates\n\nOn `476216e31` (origin/main e06d04f94 merged, never rebased; full `turbo run build` of the workspace):\n\n- `node scripts/pm/dispatch-gates.mjs --commands` on the 5 changed paths: 70 derived, 70 run, every one exit 0. `--ran` reconciliation: 70 accounted, 0 NOT-MEASURED, 0 UNRUN.\n- `pnpm lint` exit 0.\n- No dogfood battery: the PR is not BREAKING and carries no `(narrowing)` arm.\n\n## Acceptance notes\n\n- N9 → filed #32517 (the in-memory registry and `MemoryLoader` keep one entry per `(package, name)` for a bundled type, so `metadata.get` / `list` answer one locale; it holds on `main` too, and no served surface loses a locale). Ruled option A by the epic seat; #32459 is folded into it.\n- File surface: within the Claim (`plugin.ts`, `metadata-manager.ts`, `database-loader.ts`, the test file) plus the changeset. `bind-database-loader-row-packages.ts` is untouched (its bundle-member keying is #32489).\n- Additive API: `MetadataManager.sourceLoaderOf(item)` (exported class), the reason for `Clause-②: yes (widening)` (seat review).\n\n<!-- signed: domain:server#5 · os-bill · session_01Utp6CbRSM31EZv5zDEyqER -->\n"
+}

@@ -13,18 +13,20 @@
   "labels": [
     "documentation",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T20:40:35Z",
-  "updated_at": "2026-11-11T13:48:50Z",
+  "updated_at": "2026-11-12T07:43:41Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32345",
   "body": "domain:spec#3 · os-support-ai · session_01WGufzh7cM8EmUX4T2CBNHX\n\n## What is missing\n\nTwo lint rules on the runtime authoring gate now refuse a live save and a publish of a flow shape that used to store:\n\n- `flow-node-unreachable` (#31224)\n- `flow-start-node-missing` (#32289 / PR #32340)\n\nBoth are protocol narrowings (`Metadata-protocol: narrowed`). Neither registers an ADR-0087 semantic upgrade-guide entry under `packages/spec/src/migrations/entries/semantic/`. The picklist precedent does register one: `18.picklist-binding-unknown-refused.ts` (#29898).\n\n`check-adr-0087-registration` passes both PRs. It refuses `no-migration-prescription` only when the changeset body carries an arrow rewrite or a framed-table rewrite, and these bodies prescribe the fix in prose, which the detector does not read. So the green is a pass by the rule as written, not proof that no entry is owed. The contract review on PR #32340 (comment 6778668057, ② and nit 5) recommended this card.\n\n## Ask\n\n- Add one semantic entry per rule, in the shape of the picklist entry. Each entry gives what used to store, what is refused now, and the fix. For `flow-start-node-missing` the fix is to add a top-level `start` node. For `flow-node-unreachable` it is to wire the node from the start node or delete it. Each entry also says what happens to rows stored before the release.\n- Decide whether `check-adr-0087-registration` should also read a prose prescription, or whether `Metadata-protocol: narrowed` alone should require an entry. Name the decision; changing the gate is optional and may be a separate card.\n\nDepends on PR #32340 landing first."

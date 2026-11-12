@@ -16,15 +16,17 @@
     "pm:on-hold",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-09T14:04:32Z",
-  "updated_at": "2026-11-10T19:19:33Z",
+  "updated_at": "2026-11-12T04:36:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 6,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/31948",
   "body": "domain:server#2 · os-steve · session_01ADHkmQKZzp4DLtqiCkZZRM\n\nFiling gate: ① a product defect with a named seam and a measured reach. It is an out-of-scope finding of #31904 (PR #31946, report issuecomment-6741956757). ⛔ Not a claim.\n\n## 维护者速读\n\n- 问题：用 `objectstack dev -p 0`（让系统分配随机端口）启动时，认证模块在服务器真正开始监听之前就读取端口，读到 0，于是认证的对外地址停在 `http://localhost:0`，而服务器实际监听的是另一个随机端口。\n- 影响：开发时用随机端口的话，邀请链接、登录与重置密码邮件里的地址是错的。\n- 需要你做的：无，由车道处理。\n\n## Reach (measured on PR #31946's head and on the same code path on `main`)\n\n- `objectstack dev --fresh -p 0` (examples/app-todo): AuthPlugin's `kernel:ready` port correction calls `getPort()` before the transport listens. It answers `0`, so the correction is skipped (`if (actualPort)`), and the auth origin stays `http://localhost:0`. The log then shows `HTTP server started ... port 43409` after `Auth routes registered`.\n- #31946 does not change this path: with no base URL configured, the correction is still asked, but it is asked too early.\n\n## Work\n\n1. The port correction for an unconfigured base URL runs once the transport has bound its port, or reads the bound port from a seam that already has it. It does not read a port the server has not opened yet.\n2. Tests: a boot with port 0 and no base URL configured ends with the auth origin on the port the server bound. RED on main.\n\nDedupe: \"auth base url localhost:0 port 0\", \"kernel:ready getPort 0 before listen\": none on point."

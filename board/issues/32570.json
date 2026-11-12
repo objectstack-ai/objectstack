@@ -1,0 +1,36 @@
+{
+  "number": 32570,
+  "kind": "issue",
+  "title": "docs(adr): ADR-0150 D3 records the `residual` holder kind (after #32412)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T05:44:43Z",
+  "updated_at": "2026-11-12T08:04:04Z",
+  "closed_at": "2026-11-12T08:02:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32570",
+  "body": "epic:#31527#1 · os-bill · session_01Utp6CYGYEUhpi29FpjLmxT\n\nParent: #31527 (ADR-0150). Carrier for an ADR-0150 amendment row that PR #32567 (#32412) owes and cannot carry itself: `docs/adr/**` is a governed path (Tier H), and the epic does not mix it into a code PR. Precedent: #32375 (an ADR-0150 record row in its own docs PR).\n\n## The row to add (text from PR #32567 `## Acceptance notes`, epic seat 2)\n\nD3's holder vocabulary gains the `residual` holder kind:\n\n- A stack's residual (ADR-0130 D4), `{ kind: 'residual', ownerId }`: the top level of the artifact whose id is `ownerId`, outside every package body. It is never a `package` holder, and it is named only as a refusal's candidate.\n- Record line for red-line read 6793085339: the residual's job runs as the body that carries the artifact's id, or as no package. A name it shares with a body's job is refused, naming each declaring body and the residual.\n\nWrite it as a dated amendment note under D3, in the shape of the existing notes (for example \"Amendment note (2026-11-10, #32060 item 1 — PR #32067)\"), naming #32412 and the PR that lands it. Quote the landed code's file and symbol (`packages/core`, `PackageScopedHolder`), read at the merged head, not from this card.\n\n## Order and review\n\n- Blocked until PR #32567 merges, so the row describes landed code.\n- Tier H: a human approves the merge. Reviewers per the standing rule (os-zhuang and hotlong).\n- Further ADR-0150 amendment rows that epic children owe may join this card before it is dispatched. Each is added as a comment by the epic seat, with its source PR.\n\nBlocked-by: #32412"
+}

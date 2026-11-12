@@ -1,0 +1,31 @@
+{
+  "number": 32584,
+  "kind": "issue",
+  "title": "Adding a top-level key or a bound enum member reds two-way skill gates in both card orders under the skills split",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T06:43:32Z",
+  "updated_at": "2026-11-12T06:55:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32584",
+  "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① tooling/rules defect with a named producer, raised outside the diff by contract review 6816730756 on PR #32581 (#32549). It is the addition-side twin of #32550. ⛔ Not a claim; triage decides lane and grade, and whether it needs a decision card.\n\n## The case\n\nA product-lane PR that ADDS an authorable `defineStack()` top-level key, or a live member of a schema symbol bound to a registered exhaustive skills section, meets a two-way gate:\n\n- `scripts/check-skill-top-level-keys.mjs`: the symmetric difference against the skills enumeration. The new key with no skills row is red `[missing]` in the product PR. A skills PR that lists it first is red `[phantom]`.\n- `scripts/check-skill-identifier-liveness.mjs` Leg 2: a new live member with no row is red `[leg2-missing-row]` in the product PR.\n\n`lanes/skills.md` L13-14 on `main`: a product-lane PR never edits `skills/**`, and the skills sub-card is `Blocked-by:` the product card. Both gates run on every PR with no paths filter (`lint.yml`). Under the split the product PR is red with no legal repair, and the reversed order is red too. PR #32581 binds the lane's reversed order to removals only, so it does not answer this case.\n\n## Reach\n\nThe next product PR that adds a top-level key, or a member to a bound enum, that a published skill enumerates.\n\n## Duplicate check\n\n#32550 is the removal-side `generate-kinds` case. No open card names the addition case.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
+}

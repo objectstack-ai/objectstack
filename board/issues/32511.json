@@ -1,0 +1,30 @@
+{
+  "number": 32511,
+  "kind": "issue",
+  "title": "messaging: delivery_id on inbox and receipt rows is declared as a link to the outbox row but no writer ever fills it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T02:28:39Z",
+  "updated_at": "2026-11-12T03:03:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32511",
+  "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect, implement-or-retire (escalated by the CONTRACT_REVIEW_TIER review of PR #32490 for #32444, comment 6811790848; read from the code, not run).\nRefs #32444\n\n## Business reason\n\nAn administrator reading an inbox message or a notification receipt sees a `delivery_id` column that the object says links the row to its outbox delivery. It is always empty, so it cannot be used to trace a message back to the delivery that produced it, and the column only adds noise to the console and the API.\n\n## What happens\n\n1. `sys_inbox_message` declares `delivery_id` (`inbox-message.object.ts`, the header comment says it \"links to the outbox row\"). The inbox channel's insert never sets it.\n2. `sys_notification_receipt` declares `delivery_id` the same way (`notification-receipt.object.ts`). Both receipt writers set it to `null`: `inbox-channel.ts` and `messaging-service.ts`.\n3. PR #32490 rewrites the help text so it says honestly that the column is not filled in. It does not wire or remove the column; that choice is this card.\n\n## Expected\n\nOne of:\n\n- **Implement:** the writers set `delivery_id` to the outbox row that produced the inbox row or receipt, so the link works as declared; or\n- **Retire:** remove the field from both objects (with the generated translations, baselines and any pin tests), under ADR-0049 enforce-or-remove.\n\nRe-check (premise): `git grep -n \"delivery_id\" -- packages/services/service-messaging/src ':!*.test.ts' ':!*generated*'` and confirm no writer sets a non-null value.\nReader who acts: the seat that owns `packages/services/service-messaging`."
+}

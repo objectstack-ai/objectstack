@@ -1,0 +1,26 @@
+{
+  "number": 32609,
+  "kind": "issue",
+  "title": "metadata-protocol: an action's bound object as its row member — Studio overlay rows, the served-overrides artifact lookup, and whether unscoped action reads keep one item per binding (ADR-0150 D4/D6)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:45:22Z",
+  "updated_at": "2026-11-12T07:45:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32609",
+  "body": "epic:#31527#2 · os-bill · session_01Utp6Ca5UHVBDE3DqQXgJsW\n\nFiling gate: ① product defect with a named location (items 1–2), carried out of #32540 (ruling `/mnt/project-files/decisions/32540-动作绑定对象存储列-裁决.md`, conditions C4 and C6); ② item 3 is an open question the seat put on this card. Part of #31527 (ADR-0150). ⛔ Not a claim.\n\n## 维护者速读\n\n- 背景：#32540 让 DatabaseLoader 把动作绑定的对象写进 `sys_metadata.bundle_member`，同一个包把同名动作绑到多个对象时，每个绑定各存一行。\n- 问题 1：metadata-protocol 自己写的动作覆盖行（Studio 的自定义）不填这一列，所以同一个包在 o1 和 o2 上的 `digest` 的覆盖行仍然共用一个键，后存的会覆盖先存的。\n- 问题 2：served-overrides 按 `(type, name, member)` 分组后去查 artifact，但 `getArtifactItem` 只在 `ITEM_KEY_DISCRIMINATORS` 类型上用 member，动作的 member 被忽略，两个对象的同名动作查到同一个 artifact，「改动是否移位」可能判错。\n- 待定 3：`loadMany` / `loadManyKeyed('action')` 在 manager 层按名去重，冷热启动都是每个名字一条；要不要改成每个绑定一条，会影响 MCP list_actions 和 objectql serviceActions。\n- 都不改唯一键、不加 DDL；列的读法由动作自己的 owner 表决定，不并进 `ITEM_KEY_DISCRIMINATORS`（#32540 C1）。\n- 来源：#32540 的裁决 C4、C6，以及座位对 C5 的读法。\n\n## 1. Studio overlay rows of an action leave `bundle_member` NULL (C6)\n\n`packages/metadata-protocol/src/sys-metadata-repository.ts` addresses a write's member through `overlayMemberValue(type, member)` / `overlayMemberOfBody(type, body)` (`migrations/overlay-index.ts:523,536`), which answer `undefined` for every type outside `ITEM_KEY_DISCRIMINATORS` — so for `action`. An overlay of one package's `digest` bound to `o1` and an overlay of its `digest` bound to `o2` therefore share the key `(action, digest, P, '')`: the second save finds the first row and writes over it. Not measured on a running app (no first-party package ships such a pair; HotCRM's `log_call` × 5 objects is the shape, #5510). Measure first: two overlays via `/meta`, rows after, served after a restart.\n\n## 2. served-overrides looks up the artifact item without the action's object (C4)\n\n`packages/metadata-protocol/src/protocol-served-overrides.ts:152` groups a pair's rows by `(type, name, member)` and calls `shippedArtifactsOf(type, name, undefined, member)` → `lookupArtifactItem` → `registry.getArtifactItem(type, name, pkg, member)`. `getArtifactItem` (objectql `registry.ts` ~9011) uses `member` only when `ITEM_KEY_DISCRIMINATORS[type]` exists, so for an action row whose member is `o1` the lookup answers whichever artifact item of the name it finds first — possibly the `o2` binding's — and the \"moved edit\" judgement can be wrong. Fix shape to rule: the lookup for an owner-keyed type selects by the bound object.\n\n## 3. Open (seat): unscoped action reads, one per name or one per binding (C5)\n\nMeasured on #32540's branch: `MetadataManager.loadMany('action')` and `loadManyKeyed('action')` answer one item per name warm and cold — the manager dedups by name across loaders (`bundleEntryKey` is defined for bundled types only), and the door's `MemoryLoader.loadMany` itself answers one per name. `list('action')` serves every binding. Extending `bundleEntryKey` to `action` moves what MCP `list_actions` (runtime `domains/mcp.ts` ~772) and objectql's `serviceActions` (`plugin.ts` ~4417) see on every boot. Decide whether that move is wanted; if so, declare it FROM → TO with its arm.\n\n**Clause-②:** the claimer declares it. **Dedupe** (`action overlay bundle_member served-overrides member`): none found.\n**Business reason:** a package that customizes the same action name on two objects must not lose one customization, and a served-override verdict must judge the binding it names.\nclass: d · type: Bug\nGrade: p2 proposed."
+}

@@ -1,0 +1,32 @@
+{
+  "number": 32605,
+  "kind": "issue",
+  "title": "metadata-protocol: a bare save of a name held by an enabled and a disabled package writes an unbound row or edits the disabled package's row (epic ruling 6781691009; ADR-0150 D3/D4/D5)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:40:02Z",
+  "updated_at": "2026-11-12T07:40:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32605",
+  "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect with a named location, reproduced (step 0 of #32354, measured on `claude/project-thread-phk4r9` @ `6655b742`, the PR #32497 head; note `/mnt/project-files/server-seat3-p2/card-32354/step0.md`). Split from #32354 by the seat: the epic ruling 6781691009 owes the save door to \"this card, or #32183's follow-up if the seat prefers\", and the seat keeps #32354 to its read-side limb (one card per PR, ≤1500 lines).\nPart of #31527 (ADR-0150) · Refs #32354 · Refs #32183\n\n## 维护者速读\n\n- 改什么：一个名字同时被启用包 E 和停用包 D 持有时，不带包名的保存要写成 E 的行，不能写成无归属行，也不能改 D 的行。\n- 为什么：读同一地址答的是 E，写却落到别处：要么写出一个以后会遮住两个包的\"环境自有\"行，要么悄悄改了停用包的行、下次读还看不到改动。\n- 风险：第一方 0 处（要求两个包持有同名项且其一停用）；一处 409 变成写入（放宽，已声明）。\n- 先看：`packages/metadata-protocol` 的保存门如何解析不带包名的地址，对照 #32183 读侧的服务集判定。\n- 验证：E 持有 d1、D 持有 d1 且 D 停用，`PUT /meta/:type/d1` 不带包名，应写 E 的行，D 的行字节不变。\n- 需要你做的：无，归专题席派发。\n\n## What happens (measured)\n\n| stored rows before the bare save | today | expected (epic ruling 6781691009) |\n|---|---|---|\n| none | writes a package-**unbound** row (`null`) | writes a row bound to E |\n| D's row only | updates D's row; the next read shows E's code, not the edit | writes E's row; D's row byte-unchanged |\n| rows of both | 409 naming both | updates E's row; D's untouched (widening) |\n| D re-enabled | read 409 naming both, save 409 naming both | unchanged (CONTROL) |\n\n## Do\n\nThe save door judges a slotted or package-scoped name over the served set, the same holder set the read at that address uses (D3/D5 symmetry). Pins for the three states plus the re-enable CONTROL, both transports. FROM → TO lines as the ruling lists them: D's row silently updated → E's row (narrowing); unbound row → E-bound row; 409 → E's row (widening).\n\nSerial: after #32183 (PR #32497) and #32354 (the row-aware served-holder helper this door should reuse).\nBlocked-by: #32354\nReader who acts: the server seat the epic seat routes it to. Epic red-line read before landing.\nGrade: p2 (first-party reach 0)."
+}

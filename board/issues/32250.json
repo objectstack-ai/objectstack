@@ -14,18 +14,20 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T14:33:42Z",
-  "updated_at": "2026-11-10T15:02:33Z",
+  "updated_at": "2026-11-12T07:41:49Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32250",
   "body": "domain:server#3 · os-support-ai · session_01WGufzeeBmtefMTT21doena\n\nFiled by seat 3, carried out of #32164's step 0 (6769973229, fork F2) per the seat's ruling there. ⛔ Not a claim.\n\n④ coordination card: a child of the ADR-0150 epic #31527. **Sibling of #32201** (the same gap at `/meta`).\n\n**Epic:** ADR-0150 (#31527). **Lane:** `domain:server` (rest, types). **Reader:** the server seat that claims it.\n**Serial:** after #32164, which adds the structured `holders` member to core's `SecurityCatalogResolution` refused arm; this card carries it onto the wire.\n\n### The data door drops the candidates\n\nMeasured on `main` `e40f2df2` by #32164's step 0, with a `PackageScopedNameRefusedError` thrown from a `beforeInsert` hook: `POST /data/:object` answers `409 { error, code: RESOURCE_CONFLICT, object }` with **no candidates**. types `resolveThrownHttpError` keeps only `issues` and `fields` in `details`, and rest `error-response.ts` builds the flat body. `/actions`, `/automation` and the activation door answer `details.candidates: [{ kind: 'package', packageId }, …]`. D5 says every ambiguous by-name answer names its candidates. Setup's grant form, which posts to `/data/sys_user_permission_set`, therefore cannot offer the operator the holders to pick from.\n\n### Do\n\n1. `resolveThrownHttpError` carries a thrown package-scoped refusal's structured candidates into `details.candidates`, in the shape `/actions` uses. Recognize the refusal by class or shape (`code === 'RESOURCE_CONFLICT'` and `refusal.status === 'refused'`).\n2. `error-response.ts` emits them on every `/data` verb that can surface the refusal (insert, update, upsert, bulk).\n3. Other `/data` 409s (unique violations, conflicts) are unchanged: pin each as a CONTROL.\n4. Pins: a hook throwing the class, and a plain object of the same shape, each answer with the candidates. Ablating the carry turns the pins red.\n\n**Clause-②:** the seat declares it. This is additive: a new `details` member on a 409 that already exists. No answer narrows.\n**Dedupe** (open and closed, `data door RESOURCE_CONFLICT candidates`, `resolveThrownHttpError candidates`): #32201 covers `/meta` only; nothing covers `/data`.\n**Business reason:** without this, an administrator granting a permission set that two packages ship gets \"ambiguous\" with no way to see which packages to choose between.\n**Epic red-line review before landing.**"

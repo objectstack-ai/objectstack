@@ -1,0 +1,34 @@
+{
+  "number": 32585,
+  "kind": "issue",
+  "title": "ADR-0019 (app-as-consumer-unit) D3 amendment: a suite may surface several apps, each owned by one module package of the suite; an app package still defines at most one app; one terminology for package, module, app and suite",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:blocking",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T06:43:32Z",
+  "updated_at": "2026-11-12T08:18:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32585",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ a task the maintainer assigned in session (2026-11-12). Verbatim, not translated:\n- On the direction for HotCRM's menu split, offered A (one app with areas, ADR-0019 as written), B′ (amend ADR-0019 D3 so a suite may surface several apps, each owned by one module package) and C (allow several apps in one `type: app` package), the maintainer answered: 「改成 Salesforce 模式」 (B′).\n- Asked 「type: app（主包），是否建议改为 type: solution（主包）」, the seat recommended keeping `type: app` and fixing the confusion in wording only; the maintainer answered 「同意」, which also approved filing this card.\n\nReader: the `domain:skills` lane (the diff is `docs/adr/**`, a governed path: the PR stays for the maintainer's own merge). The spec check that enforces the amended rule is a separate `domain:spec` card, blocked by this one.\n\nDedupe (objectstack, open and closed): `\"ADR-0019\" suite apps is:issue` → 16, `app-as-consumer-unit is:issue` → 690 (the ADR's name is cited across the tree), `\"at most one app\" is:issue` → 8. None amends D3; the nearest, #25403 (closed), decided inter-app dependencies, not apps per suite.\n\n## 维护者速读\n\n把 ADR-0019 D3 从「装一次只露出一个应用」改成「一个套件可以露出几个应用，但每个包最多一个应用，各放各的」。HotCRM 的销售、服务、营销三个应用分别放在主包、服务包、营销包里。`type: app` 不改名，只统一叫法：应用包 / 模块 / 应用 / 套件。\n\n## Business reason\n\nThe maintainer ruled on 2026-11-05 (hotcrm#2417) to split HotCRM's one ~40-entry menu by function into apps switched from the app launcher, the Salesforce / Dynamics shape. The hotcrm lane's plan (hotcrm#2417 comment 6814732293) puts the Service and Marketing apps in their module packages. That builds on 18.3.0 only because `validateSingleApp` checks `type: app` packages alone, while ADR-0019 D3 as written forbids any suite that surfaces N apps. Without this amendment the plan lands through an enforcement gap in an accepted ADR. With it, the shape is the rule.\n\n## Amendment content (the dev drafts it; the substance is ruled)\n\n1. **D3 amended.** A suite (one install: an app package plus the module packages it composes) MAY surface more than one app, provided each app is defined by a different package of the suite, and an app package defines at most one app. A product that is genuinely independent still ships as its own app package (the iWork route stays).\n2. **Why one app per package, recorded as reasons, not as taste.** Each one was measured by the seat or by the hotcrm plan on 18.3.0:\n   - The console addresses an app by its package id. `ui/packages/app-shell/src/utils/appRoute.ts:46-68` notes that apps sharing a package id leave all but the first reachable only by name.\n   - An app may not name another package's object (ADR-0130 §1.5; hotcrm `src/sales/apps/crm.app.ts:246`). An app housed apart from its objects is a shell that only contributions can fill.\n   - Disabling a module removes the app that module owns (hotcrm plan, M11). An app in the app package cannot be disabled with the module whose objects it shows.\n3. **Terminology, one table** (wording only; no protocol change): `type: app` package = 应用包 (主包 in a suite) / app package; `type: module` package = 模块 / module; an entry in `apps[]` = 应用 / app; one install of an app package with its modules = 套件 / suite, a descriptive word, not a package type. `type: app` is NOT renamed (maintainer, 「同意」 above).\n4. **Lines to update.** ADR-0019's Status \"Pending … HotCRM folded to a single App (D3/D4)\" and the Consequences line \"HotCRM and any existing suite-style packages must fold to a single App (D3/D4)\" (line 156 on main `67c49d77`) no longer describe the target. D1 (the consumer listing is an app listing) and D2 (only `type: app` is consumer-installable) are unchanged: one marketplace listing still installs one app package.\n\n## Not in scope\n\n- Several apps in one `type: app` package (option C): not ruled, and contradicted by the three reasons above.\n- Per-position app visibility and a per-position default app (the hotcrm plan's L1): a platform capability with no ruling. A card is filed only when a need is ruled.\n\n## Acceptance\n\nThe amended ADR is merged by the maintainer. Its D3 text states the rule in item 1, the reasons in item 2 with their file citations, and the terminology table. The two stale lines in item 4 are rewritten."
+}

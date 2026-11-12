@@ -2,9 +2,9 @@
   "number": 32498,
   "kind": "pull_request",
   "title": "docs(mcp): resources are served on the stdio transport only; name the HTTP tools that read the same data",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/s",
     "tooling"
   ],
@@ -20,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T01:55:07Z",
-  "updated_at": "2026-11-12T02:15:28Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 2,
+  "updated_at": "2026-11-12T02:51:28Z",
+  "closed_at": "2026-11-12T02:50:41Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-12T02:50:41Z",
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32498",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgJSRdLSMks47MshHcmtLwgx)_\ndomain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\n## 维护者速读\n\n- 改了什么：只改 `@objectstack/mcp` 的 README 和一个 patch changeset，不动代码。README 在三处写明 MCP 资源（`objectstack://…`）只在 stdio 传输上提供；通过 HTTP（`/api/v1/mcp`）连接的客户端要读同样的数据，用 `list_objects`、`describe_object`、`get_record` 三个工具。\n- 为什么改：原来的 README 列了四个资源，没说只在哪种传输上有，托管和 Docker 部署的客户端读了会以为 HTTP 上也能浏览资源。实测 HTTP 上 `resources/list` 回 -32601 Method not found，文档和实际行为对不上。座位裁定按方案 B 修文档，不在 HTTP 上新增资源。\n- 风险与回滚：纯文档改动，运行时行为不变。回滚即还原本 PR。\n- 先看：`packages/mcp/README.md` 的 § Resources，新增的「资源 → 工具」对照表。\n- 两分钟验证：`git show --stat HEAD`，应只有 README 和 changeset 两个文件；读 § Resources 的新段落。\n- 需要你做的：无，席位落地。\n\nFixes #32438\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — `git grep -n -e \"objectstack://\" -e \"resources/list\" -- 'skills/**' 'packages/mcp/src/skill-md.ts'` has no hit; no skill or the rendered SKILL.md mentions resources\n\n## What changes\n\n`packages/mcp/README.md` documented the four `objectstack://` resources with no transport caveat. They are registered by `bridgeResources()` on the long-lived server only, and its one caller is the stdio start path in `plugin.ts`. `handleHttpRequest()` builds a fresh server per request and registers no resource, so its derived capabilities honestly omit `resources`. The README now says so in the three places the seat's ruling names:\n\n- **Features**: the Resources bullet is marked stdio-only and names the HTTP tools.\n- **§ Resources**: it opens with \"served on the stdio transport only\". A new paragraph says the HTTP endpoint advertises no `resources` capability and answers `-32601` to `resources/list`, `resources/templates/list` and `resources/read`. A table maps each resource to the tool that reads the same data under the same caller's principal (`list_objects`, `describe_object`, `get_record`). `objectstack://metadata/types` has no HTTP counterpart.\n- **§ Server capabilities**: `resources` appears on the stdio server only, and the HTTP endpoint never advertises it.\n\nOne changeset: `@objectstack/mcp` patch, because the README ships in the npm package.\n\nRuling: option B, seat comment 6811836163 on #32438. ADR-0036 Phase 2 scopes the HTTP door to tools, and ADR-0101 places resources on the long-lived stdio server. Serving resources over HTTP would be a Clause-② widening with its own card.\n\n## Tests\n\nNo pin and no ablation: no code changes, and no gate reads `packages/mcp/README.md` (`git grep -n \"mcp/README\" -- scripts '.github' 'packages/*/src' 'packages/*/scripts'` has no hit). The behaviour the text now states was measured on `main` `e765a092` through the real door:\n\n<details><summary>Measured: <code>pnpm dev:crm -- --fresh -p 38732</code>, an <code>osk_</code> key from <code>POST /api/v1/keys</code>, Bearer on <code>POST /api/v1/mcp</code></summary>\n\n```\n== initialize\n{\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"prompts\":{},\"tools\":{\"listChanged\":true}},\"serverInfo\":{\"name\":\"objectstack\",\"version\":\"18.3.0\"},...}\n== resources/list\n{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\n== resources/templates/list\n{\"jsonrpc\":\"2.0\",\"id\":3,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\n== resources/read objectstack://objects\n{\"jsonrpc\":\"2.0\",\"id\":4,\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\n== control: tools/call list_objects\n{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"objects\\\": [\\n    {\\n      \\\"name\\\": \\\"crm_account\\\", ...\n```\n</details>\n\n## Verification\n\nGates were run on the change commit `2b3d026a`, before the merge of `origin/main` (`7642648f`; `git diff e765a092 origin/main -- packages/mcp/` is empty):\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack packages/mcp/README.md .changeset/32438-mcp-readme-resources-stdio-only.md` → 50 commands, each exit recorded to a file before any pipe. Then `--ran`: `50 derived famil(ies) accounted for — 50 run, 0 NOT-MEASURED`, all exit 0. `check-plugin-teardown-shape --self-test` first exited 3 (prerequisite: shallow clone). After `git fetch origin 621a4876…` it passed 48/48.\n- `pnpm lint` → exit 0.\n- No package typecheck or suite is owed, because no TypeScript changed.\n\nFull dogfood: n/a. The title has no `!` and Clause-② has no `(narrowing)` arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6Cb2vksWyoMWrYYgiCW)_\n"

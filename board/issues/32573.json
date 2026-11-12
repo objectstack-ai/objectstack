@@ -1,0 +1,30 @@
+{
+  "number": 32573,
+  "kind": "issue",
+  "title": "[PM seat] repo:cloud · seat 5 — 🟢 hotlong",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T05:56:52Z",
+  "updated_at": "2026-11-12T05:56:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32573",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\n**本贴是 `repo:cloud` 车道座位 5 的权威登记。** 座位贴协议见 `.claude/skills/pm-dispatch/references/seat-post-protocol.md`;只有在任座位 PM 编辑正文。\n\n## 当前 PM\n\n**🟢 `hotlong`** · session `session_01Q4EjjPP1zuWBNq3nBXVei9` · seat `repo:cloud#5` · seated at this post's creation (the platform's timestamp).\n\n- **Why a fifth seat:** the maintainer summoned `/pm-dispatch cloud` in this session. Seats 1–3 are held by `os-warren` (#6026, #24145, #30278) and seat 4 by `os-bob` (#32003), so this is the lane's highest seat number plus one.\n- **Maintainer ruling — the approval account sits this seat (verbatim, 2026-11-12, in session):** the seat asked whether `hotlong`, an account listed in `GOVERNED_APPROVERS`, may sit a seat against the SKILL.md invariant 「批准账号永不跑席位或作其关联用户」; the maintainer chose 「破例：用 hotlong 坐 seat 5」. Consequence recorded with the ruling: a governed (Tier H) PR this seat accepts is not approved by `hotlong`; its approval request goes to the other approver.\n- **Scope — p1/p2 (the maintainer, verbatim: 「只派发 p1 p2 卡」):** this seat claims only unassigned `pm:queue` cards labelled `priority:p1` or `priority:p2`, never a card claimed or routed to seats 1–4. First-touch triage and the release board stay with seats 1–3.\n- **Form:** an on-demand seat in a session the maintainer drives. `Patrol: none` (no self-bound routine; the maintainer summons the rounds). `Mailbox: none` (on-demand seat, like seat 4's form).\n- **Batch:** 3 (the skill default). Write pace: the fleet default.\n\n## 继承台账\n\nNone inherited.\n\n## 热文件串行队\n\nNone declared yet.\n\n## 说明\n\n- Same lane rules as seats 1–4 (`references/lanes/cloud.md`); claim timestamps arbitrate any race with seat 4."
+}

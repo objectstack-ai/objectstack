@@ -1,0 +1,31 @@
+{
+  "number": 32565,
+  "kind": "issue",
+  "title": "plugin-hono-server compression: a 304 with no Content-Type gets no Vary: Accept-Encoding, while the README and docs say every 304 does",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T05:24:38Z",
+  "updated_at": "2026-11-12T06:05:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32565",
+  "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ② docs-versus-behaviour gap, low (escalated by the TIER_DEFAULT review of PR #32491 for #32155, comment 6815452954 ③; read from the code, not run).\nRefs #32155 · Refs #32491\n\n## Business reason\n\nThe self-hosted server's response compression (PR #32491) adds `Vary: Accept-Encoding` so caches keep compressed and uncompressed copies apart. The README, `http-protocol.mdx` and the changeset say `304` answers carry that `Vary` too. For the `304` answers the platform actually sends, they do not, so the docs promise more than the server does. No cache result is wrong today, because a cache refreshing a stored answer from a `304` keeps the stored `Vary`.\n\n## What happens\n\n1. The middleware decides whether a response is of an encodable kind from its `Content-Type`. It appends `Vary` for every such response, including `HEAD`, `206` and `304` after the Y′ patch round.\n2. A `304` usually carries no `Content-Type`, so the rule cannot tell what its `200` would have carried, and no `Vary` is added.\n3. Both `304` producers in the tree have that shape: `packages/cli/src/utils/console.ts` (the stable-file branch) and `packages/runtime/src/domains/i18n.ts`.\n\n## Expected\n\nEither the docs say exactly what the server does (a `304` carries `Vary: Accept-Encoding` only when it carries a compressible `Content-Type`), or the middleware adds `Vary` to a `304` whose route would encode its `200`. Then pin it with a `304` case in `response-compression.test.ts`.\n\nRe-check (premise): after #32491 lands, read the `Vary` branch of `packages/plugins/plugin-hono-server/src/response-compression.ts` and the two `304` producers above.\nReader who acts: the seat that owns `packages/plugins/plugin-hono-server`."
+}

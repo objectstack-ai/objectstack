@@ -1,0 +1,36 @@
+{
+  "number": 32531,
+  "kind": "pull_request",
+  "title": "docs(agents): a package-creating PR leaves the ADR alone; the landing seat files its status-line amendment after the merge",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:26:43Z",
+  "updated_at": "2026-11-12T04:15:05Z",
+  "closed_at": "2026-11-12T04:14:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-12T04:14:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32531",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgSnFirZ8ynCmAemTPrCvXpF)_\ndomain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\n## 维护者速读\n\n- 改了什么:`AGENTS.md` 的 Context Routing 表里 `packages/services/**` 一行改了半句。新建包的 PR 照树上惯例命名后不再顺手改 ADR 状态行;那行 ADR 记账改由落地席在代码合并后单独立一张 `domain:skills` 卡,引合并 commit。\n- 为什么改:裁决记录 6797014134 选 B(原话「32066 C 其他同意」):实施卡的文件面不含 `docs/adr/**`,ADR 记账行合并后由落地席立卡。派发规则已按此改过,`AGENTS.md` 这一行还写着「同一个 PR 里改 ADR 状态行」,两处互相打架。\n- 风险与回滚:纯规则文本,一行改一行,文件仍是 1050 行;不新增门禁,不碰脚本。回滚即 revert 本 PR。\n- 先看:`AGENTS.md` 第 728 行(`packages/services/**` 行末半句),这是唯一改动。\n- 两分钟验证:在本分支跑 `git grep -n \"status line in the same change\" -- AGENTS.md`,预期无输出(退出码 1);再看第 728 行末尾应为 \"leaves `docs/adr/**` untouched; the landing seat files that ADR's status-line amendment … (ruling record 6797014134)\"。\n- 需要你做的:审阅并批准(`AGENTS.md` 属 Tier H)。契约复核 PASS:评论 6813722700,`Head-sha: 8f7811d0f8114eb220c5d8ef58c72e214f22c2da`(只有 4 个 nit,无 should-fix)。批准后席位落地。\n\nFixes #32519\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — internal rules text\n\n## What changes\n\n`AGENTS.md`, Context Routing, the `packages/services/**` row (L728). The tail of the row read: \"the PR that creates the package follows the precedent and amends that ADR's status line in the same change\". It now reads: \"the PR that creates the package follows the precedent and leaves `docs/adr/**` untouched; the landing seat files that ADR's status-line amendment as its own `domain:skills` card after the merge, citing the merge commit (ruling record 6797014134)\".\n\nThe rest of the row is byte-identical. The row above (`packages/plugins/**`) does not carry the sentence; it is reached through this row's \"in this row or the one above\", so it needs no edit.\n\n## Tests\n\nRules text only: no package, no test, nothing to ablate. `skip-changeset`: `AGENTS.md` sits at the repo root and is in no package's `files[]` (`git grep -n AGENTS.md -- '*package.json'`: zero hits).\n\n## Verification\n\nGate set derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on head `8f7811d0f` (1 path vs merge base `e06d04f94`), each run with the exit code captured before any pipe:\n\n<details><summary>15 derived families: all exit 0; --ran reconciliation 15/15</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\npnpm check:agent-test-spelling :: exit 0\npnpm check:docs-audit-scope :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-governed-prose :: exit 0   (2 instruction surfaces name all 13 registered governed surfaces)\npnpm check:pm-skill-id-lint :: exit 0    (113 files clean)\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:required-contexts :: exit 0\npnpm check:watch-hint-literal :: exit 0\n\ndispatch-gates --ran: 15 derived famil(ies) accounted for, 15 run, 0 NOT-MEASURED\n(a DERIVED zero: all 15 recorded an exit code and none of them is 3)\n```\n\n</details>\n\n`pnpm lint` not run: no code changed. Every other family CI runs is read from this PR's check-runs, not re-run locally.\n\n## Acceptance notes\n\n- Prime Directive 13 still says reversing a decision needs \"a new ADR (or an amended status line on the old one)\". That sentence says what record a reversal needs, not which PR writes it, so it agrees with the new row text and stays as it is.\n- `AGENTS.md` has no line ratchet. The edit is one line for one line; the file stays at 1050 lines.\n- Out of scope, from the dev report 6813508247 (class b): the relay's `pr_create` read-back prints no labels clause, so `os-dev.md`'s label read-back rule cannot be met from relay output. filed #32542\n- Out of scope, from contract review 6813722700 nit N1: `docs/adr/README.md` \"Status hygiene\" (generated by `scripts/adr-index.mjs`) still tells the implementing PR to flip the ADR status line in the same PR, against ruling B. filed #32543\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Utp6CaqHXh17Qc3C7MRAQw)_\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n\n"
+}

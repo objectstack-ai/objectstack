@@ -1,0 +1,31 @@
+{
+  "number": 32536,
+  "kind": "issue",
+  "title": "hosted door: createHonoApp sends responses uncompressed; record compression as the platform's or CDN's job and document it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:35:31Z",
+  "updated_at": "2026-11-12T06:06:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32536",
+  "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ③ follow-up the maintainer's ruling asks for (#32155, ruling Y′ recorded on the card; analysis /mnt/project-files/server-seat3-p2/card-32155/fable-analysis-xy.md; read from the code, not run).\nRefs #32155 · Refs #32491\n\n## Business reason\n\nAfter #32491, a self-hosted ObjectStack server compresses its responses (brotli or gzip above 1 KB), which cuts the console's vendor bundle from about 2 MB on the wire. A deployment that serves through the hosted door, `createHonoApp` in `@objectstack/hono` (Cloudflare Workers, Deno, Bun, Vercel Edge, and the cloud's tenant kernels), does not compress in the application. Operators need to know where compression is supposed to happen there, so nobody ships a large uncompressed bundle by mistake, or compresses twice.\n\n## What happens\n\n1. #32491 adds compression only to `plugin-hono-server` (the self-hosted Node door). Its implementation uses `node:zlib` and `node:buffer`, which edge runtimes do not offer directly.\n2. `createHonoApp` adds neither `Content-Encoding` nor `Vary: Accept-Encoding`. The two doors-equal conformance pins (#22576, #22755) now compare across doors with `content-encoding` and the `accept-encoding` member of `Vary` treated as transport headers.\n3. Nothing in the adapter README or the deployment docs says who compresses on the hosted door.\n\n## Expected\n\nThe owning seat states the rule and writes it down: on the hosted door, compression is the platform's or CDN's job (edge platforms compress by default), and the application does not compress there. If measurement shows a hosted target that does not compress, file the edge-native compression work separately. Document the rule in `packages/adapters/hono/README.md` and the deployment docs.\n\nRe-check (premise): after #32491 lands, `git grep -n \"Content-Encoding\\|compress\" -- packages/adapters/hono/src` finds no compression in the hosted door.\nReader who acts: the seat that owns `packages/adapters/hono` and the deployment docs."
+}

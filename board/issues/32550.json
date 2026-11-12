@@ -1,0 +1,33 @@
+{
+  "number": 32550,
+  "kind": "issue",
+  "title": "check-skill-identifier-liveness: retiring an os generate kind reds the generate-kinds binding in both card orders",
+  "state": "closed",
+  "state_reason": "not_planned",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T04:21:53Z",
+  "updated_at": "2026-11-12T06:11:08Z",
+  "closed_at": "2026-11-12T06:11:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32550",
+  "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① tooling defect with a named producer, raised as class b by the dev of PR #32546 (#32520, report 6814196068) and confirmed by contract review 6814405786 ③. ⛔ Not a claim; triage decides lane and grade.\n\n## The binding\n\n`scripts/check-skill-identifier-liveness.mjs` Leg 2 binding `generate-kinds` (L408 on `main`): section `skills/objectstack-platform/references/operations.md` 「## Build & runtime」, members = `GENERATORS` **minus** `RETIRED_GENERATORS` (both in `packages/cli/src/commands/generate.ts`). It is the only binding with a `minus` set.\n\n## Why no order works\n\nRetiring a CLI generator kind under the split rule (product PR never edits `skills/**`, `lanes/skills.md` L13):\n\n- Skills card first (row deleted while the kind is still live in `GENERATORS`): red `[leg2-missing-row]`.\n- Retirement first (kind moved to `RETIRED_GENERATORS` while the row remains): red `[leg2-retired-row]`.\n\nBoth PRs are red whichever lands first, and the gate runs with no paths filter. This is outside the spec-property-retirement playbook (a CLI generator, not a spec property), so PR #32546 does not cover it.\n\n## Reach\n\nThe next retirement of an `os generate` kind.\n\n## Duplicate check\n\nSearched open issues for `generate-kinds` and `RETIRED_GENERATORS`: only #32520. No open card.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
+}

@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:35:48Z",
-  "updated_at": "2026-11-11T13:45:42Z",
+  "updated_at": "2026-11-12T07:44:15Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 8,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32154",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ③ a task on the maintainer's word. Asked in session on 2026-11-10, after the full-platform test run listed its improvement suggestions, verbatim: 「立卡处理」.\n\nQA-source: #32135 · new-user flow (create-objectstack 18.3.0) · observed beside the clauses\nBatch-of: objectstack-ai/objectstack#32135 follow-ups, 15 cards filed on the maintainer's 「立卡处理」\n\n## What we saw\n\n- The starter's `pnpm test` (one passing test that asserts a note without a title is refused) prints dozens of INFO lines and a WARN with a full stack trace for that expected refusal.\n- `os verify` on the starter passes but prints hundreds of `[Registry] …` lines, `[sql-driver] DATABASE_ERROR … no such table: _objectstack_sequences`, and two better-auth warnings that the secret is short and low-entropy (verify's own in-process secret).\n\n## Proposed change\n\nDefault these runs to warn-level output with the verdict at the end; an expected refusal inside a test is not logged with a stack; the sequences-table probe does not log DATABASE_ERROR when the table is simply not there yet; verify generates a full-strength ephemeral secret.\n\n## Business reason\n\nWho: every new user running the two commands the README tells them to run after each edit. Cost: a green run that looks red teaches people to ignore errors, which is the opposite of what verify is for.\n\n## Reader\n\nTriage first touch; lands in `packages/verify` (boot logging and secret) and the starter template's vitest config.\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack verify output noise Registry` (137, open and closed): no card for this."

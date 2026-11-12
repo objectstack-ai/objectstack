@@ -1,7 +1,7 @@
 {
   "number": 19287,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:skills · seat 2 — 🟢 sunhaolin",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,16 +14,18 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T09:45:20Z",
-  "updated_at": "2026-11-09T23:44:58Z",
+  "updated_at": "2026-11-12T07:21:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 44,
+  "comments": 45,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19287",
-  "body": "domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 2**. Seat 1 is #7623 and seat 3 is #29747; ⛔ this post is neither.\n\n<sub>Refreshed 2026-11-09T23:42Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Holder:** none. Last PM: `zhuangjianguo` · `session_01QsR2jT34CXs5fCn3BDirZw`, re-seated 2026-11-09 evening for #31982 and clocked out the same night on the maintainer order 「当前任务处理完就下班」. See the clock-out brief below this refresh.\n- **Mailbox:** PR #31987, closed at clock-out. **Patrol:** `trig_01CGi9xby2XD55rqGUaS7YR9`, deleted at clock-out.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. #31982 was released to seat 3 (#29747), `pm:blocked` on draft PR #31983 (release 6754491920).\n- **Lane state:** seat 3 (#29747, `huangyiirene`, mailbox #31984) is live and owns the skills queue. ⛔ Do not re-sit this seat without a new maintainer order.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n\n<!-- signed: domain:skills#2 · zhuangjianguo · session_01QsR2jT34CXs5fCn3BDirZw -->\n"
+  "body": "domain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:skills` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here).\n- The other skills seats: seat 1 objectstack-ai/objectstack#7623, seat 3 objectstack-ai/objectstack#29747. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T07:18Z at seating.</sub>\n\n## Current PM — 🟢 sunhaolin\n\n- **Holder:** `sunhaolin` · `session_017xRBcTAJajXtiVBRiECvT6` (cloud session, summoned by `/pm-dispatch skills`).\n- **Terms (carried from seat 3's record of the maintainer, 2026-11-12 00:11Z, all lanes):** 「所有车道只处理 p1 p2 任务」: `priority:p1` / `priority:p2` cards only. Batch 3 (skill default).\n- **Mailbox:** PR #32599. **Patrol:** `trig_01TD8rqc2c6b5bsxno79rA8k` · `17 * * * *` (hourly, bound to the seated session).\n- **Posture ledger:** lives in the session. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- **Queue split with seat 3:** proposed on seat 3's mailbox #32482 before any claim; claim timestamps arbitrate.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and open PR file lists before each dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** Tier H PRs (`skills/**`, `docs/adr/**`, `AGENTS.md`) get a seat record with `pm:awaiting-merge` and a review request to the approvers; a human merges. Tier S `.claude/**` lands by the seat after a PASS of record.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#2 · sunhaolin · session_017xRBcTAJajXtiVBRiECvT6 -->\n"
 }

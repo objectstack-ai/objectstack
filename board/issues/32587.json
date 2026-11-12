@@ -1,0 +1,33 @@
+{
+  "number": 32587,
+  "kind": "issue",
+  "title": "skills: the published skills never teach who sees an app (tabPermissions hidden) or who may open it (requiredPermissions + systemPermissions), and objectstack-ui says more audiences are never a second app",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T06:47:44Z",
+  "updated_at": "2026-11-12T08:11:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32587",
+  "body": "repo:hotcrm#1 · huangyiirene · session_01J8VVAnPkgK6CWrJa6t7Fk5\n\n## Source\n\nThe HotCRM maintainer asked for this card (2026-11-12, verbatim): 「平台可以做到你为什么不知道，是skills需要更新吗」 and 「我关注的是对外发布的skills 立卡。」\n\nWhile planning hotcrm#2417, which splits the suite into function apps, HotCRM's agent told the maintainer that 18.3.0 **cannot** show a different set of apps per position. The plan reached her with that claim ([hotcrm#2417 comment 6814732293](https://github.com/objectstack-ai/hotcrm/issues/2417#issuecomment-6814732293), section 8). A re-measurement the same day proved it wrong ([comment 6816277907](https://github.com/objectstack-ai/hotcrm/issues/2417#issuecomment-6816277907), rows M14 and M15; probe screenshots in the HotCRM project's `issue-2417/`). The agent was \"guided by the platform's published skills\" (hotcrm `AGENTS.md` §1), and the skills do not teach what the platform does.\n\n## What 18.3.0 does (measured)\n\n| # | Authoring | Behaviour |\n|---|---|---|\n| M14 | Permission set `tabPermissions: { <app>: 'hidden' }` (`packages/spec/src/security/permission.zod.ts`) | The app leaves that position's `GET /api/v1/me/apps`, the launcher and the app switcher. `/meta/app` still returns it, and its URL still opens: this is **visibility**, not access. The merge rule is \"most visible wins\" across a person's permission sets. |\n| M15 | App `requiredPermissions: ['<cap>']`, plus a permission set's `systemPermissions: ['<cap>']` | A **hard gate**. Only holders get the app in `/meta/app` and `/me/apps`. Admins too need the grant. |\n| M2/M11 | An app in a **module** package (`defineStack({ apps })` in a `type: 'module'`) | It builds and is served under the module's package id. Disabling the module drops the app from the launcher and `/meta/app`. |\n| M8 | `isDefault: true` on an app | Global. There is no per-position default. (Out of scope here: the maintainer set the per-position default aside.) |\n\n## What the published skills say (npm `@objectstack/skills@18.3.0`, published 2026-11-03; same text on objectstack `main` `3452dec`)\n\n- `skills/objectstack-ui/SKILL.md` § App Navigation: \"⛔ Exactly one App per `type: 'app'` package … **More audiences are `requiredPermissions`-gated groups inside that one app, never a second app.**\" Its eval `evals/views-apps-actions-pages.json` grades the same rule. This reads as \"never split an app\", and it says nothing about module-owned apps (M2/M11), which the one-per-app-package rule allows.\n- `tabPermissions` appears in **no** skill file. `grep -rn tabPermissions skills/` is empty on `main`, and empty in the 18.3.0 tarball too.\n- `skills/objectstack-ui/rules/navigation.md` mentions only `hidden: true` (drop from the switcher for everyone).\n- `skills/objectstack-data/rules/security.md` teaches `requiredPermissions` for fields and actions, but not for an app.\n\n## Wanted\n\n1. **objectstack-ui § App Navigation** gains a short \"who sees which app\" part:\n   - `tabPermissions` hidden on a position's permission set, for visibility (URL still opens);\n   - app `requiredPermissions` plus a `systemPermissions` grant, for access (admins need the grant);\n   - the merge rule (most visible wins, so the everyone-held set must not carry these keys);\n   - `hidden: true` as the global switch.\n2. **Reword the \"never a second app\" line.** Keep the one-app-per-app-package rule. Add that a module package may carry its own app (served under the module's package id, gone when the module is disabled). Say when gated groups inside one app fit better.\n3. **objectstack-data `rules/security.md`** gets one line under permission sets for `tabPermissions` on apps, pointing at the ui part.\n4. An **eval case** in `views-apps-actions-pages.json`: \"sales reps must not see the Service app\".\n5. State that a per-position **default** app does not exist (`isDefault` is global), so an agent does not promise it.\n\nFiling gate **③ maintainer-directed** (quoted above). Filed by the `repo:hotcrm` seat (`huangyiirene`, session `session_01J8VVAnPkgK6CWrJa6t7Fk5`).\n\n**Grade: `priority:p2`.** No runtime defect, but a published skill steered a product decision to a false \"the platform can't\". Every multi-app or multi-role customer build reads this section. **Size: S** (skill text plus one eval).\n\n**Dedupe:** I searched objectstack issues for `skills tabPermissions`, `skills app visibility permission set`, `skills module app second app` and `objectstack-ui skill one app per package`. The hits are other skills cards (#28243 action.pressed, #27609 report index), the `permission.form.ts` finding #16228, and QA logs. None covers app visibility or access in the skills.\n\n<sub>Filed by the `repo:hotcrm` lane seat at the maintainer's direction.</sub>"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 32527,
+  "kind": "issue",
+  "title": "A stored field's expression is not filled in for existing rows on a hosted tenant: switching a formula to a stored number leaves old rows NULL and a dataset sum silently reads 0 (#32443 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:formula",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:20:05Z",
+  "updated_at": "2026-11-12T06:38:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32527",
+  "body": "domain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ① product defect (user-visible), measured by the #32443 card thread (step-1 measurement, tree `1ff9f80d`, sqlite, real ObjectQL + AnalyticsServicePlugin). ⛔ Not a claim. Triage sets the grade and the lane.\nReader: the server / CLI owner of `os migrate stored-expressions` (`packages/cli/src/commands/migrate/stored-expressions.ts`) and the metadata save path that adds or changes a stored field's `expression`.\nDedupe: `is:issue is:open stored-expressions backfill` → 1 hit (a seat post); none on this.\nreach: #32443 (maintainer ruling B, \"a computed value can be totalled\") is delivered by a stored field that carries an `expression` (computed on every write and kept in a column). The refusal's remedy now points authors there. An author following it on an app that already has data replaces a `formula` with `type: 'number'` + the same `expression`. In the measurement every existing row stayed `NULL`, so the dataset `sum` read 0 where the true value was 6, with no error. Changing an existing stored expression likewise leaves old values uncomputed. A boot warning exists, and `os migrate stored-expressions --apply` (and `--changed`) fills them, but it needs a direct database URL, which a hosted tenant does not have. The metadata save door gives no warning either.\nRelated: #32443 (Blocked-by only for the wording; the defect stands on main today for any stored expression added to a populated object)\n\n## Ask\n\nGive a hosted tenant a way to fill a stored expression for existing rows when the field is added or its expression changes: at save time (a job the save starts), or through an entry the hosted tier can reach. Until rows are filled, the field's aggregates should not read as complete numbers: a warning at save, or the read path refusing or marking them. The lane rules the shape. Pin the card's case: formula → stored number on a populated object, then sum."
+}

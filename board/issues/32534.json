@@ -1,0 +1,31 @@
+{
+  "number": 32534,
+  "kind": "issue",
+  "title": "objectql: a function moved to another package on a sealed re-bind keeps the old owner's bare-name claim, so the new owner's hooks stay unbound",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:28:45Z",
+  "updated_at": "2026-11-12T03:28:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32534",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：PR #32468（#32349）契约审查 r2 6809277278 的 S1 余项（should-fix）。Part of #31527 (ADR-0150)。Blocked-by #32468.\n\n## What\n\nPR #32468 re-binds a multi-package artifact's hooks and functions per declaring body, and `releaseMovedFunctions` takes a moved function off its still-named old owner. The old owner's **bare-name claim** stays in the registry until `uninstallPackage`. After the cold-boot seal, `claimBareNameFunctions` then throws for the gaining owner, so that owner's group is left unbound; with the release, the moved function is held by nobody.\n\nReach (as the review states it): the exported binder called twice with callables on a sealed engine; not the JSON install-local door. `packages/objectql/src/registry.ts` was outside #32349's surface.\n\n## Acceptance\n\n- A single-claim release in `registry.ts`: when a function moves from owner A to owner B on a re-bind, A's bare-name claim on that one name is released before B claims it, on a sealed engine.\n- Pin: re-bind after the seal moves the function, B's group binds, the function is held by B; CONTROL: A's other claims stay.\n- `Clause-②:` measure (likely `no`); contract review owed if it narrows.\n\n## 业务理由\n\n谁受益：重装或热更多包制品的部署。场景：制品重绑后某函数换了归属包。不做：新归属包的整组 hook 静默不绑定，该函数无人持有，调用时失败。\n\n## 读者\n\n`domain:server` 席位（专题 #31527 派），#32468 合并后，起点 `registry.ts` 的 bare-name claim 与 `releaseMovedFunctions`。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue claimBareNameFunctions release bare-name claim` → 1 hit (#30803, closed); none tracks this release. No duplicate.\n"
+}

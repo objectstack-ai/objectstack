@@ -1,0 +1,32 @@
+{
+  "number": 32601,
+  "kind": "issue",
+  "title": "check-adr-0087-registration: a changeset declaring `Metadata-protocol: narrowed` can still take `not-required (no-migration-prescription)`, so a narrowing ships with no upgrade-guide entry (#32345 item 2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:21:16Z",
+  "updated_at": "2026-11-12T07:48:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32601",
+  "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\nFiling gate: ① a named blind spot with a measured reach, item 2 of #32345 (whose Ask says \"Name the decision; changing the gate is optional and may be a separate card\"). ⛔ Not a claim. Triage sets the lane and grade.\nReader: `domain:spec`, `scripts/check-adr-0087-registration.mjs` (`readDisposition` and the `not-required` categories; signal (5) in `breakingDeclaration`).\nDedupe: search `is:issue no-migration-prescription` (open and closed), `is:issue adr-0087 narrowed` and `is:issue check-adr-0087-registration prose` → no card on this; #32345 itself, and closed #22915 / #22918 / #26220 are other categories.\nreach: named producers. `.changeset/31224-flow-node-unreachable.md` and `.changeset/32289-flow-start-node-missing.md` (both runtime-gate narrowings), and #32075's changeset (the G1 namespace `runs` refusal, seat-4 note 6797576404 on #32345), each passed this gate with `not-required (no-migration-prescription)` while prescribing the fix in prose. Measured by the #32345 dev (report 6817344535, with the gate's own exported readers over 1096 changesets): 39 of the 62 changesets declaring `narrowed` in stock carry that marker and no entry.\n\n## Business reason\n\nAn agent or author upgrading reads the ADR-0087 upgrade guide and `os migrate meta` to learn what the new release refuses before the save door answers 422. A narrowing is by definition a refusal of something an author used to write (ruling A, signal (5)), yet the gate lets it opt out of the guide whenever its fix is written as a sentence instead of an arrow or a framed table. Careful prose is exactly what defeats the detector, so the exemption is reachable by wording.\n\n## Seat decision (option A of the dev's three, the seat's call under the non-escalation class \"an existing gate's blind-spot repair: strengthening, not weakening, not new\")\n\nWhen a changeset declares `Metadata-protocol: narrowed` (signal (5), read by the imported reader), `not-required (no-migration-prescription)` is refused; `registered` and the fact-checked categories (unpublished, already-registered, runtime-interface-only, type-surface-only) stay open. The gate judges only added or newly breaking changesets, so nothing in stock turns red.\n\nRejected: B (widen the prose detector): no measured candidate catches all three bodies without an arm that hits 61 of 191 stock markers, 41 on non-narrowed changesets. C (no change): leaves the opt-out reachable by wording; scope-minimal, recorded as the alternative.\n\n## Ask\n\n- Implement A in `scripts/check-adr-0087-registration.mjs`, with self-test pins: a `narrowed` changeset with `no-migration-prescription` is refused; the same body with `registered` passes; a `none` / `added` / `semantic` changeset with `no-migration-prescription` still passes.\n- The refusal text names the fix: register an entry under `packages/spec/src/migrations/entries/semantic/`.\n- Maintainer veto window: this adds about one D3 entry per narrowing PR."
+}

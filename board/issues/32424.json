@@ -12,7 +12,7 @@
   },
   "labels": [
     "domain:skills",
-    "needs-user-decision",
+    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -22,11 +22,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T12:44:51Z",
-  "updated_at": "2026-11-12T00:34:43Z",
+  "updated_at": "2026-11-12T08:19:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32424",
   "body": "security#2 · os-justin · session_01QSeKYn5CmmdShCJifm6WYj\n\n**Filing gate ③, the maintainer's order.** In session `session_01QSeKYn5CmmdShCJifm6WYj` on 2026-11-11, the maintainer asked the security seat whether a ruling could be written onto the private advisory itself rather than the public seat post. The seat answered that the relay has no op for an advisory's description. The maintainer then said, verbatim: 「立卡处理 给 relay 加一个\"改 advisory 正文\"的操作（长期办法）」.\n\n## Problem\n\nA security seat records a maintainer's ruling on a finding in two places today.\n- **The public seat post.** It holds the rule only, because no mechanism of an unfixed finding may appear in public text.\n- **The seat's session notes.** These are ephemeral.\n\nThe analysis behind a ruling therefore survives nowhere that the next seat holder, or the maintainer, can read: the reach, the options weighed, the measurements and the census. The private advisory is the natural home for it. Only the maintainers and the advisory's collaborators can read it, and its text becomes public only when the advisory is published, which happens after the fix ships.\n\nThe relay (`scripts/pm/fleet-write/`) offers these advisory ops: `advisory_create`, `advisory_report`, `advisory_read`, `advisory_list`, `advisory_state`, `advisory_versions` and `advisory_collaborators_add`. None of them writes the description. The platform has no comment thread on a repository advisory, so the description is the only place to write.\n\n## Asked\n\nAdd one relay op, for example `advisory_note`, that **appends** a dated, signed section to a repository security advisory's `description` (`PATCH /repos/{o}/{r}/security-advisories/{ghsa_id}`).\n\nRequirements:\n- **Append only.** The op reads the current description, adds one section at the end, and writes the whole back. It never edits or removes text that is already there, whether the finder's or an earlier note's.\n- **Concurrency.** It refuses, rather than overwrites, when the description changed between its read and its write.\n- **Sealed end to end.** The note's plaintext must never appear in the dispatch payload, an Actions log, a file in the repository, or a step output. Use the same sealing `advisory_read` already uses, but inbound: the seat seals the note to the relay's key, and the relay opens it only inside the step that sends the PATCH.\n- **Read-back.** It confirms that the stored description ends with the sent section, byte for byte. It reports only lengths and a digest, never the text.\n- **Signature line.** The section opens with the seat's signature line (`LANE#N · ACCOUNT · SESSION`) and a UTC stamp, as every seat post does. It names the ruling record on the seat post when one exists.\n- **Scope.** Draft, triage and closed advisories only. A `published` advisory is refused, because a note on a published advisory is public.\n- **Permission.** `repository-advisories: write`, the same as `advisory_versions` and `advisory_state`.\n- **Spelling.** The usual relay discipline applies: one op per stroke where the ops table says `alone`, validator refusals before dispatch, and a self-test.\n\nAlso:\n- Document the op in the security lane's charter (`.claude/skills/pm-dispatch/references/lanes/security.md`) and in `security-findings.md`, as the place where a ruling's private analysis is kept.\n- Add a pin that no log line or artifact of a dispatched note run contains the note's plaintext.\n\n## Not asked\n\n- Editing or deleting existing advisory text.\n- Writing to a published advisory.\n- Any change to the public seat-post rule: rulings stay recorded there at rule level, and the advisory note complements that record."

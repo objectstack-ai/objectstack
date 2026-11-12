@@ -18,11 +18,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-07T15:16:20Z",
-  "updated_at": "2026-11-11T08:30:46Z",
+  "updated_at": "2026-11-12T08:09:43Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 368,
+  "comments": 371,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6367",
   "body": "domain:server#1 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 1**. Seat 2 is #20966, seat 3 is #26761, seat 4 is #27737, seat 5 is #28677 and seat 6 is #29908. #6021 and #6024 are archives of this post, ⛔ do not edit them.\n\n<sub>Refreshed 2026-11-11T08:29Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-support-ai` · `session_01WGufzg5AUtn9pwa3g2bBqk` (project \"objectstack spec\"), seated by forced takeover 2026-11-10T10:04Z (6764249790), stood down 2026-11-11T02:47Z on the maintainer's 「当前任务处理完就下班」; its last PRs were landed and its claims released by `session_01WGufzeuyJD7E2jWKzpvgVH`. `check-handover` exit 0. The clock-out brief is 6790967470; this body flip is written by `session_01WGufzi7JmNEq5dKHBJdAFu`.\n- **Mailbox:** PR #32136, closed at clock-out. **Patrol:** disabled at clock-out. The next holder opens both anew.\n- **Resume:** `/pm-dispatch 接手`, then read this post and the clock-out brief 6790967470.\n\n## Ledger\n\n- **In flight:** none. **Stay-behind:** none.\n- **Released at clock-out:** #31699 (6790921204; draft PR #32214 at `7136e339d9` owes a delta contract review, the epic red-line read, then landing) and #31696 (6790939788; PR-2 #32374 merged `aab20c10`, PR-3 not dispatched).\n- **Pointer:** the canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. Open order on `bare-name-one-holder.ts` / `protocol-exact-qualifier.ts`: #32214 → #32327 → #31699 PR-2/3 → #31700 → #31985. ⛔ Re-derive from live `Claim:` comments and PR file lists before dispatching.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:server#1 · os-support-ai · session_01WGufzi7JmNEq5dKHBJdAFu -->\n"

@@ -1,0 +1,31 @@
+{
+  "number": 32538,
+  "kind": "issue",
+  "title": "plugin-security: the delegated-admin gate refuses an organization administrator who names one of two holders of a permission set",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:37:37Z",
+  "updated_at": "2026-11-12T03:37:37Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32538",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32164 P2（PR #32306）契约审查 6813617327 ④ should-fix 4。Part of #31527 (ADR-0150)。Blocked-by #32306. Blocks #31698 PR-2.\n\n## What\n\n`packages/plugins/plugin-security/src/delegated-admin-gate.ts` (the grant leg of the organization-boundary check, near the `[ADR-0150 D8 R1]` comment) still reasons from the insert re-stamp that PR #32306 removes: \"the write seam re-stamps the column from the name with no caller, so that holder is judged as well\". After #32306 a named package is refused when it does not hold the name and is never re-stamped. The gate judges the named holder and then the bare name. A bare name two packages hold is `refused`, so the second leg refuses an organization administrator who names one of the two holders.\n\nFail-closed today. Reachable only after #31698 PR-2 (second holder), where it removes the capability #32164 exists for: a delegated administrator granting one of two same-named sets.\n\n## Acceptance\n\n- When the grant names a package, the gate judges that holder only; the bare-name leg runs only when no package is named.\n- The comment matches the seam after #32306.\n- Pins: a two-holder stand-in registry; an organization administrator naming holder A inside the boundary is admitted; naming a holder outside it is refused; naming no package keeps today's refusal. CONTROL: one holder unchanged.\n- `Clause-②:` measured (likely a widening of an over-refusal; declare FROM → TO).\n\n## 业务理由\n\n谁受益：组织管理员（委托管理）。场景：两个包都带同名权限集，管理员指定其中一个包授予本组织用户。不做：#31698 PR-2 后这类授予一律被拒，只能由平台管理员代办。\n\n## 读者\n\n`domain:server` 席位（专题 #31527 派），#32306 合并后、#31698 PR-2 前；起点 `delegated-admin-gate.ts` 的 grant 分支与 `grantPackageOf`。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue delegated-admin-gate two holders permission set package` → 20 hits, open ones are seat posts only (#6015, #6026); none tracks this leg. No duplicate.\n"
+}

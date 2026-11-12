@@ -2,7 +2,7 @@
   "number": 32496,
   "kind": "pull_request",
   "title": "docs(adr): ADR-0067 D2's atomicity is scoped to a runtime that can roll back; the compensated package publish is recorded as best effort",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "size/m",
     "skip-changeset"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T01:39:15Z",
-  "updated_at": "2026-11-12T02:11:53Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-12T02:28:20Z",
+  "closed_at": "2026-11-12T02:27:07Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-12T02:27:07Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32496",

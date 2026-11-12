@@ -1,0 +1,31 @@
+{
+  "number": 32539,
+  "kind": "issue",
+  "title": "skills: objectstack-data security.md states the old grant key and never mentions permission_set_package",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:skills",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:37:40Z",
+  "updated_at": "2026-11-12T04:18:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32539",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32164 P2（PR #32306）dev 报告 6813351213 与契约审查 6813617327 ③ 点名的 skills 文档余项。Part of #31527 (ADR-0150)。Blocked-by #32306.\n\nBlocked-by: #32306\n\n## What\n\n`skills/objectstack-data/rules/security.md` says one grant per user, set and organization is enforced by the `unique: 'organization'` index and does not mention `permission_set_package`. After PR #32306 the key is `(user_id, permission_set, permission_set_package, organization_id)` with a package-less guard, a grant may name its holder's package, and a name two packages hold must be granted with the package (`409 RESOURCE_CONFLICT` with candidates otherwise).\n\n## Acceptance\n\n- The rule text states the four-column key, the package-less guard, and when an author must name `permission_set_package`; it does not promise more than the changeset of #32306 declares (driver-memory not enforced).\n- The skills lane's own gates pass.\n\n## 业务理由\n\n谁受益：照 skill 写授权元数据和种子数据的客户与 agent。场景：多包环境里给用户授予同名权限集。不做：按 skill 写出的授予不带包，#31698 PR-2 后被 409 拒收，skill 却说一条 `unique` 就够。\n\n## 读者\n\n`domain:skills` 车道，#32306 合并后；起点 `skills/objectstack-data/rules/security.md`。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue objectstack-data security.md permission set grant unique` → 10 hits; open only #32164; the closed #31819 #23615 #23513 fixed other sentences. No duplicate.\n\n"
+}

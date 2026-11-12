@@ -1,0 +1,30 @@
+{
+  "number": 32615,
+  "kind": "issue",
+  "title": "Studio home: the 最近访问 (recent) list keeps a package after it is deleted, and opening it shows an empty workbench for a package that no longer exists",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T08:07:17Z",
+  "updated_at": "2026-11-12T08:07:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32615",
+  "body": "coordinator#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\n\n立卡门类别:① 用户可见的体验缺陷(reach: 界面实测一次,见下)\n\n## 维护者速读\n在 Studio 里删除一个软件包后,Studio 首页的「最近访问」仍然列着它,名字没了、只剩 id。点进去会打开一个空工作台,显示「对象 0」和「创建应用」,右侧副驾提示「正在编辑」「编辑此应用」,看起来像这个包还在、只是空了。\n\n## reach\nstaging 环境 `os-6hf1jq`(cloud main `23b6cf9d`),读于 2026-11-12T08:02Z–08:03Z:\n1. 用 MCP 建了软件包 `app.p3656`(「MCP 删除验收 (cloud#3656)」),在 Studio 发布后打开过一次,于是它出现在 Studio 首页「最近访问」里。\n2. 在 Studio 删除这个包,选「删除结构和数据」。删除成功:`/api/v1/meta/app` 与 MCP `list_packages` 都没有它了,首页「我的软件包」也不再列出它。\n3. Studio 首页「最近访问」仍有两个 `app.p3656` 文本和一个链接 `/_console/studio/app.p3656`。\n4. 点这个链接,打开 `/_console/studio/app.p3656/data`:标题 `app.p3656`、「没有待发布的草稿」「对象 0」「创建应用」,副驾显示「构建 app.p3656 · 编辑此应用」。\n\n## 预期\n- 软件包被删除后,「最近访问」不再列出它;删除动作发生在当前页面时同步移除,其余情况按服务端软件包清单过滤。\n- 直接打开一个不存在的软件包地址时,显示「这个软件包已不存在」并带返回 Studio 首页的入口,不显示可编辑的空工作台,也不让副驾在里面「编辑此应用」。\n\n## 落点\n`ui/packages/app-shell/src/views/studio-design/`:Studio 首页的最近访问列表,以及按地址打开软件包工作台时对软件包是否存在的判断。\n\n## 业务理由\n- 谁受益:在 Studio 里清理应用的搭建者。\n- 场景:删掉一个试验应用后回到 Studio 首页。\n- 不做会怎样:用户以为没删干净,或者在这个空工作台里让副驾继续「编辑」,在一个已删除的包 id 下又写出新的草稿。\n\nReader: `domain:ui` 车道,Studio 首页与工作台(`ui/packages/app-shell/src/views/studio-design/`)。验收:删除一个软件包后,Studio 首页「最近访问」不再列出它;直接打开它的地址显示「已不存在」,不出现可编辑的空工作台;加测试钉住这两点。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue studio recent deleted package` → 61 hits(全是 QA run、元数据门等无关卡),`最近访问 软件包 删除` → 0 hits,`studio \"recent\" package removed in:title` → 0 hits,`studio home recent visits stale` → 3 hits(无关)。没有同题卡。\n\nRelated: objectstack-ai/cloud#3656(本次读数)。"
+}

@@ -1,7 +1,7 @@
 {
   "number": 28677,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 5 — ⏳ vacant",
+  "title": "[PM seat] domain:server · seat 5 — 🟢 os-bill",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-bill"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:10:21Z",
-  "updated_at": "2026-11-10T19:22:40Z",
+  "updated_at": "2026-11-12T02:33:09Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 18,
+  "comments": 19,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
-  "body": "domain:server#5 · os-bob · session_012dn2Ae4fomvXPZ2AioCpY4\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 4 is #27737 and seat 6 is #29908 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-10T19:21Z (signed off).</sub>\n\n## Current PM\n\n⏳ vacant. Signed off by `os-bob` · `session_012dn2Ae4fomvXPZ2AioCpY4` (seated 2026-11-10T10:30Z), on the maintainer's 「当前任务处理完，合并后就下班」. `check-handover.mjs` exited 0 before this body was written.\n\n## Handover ledger\n\n- **In flight:** none.\n- **Stay-behind:** none.\n- **Merged this shift:** #32177 (Fixes #32109), #32196 (Fixes #32106), #32210 (Fixes #32108), #32216 (Fixes #31911).\n- **Released:** #31948 → `pm:on-hold` with its `Restart-when:` line. Release 6776921470 carries `Resume-from:`. PR #32194 is a draft, ACCEPTed at its head.\n- **Security ledger:** GHSA-mj3h-7hj5-6xf5 · session_012dn2Ae4fomvXPZ2AioCpY4 · received (owner `security#1`).\n- **Filed this shift:**\n  - [Decision] #32179 (in the inbox);\n  - #32312 (class b follow-up of #31911);\n  - carry notes on #31957 (ADR-0144 D5 line, edge 1 adopted, review nit F6).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch server` and read this post first.\n- **Patrol:** none. **Mailbox:** none.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n"
+  "body": "domain:server#5 · os-bill · session_01Utp6CX9R5BLZwgJDeivmA7\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:server` seat 5**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here).\n- The other server seats: seat 1 objectstack-ai/objectstack#6367, seat 2 objectstack-ai/objectstack#20966, seat 3 objectstack-ai/objectstack#26761, seat 4 objectstack-ai/objectstack#27737, seat 6 objectstack-ai/objectstack#29908, seat 7 objectstack-ai/objectstack#32231. ⛔ This post is none of them.\n\n<sub>Refreshed 2026-11-12T02:31Z at seating.</sub>\n\n## Current PM — 🟢 os-bill\n\n- **Holder:** `os-bill` · `session_01Utp6CX9R5BLZwgJDeivmA7` (project \"Objectstack server 31527 devx\", thread \"server 座位 C:#31527 专题派卡\"), seated 2026-11-12T02:31Z.\n- **Terms:** the maintainer: 「server 车道暂时也只处理 p1 或是你派出的专题相关的 卡」 and 「需要的话可以再开一个 server 车道。」. This seat takes the five #31527 (ADR-0150) cards the epic seat `epic:#31527#1` dispatched to the server lane. Batch 5.\n- **Mailbox:** PR #32509. **Patrol:** `trig_01PPU8xBoQpJnJaXKVuZrjfo` · `30 * * * *` (hourly, bound to the seated session).\n- **Posture ledger:** lives in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#5` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** #32488 (claim 6812607505), #32458 (6812607930), #32459 (6812609469), #32408 (6812609395), #32407 (6812610051). All develop locally from PR #32214's final head; none pushes before #32214 merges.\n- **Inherited from the previous holder (brief 6776991185):** nothing in flight.\n\n## Hot-file serial queue\n\n- `packages/metadata` boot pass / `DatabaseLoader` / `MemoryLoader` / `package-slotted-store.ts`: #32488 → #32458 → #32459 → #32408, after PR #32214 and in the gaps of the epic seat's chain (#31696 PR-3 → #31700 → PR #32497 → #31699 PR 2/3 → #31985).\n- `packages/metadata-protocol/src/protocol-exact-qualifier.ts` + the layered read door: #32407, after PR #32214 and before #31699 PR 2/3 narrow their types.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs --repo objectstack-ai/objectstack`). ⛔ No GitHub MCP writes.\n"
 }

@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui · seat 1 — ⏳ vacant",
+  "title": "[PM seat] domain:ui · seat 1 — 🟢 sunhaolin",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-project-manager"
+    "sunhaolin"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-08T07:15:44Z",
+  "updated_at": "2026-11-12T06:51:25Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 21,
+  "comments": 22,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-project-manager · session_01FEkQ5nLA7wiVY5YWjT9Svr\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-08T07:15Z at sign-off.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Last holder:** `os-project-manager` · `session_01FEkQ5nLA7wiVY5YWjT9Svr`, signed off in brief 6718618961 on the maintainer's 「ui 车道当前任务处理完就下班」 (2026-11-08T06:02Z).\n- **Mailbox:** none (PR #31166 is closed). **Patrol:** none (disabled).\n- **Pointer:** the lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Ledger\n\n- In flight at sign-off: none. **Stay-behind:** none. 18 PRs landed this tenure (listed in the brief).\n- `pm:queue`: #25921 (Part of; what is left is in Release note 6718192057), #31421 (p3, filed during the off-shift window), #31025 Expected 2 (cloud payload shape), #29800 (mobile shell).\n- `pm:blocked`: #30514 on #30512, #30239 on #30237, #29314 on mobile#150.\n- Closed on the maintainer's word: #25918 (no new gate).\n- Out of scope: every `pm:epic` subtree.\n\n## Hot-file serial queue\n\n- None held by this seat. ⛔ Re-derive from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. Cloud-touching cards go whole to the `repo:cloud` lane. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n"
+  "body": "domain:ui#1 · sunhaolin · session_017xRBcSf5S4Kkc7aL9t5DSd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md` (⛔ not copied here). This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945, and seat 6 is #30423 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-12T06:51Z at the batch change.</sub>\n\n## Current PM — 🟢 sunhaolin\n\n- **Holder:** `sunhaolin` · `session_017xRBcSf5S4Kkc7aL9t5DSd` (a cloud session, summoned with `/pm-dispatch ui`). Seated 2026-11-12T06:39Z. Audit: 6816641652.\n- **Mailbox:** PR #32583 (head `claude/adoring-dirac-2sr922`, the session branch; `--close` leaves the branch for a person to delete). **Patrol:** `trig_01XdNUBftPHeWFHaXn2xrSaj` · `39 * * * *` (hourly, self-bound).\n- **Pointer:** posture and ledger live in the session. The lane ledger is labels + assignee + `Claim:` comments that carry `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Ledger\n\n- In flight: #32478, #32440 and #32564 (claims 6816791170, 6816804377 and 6816816346; `mode:subagent`). Cap: `batch:5`, with cloud cards allowed. The maintainer's words in this session: 「并发5，可以开云卡」 (2026-11-12T06:51Z).\n- Out of scope: every `pm:epic` subtree, and every card another seat holds.\n\n## Hot-file serial queue\n\n- `ui/packages/plugin-dashboard/src/**`: #32311 (seat 2, in flight) → #32462 (waits for #32311 to land).\n- ⛔ Re-derive this from the live `Claim:` comments of every `domain:ui` seat before any dispatch.\n\n## Notes\n\n- **Standing constraints (carried):** ui changesets go to the root `.changeset/`. No PR goes to the objectui repository. `node scripts/check-sdui-manifest.mjs` gates every ui card. Cloud-touching cards go whole to the `repo:cloud` lane. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, which a person merges.\n"
 }

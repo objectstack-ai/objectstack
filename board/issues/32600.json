@@ -1,0 +1,31 @@
+{
+  "number": 32600,
+  "kind": "issue",
+  "title": "plugin-security: the AI-account ceiling refusal judges served holders only, so a disabled package's breaching set can be granted to an AI account",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:17:03Z",
+  "updated_at": "2026-11-12T07:17:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32600",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32164 P2（PR #32306）专题红线复读 6817314015 的 should-note S2。Part of #31527 (ADR-0150)。Blocked-by #32306.\n\n## What\n\nThe AI-account ceiling refusal (`packages/plugins/plugin-security/src/agent-account-grant-refusal.ts`, `setBreaches`, its fail-closed arm near :245-250 at PR #32306's head) judges the permission-set definitions of **served** holders only. A disabled package is not served, so a stored grant of a disabled package's set whose permissions breach the ceiling can be moved onto an AI service account and is admitted. `main` answers the same for one holder, so #32306 loosens nothing, and the clamp at evaluation still holds; the door refusal is what is missing.\n\n## Acceptance\n\n- The ceiling judges the grant's own holder's definition whether or not that holder is enabled (or refuses fail-closed when the definition cannot be read).\n- Pins: a disabled package's breaching set granted to an AI account is refused; an enabled holder's non-breaching set is admitted as today (CONTROL).\n- `Clause-②:` measured (a 201 moves to a 400: `no (narrowing)` expected).\n\n## 业务理由\n\n谁受益：给 AI 服务账号授权的管理员与安全审计。场景：某包停用后，其超出 AI 上限的权限集授权被转给 AI 账号。不做：授权门不拒，只靠运行时裁剪兜底，审计看到一条本应被拒的授权。\n\n## 读者\n\n`domain:server` 席位（专题 #31527 派），#32306 合并后；起点 `agent-account-grant-refusal.ts` 的 `setBreaches`。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue setBreaches disabled package ceiling` → 0 hits. No duplicate.\n"
+}

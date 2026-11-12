@@ -2,8 +2,8 @@
   "number": 32480,
   "kind": "issue",
   "title": "docs(adr): ADR-0067 D2 says atomicity is a SQL-driver guarantee and \"production is SQL\", but remote Turso is SQL and cannot roll back",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T00:11:11Z",
-  "updated_at": "2026-11-12T02:07:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T02:27:54Z",
+  "closed_at": "2026-11-12T02:27:09Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32480",
   "body": "domain:server#6 · huangyiirene · session_01J8VVAnTcb4cZVkPdhkPicW\n\nFiling gate: ① documentation defect with a named producer. The ADR's own sentence reads against the code on `main`, and #32396's defect came from that premise.\nreach: named producer. `docs/adr/0067-commit-history-and-rollback-for-ai-authoring.md` line 79 (D2's *Driver caveat*: \"in-memory drivers have no real transaction; atomicity is a SQL-driver guarantee. Production is SQL\") and line 128 (consequences: \"Turn-atomicity is a **SQL-driver** guarantee; in-memory loses it\"). `driver-turso` extends `SqlDriver`, yet on the remote arm it declares `supports.transactionsUnsupported` (`turso-driver.ts`, `transactionsUnsupported: this.transportMode === 'remote'`; rationale at `remote-transport.ts`, #18616 / #18063). Per ADR-0119 D1, the engine then runs a `transaction()` callback with no transaction and no rollback. So \"production is SQL ⇒ atomic\" does not hold for a remote-Turso production deployment.\n\n## Ruling (maintainer)\n\n- **Who / words / where:** the maintainer (account owner `huangyiirene`), verbatim 「同意」, in session `session_01J8VVAnTcb4cZVkPdhkPicW` on 2026-11-12. It answered the seat's three options for this caveat (A amend the ADR / B note it in driver-turso docs only / C make remote Turso transactional), where the seat recommended A. **Ruled: A.**\n- C (real transactions on the remote transport) was not ruled. It is separate product work and needs its own card if wanted.\n\n## Expected (option A)\n\nAmend ADR-0067, as a dated Amendment entry in the ADR's own style, with no rewrite of the historical decision text:\n\n1. D2's caveat: atomicity holds only where the engine can roll back (`engineCanRollBack(engine)`, i.e. the default driver really begins, commits and rolls back). Name the drivers that cannot: in-memory, remote-arm Turso, OData (`transactionsUnsupported: true`). On those, package publish takes #32396's path (PR #32454): judge every draft before any write, then undo by compensation on a mid-promotion failure, naming any undo that fails. That is best effort, not atomic: a crash between promotion and undo can still half-land.\n2. Line 128's consequence: the same scope, worded the same way.\n3. Cite ADR-0119 D1 (the no-rollback degrade) and #32396 / PR #32454.\n\n`docs/adr/**` is a governed surface (Tier H), so it needs an approval from `GOVERNED_APPROVERS`. It is a prose-only change: no code, no contract face.\n\n## Business reason\n\nWho: anyone who reads ADR-0067 to judge whether AI authoring on a remote-Turso deployment can half-land. Today the ADR tells them it cannot. #32396 shipped exactly that half-land.\n\n## Reader\n\nThe `domain:server` seat that claims it after triage (with `Ruling-ref:` to this card's body ruling).\n\n## Duplicate check\n\nWritten from the seat's #32396 review (lane ACCEPT on PR #32454, \"Out of scope\" row). No separate search beyond the open `domain:server` queue read at clock-out."

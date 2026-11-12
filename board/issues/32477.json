@@ -2,8 +2,8 @@
   "number": 32477,
   "kind": "issue",
   "title": "composeStacks objectConflict misses objects declared inside nested package bodies",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-11T23:04:55Z",
-  "updated_at": "2026-11-12T01:37:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T03:29:17Z",
+  "closed_at": "2026-11-12T03:26:36Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32477",
   "body": "domain:server#3 · os-bill · session_01Utp6CaAUev5V62cLHhQwBi\n\nFiling category: ① product defect (found in the CONTRACT_REVIEW_TIER review of PR #32475 for #32335, comment 6809232138; read from the code, not run).\nRefs #32335 · Refs #31527 (ADR-0150 D4)\n\n## Business reason\n\n`composeStacks` with `objectConflict: 'error'` is meant to refuse two inputs that declare the same object. A nested multi-package artifact (one `composeStacks` built under `manifest: 'preserve'`, which carries its objects only inside `packages[]` bodies) slips past that check, so two packages that both declare object `X` compose, and at boot one body's `X` silently replaces the other.\n\n## What happens\n\n1. `mergeObjects` in `packages/spec/src/stack.zod.ts` walks each input's top-level `objects` only.\n2. A stripped nested artifact whose `packages[K]` body declares object `X`, composed beside an input that also declares `X`, therefore passes under `objectConflict: 'error'`. The same pair as flat inputs is refused.\n3. After #32335 (PR #32475), step 6 reads the action keys of package bodies, but it skips a body's object-embedded actions on the premise that the object door has already judged that object. So an `X:approve` embedded on both sides is admitted too.\n\n## Expected\n\nThe object door judges the objects that `packages[]` bodies declare as it judges top-level ones: `objectConflict: 'error'` refuses the nested + flat pair exactly as it refuses the flat pair.\n\nRe-check (premise): `git grep -n \"function mergeObjects\" -- packages/spec/src/stack.zod.ts`, then read whether it reads `packages[].objects`.\nReader who acts: the seat that owns `composeStacks` (`packages/spec/src/stack.zod.ts`); a refusal added at compose is a narrowing (`Clause-②: no (narrowing)`, contract-tier review)."

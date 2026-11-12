@@ -1,0 +1,36 @@
+{
+  "number": 32581,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): lanes/skills.md names the gate-forced reversed sub-card order",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T06:34:45Z",
+  "updated_at": "2026-11-12T07:27:34Z",
+  "closed_at": "2026-11-12T07:27:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T07:27:32Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32581",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-bill\"} -->\n_Requested by **Bill** · [project thread](https://claude.ai/code/project/chan_016iMXWSZDzqWRWvWzdNo8wg?thread=cmsg_016iMXWSZDzqWRWvWzdNo8wgSnFirZ8ynCmAemTPrCvXpF)_\nFixes #32549\n\ndomain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — internal rules text\n\n## 维护者速读\n\n- 改了什么:skills 车道章程「子卡带 `Blocked-by:` 产品卡」后加一行例外:退役时必跑门禁会红产品 PR 则反序,次序指向 `spec-property-retirement` §4;另删去一行指向已不存在章节的 fold-or-serial 指针以付行。\n- 为什么改:退役手册已写明标记示例等情形门禁强制 skills 卡先落,而车道章程仍说子卡恒等产品卡,只读章程的席位会把 `Blocked-by:` 写反,退役 PR 红且无合法修法。\n- 风险与回滚:只动内部规则文本,不发布任何包;回滚即 revert 本 PR。\n- 先看:`.claude/skills/pm-dispatch/references/lanes/skills.md` 第 12–13 行(默认与例外)与第 33 行(付行处)。\n- 两分钟验证:`pnpm check:pm-skill-ratchet`,预期该文件 33 行、上限 33、余量 0。\n- 需要你做的:无,`.claude/**` 属 Tier S,席位凭契约复核落地。\n\n## What changes\n\nOne file, net zero lines (+2 / -2 against merge base `3452dec21`; 33 lines before and after, ceiling 33).\n\n- **Line 12 is unchanged:** the skills sub-card is `Blocked-by:` the product card by default, because a skill records only landed behaviour.\n- **New line 13 (119 bytes):** when a retirement makes a required gate red the product PR, the order reverses. The line opens with 「退役时」 because the two-way gates (`check:skill-top-level-keys`, liveness Leg 2) also red an ADDITION, and there a skills card landing first is red too and would record unlanded behaviour; the addition case is filed as #32584. The order itself is pointed at, not restated: the `spec-property-retirement` §4 「已发布 skills」 item (marked TS/YAML examples via `check:skill-examples` / `check:yaml-examples`, and a Leg 1 table row on a no-tombstone removal). The line keeps the lane line's reason: a sub-card that lands first only deletes a key or changes a value (the playbook's 「删键或改值」), so it records nothing unlanded.\n- **Payment, a content cut in the same file:** the old line 32 (`fold-or-serial 必答与家族派发五门在 SKILL.md 批次独立性段。`) pointed at a SKILL.md section that no longer exists (`批次独立性` has zero hits in the tree; control: `路径分叉`, which line 9 cites, hits `SKILL.md` L179). The rule it pointed at lives in `.claude/skills/pm-dispatch/references/execution-duties.md` L28–34 (family dispatch, the five gates, fold-or-serial 必答, and 「答题处是串行队条目和/或链首认领」). The next line referred back to it as 「它」, so it now names `fold-or-serial` instead of the pronoun (94 → 107 bytes). This is a deletion, not a re-wrap: no wording of the cut line survives anywhere in the file.\n\n## Tests\n\nNo code changed; no package is touched, so no build closure, unit suite or typecheck is owed. Verification is the derived gate set below.\n\n## Acceptance notes\n\n- Body order follows `.claude/agents/os-dev.md` (`Fixes` right after the attribution block, declaration lines before `## 维护者速读`), which differs from the order the dispatch tail lists; os-dev.md wins on conflict.\n- Out of scope, noted only: the lane charter's line 9 cites 「SKILL.md 域车道表」 while the section heading is `## 域车道`; the pointer still resolves, so it is not a stale path.\n- Contract review 6816730756: finding 1 (trigger bound to a retirement) and nit 2 (skill named by name) fixed on `08ce7fb56`. The addition case it raised outside the diff: filed #32584.\n\n## Verification\n\nGates run on head `08ce7fb56` (final tree; `origin/main` `3452dec21` merged, no rebase). Derived with `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 17 commands. Each exit code was captured before any pipe.\n\n<details><summary>Derived gates: 17 of 17 exit 0; reconciliation 17 run, 0 NOT-MEASURED</summary>\n\n```text\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0   (formula+lint built first under the verify lock, VERDICT command-exit 0)\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:pm-settings-deny-roster :: exit 0   (outside the derivation; run because its roster sits under .claude)\n\ncheck-skill-line-ratchet: .claude/skills/pm-dispatch/references/lanes/skills.md is 33 lines (ceiling 33; headroom 0).\ncheck-skill-id-lint: 113 file(s) clean (pattern /#[0-9]{3,}/g).\ndispatch-gates --ran: 17 derived famil(ies) accounted for — 17 run, 0 NOT-MEASURED (a DERIVED zero — all 17 recorded an exit code and none of them is 3).\n```\n\n</details>\n\n`pnpm lint` not run: no code changed (CI owns the repo-wide scan). Every family CI runs is read from this PR's check-runs, not re-run locally.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01Utp6CaqHXh17Qc3C7MRAQw\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n\n"
+}

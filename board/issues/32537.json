@@ -1,0 +1,32 @@
+{
+  "number": 32537,
+  "kind": "issue",
+  "title": "ui: the permission-set pages send the holder's package to the grant, clone and activation doors",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:ui",
+    "pm:blocked",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T03:37:34Z",
+  "updated_at": "2026-11-12T07:42:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32537",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32164 P2（PR #32306）契约审查 6813617327 ③ 与 step 0 6769973229 §3 点名的 UI 余项。Part of #31527 (ADR-0150)。Blocked-by #32306. Blocks #31698 PR-2.\n\n## What\n\nAfter PR #32306, the three permission-set doors take the holder's package: the grant through the stored column `permission_set_package`, clone and activation through `?package=PKG`. A name two packages hold answers `409 RESOURCE_CONFLICT` with structured `candidates` when no package is named. The Console still sends the bare name everywhere, so once #31698 PR-2 lets a second package hold a name, an administrator cannot grant, clone or switch that set from the Console.\n\nCallers (step 0 6769973229 §3):\n- `ui/packages/app-shell/src/views/metadata-admin/AssignedUsersSection.tsx`: ADD writes `{ user_id, permission_set }`; its list reads grants by `{ permission_set: name }`, so one set's page lists both holders' grants.\n- `…/metadata-admin/permission-set-clone.ts`: `POST …/clone` names no source package.\n- `…/metadata-admin/catalog-activation.ts`: `POST /security/_activation/:type/:name`, and its `sys_metadata_activation` read is keyed by `(metadata_type, name)` only.\n- Read-only by name, same card: `catalog-holders.ts`, and the `permission-ref` widget (`ui/packages/fields/src/widgets/RegistryRefField.tsx`).\n\n## Acceptance\n\n- Each write door sends the holder's package the page already holds; each list and ledger read is keyed by `(package, name)`.\n- A `409` with `candidates` is shown as a pick among the named holders, never resolved by order.\n- One holder: every request and screen is unchanged (CONTROL).\n- Uses existing generic blocks and the doors' spec contract only; no new product-named widget.\n\n## 业务理由\n\n谁受益：管理员在装了两个同名权限集的包的环境里。场景：#31698 PR-2 后两个包都带 `sales_rep` 权限集。不做：Console 里对该权限集的授予、克隆、启停全部 409，管理员只能走 API。\n\n## 读者\n\n`domain:ui` 车道，#32306 合并后、#31698 PR-2 合并前；起点上列四个文件。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue AssignedUsersSection permission_set_package` → 1 hit (#32164 itself); `… permission_set_package Console clone activation package` → 1 hit (#32164). No duplicate.\n\n\nBlocked-by: #32306\n"
+}

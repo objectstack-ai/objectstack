@@ -1,0 +1,31 @@
+{
+  "number": 32572,
+  "kind": "issue",
+  "title": "cloud-connection: install-local answers 200 for a package with two enabled jobs of one name, which the binder then refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T05:53:23Z",
+  "updated_at": "2026-11-12T05:53:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32572",
+  "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\n立卡门 ① · 已落地工作欠的后续：#32411（PR #32563）契约审查 6815889291 ④ 点名的余项（install-local 门与绑定器口径不一）。Part of #31527 (ADR-0150)。Blocked-by #32563.\n\n## What\n\nAfter PR #32563, two or more enabled jobs of one name in one artifact are refused at bind (`scheduleAppArtifactJobs`, `packages/runtime/src/app-artifact-handlers.ts`): none is scheduled and an earlier version's job of that name is cancelled. The install-local door (`packages/cloud-connection/src/marketplace-install-local-plugin.ts`, which pre-judges jobs through `collectJobsWithoutBody` in the same runtime file) does not judge a shared name, so installing such a package answers 200, the bind then refuses at `error`, and the job the previous version ran stops. The door tells the operator the install succeeded when the binder will run none of those jobs.\n\n## Acceptance\n\n- The install-local door refuses (or reports in its answer) a package with two or more enabled jobs of one name, naming every job, with the same holder vocabulary as the bind refusal (after #32567, `residual` holders included).\n- A package with distinct job names installs as today (CONTROL); a disabled twin does not trigger the refusal.\n- `Clause-②:` measured (a 200 moves to a refusal: `no (narrowing)` expected).\n\n## 业务理由\n\n谁受益：通过 install-local 装包的运维。场景：包里两个同名启用的 job。不做：安装报成功，实际两个 job 都不跑，旧版本那个也被取消，运维毫无提示。\n\n## 读者\n\n`domain:server` 席位（专题 #31527 派），#32563 合并后；起点 `marketplace-install-local-plugin.ts` 调 `collectJobsWithoutBody` 处。\n\n## 查重\n\n`repo:objectstack-ai/objectstack is:issue collectJobsWithoutBody shared name install-local` → 6 hits, open only #32411 (the bind half); `… install-local job twins same name refused` → 18 hits, open #32411 and a seat post (#6017). No duplicate.\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 32554,
+  "kind": "issue",
+  "title": "A stored field's expression that reads now() / today(), the current user or can() keeps the value of the write moment, while the same formula recomputes on read; authoring does not say so (#32443 follow-up)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:formula",
+    "domain:spec",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T04:31:41Z",
+  "updated_at": "2026-11-12T06:47:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32554",
+  "body": "director#1 · hotlong · session_f4c42f815d5e47b39de5e9fb0d6d7864\nRuled: 6816315099 · letter B · 2026-11-12T06:45Z\n\ndomain:spec#4 · marchtian · session_017ihL2gENvvRYHmL5nFTF5x\n\nFiling gate: ② measured gap. Fourth gap from #32443's contract review round 1 (should-fix 2), measured on PR #32545. ⛔ Not a claim. Triage sets the grade.\nReader: `domain:spec`, the `expression` contract on stored fields (`packages/spec/src/data/field.zod.ts`) and the lint that could judge an expression's inputs.\nDedupe: the open cards on stored expressions are #32443, #32527, #32528 and #32529; none covers volatile inputs.\nreach: after #32443 the refusal's remedy tells an author to replace a `formula` with a stored field of its return type carrying the same `expression`. For an expression that reads `now()` / `today()`, the current user, or `can()`, that is not the same value. The stored field keeps what the expression returned at the moment of the write, and the formula it replaced recomputed on every read. PR #32545 states this in the TSDoc and in `os explain`; authoring itself says nothing.\nRelated: #32443, #32527, #32528, #32529\n\n## Ask\n\nChoose one, the lane's ruling:\n- refuse a volatile input in a stored `expression` at authoring, naming the formula (not summable) or a scheduled flow as the alternatives; or\n- warn at authoring that the value is frozen at write time.\n\nPin both reads: one with `today()` and one with the current user.\n"
+}

@@ -1,0 +1,31 @@
+{
+  "number": 32604,
+  "kind": "issue",
+  "title": "rest: cross-object POST /batch only checks `typeof ql.transaction` and calls it without `require: true`, so on a runtime that cannot roll back it silently applies non-atomically instead of answering 501",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:39:32Z",
+  "updated_at": "2026-11-12T07:39:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32604",
+  "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: the account owner's word in the cloud seat session (「现在可以先做的两件小事，同意」), item 2 of the cloud evaluation on objectstack#32500. The issue is the topic checkpoint's §7 suggestion, which was \"read from code, not reproduced\".\n\n## What\n\n`packages/rest/src/batch-routes.ts` (origin/main):\n- About L277: the route answers `501 NOT_IMPLEMENTED` only when `typeof ql.transaction !== 'function'`.\n- About L355: it then calls `ql.transaction(async (trxCtx) => …)` with **no options**.\n\nThe engine's transaction contract (`engine-transactions-section.ts:61`; ADR-0119 D1; `engine-transaction-contract.test.ts`) **degrades** when the default driver declares `supports.transactionsUnsupported` (remote Turso today) and the caller did not pass `require: true`. So on a hosted environment, a cross-object batch that the route calls \"always atomic\" can apply its first ops and leave them in place when a later op fails. The client is told the batch is atomic; the console caches `transactionalBatch: true`.\n\n## Expected\n\nThe route's honest contract, as its own comment already says (\"All-or-nothing by construction … honest contract\"):\n- call `ql.transaction(cb, { require: true })`, or the equivalent the engine offers;\n- map the engine's \"cannot roll back\" refusal to the typed `501 NOT_IMPLEMENTED` the route already uses;\n- make the discovery/capabilities answer (`transactionalBatch`) say `false` on such a runtime, so the console does not offer atomic batch there.\n\nNo behaviour change on drivers that can roll back.\n\n## Acceptance\n\n- **Reproduce first.** With a test driver that declares `transactionsUnsupported`, send a 2-op cross-object batch whose second op fails. Today the first op persists (expected red). After the fix: 501, and nothing persists.\n- **Unchanged on a transactional driver.** Same batch on a driver that can roll back: still atomic, still 200, or the existing error with nothing persisted.\n- **Discovery.** `transactionalBatch` reflects the runtime.\n- **Ablation.** Drop `require: true` and the repro goes red again.\n\nLane: `domain:server` (rest + objectql contract). Related: objectstack#32500, #32481, ADR-0119."
+}

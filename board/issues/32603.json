@@ -1,0 +1,31 @@
+{
+  "number": 32603,
+  "kind": "issue",
+  "title": "Protocol re-discussion: the spec says an approved-but-failed pending action is a 200 with status failed, while the runtime action door holds that failures speak HTTP (#3962); which one stands, and does the approve answer need a code slot",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:spec",
+    "needs-user-decision",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T07:34:43Z",
+  "updated_at": "2026-11-12T07:50:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32603",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ a task the maintainer approved in session (2026-11-12): the seat's plan for cloud#4346, which named this card as a separate follow-up, was answered 「4346 同意，按钮两个都下掉」 (cloud ruling comment 6817576806).\n\n## 维护者速读\n\n「AI 待办批准了但执行失败」，协议规定返回 200 加「失败」。平台另一条原则是「失败要用 HTTP 状态码表达」，通用按钮也是照这条写的，结果读不懂这个 200。cloud#4346 先按协议改成 200，不在缺陷卡上翻协议。这张卡要回答两个问题：协议这条要不要改；返回里要不要加机器能读的错误码。\n\n## The tension, with readings (objectstack main `67c49d77`)\n\n- `packages/spec/src/api/protocol.zod.ts` ~L4200, `ApproveAiPendingActionResponseSchema` docblock: 「`status: 'failed'` is a 200 with a reason, not an HTTP error: the approval succeeded, the execution did not. A caller that only checks `res.ok` will report a failed write as a success.」 The response has no `code` slot.\n- `packages/runtime/src/action-execution.ts` ~L2180-2189: 「A target that starts answering 2xx `success: false` has the defect itself (failures speak HTTP, #3962), and the fix goes in that target, never in a body check here」.\n- `ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx` ~L578-591: a generic `type: 'api'` action treats only `!res.ok` or a top-level `success: false` as failure. That is why cloud#4346 removed its two row actions on `ai_pending_actions`.\n- Consumers written for 200-failed: `packages/client/src/index.ts` (`ai.pendingActions.approve`), `ui/packages/plugin-chatbot/src/useHitlInChat.ts`, `AiPendingActionsInbox.tsx`.\n\n## Questions for the maintainer (the analysis is owed with the four-facet block before the box)\n\n1. Keep 200-failed, or move to a non-2xx answer for an executed-but-refused write? The row has already moved to a terminal `failed`, so a 4xx that reads as \"nothing changed, retry\" misstates the state. Weigh that.\n2. Does the answer need a closed `code` (and `details`)? Measured readers today: zero.\n3. If HTTP wins, cloud's removed row actions on `ai_pending_actions` may come back (recorded in cloud#4346's ruling).\n\nReader: `domain:spec` lane for the analysis; the decision is the maintainer's.\n\nDedupe: `repo:objectstack-ai/objectstack \"200 with a reason\" is:issue` → 7, none on this route. `ApproveAiPendingActionResponseSchema is:issue` → 1 (#31884, closed, the `held` outcome)."
+}

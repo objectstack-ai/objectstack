@@ -1,0 +1,36 @@
+{
+  "number": 32549,
+  "kind": "issue",
+  "title": "pm-dispatch lanes/skills.md: the skills sub-card is always Blocked-by the product card, but for a marked example the gates force the skills card first",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-bill"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T04:21:51Z",
+  "updated_at": "2026-11-12T07:28:21Z",
+  "closed_at": "2026-11-12T07:27:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32549",
+  "body": "domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw\n\nFiling gate: ① documentation defect with a named producer (two rules texts that order the same two cards opposite ways), raised as `open_questions[0]` by the dev of PR #32546 (#32520, report 6814196068) and escalated by its contract review 6814405786 ③. ⛔ Not a claim; triage decides lane, grade, and whether this needs a decision card first.\n\n## The two texts\n\n- `.claude/skills/pm-dispatch/references/lanes/skills.md` L12: 「子卡带 `Blocked-by:` 产品卡,技能只记已落地的行为」 — the skills sub-card always waits on the product card.\n- `.claude/skills/spec-property-retirement/SKILL.md` §4 「已发布 skills」 item, as PR #32546 rewrites it: when a marked example (`os:check` TS, or a marked YAML fence) writes the retired key, `check:skill-examples` / `check:yaml-examples` turn the retirement PR red, so the skills card lands first and the retirement card is `Blocked-by:` it.\n\n## Why the lane line has to yield in that case\n\nBoth example gates run on every PR with no paths filter (`lint.yml`), and a product-lane PR never edits `skills/**` (`lanes/skills.md` L13), so under the lane line's order the retirement PR is red with no legal repair. The lane line's reason still holds for the reversed case: a skills card that only removes a key from an example records nothing unlanded. The review recommends option A: a net-zero edit to `lanes/skills.md` naming the gate-forced exception (or pointing at the playbook's order).\n\n## Reach\n\nEvery seat that files the skills sub-card for a spec retirement from the lane charter alone: it writes the `Blocked-by:` the wrong way round.\n\n## Duplicate check\n\nSearched open issues for the lane line; only #32520 names it. No open card.\n\n<!-- signed: domain:skills#3 · os-bill · session_01Utp6CaqHXh17Qc3C7MRAQw -->\n"
+}

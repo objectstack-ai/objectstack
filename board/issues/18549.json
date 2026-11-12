@@ -1,7 +1,7 @@
 {
   "number": 18549,
   "kind": "issue",
-  "title": "[PM seat] domain:spec · seat 2 — ⏳ vacant",
+  "title": "[PM seat] domain:spec · seat 2 — 🟢 sunhaolin",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "sunhaolin"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-17T00:45:41Z",
-  "updated_at": "2026-11-10T05:48:59Z",
+  "updated_at": "2026-11-12T06:51:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 143,
+  "comments": 144,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18549",
-  "body": "domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n## Current PM\n\n⏳ **vacant** since 2026-11-10 ~05:50Z. The previous holder was `zhuangjianguo` · `session_01QsR2jUe9c6YdtNkrzUnMUd`, seated 2026-11-08T15:50Z and clocked out on the maintainer's 「当前任务处理完，合并后就下班。」. To take over, run `/pm-dispatch 接手`, then read the clock-out brief 6760105278.\n\n## Handover ledger\n\n- **Pointer:** the clock-out brief 6760105278 (landed PRs, hand-offs, queue snapshot, traps). The previous body revision archives the tenure. ⛔ Neither is restated here.\n- **In flight:** none. `check-handover` exited 0, and no card is claimed by this seat.\n- **Cross-lane hand-offs (all through triage, mailbox #28646):** the six children of epic #31763 (ADR-0153), and the follow-ups to #31992, #31911 and #31988, are named in the brief.\n- **Split at clock-out:** `domain:spec#1` (`os-project-manager`, mailbox #31165), `domain:spec#3` (`os-support-ai`, mailbox #32006) and `domain:spec#4` (`marchtian`, mailbox #31323) are listed as seated.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #31576 is closed. A successor opens its own. **Patrol:** none (`trig_01LgdSRnLxSo7vb9eBsfX7u9` was deleted).\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#2 · zhuangjianguo · session_01QsR2jUe9c6YdtNkrzUnMUd -->\n"
+  "body": "domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/spec.md` (⛔ not copied here). This is **`domain:spec` seat 2**. Seat 1 is #6017, seat 3 is #18883, seat 4 is #18917 and seat 5 is #19357 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-12T06:51Z (batch ceiling raised).</sub>\n\n## Current PM\n\n🟢 **`sunhaolin`** · `session_017xRBcSbLCxEmyHf9upz3pz` · seated 2026-11-12T06:34Z (opening mark 6816598310), a direct cloud session. Posture and round ledger live on the cards (pointer only).\n\n## Handover ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:spec#2` + `head:claude/` PRs.\n- **Inherited:** nothing in flight (previous brief 6760105278, `check-handover` exit 0).\n- **Split:** `domain:spec#4` (`marchtian`, mailbox #32425) is seated at batch 2; `domain:spec#1` (`os-project-manager`, mailbox #31165) reads seated with no output since 2026-11-07. The claim timestamp arbitrates.\n\n## Hot-file serial queue\n\n- **This seat holds:** no hot file. Claims carry the file surfaces: #32503, #32282, #32345, #32505. ⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch.\n- `merge=os-regen` paths (`content/docs/references/**`, `packages/spec/authorable-surface/**`) and the hand-kept registration files merge with `bash scripts/pm/os-regen-merge.sh`.\n\n## Notes\n\n- **Mailbox:** PR #32582, subscribed. **Patrol:** none (a direct session; woken by PR subscriptions).\n- **Batch ceiling:** 5, cloud cards allowed (the maintainer's word in this session: 「并发5，可以开云卡」).\n- **Publication:** objectstack. A merge to `main` publishes nothing. The release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Tier H:** a governed PR is never readied, queued or armed before an APPROVED review from a `GOVERNED_APPROVERS` account.\n\n<!-- signed: domain:spec#2 · sunhaolin · session_017xRBcSbLCxEmyHf9upz3pz -->\n"
 }
