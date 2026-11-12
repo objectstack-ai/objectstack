@@ -5086,26 +5086,27 @@ export class SchemaRegistry {
 
   /**
    * [ADR-0150 D9, #31699] `packageId`'s holding of the bundled `(type, name)`
-   * as the registry holds it — the members its composite group and its bound
-   * overlays hold ({@link bundleMembersHeldBy}) and its declared dependency
-   * closure — or `undefined` for a type that is no bundle.
+   * as the bare-name gate reads it — the members its composite group and its
+   * bound overlays hold ({@link bundleMembersHeldBy}, a pair's row read by
+   * {@link gateSlotBinding}) and its declared dependency closure — or
+   * `undefined` for a type that is no bundle. Both doors and the cold boot's
+   * seal read a holding here, and nothing else does.
    *
    * With an `arrival` (a door judging a registration), the members are read
    * as if the arrival were registered: its members in its composite slot, and
-   * its manifest installed when it is not yet. A row a pair stores binds by
-   * its owners ({@link pairRowBinding}), and the arriving package may be one
-   * of them: an undeclared row of the very member it ships is its member too,
-   * so the row binds to no package once it is registered. Read without the
-   * arrival, the row would be the holder's member, the arrival no addition to
-   * the holder, and the door would admit what the seal then reports (#32408,
-   * contract review F2).
+   * its manifest installed when it is not yet. A package-less row binds to
+   * the one package holding the name only while there is one
+   * ({@link overlaySlotBinding}), so beside the arrival it binds to neither.
+   * Read without the arrival, the row would be the holder's member, the
+   * arrival no addition to the holder, and the door would admit what the seal
+   * then reports (#32408, contract review F2, delta review N1).
    */
   private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string, arrival?: BundleArrival): BundleHolding | undefined {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || !isBareNameRegistryType(type)) return undefined;
     const registered = this.metadata.get(type) ?? new Map<string, any>();
     const collection = arrival === undefined ? registered : withArrivingMembers(registered, name, disc, arrival);
-    const read = () => this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc);
+    const read = () => this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc, true);
     let members: Set<string>;
     if (arrival?.manifest === undefined) {
       members = read();
@@ -9095,14 +9096,47 @@ export class SchemaRegistry {
   /**
    * [#28802] The members (discriminator values) of `name`'s bundle that
    * `packageId` holds: its composite group's, and the bare-slot entries that
-   * bind to it ({@link overlaySlotBinding}).
+   * bind to it ({@link overlaySlotBinding}; with `atGate`, as the bare-name
+   * gate reads them, {@link gateSlotBinding}).
    */
   private bundleMembersHeldBy(type: string, collection: Map<string, any>, name: string, packageId: string,
-    holders: ReadonlySet<string>, disc: { field: string; canonical: string }): Set<string> {
+    holders: ReadonlySet<string>, disc: { field: string; canonical: string }, atGate = false): Set<string> {
     const { local } = collectBundle(collection, name, disc, packageId);
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(type, item, name, collection, holders) === packageId);
+      .filter(({ item }) => (atGate
+        ? this.gateSlotBinding(type, item, name, collection, holders)
+        : this.overlaySlotBinding(type, item, name, collection, holders)) === packageId);
     return new Set([...local, ...bound].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical));
+  }
+
+  /**
+   * [#32408, epic ruling 6838245909 option B] A bare-slot row's binding as the
+   * bare-name gate reads a holder's members ({@link registeredBundleHolding}:
+   * both doors and the cold boot's seal): {@link overlaySlotBinding}'s, except
+   * that a row of a customization pair lends its member to a holder only
+   * where the per-package reading binds it to that holder too (the pair's
+   * base when it holds the name in a composite slot, else the pair itself:
+   * the reading every reader applied before {@link pairRowBinding}).
+   *
+   * Where the pair-row binding moved the row (to X, a package of the App,
+   * from the App or from the pair), the gate counts it for no holder. The App
+   * no longer holds a locale it shipped none of through a row declared for X
+   * (the narrowing the changeset declares), and X does not gain the row's
+   * locale either: a package of another namespace on X that ships only that
+   * locale stays an addition to X's template, refused at both doors in either
+   * registration order and reported by the seal, as before the binding
+   * moved. Admitting it waits on the by-name read following the binding (a
+   * follow-up under #32408): in that state the by-name read answers by
+   * registration order. The reads keep {@link overlaySlotBinding}.
+   */
+  private gateSlotBinding(type: string, item: unknown, name: string, collection: Map<string, any>,
+    holders: ReadonlySet<string>): string | null | undefined {
+    const bound = this.overlaySlotBinding(type, item, name, collection, holders);
+    const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof stamped !== 'string' || stamped === '' || stamped === 'sys_metadata' || holders.has(stamped)) return bound;
+    const base = customizationBasePackageId(stamped);
+    const perPackage = base !== null && holders.has(base) ? base : stamped;
+    return bound === perPackage ? bound : undefined;
   }
 
   /**
