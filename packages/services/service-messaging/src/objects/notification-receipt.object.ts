@@ -63,13 +63,13 @@ export const NotificationReceipt = ObjectSchema.create({
             // `sys_notification.id` — physical varchar(255), the id column
             // driver-sql creates (`table.string('id').primary()`).
             maxLength: 255,
-            description: 'FK → sys_notification (L2 event)',
+            description: 'The notification whose state this receipt records.',
         }),
 
         delivery_id: Field.text({
             label: 'Delivery',
             required: false,
-            description: 'FK → sys_notification_delivery (outbox row); null until P1',
+            description: 'The delivery record this receipt belongs to. Not currently filled in.',
         }),
 
         user_id: Field.text({
