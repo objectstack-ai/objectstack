@@ -69,6 +69,7 @@ import {
 } from './protocol-view-normalization.js';
 import { isShippedViewItem, stripDerivedProvenance } from './protocol-package-bindings.js';
 import { mutationEventMemberOfBody } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import {
     destructiveChangeRemedy,
@@ -2166,6 +2167,9 @@ export class ProtocolSaveFacet {
                 organizationId: null,
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
+                // [#32451] …and its package: the binding `put` wrote under (a
+                // draft naming none inherits the active rows' package).
+                ...mutationEventPackage(mode === 'draft' && request.packageId == null ? inheritedDraftPackageId : request.packageId),
             });
             const receiptPackageId = typeof request.packageId === 'string' && request.packageId !== ''
                 ? request.packageId

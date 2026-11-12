@@ -69,7 +69,7 @@ import {
   droppedFieldEvents, handBackWithheldInsertReadonly, hydrateWriteFormulas, insertStaticReadonlySubject,
   planStoredExpressions, recomputeAutonumberReaders, replacedStoredExpressionFields, shouldSkipStateMachine,
   storedExpressionsReading, stripComputedWriteFields, undeclaredWriteFieldErrors, withholdInsertReadonlyFromHooks,
-  writeFailureLogMeta,
+  callerInputRefusalLogMeta, writeFailureLogMeta,
 } from './engine-top-level.js';
 import type {
   AutonumberReaders, IssuedAutonumber, OperationContext, PermissionResolution, StoredExpressionServing,
@@ -1697,10 +1697,16 @@ export class InsertFacet {
         // slot, and an Error's fields are non-enumerable).
         // [#24768] A NOT NULL refusal's `ValidationError` carries the driver's
         // error the same way, for the same reason.
+        // [#32154] A caller-input refusal (the engine's own `ValidationError`,
+        // raised before the statement) is still `warn`, as one line with no
+        // stack: object, operation, fields, reason. Everything else, the NOT
+        // NULL refusal included, takes the line above unchanged. See
+        // `callerInputRefusalLogMeta`.
         const logged = e instanceof DuplicateRecordError || e instanceof NotNullRefusalError ? e.cause : e;
         this.logger.warn(
           'Insert operation failed',
-          writeFailureLogMeta(redactBoundStatement(logged), { object }),
+          callerInputRefusalLogMeta(e, { object, operation: 'insert' })
+            ?? writeFailureLogMeta(redactBoundStatement(logged), { object }),
         );
         // [#27495] A write that did not complete takes back the credential rows
         // it wrote; one a stored row names after all (a batch the driver

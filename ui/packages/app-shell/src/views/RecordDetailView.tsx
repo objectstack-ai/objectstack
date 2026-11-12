@@ -100,6 +100,7 @@ import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type Sh
 import { nativeShare } from '@object-ui/mobile';
 import { useActionModal } from '../hooks/useActionModal.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
@@ -4348,17 +4349,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   if (!objectDef) {
     return withPhoneBar(
-      <div className="flex h-full items-center justify-center p-4">
-        <Empty>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <Database className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <EmptyTitle>{t('empty.objectNotFound')}</EmptyTitle>
-          <EmptyDescription>
-            {t('empty.objectNotFoundDescription', { name: objectName })}
-          </EmptyDescription>
-        </Empty>
-      </div>
+      <NotFoundState
+        testId="object-not-found"
+        icon={Database}
+        title={t('empty.objectNotFound')}
+        description={t('empty.objectNotFoundDescription', { name: objectName })}
+        actions={<BackToHomeButton testId="object-not-found-home" />}
+      />
     );
   }
 
@@ -4391,22 +4388,31 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // broken page instead of a clean 404.
   // A write deleted the record (`recordDeleted`): it is missing, and no body
   // is drawn, so none of its readers asks the server for it again.
+  // Its way out is the object's own list, then Home.
   if (pageRecordStatus === 'missing' || recordDeleted) {
+    const listName = servedObjectPluralLabel(objectDef, language, objectPluralLabel);
     return withPhoneBar(
-      <div className="flex h-full items-center justify-center p-4">
-        <Empty>
-          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-            <Database className="h-6 w-6 text-muted-foreground" />
-          </div>
-          <EmptyTitle>{t('empty.recordNotFound', { defaultValue: 'Record not found' })}</EmptyTitle>
-          <EmptyDescription>
-            {t('empty.recordNotFoundDescription', {
-              defaultValue:
-                'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
-            })}
-          </EmptyDescription>
-        </Empty>
-      </div>
+      <NotFoundState
+        testId="record-not-found"
+        icon={Database}
+        title={t('empty.recordNotFound', { defaultValue: 'Record not found' })}
+        description={t('empty.recordNotFoundDescription', {
+          defaultValue:
+            'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
+        })}
+        actions={
+          <>
+            {objectListPath ? (
+              <Button asChild variant="outline">
+                <Link to={objectListPath} data-testid="record-not-found-list">
+                  {t('empty.backToList', { name: listName, defaultValue: 'Back to {{name}}' })}
+                </Link>
+              </Button>
+            ) : null}
+            <BackToHomeButton testId="record-not-found-home" />
+          </>
+        }
+      />
     );
   }
 
