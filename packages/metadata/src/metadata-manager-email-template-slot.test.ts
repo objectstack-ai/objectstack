@@ -241,6 +241,22 @@ describe('[#32517] a bundled type keeps one item per (package, name, member) in 
     expect(((await registered(...rewrite()).get('email_template', NAME)) as any)?.subject).toBe('en again');
   });
 
+  /**
+   * [#32560] The view a read over the loaders judges inherits the registry's
+   * write order (the action read's "written last"). A slot only a loader holds
+   * has no member in that order, and still answers its first member — the
+   * member written last, which `loadSlots` hands first.
+   */
+  it('a read the registry cannot answer while it holds another item of the type: the loader slot\'s member written last still answers (BASE: the same)', async () => {
+    const { manager } = await stored(...ONE_HOLDER(), member(ALPHA, 'en-US', 'en again'));
+    manager.registerInMemory('email_template', 'other_template', { ...member(BETA, 'en-US'), name: 'other_template' });
+    expect(((await manager.get('email_template', NAME)) as any)?.subject).toBe('en again');
+    expect(((await manager.get('email_template', NAME, ALPHA)) as any)?.subject).toBe('en again');
+    const { manager: frLast } = await stored(...ONE_HOLDER());
+    frLast.registerInMemory('email_template', 'other_template', { ...member(BETA, 'en-US'), name: 'other_template' });
+    expect(((await frLast.get('email_template', NAME, ALPHA)) as any)?.subject).toBe(`${ALPHA}:fr-FR`);
+  });
+
   it('a second write of one member replaces that member only', async () => {
     const manager = registered(...ONE_HOLDER(), member(ALPHA, 'fr-FR', 'fr again'));
     expect(subjects(await manager.list('email_template'))).toEqual([`${ALPHA}:en-US`, 'fr again']);

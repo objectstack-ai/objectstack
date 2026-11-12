@@ -12802,6 +12802,17 @@ export function residueLines(
  * that session; this constant is a property of the lane's governance, and the
  * two ⛔ never trade places.
  *
+ * The one case that moves this line FORWARD is an upgrade by ruling, and it
+ * is not a retirement either. Maintainer, 2026-11-09, verbatim and
+ * untranslated (ruling record: issue #31982): 「复审档位要从 Fable 5.1 改到 5.2，立卡修改」.
+ * On that word the value above moved one minor up inside its family, and
+ * nothing was retired with it: `RETIRED_TIER_WORDS` (`dispatch-gates.data.mjs`)
+ * stays empty, and the family word {@link TIER_CEILING} derives is unchanged.
+ * The comparison stays EXACT — the previous minor is ⛔ not accepted beside
+ * the new one — and a seat still served the previous minor is the case the
+ * paragraph above already rules on: an isolated at-tier subagent or a wait
+ * outside the queue, ⛔ never this line edited back.
+ *
  * Rulebook: `.claude/skills/pm-dispatch/references/contract-review.md` — the review of record and its `Served-tier:` line.
  */
 export const CONTRACT_REVIEW_TIER = 'claude-fable-5-2';
