@@ -190,7 +190,7 @@ rateLimit: { enabled: true, windowMs: 60_000, maxRequests: 100 },
 ```
 
 The gate's predicate is `rateLimit.enabled === true`, **not** the key's presence:
-`RateLimitConfigSchema.enabled` itself defaults to `false`, so writing only
+`RateLimitConfigSchema.enabled` (`@objectstack/spec/shared`) itself defaults to `false`, so writing only
 `windowMs` / `maxRequests` declares a budget that meters nothing. Endpoint
 budgets are metered independently of the server-level `server.security.rateLimit`.
 
@@ -298,8 +298,6 @@ The **HttpDispatcher** is the central request router; it answers:
 ---
 
 ## Realtime Subscriptions
-
-Realtime contracts live in the spec source:
 
 - `node_modules/@objectstack/spec/src/api/realtime.zod.ts` — `TransportProtocol`
   (`websocket` | `sse` | `polling`), `SubscriptionSchema` (`id`, `events[]`,
