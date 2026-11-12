@@ -51,8 +51,16 @@
  *  4. **The ablation is held PERMANENTLY** (§4). Its handle is the wiring this
  *     package shipped before this card: a `PluginContext` with no `getKernel`
  *     at all, which is byte-identically what the other suites in this package
- *     still mount. Remove the fix's input and the ex-member is admitted again,
- *     writes and all. A pin that cannot go red has measured nothing.
+ *     still mount. Remove the fix's input and the organization-less key is
+ *     admitted again (the capability `403`, not the posture `401`). A pin that
+ *     cannot go red has measured nothing.
+ *
+ * [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+ * access requires a current membership in the organization, judged on each
+ * request. The ex-member's refusal (`organization_membership_ended`) is that
+ * rule's, and it reads no posture: it stands under `single` (§7), with no
+ * `tenancy` service registered (§5) and with no kernel to read one from (§4).
+ * Only `organization_required` is keyed on the posture.
  *
  * §8 adds the walled-catalog rule (ADR-0131 D3, D12 items 7–8, D11): under
  * `isolated` and `group` a route that writes a datasource record admits only
@@ -510,28 +518,32 @@ describe('[#15350] §3 — an organization-less key under `isolated`', () => {
 // store are byte-identical to §2 and §3.
 // ---------------------------------------------------------------------------
 
-describe('[#15350] §4 — ablation: with no kernel to read the posture from, the admission returns', () => {
+describe('[#15350] §4 — ablation: with no kernel to read the posture from, the posture-keyed admission returns', () => {
   const ABLATED: Wiring = { kind: 'no-kernel' };
 
-  it('the ex-member is ADMITTED again — the list answers 200', async () => {
+  // [ADR-0093 D8.1, as amended] The membership rule reads no posture, so the
+  // ablation does not reach it: the ex-member's key is refused as in §2.
+  it('the membership rule reads no posture: the ex-member\'s list is still 401', async () => {
     const h = mount(ABLATED);
     const res = await listOf(h, RAW_EXMEMBER_KEY);
-    expect(res.status).toBe(200);
-    expect(res.body?.data?.datasources?.map((d: DatasourceRow) => d.name)).toEqual(['pg']);
+    expect(res.status).toBe(401);
+    expect(res.body?.error?.code).toBe('UNAUTHENTICATED');
   });
 
-  it('the ex-member WRITES again — POST 201 and the row LANDS in the store', async () => {
+  it('the membership rule reads no posture: the ex-member\'s CREATE is still 401 and nothing lands', async () => {
     const h = mount(ABLATED);
     const res = await createOf(h, RAW_EXMEMBER_KEY, 'ds_exmember');
-    expect(res.status).toBe(201);
-    expect(h.store().filter((r) => r.name === 'ds_exmember')).toHaveLength(1);
+    expect(res.status).toBe(401);
+    expect(h.store().filter((r) => r.name === 'ds_exmember')).toHaveLength(0);
+    expect(h.service.createDatasource).not.toHaveBeenCalled();
   });
 
-  it('the ex-member DELETES again — DELETE 204 and the row is GONE from the store', async () => {
+  it('the membership rule reads no posture: the ex-member\'s DELETE is still 401 and the row survives', async () => {
     const h = mount(ABLATED);
     const res = await removeOf(h, RAW_EXMEMBER_KEY);
-    expect(res.status).toBe(204);
-    expect(h.store().filter((r) => r.name === 'pg')).toHaveLength(0);
+    expect(res.status).toBe(401);
+    expect(h.store().filter((r) => r.name === 'pg')).toHaveLength(1);
+    expect(h.service.removeDatasource).not.toHaveBeenCalled();
   });
 
   it('the organization-less key is admitted again too — the capability 403, not the posture 401', async () => {
@@ -546,11 +558,14 @@ describe('[#15350] §4 — ablation: with no kernel to read the posture from, th
     expect(res.body?.error?.code).toBe('PERMISSION_DENIED');
   });
 
-  it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
+  it('the one refusal line is the membership rule\'s: no posture refusal is decided for the organization-less key', async () => {
     const h = mount(ABLATED);
     await listOf(h, RAW_EXMEMBER_KEY);
     await listOf(h, RAW_ORGLESS_KEY);
-    expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
+    const lines = h.warnings().filter((l) => l.includes('API key refused'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
+    expect(lines[0]).toContain('key=key_exmember');
   });
 
   it('NARROWNESS: the member and capability controls are UNCHANGED by the ablation', async () => {
@@ -573,13 +588,15 @@ describe('[#15350] §5 — a `tenancy` service that was NEVER REGISTERED resolve
     expect((await listOf(h, RAW_MEMBER_KEY)).status).toBe(200);
   });
 
-  it('and it runs NO posture-conditional refusal — behaviour is exactly what it was', async () => {
+  it('it runs no posture-conditional refusal, and the membership rule, which reads no posture, still refuses the ex-member', async () => {
     const h = mount(UNREGISTERED);
-    expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(200);
+    expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(401);
     // Admitted (the capability 403, not the posture 401): with no active
     // organization its owner's organization-owned grant applies nowhere.
     expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(403);
-    expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
+    const lines = h.warnings().filter((l) => l.includes('API key refused'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('organization_membership_ended');
   });
 });
 
@@ -632,9 +649,10 @@ describe('[#15350] §6 — the `group` posture, measured on the READ and the WRI
 
   it('the ex-member IS refused under `group` too — `postureEnforcesWall(\'group\')` is true', async () => {
     // ⚠️ The card records the `group` WRITE path as never measured. It is
-    // measured here: `organization_membership_ended` keys on
-    // `postureEnforcesWall`, which `group` satisfies, so the ex-member's
-    // stamped key is refused under `group` exactly as under `isolated`.
+    // measured here: `organization_membership_ended` is the membership rule's
+    // refusal, asked under every posture (ADR-0093 D8.1, as amended), so the
+    // ex-member's stamped key is refused under `group` exactly as under
+    // `isolated`.
     const h = mount(GROUP);
     expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(401);
     const post = await createOf(h, RAW_EXMEMBER_KEY, 'ds_group_exmember');
@@ -672,20 +690,25 @@ describe('[#15350] §6 — the `group` posture, measured on the READ and the WRI
 });
 
 // ---------------------------------------------------------------------------
-// §7 — `single`. The posture that enforces no wall admits everyone it did.
+// §7 — `single`. No wall between organizations, and the membership rule holds.
 // ---------------------------------------------------------------------------
 
-describe('[#15350] §7 — under `single` nothing changes', () => {
+describe('[#15350 · ADR-0093 D8.1] §7 — under `single`, a key is admitted only while its owner holds a membership in the organization it names', () => {
   const SINGLE: Wiring = { kind: 'posture', posture: 'single' };
 
-  it('every key is admitted, stamped or not', async () => {
+  it('the member\'s key is admitted, the ex-member\'s is refused, and the organization-less key meets the capability gate', async () => {
     const h = mount(SINGLE);
     expect((await listOf(h, RAW_MEMBER_KEY)).status).toBe(200);
-    expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(200);
+    expect((await listOf(h, RAW_EXMEMBER_KEY)).status).toBe(401);
+    const post = await createOf(h, RAW_EXMEMBER_KEY, 'ds_single_exmember');
+    expect(post.status).toBe(401);
+    expect(h.store().filter((r) => r.name === 'ds_single_exmember')).toHaveLength(0);
     // Admitted (the capability 403, not a posture 401): with no active
     // organization the `org_alpha` grant applies nowhere.
     expect((await listOf(h, RAW_ORGLESS_KEY)).status).toBe(403);
-    expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
+    const lines = h.warnings().filter((l) => l.includes('API key refused'));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((l) => l.includes('organization_membership_ended'))).toBe(true);
   });
 
   it('and the two non-posture refusals still stand', async () => {

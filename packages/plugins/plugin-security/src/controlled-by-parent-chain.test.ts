@@ -313,6 +313,9 @@ function fixtureRows(): Record<string, Row[]> {
       { id: REP, name: 'Rep' },
       { id: OTHER, name: 'Other' },
     ],
+    // ...and the delegator is a current member of the organization the
+    // delegated read runs in (ADR-0093 D8.1, as amended: under every posture).
+    sys_member: [{ user_id: OTHER, organization_id: 'org-1', role: 'member' }],
     ...chainRows('ok', OK_LINKS),
     ...chainRows('deep', DEEP_LINKS),
     sys_record_share: [
