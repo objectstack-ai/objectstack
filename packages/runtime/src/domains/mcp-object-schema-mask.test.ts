@@ -122,6 +122,9 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
             described: await settle(() => bridge.describeObject(OBJECT)),
             listed: await settle(() => bridge.listObjects()),
             options: await settle(() => bridge.optionFieldsOf(OBJECT)),
+            // The same caller's answers for a name nothing declares.
+            unknownDescribed: await settle(() => bridge.describeObject('no_such_object')),
+            unknownOptions: await settle(() => bridge.optionFieldsOf('no_such_object')),
         };
     }
 
@@ -135,6 +138,15 @@ describe('[ADR-0106] HTTP MCP bridge object-schema reads — the shared case tab
             const baseline = await readsUnder(undefined);
             const reads = await readsUnder(testCase);
             const expected = testCase.expect;
+            if (expected.kind === 'absent') {
+                // [ruling record 6787890900] Answered exactly as a name nothing
+                // declares, and left out of the listing.
+                expect(reads.described).toEqual(reads.unknownDescribed);
+                expect(reads.options).toEqual(reads.unknownOptions);
+                expect(reads.described.value).toBeNull();
+                expect((reads.listed.value as any[]).map((o) => o.name)).not.toContain(OBJECT);
+                return;
+            }
             if (expected.kind === 'fault') {
                 for (const read of [reads.described, reads.listed, reads.options]) {
                     expect(read.error, `${testCase.id}: refused, never served`).toBeDefined();
@@ -300,7 +312,13 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
         // …and both are the answer a deployment with no security service gets.
         const unsecured = await bridgeFor(kernelOver({ ...services, security: undefined }), PERSONAS.staff);
         expect(JSON.stringify(staff.describe)).toBe(JSON.stringify(await unsecured.bridge.describeObject(OBJ)));
-        expect(JSON.stringify(await staff.bridge.listObjects())).toBe(JSON.stringify(await unsecured.bridge.listObjects()));
+        // [ruling record 6787890900] …listed minus the objects the data plane
+        // refuses this member (a wildcard grant reaches no private object).
+        const everything: any[] = await unsecured.bridge.listObjects();
+        const readable: any[] = [];
+        for (const o of everything) if (await services.security.canReadObject(o.name, PERSONAS.staff)) readable.push(o);
+        expect(readable.map((o) => o.name)).toContain(OBJ);
+        expect(JSON.stringify(await staff.bridge.listObjects())).toBe(JSON.stringify(readable));
     });
 
     it('a member denied every field is refused on both doors, never served an object with no fields', async () => {
@@ -312,6 +330,155 @@ describe('[ADR-0106] HTTP MCP bridge and the /metadata object door agree — the
         expect({ code: listed?.code, status: listed?.status }).toEqual(REFUSED);
         const options = await rejectionOf(() => bridge.optionFieldsOf(OBJ));
         expect({ code: options?.code, status: options?.status }).toEqual(REFUSED);
+    });
+});
+
+describe('[ruling record 6787890900] an object the caller may not read does not exist on any schema door — the real security layer', () => {
+    const OBJ = 'mcp_vis_ledger';
+    /** A readable object whose reference field names {@link OBJ}. */
+    const REF = 'mcp_vis_ledger_line';
+    const SECRET = 'secret_margin';
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+    let allFields: string[];
+
+    const PERSONAS = {
+        /** Holds a read grant on {@link REF} only — none on {@link OBJ}. */
+        lines: { userId: 'usr_lines', positions: [] as string[], permissions: ['mcp_vis_lines'], systemPermissions: [] as string[] },
+        /** The same grant, and D4: served every object whole all the same. */
+        author: { userId: 'usr_author', positions: [] as string[], permissions: ['mcp_vis_lines'], systemPermissions: ['manage_metadata'] },
+        /** A read grant on both: the control. */
+        both: { userId: 'usr_both', positions: [] as string[], permissions: ['mcp_vis_both'], systemPermissions: [] as string[] },
+    } as const;
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.mcp-object-read-visibility',
+            name: 'MCP object read visibility',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [{
+                name: OBJ,
+                label: 'Ledger',
+                sharingModel: 'public_read_write',
+                fields: {
+                    title: { name: 'title', type: 'text', label: 'Title' },
+                    [SECRET]: { name: SECRET, type: 'currency', label: 'Secret margin' },
+                },
+            }, {
+                name: REF,
+                label: 'Ledger line',
+                sharingModel: 'public_read_write',
+                fields: {
+                    memo: { name: 'memo', type: 'text', label: 'Memo' },
+                    ledger: { name: 'ledger', type: 'lookup', reference: OBJ, label: 'Ledger' },
+                },
+            }],
+        } as never);
+        await engine.syncSchemas();
+        allFields = Object.keys((engine.getSchema(OBJ) as any).fields);
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const sets = [
+            PermissionSetSchema.parse({ name: 'mcp_vis_lines', label: 'Lines', objects: { [REF]: all } }),
+            PermissionSetSchema.parse({ name: 'mcp_vis_both', label: 'Both', objects: { [REF]: all, [OBJ]: all } }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        // The deployment's baseline set grants nothing on {@link OBJ}.
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'mcp_vis_lines' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    /** One persona's whole answer for `name`: the `/metadata` item and list, and the MCP reads. */
+    async function doorsFor(persona: Record<string, unknown>, name: string) {
+        const kernel = kernelOver(services);
+        const { bridge, dispatcher } = await bridgeFor(kernel, persona);
+        const ctx = { request: {}, environmentId: undefined, executionContext: { ...persona } } as any;
+        const item = await dispatcher.handleMetadata(`/object/${name}`, ctx, 'GET');
+        const list = await dispatcher.handleMetadata('/object', ctx, 'GET');
+        const listData = list.response?.body?.data;
+        return {
+            item: { status: item.response?.status, body: item.response?.body },
+            listed: ((Array.isArray(listData) ? listData : listData?.items) ?? []).map((o: any) => o?.name),
+            described: await bridge.describeObject(name),
+            options: await bridge.optionFieldsOf(name),
+            mcpListed: (await bridge.listObjects()).map((o: any) => o.name),
+        };
+    }
+
+    it('precondition: the data plane refuses the caller the object, and admits the control', async () => {
+        expect(await services.security.canReadObject(OBJ, PERSONAS.lines)).toBe(false);
+        expect(await services.security.canReadObject(REF, PERSONAS.lines)).toBe(true);
+        expect(await services.security.canReadObject(OBJ, PERSONAS.both)).toBe(true);
+    });
+
+    it('is answered on every door exactly as a name that names no object, and left out of every list', async () => {
+        const hidden = await doorsFor(PERSONAS.lines, OBJ);
+        const unknown = await doorsFor(PERSONAS.lines, 'mcp_vis_no_such_object');
+        expect(hidden.item.status).toBe(404);
+        expect(JSON.stringify(hidden.item.body)).toBe(JSON.stringify(unknown.item.body));
+        expect(hidden.described).toBeNull();
+        expect(hidden.described).toEqual(unknown.described);
+        expect(hidden.options).toEqual(unknown.options);
+        for (const listed of [hidden.listed, hidden.mcpListed]) {
+            expect(listed).not.toContain(OBJ);
+            expect(listed).toContain(REF);
+        }
+        expect(JSON.stringify(hidden).includes(SECRET)).toBe(false);
+    });
+
+    it('CONTROL — a readable object\'s reference field still names it', async () => {
+        const line = await doorsFor(PERSONAS.lines, REF);
+        expect(line.item.status).toBe(200);
+        expect(line.item.body.data.item.fields.ledger.reference).toBe(OBJ);
+        expect(line.described.fields.map((f: any) => f.name)).toContain('ledger');
+    });
+
+    it('CONTROL — an author with the same grant, and a member with a grant on it, are served it on every door', async () => {
+        for (const persona of [PERSONAS.author, PERSONAS.both]) {
+            const doors = await doorsFor(persona, OBJ);
+            expect(doors.item.status).toBe(200);
+            expect(Object.keys(doors.item.body.data.item.fields).sort()).toEqual([...allFields].sort());
+            expect(doors.described.fields.map((f: any) => f.name).sort()).toEqual([...allFields].sort());
+            expect(doors.listed).toContain(OBJ);
+            expect(doors.mcpListed).toContain(OBJ);
+        }
     });
 });
 
@@ -1191,5 +1358,157 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
         }
         // The system context's run writes.
         expect((await rowOf(`p_${PERSONAS.system.userId}_REST`))?.budget).toBe(7);
+    });
+});
+
+describe('[#32435] describe_object serves what a write needs, as the caller is served the object — the real security layer', () => {
+    const OBJ = 'mcp_write_leave';
+    const DENIED = 'secret_margin';
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+
+    const PERSONAS = {
+        /** Denied one field. */
+        member: { userId: 'usr_member', positions: [] as string[], permissions: ['mcp_write_member'], systemPermissions: [] as string[] },
+        /** Denied nothing: the control. */
+        staff: { userId: 'usr_staff', positions: [] as string[], permissions: ['mcp_write_staff'], systemPermissions: [] as string[] },
+    } as const;
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.mcp-describe-write-facts',
+            name: 'MCP describe write facts',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [{
+                name: OBJ,
+                label: 'Leave',
+                sharingModel: 'public_read_write',
+                fields: {
+                    subject: { name: 'subject', type: 'text', label: 'Subject', required: true },
+                    leave_type: {
+                        name: 'leave_type',
+                        type: 'select',
+                        label: 'Leave type',
+                        required: true,
+                        options: [{ value: 'annual', label: 'Annual', color: '#0a0' }, { value: 'sick', label: 'Sick' }],
+                        defaultValue: 'annual',
+                    },
+                    [DENIED]: { name: DENIED, type: 'currency', label: 'Margin' },
+                },
+                validations: [
+                    { type: 'script', name: 'subject_not_blank', condition: 'record.subject == ""', message: 'Subject must not be blank.' },
+                    {
+                        type: 'cross_field',
+                        name: 'margin_needs_subject',
+                        fields: [DENIED, 'subject'],
+                        condition: 'record.subject == null',
+                        message: 'A margin needs a subject.',
+                    },
+                    // Names the hidden field in its MESSAGE alone.
+                    { type: 'script', name: 'message_names_hidden', condition: 'record.subject == "x"', message: `Fill ${DENIED} first.` },
+                    { type: 'script', name: 'retired_rule', active: false, condition: 'record.subject == "y"', message: 'Retired.' },
+                ],
+            }],
+        } as never);
+        await engine.syncSchemas();
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const sets = [
+            PermissionSetSchema.parse({
+                name: 'mcp_write_member', label: 'Member', objects: { '*': all },
+                fields: { [`${OBJ}.${DENIED}`]: { readable: false, editable: false } },
+            }),
+            PermissionSetSchema.parse({ name: 'mcp_write_staff', label: 'Staff', objects: { '*': all } }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'mcp_write_staff' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    const describedFor = async (persona: Record<string, unknown>): Promise<any> =>
+        (await bridgeFor(kernelOver(services), persona)).bridge.describeObject(OBJ);
+    const field = (described: any, name: string) => described.fields.find((f: any) => f.name === name);
+    /** Does `name` occur in `text` as an identifier token? */
+    const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? ([] as string[])).includes(name);
+
+    it('a member denied a field is served options, defaults, readonly/system and the rule messages, and nothing of the field', async () => {
+        const described = await describedFor(PERSONAS.member);
+        expect(field(described, 'subject')).toEqual({
+            name: 'subject', type: 'text', label: 'Subject', required: true, readonly: false, system: false,
+        });
+        expect(field(described, 'leave_type')).toEqual({
+            name: 'leave_type',
+            type: 'select',
+            label: 'Leave type',
+            required: true,
+            readonly: false,
+            system: false,
+            options: [{ value: 'annual', label: 'Annual' }, { value: 'sick', label: 'Sick' }],
+            defaultValue: 'annual',
+        });
+        // An audit column the registry injects: never writable, and said so.
+        expect(field(described, 'created_at')).toMatchObject({ readonly: true, system: true });
+        expect(described.validations).toEqual([{
+            name: 'subject_not_blank',
+            type: 'script',
+            message: 'Subject must not be blank.',
+            severity: 'error',
+            events: ['insert', 'update'],
+            fields: [],
+        }]);
+        const text = JSON.stringify(described);
+        expect(mentions(text, DENIED)).toBe(false);
+        expect(text).not.toContain('record.');
+    });
+
+    it('CONTROL — an unrestricted member is served every active rule, the hidden-field ones included', async () => {
+        const described = await describedFor(PERSONAS.staff);
+        expect(described.fields.map((f: any) => f.name)).toContain(DENIED);
+        expect(described.validations.map((r: any) => r.name))
+            .toEqual(['subject_not_blank', 'margin_needs_subject', 'message_names_hidden']);
+        expect(described.validations[1].fields).toEqual([DENIED, 'subject']);
+        const text = JSON.stringify(described);
+        expect(mentions(text, 'retired_rule')).toBe(false);
+        expect(text).not.toContain('record.');
+        // …and it is the answer a deployment with no security service gets.
+        const unsecured = await bridgeFor(kernelOver({ ...services, security: undefined }), PERSONAS.staff);
+        expect(text).toBe(JSON.stringify(await unsecured.bridge.describeObject(OBJ)));
     });
 });

@@ -82,6 +82,13 @@ export interface EmailSenderSurface {
          * a hole with `TEMPLATE_INVALID` rather than guessing a currency.
          */
         currency?: string;
+        /**
+         * Structural mirror of `SendTemplateInput.callerPackageId` — the
+         * package the template name resolves from (ADR-0150 D3): the package
+         * whose own flow body sent the notification. Absent, the name keeps
+         * its bare-name meaning.
+         */
+        callerPackageId?: string;
     }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
     /**
      * Structural mirror of `IEmailService.renderTemplate` (#9225) — resolves a
@@ -99,11 +106,26 @@ export interface EmailSenderSurface {
         locale?: string;
         /** Same default currency as on `sendTemplate` (#26939). */
         currency?: string;
+        /** Same caller package as on `sendTemplate` (ADR-0150 D3). */
+        callerPackageId?: string;
     }): Promise<{ subject: string; html: string; text: string }>;
 }
 
 /** The input `EmailSenderSurface.sendTemplate` declares — the email channel builds it by name. */
 type TemplateSendInput = Parameters<NonNullable<EmailSenderSurface['sendTemplate']>>[0];
+
+/**
+ * [ADR-0150 D3, #31699] The package a delivery's template name resolves from:
+ * `payload.templateCallerPackageId`, which a flow's `notify` node writes beside
+ * `template` when the flow body it ran is a package's own. Absent (an
+ * environment-authored flow, a producer that names none, a delivery row
+ * snapshotted before the key existed), the send names no package and the name
+ * keeps its bare-name meaning.
+ */
+export function templateCallerPackageOf(payload: Record<string, unknown>): string | undefined {
+    const value = payload.templateCallerPackageId;
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
 
 export interface EmailChannelOptions {
     /**
@@ -499,6 +521,10 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                 // against the declared input, so a rename on either side fails
                 // to compile. No default currency sends no key (#27754).
                 if (currency) sendInput.currency = currency;
+                // [ADR-0150 D3, #31699] The package the template name resolves
+                // from, as the node that emitted it recorded it.
+                const callerPackageId = templateCallerPackageOf(payload);
+                if (callerPackageId) sendInput.callerPackageId = callerPackageId;
                 try {
                     const result = (await email.sendTemplate(sendInput)) as
                         | { id?: unknown; status?: unknown; error?: unknown }
@@ -526,6 +552,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                                 template: templateName,
                                 ...(data !== undefined ? { data } : {}),
                                 ...(templateLocale ? { locale: templateLocale } : {}),
+                                ...(callerPackageId ? { callerPackageId } : {}),
                                 currency: probe,
                             })),
                         ),

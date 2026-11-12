@@ -280,6 +280,19 @@ export interface SendTemplateInput {
    * row goes to `sys_identity_email`, and `organizationId` beside it is refused.
    */
   identityMail?: boolean;
+  /**
+   * The package the send is made from, which the template name resolves from
+   * (ADR-0150 D3): that package's own template, else the one holder in its
+   * declared dependency closure, else a refusal naming every candidate. A
+   * flow's `notify` node passes the package whose own flow body is armed; an
+   * environment-authored flow passes none.
+   *
+   * Omitted (or `null`), the send names no package and keeps the bare-name
+   * meaning: the environment's own template, else the one package holder,
+   * else a `409 RESOURCE_CONFLICT` refusal naming every holder. The auth mails
+   * the platform sends by name resolve environment-wide whatever is passed.
+   */
+  callerPackageId?: string | null;
 }
 
 /**
@@ -313,6 +326,11 @@ export interface RenderTemplateInput {
    * {@link SendTemplateInput.timezone}.
    */
   timezone?: string;
+  /**
+   * The package the render is made from. Same semantics as
+   * {@link SendTemplateInput.callerPackageId}.
+   */
+  callerPackageId?: string | null;
 }
 
 /**

@@ -613,6 +613,19 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         return;
                     }
 
+                    // [ruling record 6787890900] An object the caller may not
+                    // read is answered as a name with nothing behind it
+                    // ({@link sendMetaItemAbsent}, the one absence emitter),
+                    // before any fetch: no validator — `If-None-Match` or
+                    // `If-Modified-Since` — is ever judged for it, so no `304`
+                    // can say it exists. After the refusals above, which answer
+                    // every name alike; the layered branch's chain answers it
+                    // absent itself.
+                    if (maskPosture.kind === 'hidden') {
+                        sendMetaItemAbsent(res);
+                        return;
+                    }
+
                     // Check if cached version is available.
                     // For `app` metadata we skip the cache path so the
                     // per-user RBAC filter below can apply without

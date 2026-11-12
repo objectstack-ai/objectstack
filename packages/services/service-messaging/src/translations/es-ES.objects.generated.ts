@@ -28,15 +28,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificación",
-        help: "FK → sys_notification (el evento L2 que materializa esta fila)"
+        help: "La notificación que entrega este mensaje. Al marcar el mensaje como leído, se registra en esta notificación."
       },
       delivery_id: {
         label: "Entrega",
-        help: "FK → sys_notification_delivery (fila de outbox); nulo hasta P1"
+        help: "El registro de entrega de este mensaje. No se rellena en los mensajes en la aplicación."
       },
       actor_id: {
-        label: "Actor",
-        help: "Usuario que provocó el evento (quien menciona, quien asigna); misma semántica que sys_notification.actor_id. Permite que un cliente silencie sus propios acuses con una comparación puramente local. Nulo en una fila de resumen por construcción: un grupo colapsado no tiene un único actor."
+        label: "Activado por",
+        help: "La persona cuya acción generó esta notificación, por ejemplo quien mencionó o asignó al destinatario. Vacío cuando el mensaje agrupa varias notificaciones."
       },
       topic: {
         label: "Tema"
@@ -86,11 +86,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "La notificación cuyo estado registra este acuse."
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "El registro de entrega al que pertenece este acuse. Actualmente no se rellena."
       },
       user_id: {
         label: "Recipient User"
@@ -131,7 +131,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "La notificación que envía esta entrega."
       },
       recipient_id: {
         label: "Recipient",
