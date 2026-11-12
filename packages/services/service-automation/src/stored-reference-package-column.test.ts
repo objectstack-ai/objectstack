@@ -382,6 +382,21 @@ describe('#32183 — a disable moves no binding: R8–R11 ask every holder', () 
         expect(servedConnector('mailer', null, { includeDisabledPackages: true })?.status).toBe('refused');
     });
 
+    it('R10 at the trigger: the dispatch coordinates read every holder, as the re-key does; a disable moves no key', () => {
+        const coordinates = () => Object.fromEntries([PARKED, TWO_HOLDERS, REVERSED, ONE_HOLDER].map((name) => [name, automation.flowDispatchHolder(name)]));
+        const disabled = coordinates();
+        // The disabled D's own flow keeps its scope, the bare key claimed first.
+        expect(disabled[PARKED]).toEqual({ packageId: D, claimBare: true });
+        // A clash with one holder disabled keeps the collision guard: the bare key is never claimed.
+        expect(disabled[TWO_HOLDERS]).toEqual({ packageId: null, claimBare: false });
+        expect(disabled[REVERSED]).toEqual({ packageId: null, claimBare: false });
+        // CONTROL: re-enabled, every coordinate is the same.
+        registry.enablePackage(D);
+        registry.enablePackage(B);
+        expect(coordinates()).toEqual(disabled);
+        expect(disabled[ONE_HOLDER]).toEqual({ packageId: A, claimBare: true });
+    });
+
     it('R8, R9: a flow only a disabled package holds binds to it; a clash with one holder disabled stays null, both named', async () => {
         const engine = await boot();
         for (const [id, name] of [['r1', PARKED], ['r2', TWO_HOLDERS], ['r3', REVERSED]] as const) {

@@ -5897,11 +5897,13 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D8 row R10] The package of {@link flowHolder}'s answer when
+     * [ADR-0150 D8 row R9] The package of {@link flowHolder}'s answer when
      * one package holds `name`, else `null`: an environment-authored flow, a
      * flow registered straight into the engine, a name two packages hold and a
-     * name nothing holds all answer `null`, so their dispatch keys keep the
-     * bare shape. ⛔ No first-registered fallback: a refusal is `null`.
+     * name nothing holds all answer `null`. The credential channel's row stamp
+     * reads it (served, #32183); the dispatch key's coordinates read every
+     * holder ({@link flowDispatchHolder}). ⛔ No first-registered fallback: a
+     * refusal is `null`.
      */
     flowHolderPackage(name: string): string | null {
         const answer = this.flowHolder(name);
@@ -5938,9 +5940,15 @@ export class AutomationEngine implements IAutomationService {
             const slot = this.flowSlots.slot(name);
             if (slot) return { packageId: slot.packageId, claimBare: false, name: slot.name };
         }
-        const answer = this.flowHolder(name);
+        // [#32183] Over every holder, a disabled package's included
+        // (`durableFlowHolder`): a dispatch key names a row of the ledger, the
+        // row the re-key backfill scopes over every holder, and a disable is
+        // reversible, so it moves no key. A flow only a disabled package holds
+        // keeps that package's scope; a name an enabled and a disabled package
+        // hold keeps the collision guard, as on `main`.
+        const answer = this.durableFlowHolder(name);
         if (answer?.status === 'refused') return { packageId: this.armedFlowPackage(name) ?? null, claimBare: false };
-        return { packageId: this.flowHolderPackage(name), claimBare: true };
+        return { packageId: answer?.status === 'resolved' && answer.holder.kind === 'package' ? answer.holder.packageId : null, claimBare: true };
     }
 
     /**
