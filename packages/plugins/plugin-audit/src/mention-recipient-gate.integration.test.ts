@@ -300,6 +300,12 @@ describe('@mention notifications reach only mentioned users who can read the com
     it('treats an audience expansion as no mention at all', async () => {
       expect(audiences(await comment(openTask, ['role:member', `team:t1`, `owner_of:${TASK}:${openTask}`]))).toEqual([]);
     });
+
+    it('treats the organization-wide audience as no mention at all, on a record every member can read', async () => {
+      // [#32445] `org:members` expands to every member of the organization;
+      // the prefix list refuses it before any read is asked.
+      expect(audiences(await comment(openTask, ['org:members', 'user:org:members', 'org:anything']))).toEqual([]);
+    });
   });
 
   describe('group', () => {
@@ -379,6 +385,26 @@ describe('@mention notifications reach only mentioned users who can read the com
         { reason: 'cannot_read_thread', userId: DAVE.id, commentId },
       ]);
       expect(JSON.stringify(warned)).not.toContain(String(row.body));
+    });
+
+    it('[#32445] refuses the organization-wide audience by its prefix, before any read: `not_a_user`, no user id', async () => {
+      const commentId = String((await post(openTask, [])).id);
+      const warned: Array<{ message: string; meta?: Record<string, unknown> }> = [];
+      const admitted = await admitMentionRecipients(gate(warned), {
+        mentions: ['org:members', 'user:org:members', 'org:anything', CAROL.id],
+        threadId: `${TASK}:${openTask}`,
+        actorId: ALICE.id,
+        organizationId: ORG_A,
+        commentId,
+      });
+      expect(admitted).toEqual([CAROL.id]);
+      // The prefix list answers, as it does for role:/team:/owner_of: — not
+      // the per-recipient read, which would name the entry as a user id.
+      expect(warned.map((w) => w.meta)).toEqual([
+        { reason: 'not_a_user', commentId },
+        { reason: 'not_a_user', commentId },
+        { reason: 'not_a_user', commentId },
+      ]);
     });
 
     it('logs no unknown_email for a differently-cased address of a stored user', async () => {

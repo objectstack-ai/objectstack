@@ -31,6 +31,10 @@ import { MemoryRouter } from 'react-router-dom';
 // specifier. Loaded here, its cost lands in the import phase rather than inside
 // a `findBy` window (AGENTS.md, test discipline).
 import '@objectstack/spec/identity';
+// The page reaches `celAuthoring`'s dynamic `@objectstack/lint` import; its
+// first load is paid here, at collection, never inside a case's clock
+// (`check:test-source-alias`).
+import '@objectstack/lint';
 
 const PROJECT_PKG = 'com.example.showcase';
 const TYPE = 'permission';
@@ -283,5 +287,93 @@ describe('the Capabilities catalog page: the registry, read-only, with no switch
       expect(screen.queryByTestId(`catalog-active-${name}`)).toBeNull();
     }
     expect(requests.some((r) => /sys_metadata_activation|sys_capability/.test(r.url))).toBe(false);
+  });
+});
+
+describe('a permission set more than one package holds: one switch per holder (objectstack#32537)', () => {
+  const HELD_TWICE = [
+    { name: 'sales_rep', label: 'Sales Rep', _packageId: 'com.acme.crm', _provenance: 'package' },
+    { name: 'sales_rep', label: 'Sales Rep', _packageId: 'com.acme.sales', _provenance: 'package' },
+  ];
+  beforeEach(() => {
+    ITEMS.push(...HELD_TWICE);
+    ledgerRows = [
+      ...ledgerRows,
+      { metadata_type: 'permission', name: 'sales_rep', package_id: 'com.acme.crm', active: false },
+    ];
+  });
+  afterEach(() => {
+    ITEMS.splice(ITEMS.length - HELD_TWICE.length, HELD_TWICE.length);
+  });
+
+  const posts = () => requests.filter((r) => r.method === 'POST');
+
+  it("shows each holder's own state, and switches it through ?package= with the body unchanged", async () => {
+    doorAnswer = { status: 200, body: { success: true, data: { enabled: true } } };
+    mount('?scope=environment');
+    const crm = await screen.findByTestId('catalog-active-sales_rep@com.acme.crm');
+    expect(crm).toHaveAttribute('aria-checked', 'false');
+    // The row naming com.acme.crm does not switch com.acme.sales's set off.
+    expect(screen.getByTestId('catalog-active-sales_rep@com.acme.sales')).toHaveAttribute('aria-checked', 'true');
+    // CONTROL: a name with one holder keeps its by-name switch.
+    expect(screen.getByTestId('catalog-active-showcase_auditor')).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(crm);
+    await waitFor(() =>
+      expect(screen.getByTestId('catalog-active-sales_rep@com.acme.crm')).toHaveAttribute('aria-checked', 'true'),
+    );
+    expect(screen.getByTestId('catalog-active-sales_rep@com.acme.sales')).toHaveAttribute('aria-checked', 'true');
+    expect(posts()).toEqual([
+      {
+        url: '/api/v1/security/_activation/permission/sales_rep?package=com.acme.crm',
+        method: 'POST',
+        body: '{"enabled":true}',
+      },
+    ]);
+  });
+
+  it('switching one holder off asks first, then writes only that holder', async () => {
+    doorAnswer = { status: 200, body: { success: true, data: { enabled: false } } };
+    mount('?scope=environment');
+    fireEvent.click(await screen.findByTestId('catalog-active-sales_rep@com.acme.sales'));
+    const confirm = await screen.findByTestId('catalog-deactivate-confirm');
+    await waitFor(() => expect(confirm).not.toBeDisabled());
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(screen.getByTestId('catalog-active-sales_rep@com.acme.sales')).toHaveAttribute('aria-checked', 'false'),
+    );
+    expect(posts().map((p) => p.url)).toEqual(['/api/v1/security/_activation/permission/sales_rep?package=com.acme.sales']);
+    expect(screen.getByTestId('catalog-active-sales_rep@com.acme.crm')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it("a 409 naming the holders opens a pick; nothing more is sent until one is chosen, then that holder's write", async () => {
+    const said = 'Permission set "showcase_auditor" is held by more than one package; name one with ?package=.';
+    doorAnswer = {
+      status: 409,
+      body: {
+        success: false,
+        error: {
+          code: 'RESOURCE_CONFLICT',
+          message: said,
+          details: { candidates: [{ kind: 'package', packageId: PROJECT_PKG }, { kind: 'package', packageId: 'com.acme.crm' }] },
+        },
+      },
+    };
+    mount('?scope=environment');
+    fireEvent.click(await screen.findByTestId('catalog-active-showcase_auditor'));
+    const dialog = await screen.findByTestId('perm-holder-pick-dialog');
+    expect(dialog.textContent).toContain(said);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts()).toHaveLength(1);
+    expect(screen.queryByText(tFormat('engine.catalog.active.failed', 'en-US', { message: said }))).toBeNull();
+
+    doorAnswer = { status: 200, body: { success: true, data: { enabled: true } } };
+    fireEvent.click(screen.getByTestId(`perm-holder-pick-${PROJECT_PKG}`));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(posts()[1]).toEqual({
+      url: `/api/v1/security/_activation/permission/showcase_auditor?package=${PROJECT_PKG}`,
+      method: 'POST',
+      body: '{"enabled":true}',
+    });
   });
 });

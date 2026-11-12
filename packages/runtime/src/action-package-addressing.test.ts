@@ -364,6 +364,80 @@ describe('[#31697 review F4] the bare REST door reads the by-name read\'s refusa
 });
 
 /**
+ * [#32183] A disabled package holds no name, and the rung's read answers a
+ * package-scoped refusal as the declared 409.
+ *
+ * BASE (main de141e32): a caller whose closure holds the name twice, one
+ * package disabled, was refused naming both; a refusal the protocol's
+ * execution read threw was swallowed as `degraded`. No door on main makes
+ * that read throw one for an `action` (the type is outside the protocol's
+ * package-scoped reads), so the second half is pinned by function.
+ */
+describe('#32183 — the route rung judges the served holders and answers a thrown refusal as 409', () => {
+    it('a closure holding the name twice, one package disabled: the enabled holder\'s declaration, and its handler', async () => {
+        install(A);
+        install(B);
+        install(P, [A, B]);
+        ship(A);
+        ship(B);
+        bind(A);
+        bind(B);
+        expect((await resolve(P)).refusal).toMatchObject({ reason: 'ambiguous-in-closure' });
+        engine.registry.disablePackage(B);
+        const declaration = await resolve(P);
+        expect(declaration.refusal).toBeUndefined();
+        expect(declaration).toMatchObject({ action: { label: 'alpha' }, packageId: A });
+        expect((await executeRegisteredAction(deps, engine, OBJECT, ['approve'], {}, declaration.packageId)).result).toBe(`ran ${A}`);
+    });
+
+    it('a caller outside both closures is refused naming the enabled holder only', async () => {
+        install(A);
+        install(B);
+        install(P);
+        ship(A);
+        ship(B);
+        engine.registry.disablePackage(B);
+        const declaration = await resolve(P);
+        expect(declaration.refusal).toMatchObject({ reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }] });
+    });
+
+    const readThrowing = (thrown: unknown) => {
+        deps = {
+            ...deps,
+            resolveService: (async (_ctx: unknown, name: string) => (name === 'protocol'
+                ? { getMetaItemForExecution: async () => { throw thrown; } }
+                : undefined)) as any,
+        } as ActionExecutionDeps;
+    };
+
+    it('a package-scoped refusal the execution read throws is the declaration\'s refusal (409), never `degraded`', async () => {
+        install(A);
+        install(P, [A]);
+        ship(A);
+        const refusal = {
+            status: 'refused' as const, reason: 'ambiguous-in-environment' as const, type: 'action' as const, name: 'approve',
+            callerPackageId: null, candidates: [{ kind: 'package' as const, packageId: A }, { kind: 'package' as const, packageId: B }],
+            message: 'The action "approve" is held by 2 packages',
+        };
+        readThrowing(new PackageScopedNameRefusedError(refusal));
+        const declaration = await resolve(P);
+        expect(declaration.degraded).toBeUndefined();
+        expect(declaration.action).toBeUndefined();
+        expect(declaration.refusal).toEqual(refusal);
+    });
+
+    it('CONTROL — any other throw of the read stays `degraded`', async () => {
+        install(A);
+        install(P, [A]);
+        ship(A);
+        readThrowing(new Error('loader offline'));
+        const declaration = await resolve(P);
+        expect(declaration).toMatchObject({ degraded: true, reason: 'loader offline' });
+        expect(declaration.refusal).toBeUndefined();
+    });
+});
+
+/**
  * [#32244, ADR-0150 D3] The by-name read naming no package of an action name
  * two packages hold on ANY object key — two objects, or one — is refused
  * naming each package with its object (`409 RESOURCE_CONFLICT`); it served the

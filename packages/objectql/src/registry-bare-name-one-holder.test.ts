@@ -608,6 +608,66 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       expect(registry.resolvePicklistOptions('p1', 'com.acme.alpha')?.map((o) => o.value)).toEqual(['alpha_one', 'extra']);
     });
 
+    // [#32183, ADR-0150 D3] The arrival judge reads every holder, a disabled
+    // package's included, as the field verdict (`picklistReferenceVerdict`)
+    // does: a reversible disable of the installed holder must not let a second
+    // namespace's list in that the field verdict then finds ambiguous. Without
+    // it the served `before` is not-found for q's field, the reference is
+    // skipped as refused already, the list is admitted and the field silently
+    // loses its options.
+    describe.each([
+      ['alpha installed, beta arriving', 'com.acme.alpha', 'com.acme.beta'],
+      ['beta installed, alpha arriving', 'com.acme.beta', 'com.acme.alpha'],
+    ])('[#32183] a disabled holder is still a holder for the arrival judge (%s)', (_order, installed, arriving) => {
+      const q = () => pkg('com.acme.q', {}, {
+        dependencies: { [installed]: '^1.0.0', [arriving]: '^1.0.0' }, ...fieldOn('q_item'),
+      });
+      const upgrade = () => pkg(arriving, { picklist: ['p1'] }, { version: '1.1.0' });
+      const refusalWith = async (disabled: boolean) => {
+        const booted = await boot([pkg(installed, { picklist: ['p1'] }), pkg(arriving), q()]);
+        if (disabled) booted.registry.disablePackage(installed);
+        return { ...booted, err: await booted.register(upgrade()) };
+      };
+
+      it('an upgrade adding the list is refused exactly as with the holder enabled, naming the field and both holders', async () => {
+        const enabled = await refusalWith(false);
+        expect(enabled.err, 'the upgrade was refused with the holder enabled').toBeDefined();
+        const { registry, err } = await refusalWith(true);
+        expect(err, 'the upgrade was refused with the holder disabled').toBeDefined();
+        expect(err!.message).toBe(enabled.err!.message);
+        expect(err!.message).toContain("field 'q_item.s' (package 'com.acme.q') references picklist 'p1'");
+        expect(err!.message).toContain(`package "${installed}"`);
+        expect(err!.message).toContain(`package "${arriving}"`);
+        expect(registry.getPackage(arriving)?.manifest?.version, 'the installed version stays').toBe('1.0.0');
+        expect(registry.packageScopedHoldersOf('picklist', 'p1', null, { includeDisabledPackages: true })).toEqual([installed]);
+      });
+
+      it('an installed extension of the list: a late install of the arriving package\'s list is refused alike', async () => {
+        const run = async (disabled: boolean) => {
+          const booted = await boot([pkg(installed, { picklist: ['p1'] }), extension('com.acme.gamma')]);
+          if (disabled) booted.registry.disablePackage(installed);
+          return { ...booted, err: await booted.register(pkg(arriving, { picklist: ['p1'] })) };
+        };
+        const enabled = await run(false);
+        expect(enabled.err, 'refused with the holder enabled').toBeDefined();
+        const { registry, err } = await run(true);
+        expect(err, 'refused with the holder disabled').toBeDefined();
+        expect(err!.message).toBe(enabled.err!.message);
+        expect(err!.message).toContain("a `picklistExtensions` entry (package 'com.acme.gamma') extends picklist 'p1'");
+        expect(registry.getPackage(arriving), 'nothing of it registered').toBeUndefined();
+      });
+
+      it('CONTROL: the field verdict resolves the disabled holder\'s list, and the served read does not', async () => {
+        const { registry } = await boot([pkg(installed, { picklist: ['p1'] }), pkg(arriving), q()]);
+        registry.disablePackage(installed);
+        const verdict = registry.picklistReferenceVerdict('p1', 'com.acme.q');
+        expect(verdict.status).toBe('resolved');
+        expect((verdict as { holder: Holder }).holder).toEqual({ kind: 'package', packageId: installed });
+        expect(resolvePackageScopedName(registry, { type: 'picklist', name: 'p1', callerPackageId: 'com.acme.q' }).status)
+          .toBe('not-found');
+      });
+    });
+
     // [#31700, epic seat ruling R2-A 6812862622] Every way a list, an extension
     // or a field's reference arrives after the seal meets the registry's one
     // re-judge (`SchemaRegistry.judgePicklistArrival`), the whole arrival

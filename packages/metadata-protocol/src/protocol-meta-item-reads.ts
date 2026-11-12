@@ -83,7 +83,13 @@ export function packageScopedRefusalOf(error: unknown): PackageScopedRefusal | u
 
 /** The registry reads {@link refuseActionHeldByPackages} counts an action name's holders with. */
 interface ActionHolderRegistry {
-    packageScopedHoldersOf(type: string, name: string): string[];
+    /** [#32183] The served holders; `options.includeDisabledPackages` asks for every holder. */
+    packageScopedHoldersOf(
+        type: string,
+        name: string,
+        callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
     getPackageScopedItem(type: string, name: string, packageId: string): unknown;
     isPackageDisabled?(packageId: string): boolean;
     getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
@@ -340,7 +346,11 @@ export async function servedFromDisabledHolder(
 ): Promise<boolean> {
     if (storedItemPackageId(data) !== undefined) return false;
     const registry = actionHolderRegistry(host);
-    const disabled = (registry?.packageScopedHoldersOf('action', name) ?? []).filter((id) => isDisabledHolder(registry, id));
+    // [#32183] Every holder, a disabled package's included: the served
+    // holders leave a disabled package out, and this read asks which disabled
+    // holder's slot the answer came from.
+    const disabled = (registry?.packageScopedHoldersOf('action', name, null, { includeDisabledPackages: true }) ?? [])
+        .filter((id) => isDisabledHolder(registry, id));
     for (const packageId of disabled) {
         const atHolder = (await host.readItemFromMetadataService('action', name, packageId)).data;
         if (atHolder !== undefined && atHolder !== null && sameStoredItem(atHolder, data)) return true;

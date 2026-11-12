@@ -224,6 +224,10 @@ const STUDIO_ZH: Record<string, string> = {
     '副本已保存在软件包 {package} 中，与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
   'perm.clone.notice.inCreatedPackage':
     '副本已保存在软件包 {package} 中：这个软件包是为存放你对原权限集所在软件包的修改而创建的。副本与原权限集并存而不是替换它，并随该软件包一起分发。副本是在本系统中新建的权限集，与被复制的权限集没有任何关联：对那个权限集的更改不会影响它。未复制：委派管理范围（`adminScope`）和全员基线建议（`isDefault`）——如副本需要，请在副本上有意授予。副本目前还没有任何持有者：请把它加入某个岗位，或分配给用户。',
+  'perm.holder.pick.title': '哪个软件包的 {name}？',
+  'perm.holder.pick.hint': '请选择本次操作针对哪个软件包的权限集。',
+  'perm.holder.pick.package': '软件包 {package}',
+  'perm.holder.pick.environment': '本环境自己的权限集',
   'perm.save.locked':
     '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改用「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，升级会继续流向这个基线。',
   // Designer wrapper
