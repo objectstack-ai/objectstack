@@ -1518,13 +1518,33 @@ function readAnalyticsErrorEnvelope(body: unknown): { code?: string; message?: s
  */
 const ANALYTICS_ABSENT_STATUSES: readonly number[] = [404, 501];
 
+/** How a dataset query addresses a saved dataset name by package (ADR-0150). */
+interface DatasetQueryAddressOptions {
+  /** The exact qualifier `?package=` (ADR-0150 D5): that package's dataset, or a refusal. */
+  packageId?: string;
+  /**
+   * The caller arm `?callerPackage=` (ADR-0150 D3): the package of the item
+   * that names the dataset. The server resolves the name for that reader, its
+   * own dataset first, then the unique holder in its dependency closure plus
+   * `sys`, else `409` naming the candidates.
+   */
+  callerPackage?: string;
+}
+
 /**
- * The package a dataset query is read from, sent as `?package=` (ADR-0150 D5):
- * the caller's package, and only with a saved dataset NAME. An inline draft
- * names no saved item, so it is read with no package.
+ * The package query parameters a dataset query carries, in the order the
+ * server reads them, and only with a saved dataset NAME: an inline draft names
+ * no saved item, so it is sent with neither. An empty value sends nothing, so
+ * the read stays caller-less. Both arms set are both sent, and the server
+ * refuses the pair `400`: which one the caller meant is not guessed here.
  */
-function datasetQueryPackage(dataset: Record<string, unknown> | string, packageId: string | undefined): string | undefined {
-  return typeof dataset === 'string' && typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+function datasetQueryAddress(dataset: Record<string, unknown> | string, options: DatasetQueryAddressOptions | undefined): string {
+  if (typeof dataset !== 'string') return '';
+  const params = new URLSearchParams();
+  if (typeof options?.packageId === 'string' && options.packageId !== '') params.set('package', options.packageId);
+  if (typeof options?.callerPackage === 'string' && options.callerPackage !== '') params.set('callerPackage', options.callerPackage);
+  const query = params.toString();
+  return query === '' ? '' : `?${query}`;
 }
 
 /**
@@ -7500,20 +7520,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   flag passes it: the Studio canvas. When the option is absent, the page
    *   URL decides (see the body).
    *
-   *   `packageId` names the package a saved dataset is read from, sent as
-   *   `?package=` (ADR-0150 D5): the exact qualifier the server reads with
-   *   `/meta`'s meaning, that package's dataset or a refusal naming the
-   *   holders. It is the package of the item that references the dataset (the
-   *   dashboard, report or view as served), and it is sent only with a saved
-   *   dataset NAME: an inline draft names no saved item. A caller with no
-   *   package leaves it out and the read stays caller-less. A `409
+   *   `callerPackage` names the package of the item that references a saved
+   *   dataset (the dashboard, report or view as served), sent as
+   *   `?callerPackage=` (ADR-0150 D3): the server resolves the name for that
+   *   reader, its own dataset, else the unique holder in its dependency
+   *   closure plus `sys`, else a refusal naming the candidates. `packageId`
+   *   is the exact qualifier `?package=` (ADR-0150 D5): that package's
+   *   dataset, or a refusal naming the holders. Either is sent only with a
+   *   saved dataset NAME: an inline draft names no saved item. A caller with
+   *   no package leaves both out and the read stays caller-less. A `409
    *   RESOURCE_CONFLICT` is thrown as it came, with the server's sentence that
    *   names every candidate; it is never retried bare.
    */
   async queryDataset(
     dataset: Record<string, unknown> | string,
     selection: DatasetSelection,
-    options?: { previewDrafts?: boolean; packageId?: string },
+    options?: { previewDrafts?: boolean } & DatasetQueryAddressOptions,
   ): Promise<{
     rows: Array<Record<string, unknown>>;
     /**
@@ -7579,9 +7601,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     totals?: Array<{ dimensions: string[]; rows: Array<Record<string, unknown>> }>;
   }> {
     await this.connect();
-    const packageId = datasetQueryPackage(dataset, options?.packageId);
-    const url = `${this.baseUrl}/api/v1/analytics/dataset/query`
-      + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
+    const url = `${this.baseUrl}/api/v1/analytics/dataset/query${datasetQueryAddress(dataset, options)}`;
     const requestBody = datasetQueryBody(dataset, selection, datasetPreviewDrafts(options?.previewDrafts));
 
     const res = await this.fetchImpl(url, {
@@ -7660,11 +7680,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *
    * What a batch request can carry decides how the queries are sent:
    *
-   * - The batch URL's `?package=` and `?preview=` are read once for every
-   *   query, so one request carries one package. `packageId` is the package
-   *   of every saved dataset name here; an inline draft names no saved item
-   *   and goes without one, as the single door sends it. Queries with no
-   *   package and queries with one go in separate requests.
+   * - The batch URL's `?callerPackage=`, `?package=` and `?preview=` are
+   *   read once for every query, so one request carries one caller.
+   *   `callerPackage` (or `packageId`) addresses every saved dataset name
+   *   here; an inline draft names no saved item and goes without one, as the
+   *   single door sends it. Queries with no package and queries with one go
+   *   in separate requests, and so do two callers.
    * - At most `DATASET_QUERY_BATCH_MAX_QUERIES` queries go in one request;
    *   more go in several, sent side by side.
    * - A request carrying one query is the single door's own request.
@@ -7677,21 +7698,24 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    */
   async queryDatasetBatch(
     queries: readonly DatasetBatchQuery[],
-    options?: { previewDrafts?: boolean; packageId?: string },
+    options?: { previewDrafts?: boolean } & DatasetQueryAddressOptions,
   ): Promise<DatasetBatchOutcome[]> {
     const outcomes = new Array<DatasetBatchOutcome>(queries.length);
-    // Group by the package each query is read from, keeping each query's index.
+    // Group by the package address each query is sent with, keeping each query's index.
     const groups = new Map<string, number[]>();
     queries.forEach((query, index) => {
-      const key = datasetQueryPackage(query.dataset, options?.packageId) ?? '';
+      const key = datasetQueryAddress(query.dataset, options);
       const group = groups.get(key);
       if (group) group.push(index); else groups.set(key, [index]);
     });
     const requests: Promise<void>[] = [];
-    for (const [packageKey, indexes] of groups) {
+    for (const [address, indexes] of groups) {
+      // A group with no address is the inline drafts' (or a caller with no
+      // package): it is sent with neither arm.
+      const addressed = address === '' ? undefined : options;
       for (let at = 0; at < indexes.length; at += DATASET_QUERY_BATCH_MAX_QUERIES) {
         const chunk = indexes.slice(at, at + DATASET_QUERY_BATCH_MAX_QUERIES);
-        requests.push(this.sendDatasetQueryBatch(queries, chunk, packageKey || undefined, options?.previewDrafts, outcomes));
+        requests.push(this.sendDatasetQueryBatch(queries, chunk, addressed, options?.previewDrafts, outcomes));
       }
     }
     await Promise.all(requests);
@@ -7703,19 +7727,22 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
   /**
    * One request of {@link queryDatasetBatch}: the queries at `indexes`, all
-   * read from `packageId`, settled into `outcomes` at their own indexes.
+   * sent with `address`, settled into `outcomes` at their own indexes.
    */
   private async sendDatasetQueryBatch(
     queries: readonly DatasetBatchQuery[],
     indexes: readonly number[],
-    packageId: string | undefined,
+    address: DatasetQueryAddressOptions | undefined,
     previewDrafts: boolean | undefined,
     outcomes: DatasetBatchOutcome[],
   ): Promise<void> {
     const viaSingleDoor = () => Promise.all(indexes.map(async (index) => {
       const { dataset, selection } = queries[index];
       try {
-        outcomes[index] = { status: 'fulfilled', value: await this.queryDataset(dataset, selection, { previewDrafts, packageId }) };
+        outcomes[index] = {
+          status: 'fulfilled',
+          value: await this.queryDataset(dataset, selection, { previewDrafts, packageId: address?.packageId, callerPackage: address?.callerPackage }),
+        };
       } catch (reason) {
         outcomes[index] = { status: 'rejected', reason };
       }
@@ -7730,8 +7757,9 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     try {
       await this.connect();
       const drafts = datasetPreviewDrafts(previewDrafts);
-      const url = `${this.baseUrl}/api/v1/analytics/dataset/query/batch`
-        + (packageId !== undefined ? `?package=${encodeURIComponent(packageId)}` : '');
+      // Every query of one request shares its address, so the first one's
+      // reading is the request's (an inline draft's group carries none).
+      const url = `${this.baseUrl}/api/v1/analytics/dataset/query/batch${datasetQueryAddress(queries[indexes[0]].dataset, address)}`;
       const res = await this.fetchImpl(url, {
         method: 'POST',
         headers: {

@@ -110,7 +110,8 @@ async function mountBridges(deps: {
   });
   await plugin.init(ctx);
   (plugin as any).authManager = {
-    handleRequest: deps.handleRequest,
+    // [#32637] The bridges delegate through the manager's vendor entry.
+    handleVendorRequest: deps.handleRequest,
     getApi: async () => ({
       getSession: async ({ headers }: { headers: Headers }) => deps.getSession(headers),
     }),

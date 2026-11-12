@@ -127,6 +127,12 @@ export type RecentItemInput =
 interface RecentItemsContextValue {
   recentItems: RecentItem[];
   addRecentItem: (item: RecentItemInput) => void;
+  /**
+   * Drops the entry whose `id` this is (`package:<id>`, …) — for a target this
+   * tab KNOWS is gone, such as a package it just deleted (objectstack#32615).
+   * An id the list does not hold changes nothing and writes nothing.
+   */
+  removeRecentItem: (id: string) => void;
   clearRecentItems: () => void;
 }
 
@@ -326,13 +332,22 @@ export function RecentItemsProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
+  const removeRecentItem = useCallback(
+    (id: string) => {
+      const prev = itemsRef.current;
+      if (!prev.some(r => r.id === id)) return;
+      commit(prev.filter(r => r.id !== id));
+    },
+    [commit],
+  );
+
   const clearRecentItems = useCallback(() => {
     commit([]);
   }, [commit]);
 
   const value = useMemo<RecentItemsContextValue>(
-    () => ({ recentItems, addRecentItem, clearRecentItems }),
-    [recentItems, addRecentItem, clearRecentItems],
+    () => ({ recentItems, addRecentItem, removeRecentItem, clearRecentItems }),
+    [recentItems, addRecentItem, removeRecentItem, clearRecentItems],
   );
 
   return (
@@ -359,6 +374,7 @@ export function useRecentItems(): RecentItemsContextValue {
     return {
       recentItems: [],
       addRecentItem: () => {},
+      removeRecentItem: () => {},
       clearRecentItems: () => {},
     };
   }

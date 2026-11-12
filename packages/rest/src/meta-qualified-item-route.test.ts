@@ -801,6 +801,69 @@ describe('#32183 × #32310 — the caller arm judges the served holders', () => 
 });
 
 /**
+ * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name`, its `/layers` and
+ * its `/published`, judged over every holder, on this transport too: a package-less item the
+ * environment's store holds no row of (the platform's) beside a package's is
+ * refused naming both, and beside two packages' it is named with them; one
+ * enabled holder answers though a disabled package registered first.
+ *
+ * BASE (main 89d815c5): 200 with the platform's item; 409 naming the two
+ * packages only; 200 with no item (and the DISABLED package's body on `/layers`).
+ */
+describe('#32365 — the bare action read weighs the package-less holder and serves the one enabled holder', () => {
+    const shipAction = (packageId: string | undefined, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId?.split('.').pop() ?? 'platform', type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
+    const PUBLISHED = '/api/v1/meta/:type/:name/published';
+    const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
+
+    it('the platform\'s item on `contact` beside A\'s on `account`: 409 naming A and the platform, on the item read, `/layers` and `/published`', async () => {
+        shipAction(A, 'account');
+        shipAction(undefined, 'contact');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer), answer.body?.details?.candidates], JSON.stringify(answer.body))
+            .toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), { kind: 'platform' }]]);
+        expect(messageOf(answer)).toContain('The platform\'s item binds it to object "contact"');
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect([layers.status, codeOf(layers)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        // `/layers` and `/published` carry the refusal's text, not its candidates.
+        const published = await drive(PUBLISHED, { type: 'action', name: 'approve' });
+        expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(published)).toContain(`package "${A}"`);
+        expect(messageOf(published)).toContain(PLATFORM);
+    });
+
+    it('beside two packages\' on two objects: 409 naming both packages and the package-less holder', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        shipAction(undefined, 'lead');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, answer.body?.details?.candidates], JSON.stringify(answer.body))
+            .toEqual([409, [pkg(A), pkg(B), { kind: 'platform' }]]);
+        for (const door of [LAYERS, PUBLISHED]) {
+            const refused = await drive(door, { type: 'action', name: 'approve' });
+            expect([refused.status, codeOf(refused)], `${door} ${JSON.stringify(refused.body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+            for (const holder of [`package "${A}"`, `package "${B}"`, PLATFORM]) expect(messageOf(refused), door).toContain(holder);
+        }
+    });
+
+    it('a disabled package registered before the one enabled holder: both doors answer the enabled holder', async () => {
+        shipAction(B, 'contact');
+        shipAction(A, 'account');
+        registry.disablePackage(B);
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, labelOf(answer)], JSON.stringify(answer.body)).toEqual([200, 'alpha']);
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+        expect(JSON.stringify(layers.body)).toContain('"label":"alpha"');
+        expect(JSON.stringify(layers.body)).not.toContain('"label":"beta"');
+    });
+});
+
+/**
  * [#32501, ADR-0150 D5, epic red line 2] An exact address reads one package,
  * and its answer names that package: its envelope (`_packageId`) and, on
  * `/layers`, its body. Never the package that registered the name first.

@@ -11,7 +11,7 @@
  * it registers.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
 import type { ObjectQL } from './engine.js';
@@ -202,6 +202,56 @@ describe('the picklist boot audit — a list only the environment holds (ADR-015
     expect(ql.registry.findOutsideClosurePicklistReferences()).toEqual([
       expect.objectContaining({ object: 'pb_account', field: 'industry', packageId: 'com.test.boot.app' }),
     ]);
+  });
+});
+
+/**
+ * [ADR-0150 D3, child E6; #31700] Two namespaces may each hold one list name:
+ * an owner and an extender that write one field's reference, each reaching
+ * its OWN namespace's list, disagree. The field is served no options (no
+ * referrer is preferred), every referrer resolves so neither audit above
+ * names it, and the boot warns once, naming each referrer and the list it
+ * reaches. A refused reference, never a refused boot (ruling N2).
+ */
+describe('the picklist boot audit — referrers that reach different lists (#31700)', () => {
+  const TIER = (value: string) => ({ name: 'tier', label: 'Tier', options: [{ label: value, value }] });
+  const MEMBER = { name: 'pb_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'tier' } } };
+  const EXTENSION = { extend: 'pb_member', fields: { tier: { name: 'tier', type: 'select', picklist: 'tier' } } };
+  const bootWarnings = (kernel: ObjectKernel) =>
+    vi.spyOn((kernel as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger, 'warn');
+  const disagreement = (warn: ReturnType<typeof bootWarnings>) =>
+    warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('resolve that name to different lists'));
+
+  it('boots, serving the field no options, and warns once naming each referrer and the list it reaches', async () => {
+    const { kernel, use } = kernelWith(
+      new ObjectQLPlugin(),
+      registering('alpha', [{ id: 'com.acme.alpha', name: 'alpha', namespace: 'alpha', picklists: [TIER('gold')], objects: [MEMBER] }]),
+      registering('beta', [{ id: 'com.beta.ext', name: 'ext', namespace: 'beta', picklists: [TIER('silver')], objectExtensions: [EXTENSION] }]),
+    );
+    const warn = bootWarnings(kernel);
+    await use();
+    await kernel.bootstrap();
+    expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_member', 'tier')).toEqual([]);
+    const warnings = disagreement(warn);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("Field 'pb_member.tier' is served with no options and refuses every value");
+    expect(warnings[0]).toContain('package \'com.acme.alpha\' reaches the list of package "com.acme.alpha"');
+    expect(warnings[0]).toContain('package \'com.beta.ext\' reaches the list of package "com.beta.ext"');
+  });
+
+  it('CONTROL — the extender depending on the owner and holding no list of its own: served, no warning', async () => {
+    const { kernel, use } = kernelWith(
+      new ObjectQLPlugin(),
+      registering('alpha', [{ id: 'com.acme.alpha', name: 'alpha', namespace: 'alpha', picklists: [TIER('gold')], objects: [MEMBER] }]),
+      registering('beta', [{
+        id: 'com.beta.ext', name: 'ext', namespace: 'beta', dependencies: { 'com.acme.alpha': '^1.0.0' }, objectExtensions: [EXTENSION],
+      }]),
+    );
+    const warn = bootWarnings(kernel);
+    await use();
+    await kernel.bootstrap();
+    expect(servedValues(kernel.getService<ObjectQL>('objectql'), 'pb_member', 'tier')).toEqual(['gold']);
+    expect(disagreement(warn)).toEqual([]);
   });
 });
 

@@ -7,19 +7,16 @@
  *
  * ## What is broken without it
  *
- * A permission set is identified by `(package, name)` (ADR-0150 D4), so
- * ADR-0150 gives the grant the key `(user_id, permission_set,
- * permission_set_package, organization_id)`: one user may hold both packages'
- * sets of one name in one organization. `permission_set_package` is NULL on
- * every grant of a set the environment authored, the platform registered, or
- * two packages hold with no binding yet (the column's documented "empty", never
- * a sentinel), and a SQL UNIQUE treats NULLs as distinct, so for exactly those
- * grants that key constrains nothing. The key it replaces, `(user_id,
- * permission_set, organization_id)`, holds them to one. Two of them would grant
- * the same set twice, and a revoke that deletes one would leave the other
- * granting. This index lands before the grant's declared key is widened; while
- * the declared key is still the three-column one, that key refuses everything
- * this index would.
+ * A permission set is identified by `(package, name)` (ADR-0150 D4), so the
+ * grant's declared key is `(user_id, permission_set, permission_set_package,
+ * organization_id)`: one user may hold both packages' sets of one name in one
+ * organization. `permission_set_package` is NULL on every grant of a set the
+ * environment authored, the platform registered, or two packages hold with no
+ * binding yet (the column's documented "empty", never a sentinel), and a SQL
+ * UNIQUE treats NULLs as distinct, so for exactly those grants the declared key
+ * constrains nothing. The key it replaced, `(user_id, permission_set,
+ * organization_id)`, held them to one. Two of them would grant the same set
+ * twice, and a revoke that deletes one would leave the other granting.
  *
  * ## Why THIS route
  *

@@ -21,6 +21,7 @@ import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupa
 import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
+import { composeRedactionSeal } from '../../utils/audit-redaction-seal.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -145,6 +146,8 @@ export default class MigrateAuditMetadataBodies extends Command {
       printStep(apply ? 'Booting data stack (APPLY mode)…' : 'Booting data stack (dry run)…');
     }
 
+    // [ADR-0154 D7] The crypto `os serve` seals with, so a sealed row is amended before it is rewritten.
+    const redaction = await composeRedactionSeal();
     let stack;
     try {
       // [#21349] The dry run boots READ-ONLY — the same boot `os migrate plan`
@@ -155,7 +158,7 @@ export default class MigrateAuditMetadataBodies extends Command {
       stack = await bootSchemaStack({
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
-        extraPlugins: await buildDataMigrationPlugins({ audit: true }),
+        extraPlugins: [...(await buildDataMigrationPlugins({ audit: true })), ...redaction.plugins],
         ...(apply ? {} : { deferSchemaDdl: true, readOnlyProbe: true }),
       });
     } catch (error: any) {
@@ -204,12 +207,12 @@ export default class MigrateAuditMetadataBodies extends Command {
         update: (object, data, options) => engine.update(object, data, options),
       };
 
-      const report = await migrateStoredMetadataBodyCopies(readView, logger, { apply });
+      const report = await migrateStoredMetadataBodyCopies(readView, logger, { apply, seal: redaction.seal(stack.kernel, engine) });
 
       if (flags.json) {
         reads.notice(true);
         await emitJson({ database: stack.dbLabel, apply, report, duration: timer.elapsed() });
-        if (report.failures > 0) this.exit(1);
+        if (report.failures > 0 || report.refused > 0) this.exit(1);
         return;
       }
 
@@ -217,26 +220,30 @@ export default class MigrateAuditMetadataBodies extends Command {
       reads.notice(false);
       console.log('');
       for (const [object, stats] of Object.entries(report.byObject)) {
-        console.log(`  ${chalk.white(object)}: ${stats.scanned} scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}`);
+        console.log(
+          `  ${chalk.white(object)}: ${stats.scanned} scanned, ${stats.rewritten} ${apply ? 'rewritten' : 'to rewrite'}` +
+            (stats.refused > 0 ? `, ${stats.refused} sealed and refused` : ''),
+        );
       }
       console.log('');
 
+      if (report.refused > 0) printError(redaction.refusedLine(report.refused));
       if (report.failures > 0) {
         printError(`${report.failures} row(s) could not be rewritten — re-run to finish them.`);
       } else if (apply && report.rewritten > 0) {
         printSuccess(
           `Rewrote ${report.rewritten} audit/activity/decision row(s). Re-run any time — it only revisits rows still carrying a body or a hash.`,
         );
-      } else if (apply) {
+      } else if (apply && report.refused === 0) {
         printSuccess('Nothing to rewrite — no audit/activity/decision row carries a stored metadata body or content hash.');
-      } else if (report.rewritten > 0) {
+      } else if (!apply && report.rewritten > 0) {
         printInfo(`Dry run only — ${report.rewritten} row(s) would be rewritten. Re-run with --apply.`);
-      } else {
+      } else if (report.refused === 0) {
         printSuccess('Nothing to rewrite — no audit/activity/decision row carries a stored metadata body or content hash.');
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
-      if (report.failures > 0) this.exit(1);
+      if (report.failures > 0 || report.refused > 0) this.exit(1);
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

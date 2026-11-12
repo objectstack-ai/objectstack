@@ -21,7 +21,9 @@
  * template `m31693_notice`: two namespaces' holders of one agent, one skill,
  * one object-less action and one email template name, which the one-holder
  * rule no longer calls a clash (#31701, #31697, #31699; ADR-0150 D2/D9), so
- * the sealed-clash section never lists them.
+ * the sealed-clash section never lists them; nor the picklist `m31693_tone`
+ * they both declare (#31700). The clash the seal still records is the tool
+ * `m31693_lookup` both declare: a tool name is held once per deployment.
  *
  * Over a database an older release left: two managed `sys_sharing_rule` rows
  * naming `m31693_share` (two holders: ambiguous) and `m31693_only_a` (one
@@ -92,12 +94,17 @@ const rule = (name: string) => ({
   accessLevel: 'read', sharedWith: { type: 'user', value: 'u1' }, active: true,
 });
 const list = (name: string) => ({ name, label: name, options: [{ label: 'One', value: 'one' }] });
-/** The agent, the skill (#31701), the object-less action (#31697) and the email template (#31699) A and B both declare, in their own namespaces. */
+/**
+ * The agent, the skill (#31701), the object-less action (#31697) and the email
+ * template (#31699) A and B both declare, in their own namespaces; and the
+ * tool, whose name is still held once per deployment: the sealed clash.
+ */
 const ai = (tag: string) => ({
   agents: [{ name: 'm31693_helper', label: `${tag} helper`, role: `${tag} role`, instructions: `${tag} helper instructions` }],
   skills: [{ name: 'm31693_triage', label: `${tag} triage`, description: `${tag} triage`, instructions: `${tag} triage instructions`, tools: [] }],
   actions: [{ name: 'm31693_digest', label: `${tag} digest`, type: 'script', body: { language: 'js', source: `return '${tag}';`, capabilities: [] } }],
   emailTemplates: [{ name: 'm31693_notice', label: `${tag} notice`, locale: 'en-US', subject: `${tag} notice`, bodyHtml: `<p>${tag}</p>`, active: true }],
+  tools: [{ name: 'm31693_lookup', label: `${tag} lookup`, description: `${tag} lookup`, parameters: { type: 'object', properties: {} } }],
 });
 const pkgA = {
   manifest: {
@@ -299,8 +306,10 @@ describe('os migrate stored-references (the report)', () => {
       d8: 'R17', object: 'm31693a_task', field: 'hue', packageId: A, name: 'm31693_hue', reason: 'outside-closure',
       candidates: [{ holder: 'package', packageId: C, address: 'm31693c/m31693_hue' }],
     }]);
-    // [#31701, #31697, #31699] Only the picklist: never the agent, the skill, the object-less action and the email template A and B hold in two namespaces.
-    expect(payload.sealedClashes).toEqual([{ type: 'picklist', name: 'm31693_tone', candidates: [`package "${A}"`, `package "${B}"`] }]);
+    // [#31701, #31697, #31699, #31700] Only the tool: never the agent, the
+    // skill, the object-less action, the email template and the picklist A
+    // and B hold in two namespaces.
+    expect(payload.sealedClashes).toEqual([{ type: 'tool', name: 'm31693_lookup', candidates: [`package "${A}"`, `package "${B}"`] }]);
     // The served platform carries no automation or approvals table here: named, not silently skipped.
     expect(payload.tablesNotCarried).toEqual(expect.arrayContaining(['sys_automation_run', 'sys_flow_credential', 'sys_approval_request']));
   }, CASE_TIMEOUT_MS);
