@@ -22,7 +22,7 @@ import {
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
-import { GENERATOR_SCAFFOLD_TARGETS } from './generate.js';
+import { GENERATOR_SCAFFOLD_TARGETS, barrelExportLine } from './generate.js';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -858,6 +858,32 @@ function starterObjectImport(namespace: string): string {
   return `import ${toCamelCase(namespace)}Item from '../objects/${namespace}_item.object';`;
 }
 
+/**
+ * The starter object's barrel, `src/objects/index.ts`: the line
+ * `os g object <namespace>_item` would append, read off the generator rather
+ * than restated (#32393), so the barrel re-exports the object by name exactly
+ * as every barrel line `os g object` writes beside it does.
+ */
+function starterObjectExport(namespace: string): string {
+  return `${barrelExportLine('object', `${namespace}_item`, `./${namespace}_item.object`).line}\n`;
+}
+
+/**
+ * The comment above the starter object's declaration. The object is written
+ * in the style `os g object` writes (#32393): `Field.*` builders, and the
+ * binding exported by name. The default export stays beside it — the starter
+ * app and list view import it, and `scaffold-object-declaration-shape.test.ts`
+ * holds every `*.object.ts` door to a default export of the declared binding.
+ */
+function starterObjectExportsNote(importers: readonly string[]): string {
+  return [
+    '// Exported by name, the binding src/objects/index.ts re-exports, the way',
+    '// `objectstack generate object` exports each object it writes. The default',
+    `// export at the bottom is the one ${importers.length === 1 ? 'this file imports' : 'these files import'}:`,
+    ...importers.map((file) => `//   ${file}`),
+  ].join('\n');
+}
+
 /** The plural label the starter app and list view show the starter object under. */
 function starterObjectPlural(namespace: string): string {
   return `${toTitleCase(namespace)} Items`;
@@ -996,11 +1022,11 @@ ${renderWiredStackKeys()}
 });
 `,
     srcFiles: withWiredBarrels({
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
-`,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
+      'src/objects/index.ts': (_name, namespace) => starterObjectExport(namespace),
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item = ObjectSchema.create({
+${starterObjectExportsNote(['src/apps/main.app.ts', `src/views/${namespace}_item.view.ts`])}
+export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   // Field groups: the sections an item's form and detail page draw, top to
@@ -1015,19 +1041,18 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
     { key: 'details', label: 'Details' },
   ],
   fields: {
-    name: {
-      type: 'text',
+    // Each field through a \`Field.*\` builder (Field.textarea, Field.select,
+    // Field.lookup, …), the way \`objectstack generate object\` writes them.
+    name: Field.text({
       label: 'Name',
       required: true,
       group: 'details',
-    },
-    description: {
-      type: 'textarea',
+    }),
+    description: Field.textarea({
       label: 'Description',
       group: 'details',
-    },
-    status: {
-      type: 'select',
+    }),
+    status: Field.select({
       label: 'Status',
       options: [
         { label: 'Draft', value: 'draft' },
@@ -1036,7 +1061,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
       ],
       defaultValue: 'draft',
       group: 'details',
-    },
+    }),
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
@@ -1158,19 +1183,20 @@ ${renderWiredStackKeys()}
 });
 `,
     srcFiles: withWiredBarrels({
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
-`,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
+      'src/objects/index.ts': (_name, namespace) => starterObjectExport(namespace),
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item = ObjectSchema.create({
+${starterObjectExportsNote([`src/views/${namespace}_item.view.ts`])}
+export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {
-    name: {
-      type: 'text',
+    // Each field through a \`Field.*\` builder (Field.textarea, Field.select,
+    // Field.lookup, …), the way \`objectstack generate object\` writes them.
+    name: Field.text({
       label: 'Name',
       required: true,
-    },
+    }),
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing

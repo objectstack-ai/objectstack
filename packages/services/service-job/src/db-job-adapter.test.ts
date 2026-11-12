@@ -140,13 +140,11 @@ describe('DbJobAdapter', () => {
     expect(runs.map((r) => r.jobId)).toEqual(['third', 'second', 'first']);
   });
 
-  it('replay tags a synthetic run as replay trigger', async () => {
+  it('replay tags its run as replay trigger — one row, not a second beside a `schedule` one', async () => {
     await adapter.schedule('rj', { type: 'cron', expression: '* * * * *' }, async () => {});
     await adapter.replay('rj');
     const runs = engine.tables.get('sys_job_run') ?? [];
-    // One synthetic replay run + one wrapped success run from inner trigger
-    const triggers = runs.map((r) => r.trigger).sort();
-    expect(triggers).toEqual(['replay', 'schedule']);
+    expect(runs.map((r) => r.trigger)).toEqual(['replay']);
   });
 });
 
@@ -299,7 +297,8 @@ describe('DbJobAdapter — recordRuns (#9631)', () => {
     await adapter.trigger('on');
     const runs = engine.tables.get('sys_job_run') ?? [];
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ job_name: 'on', trigger: 'schedule', status: 'success' });
+    // `trigger()` is a manual run, and the row says so.
+    expect(runs[0]).toMatchObject({ job_name: 'on', trigger: 'manual', status: 'success' });
   });
 
   // ─── the fifth case that stood here is GONE, by design ───
@@ -323,7 +322,9 @@ describe('DbJobAdapter — recordRuns (#9631)', () => {
 // with no non-replay rows beside them for context. The carve-out was an
 // artifact of `replay` being written to solve a different problem (#5548's
 // synthetic row forces the `trigger: 'replay'` tag), never a designed exception,
-// so it is closed rather than documented (the ruling on #9633).
+// so it is closed rather than documented (the ruling on #9633). Since then
+// the synthetic row is gone altogether: the replay's own per-attempt row is
+// tagged `replay`, so `startRun` has one call site and one gate.
 //
 // ⚠️ Nothing in this package referenced `recordRuns` in ANY direction before
 // #9631 — the flag could have stopped being honoured entirely and the suite
@@ -331,8 +332,8 @@ describe('DbJobAdapter — recordRuns (#9631)', () => {
 // each flag-off case asserts the execution REALLY RAN (handler counter plus the
 // `sys_job` counters, which the flag deliberately does not gate) alongside the
 // "no rows" assertion, so "0 rows" cannot pass for a job that never ran; and
-// the flag-on cases assert the synthetic row reached a TERMINAL status, so
-// over-gating the three `finishRun` arms — a dangling `running` half-row, worse
+// the flag-on cases assert the replay row reached a TERMINAL status, so
+// over-gating its settle — a dangling `running` half-row, worse
 // than either original state — goes red instead of silently passing "a row
 // exists".
 describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
@@ -363,9 +364,8 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
 
     await adapter.replay('quiet');
 
-    // The discriminator: neither the synthetic replay row nor the wrapped
-    // per-attempt row is written. Ungated, this table holds a `trigger:
-    // 'replay'` row here.
+    // The discriminator: the replay's per-attempt row is not written.
+    // Ungated, this table holds a `trigger: 'replay'` row here.
     expect(runs()).toHaveLength(0);
     // …and the execution really happened, so "0 rows" cannot be passing for a
     // job that never ran. `bumpJob` is called outside the row gate by design.
@@ -398,11 +398,11 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
     expect(job().failure_count).toBe(1);
   });
 
-  it('recordRuns: false — the catch arm writes nothing and still rethrows', async () => {
+  it('recordRuns: false — an inner call that rejects writes nothing and still rethrows', async () => {
     const adapter = makeAdapter({ recordRuns: false });
     await adapter.schedule('boom', { type: 'cron', expression: '* * * * *' }, async () => {});
-    // `executeJob` swallows a handler throw, so the catch arm is unreachable
-    // through the handler — the inner call itself has to reject for it to run.
+    // `executeJob` swallows a handler throw, so a rejection cannot come
+    // through the handler — the inner call itself has to reject.
     const inner = (adapter as any).inner;
     inner.trigger = async () => { throw new Error('inner exploded'); };
 
@@ -411,21 +411,21 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
     expect(runs()).toHaveLength(0);
   });
 
-  it('default recordRuns — the synthetic replay row is still written, and SETTLED', async () => {
+  it('default recordRuns — the replay row is still written, and SETTLED', async () => {
     const adapter = makeAdapter(); // no options at all: the flag defaults to true
     await adapter.schedule('loud', { type: 'cron', expression: '* * * * *' }, async () => {});
 
     await adapter.replay('loud');
 
-    // The #5548 tag survives the gate: one synthetic replay row beside the
-    // wrapped run the execution itself produced.
+    // The #5548 tag survives the gate: the replay is one run, so one row,
+    // tagged `replay` — no second row beside it.
     const replayRows = runs().filter((r: any) => r.trigger === 'replay');
     expect(replayRows).toHaveLength(1);
-    // Terminal, not left `running` — this is what goes red if the three
-    // `finishRun` arms are over-gated along with `startRun`.
+    // Terminal, not left `running` — this is what goes red if the settle is
+    // over-gated along with `startRun`.
     expect(replayRows[0].status).toBe('success');
     expect(replayRows[0].completed_at).toBeTruthy();
-    expect(runs().map((r: any) => r.trigger).sort()).toEqual(['replay', 'schedule']);
+    expect(runs().map((r: any) => r.trigger)).toEqual(['replay']);
   });
 
   it('recordRuns: true — the replay row still carries the terminal status of the inner execution', async () => {
@@ -436,9 +436,10 @@ describe('DbJobAdapter — replay() honours recordRuns (#9633)', () => {
 
     await adapter.replay('sour');
 
+    expect(runs()).toHaveLength(1);
     const replayRows = runs().filter((r: any) => r.trigger === 'replay');
     expect(replayRows).toHaveLength(1);
-    // #7734: read off the inner execution, not assumed `success`.
+    // #7734: the run's real terminal status, not assumed `success`.
     expect(replayRows[0].status).toBe('failed');
     expect(replayRows[0].error).toBe('replayed and failed');
     expect(replayRows[0].completed_at).toBeTruthy();
@@ -510,5 +511,143 @@ describe('DbJobAdapter — readArming (#25235)', () => {
     engine.find = async () => { throw new Error('no such table: sys_job'); };
     await expect(adapter.readArming('flow-schedule:nightly')).rejects.toThrow('no such table: sys_job');
     await adapter.destroy();
+  });
+});
+
+// ─── the trigger a run row records is the trigger of the call that ran it ────
+//
+// `sys_job_run.trigger` is documented as `schedule | manual | replay`, and the
+// `sys_job_run` object says the field tells "whether the run was a manual
+// trigger or a scheduled tick". The wrapper used to fix the value when the job
+// was SCHEDULED, so every row it wrote said `schedule`: a manual `trigger()`
+// read as a scheduled tick, and a `replay()` landed two rows — its own
+// `replay` row beside the wrapper's `schedule` one. Pinned on both
+// assemblies, because they hand the wrapper to different callers: with a cron
+// adapter the elected scheduler fires one registration and `inner` serves
+// `trigger()` / `replay()`; without one, `inner` fires the timer AND serves the
+// manual calls through the very same wrapper, so only a value read per call can
+// tell them apart there.
+describe('DbJobAdapter — a run row records the trigger of the call that ran it', () => {
+  const TICK = 60_000;
+  const adapters: DbJobAdapter[] = [];
+  afterEach(async () => {
+    vi.useRealTimers();
+    while (adapters.length) await adapters.pop()!.destroy();
+  });
+
+  const assemblies = [
+    ['with a cron adapter (the elected scheduler fires the tick)', () => new CronJobAdapter()],
+    ['without one (inner owns the timer and the manual calls)', () => undefined],
+  ] as const;
+
+  const build = (cron?: CronJobAdapter) => {
+    const engine = makeFakeEngine();
+    const adapter = new DbJobAdapter({ engine, cron });
+    adapters.push(adapter);
+    const runs = () => engine.tables.get('sys_job_run') ?? [];
+    return { engine, adapter, runs };
+  };
+
+  for (const [label, makeCron] of assemblies) {
+    describe(label, () => {
+      it('a scheduled tick writes `schedule`', async () => {
+        vi.useFakeTimers();
+        const { adapter, runs } = build(makeCron());
+        await adapter.schedule('job', { type: 'interval', intervalMs: TICK }, async () => {});
+
+        await vi.advanceTimersByTimeAsync(TICK);
+        expect(runs()).toHaveLength(1);
+        expect(runs()[0]).toMatchObject({ job_name: 'job', trigger: 'schedule', status: 'success' });
+      });
+
+      it('`trigger()` writes `manual`', async () => {
+        vi.useFakeTimers();
+        const { adapter, runs } = build(makeCron());
+        await adapter.schedule('job', { type: 'interval', intervalMs: TICK }, async () => {});
+
+        await adapter.trigger('job');
+        await vi.advanceTimersByTimeAsync(TICK);
+        // The manual run, then the next tick of the same registration.
+        expect(runs().map((r) => r.trigger)).toEqual(['manual', 'schedule']);
+      });
+
+      it('`replay()` writes ONE row, `replay`, settled to the run\'s status', async () => {
+        const { adapter, runs } = build(makeCron());
+        await adapter.schedule('job', { type: 'interval', intervalMs: TICK }, async () => {
+          throw new Error('replayed and failed');
+        });
+
+        await adapter.replay('job');
+        expect(runs()).toHaveLength(1);
+        expect(runs()[0]).toMatchObject({
+          job_name: 'job',
+          trigger: 'replay',
+          status: 'failed',
+          error: 'replayed and failed',
+          attempt: 1,
+        });
+        expect(runs()[0].completed_at).toBeTruthy();
+      });
+    });
+  }
+
+  it('a replayed handler is told `manual` and the id of the replay row', async () => {
+    // The handler's context keeps the contract's two values (`replay()` runs
+    // through `trigger()`); the row is where `replay` is recorded, and the run
+    // id the handler records beside its own work names that row.
+    const { adapter, runs } = build();
+    const seen: unknown[] = [];
+    await adapter.schedule('job', { type: 'cron', expression: '0 0 1 1 *' }, async (ctx) => { seen.push(ctx); });
+
+    await adapter.replay('job', { key: 'val' });
+    expect(runs()).toHaveLength(1);
+    expect(seen).toEqual([{ jobId: 'job', data: { key: 'val' }, trigger: 'manual', runId: runs()[0].id }]);
+  });
+
+  it('every attempt of a retried replay is a `replay` row', async () => {
+    const { adapter, runs } = build();
+    let calls = 0;
+    await adapter.schedule('job', { type: 'cron', expression: '0 0 1 1 *' }, async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('first attempt fails');
+    }, { retryPolicy: { maxRetries: 1, backoffMs: 1, jitter: false } });
+
+    await adapter.replay('job');
+    expect(runs().map((r) => [r.trigger, r.attempt, r.status])).toEqual([
+      ['replay', 1, 'failed'],
+      ['replay', 2, 'success'],
+    ]);
+  });
+
+  it('the `replay` tag belongs to the replayed run alone — not to a run it starts, nor to the next call', async () => {
+    const { adapter, runs } = build();
+    await adapter.schedule('other', { type: 'cron', expression: '0 0 1 1 *' }, async () => {});
+    await adapter.schedule('job', { type: 'cron', expression: '0 0 1 1 *' }, async () => {
+      await adapter.trigger('other');
+    });
+
+    await adapter.replay('job');
+    await adapter.trigger('job');
+    expect(runs().map((r) => [r.job_name, r.trigger])).toEqual([
+      ['job', 'replay'],
+      ['other', 'manual'],
+      ['job', 'manual'],
+      ['other', 'manual'],
+    ]);
+  });
+
+  it('a job re-scheduled while its replay guard is consulted still replays as `replay`', async () => {
+    // The re-schedule replaces the wrapper `inner` holds; the tag must name
+    // the wrapper the replay actually runs, not the one it found first.
+    const { adapter, runs } = build();
+    const schedule = { type: 'cron', expression: '0 0 1 1 *' } as const;
+    await adapter.schedule('job', schedule, async () => {});
+    adapter.setReplayGuard('job', async () => {
+      await adapter.schedule('job', schedule, async () => {});
+      return { allow: true };
+    });
+
+    await adapter.replay('job');
+    expect(runs().map((r) => r.trigger)).toEqual(['replay']);
   });
 });

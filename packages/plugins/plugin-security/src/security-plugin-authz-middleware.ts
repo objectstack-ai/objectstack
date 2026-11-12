@@ -103,7 +103,10 @@ import { crossFieldClassRefusalCarriedBy, findCrossFieldClassRefusal } from '@ob
 import { declaredHttpStatus } from '@objectstack/types';
 import type { SecurityPlugin } from './security-plugin.js';
 import { isGuestEnvelope, readUnlessRefused, requiredCapsForOperation } from './security-plugin.js';
-import { assertFlowSystemIdentityWriteAllowed } from './flow-system-identity-write-refusal.js';
+import {
+  assertAppAutomationAppendOnlyWriteAllowed,
+  assertFlowSystemIdentityWriteAllowed,
+} from './flow-system-identity-write-refusal.js';
 import { delegatedUnitReadScope, isUnreadableAddressedRowRefusal } from './delegated-admin-gate.js';
 import { isRowWriteProbe, logGateRefusal, type AuthzMiddlewareFn } from './record-row-write-probe.js';
 import {
@@ -527,6 +530,14 @@ export function registerAuthzMiddleware(
     // `isSystem`. Every other system write, and every read, passes on to the
     // bypass unchanged. See `flow-system-identity-write-refusal.ts`.
     assertFlowSystemIdentityWriteAllowed(opCtx);
+    // [Ruling record 6787890900] The same elevation, judged by the same
+    // predicate, does not change or delete an append-only object's rows: a
+    // ledger is written by the platform service that owns it. The bucket is
+    // read off the live registry, and only for an elevation the predicate
+    // names. See `flow-system-identity-write-refusal.ts`.
+    assertAppAutomationAppendOnlyWriteAllowed(opCtx, (object) =>
+      typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined,
+    );
 
     // System operations bypass security
     if (opCtx.context?.isSystem) {

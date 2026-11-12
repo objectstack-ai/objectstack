@@ -843,9 +843,10 @@ export async function absentUnderCallerRead(read: () => Promise<unknown>): Promi
  * both "cannot read": neither gives the caller the record, so neither may let
  * an explanation say it exists. A store fault propagates, as in
  * {@link absentUnderCallerRead}. Only the classification of a refusal differs
- * from that predicate, and only for a third-party asker: a principal
- * explaining itself keeps the write path's notion, so its explanation shows
- * what its own doors do.
+ * from that predicate. [Ruling of record 6787890900] A principal explaining
+ * itself is asked the same read through {@link readUnlessRefused}, three ways,
+ * so a refused read is "cannot read" for it too and is answered for every
+ * record id alike, with the refusal as its decider.
  */
 export async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
   const answer = await readUnlessRefused(read);
@@ -2485,8 +2486,12 @@ export class SecurityPlugin implements Plugin {
    * explained user's: a caller the read door does not return the record to is
    * answered exactly as for an id no row carries. [#22851, ruling C] A caller
    * explaining ANOTHER user whose read of the record is refused (a declared
-   * 4xx) is answered so too; a caller explaining itself keeps the write path's
-   * notion (no row), so its explanation shows what its own doors do.
+   * 4xx) is answered so too. [Ruling of record 6787890900] A caller explaining
+   * itself whose read of the object is refused gets the same explanation for
+   * every record id: the missing record's, with the layer that refused the
+   * read as its decider (omitted when no read layer names the refusal). A
+   * self-explanation is told by the request (no other user named), whatever
+   * kind of principal the caller is.
    *
    * The request is the contract's `ExplainAccessRequest` itself, so the
    * method's declared type carries every member the body honours, the batch

@@ -368,6 +368,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
@@ -562,6 +563,7 @@ export {
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  GRID_AGGREGATION_FIELD_TYPE_REFUSED,
 } from './validate-sortable-fields.js';
 export type {
   SortableFieldFinding,

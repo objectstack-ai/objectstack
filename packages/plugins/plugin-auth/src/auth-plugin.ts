@@ -105,6 +105,7 @@ import { registerUserLocaleCaseFold } from './sys-user-locale-case.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
 import { registerExternalMembershipGuard } from './external-membership.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
+import { backfillScimProvisionedIdentitySource } from './scim-identity-source.js';
 import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js';
 import { runSetInitialPassword } from './set-initial-password.js';
 import { createEngineSsoProviderConfigReader, runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runSetSsoAttributeMapping, runSetSsoGroupsClaim, runShowSsoAttributeMapping, runShowSsoGroupsClaim, runSsoProviderDeleteImpact, runUpdateSsoProviderFromForm, runVerifyDomain, type AuthRequestHandler, type SsoProviderConfigEngine } from './register-sso-provider.js';
@@ -1903,13 +1904,18 @@ export class AuthPlugin implements Plugin {
     }
 
     // Identity-source provenance for accounts created OUTSIDE better-auth's
-    // `databaseHooks` — @better-auth/scim creates `sys_account` at the adapter
-    // level, which BYPASSES `account.create.after` / `stampIdentitySource`. This
-    // ObjectQL `afterInsert` hook stamps `source=idp_provisioned` regardless of
-    // the creation path, so SCIM-provisioned users are correctly marked as the
-    // managed mirror (cloud ADR-0024 D4 / cloud ADR-0071 verification #1). It mirrors the
+    // `databaseHooks` — an adapter-level `sys_account` insert BYPASSES
+    // `account.create.after` / `stampIdentitySource`. This ObjectQL
+    // `afterInsert` hook stamps `source=idp_provisioned` for a federated
+    // account regardless of the creation path (ADR-0135 D4). It mirrors the
     // federated branch of `stampIdentitySource`, is idempotent, and never breaks
     // the insert. Complementary to (not a replacement for) the OAuth-path stamp.
+    //
+    // SCIM is NOT stamped here: @better-auth/scim keeps its directory links in
+    // its own tables and writes no `sys_account` row. A SCIM-provisioned user
+    // is marked on the vendor's `identity.reconcileUser` callback
+    // (`AuthManager#reconcileScimUserLifecycle`), and users provisioned before
+    // that by the boot backfill below — `scim-identity-source.ts` holds both.
     ctx.hook('kernel:ready', async () => {
       try {
         // Use the kernel's ObjectQL engine (available + hookable at kernel:ready);
@@ -1941,43 +1947,77 @@ export class AuthPlugin implements Plugin {
           } catch (e) {
             // Provenance must never break account creation — the sys_account
             // insert still stands. [#12981] It must not be SILENT either: this
-            // hook is the only stamp on the SCIM path, so nothing re-runs it.
+            // hook is the only stamp on the adapter-level account-create path,
+            // so nothing re-runs it.
             ctx.logger.error(
-              '[auth] the SCIM identity-source stamp was NOT written — the sys_account row was '
-                + 'created and provisioning reports success, so nothing looks wrong. The user '
-                + 'keeps their previous `source`, so a SCIM-provisioned identity still reading '
-                + '`env_native` is offered the password / identity-edit actions that are supposed '
-                + 'to hide for a managed identity (cloud ADR-0024 D4) — the path by which a '
-                + 'managed user self-mints a local password that bypasses enforced SSO. '
-                + 'better-auth\'s `account.create.after` is bypassed by adapter-level creates, so '
-                + 'this hook is the ONLY stamp on that path and nothing retries it: the row stays '
-                + 'mis-stamped until the user is re-provisioned. Remedy: make the sys_user update '
-                + 'land (write permission on `source`, driver connectivity), then re-run the SCIM '
-                + 'sync for this user.',
+              '[auth] the adapter-level identity-source stamp was NOT written — the sys_account row '
+                + 'was created and the caller saw success, so nothing looks wrong. The user keeps '
+                + 'their previous `source`, so a federated identity still reading `env_native` is '
+                + 'offered the password / identity-edit actions that are supposed to hide for a '
+                + 'managed identity (ADR-0135 D4) — the path by which a managed user self-mints a '
+                + 'local password that bypasses enforced SSO. better-auth\'s `account.create.after` '
+                + 'is bypassed by adapter-level creates, so this hook is the only stamp on that path '
+                + 'and nothing retries it: the row stays mis-stamped until the account is linked '
+                + 'again. Remedy: make the sys_user update land (write permission on `source`, '
+                + 'driver connectivity), then re-link the account.',
               e instanceof Error ? e : undefined,
               { object: 'sys_user', field: 'source' },
             );
           }
         }, { packageId: 'com.objectstack.plugin-auth' });
-        ctx.logger.info('Identity-source afterInsert stamp registered on sys_account (SCIM-safe)');
+        ctx.logger.info('Identity-source afterInsert stamp registered on sys_account (adapter-level creates)');
       } catch (e) {
         // [#12981] Was: "Engine not available — skip". That is one of the two
         // things this catch actually sees, and the quiet one; `registerHook`
-        // refusing is the other, and it silently un-arms the SCIM stamp for the
-        // whole process while the boot goes on looking healthy.
+        // refusing is the other, and it silently un-arms the adapter-level
+        // account stamp for the whole process while the boot goes on looking
+        // healthy. (SCIM is marked on its own reconcile callback, not here.)
         ctx.logger.error(
-          '[auth] the SCIM identity-source stamp was NOT registered — boot continues and every '
-            + 'other auth surface works, so nothing looks wrong. For the rest of this process no '
-            + 'adapter-level `sys_account` insert stamps `source=idp_provisioned`, so every '
-            + 'SCIM-provisioned user is left reading `env_native` and is offered the password / '
-            + 'identity-edit actions that are supposed to hide for a managed identity (cloud '
-            + 'ADR-0135 D4). The OAuth path still stamps via better-auth databaseHooks, which is '
-            + 'why this is invisible on a deployment that also uses OAuth. This line is the only '
-            + 'notice; it is registered once per boot and does NOT retry. Remedy: check that the '
-            + '`objectql` service is registered by kernel:ready and that registerHook is '
-            + 'available, then restart.',
+          '[auth] the adapter-level identity-source stamp was NOT registered — boot continues and '
+            + 'every other auth surface works, so nothing looks wrong. For the rest of this process '
+            + 'no adapter-level `sys_account` insert stamps `source=idp_provisioned`, so a '
+            + 'federated user created that way is left reading `env_native` and is offered the '
+            + 'password / identity-edit actions that are supposed to hide for a managed identity '
+            + '(ADR-0135 D4). The OAuth path still stamps via better-auth databaseHooks, and SCIM '
+            + 'through its own reconcile callback, which is why this is invisible on most '
+            + 'deployments. This line is the only notice; it is registered once per boot and does '
+            + 'NOT retry. Remedy: check that the `objectql` service is registered by kernel:ready '
+            + 'and that registerHook is available, then restart.',
           e instanceof Error ? e : undefined,
           { hook: 'afterInsert', object: 'sys_account' },
+        );
+      }
+    });
+
+    // [ADR-0135 D4] Users a SCIM directory provisioned before the SCIM write
+    // path carried the directory-managed mark are marked once here, from a
+    // stored fact (they own a `sys_scim_subject` row) and never from a guess.
+    // Idempotent — it writes only a row whose value is wrong, so every boot
+    // after the first marks zero. `scim-identity-source.ts` holds the rule.
+    ctx.hook('kernel:ready', async () => {
+      try {
+        // A composition with no engine has no identity tables to mark — the
+        // same posture as the `sys_account` stamp registration above.
+        const engine = ctx.getService<IObjectQLEngine>('objectql');
+        if (!engine || typeof engine.find !== 'function') return;
+        const { directoryProvisioned, marked } = await backfillScimProvisionedIdentitySource(engine as never);
+        ctx.logger.info(
+          `[auth] SCIM identity-source backfill: marked ${marked} of ${directoryProvisioned} `
+            + 'directory-provisioned user(s) as idp_provisioned (ADR-0135 D4); a user holding a '
+            + 'local password stays env_native.',
+          { object: 'sys_user', field: 'source', directoryProvisioned, marked },
+        );
+      } catch (e) {
+        ctx.logger.error(
+          '[auth] the SCIM identity-source backfill did NOT complete — boot continues and new SCIM '
+            + 'writes are marked as they happen, so nothing looks wrong. A user a directory '
+            + 'provisioned earlier may still read `env_native` and be offered the password / '
+            + 'identity-edit actions that are supposed to hide for a managed identity (ADR-0135 '
+            + 'D4) until the directory next writes that user. Remedy: make sys_scim_subject, '
+            + 'sys_account and sys_user readable and sys_user.source writable for the system '
+            + 'context (driver connectivity, schema sync), then restart; the pass is idempotent.',
+          e instanceof Error ? e : undefined,
+          { object: 'sys_user', field: 'source' },
         );
       }
     });
