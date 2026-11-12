@@ -4917,6 +4917,8 @@ const ko = {
     setsEmptyBody: "이 환경에는 아직 정의된 권한 집합이 없습니다.",
     setsPick: "권한 집합을 선택하면 사용자가 표시됩니다.",
     setsLoadFailed: "권한 집합을 읽을 수 없습니다.",
+    setsHolderPackage: "패키지 {{package}}",
+    setsHolderEnvironment: "이 환경 자체의 권한 집합",
     noMatch: "필터와 일치하는 항목이 없습니다.",
     notFound: "\"{{name}}\"은(는) 이 목록에 없습니다.",
     retry: "다시 시도",

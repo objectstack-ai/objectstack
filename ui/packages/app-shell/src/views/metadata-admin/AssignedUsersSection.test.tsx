@@ -14,7 +14,7 @@
 // `sys_permission_set` row at all (objectstack ADR-0131 D10, stage 6b-2-pre).
 
 import * as React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { normaliseClientError } from '@object-ui/data-objectstack';
 import { AssignedUsersSection } from './AssignedUsersSection';
@@ -257,5 +257,94 @@ describe('AssignedUsersSection — the everyone note says who holds the set (obj
     } finally {
       localeFixture = 'en-US';
     }
+  });
+});
+
+describe('AssignedUsersSection — one holder of a name more than one package holds (objectstack#32537)', () => {
+  const TWO = ['com.acme.crm', 'com.acme.sales'];
+  const salesHolding = { packageId: 'com.acme.sales', holders: TWO };
+  const grants = [
+    { id: 'g_sales', permission_set: 'sales_rep', permission_set_package: 'com.acme.sales', user_id: 'u_sales' },
+    { id: 'g_crm', permission_set: 'sales_rep', permission_set_package: 'com.acme.crm', user_id: 'u_crm' },
+    // No column under two package holders: the resolver refuses it.
+    { id: 'g_bare', permission_set: 'sales_rep', permission_set_package: null, user_id: 'u_bare' },
+  ];
+  const positions = [
+    { name: 'sales_lead', label: 'Sales lead', _packageId: 'com.acme.sales', permissionSets: ['sales_rep'] },
+    { name: 'crm_lead', label: 'CRM lead', _packageId: 'com.acme.crm', permissionSets: ['sales_rep'] },
+  ];
+  let restore: () => void = () => {};
+  beforeEach(() => {
+    const saved = { ...data };
+    const savedPositions = [...registryPositions];
+    data.sys_user_permission_set = [...saved.sys_user_permission_set, ...grants];
+    data.sys_user_position = [
+      ...saved.sys_user_position,
+      { id: 'up_s', user_id: 'u_lead', position: 'sales_lead' },
+      { id: 'up_c', user_id: 'u_crm_lead', position: 'crm_lead' },
+    ];
+    data.sys_user = [
+      ...saved.sys_user,
+      { id: 'u_sales', name: 'Sales Sam' },
+      { id: 'u_crm', name: 'Crm Cora' },
+      { id: 'u_bare', name: 'Bare Bo' },
+      { id: 'u_lead', name: 'Lead Lee' },
+      { id: 'u_crm_lead', name: 'Crm Lead Cy' },
+    ];
+    registryPositions.push(...positions);
+    restore = () => {
+      Object.assign(data, saved);
+      registryPositions.splice(0, registryPositions.length, ...savedPositions);
+    };
+  });
+  afterEach(() => restore());
+
+  it("lists the grants and positions the resolver reads as this holder's, through the same by-name read", async () => {
+    mockAdapter.find.mockClear();
+    render(<AssignedUsersSection permissionSetName="sales_rep" holding={salesHolding} />);
+    await waitFor(() => expect(screen.getByText('Sales Sam')).toBeTruthy());
+    expect(screen.getByText('Lead Lee')).toBeTruthy();
+    expect(screen.queryByText('Crm Cora')).toBeNull();
+    expect(screen.queryByText('Crm Lead Cy')).toBeNull();
+    expect(screen.queryByText('Bare Bo')).toBeNull();
+    const grantQuery = mockAdapter.find.mock.calls.find(([o]) => o === 'sys_user_permission_set')?.[1];
+    expect(grantQuery?.$filter).toEqual({ permission_set: 'sales_rep' });
+  });
+
+  it("ADD names the holder's package in the grant's stored column", async () => {
+    mockAdapter.create.mockClear();
+    render(<AssignedUsersSection permissionSetName="sales_rep" holding={{ packageId: 'com.acme.sales', holders: TWO }} />);
+    await waitFor(() => expect(screen.getByText('Sales Sam')).toBeTruthy());
+    fireEvent.click(screen.getByText('Add user'));
+    fireEvent.click(await screen.findByText('pick'));
+    await waitFor(() => expect(mockAdapter.create).toHaveBeenCalledTimes(1));
+    expect(mockAdapter.create).toHaveBeenCalledWith('sys_user_permission_set', {
+      user_id: 'u_new',
+      permission_set: 'sales_rep',
+      permission_set_package: 'com.acme.sales',
+    });
+  });
+
+  it("the environment's own set is granted by the name alone, and holds the grants that name no package", async () => {
+    mockAdapter.create.mockClear();
+    render(<AssignedUsersSection permissionSetName="sales_rep" holding={{ packageId: null, holders: [null, 'com.acme.crm'] }} />);
+    await waitFor(() => expect(screen.getByText('Bare Bo')).toBeTruthy());
+    expect(screen.queryByText('Crm Cora')).toBeNull();
+    fireEvent.click(screen.getByText('Add user'));
+    fireEvent.click(await screen.findByText('pick'));
+    await waitFor(() => expect(mockAdapter.create).toHaveBeenCalledTimes(1));
+    expect(mockAdapter.create).toHaveBeenCalledWith('sys_user_permission_set', { user_id: 'u_new', permission_set: 'sales_rep' });
+  });
+
+  it('CONTROL: with no holding every grant of the name is listed and ADD is the name alone', async () => {
+    mockAdapter.create.mockClear();
+    render(<AssignedUsersSection permissionSetName="sales_rep" />);
+    await waitFor(() => expect(screen.getByText('Sales Sam')).toBeTruthy());
+    expect(screen.getByText('Crm Cora')).toBeTruthy();
+    expect(screen.getByText('Bare Bo')).toBeTruthy();
+    fireEvent.click(screen.getByText('Add user'));
+    fireEvent.click(await screen.findByText('pick'));
+    await waitFor(() => expect(mockAdapter.create).toHaveBeenCalledTimes(1));
+    expect(mockAdapter.create).toHaveBeenCalledWith('sys_user_permission_set', { user_id: 'u_new', permission_set: 'sales_rep' });
   });
 });

@@ -5056,6 +5056,8 @@ const fr = {
     setsEmptyBody: "Aucun ensemble d’autorisations n’est encore défini dans cet environnement.",
     setsPick: "Choisissez un ensemble d’autorisations pour voir ses utilisateurs.",
     setsLoadFailed: "Impossible de lire les ensembles d’autorisations.",
+    setsHolderPackage: "Package {{package}}",
+    setsHolderEnvironment: "Ensemble d’autorisations propre à cet environnement",
     noMatch: "Rien ne correspond au filtre.",
     notFound: "« {{name}} » ne figure pas dans cette liste.",
     retry: "Réessayer",

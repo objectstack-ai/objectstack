@@ -5060,6 +5060,8 @@ const es = {
     setsEmptyBody: "Aún no hay ningún conjunto de permisos definido en este entorno.",
     setsPick: "Elija un conjunto de permisos para ver sus usuarios.",
     setsLoadFailed: "No se pudieron leer los conjuntos de permisos.",
+    setsHolderPackage: "Paquete {{package}}",
+    setsHolderEnvironment: "Conjunto de permisos propio de este entorno",
     noMatch: "Nada coincide con el filtro.",
     notFound: "\"{{name}}\" no está en esta lista.",
     retry: "Reintentar",

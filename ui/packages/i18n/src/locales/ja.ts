@@ -4920,6 +4920,8 @@ const ja = {
     setsEmptyBody: "この環境にはまだ権限セットが定義されていません。",
     setsPick: "権限セットを選ぶとユーザーが表示されます。",
     setsLoadFailed: "権限セットを読み込めませんでした。",
+    setsHolderPackage: "パッケージ {{package}}",
+    setsHolderEnvironment: "この環境独自の権限セット",
     noMatch: "絞り込み条件に一致する項目はありません。",
     notFound: "「{{name}}」はこの一覧にありません。",
     retry: "再試行",

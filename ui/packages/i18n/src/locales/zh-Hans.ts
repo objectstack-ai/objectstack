@@ -4978,6 +4978,8 @@ const zh = {
     setsEmptyBody: '此环境尚未定义任何权限集。',
     setsPick: '选择一个权限集以查看其用户。',
     setsLoadFailed: '无法读取权限集。',
+    setsHolderPackage: '软件包 {{package}}',
+    setsHolderEnvironment: '本环境自己的权限集',
     noMatch: '没有与筛选条件匹配的项。',
     notFound: '“{{name}}”不在此列表中。',
     retry: '重试',

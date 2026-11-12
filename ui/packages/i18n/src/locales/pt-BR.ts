@@ -5055,6 +5055,8 @@ const pt = {
     setsEmptyBody: "Ainda não há nenhum conjunto de permissões definido neste ambiente.",
     setsPick: "Escolha um conjunto de permissões para ver seus usuários.",
     setsLoadFailed: "Não foi possível ler os conjuntos de permissões.",
+    setsHolderPackage: "Pacote {{package}}",
+    setsHolderEnvironment: "Conjunto de permissões próprio deste ambiente",
     noMatch: "Nada corresponde ao filtro.",
     notFound: "\"{{name}}\" não está nesta lista.",
     retry: "Tentar novamente",
