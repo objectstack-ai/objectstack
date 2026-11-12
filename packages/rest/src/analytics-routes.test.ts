@@ -655,3 +655,240 @@ describe('[#32310] POST /analytics/dataset/query?callerPackage= — the dataset 
     expect(exact.body).toEqual(bare.body);
   });
 });
+
+// ── [#32292, ADR-0150 D3 after ADR-0149 D2] the refusal arm judges admission first ──
+// When the by-name read REFUSES a name, the door asks which refused holders the
+// caller is admitted to before it answers (epic ruling 6766102988; seat ruling
+// 6817809380): none answers what a missing name answers, byte for byte; an
+// ambiguity with exactly one admitted runs that one; otherwise the 409 names
+// only the admitted holders; a holder whose admission cannot be judged, when it
+// could move the answer, is a 503. A hidden holder is never named.
+// ⛔ Only the refusal arm (Q1 = A): a name the read resolves keeps its answer
+// (queryDataset's own gates, the 403), and the caller arm never falls through
+// to another package's item (Q2 = A).
+//
+// BASE (blocker head 6655b742): every refusal below answered 409 naming every
+// holder, whatever the caller was admitted to.
+// Driven over the real `ObjectStackProtocolImplementation` and `SchemaRegistry`;
+// the analytics service is a double whose admission admits by the dataset's
+// object, the way the real one judges the object read grant.
+describe('[#32292] POST /analytics/dataset/query — a refused name is judged over the holders the caller is admitted to', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const C = 'com.acme.gamma';
+  const P = 'com.acme.app';
+  let registry: InstanceType<typeof SchemaRegistry>;
+  let protocol: InstanceType<typeof ObjectStackProtocolImplementation>;
+
+  const ship = (name: string, packageId: string) => registry.registerItem('dataset', {
+    name, label: `${packageId.split('.').pop()} ${name}`, object: `${packageId.split('.').pop()}_item`,
+    dimensions: [{ name: 'region', field: 'region', type: 'string' }],
+    measures: [{ name: 'revenue', aggregate: 'sum', field: 'amount' }],
+  }, 'name' as never, packageId);
+
+  /**
+   * The analytics double: `admitted` and `unresolved` are the objects whose
+   * datasets the caller is admitted to / whose admission cannot be judged.
+   */
+  const service = (opts: { admitted?: string[]; unresolved?: string[]; wired?: boolean } = {}) => {
+    const queryDataset = vi.fn(async (dataset: any) => ({ rows: [], fields: [], object: dataset.object }));
+    const admitDatasetCatalogEntry = vi.fn(async (dataset: any) => {
+      if ((opts.unresolved ?? []).includes(dataset.object)) return { admitted: false, unresolved: true };
+      if ((opts.admitted ?? []).includes(dataset.object)) {
+        return { admitted: true, dimensions: new Set<string>(), measures: new Set<string>(), withheld: false, unresolved: false };
+      }
+      return { admitted: false, unresolved: false };
+    });
+    return { queryDataset, admitDatasetCatalogEntry, hasPluginWiredAdmission: () => opts.wired !== false };
+  };
+  const send = async (svc: ReturnType<typeof service>, query: Record<string, unknown> = {}, datasetName = 'sales') => {
+    const { route } = buildServer(async () => svc, protocol);
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, query, headers: {}, body: { datasetName, selection: { measures: ['revenue'] } } } as any, res);
+    const body = res.body;
+    return {
+      status: res.statusCode as number, body, text: JSON.stringify(body),
+      code: body?.code ?? body?.error?.code, message: String(body?.message ?? body?.error?.message ?? ''),
+    };
+  };
+
+  beforeEach(() => {
+    registry = new SchemaRegistry({ multiTenant: false });
+    for (const id of [A, B, C]) registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
+    registry.installPackage({
+      id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app', dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+    } as never, 'code');
+    const engine = {
+      registry,
+      find: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn().mockResolvedValue(null),
+      insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+      count: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockResolvedValue([]),
+    };
+    protocol = new ObjectStackProtocolImplementation(engine as never);
+  });
+
+  it('admitted to neither holder: 404 NOT_FOUND, byte-equal to the answer for a name nothing holds; neither is named, nothing run', async () => {
+    const missing = await send(service());
+    expect([missing.status, missing.code]).toEqual([404, 'NOT_FOUND']);
+    ship('sales', A);
+    ship('sales', B);
+    const svc = service();
+    const hidden = await send(svc);
+    expect(hidden.status).toBe(missing.status);
+    expect(hidden.text).toBe(missing.text);
+    expect(hidden.text).not.toContain(A);
+    expect(hidden.text).not.toContain(B);
+    expect(svc.admitDatasetCatalogEntry).toHaveBeenCalledTimes(2);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('admitted to exactly one of two holders: that one runs, in either order, and the hidden holder is never named', async () => {
+    for (const order of [[A, B], [B, A]]) {
+      registry = new SchemaRegistry({ multiTenant: false });
+      for (const id of [A, B]) registry.installPackage({ id, name: id, version: '1.0.0', type: 'app', namespace: id.split('.').pop()! } as never, 'code');
+      protocol = new ObjectStackProtocolImplementation({ registry, find: vi.fn().mockResolvedValue([]), findOne: vi.fn(), count: vi.fn(), aggregate: vi.fn() } as never);
+      for (const id of order) ship('sales', id);
+      const svc = service({ admitted: ['beta_item'] });
+      const answer = await send(svc);
+      expect(answer.status, answer.text).toBe(200);
+      expect(answer.body.object).toBe('beta_item');
+      expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+      expect(svc.queryDataset.mock.calls[0][0].label).toBe('beta sales');
+      expect(answer.text).not.toContain(A);
+    }
+  });
+
+  it('admitted to two of three holders: 409 naming only those two; the hidden third is never named, nothing run', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    ship('sales', C);
+    const svc = service({ admitted: ['alpha_item', 'gamma_item'] });
+    const answer = await send(svc);
+    expect([answer.status, answer.code], answer.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(answer.message).toContain(`package "${A}"`);
+    expect(answer.message).toContain(`package "${C}"`);
+    expect(answer.text).not.toContain(B);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: admitted to both holders: 409 naming both, as before', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    const svc = service({ admitted: ['alpha_item', 'beta_item'] });
+    const answer = await send(svc);
+    expect([answer.status, answer.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(answer.message).toContain(`package "${A}"`);
+    expect(answer.message).toContain(`package "${B}"`);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
+  it('the caller arm: two holders in P\'s closure are judged the same way (none → 404, one → runs, never the hidden one named)', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    const missing = await send(service(), { callerPackage: P }, 'nowhere');
+    const none = await send(service(), { callerPackage: P });
+    expect([none.status, none.code]).toEqual([404, 'NOT_FOUND']);
+    expect(none.text).toBe(missing.text.replace('nowhere', 'sales'));
+    expect(none.text).not.toContain(A);
+    expect(none.text).not.toContain(B);
+    const one = await send(service({ admitted: ['alpha_item'] }), { callerPackage: P });
+    expect(one.status, one.text).toBe(200);
+    expect(one.body.object).toBe('alpha_item');
+    expect(one.text).not.toContain(B);
+  });
+
+  it('outside P\'s closure and `?package=` naming a non-holder are never picked: admitted → 409 naming only the admitted, none → 404', async () => {
+    ship('sales', C);
+    const outside = await send(service({ admitted: ['gamma_item'] }), { callerPackage: P });
+    expect([outside.status, outside.code], outside.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(outside.message).toContain(`package "${C}"`);
+    const outsideHidden = await send(service(), { callerPackage: P });
+    expect([outsideHidden.status, outsideHidden.code]).toEqual([404, 'NOT_FOUND']);
+    expect(outsideHidden.text).not.toContain(C);
+    ship('sales', A);
+    const svc = service({ admitted: ['alpha_item'] });
+    const notHeld = await send(svc, { package: B });
+    expect([notHeld.status, notHeld.code], notHeld.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(notHeld.message).toContain(`package "${A}"`);
+    expect(notHeld.text).not.toContain(C);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+    const notHeldHidden = await send(service(), { package: B });
+    expect([notHeldHidden.status, notHeldHidden.code]).toEqual([404, 'NOT_FOUND']);
+    expect(notHeldHidden.text).not.toContain(A);
+    expect(notHeldHidden.text).not.toContain(C);
+  });
+
+  it('a holder whose admission cannot be judged, where it could move the answer: 503, no holder named, nothing run', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    for (const svc of [service({ unresolved: ['alpha_item'] }), service({ unresolved: ['alpha_item'], admitted: ['beta_item'] })]) {
+      const answer = await send(svc);
+      expect([answer.status, answer.code], answer.text).toEqual([503, 'SERVICE_UNAVAILABLE']);
+      expect(answer.text).not.toContain(A);
+      expect(answer.text).not.toContain(B);
+      expect(svc.queryDataset).not.toHaveBeenCalled();
+    }
+  });
+
+  it('a name the read resolves keeps its answer: admission is not asked, and the one holder runs into queryDataset\'s own gates', async () => {
+    ship('sales', A);
+    const svc = service();
+    const answer = await send(svc);
+    expect(answer.status).toBe(200);
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+    expect(svc.queryDataset.mock.calls[0][0].object).toBe('alpha_item');
+  });
+
+  it('the caller arm resolved to P\'s own item never falls through to a dependency\'s item of the name', async () => {
+    ship('sales', A);
+    ship('sales', P);
+    const svc = service({ admitted: ['alpha_item'] });
+    const answer = await send(svc, { callerPackage: P });
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+    expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+    expect(svc.queryDataset.mock.calls[0][0].object).toBe('app_item');
+    expect(answer.body.object).toBe('app_item');
+  });
+
+  it('a service whose admission is not the plugin-wired set is not asked: the refusal names every holder, as before', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    const svc = service({ wired: false });
+    const answer = await send(svc);
+    expect([answer.status, answer.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(answer.message).toContain(`package "${A}"`);
+    expect(answer.message).toContain(`package "${B}"`);
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+  });
+
+  it('the batch door judges each query the same way: a hidden name\'s entry is byte-equal to a missing name\'s', async () => {
+    ship('sales', A);
+    ship('sales', B);
+    ship('orders', A);
+    ship('orders', B);
+    const svc = service({ admitted: ['beta_item'] });
+    const { rest } = buildServer(async () => svc, protocol);
+    const batch = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'));
+    const res = mockRes();
+    const queries = ['sales', 'nowhere'].map((datasetName) => ({ datasetName, selection: { measures: ['revenue'] } }));
+    await batch!.handler({ method: 'POST', params: {}, query: {}, headers: {}, body: { queries } } as any, res);
+    expect(res.statusCode).toBe(200);
+    const [sales, nowhere] = res.body.data.results;
+    expect(sales.data.object).toBe('beta_item');
+    expect(nowhere.status).toBe(404);
+    expect(JSON.stringify(res.body)).not.toContain(A);
+    const hiddenSvc = service();
+    const hidden = buildServer(async () => hiddenSvc, protocol);
+    const hiddenBatch = hidden.rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query/batch'));
+    const res2 = mockRes();
+    await hiddenBatch!.handler({ method: 'POST', params: {}, query: {}, headers: {}, body: {
+      queries: [{ datasetName: 'orders', selection: { measures: ['revenue'] } }, { datasetName: 'orders_missing', selection: { measures: ['revenue'] } }],
+    } } as any, res2);
+    const [hiddenEntry, missingEntry] = res2.body.data.results;
+    expect(JSON.stringify(hiddenEntry)).toBe(JSON.stringify(missingEntry).replace('orders_missing', 'orders'));
+    expect(JSON.stringify(res2.body)).not.toContain(A);
+    expect(JSON.stringify(res2.body)).not.toContain(B);
+  });
+});

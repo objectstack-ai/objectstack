@@ -82,6 +82,7 @@ import { logError } from './log.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { mayReadPendingDrafts, metaItemPackageBinding, type RestServer } from './rest-server.js';
 import { metaCallerPackageQuery, metaItemCallerPackageRefusalMessage } from './meta-item-read-gate.js';
+import { admitRefusedDatasetHolders } from './analytics-dataset-admission-order.js';
 
 /**
  * The `RestServer` members {@link registerAnalyticsEndpoints} reads — every
@@ -607,60 +608,101 @@ async function answerDatasetQuery(
             // follows (the by-name read, the parse, the query's admission of
             // the caller) judges the resolved item exactly as that address's.
             // A protocol that cannot resolve by caller fails closed, `503`.
-            const callerQuery = metaCallerPackageQuery(p, { type: 'dataset', name: body.datasetName }, req.query);
-            const packageId = metaItemPackageBinding((callerQuery ?? req.query)?.package);
-            const datasetRequest: GetMetaItemRequest = {
+            //
+            // [#32292] Both resolutions (the caller arm's and the by-name
+            // read's) run inside `readByName`, so a refusal from either reaches
+            // the admission arm below in one shape.
+            const readOne = async (datasetRequest: GetMetaItemRequest): Promise<any> => {
+                // [#31774] A read that FAILED is not a read that came
+                // back without the name. The `.catch(() => null)` that
+                // stood here turned a metadata-store outage into an
+                // empty list, so the door answered `404 "Dataset … not
+                // found."`: a dashboard told its user the dataset was
+                // gone, and the operator read a 404 instead of an
+                // outage. The AI tool `query_dataset` answers the same
+                // failed read `503 SERVICE_UNAVAILABLE`, so this door
+                // does too.
+                //
+                // The refusal is THROWN, declared, into this handler's
+                // own catch, never answered by hand: its declared-5xx arm
+                // (`declaredServerFaultAnswer`, #11718) is the one this
+                // door already answers every producer-declared 503 with,
+                // and its `logError` runs first, so the store's own text
+                // — withheld from the client like every 5xx's (#5437) —
+                // reaches the operator on `cause`. `refusal: true` lets
+                // the sentence below, which this code wrote for the
+                // caller, through that arm.
+                //
+                // Unchanged: a read that succeeds without the name is the
+                // `404` below. [#32072] The resolver's refusal is not a
+                // failed read: it is rethrown as thrown, a declared
+                // `409 RESOURCE_CONFLICT` naming every candidate, which
+                // the catch below answers through its ADR-0112 arm. It is
+                // told apart by class OR by shape, the `/meta`
+                // dispatcher's predicate ({@link isPackageScopedRefusal}),
+                // so a refusal from another copy of `@objectstack/core`
+                // is still a 409 and never a 503.
+                try {
+                    return await p.getMetaItem(datasetRequest);
+                } catch (readError) {
+                    if (readError instanceof PackageScopedNameRefusedError) throw readError;
+                    if (isPackageScopedRefusal(readError)) throw new PackageScopedNameRefusedError(readError.refusal);
+                    throw Object.assign(
+                        new Error(
+                            `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
+                            + 'This is a server-side fault, not a missing dataset.',
+                        ),
+                        { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: readError },
+                    );
+                }
+            };
+            const baseRequest: GetMetaItemRequest = {
                 type: 'dataset',
                 name: body.datasetName,
-                ...(packageId !== undefined ? { packageId } : {}),
                 ...(previewDrafts ? { previewDrafts } : {}),
             };
-            // [#31774] A read that FAILED is not a read that came
-            // back without the name. The `.catch(() => null)` that
-            // stood here turned a metadata-store outage into an
-            // empty list, so the door answered `404 "Dataset … not
-            // found."`: a dashboard told its user the dataset was
-            // gone, and the operator read a 404 instead of an
-            // outage. The AI tool `query_dataset` answers the same
-            // failed read `503 SERVICE_UNAVAILABLE`, so this door
-            // does too.
-            //
-            // The refusal is THROWN, declared, into this handler's
-            // own catch, never answered by hand: its declared-5xx arm
-            // (`declaredServerFaultAnswer`, #11718) is the one this
-            // door already answers every producer-declared 503 with,
-            // and its `logError` runs first, so the store's own text
-            // — withheld from the client like every 5xx's (#5437) —
-            // reaches the operator on `cause`. `refusal: true` lets
-            // the sentence below, which this code wrote for the
-            // caller, through that arm.
-            //
-            // Unchanged: a read that succeeds without the name is the
-            // `404` below. [#32072] The resolver's refusal is not a
-            // failed read: it is rethrown as thrown, a declared
-            // `409 RESOURCE_CONFLICT` naming every candidate, which
-            // the catch below answers through its ADR-0112 arm. It is
-            // told apart by class OR by shape, the `/meta`
-            // dispatcher's predicate ({@link isPackageScopedRefusal}),
-            // so a refusal from another copy of `@objectstack/core`
-            // is still a 409 and never a 503.
+            const readByName = async (): Promise<any> => {
+                const callerQuery = metaCallerPackageQuery(p, { type: 'dataset', name: body.datasetName }, req.query);
+                const packageId = metaItemPackageBinding((callerQuery ?? req.query)?.package);
+                return readOne({ ...baseRequest, ...(packageId !== undefined ? { packageId } : {}) });
+            };
             let read: any;
             try {
-                read = await p.getMetaItem(datasetRequest);
-            } catch (readError) {
-                if (readError instanceof PackageScopedNameRefusedError) throw readError;
-                if (isPackageScopedRefusal(readError)) throw new PackageScopedNameRefusedError(readError.refusal);
-                throw Object.assign(
-                    new Error(
-                        `The dataset "${body.datasetName}" could not be resolved: the dataset read failed. `
-                        + 'This is a server-side fault, not a missing dataset.',
-                    ),
-                    { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true, cause: readError },
-                );
+                read = await readByName();
+            } catch (resolveError) {
+                const refused = resolveError instanceof PackageScopedNameRefusedError
+                    ? resolveError
+                    : isPackageScopedRefusal(resolveError) ? new PackageScopedNameRefusedError(resolveError.refusal) : undefined;
+                if (!refused) throw resolveError;
+                // [#32292, ADR-0150 D3 after ADR-0149 D2] The refusal arm judges
+                // admission before it answers: a holder this caller may not
+                // query is no candidate and is never named (epic ruling
+                // 6766102988; seat ruling 6817809380). Only this arm: a name the
+                // read resolves keeps its answer, `queryDataset`'s own `403`
+                // included. {@link admitRefusedDatasetHolders} carries the rule.
+                const judged = await admitRefusedDatasetHolders({
+                    refusal: refused.refusal,
+                    svc,
+                    context,
+                    readHolder: (holder) => readOne({ ...baseRequest, packageId: holder }),
+                });
+                if (judged.kind === 'rethrow') throw refused;
+                if (judged.kind === 'refused') throw judged.error;
+                if (judged.kind === 'not-found') return datasetNotFoundAnswer(body.datasetName);
+                if (judged.kind === 'undetermined') {
+                    throw Object.assign(
+                        new Error(
+                            `Read access to the dataset "${body.datasetName}" could not be determined, so the query was not run. `
+                            + 'This is a server-side fault, not a permission denial.',
+                        ),
+                        { code: 'SERVICE_UNAVAILABLE', status: 503, refusal: true },
+                    );
+                }
+                read = judged.read;
             }
             dataset = read?.item;
             if (!dataset) {
-                return { status: 404, body: { code: 'NOT_FOUND', message: `Dataset "${body.datasetName}" not found.` } };
+                return datasetNotFoundAnswer(body.datasetName);
             }
             // [#14253] Localize the SAVED definition here, at the
             // metadata boundary, the same way `/meta/:type` does.
@@ -733,6 +775,15 @@ async function answerDatasetQuery(
     } catch (error: any) {
         return datasetQueryFaultAnswer(error);
     }
+}
+
+/**
+ * [#32292] The answer a saved dataset this door cannot find gets, and the one a
+ * caller admitted to none of a refused name's holders gets: one function, so
+ * the two stay byte-equal (ADR-0149 D2: hidden and missing are one answer).
+ */
+function datasetNotFoundAnswer(datasetName: string): DatasetQueryAnswer {
+    return { status: 404, body: { code: 'NOT_FOUND', message: `Dataset "${datasetName}" not found.` } };
 }
 
 /**
