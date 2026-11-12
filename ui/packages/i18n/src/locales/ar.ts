@@ -5484,6 +5484,8 @@ const ar = {
     setsEmptyBody: "لم تُعرَّف أي مجموعة أذونات في هذه البيئة بعد.",
     setsPick: "اختر مجموعة أذونات لعرض مستخدميها.",
     setsLoadFailed: "تعذّرت قراءة مجموعات الأذونات.",
+    setsHolderPackage: "الحزمة {{package}}",
+    setsHolderEnvironment: "مجموعة الأذونات الخاصة بهذه البيئة",
     noMatch: "لا شيء يطابق عامل التصفية.",
     notFound: "\"{{name}}\" ليس في هذه القائمة.",
     retry: "إعادة المحاولة",

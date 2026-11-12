@@ -4918,6 +4918,8 @@ const de = {
     setsEmptyBody: "In dieser Umgebung ist noch kein Berechtigungssatz definiert.",
     setsPick: "Wählen Sie einen Berechtigungssatz, um seine Benutzer zu sehen.",
     setsLoadFailed: "Die Berechtigungssätze konnten nicht gelesen werden.",
+    setsHolderPackage: "Paket {{package}}",
+    setsHolderEnvironment: "Eigener Berechtigungssatz dieser Umgebung",
     noMatch: "Nichts entspricht dem Filter.",
     notFound: "„{{name}}“ ist nicht in dieser Liste.",
     retry: "Erneut versuchen",

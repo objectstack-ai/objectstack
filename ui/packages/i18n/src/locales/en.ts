@@ -5777,6 +5777,9 @@ const en = {
     setsEmptyBody: 'No permission set is defined in this environment yet.',
     setsPick: 'Pick a permission set to see its users.',
     setsLoadFailed: 'Could not read the permission sets.',
+    // objectstack#32537 — a permission set more than one package holds is listed once per holder.
+    setsHolderPackage: 'Package {{package}}',
+    setsHolderEnvironment: 'This environment’s own set',
     noMatch: 'Nothing matches the filter.',
     notFound: '"{{name}}" is not in this list.',
     retry: 'Try again',
