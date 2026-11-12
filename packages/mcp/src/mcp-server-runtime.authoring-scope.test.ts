@@ -26,6 +26,11 @@
  *     injection answer `initialize` only under the grant that registers the
  *     family; a `data:read` token, a key or a session gets the configured or
  *     default text, and so does an authoring request that carries none.
+ *  5. [#32766] The DATA-ONLY INSTRUCTIONS. The injection's
+ *     `dataOnlyInstructions` answer `initialize` under exactly the grants the
+ *     family does not register for, never under one it does; without them
+ *     (or without an injection at all) the default answers, and it never
+ *     promises building.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -147,6 +152,8 @@ interface CallOptions {
   noBridge?: boolean;
   /** [#31022] Per-request server instructions carried on the authoring injection. */
   instructions?: string;
+  /** [#32766] Per-request instructions for a grant that does NOT admit the family. */
+  dataOnlyInstructions?: string;
 }
 
 async function call(runtime: MCPServerRuntime, bridge: any, body: unknown, o: CallOptions = {}) {
@@ -170,6 +177,7 @@ async function call(runtime: MCPServerRuntime, bridge: any, body: unknown, o: Ca
             principal: PRINCIPAL,
             environmentId: ENVIRONMENT_ID,
             ...(o.instructions !== undefined ? { instructions: o.instructions } : {}),
+            ...(o.dataOnlyInstructions !== undefined ? { dataOnlyInstructions: o.dataOnlyInstructions } : {}),
           },
         }
       : {}),
@@ -703,5 +711,109 @@ describe('[#31022] per-request instructions on the authoring injection — answe
         instructions: HOST_INSTRUCTIONS,
       }),
     ).toBe(HOST_INSTRUCTIONS);
+  });
+});
+
+describe('[#32766] data-only instructions on the authoring injection — the complement of the authoring text', () => {
+  let runtime: MCPServerRuntime;
+  let bridge: ReturnType<typeof makeBridge>;
+  let registry: RecordingAuthoringRegistry;
+  const AUTHORING_TEXT = 'Authoring rules: call get_authoring_rules with no arguments for the index.';
+  const DATA_ONLY_TEXT = 'To build this app, connect over OAuth and grant metadata:write.';
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 't', version: '1.0.0' });
+    bridge = makeBridge();
+    registry = makeAuthoringRegistry();
+  });
+
+  async function instructionsAtInitialize(rt: MCPServerRuntime, o: CallOptions = {}): Promise<unknown> {
+    const { status, json } = await call(rt, bridge, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'pin', version: '0' } },
+    }, o);
+    expect(status).toBe(200);
+    expect(json.error).toBeUndefined();
+    return json.result.instructions;
+  }
+
+  it('a data:read token, a data:write token, an actions token and an empty grant are answered with the data-only text', async () => {
+    for (const grantedScopes of [
+      [MCP_OAUTH_SCOPE_DATA_READ],
+      [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE],
+      [MCP_OAUTH_SCOPE_ACTIONS],
+      [],
+    ]) {
+      const control = await instructionsAtInitialize(runtime, { grantedScopes, registry });
+      const subject = await instructionsAtInitialize(runtime, {
+        grantedScopes,
+        registry,
+        instructions: AUTHORING_TEXT,
+        dataOnlyInstructions: DATA_ONLY_TEXT,
+      });
+      expect(subject).toBe(DATA_ONLY_TEXT);
+      // Control leg: the same request without the field answers something
+      // else, so the equality above is the injection's doing.
+      expect(control).not.toBe(DATA_ONLY_TEXT);
+    }
+  });
+
+  it('the undefined grant of an API key or a session is answered with the data-only text', async () => {
+    expect(
+      await instructionsAtInitialize(runtime, { registry, instructions: AUTHORING_TEXT, dataOnlyInstructions: DATA_ONLY_TEXT }),
+    ).toBe(DATA_ONLY_TEXT);
+  });
+
+  it('a metadata:write request never sees the data-only text — the authoring answer is unchanged', async () => {
+    const before = await instructionsAtInitialize(runtime, {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      registry,
+      instructions: AUTHORING_TEXT,
+    });
+    const subject = await instructionsAtInitialize(runtime, {
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      registry,
+      instructions: AUTHORING_TEXT,
+      dataOnlyInstructions: DATA_ONLY_TEXT,
+    });
+    expect(subject).toBe(AUTHORING_TEXT);
+    expect(subject).toBe(before);
+    // And with no authoring text of its own, it falls to the default — not to
+    // the data-only text the same injection carries.
+    const defaultText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE], registry });
+    expect(
+      await instructionsAtInitialize(runtime, {
+        grantedScopes: [MCP_OAUTH_SCOPE_METADATA_WRITE],
+        registry,
+        dataOnlyInstructions: DATA_ONLY_TEXT,
+      }),
+    ).toBe(defaultText);
+  });
+
+  it('a data-only request with no data-only text, or with no injection at all, gets a default that promises no building', async () => {
+    const noInjection = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ] });
+    const noText = await instructionsAtInitialize(runtime, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], registry, instructions: AUTHORING_TEXT });
+    const keyNoInjection = await instructionsAtInitialize(runtime, {});
+    expect(typeof noInjection).toBe('string');
+    expect(noText).toBe(noInjection);
+    expect(keyNoInjection).toBe(noInjection);
+    // A deployment with no build door gets this text: it must not tell the
+    // client that building, metadata or a scope that unlocks it is on offer.
+    expect(noInjection).not.toMatch(/build|metadata|author|scope/i);
+  });
+
+  it('the per-request data-only text wins over the runtime\'s configured text; without it the configured text stays', async () => {
+    const CONFIGURED = 'Configured server-wide instructions.';
+    const configured = new MCPServerRuntime({ name: 't', version: '1.0.0', instructions: CONFIGURED });
+    expect(
+      await instructionsAtInitialize(configured, {
+        grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ],
+        registry,
+        dataOnlyInstructions: DATA_ONLY_TEXT,
+      }),
+    ).toBe(DATA_ONLY_TEXT);
+    expect(await instructionsAtInitialize(configured, { grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], registry })).toBe(CONFIGURED);
   });
 });

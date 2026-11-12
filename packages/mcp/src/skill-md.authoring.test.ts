@@ -120,3 +120,51 @@ describe('[#26464] renderSkillMarkdown — the authoring section follows the gra
     expect(withoutSection).toBe(baseline);
   });
 });
+
+describe('[#32766] renderSkillMarkdown — the host\'s data-only text renders only beside a build door, for a grant that cannot build', () => {
+  const baseline = renderSkillMarkdown();
+  const DATA_ONLY = 'To build this app, connect over OAuth and grant `metadata:write`.';
+
+  it('a data grant and the undefined grant, with a build door\'s tools handed in, render the text after the tools and keep the data description', () => {
+    for (const grantedScopes of [[MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_DATA_WRITE], undefined]) {
+      const md = renderSkillMarkdown({
+        ...(grantedScopes ? { grantedScopes } : {}),
+        authoringTools: TOOLS,
+        dataOnlyInstructions: DATA_ONLY,
+      });
+      const at = md.indexOf(DATA_ONLY);
+      expect(at).toBeGreaterThan(md.indexOf('## Tools'));
+      expect(md.indexOf('## Conventions & gotchas')).toBeGreaterThan(at);
+      expect(md).not.toContain(SECTION);
+      expect(frontmatterDescription(md)).toBe(OBJECTSTACK_SKILL_DESCRIPTION);
+      // Removing the block gives back the baseline: nothing else moved.
+      expect(md.replace(`\n${DATA_ONLY}\n`, '')).toBe(baseline);
+    }
+  });
+
+  it('no build door (no authoring tools handed in) renders the data skill byte-identically, text or not', () => {
+    expect(renderSkillMarkdown({ dataOnlyInstructions: DATA_ONLY })).toBe(baseline);
+    expect(renderSkillMarkdown({ authoringTools: [], dataOnlyInstructions: DATA_ONLY })).toBe(baseline);
+    expect(
+      renderSkillMarkdown({ grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ], dataOnlyInstructions: DATA_ONLY }),
+    ).toBe(baseline);
+  });
+
+  it('a grant that admits the family renders the authoring section and never the data-only text', () => {
+    const withText = renderSkillMarkdown({
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoringTools: TOOLS,
+      dataOnlyInstructions: DATA_ONLY,
+    });
+    const without = renderSkillMarkdown({
+      grantedScopes: [MCP_OAUTH_SCOPE_DATA_READ, MCP_OAUTH_SCOPE_METADATA_WRITE],
+      authoringTools: TOOLS,
+    });
+    expect(withText).not.toContain(DATA_ONLY);
+    expect(withText).toBe(without);
+  });
+
+  it('a blank text renders nothing', () => {
+    expect(renderSkillMarkdown({ authoringTools: TOOLS, dataOnlyInstructions: '  \n ' })).toBe(baseline);
+  });
+});

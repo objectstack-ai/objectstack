@@ -133,6 +133,23 @@ export interface McpAuthoringInjection {
    * configured or default instructions too.
    */
   instructions?: string;
+  /**
+   * The server instructions this request's `initialize` answers with when
+   * its grant does NOT admit {@link registry} — a `data:read` / `data:write`
+   * / `actions:execute` token, an empty grant, and the undefined grant of an
+   * API key or a session. The exact complement of {@link instructions}: a
+   * request is answered with one of the two, never both, and a request whose
+   * grant admits the family never sees this text.
+   *
+   * It is the place for a host that mounts a build door to say how to reach
+   * it (for example, that building needs an OAuth connection with
+   * `metadata:write`). It rides this injection, and not `handleHttpRequest`'s
+   * own options, so that only a host that injects an authoring registry can
+   * serve it: a deployment with no build door has no injection and cannot
+   * promise building. Omitted, such a request gets the configured or default
+   * instructions, as before.
+   */
+  dataOnlyInstructions?: string;
 }
 
 // ── Host-installed tool-call interceptor (every MCP tool call) ───────────────
