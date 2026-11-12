@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 307 |
+| Write call sites | 308 |
 | Object name statically decidable | 214 |
-| Object name chosen at run time | 93 |
+| Object name chosen at run time | 94 |
 | Against a tenancy-enabled object | 207 |
 | Against an object declaring tenancy off | 7 |
-| Threading a tenant context | 237 |
+| Threading a tenant context | 238 |
 | Provably carrying none | 12 |
 | …and decidably tenancy-enabled | 3 |
 | Options argument unreadable | 58 |
 | …and decidably tenancy-enabled | 31 |
-| Threading a decidably elevated context | 172 |
+| Threading a decidably elevated context | 173 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 123 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-11-11 at `0113ef333`.
+Measured on 2026-11-12 at `0e97e095f`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 1133 |
-| engine-shaped types recognised | 133 |
+| tracked non-test sources scanned | 1139 |
+| engine-shaped types recognised | 134 |
 | declared objects in the registry | 137 |
-| same-named calls subtracted as non-engine | 287 |
+| same-named calls subtracted as non-engine | 291 |
 
 ## Every site
 
@@ -119,6 +119,7 @@ Measured on 2026-11-11 at `0113ef333`.
 | `packages/plugins/plugin-approvals/src/stored-process-package-backfill.ts` | `update` | `sys_approval_request` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/action-invocation-audit.ts` | `insert` | `sys_audit_log` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
+| `packages/plugins/plugin-audit/src/audit-seal/amendment-writer.ts` | `insert` | `AUDIT_AMENDMENT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/sealer.ts` | `insert` | `AUDIT_CHECKPOINT_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `insert` | `AUDIT_SIGNING_KEY_OBJECT` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-audit/src/audit-seal/signer.ts` | `delete` | `sys_secret` | enabled | options unreadable | 1 |

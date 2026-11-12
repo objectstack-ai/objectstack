@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072) and `permission` (#32162). */
-const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162) and `flow` (#31696). */
+const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -263,6 +263,44 @@ describe('narrowing (3) — D3 step 3: one holder outside the package caller\'s 
   }
 });
 
+/**
+ * [ADR-0150 D9, child B #31696] `flow` joins the readers in the change that
+ * narrows its one-holder rule to the namespace, so two namespaces' packages
+ * may each hold a flow name. Its by-name read takes E8's three narrowings,
+ * each declared on the card and the PR.
+ */
+describe('flow joins the readers (ADR-0150 D9, child B #31696)', () => {
+  it('a caller with no package is refused a name two packages ship, naming both; each package reads its own', async () => {
+    ship('flow', 'onboard', A);
+    ship('flow', 'onboard', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'flow', name: 'onboard' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('flow', 'onboard'), 'ambiguous-in-environment', [A, B]);
+    expect(labelOf(await facade.get('flow', 'onboard', A))).toBe('alpha flow');
+    expect(labelOf(await facade.get('flow', 'onboard', B))).toBe('beta flow');
+  });
+
+  it('D3 (a): a package caller never resolves to the environment\'s own flow; a caller with no package is served it', async () => {
+    install(P);
+    envItem('flow', 'local');
+    await expectRefusal(() => facade.get('flow', 'local', P), 'outside-closure', ['the environment']);
+    expect(labelOf(await facade.get('flow', 'local'))).toBe('env flow');
+  });
+
+  it('D3 step 3: one holder outside the package caller\'s declared closure is refused; inside it, served', async () => {
+    install(P);
+    ship('flow', 'solo', A);
+    await expectRefusal(() => facade.get('flow', 'solo', P), 'outside-closure', [A]);
+    install('com.acme.dependent', [A]);
+    expect(labelOf(await facade.get('flow', 'solo', 'com.acme.dependent'))).toBe('alpha flow');
+  });
+
+  it('CONTROL — one holder is served to a caller with no package, as before', async () => {
+    ship('flow', 'solo', A);
+    expect(labelOf(await facade.get('flow', 'solo'))).toBe('alpha flow');
+    expect(labelOf((await protocol.getMetaItem({ type: 'flow', name: 'solo' }))?.item)).toBe('alpha flow');
+  });
+});
+
 describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by-name read resolves member by member', () => {
   /** One member of `packageId`'s bundle `name` (its composite slot), or the environment's own when `packageId` is undefined. */
   const tpl = (name: string, locale: string, packageId?: string) => {
@@ -304,9 +342,9 @@ describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by
 });
 
 describe('the types E8 does not wire keep the legacy read', () => {
-  it('a view (bucket 1) and a flow (child E1) are read by getItem, untouched', async () => {
-    ship('flow', 'onboard', A);
-    expect(labelOf(await facade.get('flow', 'onboard', P))).toBe('alpha flow');
+  it('a view (bucket 1) and a webhook (child B, not yet wired) are read by getItem, untouched', async () => {
+    ship('webhook', 'onboard', A);
+    expect(labelOf(await facade.get('webhook', 'onboard', P))).toBe('alpha webhook');
   });
 });
 
@@ -446,5 +484,91 @@ describe('[#32072] dataset: the by-name read is the package-scoped resolver\'s',
       expect(registry.resolveItem('dataset', name)).toBe(before);
       expect(labelOf((await protocol.getMetaItem({ type: 'dataset', name }))?.item)).toBe(labelOf(before));
     }
+  });
+});
+
+/**
+ * [#32183] A disabled package holds no name: every library reader judges the
+ * served holders. Iterates the live `PACKAGE_SCOPED_READ_TYPES`.
+ *
+ * BASE (main de141e32): two holders with one disabled refused naming both at
+ * every reader; a name only a disabled package holds served that package's
+ * body from `resolveItem`, `MetadataFacade.get` / `getEntry` and `getApp`
+ * (`exists` true), while the protocol's by-name read withheld it. That last
+ * move is the declared narrowing: the body is now `undefined` (`exists`
+ * false) at every reader alike. No in-tree production caller reads it.
+ */
+describe('#32183 — a disabled package holds no name at the library readers', () => {
+  // [contract review S2] Both registration orders of every two-holder pin.
+  const ORDERS = [['enabled first', [A, B]], ['disabled first', [B, A]]] as const;
+  /**
+   * `permission` joined the live list (#32162), and the security catalog's
+   * item seam refuses a second package holder of a set at registration.
+   * Lift that one seam, as the exact-qualifier pins do, so the two-holder
+   * state (the one #31698 PR-2 opens) is reached; nothing else changes.
+   */
+  const admitSecondPermissionHolder = () =>
+    vi.spyOn(registry as unknown as { securityCatalogHoldersOtherThan: () => unknown[] }, 'securityCatalogHoldersOtherThan')
+      .mockReturnValue([]);
+
+  for (const type of PACKAGE_SCOPED_READ_TYPES) {
+    it.each(ORDERS)(`${type}: two holders, one disabled (%s) — every reader serves the enabled holder's item`, async (_order, order) => {
+      if (type === 'permission') admitSecondPermissionHolder();
+      for (const id of order) ship(type, 'shared', id);
+      registry.disablePackage(B);
+      expect(labelOf(registry.resolveItem(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(labelOf((await protocol.getMetaItem({ type, name: 'shared' }))?.item)).toBe(`alpha ${type}`);
+      expect(labelOf((await protocol.getMetaItemForExecution({ type, name: 'shared' }))?.item)).toBe(`alpha ${type}`);
+      expect(labelOf(await facade.get(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(labelOf(facade.getEntry(type, 'shared'))).toBe(`alpha ${type}`);
+      expect(await facade.exists(type, 'shared')).toBe(true);
+    });
+
+    it(`${type}: only a disabled holder — no reader serves its body (the declared narrowing); its own caller still reads it`, async () => {
+      ship(type, 'solo', B);
+      registry.disablePackage(B);
+      expect(registry.resolveItem(type, 'solo')).toBeUndefined();
+      expect(await facade.get(type, 'solo')).toBeUndefined();
+      expect(facade.getEntry(type, 'solo')).toBeUndefined();
+      expect(await facade.exists(type, 'solo')).toBe(false);
+      expect((await protocol.getMetaItem({ type, name: 'solo' }))?.item).toBeUndefined();
+      // A caller inside the disabled package answers its own item, as before.
+      expect(labelOf(await facade.get(type, 'solo', B))).toBe(`beta ${type}`);
+      registry.enablePackage(B);
+      expect(labelOf(registry.resolveItem(type, 'solo'))).toBe(`beta ${type}`);
+    });
+  }
+
+  it.each(ORDERS)('`getApp`: two holders, one disabled (%s), serves the enabled one; only a disabled holder, none', (_order, order) => {
+    for (const id of order) ship('app', 'crm', id);
+    ship('app', 'solo', B);
+    registry.disablePackage(B);
+    expect(labelOf(registry.getApp('crm'))).toBe('alpha app');
+    expect(registry.getApp('solo')).toBeUndefined();
+    expect(labelOf(registry.getApp('solo', B))).toBe('beta app');
+  });
+
+  it.each(ORDERS)('the read MCP `agent_prompt` makes (the by-name read naming no package) serves the enabled holder\'s agent (%s)', async (_order, order) => {
+    for (const id of order) ship('agent', 'helper', id);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'agent', name: 'helper' }), 'ambiguous-in-environment', [...order]);
+    registry.disablePackage(B);
+    const read = await protocol.getMetaItem({ type: 'agent', name: 'helper' });
+    expect(labelOf(read?.item)).toBe('alpha agent');
+    expect((read?.item as { instructions?: string } | undefined)?.instructions).toBe('alpha');
+  });
+
+  it.each(ORDERS)('a package caller outside both closures is refused naming the enabled holder only (%s)', async (_order, order) => {
+    install(P);
+    for (const id of order) ship('page', 'home', id);
+    registry.disablePackage(B);
+    let thrown: unknown;
+    try {
+      registry.resolveItem('page', 'home', P);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect((thrown as PackageScopedNameRefusedError).refusal.candidates).toEqual([{ kind: 'package', packageId: A }]);
+    expect((thrown as Error).message).not.toContain(B);
   });
 });

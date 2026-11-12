@@ -56,7 +56,9 @@
  * refused, and listed here, until it is deleted.
  *
  * Beside them it lists each package-less `sys_metadata` row of such a type
- * (any type whose readers consult `(package, name)`, not only a bundled one)
+ * (any type whose readers consult `(package, name)`, not only a bundled one,
+ * and any type whose one-holder rule has narrowed to the namespace, such as
+ * `action`: `judgesPackageLessRows`, #32407)
  * whose name two or more packages hold: the row is the customization of one
  * holder and cannot say which (ADR-0150 D4), so each holder's exact read
  * refuses it and the list scoped to a holder leaves it out
@@ -95,11 +97,12 @@
  */
 
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
-import { PACKAGE_SCOPED_READ_TYPES, resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
+import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import { keysetWalk } from '@objectstack/types';
 import { isCustomizationPackage, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { ITEM_KEY_DISCRIMINATORS, installedManifestsOf } from '@objectstack/metadata-core';
-import { packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
+import { judgesPackageLessRows, packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
 
 /** The D3 types a stored reference names. */
 type ReferencedType = 'permission' | 'sharing_rule' | 'queue' | 'assignment_rule' | 'flow' | 'connector' | 'email_template';
@@ -159,7 +162,9 @@ export type StoredReferenceRefusal = 'ambiguous' | 'environment-only' | 'outside
 export type ReferenceCandidate =
   | { readonly holder: 'package'; readonly packageId: string; readonly address: string }
   | { readonly holder: 'environment'; readonly address: string }
-  | { readonly holder: 'platform' };
+  | { readonly holder: 'platform' }
+  /** [#32412] A stack's residual (ADR-0130 D4); the registry's rule never names one, the job binder's refusal does. */
+  | { readonly holder: 'residual'; readonly ownerId: string };
 
 /** One stored row the rule refused. */
 export interface StoredReferenceFinding {
@@ -313,9 +318,18 @@ function fieldsOf(reference: StoredPackageReference, packageColumnPresent = true
   return [...fields];
 }
 
-/** Ask the one rule, as the reference's backfill asks it. */
+/**
+ * Ask the one rule, as the reference's backfill asks it: over every holder, a
+ * disabled package's included (#32183), since a binding never moves with a
+ * reversible disable. Every D8 backfill this report covers asks that way: the
+ * flow rows (R7–R10) through the automation engine's `durableFlowHolder`, the
+ * connector row (R11) through its resolver with `includeDisabledPackages`,
+ * the rest through objectql's resolver or the registry's holder read with it.
+ * So a row resolved here is one the next boot binds, its package disabled or
+ * not.
+ */
 function ask(registry: StoredReferenceRegistry, type: ReferencedType, name: string, callerPackageId: string | null): PackageScopedResolution {
-  return resolvePackageScopedName(registry, { type, name, callerPackageId });
+  return resolvePackageScopedName(registry, { type, name, callerPackageId, includeDisabledPackages: true });
 }
 
 /** The report's reading of a refusal (module doc). */
@@ -329,6 +343,7 @@ export function refusalOf(answer: PackageScopedResolution): StoredReferenceRefus
 function candidateOf(registry: StoredReferenceRegistry, holder: PackageScopedHolder, name: string): ReferenceCandidate {
   if (holder.kind === 'environment') return { holder: 'environment', address: `_env/${name}` };
   if (holder.kind === 'platform') return { holder: 'platform' };
+  if (holder.kind === 'residual') return { holder: 'residual', ownerId: holder.ownerId };
   const pkg = registry.getPackage(holder.packageId) as { manifest?: { namespace?: unknown } } | undefined;
   const namespace = typeof pkg?.manifest?.namespace === 'string' && pkg.manifest.namespace !== '' ? pkg.manifest.namespace : undefined;
   return { holder: 'package', packageId: holder.packageId, address: namespace ? `${namespace}/${name}` : `${holder.packageId}:${name}` };
@@ -436,7 +451,10 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
       const pairId = row.package_id;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || typeof pairId !== 'string' || !isCustomizationPackage(pairId)) continue;
-      const owners = pairMemberOwners(pairId, registry.packageScopedHoldersOf(type, name) ?? [], installed, storedBody(row.metadata));
+      // [#32183] Every holder, a disabled package's included: the report is a
+      // durable judgment, so its listing never moves with a reversible disable.
+      const every = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+      const owners = pairMemberOwners(pairId, every, installed, storedBody(row.metadata));
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,
@@ -451,7 +469,7 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
 
 /** The package-less rows two or more holders of the name could own (module doc). Reads only; ordered by id. */
 async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry: StoredReferenceRegistry): Promise<PackageLessRowFinding[]> {
-  const types: string[] = PACKAGE_SCOPED_READ_TYPES.filter((type) => registry.readsByPackage?.(type) === true);
+  const types: string[] = PACKAGE_SCOPED_TYPES.filter((type) => judgesPackageLessRows(registry, type));
   if (types.length === 0) return [];
   const findings: PackageLessRowFinding[] = [];
   const walk = keysetWalk<Row>(
@@ -468,7 +486,7 @@ async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry:
       const { id, type, name } = row;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || (row.package_id !== null && row.package_id !== undefined && row.package_id !== '')) continue;
-      const owners = packageLessRowOwners(registry as never, type, name);
+      const owners = packageLessRowOwners(registry as never, type, name, { includeDisabledPackages: true });
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,

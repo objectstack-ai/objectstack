@@ -40,9 +40,16 @@
  * routes `sys_audit_log` there. {@link migrateArchivedKeyMaterialCopies} drives
  * the very same pages and planners through the archive datasource's DRIVER, as
  * the mail-log rewrite does.
+ *
+ * ## A sealed row is amended first, or not rewritten (ADR-0154 D7)
+ *
+ * The shared runner sends each row of a sealed object through the one
+ * redaction amendment writer before it rewrites it, as for the mail-log
+ * rewrite: amended first, or left as it is and counted `refused`.
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+import type { AuditRedactionSeal } from './audit-seal/amendment-writer.js';
 import { KEY_MATERIAL_COPY_OBJECTS, omitKeyMaterialFromCopy } from './key-material-copy.js';
 import {
   ledgerCopyStoreOverArchiveDriver,
@@ -133,17 +140,28 @@ export interface KeyMaterialMigrationOptions {
   pageSize?: number;
   /** The copy tables to walk — both by default. */
   objects?: readonly KeyMaterialCopyTable[];
+  /**
+   * [ADR-0154 D7] What amending a sealed row takes. Every shipped caller
+   * passes it; without it a row is rewritten with no amendment, and a sealed
+   * one then reads `modified` in `os audit verify`.
+   */
+  seal?: AuditRedactionSeal;
 }
 
 /** What one migration run did (or would do in dry-run). Counts only. */
 export interface KeyMaterialMigrationReport {
   apply: boolean;
-  /** Per copy table: copy rows read, and rows rewritten (or that would be). */
-  readonly byObject: Record<string, { scanned: number; rewritten: number }>;
+  /** Per copy table: copy rows read, rows rewritten (or that would be), and sealed rows refused. */
+  readonly byObject: Record<string, { scanned: number; rewritten: number; refused: number }>;
   /** Copy rows read, total. */
   scanned: number;
   /** Rows holding key material, total — rewritten under `apply`. */
   rewritten: number;
+  /**
+   * [ADR-0154 D7] Sealed rows left as they are because their redaction
+   * amendment cannot be written — not counted in `rewritten`.
+   */
+  refused: number;
   /** A failed read, or a row an `update` threw on (apply mode) — re-run to finish. */
   failures: number;
 }
@@ -153,10 +171,12 @@ const KEY_MATERIAL_REWRITE: LedgerCopyRewriteSpec = {
   objectNames: KEY_MATERIAL_COPY_OBJECTS,
   planAudit: planKeyMaterialAuditRowPatch,
   planActivity: planKeyMaterialActivityRowPatch,
+  migration: 'os migrate audit-key-material',
   tag: '[key-material-copy-migration]',
   summary: (report, label) =>
     `[key-material-copy-migration] ${report.apply ? 'removed' : 'would remove'} key material from ${report.rewritten} of ` +
     `${report.scanned} ${label} cop(ies)` +
+    (report.refused > 0 ? ` (${report.refused} sealed row(s) refused: no amendment could be written)` : '') +
     (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
 };
 

@@ -344,8 +344,9 @@ Lanes 2 to 5 share one contract, stated once here rather than in each
 channel's own doc comment:
 
 - **Address-only signal.** No message body ever rides these channels — the
-  payload names only what changed (a metadata address, a datasource name,
-  a connector credential reference, or a settings namespace and key), never
+  payload names only what changed (a metadata address, which includes the
+  bundle member and the package; a datasource name;
+  a connector credential reference; or a settings namespace and key), never
   the changed value.
 - **Receipt runs convergence, not trust.** A peer that receives a signal does
   not apply the payload as content; it re-reads its OWN copy of the source of
@@ -423,6 +424,7 @@ this.clusterPubSub.publish('metadata.changed', {
   originNode: this.clusterNodeId, // used for loopback suppression
   type,                           // 'object' | 'view' | 'dashboard' | …
   event,                          // the local watch event, replayed verbatim on peers
+  removal,                        // unregister()'s `deleted` event only: { packageId? }
 }, { partitionKey: `${type}:${event.name ?? ''}` })
 ```
 
@@ -445,9 +447,23 @@ the pre-write set (#5109). The registry entry is **deleted, never pre-filled**
 from the payload — the peer re-reads the shared store, which is the source of
 truth.
 
+A removal is the one event that reaches a store the peer does not share. Every
+node holds its own in-memory (`memory:`) copy of what the artifact door
+loaded, and `unregister()` deletes the origin's copy along with the shared
+row. So its `deleted` event carries `removal` (with the `packageId` the
+removal named, for a type stored per `(package, name)`), and the peer deletes
+its own in-memory copy by the same key before it drops the registry entry;
+the removed item then answers nothing on every node (#32499). The peer never
+deletes from the shared store — the origin already has. Every other event,
+a `deleted` event from a file or repository watcher included, carries no
+`removal`, and the peer keeps its in-memory copy, which no loader could
+restore once dropped. A removal made with `notify: false` publishes nothing,
+so it reaches no peer at all.
+
 At the payload's top level there is **no** `version` / `name` / `tenantId`
 / `operation` field and **no** version comparison — by design, not by
-omission; the item's name is carried only inside the replayed `event`.
+omission; the item's name is carried only inside the replayed `event`, and
+`removal` is an address too (the package a removal named), not a version.
 
 **No richer payload is declared.** The spec once carried a version-stamped
 target shape for this lane — `MetadataChangedEventPayloadSchema` in
@@ -474,7 +490,7 @@ second, independent channel — `METADATA_MUTATION_CLUSTER_CHANNEL =
 // packages/metadata-protocol/src/protocol.ts
 export interface ClusterMetadataMutationPayload {
   originNode?: string;          // used for loopback suppression
-  event: MetadataMutationEvent; // address-only: type/name/state/org scope, no body
+  event: MetadataMutationEvent; // address-only: type/name/state/org scope, member, packageId; no body
 }
 ```
 
@@ -489,7 +505,21 @@ creates through the load balancer gave 67×201 / 133×404.
 On receipt, a peer suppresses its own `originNode`, then re-reads the row
 from its OWN `sys_metadata` and re-runs the registry write-through from that
 read (`applyRemoteMetadataMutation`) rather than applying the payload as
-content. Attached by `MetadataClusterBridgePlugin`'s protocol lane at
+content.
+
+**The address includes the bundle member and the package.** `member` names the
+bundle member of a type whose identity is a pair (the `zh-CN` locale of an
+`email_template`). `packageId` names the package the row is bound to, `null`
+for a row bound to none (ADR-0150 D4). For a type the metadata service stores
+per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES`), the peer reads that
+package's row and registers it with that binding; with no row there, it runs
+the writer's own heal for that package. Every other type converges by name. A
+signal with no `packageId` comes from a replica that predates the field: the
+peer converges it by name when the stored rows of the address are bound to one
+package, and when they are bound to several it logs one `error` line naming
+them and keeps the entry it holds, healed by the next resync, a re-save from an
+upgraded replica, or a restart. An older replica ignores the field, so a
+rolling upgrade needs no order. Attached by `MetadataClusterBridgePlugin`'s protocol lane at
 `kernel:ready`, duck-typed against `protocol.attachMetadataMutationPubSub()`
 so this package takes no dependency on `@objectstack/metadata-protocol`.
 

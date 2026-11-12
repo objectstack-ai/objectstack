@@ -35,6 +35,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads this dependency in a function body; paid here,
+// at collection, not inside the first case's clocked window.
+import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 
@@ -57,7 +60,18 @@ const AUTHOR = (): HttpProtocolContext => ({
 /** A refusal as the store raises one — an ADR-0112 envelope the door must relay as is. */
 const storeRefusal = () => Object.assign(new Error('flow/x failed spec validation'), { code: 'INVALID_METADATA', status: 422 });
 
-function boot({ protocol: mode = 'real' }: { protocol?: 'real' | 'absent' } = {}) {
+/**
+ * What the composition's messaging service answers for its channels:
+ * `getKnownChannels()`'s list, a service with no such reader, or no service.
+ * And whether the kernel's `kernel:ready` has settled (`hasBootPhaseSettled`).
+ */
+interface ChannelComposition {
+    messaging?: ReadonlyArray<{ id: string; configured: boolean }> | 'no-reader' | 'reader-throws' | 'reader-not-a-list';
+    /** `'throws'`: the kernel's boot-phase reader itself throws, so the check cannot finish. */
+    ready?: boolean | 'throws';
+}
+
+function boot({ protocol: mode = 'real', messaging, ready = false }: { protocol?: 'real' | 'absent' } & ChannelComposition = {}) {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     registry.registerItem('flow', definitionOf(PACKAGED), 'name', PACKAGE_ID);
 
@@ -84,8 +98,20 @@ function boot({ protocol: mode = 'real' }: { protocol?: 'real' | 'absent' } = {}
         automation: { handlerReady: true, registerFlow, unregisterFlow, getFlow },
     };
     if (mode === 'real') services.protocol = protocol;
+    if (messaging === 'no-reader') services.messaging = { emit: async () => ({}) };
+    else if (messaging === 'reader-throws') services.messaging = { getKnownChannels: () => { throw new Error('registry unreadable'); } };
+    else if (messaging === 'reader-not-a-list') services.messaging = { getKnownChannels: () => ({ inbox: true }) };
+    else if (messaging) services.messaging = { getKnownChannels: () => messaging.map((entry) => ({ ...entry })) };
     const resolve = (name: string): unknown => services[name];
-    const kernel = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
+    const kernel = {
+        getService: resolve,
+        getServiceAsync: async (name: string) => resolve(name),
+        context: { getService: resolve },
+        hasBootPhaseSettled: (phase: string) => {
+            if (ready === 'throws') throw new Error('boot phase unreadable');
+            return ready === true && phase === 'kernel:ready';
+        },
+    };
 
     return {
         dispatcher: new HttpDispatcher(kernel as never),
@@ -237,5 +263,144 @@ describe('[#20862] the removal door keeps pace: DELETE removes the tenant row to
         expect(statusOf(response)).toBe(200);
         expect(h.held(CUSTOMER)).toBeUndefined();
         expect(h.deleteMetaItem).not.toHaveBeenCalled();
+    });
+});
+
+/**
+ * A flow whose second top-level node is a `notify` naming `channels`, and whose
+ * third is a `loop` holding a `notify` of its own (`inner`) in its body.
+ */
+const notifyFlowOf = (name: string, channels: unknown, inner: unknown = 'inbox') => ({
+    name, label: 'Notify', type: 'autolaunched',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'tell_ops', type: 'notify', label: 'Tell ops', config: { recipients: 'team:ops', title: 'Hi', channels } },
+        {
+            id: 'sweep', type: 'loop', label: 'Sweep',
+            config: {
+                collection: { dialect: 'cel', source: '[]' },
+                body: { nodes: [{ id: 'tell_each', type: 'notify', label: 'Each', config: { recipients: 'team:ops', title: 'Hi', channels: inner } }], edges: [] },
+            },
+        },
+    ],
+    edges: [],
+});
+
+/** The channels a stock composition's messaging service knows: the inbox, two mounted providers, one without its transport. */
+const STOCK_CHANNELS = [
+    { id: 'inbox', configured: true },
+    { id: 'email', configured: true },
+    { id: 'sms', configured: true },
+    { id: 'push', configured: false },
+] as const;
+
+const fieldsOf = (response: any): Array<{ field?: string; code?: string }> =>
+    response?.body?.error?.details?.fields ?? [];
+
+describe('a notify node naming a channel no plugin registers is refused at the save doors (ruling 6810493176, letter B)', () => {
+    it('POST /: 400 VALIDATION_FAILED naming the node and the channel at its config path, listing the registered channels; nothing saved, the create withdrawn', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: true });
+
+        const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined);
+
+        expect(statusOf(response)).toBe(400);
+        expect(errorOf(response).code).toBe('VALIDATION_FAILED');
+        const message = String((errorOf(response) as { message?: unknown }).message);
+        expect(message).toMatch(new RegExp(`^Flow '${NEW}' rejected: 1 notify channel\\(s\\) no plugin registers:`));
+        expect(message).toContain("node 'tell_ops' (`notify`) names channel 'emial' at nodes.1.config.channels");
+        expect(message).toContain("did you mean 'email'?");
+        expect(message).toContain(
+            'The channels this deployment registers: `inbox`, `email`, `sms`, `push` (no transport configured yet).',
+        );
+        expect(fieldsOf(response)).toEqual([expect.objectContaining({ field: 'nodes.1.config.channels', code: 'invalid_value' })]);
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.unregisterFlow).toHaveBeenCalledWith(NEW);
+        expect(h.held(NEW)).toBeUndefined();
+    });
+
+    it('PUT /:name: refused the same way, and the engine gets back the definition it held', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: true });
+        const before = h.held(CUSTOMER);
+
+        const { response } = await h.dispatcher.handleAutomation(
+            `/${CUSTOMER}`, 'PUT', notifyFlowOf(CUSTOMER, ['inbox', 'slack']), AUTHOR(), undefined,
+        );
+
+        expect(statusOf(response)).toBe(400);
+        expect(errorOf(response).code).toBe('VALIDATION_FAILED');
+        expect(String((errorOf(response) as { message?: unknown }).message))
+            .toContain("node 'tell_ops' (`notify`) names channel 'slack' at nodes.1.config.channels.1");
+        expect(fieldsOf(response).map((f) => f.field)).toEqual(['nodes.1.config.channels.1']);
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.held(CUSTOMER)).toBe(before);
+    });
+
+    it('a notify inside a region body is judged, located inside the region; every unknown channel is named', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: true });
+
+        const { response } = await h.dispatcher.handleAutomation(
+            '', 'POST', notifyFlowOf(NEW, 'teams', ['inbox', 'pager']), AUTHOR(), undefined,
+        );
+
+        expect(statusOf(response)).toBe(400);
+        expect(errorOf(response).code).toBe('VALIDATION_FAILED');
+        const message = String((errorOf(response) as { message?: unknown }).message);
+        expect(message).toMatch(/rejected: 2 notify channel\(s\)/);
+        expect(message).toContain("node 'tell_each' (`notify`) (in loop 'sweep' body) names channel 'pager'");
+        expect(fieldsOf(response).map((f) => f.field)).toEqual([
+            'nodes.1.config.channels',
+            'nodes.2.config.body.nodes.0.config.channels.1',
+        ]);
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+    });
+
+    it('the control: registered channels save, a provider with no transport yet among them, and so does a node naming none', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: true });
+
+        const named = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, [' email ', 'push'], 'sms'), AUTHOR(), undefined);
+        expect(statusOf(named.response)).toBe(200);
+        const unnamed = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf('other_flow', undefined, undefined), AUTHOR(), undefined);
+        expect(statusOf(unnamed.response)).toBe(200);
+        expect(h.saveMetaItem).toHaveBeenCalledTimes(2);
+    });
+
+    it('not judged before kernel:ready has settled, with no messaging service, or with one that cannot list its channels', async () => {
+        for (const composition of [
+            { messaging: STOCK_CHANNELS, ready: false },
+            { ready: true },
+            { messaging: 'no-reader', ready: true },
+        ] as const) {
+            const h = boot(composition);
+            const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined);
+            expect(statusOf(response), JSON.stringify(composition)).toBe(200);
+            expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('a messaging reader that throws or answers no list is not judged: the save goes on, registered AND saved', async () => {
+        for (const messaging of ['reader-throws', 'reader-not-a-list'] as const) {
+            const h = boot({ messaging, ready: true });
+            const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined);
+            expect(statusOf(response), messaging).toBe(200);
+            expect(h.saveMetaItem, messaging).toHaveBeenCalledTimes(1);
+            expect(h.held(NEW), messaging).toBeDefined();
+        }
+    });
+
+    it('a check that cannot finish undoes the registration before the error leaves: nothing registered-but-unsaved', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: 'throws' });
+        const before = h.held(CUSTOMER);
+
+        await expect(
+            h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined),
+        ).rejects.toThrow('boot phase unreadable');
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.held(NEW)).toBeUndefined();
+
+        await expect(
+            h.dispatcher.handleAutomation(`/${CUSTOMER}`, 'PUT', notifyFlowOf(CUSTOMER, 'emial'), AUTHOR(), undefined),
+        ).rejects.toThrow('boot phase unreadable');
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.held(CUSTOMER)).toBe(before);
     });
 });

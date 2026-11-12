@@ -19,9 +19,18 @@
  * in (`null` for environment-wide), and a sentence saying where it went and
  * what was not copied.
  *
- * ⛔ The client never names the package. The body's optional `package` key is
- * the server's to default, and where the copy lands is read back off the
- * answer, never derived here from the source's package.
+ * ⛔ The client never names the package the copy LANDS in. The body's
+ * optional `package` key is the server's to default, and where the copy lands
+ * is read back off the answer, never derived here from the source's package.
+ *
+ * ## Which source (objectstack#32537, ADR-0150 D3/D5)
+ *
+ * `?package=PKG` names the SOURCE's package, for a name more than one package
+ * holds (`permission-set-holder.ts` says when a page names one). Without it the
+ * door refuses such a name `409 RESOURCE_CONFLICT`, naming every holder; that
+ * refusal rejects as a {@link PermissionSetHolderConflict}, which the dialog
+ * shows as a pick, and the clone is sent again with the chosen package. A name
+ * one package holds is cloned by the name alone, as before.
  *
  * So this module sends a name and a label and nothing else (the seat's ruling
  * on objectui#7611, 6097763840: "objectui calling it with a name and a label").
@@ -48,6 +57,7 @@ import { actionErrorDetail } from '@object-ui/core';
 import { apiBase } from '../../utils/apiBase.js';
 import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 import { t, tFormat } from './i18n.js';
+import { holderCandidatesOf, packageQuery, PermissionSetHolderConflict } from './permission-set-holder.js';
 
 /** What a clone that the server accepted reports back. */
 export interface PermissionSetCloned {
@@ -99,17 +109,21 @@ export function permissionSetCloneNoticeText(
 }
 
 /**
- * Clone `source` through the door. Resolves to the saved copy's name (empty
- * when the answer names none), the package it landed in, and the server's
- * notice. A refusal rejects with
- * the server's own message; `fallback` words one only when the answer has none.
+ * Clone `source` through the door — `sourcePackage`'s set of that name when
+ * one is given. Resolves to the saved copy's name (empty when the answer names
+ * none), the package it landed in, and the server's notice. A refusal rejects
+ * with the server's own message; `fallback` words one only when the answer has
+ * none. A refusal naming the name's holders rejects as a
+ * {@link PermissionSetHolderConflict}.
  */
 export async function clonePermissionSet(
   source: string,
   target: { name: string; label: string },
   fallback: (status: number) => string,
+  sourcePackage?: string,
 ): Promise<PermissionSetCloned> {
-  const res = await fetch(`${apiBase()}/security/permission-sets/${encodeURIComponent(source)}/clone`, {
+  const url = `${apiBase()}/security/permission-sets/${encodeURIComponent(source)}/clone${packageQuery(sourcePackage)}`;
+  const res = await fetch(url, {
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -118,7 +132,11 @@ export async function clonePermissionSet(
     body: JSON.stringify({ name: target.name, label: target.label }),
   });
   const json = await res.json().catch(() => null);
-  if (!res.ok || envelopeRefused(json)) throw new Error(actionErrorDetail(json, fallback(res.status)));
+  if (!res.ok || envelopeRefused(json)) {
+    const message = actionErrorDetail(json, fallback(res.status));
+    const candidates = res.status === 409 ? holderCandidatesOf(json) : null;
+    throw candidates ? new PermissionSetHolderConflict(message, candidates) : new Error(message);
+  }
   const data = envelopeData(json);
   const created = (data.permissionSet as { name?: unknown } | null | undefined)?.name;
   const landed = data.package;

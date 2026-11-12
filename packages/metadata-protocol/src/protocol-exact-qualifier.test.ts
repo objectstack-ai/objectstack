@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { exactQualifierItem, packageLessRowOwners, pairRowOnAddress } from './protocol-exact-qualifier.js';
+import { exactQualifierItem, judgesPackageLessRows, packageLessRowOwners, pairRowOnAddress } from './protocol-exact-qualifier.js';
 
 const BASE = 'com.acme.alpha';
 const PAIR = `${BASE}.custom`;
@@ -74,9 +74,17 @@ describe('[#31699] packageLessRowOwners', () => {
         expect(packageLessRowOwners(registry(['a.x']), 'agent', 'helper')).toEqual(['a.x']);
     });
 
-    it('CONTROL — a platform-requested name (an auth mail) and a type not read by package name none', () => {
+    it('CONTROL — a platform-requested name (an auth mail), and a type neither read by package nor narrowed, name none', () => {
         expect(packageLessRowOwners(registry(['a.x', 'b.y']), 'email_template', 'auth.password_reset')).toEqual([]);
-        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'email_template', 'welcome')).toEqual([]);
+        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'page', 'home')).toEqual([]);
+        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'hook', 'on_save')).toEqual([]);
+    });
+
+    it('[#32407] a type narrowed to the namespace is judged whether or not the registry reads it by package (BASE: none)', () => {
+        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'action', 'approve')).toEqual(['a.x', 'b.y']);
+        expect(packageLessRowOwners(registry(['a.x', 'b.y'], false), 'email_template', 'welcome')).toEqual(['a.x', 'b.y']);
+        expect(packageLessRowOwners({ packageScopedHoldersOf: () => ['a.x', 'b.y'] }, 'action', 'approve')).toEqual(['a.x', 'b.y']);
+        expect(judgesPackageLessRows({ readsByPackage: () => false }, 'function')).toBe(false);
     });
 });
 

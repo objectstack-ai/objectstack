@@ -154,10 +154,15 @@ function makeRes() {
 function setup(objectQLProvider?: () => Promise<unknown>, caller: Record<string, unknown> = { userId: 'u1' }) {
     const h = makeHarness();
     const snapshot = {
-        getPublished: vi.fn(async (type: string, name: string) =>
-            (type === 'page' && name.endsWith('_page') && !name.startsWith('no_such')
-                ? { name, label: `${name} (published)` }
-                : undefined)),
+        // [#32183 M4] `stamped_page`: the copy the metadata service keeps for a
+        // type it keys by name alone, when the disabled holder's body
+        // registered last (stamped with that holder).
+        getPublished: vi.fn(async (type: string, name: string, _packageId?: string) =>
+            (type === 'page' && name === 'stamped_page'
+                ? { name, label: 'disabled code', _packageId: PKG }
+                : type === 'page' && name.endsWith('_page') && !name.startsWith('no_such')
+                    ? { name, label: `${name} (published)` }
+                    : undefined)),
     };
     const server = {
         get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(), use: vi.fn(),
@@ -423,6 +428,77 @@ describe('[#24210] RestServer: the layered view of a disabled package\'s item, b
         // No engine to ask, so nothing is withheld: the doors' answer before #24210.
         expect(await absent.layers('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
         expect(await absent.layersFlag('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
+    }, 60_000);
+});
+
+/**
+ * [#32183, contract review M1] A name an enabled and a disabled package both
+ * ship: every bare door (the plain read, `/layers`, `/published`) serves the
+ * enabled holder's stack, whichever registered first, and a stored row bound
+ * to the disabled holder reaches none of them. The page's `/published` is the
+ * snapshot exit, whose stub here (as the metadata service) is blind to the
+ * package. [contract review M4] Its `stamped_page` copy is the one a service
+ * that keys the type by name alone keeps when the disabled holder's body
+ * registered last: the door serves the enabled holder's code layer instead
+ * (the artifact door's own pin is
+ * `packages/runtime/src/domains/meta-disabled-holder-artifact-door.test.ts`).
+ *
+ * Contract review M4: with this door's stamp check ablated (fix round 2,
+ * leg A12), `stamped_page`'s `/published` served the disabled holder's copy
+ * in both orders.
+ *
+ * Contract review M1 (branch head 340f7cbc, measured on this fixture): with a
+ * stored row bound to the disabled holder, the plain read, `/layers` and
+ * `/published` answered 404 (the bare read took that row and the face withheld
+ * it); with a stored row bound to each holder, `/layers` answered 409.
+ */
+describe('[#32183] RestServer: a name an enabled and a disabled package both ship', () => {
+    const tag = (pkg: string) => (pkg === PKG ? 'disabled' : 'healthy');
+    const SPECIMENS = [
+        // [type, name, plain, code, overlay, /published]
+        ['page', 'mix_page', 'healthy code', 'healthy code', undefined, 'mix_page (published)'],
+        // [contract review M4] The snapshot's copy is the disabled holder's: never served; the
+        // enabled holder's code layer is.
+        ['page', 'stamped_page', 'healthy code', 'healthy code', undefined, 'healthy code'],
+        ['dashboard', 'row_one_dash', 'healthy code', 'healthy code', undefined, undefined],
+        ['dashboard', 'row_both_dash', 'healthy row', 'healthy code', 'healthy row', 'healthy row'],
+    ] as const;
+
+    it.each([['disabled first', [PKG, OTHER_PKG]], ['enabled first', [OTHER_PKG, PKG]]] as const)('%s: the plain read, /layers and /published serve the enabled holder\'s code layer and stored row, never the disabled one\'s', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of packages) {
+            for (const name of ['mix_page', 'stamped_page']) {
+                host.registry.registerItem('page', { name, label: `${tag(pkg)} code` } as any, 'name', pkg);
+            }
+            for (const name of ['row_one_dash', 'row_both_dash']) {
+                host.registry.registerItem('dashboard', { name, label: `${tag(pkg)} code`, widgets: [] } as any, 'name', pkg);
+            }
+        }
+        // A stored row bound to the disabled holder alone, and one bound to each holder.
+        await host.protocol.saveMetaItem({ type: 'dashboard', name: 'row_one_dash', packageId: PKG, item: { name: 'row_one_dash', label: 'disabled row', widgets: [] } });
+        for (const pkg of packages) {
+            await host.protocol.saveMetaItem({ type: 'dashboard', name: 'row_both_dash', packageId: pkg, item: { name: 'row_both_dash', label: `${tag(pkg)} row`, widgets: [] } });
+        }
+        // CONTROL: the fixture carries the disabled holder's layers; its own address serves them while it is enabled.
+        expect(await host.layers('dashboard', 'row_one_dash', { package: PKG }))
+            .toMatchObject({ status: 200, body: { code: { label: 'disabled code' }, effective: { label: 'disabled row' } } });
+
+        host.registry.disablePackage(PKG);
+        for (const [type, name, plain, code, overlay, published] of SPECIMENS) {
+            const read = await host.plain(type, name);
+            expect([read.status, read.body?.item?.label, name], JSON.stringify(read.body)).toEqual([200, plain, name]);
+            const layers = await host.layers(type, name);
+            expect([layers.status, layers.body?.code?.label, layers.body?.overlay?.label, layers.body?.effective?.label, name], JSON.stringify(layers.body))
+                .toEqual([200, code, overlay, overlay ?? code, name]);
+            const served = await host.published(type, name);
+            if (published === undefined) expect([served.status, name]).toEqual([404, name]);
+            else expect([served.status, served.body?.label, name], JSON.stringify(served.body)).toEqual([200, published, name]);
+            for (const answer of [read, layers, served]) expect(JSON.stringify(answer.body ?? null)).not.toMatch(/disabled (code|row)/);
+        }
+        // [contract review M4] The snapshot is read at the enabled holder's package, so a type the
+        // metadata service stores per (package, name) answers that package's copy.
+        expect(host.snapshot.getPublished).toHaveBeenCalledWith('page', 'stamped_page', OTHER_PKG);
     }, 60_000);
 });
 

@@ -641,8 +641,11 @@ const DISPATCH_REKEY_HOLD_MS = 120_000;
  * (`stored-reference-package-backfill.ts`), and dispatch keys inside
  * retention get their scoped copy (`flow-dispatch-key-package-backfill.ts`).
  * Each asks the one D3 rule with no caller — a flow through
- * `AutomationEngine.flowHolder`, a connector through the same resolver the
- * connector reader uses — so a row records WHICH item it belongs to (D4).
+ * `AutomationEngine.durableFlowHolder`, a connector through the same resolver
+ * the connector reader uses — so a row records WHICH item it belongs to (D4).
+ * [#32183] Over every holder, a disabled package's included
+ * (`includeDisabledPackages`): a binding is written once and never moves, and
+ * a disable is reversible. The execute doors keep judging the served holders.
  *
  * The dispatch ledger is held from here until that run has finished, so a
  * trigger's first claim after an upgrade reads the re-keyed rows. A kernel
@@ -667,7 +670,9 @@ function registerStoredReferenceBackfill(
     });
     const connectorHolder = connectorNameResolver(ctx);
     const holderOf = (type: StoredReferenceType, name: string) =>
-        storedReferenceHolderOf(type === 'flow' ? engine.flowHolder(name) : connectorHolder(name, null));
+        storedReferenceHolderOf(type === 'flow'
+            ? engine.durableFlowHolder(name)
+            : connectorHolder(name, null, { includeDisabledPackages: true }));
     ctx.hook('kernel:bootstrapped', async () => {
         try {
             const registry = objectqlRegistryOf(ctx) as { bareNameHoldersAreSealed?: boolean; getObject?(name: string): unknown } | undefined;
@@ -1349,7 +1354,7 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
  * named that the engine does not hold, and nothing is guessed.
  */
 export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNameResolver {
-    return (name, callerPackageId) => {
+    return (name, callerPackageId, options) => {
         let registry: PackageScopedRegistry | undefined;
         try {
             // The same slice reader the connector reconcile asks (E5's `packageScopedRegistryOf`).
@@ -1358,7 +1363,10 @@ export function flowNameResolver(ctx: Pick<PluginContext, 'getService'>): FlowNa
             return undefined;
         }
         if (!registry) return undefined;
-        return resolvePackageScopedName(registry, { type: 'flow', name, callerPackageId });
+        return resolvePackageScopedName(registry, {
+            type: 'flow', name, callerPackageId,
+            ...(options?.includeDisabledPackages === true ? { includeDisabledPackages: true } : {}),
+        });
     };
 }
 
@@ -2392,6 +2400,11 @@ export class AutomationServicePlugin implements Plugin {
                         // the user, so `sys_user_org_members` resolves for the
                         // run as it does for the user's own request.
                         org_user_ids: grants.org_user_ids,
+                        // [ADR-0093 D8.1, as amended] The membership set the
+                        // request path carries from this same resolution, so
+                        // the organization wall judges the run as it judges
+                        // the user's own request.
+                        accessible_org_ids: grants.accessible_org_ids,
                         // The email the request path seeds through this same
                         // resolver (the user's `sys_user` email), so a row
                         // policy reading `current_user.email` resolves for the

@@ -228,3 +228,33 @@ describe('#15928: the adapter yields only a 404 that disclaims ownership', () =>
     expect(mockDispatcher.dispatch).not.toHaveBeenCalled();
   });
 });
+
+describe('#32637: the auth service is handed the transport peer', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDispatcher.dispatch.mockResolvedValue(DISPATCH_ANSWERED);
+    mockDispatcher.handleAuth.mockResolvedValue({ handled: false });
+  });
+
+  it('passes the peer `@hono/node-server` reports on `c.env.incoming` as `{ remoteAddress }`', async () => {
+    const svc = authServiceOwning([], () => new Response('{}', { status: 401 }));
+    const app: Hono = createHonoApp({ kernel: kernelWith(svc), prefix: PREFIX });
+
+    await app.request(`http://localhost${PREFIX}/auth/get-session`, {}, { incoming: { socket: { remoteAddress: '203.0.113.7' } } });
+
+    expect(svc.handleRequest).toHaveBeenCalledTimes(1);
+    const [request, transport] = svc.handleRequest.mock.calls[0] as unknown as [Request, unknown];
+    expect(new URL(request.url).pathname).toBe(`${PREFIX}/auth/get-session`);
+    expect(transport).toEqual({ remoteAddress: '203.0.113.7' });
+  });
+
+  it('passes no address when the runtime reports none — never one made up', async () => {
+    const svc = authServiceOwning([], () => new Response('{}', { status: 401 }));
+    const app: Hono = createHonoApp({ kernel: kernelWith(svc), prefix: PREFIX });
+
+    await app.request(`http://localhost${PREFIX}/auth/get-session`);
+
+    const [, transport] = svc.handleRequest.mock.calls[0] as unknown as [Request, unknown];
+    expect(transport).toEqual({});
+  });
+});

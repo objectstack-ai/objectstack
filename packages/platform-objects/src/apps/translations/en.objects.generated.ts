@@ -3725,6 +3725,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "Version"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "Operation Type",
         options: {

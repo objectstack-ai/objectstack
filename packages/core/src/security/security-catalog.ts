@@ -211,8 +211,14 @@ export interface SecurityCatalogMetadataService {
  * `getPackage`/`getAllPackages` (`PackageClosureRegistry`).
  */
 export interface SecurityCatalogPackageScopedRegistry extends PackageClosureRegistry {
-  /** Every package holding `(type, name)`, each once; the caller's own bundle addition counts for it. */
-  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): readonly string[];
+  /**
+   * Every package holding `(type, name)`, each once; the caller's own bundle
+   * addition counts for it. [#32183] A disabled package holds no name (the
+   * caller's own holding aside) unless `options.includeDisabledPackages` asks
+   * for every holder.
+   */
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): readonly string[];
   /** A package holder's item, with whatever binds to it (its ADR-0005 overlay). */
   getPackageScopedItem(type: string, name: string, packageId: string): unknown;
   /** The environment's own item of the name, bound to no package. */
@@ -329,8 +335,19 @@ export type SecurityCatalogResolution =
   | {
       readonly status: 'refused';
       readonly reason: string;
+      /** Every candidate, each as one display string (`package "com.acme.crm"`) — what a report prints. */
       readonly candidates: readonly string[];
       readonly message: string;
+      /**
+       * [ADR-0150 D3/D5, #32164] The same candidates, structured, in the same
+       * order — what a door answers a `409 RESOURCE_CONFLICT` with
+       * (`candidates: [{ kind: 'package', packageId }]`, the shape `/actions`
+       * and the activation door's declaration types answer), so no caller
+       * parses a display string back into a package id. Every refusal
+       * {@link createSecurityCatalogReader} builds carries it; optional so a
+       * hand-made reader's refusal stays well-typed without it.
+       */
+      readonly holders?: readonly PackageScopedHolder[];
     };
 
 /** The catalog read. Its members answer the same question, so they never disagree. */
@@ -567,6 +584,15 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
    * A permission set by ADR-0150 D3 (module doc): the one rule over the
    * registry's holders of the name and the one closure walk — the holder set
    * `resolvePackageScopedName` (`@objectstack/objectql`) hands the same rule.
+   *
+   * [#32183] The fixed exception to the served holder set: a permission set
+   * is judged over EVERY holder, a disabled package's included
+   * (`includeDisabledPackages`), so a disable never makes a grant confer more.
+   * Two holders with one disabled stay refused, naming both; a name only a
+   * disabled package holds counts that package, and the grant resolves to no
+   * set (its set is not servable). The same stance as the stored column
+   * below: a column naming a disabled holder confers nothing and is never
+   * re-targeted to another holder.
    */
   const resolvePermissionScoped = async (
     scope: SecurityCatalogPackageScopedRegistry,
@@ -586,6 +612,18 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       }
       const definition = servable(item, name);
       if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+      // [#32183] A column naming a package that still holds the set but is
+      // disabled confers nothing, and is not stale: the disable is
+      // reversible, and the column binds that package. Never re-targeted to
+      // another holder of the name.
+      let heldDisabled: boolean;
+      try {
+        heldDisabled = registry.isPackageDisabled(exact)
+          && scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }).includes(exact);
+      } catch (error) {
+        throw unreadable('registry', 'permission', error);
+      }
+      if (heldDisabled) return { status: 'not-found' };
       // A stale column — the set moved to another package on an upgrade, or
       // was renamed and its name taken by another — is read as an unbound
       // row: the rule below grants the one holder and refuses two, naming
@@ -605,7 +643,8 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       outcome = resolvePackageScopedHolders(
         { type: 'permission', name, callerPackageId: caller },
         {
-          packageHolders: scope.packageScopedHoldersOf('permission', name, caller),
+          // [#32183] Every holder, a disabled package's included (see above).
+          packageHolders: scope.packageScopedHoldersOf('permission', name, caller, { includeDisabledPackages: true }),
           packageItem: (packageId) => scope.getPackageScopedItem('permission', name, packageId),
           environmentItem: () => scope.getEnvironmentScopedItem('permission', name),
         },
@@ -621,6 +660,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
         reason: outcome.reason,
         candidates: outcome.candidates.map(describePackageScopedHolder),
         message: outcome.message,
+        holders: outcome.candidates,
       };
     }
     if (outcome.status === 'resolved') {
@@ -630,10 +670,11 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       const definition = servable(outcome.item, name);
       return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
     }
-    // The registry holds the name nowhere. The metadata service reads by name
-    // only, so its body is the environment's: it answers a caller with no
-    // package, and for a package's reference it is the D3 (a) refusal, naming
-    // the environment — reported, never served and never hidden as a miss.
+    // The registry holds the name nowhere, a disabled package included. The
+    // metadata service reads by name only, so its body is the environment's:
+    // it answers a caller with no package, and for a package's reference it is
+    // the D3 (a) refusal, naming the environment — reported, never served and
+    // never hidden as a miss.
     const declared = await fromMetadata('permission', name);
     if (!declared) return { status: 'not-found' };
     if (caller === null) return { status: 'resolved', entry: entry('permission', declared, 'metadata') };
@@ -651,6 +692,7 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       reason: refusal.reason,
       candidates: refusal.candidates.map(describePackageScopedHolder),
       message: packageScopedRefusalMessage(refusal),
+      holders: refusal.candidates,
     };
   };
 
@@ -864,7 +906,11 @@ export function holdsPlatformPermissionSet(engine: unknown, held: HeldPermission
     outcome = resolvePackageScopedHolders(
       { type: 'permission', name, callerPackageId: null },
       {
-        packageHolders: scope.packageScopedHoldersOf('permission', name, null),
+        // [#32183] Every holder, a disabled package's included: the catalog's
+        // fixed exception (`resolvePermissionScoped`). Two holders with one
+        // disabled are refused and hold nothing; a name only a disabled
+        // package holds resolves to it, and the disabled check below answers.
+        packageHolders: scope.packageScopedHoldersOf('permission', name, null, { includeDisabledPackages: true }),
         packageItem: (packageId) => scope.getPackageScopedItem('permission', name, packageId),
         environmentItem: () => scope.getEnvironmentScopedItem('permission', name),
       },

@@ -63,13 +63,15 @@ export interface InboxNotificationView {
 }
 
 /**
- * Audience selector for {@link EmitInput}. P0 resolves explicit user ids and
- * email-shaped recipients inline (email→id is finished at the inbox channel);
- * `role:` / `team:` / `owner_of:` selectors are forwarded but only fully
- * expanded by the `RecipientResolver` in P1.
+ * Audience selector for {@link EmitInput}. The `RecipientResolver` expands
+ * each one to user ids: an explicit user id (or `user:ID`), an email address
+ * (to the user who holds it), `role:NAME` and `org:members` (the emitting
+ * organization's members — those with that role, and all of them; both read
+ * {@link EmitInput.organizationId}), `team:ID`, and `owner_of:OBJECT:ID` /
+ * `{ ownerOf }` (the record's owner).
  */
 export type AudienceSpec =
-    | string // user id | email | 'role:x' | 'team:x'
+    | string // user id | email | 'role:x' | 'org:members' | 'team:x' | 'owner_of:obj:id'
     | { ownerOf: { object: string; id: string } };
 
 export type Audience = AudienceSpec | readonly AudienceSpec[];
@@ -113,7 +115,11 @@ export interface EmitInput {
     readonly source?: { object: string; id: string };
     /** User who caused the event (mentioner, assigner). */
     readonly actorId?: string;
-    /** Tenant stamp for sudo/background paths so RLS matches recipients. */
+    /**
+     * Tenant stamp for sudo/background paths so RLS matches recipients. Also
+     * the emitting organization the audience resolves in: `role:` scopes to
+     * it, and `org:members` names its members — nobody when this is absent.
+     */
     readonly organizationId?: string;
     /** Channels to fan out to. Defaults to `['inbox']` (always on). */
     readonly channels?: string[];
@@ -502,6 +508,11 @@ export class MessagingService {
      * exist yet — a transport service another plugin registers later in the
      * same boot — use {@link MessagingService.registerChannelProvider}, which
      * is asked again on every lookup instead.
+     *
+     * Register by the time the kernel's `kernel:ready` has settled (from
+     * `init()`, `start()` or a `kernel:ready` handler): the automation save
+     * doors (`/automation`, `@objectstack/runtime`) refuse a `notify` node
+     * naming a channel id this service does not know at that point.
      */
     registerChannel(channel: MessagingChannel): void {
         if (this.channels.has(channel.id) || this.channelProviders.has(channel.id)) {
@@ -546,6 +557,12 @@ export class MessagingService {
      * serve the stale verdict this method exists to abolish. Provider authors
      * keep the probe cheap (a service-registry closure call) and memoise the
      * CHANNEL OBJECT, never the presence of the transport.
+     *
+     * The provider itself (the channel ID) is registered by the time the
+     * kernel's `kernel:ready` has settled; only its transport may arrive later.
+     * The automation save doors (`/automation`, `@objectstack/runtime`) read
+     * {@link getKnownChannels} and refuse a `notify` node naming an id it does
+     * not list, so a provider registered later is refused there until it is.
      */
     registerChannelProvider(id: string, resolve: ChannelProvider): void {
         if (this.channels.has(id) || this.channelProviders.has(id)) {
@@ -1256,7 +1273,8 @@ export class MessagingService {
         }
 
         // 3) Resolve the audience to recipient user ids (RecipientResolver owns
-        //    role:/team:/owner_of:/email→id expansion).
+        //    role:/org:members/team:/owner_of:/email→id expansion). The
+        //    organization is the producer's, as role: has always read it.
         const recipients = await this.resolver.resolve(input.audience, {
             organizationId: input.organizationId,
         });
