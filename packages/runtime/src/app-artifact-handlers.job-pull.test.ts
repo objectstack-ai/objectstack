@@ -1022,9 +1022,8 @@ describe('[#32412] the residual-twin job refusal names the residual as a holder 
         const owned = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
         for (const job of owned.jobs) expect(jobDeclaringPackages(owned, 'com.example.alpha')(job)).toBe('com.example.alpha');
         const twoBodies = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), betaWith([pullJob('sync', 'beta_map')])]);
-        for (const job of twoBodies.jobs) {
-            expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(job) as { candidates?: unknown }).candidates)
-                .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
-        }
+        // No residual job: met by name, the #32071 refusal names the two bodies and nothing else.
+        expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(pullJob('sync', 'alpha_map')) as { candidates?: unknown }).candidates)
+            .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
     });
 });
