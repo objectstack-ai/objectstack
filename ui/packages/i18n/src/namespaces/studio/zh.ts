@@ -290,6 +290,7 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.section.basic': '基础',
   'designer.field.section.advanced': '高级',
   'designer.field.section.options': '{type} 选项',
+  'designer.field.section.computed': '计算值',
   'designer.field.apiName': 'API 名称',
   'designer.field.label': '显示名',
   // objectui#11782.
@@ -384,6 +385,14 @@ const STUDIO_ZH: Record<string, string> = {
   'designer.field.relatedList.filterHelp': '只列出符合这些条件的子记录（在匹配父记录之外再加这些条件）；标签计数与列表一致。',
   'designer.field.relatedList.filterAdvanced': '此筛选使用了构建器无法显示的嵌套或 OR 条件，将原样保留。',
   'designer.field.formula': '公式 (CEL)',
+  'designer.field.formula.storedHint':
+    '公式在读取时计算，不存储值，因此不能求和或求平均。要汇总它，请把类型改为它的返回类型（数字、日期等）：表达式会保留，值在每次写入时计算并存储。',
+  // A stored field's `expression` (objectstack#32576): computed and stored on every write.
+  'designer.field.storedExpression': '计算表达式 (CEL)',
+  'designer.field.storedExpression.hint':
+    '留空表示由用户填写的值。设置表达式后，值会在每次写入时根据记录计算并存储，因此可以求和、求平均和排序。',
+  'designer.field.storedExpression.computed':
+    '已计算且只读：任何表单、表格或导入都不能设置此值，它在每次写入时计算并存储。设置表达式之前保存的记录会保持为空，直到各自再次保存。表达式在写入时求值，因此 now()、today() 和当前用户保持写入时的值。',
   // 汇总字段(summaryOperations)
   'designer.field.summary.object': '子对象',
   'designer.field.summary.function': '汇总方式',
