@@ -2398,8 +2398,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * the list says so above its rows (`list-grouping-unstored-notice`), with a
    * button that writes the grouping without it back through `changeGrouping`.
    * A level whose field the VIEW groups by (`viewDefaults.grouping`, else the
-   * schema's own) is queried as declared, and its refusal stays the error
-   * panel: that is a defect of the view's metadata, for its author to see.
+   * schema's own, and the `groupBy` / `groupBy2` shorthand either way, which
+   * no host writes a reader's grouping to) is queried as declared, and its
+   * refusal stays the error panel: that is a defect of the view's metadata,
+   * for its author to see.
    * Nothing is judged before the object's declaration is read (`objectDef`);
    * the list's own fetch waits for that read too.
    *
@@ -2408,10 +2410,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * left out, never on a memo identity (AGENTS.md #10): the fetch effect
    * re-runs on it.
    */
-  const declaredGroupingFieldNames = new Set(
-    ((viewDefaults && 'grouping' in viewDefaults ? viewDefaults.grouping : initialGroupingConfig)?.fields ?? [])
+  const declaredGroupingFieldNames = new Set([
+    ...((viewDefaults && 'grouping' in viewDefaults ? viewDefaults.grouping : initialGroupingConfig)?.fields ?? [])
       .map((level) => level.field),
-  );
+    ...[schema.groupBy, schema.groupBy2].flatMap((name) => (typeof name === 'string' && name.trim() ? [name.trim()] : [])),
+  ]);
   const unstoredGroupingFields = (chosenGroupingConfig?.fields ?? [])
     .map((level) => level.field)
     .filter((field) => !declaredGroupingFieldNames.has(field)
