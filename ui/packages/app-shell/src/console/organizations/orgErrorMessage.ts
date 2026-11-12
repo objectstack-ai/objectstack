@@ -192,3 +192,92 @@ export function resolveOrgErrorMessage(
   if (fallback) return t(fallback.key, { defaultValue: fallback.defaultValue });
   return t(UNKNOWN_ERROR.key, { defaultValue: UNKNOWN_ERROR.defaultValue });
 }
+
+// ---------------------------------------------------------------------------
+// The organization delete that the server refuses (objectstack#32648)
+// ---------------------------------------------------------------------------
+
+/**
+ * One table a refused organization delete still holds rows in: an entry of
+ * plugin-auth's 409 `DELETE_RESTRICTED` `dependents` list, as `@object-ui/auth`
+ * carries it on the thrown error. `count` is absent where the server withholds it.
+ */
+export interface OrgDeleteDependent {
+  object: string;
+  count?: number;
+}
+
+/** A refused organization delete, as the settings page draws it. */
+export interface OrgDeleteRefusal {
+  dependents: OrgDeleteDependent[];
+  /** The producer-marked user-facing sentence, when the server sent one. */
+  userMessage?: string;
+}
+
+function isOrgDeleteDependent(entry: unknown): entry is OrgDeleteDependent {
+  if (typeof entry !== 'object' || entry === null) return false;
+  const { object, count } = entry as { object?: unknown; count?: unknown };
+  return typeof object === 'string' && object !== '' && (count === undefined || typeof count === 'number');
+}
+
+/**
+ * Read a rejected organization delete as the refusal of an organization that
+ * still owns records, or `undefined` for any other rejection. Keyed on the
+ * code alone, like every row of {@link ORG_ERROR_MESSAGE_KEYS}: the server's
+ * English `message` names API names (`sys_billing_invoice_line (1)`) and is
+ * never read, translated or shown. The refusal is the delete's contract, so a
+ * `DELETE_RESTRICTED` with no list is still this refusal, just with nothing
+ * to enumerate.
+ */
+export function readOrgDeleteRefusal(err: unknown): OrgDeleteRefusal | undefined {
+  if (errorCode(err) !== 'DELETE_RESTRICTED') return undefined;
+  const raw = (err as { dependents?: unknown }).dependents;
+  const dependents = Array.isArray(raw) ? raw.filter(isOrgDeleteDependent) : [];
+  const userMessage = (err as { userMessage?: unknown }).userMessage;
+  return typeof userMessage === 'string' && userMessage.trim() ? { dependents, userMessage } : { dependents };
+}
+
+/** One line of the refusal's list. `object` is `null` on the "other records" line. */
+export interface OrgDeleteRefusalRow {
+  object: string | null;
+  label: string;
+  count?: number;
+}
+
+/**
+ * The refusal's list as the user reads it: each dependent under its object
+ * label, in the server's order, then ONE line for every dependent no label
+ * resolves for, under `otherLabel`. An API name is never shown in a label's
+ * place: an unresolved object is counted on that line, not named. The line's
+ * count is the sum of its members' counts, and absent when any member's count
+ * was withheld, since a partial sum would read as the total.
+ *
+ * @param labelOf    - the object's label in the active language, `''` when none resolves
+ * @param otherLabel - the localized name of the line that gathers the rest
+ */
+export function orgDeleteRefusalRows(
+  dependents: readonly OrgDeleteDependent[],
+  labelOf: (object: string) => string,
+  otherLabel: string,
+): OrgDeleteRefusalRow[] {
+  const rows: OrgDeleteRefusalRow[] = [];
+  let unlabelled = 0;
+  let unlabelledCount: number | undefined = 0;
+  for (const { object, count } of dependents) {
+    const label = labelOf(object).trim();
+    if (label) {
+      rows.push(count === undefined ? { object, label } : { object, label, count });
+      continue;
+    }
+    unlabelled += 1;
+    unlabelledCount = unlabelledCount === undefined || count === undefined ? undefined : unlabelledCount + count;
+  }
+  if (unlabelled > 0) {
+    rows.push(
+      unlabelledCount === undefined
+        ? { object: null, label: otherLabel }
+        : { object: null, label: otherLabel, count: unlabelledCount },
+    );
+  }
+  return rows;
+}

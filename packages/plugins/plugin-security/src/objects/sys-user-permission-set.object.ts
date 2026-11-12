@@ -15,10 +15,13 @@ import { F, P } from '@objectstack/spec';
  *
  * The same permission set can be granted independently in each org context
  * the user belongs to, and once in each: the declared unique index is
- * (`user_id`, `permission_set`, `organization_id`), `unique: 'organization'`,
- * so its organization key part is NULL-safe (ADR-0120 D3) and a second
- * platform-wide grant (organization NULL) is refused too — by the index, for
- * every writer and write path. [ADR-0131 D10, C7b] The legacy
+ * (`user_id`, `permission_set`, `permission_set_package`, `organization_id`)
+ * (ADR-0150 D4, #32164: a set is identified by its package and name), and a
+ * grant naming no package is held to one per user, set and organization by
+ * the runtime partial index `uniq_sys_user_permission_set_packageless` — for
+ * every writer and write path. Every key part is a plain column (ADR-0131 D1),
+ * so a platform-wide grant (organization NULL) is exempt from both, as it was
+ * from the three-column key before them. [ADR-0131 D10, C7b] The legacy
  * `permission_set_id` column is retired: the v18 ceremony's verified rewrite
  * names every grant from it, then its column-drops step drops it.
  *
@@ -131,8 +134,9 @@ export const SysUserPermissionSet = ObjectSchema.create({
       readonly: true,
       maxLength: 255,
       description:
-        'The app the permission set comes from. Filled in by the platform; empty when the set was created here, ' +
-        'or when more than one app provides a set of that name.',
+        'The app the permission set comes from. A grant names it to choose between apps that provide a set of ' +
+        'the same name; otherwise the platform fills it in. Empty when the set was created here, or when more than ' +
+        'one app provides a set of that name and the grant names none.',
     }),
 
     // Provenance, not a business link: the platform writes it, a caller does
@@ -298,9 +302,21 @@ export const SysUserPermissionSet = ObjectSchema.create({
   ],
 
   indexes: [
-    // One grant of a set to a user per organization, platform-wide (NULL)
-    // included (the module note): a duplicate would keep a revoked grant in force.
-    { fields: ['user_id', 'permission_set', 'organization_id'], unique: 'organization' },
+    // [ADR-0150 D4, #32164] One grant of a set to a user per organization: a
+    // duplicate would keep a revoked grant in force. A set is (package, name),
+    // so the key carries the package column, and one user may hold both
+    // packages' sets of one name. `unique: 'global'` materializes exactly the
+    // listed columns — what `'organization'` materialized here too, since the
+    // organization column is listed (ADR-0131 D1) — and it is the spelling the
+    // drivers' widening arms retire the old three-column key under,
+    // create-before-drop. Every key part is a plain, NULL-distinct column, so
+    // a grant whose package column is empty is held to one per (user_id,
+    // permission_set, organization_id) by a runtime partial index beside this
+    // one, `uniq_sys_user_permission_set_packageless` (metadata-protocol's
+    // `user-permission-set-packageless-index.ts`; driver-mongodb's runtime-owned
+    // uniques), which the declared surface cannot spell. A grant whose
+    // organization is empty is exempt from both, as it was from the key before.
+    { fields: ['user_id', 'permission_set', 'permission_set_package', 'organization_id'], unique: 'global' },
     { fields: ['user_id'] },
     { fields: ['organization_id'] },
   ],

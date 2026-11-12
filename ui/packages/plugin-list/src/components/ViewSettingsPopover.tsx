@@ -91,6 +91,27 @@ export const PHONE_POPOVER_GUTTER = 16;
 export interface ViewSettingsField {
   name: string;
   label?: string;
+  /**
+   * `false` when the server refuses the field as a group key: the object
+   * declares it virtual (a `formula`, computed on read with no stored column),
+   * which the aggregate door refuses with `400 INVALID_FIELD`. The host judges
+   * it with the spec's `isVirtualSearchField`, the predicate that door calls.
+   * Absent means groupable.
+   */
+  groupable?: boolean;
+}
+
+/**
+ * The fields a Group editor offers: every field but those the server refuses
+ * as a group key (`groupable: false`). Both Group editors, this panel's and the
+ * wide toolbar's, read it, so the two forms offer the same fields. A level that
+ * already names a withheld field still shows: `GroupingEditor` mounts a value
+ * its options do not carry, so the level can be removed.
+ */
+export function groupFieldOptions(fields: readonly ViewSettingsField[]): Array<{ value: string; label: string }> {
+  return fields
+    .filter((f) => f.groupable !== false)
+    .map((f) => ({ value: f.name, label: f.label || f.name }));
 }
 
 export interface ViewSettingsDensity {
@@ -597,7 +618,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
             >
               <GroupingEditor
                 value={groupingConfig as any}
-                fieldOptions={allFields.map((f) => ({ value: f.name, label: f.label || f.name }))}
+                fieldOptions={groupFieldOptions(allFields)}
                 maxLevels={3}
                 labels={{
                   addGroup: t('list.addGroup', 'Add group field'),

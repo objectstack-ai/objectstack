@@ -90,6 +90,10 @@ export {
     ensureUserPermissionSetPackagelessIndex,
     createUserPermissionSetGuardAtSchemaSync,
     buildUserPermissionSetPackagelessIndexSql,
+    // [#32460] The build's own catalog read ("does the guard stand?"), for
+    // `os migrate plan`: it lists the guard `os migrate apply` would build,
+    // and nothing where this statement finds the guard standing.
+    buildUserPermissionSetPackagelessIndexPresenceSql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     resolveUserPermissionSetIndexSeam,
     buildUserPermissionSetOldKeySql,
@@ -296,7 +300,7 @@ export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.
 // and the address shape `resolveMetaItemAddress` answers. Both transports read them.
 // [ADR-0150 D3, #32310] …and where a caller-arm read (`?callerPackage=`) is read.
 export {
-    META_ITEM_SUBRESOURCE_SEGMENTS, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
+    META_ITEM_SUBRESOURCE_SEGMENTS, judgesPackageLessRows, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
 } from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
@@ -361,11 +365,12 @@ export {
   seedLoadPartialWrites,
   type SeedLoadPartialWrites,
 } from './seed-loader.js';
-export { runBuildProbes } from './build-probes.js';
+export { publishedItemReader, runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,
   BuildProbeReport,
   RunBuildProbesOptions,
   ProbeEngine,
   ProbeAnalytics,
+  ProbeItemProtocol,
 } from './build-probes.js';

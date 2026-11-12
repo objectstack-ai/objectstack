@@ -135,8 +135,16 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `skill` first (#31701), then the object-less `action` (#31697), then
  * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
  * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
- * name by package). A type not listed here keeps one package holder per
- * deployment.
+ * name by package), then the picklist family (#31700): `picklist`,
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
+ * type not listed here keeps one package holder per deployment.
+ *
+ * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
+ * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
+ * is the engine's: it keeps every holder per package itself (ADR-0150 D4's
+ * last row) and has no by-name metadata read, so the stores and the reads
+ * keyed on this list (`@objectstack/metadata`'s slotted store, the metadata
+ * protocol's fail-closed read) never meet it.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -149,6 +157,12 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'action',
   'email_template',
   'flow',
+  // the picklist family (#31700)
+  'picklist',
+  'mapping',
+  'dataset',
+  'api',
+  'function',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
