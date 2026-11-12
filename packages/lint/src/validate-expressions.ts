@@ -3390,7 +3390,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   }
 
   // ── Object validation-rule + formula predicates ────────────────────
-  for (const obj of objects) {
+  for (const [objectPosition, obj] of objects.entries()) {
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     // [#27643] The object's index in the authored list, for a validation-rule
     // finding's key path (`recordsOf` hands an array's own members back). A
@@ -3575,14 +3575,6 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       : optionHolders;
 
     /**
-     * The field-formula pass — one computed field's `expression`. A closure
-     * since #22019, whose object door ran this pass and no other slot of the
-     * field walk; since #22032's pass 2 the door runs the field-rule slots as
-     * well, and this is called at one point only — the same point of the field
-     * walk it always ran at — so the build's findings and their order are
-     * unchanged.
-     */
-    /**
      * [#32529] This object's fields by name AS THE REGISTRY SERVES THEM — what a
      * stored expression's hop is judged through, since the engine plans the hop
      * over the registered schema: the served body first (the declared fields
@@ -3591,12 +3583,22 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * columns the registry injects (`owner_id`, `created_by`, `updated_by` are
      * `lookup`s to `sys_user`), which never shadow a declared one.
      */
-    // The served body is found by the tabled `obj` receiver's own `name`, and
-    // read through `fieldEntries`, so the #5017 key scan sees no new read.
-    const servedSelf = typedObjects.find((obj) => obj.name === objectName);
+    // The served body is `typedObjects[objectPosition]`: `objectsAsServed`
+    // answers its objects positionally with `recordsOf(stack.objects)`, and
+    // `objectsWithoutTiedFields` keeps the positions. Read through
+    // `fieldEntries`, so the #5017 key scan sees no new read.
+    const servedSelf = typedObjects[objectPosition];
     const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
     for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
     for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
+    /**
+     * The field-formula pass — one computed field's `expression`. A closure
+     * since #22019, whose object door ran this pass and no other slot of the
+     * field walk; since #22032's pass 2 the door runs the field-rule slots as
+     * well, and this is called at one point only — the same point of the field
+     * walk it always ran at — so the build's findings and their order are
+     * unchanged.
+     */
     const judgeFieldFormula = (fname: string, f: AnyRec): void => {
       if (f.expression) {
         // `expression` is the key `FieldSchema` declares for a computed field —

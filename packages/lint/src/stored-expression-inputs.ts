@@ -23,7 +23,7 @@
  *    recompute engine, and the lane warns because a first-party title is
  *    stored on purpose in this shape (an import matches a record by its stored
  *    title) and the drift is repairable (`os migrate stored-expressions
- *    --changed`). The hop is judged through the definitions the registry
+ *    --changed --apply`; without `--apply` it is a dry run that writes nothing). The hop is judged through the definitions the registry
  *    SERVES the object with (`fieldDefOf`): a field an object extension adds
  *    and a reference column the registry injects (`owner_id`, `created_by`,
  *    `updated_by`) count like a declared one. A read of the hop's `id` is the
@@ -229,7 +229,8 @@ export function storedExpressionInputIssues(
         + `record's last write. To read the current value, make \`${fieldName}\` a \`formula\` field (computed on `
         + 'every read; a `formula` cannot be totalled). To keep a stored copy current, write it as a snapshot '
         + `field with a flow on ${where} that updates the records pointing at it when the value changes. To `
-        + 'repair values that have drifted, run `os migrate stored-expressions --changed`.',
+        + 'repair values that have drifted, run `os migrate stored-expressions --changed --apply` (without '
+        + '`--apply` it is a dry run that writes nothing).',
     });
   }
 

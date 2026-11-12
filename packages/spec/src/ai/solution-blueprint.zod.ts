@@ -235,9 +235,10 @@ const booleanFlagRule = (unsetRequired: string) =>
  *
  * The stored half states the inputs it may read: this record's own fields. A
  * stored expression reading another record is warned at authoring
- * (`stored-expression-cross-record-input`), and one
- * reading the clock or the acting user keeps the value it had at the write
- * (ruling 6816315099 on #32443), so neither appears here as an example.
+ * (`stored-expression-cross-record-input`), and one reading the clock or the
+ * acting user keeps the value it had at the write and is warned at authoring
+ * too (`stored-expression-volatile-input`) (ruling 6816315099 on #32443), so
+ * neither appears here as an example.
  */
 const FORMULA_STORAGE_RULE =
   'A "formula" is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it, search '

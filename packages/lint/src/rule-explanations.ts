@@ -6042,7 +6042,9 @@ const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
       'last write, and every total over it drifts, with no fault and no log. So the build and the object save ' +
       'door warn where the expression is written. A warning, not a refusal: a stored title that reads the ' +
       'owner\'s name is sometimes meant (an import matches a record by its stored title), and the drift can be ' +
-      'repaired.',
+      'repaired. A `--strict` run (`os lint --strict`, `os validate --strict`) fails on every warning, this ' +
+      'one included; there is no per-rule switch, so a strict CI step fails until the field takes one of the ' +
+      'ways forward below.',
     'Counted: a read through a reference field of the object as the registry serves it, at one hop or more, ' +
       'by any spelling the engine resolves (`record.a.b`, `record.?a.?b`, `record[\'a\'].b`): a `lookup`, ' +
       '`master_detail`, `user` or `tree` field the object declares, one an object extension adds, and a ' +
@@ -6054,8 +6056,9 @@ const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
     'Three ways forward. To read the current value, make the field a `formula`: it is current on every read, ' +
       'but a `formula` cannot be totalled. To keep a stored copy current, make it a snapshot field written by a ' +
       'flow on the related object that runs when the value changes and updates the records that point at it. ' +
-      'To repair stored values that have drifted, run `os migrate stored-expressions --changed`, which ' +
-      'recomputes every row whose stored value differs from its expression (it needs the database URL).',
+      'To repair stored values that have drifted, run `os migrate stored-expressions --changed --apply`, ' +
+      'which recomputes and writes every row whose stored value differs from its expression (it needs the ' +
+      'database URL). Without `--apply` the command is a dry run: it counts those rows and writes nothing.',
   ],
 };
 
@@ -6076,8 +6079,9 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
       'Not counted: `os.org`, the writer\'s organization, which is the record\'s own; and `label()`, which ' +
       'reads the declared option labels for a stored value, never the reader\'s locale.',
     'A warning, as a read of another record is: a value of the moment of the write is sometimes what is meant (who last ' +
-      'changed the record), and the build and the save door both pass it. A `formula` field reading the same ' +
-      'inputs is not judged.',
+      'changed the record), and the build and the save door both pass it. A `--strict` run (`os lint ' +
+      '--strict`, `os validate --strict`) fails on every warning, this one included. A `formula` field reading ' +
+      'the same inputs is not judged.',
     'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +
       'a stored value current as time passes, recompute it with a scheduled flow that updates the records.',
   ],
