@@ -56,7 +56,7 @@ import {
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
+import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
@@ -176,7 +176,7 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // packages hold on any object key is refused naming each with its object
     // ({@link refuseActionHeldByPackages}).
     if (!request.packageId && request.type === 'action') refuseActionHeldByPackages(host, request.name);
-    await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
+    const exactAddress = await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
     // environment's stored row; no organization's row is read.
@@ -299,6 +299,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // still returns `code: null` normally (a clean miss is not degraded),
     // and a registry hit above is a real code layer, so this fires only
     // when the null would otherwise be an unfounded authorship claim.
+    // [ADR-0150 D5, #32501] …and, read at an admitted exact address, the code
+    // layer is the item that address reads, as the plain read's is
+    // ({@link exactQualifierItem}): the artifact lookup and `getItem` above
+    // asked at a pair id that ships nothing, and their last tier answered
+    // the first registered package that ships the name, so `/layers` served
+    // another holder's body. Two admitted bases are refused naming both.
+    if (exactAddress && code !== null) code = exactQualifierItem(host, request, exactAddress, code, member) ?? null;
     if (code === null && codeDegraded?.degraded) {
         host.throwMetadataServiceUnavailable(codeDegraded.errors);
     }
