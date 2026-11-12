@@ -1209,3 +1209,45 @@ describe('[#32310] the caller arm resolves a dataset from the reader\'s package 
     expect((await refusalOf(() => protocol.getMetaItem({ type: 'dataset', name: 'twin' }))).refusal.reason).toBe('ambiguous-in-environment');
   });
 });
+
+/**
+ * [#32183, ruling (c)] An App's pair (`<App>.custom`) is the pair of every
+ * module of the App, so two modules holding one name are both its bases. A
+ * disabled base holds no name: the pair's address is read at the enabled
+ * base, and a refusal never names the disabled one. A pair whose every base
+ * is disabled answers a base's withheld item. The fixture's first holder is
+ * a package outside the App, so the layer below reaches neither base's item
+ * and the address's own bases decide the answer.
+ */
+describe('[#32183] an App\'s pair two modules share, one of them disabled', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const APP_PAIR = `${APP}.custom`;
+  const moduleOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!, dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(moduleOf(X), 'code');
+    registry.installPackage(moduleOf(Y), 'code');
+  });
+
+  it.each([['enabled base first', [X, Y]], ['disabled base first', [Y, X]]] as const)('dashboard (%s): read at the enabled base; both enabled, refused naming both; both disabled, not found', async (_order, order) => {
+    ship('dashboard', 'dup', C);
+    for (const id of order) ship('dashboard', 'dup', id);
+    const read = () => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: APP_PAIR } as never);
+    // CONTROL — both bases enabled: refused naming both, as on BASE.
+    const both = await refusalOf(read);
+    expect([both.status, both.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+    expect(both.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()).toEqual([X, Y]);
+    // BASE (main f0f729e7 with the email-template branch): refused naming X and the disabled Y.
+    registry.disablePackage(Y);
+    expect(labelOf(await read())).toBe('suitex dashboard');
+    registry.disablePackage(X);
+    const neither = await read();
+    expect(labelOf(neither)).toBeUndefined();
+    expect(JSON.stringify(neither ?? null)).not.toMatch(/(suitex|suitey) dashboard/);
+  });
+});

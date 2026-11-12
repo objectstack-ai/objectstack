@@ -294,8 +294,10 @@ export async function admitExactQualifier(
     const installed = installedManifestsOfEngine(host.engine);
     const servedBases = holders.filter((holder) => pairsOf(holder, installed).includes(packageId));
     if (servedBases.length > 0) return { packageId, registryHolders: servedBases };
+    // Every base disabled: the address reads one of them, which the face
+    // withholds, so no refusal names a disabled base.
     const pairedBases = every.filter((holder) => pairsOf(holder, installed).includes(packageId));
-    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases };
+    if (pairedBases.length > 0) return { packageId, registryHolders: pairedBases.slice(0, 1) };
 
     for (const state of ['active', 'draft'] as const) {
         const served = await host.findServedOverlayRow({
