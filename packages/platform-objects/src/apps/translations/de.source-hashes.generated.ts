@@ -136,6 +136,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
   "objects.sys_metadata_history.fields.version.label": "b74a37c0879ec50e",
   "objects.sys_migration.fields.details.label": "974694e5c164374e",
+  "objects.sys_notification._actions.send_in_app_message.params.link.label": "483804d6e2fdd5c0",
   "objects.sys_notification.fields.severity.options.info": "592615dc5222c9a4",
   "objects.sys_oauth_access_token.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_access_token.fields.token.label": "6e8de3393d2cee54",

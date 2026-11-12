@@ -2794,6 +2794,7 @@ const pt = {
         invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
         invalidCredentialsNoMail: 'E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Peça ao seu administrador para redefini-la.',
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
+        accountDeactivated: "Sua conta foi desativada pela sua organização. Entre em contato com o administrador.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4080,6 +4081,7 @@ const pt = {
       get_authoring_rules: "Consultar as regras de autoria",
       get_metadata_schema: "Consultar o formato dos metadados",
       get_package: "Revisar o pacote",
+      get_record_history: "Ler o histórico do registro",
       list_metadata: "Listar os metadados existentes",
       list_objects: "Listar os objetos existentes",
       list_packages: "Listar os pacotes existentes",

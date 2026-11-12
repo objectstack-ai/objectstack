@@ -2731,6 +2731,7 @@ const ja = {
         invalidCredentials: "メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、リセットするとすぐにサインインできます。",
         invalidCredentialsNoMail: 'メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、管理者にリセットを依頼してください。',
         emailNotVerified: "サインインする前にメールアドレスを確認してください。",
+        accountDeactivated: "あなたのアカウントは所属する組織によって無効にされました。管理者にお問い合わせください。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4002,6 +4003,7 @@ const ja = {
       get_authoring_rules: "作成ルールを読む",
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
+      get_record_history: "このレコードの履歴を読む",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",

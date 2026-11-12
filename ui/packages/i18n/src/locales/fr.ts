@@ -2795,6 +2795,7 @@ const fr = {
         invalidCredentials: "E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Réinitialisez-le pour vous connecter immédiatement.",
         invalidCredentialsNoMail: 'E-mail ou mot de passe invalide. Après plusieurs échecs, la connexion est suspendue pendant un moment. Mot de passe oublié ? Demandez à votre administrateur de le réinitialiser.',
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
+        accountDeactivated: "Votre compte a été désactivé par votre organisation. Contactez votre administrateur.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4081,6 +4082,7 @@ const fr = {
       get_authoring_rules: "Consulter les règles d’écriture",
       get_metadata_schema: "Consulter le format des métadonnées",
       get_package: "Examiner le paquet",
+      get_record_history: "Lire l'historique de cette fiche",
       list_metadata: "Lister les métadonnées existantes",
       list_objects: "Lister les objets existants",
       list_packages: "Lister les paquets existants",
