@@ -433,7 +433,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `fields.file.typeNotAccepted`, the file widget's refusal of a pick
     // outside the field's `accept` list („{{name}}“) — one interpolated span,
     // runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(117);
+    // 118 once objectstack-ai/objectstack#32478 added
+    // `empty.recordPagePlacesNoComponentDescription`, the record view naming a
+    // record page that places no component („{{name}}“) — one interpolated
+    // span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(118);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -540,8 +544,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 116 / 0 after objectstack-ai/objectstack#32040 added
     // `marketplace.install.targetNamespace.taken`, one more matched pair.
     // 117 / 117 / 0 after objectstack-ai/objectstack#32684 added
-    // `fields.file.typeNotAccepted`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 117, close: 117, rdq: 0 });
+    // `fields.file.typeNotAccepted`, one more matched pair. 118 / 118 / 0 after
+    // objectstack-ai/objectstack#32478 added
+    // `empty.recordPagePlacesNoComponentDescription`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 118, close: 118, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

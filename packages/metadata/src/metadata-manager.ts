@@ -91,9 +91,14 @@ import {
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
+  latestMemberOf,
+  latestMembersFirst,
+  memberSuffixOf,
+  pluralEntryKeys,
   readStoreEntry,
   recordStoreWrite,
   slotPackageOf,
+  slotOfKey,
   slotStoreOf,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
@@ -1466,7 +1471,11 @@ export class MetadataManager implements IMetadataService {
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    for (const key of storeKeysNamed(registryStore, type, name)) view.set(key, registryStore!.get(key));
+    // [#32517] Each slot's member written last first: the view has no write
+    // order of its own, and answers a slot's first member (`latestMemberOf`).
+    if (registryStore) {
+      for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) view.set(key, registryStore.get(key));
+    }
     for (const [key, data] of slotStoreOf(type, name, slots)) {
       if (!view.has(key)) view.set(key, data);
     }
@@ -1666,6 +1675,11 @@ export class MetadataManager implements IMetadataService {
    *    package-held name it is that holder's customization, never a second
    *    item).
    *
+   * [#32517] A bundled type's member is shadowed by the SAME member only (a
+   * slot's member, or the package-less slot's same member), so one package's
+   * second locale is listed beside its first, as the store keys them
+   * ({@link storeSlotKey}).
+   *
    * One loader's own slots do not shadow each other.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
@@ -1673,15 +1687,16 @@ export class MetadataManager implements IMetadataService {
     const heldIdentities = new Set<string>();
     const packageHeldIdentities = new Set<string>();
     for (const key of prior) {
-      heldIdentities.add(keyIdentityOf(key));
+      heldIdentities.add(keyIdentityOf(key) + memberSuffixOf(key));
       if (slotPackageOf(key) !== undefined) packageHeldIdentities.add(keyIdentityOf(key));
     }
     for (const entry of await this.loaderSlotEntries(loader, type)) {
       const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
       const identity = keyIdentityOf(key);
+      const member = memberSuffixOf(key);
       const shadowed = items.has(key) || (slotPackageOf(key) === undefined
-        ? heldIdentities.has(identity)
-        : prior.has(identity) && !packageHeldIdentities.has(identity));
+        ? heldIdentities.has(identity + member)
+        : prior.has(identity + member) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
   }
@@ -1774,7 +1789,33 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return { items: Array.from(items.values()), degraded, errors };
+    return { items: this.listedInSlotOrder(type, items), degraded, errors };
+  }
+
+  /**
+   * [#32517] The order {@link list} answers `items` in. For a bundled type
+   * stored per `(package, name)`, each slot's member a by-name read answers
+   * first — the registry's member written last, else the first a loader
+   * admitted (`MemoryLoader.loadManySlots` hands a slot's member saved last
+   * first) — in the order the slots first appear, then every other member in
+   * store order. Those first items are, in that order, the one item per slot
+   * this list answered before a bundle's members had keys of their own, so a
+   * served read that lays its own layers over this list (`GET /meta`, the
+   * execution read) answers in the order it answered then. Every other type:
+   * store order.
+   */
+  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): unknown[] {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.values());
+    const registryStore = this.registry.get(type);
+    const firsts = new Map<string, string>();
+    for (const key of items.keys()) {
+      const slot = slotOfKey(key);
+      if (firsts.has(slot)) continue;
+      const latest = registryStore ? latestMemberOf(registryStore, slot) : undefined;
+      firsts.set(slot, latest !== undefined && registryStore!.has(latest) && items.has(latest) ? latest : key);
+    }
+    const first = new Set(firsts.values());
+    return [...first, ...[...items.keys()].filter((key) => !first.has(key))].map((key) => items.get(key));
   }
 
   /**
@@ -2506,8 +2547,10 @@ export class MetadataManager implements IMetadataService {
    * package's row and the `deleted` event names this package.
    */
   async unregisterPackage(packageName: string): Promise<void> {
-    // Collect all items to delete (type and name pairs)
-    const itemsToDelete: Array<{ type: string; name: string; key: string }> = [];
+    // Collect all items to delete (type and name pairs). [#32517] One entry
+    // per slot: a bundled type's members of one slot are removed together,
+    // with the one `deleted` announcement the slot made before.
+    const itemsToDelete = new Map<string, { type: string; name: string; keys: string[] }>();
 
     for (const [type, typeStore] of this.registry) {
       const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
@@ -2515,15 +2558,18 @@ export class MetadataManager implements IMetadataService {
         // [#32246] A by-package type: also every item in the package's slot,
         // a package-less customization of its item (D4) included.
         if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
-          itemsToDelete.push({ type, name: storedNameOf(key), key });
+          const slot = `${type}\u0000${slotOfKey(key)}`;
+          const entry = itemsToDelete.get(slot);
+          if (entry) entry.keys.push(key);
+          else itemsToDelete.set(slot, { type, name: storedNameOf(key), keys: [key] });
         }
       }
     }
 
     // Delete each item using unregister() to ensure deletion from both registry and loaders
-    for (const { type, name, key } of itemsToDelete) {
+    for (const { type, name, keys } of itemsToDelete.values()) {
       await this.unregisterAt(type, name, undefined, {
-        keys: [key],
+        keys,
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
     }
@@ -3610,10 +3656,13 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<T[]> {
-    const results: T[] = [];
     // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
     // per `(package, name, member)` (`bundleEntryKey`), never one per name.
-    const bundleEntries = new Set<string>();
+    // [#32517] An unbundled one keeps one per `(package, name)`
+    // (`pluralEntryKeys`): keyed by name alone, two packages' items of one
+    // name were folded into the first loader's one. Every other type: one per
+    // name, the first loader's, as before.
+    const gathered: Array<{ item: T; loader: MetadataLoader }> = [];
 
     for (const loader of this.loaders.values()) {
         try {
@@ -3639,23 +3688,7 @@ export class MetadataManager implements IMetadataService {
                 : PACKAGE_SLOTTED_STORE_TYPES.has(type)
                     ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
                     : await loader.loadMany<T>(type, options);
-            for (const item of items) {
-                const itemAny = item as any;
-                if (itemAny && typeof itemAny.name === 'string') {
-                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
-                    if (bundleKey !== undefined) {
-                        if (bundleEntries.has(bundleKey)) continue;
-                        bundleEntries.add(bundleKey);
-                        results.push(item);
-                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-                        continue;
-                    }
-                    const exists = results.some((r: any) => r && r.name === itemAny.name);
-                    if (exists) continue;
-                }
-                results.push(item);
-                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-            }
+            for (const item of items) gathered.push({ item, loader });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
             // [#5108] Same seam, same verdict as `list()` — see
@@ -3665,6 +3698,18 @@ export class MetadataManager implements IMetadataService {
             this.reportLoaderReadFailure(loader.contract.name, type, e);
         }
     }
+    const keys = pluralEntryKeys(type, gathered.map(({ item }) => ({ name: (item as { name?: unknown } | null)?.name, data: item })));
+    const kept = new Set<string>();
+    const results: T[] = [];
+    gathered.forEach(({ item, loader }, at) => {
+        const key = keys[at];
+        if (key !== undefined) {
+            if (kept.has(key)) return;
+            kept.add(key);
+        }
+        results.push(item);
+        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+    });
     return results;
   }
 
@@ -3722,6 +3767,9 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
+    // [#32517] An unbundled type stored per `(package, name)`: one entry per
+    // `(package, name)` over every loader (`pluralEntryKeys`), as `loadMany`.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type) && !isBundledStoreType(type)) return this.loadManyKeyedSlotted<T>(type, options);
     // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
     // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
     const items = new Map<string, MetadataKeyedItem<T>>();
@@ -3737,6 +3785,46 @@ export class MetadataManager implements IMetadataService {
     }
 
     return Array.from(items.values());
+  }
+
+  /**
+   * [#32517] {@link loadManyKeyed} for an unbundled type stored per
+   * `(package, name)`: every loader's keyed entries (each with the package
+   * its loader holds it for), then one entry per `(package, name)`
+   * ({@link pluralEntryKeys}): two packages' items of one name are both
+   * answered, and a one-holder name answers the first loader's entry, as
+   * before. Same failure posture as {@link loadManyKeyed}.
+   */
+  private async loadManyKeyedSlotted<T = any>(type: string, options?: MetadataLoadOptions): Promise<MetadataKeyedItem<T>[]> {
+    const gathered: MetadataKeyedItem<T>[] = [];
+    for (const loader of this.loaders.values()) {
+      try {
+        if (typeof loader.loadManyKeyed === 'function') {
+          for (const entry of await loader.loadManyKeyed<T>(type, options)) {
+            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push(entry);
+          }
+        } else {
+          for (const name of await loader.list(type)) {
+            if (typeof name !== 'string' || name === '') continue;
+            const result = await loader.load(type, name, options);
+            if (result?.data != null) gathered.push({ name, data: result.data as T });
+          }
+        }
+        this.reportLoaderReadRecovered(loader.contract.name);
+      } catch (e) {
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
+      }
+    }
+    const keys = pluralEntryKeys(type, gathered);
+    const kept = new Set<string>();
+    const out: MetadataKeyedItem<T>[] = [];
+    gathered.forEach((entry, at) => {
+      const key = keys[at]!;
+      if (kept.has(key)) return;
+      kept.add(key);
+      out.push({ name: entry.name, data: entry.data });
+    });
+    return out;
   }
 
   /**
