@@ -1451,7 +1451,16 @@ export const CEILINGS = new Map([
   // file-surface line naming the exception lanes/skills.md defines. Ordered by
   // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
   // ruling record 6184799323 (letter B). Measured delta +1; headroom 0.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
+  // Raised 189 → 190 by the effort-step-down ruling (card #32784) — an ORDINARY
+  // raise, ⛔ not a cross-file move. The 〈派发〉 effort line now names three
+  // kinds of would-be-M card that dispatch at `medium` (review-nit follow-up,
+  // same-family edge card, copy- or changeset-only touch-up), adds epic child
+  // cards to the `xhigh` list, and says the `xhigh` list outranks the three.
+  // Ordered by ruling record 6830795926 (maintainer, verbatim: 「同意，立卡更新
+  // skills」); authorized under ruling record 6184799323 (letter B). Measured:
+  // the old line was already 120 B, the added content alone is over 40 B, so the
+  // rule lands as two lines (115 B and 116 B). Delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 190],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the

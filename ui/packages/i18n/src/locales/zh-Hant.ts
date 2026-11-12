@@ -4243,6 +4243,7 @@ const zhHant = {
       get_authoring_rules: '查閱編寫規範',
       get_metadata_schema: '查閱中繼資料的格式',
       get_package: '檢視應用包資訊',
+      get_record_history: '讀取這條記錄的修改歷史',
       list_metadata: '列出已有中繼資料',
       list_objects: '列出已有物件',
       list_packages: '列出已有應用包',

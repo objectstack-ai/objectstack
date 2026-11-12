@@ -3079,6 +3079,34 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       by_topic: {
         label: "حسب الموضوع"
       }
+    },
+    _actions: {
+      send_in_app_message: {
+        label: "إرسال رسالة داخل التطبيق",
+        description: "أرسل رسالة إلى جميع أعضاء مؤسستك أو إلى الأعضاء الذين تختارهم. تظهر في إشعارات كل مستلم.",
+        successMessage: "تم إرسال الرسالة. عدد المستلمين: {{ result.recipients }}",
+        params: {
+          everyone: {
+            label: "جميع أعضاء هذه المؤسسة",
+            helpText: "الإرسال إلى كل عضو في مؤسستك الحالية. اتركه متوقفًا لاختيار المستلمين أدناه."
+          },
+          recipients: {
+            label: "المستلمون",
+            helpText: "أعضاء مؤسستك الذين تُرسل إليهم الرسالة، عندما لا تكون للجميع."
+          },
+          title: {
+            label: "العنوان",
+            helpText: "السطر الذي يراه كل مستلم في إشعاراته."
+          },
+          body: {
+            label: "نص الرسالة"
+          },
+          link: {
+            label: "الرابط",
+            helpText: "اختياري. صفحة في هذا التطبيق (تبدأ بـ /) أو عنوان ويب تفتحه الرسالة."
+          }
+        }
+      }
     }
   },
   sys_attachment: {
