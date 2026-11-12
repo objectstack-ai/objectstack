@@ -4031,6 +4031,10 @@ export class MetadataManager implements IMetadataService {
     const targetVersion = await dbLoader.getHistoryRecord(type, name, version, address);
 
     if (!targetVersion) {
+      // [#32351 F1] An addressed read leaves out a version attributed to no
+      // package; on a name several row slots hold it is refused naming every
+      // holder, not answered "not found".
+      if (address !== undefined) await dbLoader.refuseUnattributedVersion(type, name, version);
       throw new Error(`Version ${version} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 

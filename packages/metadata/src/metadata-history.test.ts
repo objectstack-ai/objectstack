@@ -371,6 +371,64 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect((await rowsOf(type)).map((row) => [row.package_id, labelOf(row), row.version])).toEqual([[A, 'custom', 4]]);
       });
 
+      it('F1: a legacy unattributed version of a name several row slots hold is in no addressed read, and a rollback to it is refused naming every holder', async () => {
+        // The table as the release before this one created it: no `package_id`.
+        const { package_id: _added, ...before } = SysMetadataHistoryObject.fields as Record<string, unknown>;
+        await driver.syncSchema('sys_metadata_history', { ...SysMetadataHistoryObject, fields: before } as never);
+        const legacy = (version: number, data: Record<string, unknown>) => driver.create('sys_metadata_history', {
+          id: `legacy_${version}`, event_seq: version, type, name: 'x', version, operation_type: 'update',
+          metadata: JSON.stringify(data), checksum: `c${version}`, recorded_at: `2026-01-0${version}T00:00:00.000Z`,
+          source: 'database-loader',
+        });
+        await legacy(1, body('A1', A));
+        await legacy(2, body('B1', B));
+        await legacy(3, body('custom'));
+        // A's row, B's row and the package-less row, saved after the column.
+        await loader.save(type, 'x', body('A4', A));
+        await loader.save(type, 'x', body('B5', B));
+        await loader.save(type, 'x', body('env6'));
+        const history = (await driver.find('sys_metadata_history', { where: { type } } as never)) as Array<Record<string, unknown>>;
+        // NULL is "not attributed"; a snapshot of the package-less row carries the sentinel.
+        expect(history.map((row) => [row.version, row.package_id ?? null]).sort((l, r) => Number(l[0]) - Number(r[0]))).toEqual([
+          [1, null], [2, null], [3, null], [4, A], [5, B], [6, 'sys_metadata'],
+        ]);
+        expect(await versions(type, { packageId: A })).toEqual([4, 1]);
+        expect(await versions(type, { packageId: B })).toEqual([5, 2]);
+        for (const environment of [null, '', 'sys_metadata']) {
+          expect(await versions(type, { packageId: environment })).toEqual([6]);
+        }
+        const rows = await rowsOf(type);
+        const holders = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }, { kind: 'environment' }];
+        for (const packageId of [A, B, null]) {
+          expect(await loader.getHistoryRecord(type, 'x', 3, { packageId })).toBeNull();
+          for (const attempt of [
+            manager.rollback(type, 'x', 3, { packageId }),
+            loader.registerRollback(type, 'x', body('custom'), 3, undefined, undefined, { packageId }),
+          ]) {
+            const refused = await refusal(attempt);
+            expect(refused).toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409, reason: 'ambiguous-in-environment' });
+            expect(refused?.candidates).toHaveLength(3);
+            expect(refused?.candidates).toEqual(expect.arrayContaining(holders));
+          }
+        }
+        expect((await refusal(manager.rollback(type, 'x', 3)))?.reason).toBe('ambiguous-in-environment');
+        // Nothing was written: every row as it was.
+        expect(await rowsOf(type)).toEqual(rows);
+        // An attributed legacy version still restores into its own package's row.
+        await manager.rollback(type, 'x', 1, { packageId: A });
+        expect(labelOf(await rowOf(type, A))).toBe('A1');
+        expect(labelOf(await rowOf(type, B))).toBe('B5');
+      });
+
+      it('an environment version is not written into a package\'s row', async () => {
+        await twoHolders();
+        await loader.save(type, 'x', body('env1'));
+        const rows = await rowsOf(type);
+        await expect(loader.registerRollback(type, 'x', body('env1'), 4, undefined, undefined, { packageId: A }))
+          .rejects.toThrow(/^Version 4 of .*\/x is the environment's, not package "com\.acme\.alpha"'s: roll it back addressing the environment/);
+        expect(await rowsOf(type)).toEqual(rows);
+      });
+
       it('a package-less row beside two packages\' rows: the environment address (null, \'\' or the sentinel) reads and rolls back its versions only', async () => {
         await twoHolders();
         // A package-less save of a name two packages hold fills the bare slot (#32347 R1b's state).
