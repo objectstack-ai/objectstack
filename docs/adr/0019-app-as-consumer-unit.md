@@ -118,8 +118,9 @@ as a wrapper that surfaces N apps.
 >   consumer unit. It has no listing and no package type of its own.
 > - D4 is not amended.
 >
-> **Why one app per package**, recorded as reasons. Each was measured on 18.3.0 for #32585 and read
-> again on `main` at `874166b6`.
+> **Why one app per package**, recorded as reasons. Each was measured on 18.3.0 for #32585. On
+> `main` at `874166b6`, reasons 1 and 3 were read from the code again, and reason 2 and the
+> single-app rule were probed once, not kept as a test.
 >
 > 1. **The Console addresses an app by its package id.**
 >    [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1 makes the package id the route
@@ -165,8 +166,9 @@ as a wrapper that surfaces N apps.
 > **Enforced today, and not yet.** `defineStack` refuses an app package that defines more than one
 > app, `STACK_SINGLE_APP_VIOLATION` (`packages/spec/src/stack.zod.ts#validateSingleApp`). That
 > function returns nothing for any other package type, so a module package that defines two apps
-> builds on `main` at `874166b6`. For modules the rule is declared and not yet enforced. The check
-> is [#32586](https://github.com/objectstack-ai/objectstack/issues/32586), which waits for this
+> builds on `main` at `874166b6` (`packages/spec/src/stack.test.ts` pins the same answer for a
+> `driver` package). For modules the rule is declared and not yet enforced. The check is
+> [#32586](https://github.com/objectstack-ai/objectstack/issues/32586), which waits for this
 > amendment.
 >
 > **Not decided here.** Several apps in one `type: app` package (option C) is not ruled, and the
@@ -304,3 +306,6 @@ D1–D4:
 - `packages/spec/src/kernel/plugin.zod.ts` (`isConsumerInstallable`)
 - `packages/spec/src/cloud/marketplace.zod.ts`
 - `docs/design/marketplace-publishing.md`
+- Cited by the 2026-11-12 amendment note under D3: ADR-0048 §3.1 (the package
+  id is the route key), ADR-0130 §1.5 and D2 (navigation crosses only through
+  contributions; the release artifact is never consumer-facing), ADR-0141
