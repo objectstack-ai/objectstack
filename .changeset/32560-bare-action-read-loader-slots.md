@@ -1,13 +1,13 @@
 ---
 '@objectstack/core': patch
-'@objectstack/metadata': minor
+'@objectstack/metadata': patch
 '@objectstack/metadata-protocol': patch
 ---
 
 fix(metadata, metadata-protocol, core)!: the bare read and removal of an action name judge the loaders' slots beside the registry's, tell the platform's package-less item from the environment's, and remove what the bare read answers (ADR-0150 D3)
 
 Clause-②: yes (narrowing) — narrowing: `MetadataManager.get('action', NAME)` (and `getDiagnosed`) of a name a package holds in memory goes from 200 to 409 where a second package holds it only in a loader (it answered the in-memory package's item, a pick between two packages), and where a package-less item no loader stores (the platform's: host code or a plugin) stands beside the package (it answered the platform's item); `GET /meta/action/NAME` and its `/layers` follow where the metadata service's answer reaches them. `MetadataManager.unregister('action', NAME)` beside the platform's item and a package goes from removing both to the same 409. Moved answers: the in-process read beside one package answers the environment's own item a loader stores (it answered the package's), and the served bare read answers the environment's item the metadata service holds beside a disabled package (it answered the enabled package's), and the enabled holder's item where the service holds only a disabled package's customization (it answered that customization); a removal naming no package beside one package removes the environment's own item only (it removed the package's action too). Refusals naming the environment beside two packages now name it on removal as on read, and count "holders" rather than "packages".
-Metadata-protocol: narrowed — a package-less removal of an action name one package holds beside the platform's in-memory item is refused naming both, and one beside the environment's own item takes that item only.
+Metadata-protocol: none — no key, value or metadata type an author writes changes; what moves is which holder a by-name read or removal naming no package answers or takes, and when it refuses.
 Skills-docs: none — `skills/**` and `content/docs/**` teach no bare read or removal of an action name a package-less item shares with a package; the prescription ships in the refusal text and the FROM → TO below.
 
 <!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: the change is which holder a by-name read or removal naming no package answers or takes, and when it refuses; stored metadata is read and written exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
