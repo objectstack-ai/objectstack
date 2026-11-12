@@ -463,16 +463,25 @@ describe('[#32613] two packages ship one name, each with its declared override: 
             expect((await read(protocol, BETA)).label).toBe('OVR-B');
         });
 
-        it(`action, ${first} registered first: one entry per holder, each the by-name read naming that holder`, async () => {
+        it(`action, ${first} registered first: exactly alpha:OVR-A and beta:OVR-B, served, executed and at each address`, async () => {
             const protocol = await bootHolders(order);
             await overrideEach(protocol, 'action', [ALPHA, BETA]);
-            const p: any = protocol;
-            const byName = async (pkg: string) =>
-                `${pkg}:${(await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: pkg })).item.label}`;
-            const expected = [await byName(ALPHA), await byName(BETA)].sort();
-            expect(expected).toContain(`${order[0]}:${order[0] === ALPHA ? 'OVR-A' : 'OVR-B'}`);
             for (const face of ['served', 'execution'] as const) {
-                expect(await entries(protocol, 'action', face), face).toEqual(expected);
+                expect(await entries(protocol, 'action', face), face).toEqual([`${ALPHA}:OVR-A`, `${BETA}:OVR-B`]);
+            }
+            // The by-name read and the layered read naming each package serve
+            // that package's own override, and each base lists its own. FROM:
+            // the second package to register was judged against the first's
+            // package and declined everywhere (`beta:SHIPPED-beta` beside
+            // `alpha:OVR-A` with alpha first; `alpha:SHIPPED-alpha` beside
+            // `beta:OVR-B` with beta first).
+            const p: any = protocol;
+            for (const [pkg, label] of [[ALPHA, 'OVR-A'], [BETA, 'OVR-B']] as const) {
+                expect((await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: pkg })).item.label, pkg).toBe(label);
+                const layers = await p.getMetaItemLayered({ type: 'action', name: SHARED_ACTION, packageId: pkg });
+                expect(layers.effective?.label, `${pkg} layered effective`).toBe(label);
+                expect((await p.listServedOverrides({ packageId: pkg })).map((e: any) => `${e.type}:${e.name}`), `${pkg} served overrides`)
+                    .toEqual([`action:${SHARED_ACTION}`]);
             }
         });
     }
