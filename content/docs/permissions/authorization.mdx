@@ -448,7 +448,9 @@ name), so switching one package's set never touches the other's. A row that
 names no package switches off every holder of the name while more than one
 holds it, and so does a row naming a package that no longer serves the name;
 switching a holder on while such a row stands answers `409`, and nothing is
-written. `package` is the only query parameter, and only
+written. A disabled package still counts as a holder here. With one holder, a
+package or the environment, such a row is the holder's and the write takes it
+over. `package` is the only query parameter, and only
 for `permission`; any other, or a repeated or blank one, answers `400`
 before any lookup. A write the ledger refuses
 answers with the status its code means: a record validation failure is `400`

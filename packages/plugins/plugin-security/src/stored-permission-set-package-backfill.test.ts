@@ -136,6 +136,12 @@ async function seedGrants(engine: ObjectQL): Promise<void> {
   }
 }
 
+/** Write a grant row below the engine (no hook runs): the store's own indexes alone judge it. */
+async function rawGrant(engine: ObjectQL, row: Record<string, unknown>): Promise<void> {
+  await (engine as any).getDriver(GRANTS.object).knex(GRANTS.object)
+    .insert({ permission_set_package: null, organization_id: ORG, ...row });
+}
+
 async function packagesById(engine: ObjectQL, object: string): Promise<Record<string, unknown>> {
   const rows = (await engine.find(object, { where: {}, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
   return Object.fromEntries(rows.map((r) => [String(r.id), r.permission_set_package ?? null]));
@@ -183,6 +189,34 @@ describe('R1 — a grant gains the package that holds its permission set', () =>
     expect(report.unheld).toEqual([{ name: NOBODY, rows: 1 }]);
     expect(report.unpackaged).toEqual([{ name: ENV_SET, rows: 1, holder: 'environment' }]);
   });
+
+  // [#32164, red-line review E2] BASE: one row's unique violation threw out of
+  // the walk, the run ended ("did not finish … the next boot tries again"),
+  // and every boot stopped at the same row, so later rows were never bound.
+  it.each([['with the write seam', true], ['below it (the store\'s own key)', false]] as const)(
+    'a row whose bind would make a second grant of one user, set and organization is reported as duplicated and left null; the walk goes on (%s)',
+    async (_label, seam) => {
+      const engine = await boot();
+      if (seam) {
+        expect(registerPermissionSetPackageStamp({
+          registry: Object.assign(standInRegistry(), { bareNameHoldersAreSealed: true }),
+          getSchema: engine.getSchema.bind(engine),
+          registerHook: engine.registerHook.bind(engine),
+          unregisterHooksByPackage: engine.unregisterHooksByPackage.bind(engine),
+          find: engine.find.bind(engine),
+        })).toBe(true);
+      }
+      await rawGrant(engine, { id: 'a0', user_id: 'u_a', permission_set: ONE_HOLDER });
+      await rawGrant(engine, { id: 'a1', user_id: 'u_a', permission_set: ONE_HOLDER, permission_set_package: CRM });
+      await rawGrant(engine, { id: 'b0', user_id: 'u_b', permission_set: ONE_HOLDER });
+
+      const report = await backfillStoredPermissionSetPackages(engine, GRANTS, permissionSetHolderOf(standInRegistry()));
+
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ a0: null, a1: CRM, b0: CRM });
+      expect(report.duplicated).toEqual([{ id: 'a0', name: ONE_HOLDER, packageId: CRM }]);
+      expect(report.bound).toEqual([{ name: ONE_HOLDER, rows: 1, packageId: CRM }]);
+    },
+  );
 
   it('a second run writes no row and reports the same ambiguous and unheld names', async () => {
     const engine = await boot();
@@ -432,6 +466,7 @@ describe('the write seam stamps the package column on every write that names a s
       getSchema: engine.getSchema.bind(engine),
       registerHook: engine.registerHook.bind(engine),
       unregisterHooksByPackage: engine.unregisterHooksByPackage.bind(engine),
+      find: engine.find.bind(engine),
     })).toBe(true);
     return engine;
   }
@@ -535,6 +570,103 @@ describe('the write seam stamps the package column on every write that names a s
     // CONTROL: a holder, named on the insert, is kept (one of two in the closure, which the rule alone leaves null).
     await engine.insert(SUGGESTIONS.object, { ...suggestion('n3', P, D_AND_D2), [SUGGESTIONS.packageColumn]: D }, { context: SYS_ORG });
     expect((await packagesById(engine, SUGGESTIONS.object)).n3).toBe(D);
+  });
+
+  // [#32164, contract review 6813617327 should-fix 3] A suggestion is read from
+  // the package that made it (R3), so a holder named in its package column
+  // must be one that package's closure reaches. BASE: any holder of the name
+  // was kept, so a suggestion could be bound to a set the suggester cannot
+  // reach, which the rule alone never binds.
+  it('R3: a holder named outside the suggesting package\'s closure is 409 outside-closure, nothing stored; CONTROL: its own and a dependency\'s are kept', async () => {
+    const engine = await stamped();
+    for (const [id, name] of [['o1', U_ONLY], ['o2', P_AND_U]] as const) {
+      await expect(
+        engine.insert(SUGGESTIONS.object, { ...suggestion(id, P, name), [SUGGESTIONS.packageColumn]: U }, { context: SYS_ORG }),
+      ).rejects.toMatchObject({
+        code: 'RESOURCE_CONFLICT',
+        refusal: { reason: 'outside-closure', callerPackageId: P, candidates: [{ kind: 'package', packageId: U }] },
+      });
+    }
+    await engine.insert(SUGGESTIONS.object, suggestion('o3', P, P_AND_U), { context: SYS_ORG });
+    await expect(
+      engine.update(SUGGESTIONS.object, { id: 'o3', [SUGGESTIONS.packageColumn]: U }, { context: SYS_ORG }),
+    ).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', refusal: { reason: 'outside-closure', callerPackageId: P } });
+    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ o3: P });
+
+    // CONTROL: the suggester's own set named on an update, and a dependency's on an insert.
+    await engine.update(SUGGESTIONS.object, { id: 'o3', [SUGGESTIONS.packageColumn]: P }, { context: SYS_ORG });
+    await engine.insert(SUGGESTIONS.object, { ...suggestion('o5', P, D_ONLY), [SUGGESTIONS.packageColumn]: D }, { context: SYS_ORG });
+    expect(await packagesById(engine, SUGGESTIONS.object)).toEqual({ o3: P, o5: D });
+  });
+
+  /**
+   * [#32164, red-line review E2] One grant of a set per user and organization:
+   * the key before #32164, `(user_id, permission_set, organization_id)`,
+   * refused every second row of those three; the wider key and the
+   * package-less guard do not see a pair where one row names no package, or a
+   * package that does not hold the name. The seam refuses such a write as the
+   * old key's database did (the engine's duplicate-record refusal, `409 UNIQUE_VIOLATION` on the wire), and admits a pair only
+   * when the two rows name two different packages that each hold the name.
+   */
+  describe('[E2] R1: one grant of a set per user and organization, but two holders\' sets', () => {
+    const asUniqueViolation = { name: 'DuplicateRecordError', code: 'DUPLICATE_RECORD', status: 409 };
+
+    it('one holder: beside a grant naming no package, a second grant is refused 409 as a duplicate record; nothing stored (BASE: the three-column key refused it)', async () => {
+      const engine = await stamped();
+      await rawGrant(engine, { id: 'd0', user_id: 'u_d', permission_set: ONE_HOLDER });
+      await expect(engine.insert(GRANTS.object, grant('d1', ONE_HOLDER, { user_id: 'u_d' }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      await expect(engine.insert(GRANTS.object, grant('d2', ONE_HOLDER, { user_id: 'u_d', permission_set_package: CRM }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ d0: null });
+    });
+
+    it('one holder: beside a grant naming a package that no longer serves the name, a second grant is refused the same way', async () => {
+      const engine = await stamped();
+      await rawGrant(engine, { id: 'e0', user_id: 'u_e', permission_set: ONE_HOLDER, permission_set_package: 'com.acme.gone' });
+      await expect(engine.insert(GRANTS.object, grant('e1', ONE_HOLDER, { user_id: 'u_e' }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ e0: 'com.acme.gone' });
+    });
+
+    it('two holders: each package\'s set once is admitted (the widening); the same package twice, or a grant naming no package beside one naming a package, is refused', async () => {
+      const engine = await stamped();
+      await engine.insert(GRANTS.object, grant('t1', TWO_HOLDERS, { user_id: 'u_t', permission_set_package: CRM }), { context: SYS_ORG });
+      await engine.insert(GRANTS.object, grant('t2', TWO_HOLDERS, { user_id: 'u_t', permission_set_package: HR }), { context: SYS_ORG });
+      await expect(engine.insert(GRANTS.object, grant('t3', TWO_HOLDERS, { user_id: 'u_t', permission_set_package: HR }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      await expect(engine.insert(GRANTS.object, grant('t4', TWO_HOLDERS, { user_id: 'u_t' }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      // A grant naming no package first: a packaged one beside it is refused.
+      await engine.insert(GRANTS.object, grant('v1', TWO_HOLDERS, { user_id: 'u_v' }), { context: SYS_ORG });
+      await expect(engine.insert(GRANTS.object, grant('v2', TWO_HOLDERS, { user_id: 'u_v', permission_set_package: HR }), { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ t1: CRM, t2: HR, v1: null });
+    });
+
+    it('an update that would make such a pair is refused and the row is untouched: a column-only bind, and moving a grant to another user', async () => {
+      const engine = await stamped();
+      await engine.insert(GRANTS.object, grant('x1', ONE_HOLDER, { user_id: 'u_x' }), { context: SYS_ORG });
+      await rawGrant(engine, { id: 'x0', user_id: 'u_x', permission_set: ONE_HOLDER });
+      await expect(engine.update(GRANTS.object, { id: 'x0', permission_set_package: CRM }, { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      await engine.insert(GRANTS.object, grant('y1', ONE_HOLDER, { user_id: 'u_y' }), { context: SYS_ORG });
+      await expect(engine.update(GRANTS.object, { id: 'y1', user_id: 'u_x' }, { context: SYS_ORG }))
+        .rejects.toMatchObject(asUniqueViolation);
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ x0: null, x1: CRM, y1: CRM });
+      const y1 = (await engine.find(GRANTS.object, { where: { id: 'y1' }, context: SYSTEM_CTX })) as Array<Record<string, unknown>>;
+      expect(y1[0].user_id).toBe('u_y');
+    });
+
+    it('CONTROL: another user, another organization, another set — and an update that keeps the key — are not judged against each other', async () => {
+      const engine = await stamped();
+      await engine.insert(GRANTS.object, grant('c1', ONE_HOLDER, { user_id: 'u_c' }), { context: SYS_ORG });
+      await engine.insert(GRANTS.object, grant('c2', ONE_HOLDER, { user_id: 'u_c2' }), { context: SYS_ORG });
+      await engine.insert(GRANTS.object, grant('c3', ONE_HOLDER, { user_id: 'u_c', organization_id: 'org_b' }), { context: { isSystem: true, tenantId: 'org_b' } });
+      await engine.insert(GRANTS.object, grant('c4', TWO_HOLDERS, { user_id: 'u_c' }), { context: SYS_ORG });
+      await engine.update(GRANTS.object, { id: 'c1', valid_until: '2099-01-01T00:00:00.000Z' }, { context: SYS_ORG });
+      expect(await packagesById(engine, GRANTS.object)).toEqual({ c1: CRM, c2: CRM, c3: CRM, c4: null });
+    });
   });
 
   it('before the holders are sealed nothing is stamped: the boot backfill binds the row', async () => {

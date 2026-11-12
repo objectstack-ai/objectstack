@@ -437,6 +437,15 @@ type PermissionLedgerRow = { id?: unknown; metadata_type?: unknown; name?: unkno
 const storedPackageOf = (row: PermissionLedgerRow): string | null =>
     (typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null);
 
+/**
+ * A stored `package_id` as the readers read it (core's `catalogEntryAddress`):
+ * the overlay provenance sentinel names no package. How a refusal names a row.
+ */
+const readPackageOf = (row: PermissionLedgerRow, name: string): string | null => {
+    const stored = storedPackageOf(row);
+    return stored === null ? null : catalogEntryAddress({ name, packageId: stored }).packageId;
+};
+
 const holderPhrase = (packageId: string | null): string =>
     (packageId === null ? 'the environment\'s set' : `package "${packageId}"'s set`);
 
@@ -468,10 +477,29 @@ async function planPermissionSetLedgerWrite(
 ): Promise<{ refusal?: HttpDispatcherResult; adoptPackageless: boolean; bindStale?: boolean }> {
     const name = entry.name;
     const target = catalogEntryAddress(entry).packageId;
+    // The holders the readers count: every holder the catalog serves, and every
+    // holder the D3 rule counts when it refuses the bare name — a disabled
+    // package's set included, which the catalog does not serve but the rule
+    // still counts (contract review 6813617327, should-fix 2): a row naming no
+    // package is every holder's switch while the rule refuses the name, so it
+    // is never taken over by one of them.
     const holders = (await reader.list('permission'))
         .filter((e) => e.name === name)
         .map((e) => catalogEntryAddress(e).packageId);
-    const adoptPackageless = target !== null && holders.length === 1 && holders[0] === target;
+    const ruled = await resolveCatalogReference(reader, 'permission', name);
+    if (ruled.status === 'refused') {
+        for (const holder of ruled.holders ?? []) {
+            const packageId = holder.kind === 'package' ? holder.packageId : null;
+            if (!holders.includes(packageId)) holders.push(packageId);
+        }
+    }
+    // Whether `target` is the name's one holder, a package's set or the
+    // environment's alike (red-line review E1 on #32306: an environment holder
+    // is a one-holder answer too).
+    const soleHolder = holders.length === 1 && holders[0] === target;
+    // A package holder's row naming no package is its own (D8); an environment
+    // holder's own row names no package already, so it adopts nothing.
+    const adoptPackageless = target !== null && soleHolder;
     const found = await ql.find(METADATA_ACTIVATION_TABLE, {
         where: { metadata_type: 'permission', name },
         context: activationWriteContext(context),
@@ -480,8 +508,12 @@ async function planPermissionSetLedgerWrite(
     // [D8] The name's one holder also takes over its one row when that row names
     // a package that no longer serves the name: the readers read it by the name
     // alone, so it is this holder's switch, and the name-addressed store wrote
-    // exactly this re-address before (every one-holder answer unchanged).
-    const bindStale = adoptPackageless && rows.length === 1 && storedPackageOf(rows[0]) !== null
+    // exactly this re-address before (every one-holder answer unchanged). That
+    // holds for the environment's set as for a package's, and for a row stamped
+    // with the overlay provenance sentinel, which the name-addressed store wrote
+    // for an environment-authored set before #32164 and every reader reads as
+    // no package.
+    const bindStale = soleHolder && rows.length === 1 && storedPackageOf(rows[0]) !== null
         && storedPackageOf(rows[0]) !== target;
     const own = rows.find((r) => storedPackageOf(r) === target)
         ?? (adoptPackageless ? rows.find((r) => storedPackageOf(r) === null) : undefined)
@@ -497,7 +529,7 @@ async function planPermissionSetLedgerWrite(
                     handled: true,
                     response: deps.error(
                         `Permission set '${name}': the activation ledger row this switch would write ` +
-                            `(${storedPackageOf(own) === null ? 'naming no package' : `naming package "${storedPackageOf(own)}"`}) ` +
+                            `(${readPackageOf(own, name) === null ? 'naming no package' : `naming package "${readPackageOf(own, name)}"`}) ` +
                             `switches off ${holderPhrase(other)} too, so writing it for ${holderPhrase(target)} would switch ` +
                             `that one back on without a word (ADR-0150). Nothing was written. Delete that row from ` +
                             `${METADATA_ACTIVATION_TABLE} and switch each holder through its own row.`,
@@ -511,7 +543,7 @@ async function planPermissionSetLedgerWrite(
     if (enabled) {
         for (const row of rows) {
             if (row === own || !(await ledgerRowSwitchesOff(ql, row, target, name))) continue;
-            const named = storedPackageOf(row);
+            const named = readPackageOf(row, name);
             return {
                 adoptPackageless,
                 bindStale,

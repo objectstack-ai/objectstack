@@ -440,11 +440,18 @@ describe('one grant per user, set and organization — the declared key and the 
     expect(await grantsOfSet(h, 'u_d1', 'qa_alpha')).toEqual([]);
   });
 
-  it('CONTROL — without the guard (driver-memory\'s declared limit; a SQL table before its guard is built) the declared key alone admits a second package-less grant', async () => {
+  // [#32164, red-line review E2] Through the engine the write seam's
+  // one-grant check refuses the second grant whatever the store's indexes
+  // are; below the engine the declared key alone admits it.
+  it('CONTROL — without the guard (driver-memory\'s declared limit; a SQL table before its guard is built): the engine refuses a second package-less grant (the one-grant check), the declared key alone admits it below the engine', async () => {
     const h = await boot();
     await h.engine.insert('sys_member', { id: 'mem_g1', user_id: 'u_d1', organization_id: ORG, role: 'member' }, { context: SYS } as any);
     await h.engine.insert('sys_user_permission_set', { id: 'ups_g1', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: ADMIN } as any);
-    await h.engine.insert('sys_user_permission_set', { id: 'ups_g2', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: SYS } as any);
+    const err = await refusalOf(() => h.engine.insert(
+      'sys_user_permission_set', { id: 'ups_g2', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG }, { context: SYS } as any,
+    ));
+    expect(duplicateShape(err)).toEqual(DUPLICATE);
+    await knexOf(h)('sys_user_permission_set').insert({ id: 'ups_g2', user_id: 'u_d1', permission_set: 'qa_alpha', organization_id: ORG });
     expect((await grantsOfSet(h, 'u_d1', 'qa_alpha')).map((g) => g.permission_set_package)).toEqual([null, null]);
   });
 

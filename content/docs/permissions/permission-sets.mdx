@@ -263,11 +263,13 @@ package holds needs none: the grant is stored with that package. A set two
 packages hold, granted with no package, is refused `409` `RESOURCE_CONFLICT`,
 and the message names every holder. A package that does not hold the set is
 refused `409` whatever the number of holders, and nothing is stored. One user
-holds at most one grant per set, package and organization, and at most one
-grant that names no package per set and organization. On the in-memory driver
-(`driver-memory`) that second limit is not enforced: it builds no index for
-grants that name no package, so it admits two of them for one set and
-organization.
+holds one grant of a set per organization, as before, except that when two
+packages hold the set the user may hold each package's set once. A second
+grant written through the engine is refused as a duplicate record (`409`
+`UNIQUE_VIOLATION` on the wire). Below the engine the store's indexes keep one
+grant per set, package and organization, and one grant that names no package
+per set and organization; the in-memory driver (`driver-memory`) builds no
+index for grants that name no package.
 
 The assignment writes are **governed** (ADR-0090 D12): tenant-level admins pass
 through to the ordinary checks; a delegated admin needs a covering

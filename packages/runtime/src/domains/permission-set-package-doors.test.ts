@@ -49,8 +49,24 @@ const setOf = (name: string, packageId: string) => ({
     _packageId: packageId,
 });
 const holders: Record<string, string[]> = { [TWO]: [CRM, HR], [ONE]: [CRM] };
+/** The overlay provenance sentinel: the `_packageId` of a set rehydrated from `sys_metadata`, which names no package. */
+const SENTINEL = 'sys_metadata';
+/** A set the environment authored: no package, or (`overlay`) the sentinel. */
+const envSetOf = (name: string, spelling: 'plain' | 'overlay') => ({
+    name,
+    label: `${name} (environment)`,
+    objects: { account: { allowRead: true } },
+    ...(spelling === 'overlay' ? { _packageId: SENTINEL } : {}),
+});
 
-function boot() {
+/**
+ * `environment`: names the environment holds alone, and how its set is spelled;
+ * `disabled`: holders whose package is disabled (the catalog does not serve
+ * their set; the D3 rule still counts them).
+ */
+function boot(opts: { environment?: Record<string, 'plain' | 'overlay'>; disabled?: readonly string[] } = {}) {
+    const environment = opts.environment ?? {};
+    const disabled = new Set(opts.disabled ?? []);
     const packages: Record<string, { manifest: Row }> = {
         [CRM]: { manifest: { id: CRM, namespace: 'crm', version: '1.0.0' } },
         [HR]: { manifest: { id: HR, namespace: 'hr', version: '1.0.0' } },
@@ -96,15 +112,20 @@ function boot() {
         registry: {
             getItem: (type: string, name: string) => (type === 'permission' && holders[name]
                 ? setOf(name, holders[name][0])
+                : type === 'permission' && environment[name] ? envSetOf(name, environment[name])
                 : type === 'position' && name === POSITION ? { name, label: name, _packageId: CRM } : undefined),
             listItems: (type: string) => (type === 'permission'
-                ? Object.entries(holders).flatMap(([name, held]) => held.map((p) => setOf(name, p)))
+                ? [
+                    ...Object.entries(holders).flatMap(([name, held]) => held.map((p) => setOf(name, p))),
+                    ...Object.entries(environment).map(([name, spelling]) => envSetOf(name, spelling)),
+                ]
                 : type === 'position' ? [{ name: POSITION, label: POSITION, _packageId: CRM }] : []),
-            isPackageDisabled: () => false,
+            isPackageDisabled: (packageId: string) => disabled.has(packageId),
             packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' ? holders[name] ?? [] : []),
             getPackageScopedItem: (type: string, name: string, packageId: string) =>
                 (type === 'permission' && (holders[name] ?? []).includes(packageId) ? setOf(name, packageId) : undefined),
-            getEnvironmentScopedItem: () => undefined,
+            getEnvironmentScopedItem: (type: string, name: string) =>
+                (type === 'permission' && environment[name] ? envSetOf(name, environment[name]) : undefined),
             getArtifactItem: () => undefined,
             getPackage: (id: string) => packages[id],
             getAllPackages: () => manifests,
@@ -282,6 +303,86 @@ describe('the activation door — CONTROL, one holder', () => {
         expect(answer(await flip(h, ONE, { package: HR }))).toMatchObject({ status: 409, candidates: [{ kind: 'package', packageId: CRM }] });
         expect(answer(await flip(h, 'nobody_holds_this')).status).toBe(404);
         expect(answer(await flip(h, 'nobody_holds_this', { package: CRM })).status).toBe(404);
+    });
+});
+
+/**
+ * [#32306 red-line review E1, contract review 6813617327 must-fix 1] A set the
+ * ENVIRONMENT holds alone is a one-holder answer too: its only ledger row is
+ * its switch, whatever package that row names — one that no longer serves the
+ * name, or the overlay provenance sentinel `main`'s name-addressed store wrote
+ * for a set rehydrated from `sys_metadata`. The flip takes that row over.
+ *
+ * BASE (`main`, the name-addressed store): `200`, the one row re-addressed by
+ * name to the entry's `_packageId` as stored (the sentinel for an overlay
+ * entry, none for a plain one). Before this fix, this branch answered the
+ * enable `409` ("Delete that row") and wrote a second row on a disable.
+ */
+describe('[E1] the activation door — CONTROL, the environment is the one holder', () => {
+    const ENV = 'env_auditor';
+    describe.each(['plain', 'overlay'] as const)('the environment\'s set spelled %s', (spelling) => {
+        const h0 = () => boot({ environment: { [ENV]: spelling } });
+
+        it('a row naming a package that no longer serves the name is its switch: switching on takes it over, 200', async () => {
+            const h = h0();
+            h.tables[LEDGER].push({ id: 'stale', metadata_type: 'permission', name: ENV, package_id: OTHER, active: false });
+            expect(answer(await flip(h, ENV, {}, { enabled: true })).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['stale', null, true]]);
+        });
+
+        it('a row stamped with the overlay provenance sentinel is its switch: switching on takes it over, 200', async () => {
+            const h = h0();
+            h.tables[LEDGER].push({ id: 'sentinel', metadata_type: 'permission', name: ENV, package_id: SENTINEL, active: false });
+            expect(answer(await flip(h, ENV, {}, { enabled: true })).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['sentinel', null, true]]);
+        });
+
+        it('switching off over such a row re-addresses that one row, never a second', async () => {
+            const h = h0();
+            h.tables[LEDGER].push({ id: 'stale', metadata_type: 'permission', name: ENV, package_id: OTHER, active: true });
+            expect(answer(await flip(h, ENV)).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.id, r.package_id, r.active])).toEqual([['stale', null, false]]);
+        });
+
+        it('CONTROL: no row: the flip writes the environment\'s own row, naming no package', async () => {
+            const h = h0();
+            expect(answer(await flip(h, ENV)).status).toBe(200);
+            expect(h.tables[LEDGER].map((r) => [r.package_id ?? null, r.active])).toEqual([[null, false]]);
+        });
+    });
+});
+
+/**
+ * [Contract review 6813617327, should-fix 2] A package that holds the name but
+ * is DISABLED: the catalog does not serve its set, and the D3 rule still counts
+ * it as a holder. So the activation door counts it too: a row naming no
+ * package is every holder's switch while the rule refuses the bare name, and
+ * switching the served holder on beside it is `409`, never a take-over that
+ * would leave the disabled holder's set on once its package is enabled again.
+ * Before this fix the door counted the served holder alone and took the row
+ * over (`200`).
+ */
+describe('[should-fix 2] a disabled package still holds the name, at the activation door', () => {
+    it('a row naming no package keeps the served holder off: switching it on is 409 naming that row; nothing written', async () => {
+        const h = boot({ disabled: [HR] });
+        h.tables[LEDGER].push({ id: 'legacy', metadata_type: 'permission', name: TWO, package_id: null, active: false });
+        const res = answer(await flip(h, TWO, { package: CRM }, { enabled: true }));
+        expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+        expect(res.message).toContain('one naming no package, which switches off every holder of the name while more than one holds it');
+        expect(h.writes).toEqual([]);
+    });
+
+    it('the bare name is refused naming both holders; ?package= the disabled one holds nothing the door can switch: 409 naming the served holder', async () => {
+        const h = boot({ disabled: [HR] });
+        expect(answer(await flip(h, TWO))).toMatchObject({ status: 409, candidates: BOTH });
+        expect(answer(await flip(h, TWO, { package: HR }))).toMatchObject({ status: 409, candidates: [{ kind: 'package', packageId: CRM }] });
+        expect(h.writes).toEqual([]);
+    });
+
+    it('CONTROL: the served holder\'s own flip with no other row is 200, its own row', async () => {
+        const h = boot({ disabled: [HR] });
+        expect(answer(await flip(h, TWO, { package: CRM })).status).toBe(200);
+        expect(h.tables[LEDGER].map((r) => [r.package_id, r.active])).toEqual([[CRM, false]]);
     });
 });
 

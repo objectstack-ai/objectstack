@@ -67,6 +67,13 @@
  * differs from its `package_id`: with the suggesting package as the caller,
  * that is a set one of its declared dependencies holds. Every row reads equal
  * today; one that does not is reported, never rewritten.
+ *
+ * A bind the database or the write seam refuses as a unique violation — the
+ * row would be a second row of one key, a grant beside another of the same
+ * user, set and organization that already names the holder (#32164) — is
+ * reported by id (`duplicated`, at `warn`) and the row is left naming no
+ * package; the walk goes on, so one such row never stops every later row
+ * from being bound. Any other failed write still ends the run.
  */
 
 import {
@@ -76,7 +83,7 @@ import {
   type PackageScopedResolution,
 } from '@objectstack/core';
 import { packageResolutionClosure, type PackageClosureRegistry } from '@objectstack/metadata-core';
-import { keysetWalk } from '@objectstack/types';
+import { isUniqueViolationError, keysetWalk } from '@objectstack/types';
 
 /** One stored reference to a permission set (ADR-0150 D8). */
 export interface StoredPermissionSetReference {
@@ -210,6 +217,13 @@ export interface StoredReferenceBackfillReport {
   readonly unpackaged: ReadonlyArray<ReferencedName & { readonly holder: 'environment' | 'platform' }>;
   /** Suggestion rows whose `permission_set_package` is not their `package_id` (R3 only); never rewritten. */
   readonly differs: ReadonlyArray<{ readonly id: string; readonly name: string; readonly packageId: string; readonly permissionSetPackage: string }>;
+  /**
+   * [#32164] Rows the bind would make a second row of one key (a grant of the
+   * same user, set and organization already names the holder): the write was
+   * refused as a unique violation, the row is left naming no package, and the
+   * walk goes on. Each is named by id, so an operator can review the pair.
+   */
+  readonly duplicated: ReadonlyArray<{ readonly id: string; readonly name: string; readonly packageId: string; readonly callerPackageId?: string | null }>;
 }
 
 /** The engine slice the backfill reads and writes through. */
@@ -256,6 +270,7 @@ export async function backfillStoredPermissionSetPackages(
   const ambiguous = new Map<string, ReferencedName & { reason: PackageScopedRefusalReason; candidates: readonly string[] }>();
   const unheld = new Map<string, ReferencedName>();
   const unpackaged = new Map<string, ReferencedName & { holder: 'environment' | 'platform' }>();
+  const duplicated: Array<{ id: string; name: string; packageId: string; callerPackageId?: string | null }> = [];
   const answers = new Map<string, StoredReferenceHolder>();
   const { object, nameColumn, packageColumn, callerColumn } = reference;
   const fields = ['id', nameColumn, packageColumn, ...(callerColumn ? [callerColumn] : [])];
@@ -288,10 +303,19 @@ export async function backfillStoredPermissionSetPackages(
       }
       switch (holder.kind) {
         case 'package': {
-          if (!options?.dryRun) {
-            await engine.update(object, { id, [packageColumn]: holder.packageId }, { context: SYSTEM_CTX });
-          }
           const packageId = holder.packageId;
+          if (!options?.dryRun) {
+            try {
+              await engine.update(object, { id, [packageColumn]: packageId }, { context: SYSTEM_CTX });
+            } catch (e: unknown) {
+              // [#32164] One row whose bind is a unique violation is reported
+              // and left as it stands; the walk goes on, so every other row is
+              // still bound (`duplicated`).
+              if (!isUniqueViolationError(e)) throw e;
+              duplicated.push({ id: String(id), name, packageId, ...writer(caller) });
+              break;
+            }
+          }
           tally(bound, key, () => ({ name, ...writer(caller), rows: 0, packageId }));
           break;
         }
@@ -320,6 +344,7 @@ export async function backfillStoredPermissionSetPackages(
     unheld: [...unheld.values()],
     unpackaged: [...unpackaged.values()],
     differs,
+    duplicated,
   };
 }
 
@@ -455,6 +480,15 @@ export function logStoredReferenceBackfill(report: StoredReferenceBackfillReport
         'holds, not the suggesting package itself; nothing is rewritten — ' +
         report.differs.map((d) => `'${d.name}' (suggested by ${d.packageId}, held by ${d.permissionSetPackage})`).join(', ') + '.',
       { differs: report.differs },
+    );
+  }
+  if (report.duplicated.length > 0) {
+    logger.warn(
+      `[security] ${at}: these rows were left naming no package, because binding each would make it a second row of one ` +
+        'key: another row already names the same holder for the same reference (for a grant: the same user, permission ' +
+        'set and organization). Review each pair and delete the row that should not stand — ' +
+        report.duplicated.map((d) => `row ${d.id}: '${d.name}'${typeof d.callerPackageId === 'string' ? ` as written by ${d.callerPackageId}` : ''} → ${d.packageId}`).join(', ') + '.',
+      { duplicated: report.duplicated },
     );
   }
 }

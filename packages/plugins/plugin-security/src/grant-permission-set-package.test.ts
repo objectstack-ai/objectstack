@@ -31,7 +31,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
-import { mapDataError, resolveThrownHttpError } from '@objectstack/types';
+import { isUniqueViolationError, mapDataError, resolveThrownHttpError } from '@objectstack/types';
 
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { judgeGrantSet, registerGrantPermissionSetNameHooks } from './grant-permission-set-name.js';
@@ -84,7 +84,7 @@ afterEach(async () => {
   }
 });
 
-async function boot(): Promise<ObjectQL> {
+async function boot(opts: { seamReads?: boolean } = {}): Promise<ObjectQL> {
   const engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }),
@@ -111,6 +111,7 @@ async function boot(): Promise<ObjectQL> {
     getSchema: engine.getSchema.bind(engine),
     registerHook: engine.registerHook.bind(engine),
     unregisterHooksByPackage: engine.unregisterHooksByPackage.bind(engine),
+    ...(opts.seamReads === false ? {} : { find: engine.find.bind(engine) }),
   })).toBe(true);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   return engine;
@@ -193,6 +194,74 @@ describe('a set two packages hold (ADR-0150 D3)', () => {
       });
     }
     expect(await stored(engine)).toEqual({});
+  });
+});
+
+/**
+ * [#32164, red-line review E2] A second grant of one user, set and
+ * organization that the key before #32164 refused is refused at the write
+ * seam, and answers what the store's own unique violation answers: the same
+ * envelope at both doors and the same wire body.
+ */
+describe('[E2] a second grant of a set to one user in one organization', () => {
+  const asWire = (err: any) => {
+    const thrown = resolveThrownHttpError(err);
+    const wire = mapDataError(err, GRANTS);
+    return { envelope: [thrown.code, thrown.status], wire: [wire.status, wire.body.code, wire.body.error] };
+  };
+
+  it('reads as the store\'s own unique violation: the seam\'s refusal and the declared key\'s, envelope and wire alike', async () => {
+    // The declared key's own refusal: the same package's set twice, measured
+    // with the seam's reads off so the store answers.
+    const bare = await boot({ seamReads: false });
+    await bare.insert(GRANTS, grant('k1', TWO, { permission_set_package: HR }), { context: SYS } as any);
+    const store = await refusalOf(() =>
+      bare.insert(GRANTS, grant('k2', TWO, { user_id: 'u_k1', permission_set_package: HR }), { context: SYS } as any));
+    expect(store?.name).toBe('DuplicateRecordError');
+
+    const engine = await boot();
+    await engine.insert(GRANTS, grant('k1', TWO, { permission_set_package: HR }), { context: SYS } as any);
+    const seam = await refusalOf(() =>
+      engine.insert(GRANTS, grant('k2', TWO, { user_id: 'u_k1', permission_set_package: HR }), { context: SYS } as any));
+    expect(asWire(seam)).toEqual(asWire(store));
+    expect(asWire(seam)).toEqual({
+      envelope: ['DUPLICATE_RECORD', 409],
+      wire: [409, 'UNIQUE_VIOLATION', 'A record with this value already exists'],
+    });
+    // The in-process reading: the same class name, code, status, object and sentence.
+    expect({ name: seam.name, code: seam.code, status: seam.status, object: seam.object, message: seam.message })
+      .toEqual({ name: store.name, code: store.code, status: store.status, object: store.object, message: store.message });
+    expect(isUniqueViolationError(seam)).toBe(true);
+    expect(await stored(engine)).toEqual({ k1: HR });
+  });
+
+  it('at the data door: beside a grant that names no package, a stamped second grant of a one-holder set is refused 409 UNIQUE_VIOLATION; nothing stored', async () => {
+    const engine = await boot();
+    await engine.insert(GRANTS, grant('m1', ONE, { permission_set_package: null }), { context: SYS } as any);
+    await (engine as any).getDriver(GRANTS).knex(GRANTS).where({ id: 'm1' }).update({ permission_set_package: null });
+    const err = await refusalOf(() => engine.insert(GRANTS, grant('m2', ONE, { user_id: 'u_m1' }), { context: ADMIN } as any));
+    expect(asWire(err)).toEqual({
+      envelope: ['DUPLICATE_RECORD', 409],
+      wire: [409, 'UNIQUE_VIOLATION', 'A record with this value already exists'],
+    });
+    expect(await stored(engine)).toEqual({ m1: null });
+  });
+
+  it('CONTROL: a row repeating a stored id is left to the store\'s own refusal, not the second-grant check', async () => {
+    const engine = await boot();
+    await engine.insert(GRANTS, grant('r1', ONE), { context: SYS } as any);
+    const err = await refusalOf(() => engine.insert(GRANTS, grant('r1', ONE), { context: SYS } as any));
+    expect({ name: err?.name, code: err?.code }).toEqual({ name: 'DuplicateRecordError', code: 'DUPLICATE_RECORD' });
+    // The driver's own refusal on `cause` (the seam's own carries no driver code).
+    expect(String(err?.cause?.code)).toMatch(/^SQLITE_CONSTRAINT/);
+    expect(await stored(engine)).toEqual({ r1: CRM });
+  });
+
+  it('CONTROL: the two holders\' sets once each, for one user in one organization, are both stored', async () => {
+    const engine = await boot();
+    await engine.insert(GRANTS, grant('p1', TWO, { permission_set_package: CRM }), { context: ADMIN } as any);
+    await engine.insert(GRANTS, grant('p2', TWO, { user_id: 'u_p1', permission_set_package: HR }), { context: ADMIN } as any);
+    expect(await stored(engine)).toEqual({ p1: CRM, p2: HR });
   });
 });
 
