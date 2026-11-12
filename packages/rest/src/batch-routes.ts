@@ -100,14 +100,6 @@ export interface BatchRouteHost {
 }
 
 /**
- * The cross-object batch's answer when this runtime cannot give it a
- * transaction: an engine without `transaction()`, and (#32604) an engine whose
- * default driver cannot roll back. One body for both, typed like every other
- * 501 on this server (clone/search, #4067) so a client keys on the code.
- */
-const NO_TRANSACTION_REFUSAL = { error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' } as const;
-
-/**
  * [#32604] Is `error` the engine's refusal to open a transaction it cannot roll
  * back (`transaction(cb, base, { require: true })` on a default driver that
  * fails `driverSupportsTransactions`, #5696)?
@@ -308,7 +300,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 if (!ql || typeof ql.transaction !== 'function') {
                     // Typed like every other 501 on this server (clone/search,
                     // #4067) so a client can key on the code, not the prose.
-                    res.status(501).json({ ...NO_TRANSACTION_REFUSAL });
+                    res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
                     return;
                 }
 
@@ -435,9 +427,12 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                 // in place under a route that promises atomicity. The engine now
                 // refuses BEFORE the callback runs, and the refusal answers the
                 // same typed 501 as an engine without `transaction()` above.
-                // Discovery's `transactionalBatch` asks the same predicate
-                // (`engineCanRollBack` → `driverSupportsTransactions`), so the
-                // advertisement and this refusal agree.
+                // Discovery's `transactionalBatch` reads the same default driver
+                // through the same predicate (`engineCanRollBack` →
+                // `driverSupportsTransactions`), so the advertisement and this
+                // refusal agree wherever a default driver resolves. With none
+                // resolved, discovery still says `true` and this answers 501:
+                // the refusal side, so nothing is written.
                 //
                 // `entered` keeps the mapping to the engine's own up-front
                 // refusal: an error carrying that code from inside the callback
@@ -515,7 +510,7 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     results = await ql.transaction(runOps, context, { require: true });
                 } catch (error: unknown) {
                     if (!entered && isTransactionUnsupportedRefusal(error)) {
-                        res.status(501).json({ ...NO_TRANSACTION_REFUSAL });
+                        res.status(501).json({ error: 'Transactional batch not supported by this runtime', code: 'NOT_IMPLEMENTED' });
                         return;
                     }
                     throw error;
