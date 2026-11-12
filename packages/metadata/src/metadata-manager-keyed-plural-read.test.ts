@@ -401,7 +401,7 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
 describe('[#32517] the unscoped plural reads answer every package\'s item of an unbundled by-package type', () => {
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
-  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'permission'];
+  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission'];
   const NAME = 'shared_item';
   const item = (packageId: string | undefined, extra: Record<string, unknown> = {}) => ({
     name: NAME,
@@ -467,6 +467,20 @@ describe('[#32517] the unscoped plural reads answer every package\'s item of an 
     expect(labels(await loader.loadMany('action'))).toEqual(['contact']);
     expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).loadMany('action'))).toEqual(['contact']);
   });
+
+  for (const packagelessFirst of [true, false]) {
+    it(`action: CONTROL — a package-less action and one package's of one name, on two objects, saved ${packagelessFirst ? 'package-less first' : 'package first'}: one item, the one saved last (BASE: the same)`, async () => {
+      const loader = new MemoryLoader();
+      const env = item(undefined, { objectName: 'account', label: 'environment on account' });
+      const own = item(A, { objectName: 'contact', label: 'alpha on contact' });
+      for (const body of packagelessFirst ? [env, own] : [own, env]) await loader.save('action', NAME, body);
+      const last = packagelessFirst ? 'alpha on contact' : 'environment on account';
+      const manager = new MetadataManager({ formats: ['json'], loaders: [loader] });
+      expect(labels(await loader.loadMany('action'))).toEqual([last]);
+      expect(labels(await manager.loadMany('action'))).toEqual([last]);
+      expect(keyedLabels(await manager.loadManyKeyed('action'))).toEqual([`${NAME}=${last}`]);
+    });
+  }
 
   it('CONTROL — a type outside the slotted set keeps one item per name across loaders, the first loader\'s', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });

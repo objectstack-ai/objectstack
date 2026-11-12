@@ -228,6 +228,19 @@ describe('[#32517] a bundled type keeps one item per (package, name, member) in 
     expect(order(await rewritten.list('email_template'))).toEqual(['en again', `${ALPHA}:fr-FR`]);
   });
 
+  it('a read the registry cannot answer (loader only): the slot\'s member written last, the one `list` puts first (BASE: the same)', async () => {
+    const rewrite = () => [...ONE_HOLDER(), member(ALPHA, 'en-US', 'en again')];
+    const { manager } = await stored(...rewrite());
+    expect(((await manager.get('email_template', NAME)) as any)?.subject).toBe('en again');
+    expect(((await manager.get('email_template', NAME, ALPHA)) as any)?.subject).toBe('en again');
+    expect(((await manager.list('email_template'))[0] as any)?.subject).toBe('en again');
+    const { manager: frLast } = await stored(...ONE_HOLDER());
+    expect(((await frLast.get('email_template', NAME)) as any)?.subject).toBe(`${ALPHA}:fr-FR`);
+    expect(((await frLast.list('email_template'))[0] as any)?.subject).toBe(`${ALPHA}:fr-FR`);
+    // CONTROL: the registry answers the same.
+    expect(((await registered(...rewrite()).get('email_template', NAME)) as any)?.subject).toBe('en again');
+  });
+
   it('a second write of one member replaces that member only', async () => {
     const manager = registered(...ONE_HOLDER(), member(ALPHA, 'fr-FR', 'fr again'));
     expect(subjects(await manager.list('email_template'))).toEqual([`${ALPHA}:en-US`, 'fr again']);

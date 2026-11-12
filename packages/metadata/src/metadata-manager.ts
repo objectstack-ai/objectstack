@@ -91,6 +91,7 @@ import {
   isBundledStoreType,
   keyIdentityOf,
   latestMemberOf,
+  latestMembersFirst,
   memberSuffixOf,
   pluralEntryKeys,
   readStoreEntry,
@@ -1295,7 +1296,11 @@ export class MetadataManager implements IMetadataService {
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    for (const key of storeKeysNamed(registryStore, type, name)) view.set(key, registryStore!.get(key));
+    // [#32517] Each slot's member written last first: the view has no write
+    // order of its own, and answers a slot's first member (`latestMemberOf`).
+    if (registryStore) {
+      for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) view.set(key, registryStore.get(key));
+    }
     for (const [key, data] of slotStoreOf(type, name, slots)) {
       if (!view.has(key)) view.set(key, data);
     }

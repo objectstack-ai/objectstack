@@ -35,6 +35,7 @@ import {
   PACKAGE_SLOTTED_STORE_TYPES,
   isBundledStoreType,
   lastWrittenKeyOf,
+  latestMembersFirst,
   lastWrittenOf,
   latestMemberOf,
   recordStoreWrite,
@@ -113,10 +114,16 @@ export class MemoryLoader implements MetadataLoader {
     return Array.from(typeStore, ([name, data]) => ({ name, data: data as T }));
   }
 
-  /** [#32246] Every slot of `name`, each with the package it is held for. */
+  /**
+   * [#32246] Every slot of `name`, each with the package it is held for.
+   * [#32517] A bundled type's slot hands its member saved last first, as
+   * {@link loadManySlots} does, so a reader that keeps a slot's first item
+   * answers what the slot answers.
+   */
   async loadSlots<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]> {
     const typeStore = this.storage.get(type);
-    return storeKeysNamed(typeStore, type, name).map((key) => keyedSlot<T>(key, typeStore!.get(key)));
+    if (!typeStore) return [];
+    return latestMembersFirst(typeStore, storeKeysNamed(typeStore, type, name)).map((key) => keyedSlot<T>(key, typeStore.get(key)));
   }
 
   /**
@@ -143,15 +150,30 @@ export class MemoryLoader implements MetadataLoader {
    * saved: the slot of the package saved last (an action bound to several
    * objects by one package is one entry, as `DatabaseLoader` holds it in one
    * row), each with the package it is held for. Keyed by name alone, this
-   * answered one package's item and folded every other package's away.
+   * answered one package's item and folded every other package's away. A
+   * package-less slot under a name one package holds is that holder's (D4),
+   * so a one-holder name answers its one item saved last, as before.
    * [#31699 R3-B] A bundled type: every key (each slot's every member), each
    * under its name.
    */
   private latestByName<T>(type: string, typeStore: Map<string, any>): MetadataKeyedItem<T>[] {
     if (isBundledStoreType(type)) return Array.from(typeStore, ([key, data]) => ({ name: storedNameOf(key), data: data as T }));
+    // [ADR-0150 D4] A package-less slot under a name exactly one package
+    // holds is that holder's customization, whatever object an action binds:
+    // it folds into the holder's entry, which answers the one saved last.
+    const holdersOf = new Map<string, Set<string>>();
+    for (const key of typeStore.keys()) {
+      const packageId = slotPackageOf(key);
+      if (packageId === undefined) continue;
+      const name = storedNameOf(key);
+      holdersOf.set(name, (holdersOf.get(name) ?? new Set()).add(packageId));
+    }
     const held = new Map<string, string[]>();
     for (const key of typeStore.keys()) {
-      const holding = JSON.stringify([slotPackageOf(key) ?? null, storedNameOf(key)]);
+      const name = storedNameOf(key);
+      const holders = holdersOf.get(name);
+      const holder = slotPackageOf(key) ?? (holders?.size === 1 ? [...holders][0] : undefined);
+      const holding = JSON.stringify([holder ?? null, name]);
       held.set(holding, [...(held.get(holding) ?? []), key]);
     }
     return [...held.values()].map((keys) => {

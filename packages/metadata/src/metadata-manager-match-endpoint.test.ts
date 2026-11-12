@@ -1046,6 +1046,20 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     }
   });
 
+  it.each(BUNDLED)('%s: [#32517] a read the registry cannot answer, over the database\'s rows of one package\'s two members, answers what it answered before members had keys (BASE: the same)', async (type) => {
+    const { driver } = rowDriver();
+    const db = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    const body = (locale: string, subject: string) => ({ name: nameOf(type), label: subject, locale, subject, _packageId: A, _provenance: 'package' });
+    await db.save(type, nameOf(type), body('en-US', 'en'));
+    await db.save(type, nameOf(type), body('fr-FR', 'fr'));
+    await db.save(type, nameOf(type), body('en-US', 'en again'));
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    expect(((await manager.get(type, nameOf(type))) as any)?.subject).toBe('en again');
+    expect(((await manager.get(type, nameOf(type), A)) as any)?.subject).toBe('en again');
+    expect(((await manager.list(type))[0] as any)?.subject).toBe('en again');
+  });
+
   it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the door\'s plural reads answer every package\'s item [#32517], the database\'s one row per name (unchanged)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {

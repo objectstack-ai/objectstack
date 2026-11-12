@@ -426,10 +426,33 @@ function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
  * [#32517] Of `slot`'s members in `store`, the key written last
  * ({@link writtenLast}) — the one item the slot held before a bundle's members
  * had keys of their own; the slot itself when none is held.
+ *
+ * A store no write was recorded on is a VIEW assembled from what others hold
+ * (the manager's {@link slotStoreOf}-built view of a name the registry cannot
+ * answer): its first member of the slot answers, the item that view kept for
+ * the slot when one key held it. Its sources hand a slot's member written
+ * last first (the registry by its write order, the `MemoryLoader`'s
+ * `loadSlots`), so the view answers what they answer.
  */
 export function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
   const members = [...store.keys()].filter((key) => slotOfKey(key) === slot);
-  return members.length === 0 ? slot : writtenLast(store, members);
+  if (members.length === 0) return slot;
+  return writeOrder.has(store) ? writtenLast(store, members) : members[0]!;
+}
+
+/**
+ * [#32517] `keys` with each slot's member written last ({@link latestMemberOf})
+ * moved in front of that slot's other members, slots in the order of their
+ * first key. Unbundled keys come back in their order.
+ */
+export function latestMembersFirst(store: ReadonlyMap<string, unknown>, keys: readonly string[]): string[] {
+  const ordered: string[] = [];
+  for (const slot of new Set(keys.map(slotOfKey))) {
+    const members = keys.filter((key) => slotOfKey(key) === slot);
+    const latest = members.length > 1 ? writtenLast(store, members) : members[0]!;
+    ordered.push(latest, ...members.filter((key) => key !== latest));
+  }
+  return ordered;
 }
 
 /**
