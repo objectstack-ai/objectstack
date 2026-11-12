@@ -335,6 +335,10 @@ const de = {
     registryRef: {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
+      holderPackage: "{{item}} · Paket {{package}}",
+      holderEnvironment: "{{item}} · in dieser Umgebung definiert",
+      holderUnresolved: "{{name}} (von mehreren Paketen bereitgestellt; kein Paket angegeben)",
+      holderNeedsPackage: "Dieses Formular gibt einen Berechtigungssatz nur über seinen Namen an. Stellen mehrere Pakete einen Satz mit demselben Namen bereit, kann hier nur der in dieser Umgebung definierte ausgewählt werden.",
     },
     preferenceOption: {
       allTopics: "Alle Themen ({{value}})",
@@ -2293,6 +2297,7 @@ const de = {
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
+      optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
@@ -2723,6 +2728,7 @@ const de = {
         invalidCredentials: "Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Setzen Sie es zurück, um sich sofort anzumelden.",
         invalidCredentialsNoMail: 'Ungültige E-Mail oder Passwort. Nach mehreren fehlgeschlagenen Versuchen wird die Anmeldung für eine Weile pausiert. Passwort vergessen? Bitten Sie Ihre Administration, es zurückzusetzen.',
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
+        accountDeactivated: "Ihr Konto wurde von Ihrer Organisation deaktiviert. Wenden Sie sich an Ihren Administrator.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.

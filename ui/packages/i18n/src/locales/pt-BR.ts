@@ -338,6 +338,10 @@ const pt = {
     registryRef: {
       loadFailed: "Não foi possível carregar a lista. Você ainda pode digitar o nome.",
       notFound: "{{name}} (não encontrado)",
+      holderPackage: "{{item}} · pacote {{package}}",
+      holderEnvironment: "{{item}} · definido neste ambiente",
+      holderUnresolved: "{{name}} (fornecido por vários pacotes; nenhum indicado)",
+      holderNeedsPackage: "Este formulário indica um conjunto de permissões apenas pelo nome. Quando vários pacotes fornecem um conjunto com o mesmo nome, aqui só é possível escolher o definido neste ambiente.",
     },
     preferenceOption: {
       allTopics: "Todos os tópicos ({{value}})",
@@ -2354,6 +2358,7 @@ const pt = {
       dismiss: "Ocultar lista",
       showDone: "Mostrar concluídos ({{done}})",
       hideDone: "Ocultar concluídos",
+      optional: "Opcional",
       set: "Definir",
       change: "Alterar",
       view: "Ver",
@@ -2788,6 +2793,7 @@ const pt = {
         invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
         invalidCredentialsNoMail: 'E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Peça ao seu administrador para redefini-la.',
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
+        accountDeactivated: "Sua conta foi desativada pela sua organização. Entre em contato com o administrador.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.

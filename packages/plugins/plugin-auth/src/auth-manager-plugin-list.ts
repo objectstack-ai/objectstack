@@ -116,6 +116,7 @@ export interface PluginListHost {
   emailLocaleArg: AuthManager['emailLocaleArg'];
   enforceSessionControls: AuthManager['enforceSessionControls'];
   getAppName: AuthManager['getAppName'];
+  getAudience: AuthManager['getAudience'];
   getConsolePageUrl: AuthManager['getConsolePageUrl'];
   getDataEngine: AuthManager['getDataEngine'];
   getEmailService: AuthManager['getEmailService'];
@@ -263,6 +264,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         get config() { return readConfig(); },
         emailLocaleArg: (...a) => this.emailLocaleArg(...a),
         getAppName: (...a) => this.getAppName(...a),
+        getAudience: (...a) => this.getAudience(...a),
         getConsolePageUrl: (...a) => this.getConsolePageUrl(...a),
         getDataEngine: (...a) => this.getDataEngine(...a),
         getEmailService: (...a) => this.getEmailService(...a),
