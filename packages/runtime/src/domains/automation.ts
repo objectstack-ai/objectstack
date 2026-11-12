@@ -2278,7 +2278,9 @@ function notifyChannelEntries(value: unknown): NotifyChannelEntry[] {
  *  - **No registry, no verdict.** With no messaging service the `notify` node
  *    delivers nothing whatever it names (it records a skipped step), and a
  *    messaging service with no `getKnownChannels()` (another implementation of
- *    the service) cannot be enumerated: neither is judged.
+ *    the service) cannot be enumerated: neither is judged. Nor is a reader
+ *    that throws or answers something other than a list: an unreadable
+ *    registry gives no verdict, and the save goes on as before.
  *
  * Read per request and recorded nowhere: the answer is the registry as it
  * stands at this save (AGENTS.md, "Startup registry reads").
@@ -2304,7 +2306,22 @@ async function refuseUnknownNotifyChannels(
         messaging = undefined;
     }
     if (typeof messaging?.getKnownChannels !== 'function') return undefined;
-    const known = messaging.getKnownChannels();
+    // A reader that throws, or answers anything but a list, is a registry this
+    // door cannot read: not judged, like a service with no reader at all. The
+    // save goes on as it did before this check existed, and a delivery on an
+    // unknown channel still reports itself at run time. Members that are not a
+    // `{ id: string }` are not channels and are left out of the roster.
+    let read: unknown;
+    try {
+        read = messaging.getKnownChannels();
+    } catch {
+        return undefined;
+    }
+    if (!Array.isArray(read)) return undefined;
+    const known = (read as unknown[]).filter(
+        (entry): entry is { id: string; configured: boolean } =>
+            !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string',
+    );
     const knownIds = known.map((entry) => entry.id);
 
     const lines: string[] = [];
@@ -2706,8 +2723,16 @@ async function registerAndSaveFlow(
     // A `notify` node naming a channel no plugin registers is refused here,
     // after the engine's verdict (so a definition it refuses answers that
     // first) and on the flow it parsed, and undone like a refused save: the
-    // engine gets back what it held, and nothing is stored.
-    const unknownChannel = await refuseUnknownNotifyChannels(deps, context, name, registered);
+    // engine gets back what it held, and nothing is stored. Guarded like
+    // `land()` below: a check that throws undoes the registration first, so
+    // no exit leaves a registered-but-unsaved definition.
+    let unknownChannel: HttpDispatcherResult | undefined;
+    try {
+        unknownChannel = await refuseUnknownNotifyChannels(deps, context, name, registered);
+    } catch (e) {
+        restoreFlowRegistration(automationService, name, held);
+        throw e;
+    }
     if (unknownChannel) {
         restoreFlowRegistration(automationService, name, held);
         return { refused: unknownChannel };

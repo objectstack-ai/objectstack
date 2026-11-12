@@ -66,8 +66,9 @@ const storeRefusal = () => Object.assign(new Error('flow/x failed spec validatio
  * And whether the kernel's `kernel:ready` has settled (`hasBootPhaseSettled`).
  */
 interface ChannelComposition {
-    messaging?: ReadonlyArray<{ id: string; configured: boolean }> | 'no-reader';
-    ready?: boolean;
+    messaging?: ReadonlyArray<{ id: string; configured: boolean }> | 'no-reader' | 'reader-throws' | 'reader-not-a-list';
+    /** `'throws'`: the kernel's boot-phase reader itself throws, so the check cannot finish. */
+    ready?: boolean | 'throws';
 }
 
 function boot({ protocol: mode = 'real', messaging, ready = false }: { protocol?: 'real' | 'absent' } & ChannelComposition = {}) {
@@ -98,13 +99,18 @@ function boot({ protocol: mode = 'real', messaging, ready = false }: { protocol?
     };
     if (mode === 'real') services.protocol = protocol;
     if (messaging === 'no-reader') services.messaging = { emit: async () => ({}) };
+    else if (messaging === 'reader-throws') services.messaging = { getKnownChannels: () => { throw new Error('registry unreadable'); } };
+    else if (messaging === 'reader-not-a-list') services.messaging = { getKnownChannels: () => ({ inbox: true }) };
     else if (messaging) services.messaging = { getKnownChannels: () => messaging.map((entry) => ({ ...entry })) };
     const resolve = (name: string): unknown => services[name];
     const kernel = {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
-        hasBootPhaseSettled: (phase: string) => ready && phase === 'kernel:ready',
+        hasBootPhaseSettled: (phase: string) => {
+            if (ready === 'throws') throw new Error('boot phase unreadable');
+            return ready === true && phase === 'kernel:ready';
+        },
     };
 
     return {
@@ -369,5 +375,32 @@ describe('a notify node naming a channel no plugin registers is refused at the s
             expect(statusOf(response), JSON.stringify(composition)).toBe(200);
             expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
         }
+    });
+
+    it('a messaging reader that throws or answers no list is not judged: the save goes on, registered AND saved', async () => {
+        for (const messaging of ['reader-throws', 'reader-not-a-list'] as const) {
+            const h = boot({ messaging, ready: true });
+            const { response } = await h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined);
+            expect(statusOf(response), messaging).toBe(200);
+            expect(h.saveMetaItem, messaging).toHaveBeenCalledTimes(1);
+            expect(h.held(NEW), messaging).toBeDefined();
+        }
+    });
+
+    it('a check that cannot finish undoes the registration before the error leaves: nothing registered-but-unsaved', async () => {
+        const h = boot({ messaging: STOCK_CHANNELS, ready: 'throws' });
+        const before = h.held(CUSTOMER);
+
+        await expect(
+            h.dispatcher.handleAutomation('', 'POST', notifyFlowOf(NEW, 'emial'), AUTHOR(), undefined),
+        ).rejects.toThrow('boot phase unreadable');
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.held(NEW)).toBeUndefined();
+
+        await expect(
+            h.dispatcher.handleAutomation(`/${CUSTOMER}`, 'PUT', notifyFlowOf(CUSTOMER, 'emial'), AUTHOR(), undefined),
+        ).rejects.toThrow('boot phase unreadable');
+        expect(h.saveMetaItem).not.toHaveBeenCalled();
+        expect(h.held(CUSTOMER)).toBe(before);
     });
 });
