@@ -159,14 +159,34 @@ const formPost = (token: string): RequestInit => ({
     body: new URLSearchParams({ token }).toString(),
 });
 
-/** Headers a transport adds or drops on its own, independent of the route. */
-const TRANSPORT_HEADERS = new Set(['date', 'connection', 'keep-alive', 'content-length', 'transfer-encoding']);
+/**
+ * Headers a transport adds or drops on its own, independent of the route.
+ * `content-encoding` is one: `fetch` hands back the decoded body, and only the
+ * self-hosted server compresses (#32155).
+ */
+const TRANSPORT_HEADERS = new Set(['date', 'connection', 'keep-alive', 'content-length', 'transfer-encoding', 'content-encoding']);
 async function snapshot(res: Response) {
     return {
         status: res.status,
         headers: [...res.headers.entries()].filter(([k]) => !TRANSPORT_HEADERS.has(k)),
         body: await res.text(),
     };
+}
+
+/**
+ * A snapshot as compared ACROSS the two doors: the `accept-encoding` member of
+ * `Vary` is dropped, because only the self-hosted server negotiates an encoding
+ * (#32155). Every other `Vary` member is still compared, and a same-door
+ * comparison uses the snapshot as it is.
+ */
+function acrossDoors<T extends { headers: [string, string][] }>(s: T): T {
+    const headers: [string, string][] = [];
+    for (const [k, v] of s.headers) {
+        if (k !== 'vary') { headers.push([k, v]); continue; }
+        const kept = v.split(',').map((m) => m.trim()).filter((m) => m && m.toLowerCase() !== 'accept-encoding');
+        if (kept.length > 0) headers.push([k, kept.join(', ')]);
+    }
+    return { ...s, headers };
 }
 
 describe('[#22576] the hosted door reaches the real approvals member through createHonoApp', () => {
@@ -210,7 +230,7 @@ describe('[#22576] HEAD — one pin holding both doors equal', () => {
             expect(sHead.headers, label).toEqual(sGet.headers);
             expect(sHead.body, label).toBe('');
             // The hosted door answers exactly that.
-            expect(hHead, label).toEqual(sHead);
+            expect(acrossDoors(hHead), label).toEqual(acrossDoors(sHead));
         }
         // HEAD rendered and never decided, at either door.
         expect(await s.status()).toBe('pending');
