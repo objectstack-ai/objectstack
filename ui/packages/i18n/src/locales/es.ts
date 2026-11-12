@@ -2359,6 +2359,7 @@ const es = {
       dismiss: "Ocultar lista",
       showDone: "Mostrar completados ({{done}})",
       hideDone: "Ocultar completados",
+      optional: "Opcional",
       set: "Configurar",
       change: "Cambiar",
       view: "Ver",
