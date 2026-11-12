@@ -15,7 +15,8 @@
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
  * and agent — then `api` (#32069), whose in-memory store `@objectstack/metadata`
  * keeps per `(package, name)`, so its qualified read serves the holder's own
- * body, the picklist (#32070), whose bare by-name read was the last of its
+ * body, the email template (#31699), read member by member (`member`, its
+ * locale), the picklist (#32070), whose bare by-name read was the last of its
  * readers still on `getItem`, `mapping` (#32071, a reader the
  * picklist-family backstop #31700 needs) and `dataset` (#32072, a reader
  * #31700 needs before it narrows: `POST /analytics/dataset/query` reads its
@@ -79,9 +80,10 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680), as the registry spells them, then `api` (#32069), the
- * picklist (#32070), `mapping` (#32071), `dataset` (#32072), `permission`
- * (#32162) and `flow` (#31696). Each later child of epic #31527 appends its own.
+ * nine (#31680), as the registry spells them, then `api` (#32069), child B's
+ * `email_template` (#31699), the picklist (#32070), `mapping` (#32071),
+ * `dataset` (#32072), `permission` (#32162) and child B's `flow` (#31696).
+ * Each later child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -94,6 +96,10 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'skill',
   'agent',
   'api',
+  // [ADR-0150 D9, #31699] child B's webhook family, one type per change:
+  // `/meta/email_template/NAME` and its qualified address read through the
+  // resolver before the type's one-holder rule narrows to the namespace.
+  'email_template',
   // [#32070] the bare `/meta/picklist/NAME` read; a field's `picklist:` is
   // already resolved by its referrer's package (child E6), not through here.
   'picklist',

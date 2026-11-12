@@ -40,11 +40,13 @@ import {
   BUILT_IN_BARE_NAMES,
   NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
+  bareNameHoldersMeet,
   bareNameReason,
   bareNameTypeLabel,
   declaredBareNames,
   isOverridableBaseline,
 } from './bare-name-one-holder.js';
+import { PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE } from './package-scoped-resolver.js';
 import type { ObjectQL } from './engine.js';
 
 type ManifestService = { register(m: unknown): void | Promise<void> };
@@ -103,7 +105,7 @@ const pkg = (id: string, decl: Partial<Record<FlowType, string[]>> = {}, extra: 
   return out;
 };
 
-/** Has `type`'s rule narrowed to the namespace (ADR-0150 child B: `flow`, #31696)? */
+/** Has `type`'s rule narrowed to the namespace (ADR-0150 child B: `email_template`, #31699; `flow`, #31696)? */
 const narrowed = (type: FlowType) => (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
 
 /**
@@ -440,9 +442,10 @@ describe('email_template — the name holds the bundle, and the built-in templat
     expect(registry.getItem('email_template', 'shared_tpl', undefined, 'zh-CN')).toBeDefined();
     // One holder, so the package's own second registration passes…
     expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', 'shared_tpl', 'en-US'), member('alpha', 'shared_tpl', 'zh-CN')] }))).toBeUndefined();
-    // …and another package's member — another locale — is one conflict, on the name.
-    const err = await register(pkg('com.acme.beta', {}, { emailTemplates: [member('beta', 'shared_tpl', 'fr-FR')] }));
-    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_shared_tpl');
+    // …and another package's member — another locale — is one conflict, on the name. (Since the
+    // type narrowed to the namespace, the rival is a co-owner of alpha's namespace.)
+    const err = await register(rival('email_template', 'com.acme.beta', {}, { emailTemplates: [member('beta', 'shared_tpl', 'fr-FR')] }));
+    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'alpha_shared_tpl');
     expect(err!.conflicts).toHaveLength(1);
     expect(err!.conflicts![0].name).toBe('shared_tpl');
   });
@@ -506,12 +509,13 @@ describe('email_template — the name holds the bundle, and the built-in templat
   });
 
   it('CONTROL — an app overriding a built-in template after the boot installs: the baseline holds nothing', async () => {
-    const { registry, register } = await boot([emailServicePkg([member('sys', 'auth.welcome', 'en-US'), member('sys', 'auth.welcome', 'zh-CN')])]);
-    expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', 'auth.welcome', 'en-US')] }))).toBeUndefined();
-    expect(registry.getArtifactItem<{ label: string }>('email_template', 'auth.welcome', 'com.acme.alpha')?.label).toBe('alpha template');
-    // …and a SECOND app's override is refused, naming the first app only — never the baseline.
-    const err = await register(pkg('com.acme.beta', {}, { emailTemplates: [member('beta', 'auth.welcome', 'en-US')] }));
-    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_auth.welcome');
+    const { registry, register } = await boot([emailServicePkg([member('sys', 'auth.password_reset', 'en-US'), member('sys', 'auth.password_reset', 'zh-CN')])]);
+    expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', 'auth.password_reset', 'en-US')] }))).toBeUndefined();
+    expect(registry.getArtifactItem<{ label: string }>('email_template', 'auth.password_reset', 'com.acme.alpha')?.label).toBe('alpha template');
+    // …and a SECOND app's override is refused, naming the first app only — never the baseline. A name
+    // the platform requests by spelling keeps one holder whatever the namespaces (#31699).
+    const err = await register(pkg('com.acme.beta', {}, { emailTemplates: [member('beta', 'auth.password_reset', 'en-US')] }));
+    expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, 'beta_auth.password_reset');
     expect(err!.conflicts).toHaveLength(1);
     expect(err!.message).not.toContain(EMAIL_SERVICE_PKG);
   });
@@ -538,16 +542,185 @@ describe('email_template — the name holds the bundle, and the built-in templat
 
   it('the cold boot of two apps overriding one built-in name warns, naming the two apps and never the baseline', async () => {
     const { bareNameWarnings } = await boot([
-      emailServicePkg([member('sys', 'auth.welcome', 'en-US')]),
-      pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', 'auth.welcome', 'en-US')] }),
-      pkg('com.acme.beta', {}, { emailTemplates: [member('beta', 'auth.welcome', 'zh-CN')] }),
+      emailServicePkg([member('sys', 'auth.password_reset', 'en-US')]),
+      pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', 'auth.password_reset', 'en-US')] }),
+      pkg('com.acme.beta', {}, { emailTemplates: [member('beta', 'auth.password_reset', 'zh-CN')] }),
     ]);
     const warnings = bareNameWarnings();
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain('the email template "auth.welcome"');
+    expect(warnings[0]).toContain('the email template "auth.password_reset"');
     expect(warnings[0]).toContain('com.acme.alpha');
     expect(warnings[0]).toContain('com.acme.beta');
     expect(warnings[0]).not.toContain(EMAIL_SERVICE_PKG);
+  });
+});
+
+describe('the narrowing — an email template holds one name per namespace (ADR-0150 D2/D9, child B, #31699)', () => {
+  const type = 'email_template' as const;
+  const name = 'shared_tpl';
+  const member = (tag: string, n: string, locale: string) => body('email_template', n, tag, { locale });
+  const ofBeta = (decl: Record<string, unknown>) => pkg('com.acme.beta', {}, decl);
+
+  it('the switch holds email_template (and the flow, #31696), and neither the webhook nor the connector', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('email_template');
+    for (const other of ['webhook', 'connector'] as const) expect(narrowed(other), other).toBe(false);
+  });
+
+  it('two packages of two namespaces each install the name after the seal, and each holds its own bundle', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    expect(registry.getPackage('com.acme.beta')).toBeDefined();
+    const held = registry.listItems<{ _packageId?: string; label?: string; name?: string }>(type)
+      .filter((item) => item.name === name)
+      .map((item) => [item._packageId, marker(item)]);
+    expect(held).toEqual([['com.acme.alpha', 'alpha template'], ['com.acme.beta', 'beta template']]);
+  });
+
+  it('the item seam admits an installed package of another namespace', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    expect(await caught(() => registry.registerItem(type, member('beta', name, 'en-US'), 'name', 'com.acme.beta'))).toBeUndefined();
+  });
+
+  it('a co-owner of the holder\'s namespace is still refused beside two namespaces\' holders, naming only its own namespace\'s holder', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    const err = await register(rival(type, 'com.acme.gamma', { [type]: [name] }));
+    expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, `alpha_${name}`);
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+  });
+
+  it('a package with no namespace is still refused beside a holder, and a holder with no namespace still refuses one', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    const bare = pkg('com.acme.plain', { [type]: [name] });
+    delete bare.namespace;
+    expectRefusal(await register(bare), 'com.acme.plain', { kind: 'package', packageId: 'com.acme.alpha' });
+
+    const other = await boot();
+    const holder = pkg('com.acme.plain', { [type]: [name] });
+    delete holder.namespace;
+    expect(await other.register(holder)).toBeUndefined();
+    expectRefusal(await other.register(pkg('com.acme.beta', { [type]: [name] })), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.plain' });
+  });
+
+  it.each(['base', 'system', 'sys'])('two packages of the shareable namespace %s are still refused (not widened: D2 allows it, nothing asks it)', async (shared) => {
+    const { register } = await boot();
+    const one = pkg('com.acme.one', { [type]: [name] }, { namespace: shared, objects: [itemObject(`${shared}_one`)] });
+    const two = pkg('com.acme.two', { [type]: [name] }, { namespace: shared, objects: [itemObject(`${shared}_two`)] });
+    expect(await register(one)).toBeUndefined();
+    expectRefusal(await register(two), 'com.acme.two', { kind: 'package', packageId: 'com.acme.one' });
+  });
+
+  it('the cold boot of two namespaces\' holders boots with no bare-name warning, and the seal reports no clash', async () => {
+    const { registry, bareNameWarnings } = await boot([pkg('com.acme.alpha', { [type]: [name] }), pkg('com.acme.beta', { [type]: [name] })]);
+    expect(bareNameWarnings()).toEqual([]);
+    expect(registry.sealBareNameHolders().filter((c) => c.type === type)).toEqual([]);
+  });
+
+  it('a built-in name is still refused to a package of any namespace', async () => {
+    const builtIns = BUILT_IN_BARE_NAMES.email_template as Set<string>;
+    builtIns.add('platform_tpl');
+    try {
+      const { register } = await boot();
+      expectRefusal(await register(pkg('com.acme.beta', { [type]: ['platform_tpl'] })), 'com.acme.beta', { kind: 'built-in' });
+    } finally {
+      builtIns.delete('platform_tpl');
+    }
+  });
+
+  describe('a name the platform requests by its spelling keeps one holder per deployment, whatever the namespaces', () => {
+    const RESET = 'auth.password_reset';
+
+    it('the eight auth mails are the platform-requested email template names', () => {
+      expect([...(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE.email_template ?? [])].sort()).toEqual([
+        'auth.account_invitation', 'auth.email_change_notice', 'auth.existing_account_sign_up', 'auth.invitation',
+        'auth.magic_link', 'auth.password_reset', 'auth.two_factor_otp', 'auth.verify_email',
+      ]);
+      expect(bareNameHoldersMeet(type, 'alpha', 'beta', RESET)).toBe(true);
+      expect(bareNameHoldersMeet(type, 'alpha', 'beta', name)).toBe(false);
+    });
+
+    it('a second app of another namespace overriding it is refused at the package door and the item seam, naming the first app only', async () => {
+      const { registry, register } = await boot([emailServicePkg([member('sys', RESET, 'en-US')])]);
+      expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', RESET, 'en-US')] }))).toBeUndefined();
+      const err = await register(ofBeta({ emailTemplates: [member('beta', RESET, 'zh-CN')] }));
+      expectRefusal(err, 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${RESET}`);
+      expect(err!.message).not.toContain(EMAIL_SERVICE_PKG);
+      expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+      expectRefusal(
+        await caught(() => registry.registerItem(type, member('beta', RESET, 'zh-CN'), 'name', 'com.acme.beta')),
+        'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' },
+      );
+    });
+
+    it('the cold boot of two namespaces\' apps overriding it warns, naming both apps', async () => {
+      const { bareNameWarnings } = await boot([
+        emailServicePkg([member('sys', RESET, 'en-US')]),
+        pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', RESET, 'en-US')] }),
+        ofBeta({ emailTemplates: [member('beta', RESET, 'en-US')] }),
+      ]);
+      const warnings = bareNameWarnings();
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain(`the email template "${RESET}"`);
+      expect(warnings[0]).toContain('com.acme.beta');
+    });
+  });
+
+  describe('a bundle addition of another namespace is still its base\'s name, and is refused as before', () => {
+    /** A dependent of alpha in its own namespace, adding `fr-FR` to alpha's `en-US`. */
+    const dependent = (decl: Record<string, unknown> = { emailTemplates: [member('beta', name, 'fr-FR')] }) =>
+      pkg('com.acme.beta', {}, { dependencies: { 'com.acme.alpha': '^1.0.0' }, ...decl });
+
+    it('at the package door, naming the base', async () => {
+      const { register } = await boot();
+      expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
+      expectRefusal(await register(dependent()), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_${name}`);
+    });
+
+    it('at the item seam, naming the base', async () => {
+      const { registry, register } = await boot();
+      expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
+      expect(await register(dependent({}))).toBeUndefined();
+      expectRefusal(
+        await caught(() => registry.registerItem(type, member('beta', name, 'fr-FR'), 'name', 'com.acme.beta')),
+        'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' },
+      );
+    });
+
+    it('at the cold boot, reported against the base', () => {
+      const registry = new SchemaRegistry();
+      registry.logLevel = 'silent';
+      registry.installPackage(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }) as never, 'code');
+      registry.installPackage(dependent() as never, 'code');
+      expect(registry.sealBareNameHolders().map((c) => `${c.type}/${c.name}: ${c.incomingPackageId} vs ${(c.existingHolder as Holder).packageId}`)).toEqual([
+        `email_template/${name}: com.acme.beta vs com.acme.alpha`,
+      ]);
+    });
+
+    it('CONTROL — a dependent of another namespace shipping a member its base ships is its own template, and installs', async () => {
+      const { register } = await boot();
+      expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
+      expect(await register(dependent({ emailTemplates: [member('beta', name, 'en-US'), member('beta', name, 'fr-FR')] }))).toBeUndefined();
+    });
+
+    it('CONTROL — a package of another namespace that does not declare the holder adds nothing to it, and installs with any locale', async () => {
+      const { register } = await boot();
+      expect(await register(pkg('com.acme.alpha', {}, { emailTemplates: [member('alpha', name, 'en-US')] }))).toBeUndefined();
+      expect(await register(ofBeta({ emailTemplates: [member('beta', name, 'fr-FR')] }))).toBeUndefined();
+    });
+  });
+
+  it.each(['webhook', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
+    expectRefusal(
+      await register(pkg('com.acme.beta', { [other]: [`shared_${other}`] })),
+      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_shared_${other}`,
+    );
   });
 });
 
@@ -556,7 +729,7 @@ describe('the refusal\'s reason names the consumers of the types it lists', () =
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { flow: ['f1'], webhook: ['w1'], connector: ['c1'], email_template: ['e1'] }))).toBeUndefined();
     // A co-owner of alpha's namespace: it meets alpha for every type, the narrowed ones included.
-    const err = await register(rival('flow', 'com.acme.beta', { flow: ['f1'], webhook: ['w1'], connector: ['c1'], email_template: ['e1'] }));
+    const err = await register(rival('email_template', 'com.acme.beta', { flow: ['f1'], webhook: ['w1'], connector: ['c1'], email_template: ['e1'] }));
     expect(err!.conflicts!.map((c) => `${c.type}/${c.name}`)).toEqual(['flow/f1', 'webhook/w1', 'connector/c1', 'email_template/e1']);
     expect(err!.message).toContain(bareNameReason(['flow', 'webhook', 'connector', 'email_template']));
     expect(bareNameReason(['flow', 'webhook', 'connector', 'email_template'])).toMatch(

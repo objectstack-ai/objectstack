@@ -148,6 +148,14 @@ export interface MetadataLoader {
   loadManySlots?<T = any>(type: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
+   * [#31699 R7-A] Bind the empty `package_id` column of the legacy row this
+   * loader's plural read handed `item` out from to the package that row's own
+   * stored body names, the column only. Optional; `MetadataManager.register`
+   * calls it in place of the write-through it skips (`skipSourceLoader`).
+   */
+  bindReadRowPackage?(type: string, name: string, item: object): Promise<void>;
+
+  /**
    * Check if item exists
    * @param type The metadata type
    * @param name The item name
