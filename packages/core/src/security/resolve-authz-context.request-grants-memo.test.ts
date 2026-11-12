@@ -348,11 +348,15 @@ const CALLER_CLASSES: CallerClass[] = [
     },
   },
   {
-    name: 'non-member claiming an organization — single posture keeps the claim',
+    // [ADR-0093 D8.1, as amended] The membership rule holds under `single` too.
+    name: 'non-member claiming an organization — single posture drops the claim too',
     fixture: sessionOf('u_outsider', 'outsider@x.com', 'org_a'),
+    tenancyPosture: 'single',
     expect: (ctx) => {
-      expect(ctx.tenantId).toBe('org_a');
-      expect(ctx.positions).not.toContain('org_member');
+      expect(ctx.tenantId).toBeUndefined();
+      expect(ctx.positions).not.toContain('auditor');
+      expect(ctx.accessible_org_ids).toEqual(['org_b']);
+      expect(ctx.org_user_ids).toEqual(['u_outsider']);
     },
   },
   {
