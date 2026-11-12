@@ -583,3 +583,62 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         expect(labelOf(await read('/dataset/pipeline', { package: A }))).toBe('alpha dataset');
     });
 });
+
+/**
+ * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name`, its `/layers`
+ * and its `/published` on the dispatcher, judged over every holder as on
+ * `RestServer`: the platform's package-less item (no stored row behind it)
+ * beside a package's is refused naming both; beside two packages' it is named
+ * with them; one enabled holder answers though a disabled package registered
+ * first.
+ *
+ * BASE (main 89d815c5): 200 with the platform's item; 409 naming the two
+ * packages only; 200 with no item.
+ */
+describe('#32365 — the bare action read weighs the package-less holder on the dispatcher', () => {
+    const shipAction = (packageId: string | undefined, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId?.split('.').pop() ?? 'platform', type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, answer.body?.error?.code, answer.body?.error?.details?.candidates];
+    const DOORS = ['/action/approve', '/action/approve/layers', '/action/approve/published'];
+    // `/layers` and `/published` carry the refusal's text, not its
+    // `details.candidates`: each holder is read from the message there.
+    const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
+    const refusalOf = (answer: { status?: number; body?: any }) => {
+        const message = String(answer.body?.error?.message ?? '');
+        return [answer.status, answer.body?.error?.code, [A, B].filter((id) => message.includes(`package "${id}"`)), message.includes(PLATFORM)];
+    };
+
+    it('the platform\'s item on `contact` beside A\'s on `account`: 409 naming A and the platform, on the item read, `/layers` and `/published`', async () => {
+        shipAction(A, 'account');
+        shipAction(undefined, 'contact');
+        for (const door of DOORS) {
+            const answer = await read(door);
+            expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A], true]);
+        }
+        const item = await read('/action/approve');
+        expect(conflictOf(item)[2]).toEqual([pkg(A), { kind: 'platform' }]);
+    });
+
+    it('beside two packages\' on two objects: 409 naming both packages and the package-less holder, on all three doors', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        shipAction(undefined, 'lead');
+        for (const door of DOORS) {
+            const answer = await read(door);
+            expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A, B], true]);
+        }
+        const item = await read('/action/approve');
+        expect(conflictOf(item)[2]).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
+    });
+
+    it('a disabled package registered before the one enabled holder: the item read answers the enabled holder', async () => {
+        shipAction(B, 'contact');
+        shipAction(A, 'account');
+        registry.disablePackage(B);
+        const answer = await read('/action/approve');
+        expect([answer.status, labelOf(answer)], JSON.stringify(answer.body)).toEqual([200, 'alpha']);
+    });
+});

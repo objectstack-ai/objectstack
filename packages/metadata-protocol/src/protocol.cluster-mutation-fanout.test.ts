@@ -923,3 +923,31 @@ describe('[#32451] the peer converges a slotted item at the package the signal n
         expect(published.map((m) => m.payload.event.packageId)).toEqual([null]);
     });
 });
+
+/**
+ * [#32540, ruling C4] The resync addresses a stored item by `(type, name,
+ * member)` off its row (`protocol-mutation-resync.ts` `addressOfRow`). Since
+ * `@objectstack/metadata`'s `DatabaseLoader` names an object-bound action's
+ * object in `bundle_member`, one package's `digest` on o1, on o2 and
+ * object-less are three rows — and three addresses, each re-converged on its
+ * own row's move, never folded into one. (Converging such an address reads
+ * through the repository, whose member predicate is none for `action`:
+ * `overlay-index.test.ts` pins that half.)
+ */
+describe('cluster resync: an action\'s bindings are distinct addresses by `bundle_member` (#32540)', () => {
+    it('only the binding whose row moved is re-converged, with its object as the member', async () => {
+        const { MetadataMutationResyncLedger } = await import('./protocol-mutation-resync.js');
+        const row = (id: string, member: string | null, checksum: string) =>
+            ({ id, type: 'action', name: 'digest', bundle_member: member, checksum });
+        let rows = [row('o1', 'o1', 'c1'), row('o2', 'o2', 'c2'), row('g', null, 'c3')];
+        const ledger = new MetadataMutationResyncLedger();
+        ledger.seed(async () => rows);
+        const converged: unknown[] = [];
+        const io = { readActiveRows: async () => rows, converge: async (evt: unknown) => { converged.push(evt); } };
+        expect((await ledger.resync(io)).unchanged, 'three bindings, three baseline addresses').toBe(3);
+        rows = [row('o1', 'o1', 'c1'), row('o2', 'o2', 'c2-moved'), row('g', null, 'c3')];
+        const report = await ledger.resync(io);
+        expect([report.converged, report.unchanged]).toEqual([1, 2]);
+        expect(converged).toEqual([{ type: 'action', name: 'digest', state: 'active', organizationId: null, member: 'o2', packageId: null }]);
+    });
+});

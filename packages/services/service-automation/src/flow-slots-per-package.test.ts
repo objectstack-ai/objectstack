@@ -874,3 +874,60 @@ describe('#31696 [PR-2] a name shared again is re-armed per slot again', () => {
         expect(engineLogger.warn.mock.calls.filter(([message]: [string]) => /NOT armed on trigger/.test(message))).toEqual([]);
     });
 });
+
+describe('#31696 [R3] every record of a run follows its key when the name becomes shared', () => {
+    const resume = (runId: string) => engine.resume(runId, { [RESUME_AUTHORITY_SERVICE]: true } as never);
+    const runIdOf = (result: unknown) => (result as { runId?: string }).runId!;
+    const parkedKey = (runId: string) => engine.listSuspendedRuns().find((run) => run.runId === runId)?.flowName;
+
+    it('a paused, a finished and a stranded run of the lone slot read under its qualified key once a second package holds the name', async () => {
+        let failing = false;
+        engine.registerNodeExecutor({
+            type: 'mark',
+            async execute(node: { config?: { tag?: string } }) {
+                if (failing) throw new Error('mark failed');
+                ran.push(String(node.config?.tag));
+                return { success: true };
+            },
+        } as unknown as NodeExecutor);
+        ship(P1, pausing('f', 'p1'));
+        const paused = runIdOf(await engine.executeSlot(P1, 'f'));
+        const finished = runIdOf(await engine.executeSlot(P1, 'f'));
+        expect((await resume(finished)).success).toBe(true);
+        const stranded = runIdOf(await engine.executeSlot(P1, 'f'));
+        failing = true;
+        expect((await resume(stranded)).success).toBe(false);
+        failing = false;
+
+        ship(P2, pausing('f', 'p2'));
+        const key = `${P1}/f`;
+        for (const runId of [paused, finished, stranded]) expect((await engine.getRun(runId))?.flowName, runId).toBe(key);
+        expect(parkedKey(paused)).toBe(key);
+        expect(await engine.restoreConsumedSuspension(stranded)).toMatchObject({ restored: true });
+        expect([parkedKey(stranded), (await engine.getRun(stranded))?.flowName]).toEqual([key, key]);
+        expect((await resume(paused)).success).toBe(true);
+        expect((await resume(stranded)).success).toBe(true);
+        expect(ran).toEqual(['p1', 'p1', 'p1']);
+    });
+
+    it('a run in flight when a second package takes the name is recorded and parked under its qualified key', async () => {
+        let proceed!: () => void;
+        const gate = new Promise<void>((resolve) => { proceed = resolve; });
+        engine.registerNodeExecutor({
+            type: 'hold',
+            async execute() {
+                await gate;
+                return { success: true, suspend: true, correlation: 'held' };
+            },
+        } as unknown as NodeExecutor);
+        ship(P1, pausing('f', 'p1'));
+        const started = engine.executeSlot(P1, 'f');
+        await Promise.resolve();
+        ship(P2, pausing('f', 'p2'));
+        proceed();
+        const runId = runIdOf(await started);
+        expect([(await engine.getRun(runId))?.flowName, parkedKey(runId)]).toEqual([`${P1}/f`, `${P1}/f`]);
+        expect((await resume(runId)).success).toBe(true);
+        expect(ran).toEqual(['p1']);
+    });
+});
