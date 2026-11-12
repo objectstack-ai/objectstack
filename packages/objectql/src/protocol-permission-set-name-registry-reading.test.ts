@@ -29,6 +29,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
     bindSecurityCatalogReader,
     createSecurityCatalogReader,
+    holdsPlatformPermissionSet,
     ObjectKernel,
     PERMISSION_SET_SHARED_NAMESPACES,
     permissionSetHoldersMeet,
@@ -350,6 +351,35 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
      */
     it('row 9: a second holder of a platform (sys) set is refused at every door, also while the holder is disabled', async () => {
         expect(await doors('sys', 'crm', 'qa_reader', { disableHolder: true })).toEqual(refusedEverywhere);
+    });
+
+    // Row 9's own state is the platform holder ENABLED beside a DISABLED other
+    // holder. Reached in the other order: the other holder is installed and
+    // disabled first, and the platform package arrives second.
+    it('row 9: a platform (sys) package arriving beside a disabled holder of the name is refused at every door', async () => {
+        expect(await doors('crm', 'sys', 'qa_reader', { disableHolder: true })).toEqual(refusedEverywhere);
+    });
+
+    /**
+     * Row 9's verdict through this change's doors: `holdsPlatformPermissionSet`
+     * for a context holding the name with no address. The platform holder is
+     * the one holder: every door refuses the second, so the verdict follows the
+     * platform holder alone — `true` while enabled, and `main`'s answer at this
+     * change's merge while it is disabled.
+     */
+    it('row 9: the verdict for a name with no address follows the one platform holder, the second holder refused (main at the merge)', async () => {
+        const { engine } = await bootBare();
+        engine.registry.installPackage(manifest(HOLDING, 'sys'), 'authored');
+        engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', HOLDING);
+        const verdict = () => holdsPlatformPermissionSet(engine, { permissions: ['qa_reader'] }, 'qa_reader');
+        expect(verdict()).toBe(true);
+        engine.registry.installPackage(manifest(INCOMING, 'crm'), 'authored');
+        expect(() => engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', INCOMING)).toThrow(SecurityCatalogNameConflictError);
+        // CONTROL: an address carried with the name answers by that holder alone.
+        expect(holdsPlatformPermissionSet(engine, { permissions: ['qa_reader'], permissionSetAddresses: [{ packageId: INCOMING, name: 'qa_reader' }] }, 'qa_reader')).toBe(false);
+        engine.registry.disablePackage(HOLDING);
+        expect(() => engine.registry.registerItem('permission', permissionSet('qa_reader') as any, 'name', INCOMING)).toThrow(SecurityCatalogNameConflictError);
+        expect(verdict()).toBe(false);
     });
 
     it('row 9: a column-less grant of a name crm and hr hold, hr disabled, confers what main answers (the bound grants as CONTROLs)', async () => {
