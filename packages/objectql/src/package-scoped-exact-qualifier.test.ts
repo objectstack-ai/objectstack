@@ -770,6 +770,9 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
   });
   const listed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
     .items?.map((i) => i.label).sort();
+  /** The execution list at `packageId`'s address: what a send resolved to that package reads. */
+  const forSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'email_template', packageId } as never)) as { items?: Array<{ label?: string }> })
+    .items?.map((i) => i.label).sort();
 
   beforeEach(() => {
     registry.installPackage(manifest(APP), 'code');
@@ -799,17 +802,22 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
   // holders disabled, the member is the enabled holder's, served on its exact
   // address and in its list (FROM: refused naming both and left out), and the
   // disabled holder's address answers its withheld item. Re-enabled, as FROM.
-  it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('[#32183] one of the two holders disabled (%s): the member is the enabled holder\'s, on its exact address and in its list; re-enabled, refused naming both and left out', async (_order, order) => {
+  // [epic ruling R4-A, row 34] The execution list at the enabled holder's
+  // address, which a send resolved to that holder reads, carries the member
+  // too (FROM: no fr-FR template there; measured on `main` 216674301).
+  it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('[#32183] one of the two holders disabled (%s): the member is the enabled holder\'s, on its exact address, in its list and in its execution list; re-enabled, refused naming both and left out', async (_order, order) => {
     for (const id of order) tpl('en-US', id);
     pairRow();
     registry.disablePackage(Y);
     expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
     expect(await listed(X)).toContain('pair fr-FR');
+    expect(await forSend(X)).toEqual(['pair fr-FR', 'suitex en-US']);
     expect((await read(Y, 'fr-FR'))?.item, 'the disabled holder\'s address').toBeUndefined();
     registry.enablePackage(Y);
     const err = await refusalOf(() => read(X, 'fr-FR'));
     expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
     expect(await listed(X)).not.toContain('pair fr-FR');
+    expect(await forSend(X)).toEqual(['suitex en-US']);
   });
 
   it('one holder of the pair: the member is served on its address and listed there (#28390 ruling A)', async () => {
@@ -855,6 +863,124 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     try { served = labelOf(await read(Y, 'fr-FR')); } catch (e) { served = (e as { code?: string }).code; }
     expect(served, 'Y shares the pair but holds no template of the name').toBe('RESOURCE_CONFLICT');
     expect(await listed(Y)).not.toContain('pair fr-FR');
+  });
+});
+
+/**
+ * [#32183, epic rulings R4-B and R4-B2] A name only a disabled package holds,
+ * read at an address that neither holds it nor is a pair of a holder (a
+ * sibling module of the App), at a member only the App's customization pair
+ * stores. The metadata service answers the pair's row by name, as in the
+ * contract review's measurement (6819947096), so a layer of the exact read
+ * reaches it.
+ *
+ * FROM (`main` 216674301, measured on this fixture): `?package=Y&member=fr-FR`,
+ * its namespace path and `_env` refuse 409 naming X. The round-3 head served
+ * the pair's row at the first two and at `_env`. TO: the first two answer 404
+ * (row 17: an exact address of such a name serves only a row stored under
+ * its own package); `_env` keeps `main`'s 409 (R4-B2: with no served holder,
+ * its admission judges every holder).
+ */
+describe('[#32183] a name only a disabled package holds, at an address that neither holds it nor pairs a holder', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  const memberOf = (id: string) => ({
+    id, name: id, version: '1.0.0', type: 'module', namespace: id.split('.').pop()!,
+    dependencies: { [APP]: '^1.0.0' },
+  }) as never;
+  const pairBody = { name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', _packageId: PAIR };
+  const storedRow = (packageId: string, label: string) => rows.push({
+    id: `row_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', package_id: packageId, bundle_member: 'fr-FR',
+    metadata: JSON.stringify({ name: 'welcome', label, locale: 'fr-FR', subject: label, bodyHtml: '<p>r</p>' }),
+  });
+  let served: ObjectStackProtocolImplementation;
+  const at = (packageId: string) => served.getMetaItem({ type: 'email_template', name: 'welcome', packageId, member: 'fr-FR' } as never);
+  const atNamespace = () => {
+    const address = served.resolveMetaItemAddress({ type: 'email_template', segment: 'suitey', name: 'welcome' });
+    expect(address).toEqual({ kind: 'namespace', namespace: 'suitey', packageId: Y });
+    return at((address as { packageId: string }).packageId);
+  };
+  const atEnvironment = () => {
+    served.admitEnvironmentQualifier({ type: 'email_template', name: 'welcome', member: 'fr-FR' });
+    return served.getMetaItem({ type: 'email_template', name: 'welcome', member: 'fr-FR' } as never);
+  };
+  const READS = [['?package=Y', () => at(Y)], ['its namespace path', atNamespace], ['_env', atEnvironment]] as const;
+
+  beforeEach(() => {
+    registry.installPackage(manifest(APP), 'code');
+    registry.installPackage(memberOf(X), 'code');
+    registry.installPackage(memberOf(Y), 'code');
+    registry.installPackage(manifest(PAIR), 'code');
+    registry.registerItem('email_template', {
+      name: 'welcome', label: 'suitex en-US', locale: 'en-US', subject: 'suitex en-US', bodyHtml: '<p>x</p>',
+    }, 'name' as never, X);
+    storedRow(PAIR, 'pair fr-FR');
+    const metadata = {
+      get: vi.fn(async () => ({ ...pairBody })),
+      getDiagnosed: vi.fn(async () => ({ data: { ...pairBody }, degraded: false, errors: [] })),
+    };
+    served = new ObjectStackProtocolImplementation(engine as never, () => new Map<string, unknown>([['metadata', metadata]]));
+  });
+
+  it.each(READS.slice(0, 2))('X disabled: %s at that member answers 404, never the pair\'s row (R4-B)', async (_label, read) => {
+    registry.disablePackage(X);
+    const answer = await read();
+    expect(answer?.item).toBeUndefined();
+    expect(JSON.stringify(answer ?? null)).not.toContain('pair fr-FR');
+  });
+
+  it('X disabled: `_env` at that member refuses 409 naming X, as on main (R4-B2)', async () => {
+    registry.disablePackage(X);
+    const err = await refusalOf(atEnvironment);
+    expect([err.status, err.refusal.reason, err.refusal.candidates]).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+  });
+
+  it('CONTROL — X disabled: a row stored under Y\'s own package is served at Y', async () => {
+    storedRow(Y, 'suitey row fr-FR');
+    registry.disablePackage(X);
+    expect(labelOf(await at(Y))).toBe('suitey row fr-FR');
+  });
+
+  it('CONTROL — X enabled: each of the three refuses 409 naming X, as on main', async () => {
+    for (const [label, read] of READS) {
+      const err = await refusalOf(read);
+      expect([err.status, err.refusal.reason, err.refusal.candidates], label).toEqual([409, 'not-held-by-qualifier', [{ kind: 'package', packageId: X }]]);
+    }
+  });
+});
+
+/**
+ * [#32183, epic ruling R4-C] `?package=DISABLED&member=` where only the
+ * disabled package's customization pair stores the member. FROM (`main`
+ * 216674301, measured): 200 with the pair's row, one holder or two, both
+ * orders; `?package=DISABLED.custom&member=` the same. TO: 404, the disabled
+ * package's withheld item, at both (`disabledExactAddressHolder`): an address
+ * that reads only a disabled package never serves its customization (row 23).
+ * Re-enabled, as FROM.
+ */
+describe('[#32183] `?package=DISABLED&member=` where only the pair\'s row carries the member', () => {
+  const tpl = (packageId: string) => registry.registerItem('email_template', {
+    name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 'en', bodyHtml: '<p>x</p>',
+  }, 'name' as never, packageId);
+  const at = (packageId: string) => protocol.getMetaItem({ type: 'email_template', name: 'welcome', packageId, member: 'fr-FR' } as never);
+  const STATES = [['one holder', [A]], ['two holders, the disabled one first', [A, B]], ['two holders, the enabled one first', [B, A]]] as const;
+
+  it.each(STATES)('%s: A disabled, `?package=A` and `?package=A.custom` at the member answer 404; re-enabled, the pair\'s row', async (_state, order) => {
+    for (const id of order) tpl(id);
+    rows.push({
+      id: 'row_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR_A, bundle_member: 'fr-FR',
+      metadata: JSON.stringify({ name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>' }),
+    });
+    registry.disablePackage(A);
+    for (const address of [A, PAIR_A]) {
+      const answer = await at(address);
+      expect(answer?.item, address).toBeUndefined();
+      expect(JSON.stringify(answer ?? null), address).not.toContain('pair fr-FR');
+    }
+    registry.enablePackage(A);
+    for (const address of [A, PAIR_A]) expect(labelOf(await at(address)), address).toBe('pair fr-FR');
   });
 });
 
@@ -957,6 +1083,8 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
   // out). Re-enabled, each answers as FROM. Both registration orders.
   const dashboardsListed = async (packageId: string) => ((await protocol.getMetaItems({ type: 'dashboard', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
     .items?.filter((i) => i.name === 'dup').map((i) => i.label);
+  const dashboardsForSend = async (packageId: string) => ((await protocol.getMetaItemsForExecution({ type: 'dashboard', packageId } as never)) as { items?: Array<{ name?: string; label?: string }> })
+    .items?.filter((i) => i.name === 'dup').map((i) => i.label);
   const sortedCandidates = (err: PackageScopedNameRefusedError) => err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort();
   const HOLDER_ORDERS = [['disabled holder first', [A, B]], ['enabled holder first', [B, A]]] as const;
 
@@ -986,13 +1114,39 @@ describe('[#31699] a package-less row of a name two packages hold is no holder\'
     }
   });
 
-  it.each(HOLDER_ORDERS)('[#32183] dashboard (%s): the list scoped to the enabled holder serves the package-less stored row as its customization while the other holder is disabled; re-enabled, its own item', async (_order, order) => {
+  // [#32183, epic ruling R4-D, row 26] The ENABLED holder's pair beside the
+  // same row, the other holder disabled. FROM (`main` 216674301, measured):
+  // 409 `ambiguous-in-closure` naming both. Re-enabled, as FROM.
+  const PAIR_B = `${B}.custom`;
+  const ROW_LABELS: Record<string, string> = { 'the environment\'s item': 'env dashboard', 'a package-less stored row': 'stored dashboard' };
+  it.each(HOLDER_ORDERS.flatMap(([order, ids]) => PACKAGE_LESS_ROWS.map(([row, add]) => [order, row, ids, add] as const)))('[#32183] dashboard (%s, beside %s): `?package=<enabled>.custom` serves the row as the enabled holder\'s customization, or 404 while #32501 location 1 stands; re-enabled, refused naming both', async (_order, row, order, addRow) => {
+    for (const id of order) ship('dashboard', 'dup', id);
+    addRow();
+    registry.disablePackage(A);
+    const answer = await protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never);
+    // [#32501 location 1] With the disabled holder registered first, the pair
+    // address's envelope falls back to the first holder that ships the name,
+    // the disabled one, so the face withholds it (404), as the same fallback
+    // does on `main`. ⚠️ Flip this arm to the row (200) when #32501 lands.
+    if (order[0] === A) expect([labelOf(answer), /(env|stored|alpha|beta) dashboard/.test(JSON.stringify(answer ?? null))]).toEqual([undefined, false]);
+    else expect(labelOf(answer)).toBe(ROW_LABELS[row]);
+    registry.enablePackage(A);
+    const err = await refusalOf(() => protocol.getMetaItem({ type: 'dashboard', name: 'dup', packageId: PAIR_B } as never));
+    expect([err.status, err.refusal.reason, sortedCandidates(err)]).toEqual([409, 'ambiguous-in-closure', [A, B]]);
+  });
+
+  // [epic ruling R4-A, row 33] …and so does the execution list at that
+  // address, which a send resolved to the enabled holder reads (FROM: its own
+  // item; measured on `main` 216674301).
+  it.each(HOLDER_ORDERS)('[#32183] dashboard (%s): the list scoped to the enabled holder, and its execution list, serve the package-less stored row as its customization while the other holder is disabled; re-enabled, its own item', async (_order, order) => {
     for (const id of order) ship('dashboard', 'dup', id);
     storedPackageLessDashboard();
     registry.disablePackage(A);
     expect(await dashboardsListed(B)).toEqual(['stored dashboard']);
+    expect(await dashboardsForSend(B)).toEqual(['stored dashboard']);
     registry.enablePackage(A);
     expect(await dashboardsListed(B)).toEqual(['beta dashboard']);
+    expect(await dashboardsForSend(B)).toEqual(['beta dashboard']);
   });
 
   it.each(HOLDER_ORDERS)('[#32183] CONTROL — dashboard (%s): the environment\'s item in the registry is not in the list scoped to a holder, the other holder disabled or not', async (_order, order) => {

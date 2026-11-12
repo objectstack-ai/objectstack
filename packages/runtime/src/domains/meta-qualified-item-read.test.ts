@@ -403,12 +403,13 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
             if (order[0] === A) expect(labelOf(await read(`/${type}/shared`, { package: `${A}.custom` }))).toBe(`alpha ${type}`);
         });
 
-        it(`${type}: only a disabled holder — no holder: 404 on every address, never a 409 naming it`, async () => {
+        // [epic ruling R4-B2] `_env` is held at `main`'s answer: with no served
+        // holder it judges every holder, so it refuses naming the disabled one.
+        it(`${type}: only a disabled holder — no holder: 404 on every package address, never a 409 naming it; \`_env\` refuses naming it, as on main`, async () => {
             ship(type, 'solo', B);
             registry.disablePackage(B);
             for (const [path, query] of [
                 [`/${type}/solo`, undefined],
-                [`/${type}/_env/solo`, undefined],
                 [`/${type}/solo`, { package: C }],
                 [`/${type}/gamma/solo`, undefined],
             ] as const) {
@@ -416,6 +417,7 @@ describe('#32183 — a disabled package holds no name: the by-name read judges t
                 expect([answer.status, path, query], JSON.stringify(answer.body)).toEqual([404, path, query]);
                 expect(JSON.stringify(answer.body)).not.toContain(B);
             }
+            refusedNaming(await read(`/${type}/_env/solo`), [B], [A]);
         });
 
         it(`${type}: only disabled holders — the layered view serves none of their layers, at any address`, async () => {
