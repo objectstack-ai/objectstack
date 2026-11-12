@@ -10800,6 +10800,14 @@ export class SchemaRegistry {
    * arrival's doing and is left out. `ownRefusals: 'ambiguous'` (the per-item
    * seams) keeps only the arrival's own references and extensions the
    * resolver refuses as ambiguous.
+   *
+   * [#32183, ADR-0150 D3] Judged over EVERY holder, a disabled package's
+   * included, before and after the arrival, because the field verdict
+   * ({@link picklistReferenceVerdict}) reads every holder: the install audit
+   * and the served field agree for a disabled holder. Judged over the served
+   * holders, a field resolving to a disabled package's list would read as
+   * refused already and be skipped, and an arrival making it ambiguous would
+   * be admitted, the field silently losing its options.
    */
   judgePicklistArrival(
     manifests: readonly unknown[],
@@ -10817,9 +10825,17 @@ export class SchemaRegistry {
       const key = JSON.stringify([name, caller]);
       let entry = memo.get(key);
       if (!entry) {
+        // [#32183] Every holder, a disabled package's included, on both
+        // sides: the field verdict reads every holder
+        // ({@link picklistReferenceVerdict}), so the install audit and the
+        // served field agree for a disabled holder.
         memo.set(key, entry = {
-          before: resolvePackageScopedName<PicklistItemLike>(this, { type: 'picklist', name, callerPackageId: caller }),
-          after: resolvePackageScopedName<PicklistItemLike>(view, { type: 'picklist', name, callerPackageId: caller }),
+          before: resolvePackageScopedName<PicklistItemLike>(this, {
+            type: 'picklist', name, callerPackageId: caller, includeDisabledPackages: true,
+          }),
+          after: resolvePackageScopedName<PicklistItemLike>(view, {
+            type: 'picklist', name, callerPackageId: caller, includeDisabledPackages: true,
+          }),
         });
       }
       return entry;
