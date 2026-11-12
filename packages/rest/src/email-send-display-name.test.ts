@@ -42,25 +42,17 @@ function fakeEngine() {
       if (target) Object.assign(target.row, data);
       return { affected: target ? 1 : 0 };
     },
-    /** Equality on every `where` key; the boot sweep and the queue worker read through it. */
-    async find(object: string, query?: { where?: Record<string, unknown> }) {
-      const where = query?.where ?? {};
-      return rows
-        .filter((r) => r.object === object && Object.entries(where).every(([k, v]) => r.row[k] === v))
-        .map((r) => ({ ...r.row }));
-    },
+    async find() { return []; },
   };
 }
 
-/** A durable-looking queue double: it records publishes and keeps each subscriber to run by hand. */
+/** A durable-looking queue double: it records publishes and never delivers on its own. */
 function fakeQueue() {
   const published: Array<{ queue: string; data: any }> = [];
-  const handlers: Record<string, (msg: any) => Promise<void>> = {};
   return {
     published,
-    handlers,
     async publish(queue: string, data: any) { published.push({ queue, data }); return `msg-${published.length}`; },
-    async subscribe(queue: string, handler: (msg: any) => Promise<void>) { handlers[queue] = handler; },
+    async subscribe() { /* the worker half is pinned in plugin-email */ },
     async unsubscribe() { /* noop */ },
   };
 }
@@ -332,7 +324,9 @@ describe('POST /api/v1/email/send — an attachment\'s content is a string or a 
     }
   });
 
-  it('CONTROL — queue delivery on: a string attachment is queued, and the queued row is rebuilt and sent', async () => {
+  it('CONTROL — queue delivery on: a string attachment with a `cid` is queued, its row carrying the attachment', async () => {
+    // The worker's rebuild of the queued row is pinned in plugin-email's
+    // queue-delivery suite; this leg shows the door's queued path is live.
     const queue = fakeQueue();
     const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
     const { post, rows } = await boot({ transport, queue });
@@ -345,15 +339,9 @@ describe('POST /api/v1/email/send — an attachment\'s content is a string or a 
     expect(out.body.status).toBe('queued');
     expect(transport.send).not.toHaveBeenCalled();
     expect(queue.published).toHaveLength(1);
-    const job = queue.published[0]!;
-
-    await queue.handlers[job.queue]!({ data: job.data, attempts: 1 });
-
-    expect(transport.send).toHaveBeenCalledTimes(1);
-    const [delivered] = transport.send.mock.calls[0] as any[];
-    expect(delivered.attachments).toHaveLength(1);
-    expect(delivered.attachments[0]).toMatchObject({ filename: 'logo.txt', cid: 'logo' });
-    expect(String(delivered.attachments[0].content)).toBe('logo');
-    expect(rows.find((r) => r.row.id === out.body.id)?.row.status).toBe('sent');
+    expect(queue.published[0]!.data).toMatchObject({ rowId: out.body.id });
+    const row = rows.find((r) => r.row.id === out.body.id)!.row;
+    expect(row.status).toBe('queued');
+    expect(JSON.parse(String(row.attachments_json))[0]).toMatchObject({ filename: 'logo.txt', cid: 'logo' });
   });
 });
