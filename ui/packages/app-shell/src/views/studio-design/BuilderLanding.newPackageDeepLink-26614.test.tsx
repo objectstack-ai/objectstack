@@ -13,6 +13,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
+import '@objectstack/lint';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
@@ -20,7 +22,13 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
-  return { ...mod, fetchPackages: vi.fn(async () => []) };
+  return {
+    ...mod,
+    fetchPackages: vi.fn(async () => []),
+    // The landing reads the list's ids beside its entries (the same request,
+    // objectstack#32615): both are answered by this double, never the network.
+    fetchListedPackageIds: vi.fn(async () => new Set<string>()),
+  };
 });
 
 // The dialog's form stack is not under test: the stand-in reports whether the

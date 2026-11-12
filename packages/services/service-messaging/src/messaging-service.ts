@@ -502,6 +502,11 @@ export class MessagingService {
      * exist yet — a transport service another plugin registers later in the
      * same boot — use {@link MessagingService.registerChannelProvider}, which
      * is asked again on every lookup instead.
+     *
+     * Register by the time the kernel's `kernel:ready` has settled (from
+     * `init()`, `start()` or a `kernel:ready` handler): the automation save
+     * doors (`/automation`, `@objectstack/runtime`) refuse a `notify` node
+     * naming a channel id this service does not know at that point.
      */
     registerChannel(channel: MessagingChannel): void {
         if (this.channels.has(channel.id) || this.channelProviders.has(channel.id)) {
@@ -546,6 +551,12 @@ export class MessagingService {
      * serve the stale verdict this method exists to abolish. Provider authors
      * keep the probe cheap (a service-registry closure call) and memoise the
      * CHANNEL OBJECT, never the presence of the transport.
+     *
+     * The provider itself (the channel ID) is registered by the time the
+     * kernel's `kernel:ready` has settled; only its transport may arrive later.
+     * The automation save doors (`/automation`, `@objectstack/runtime`) read
+     * {@link getKnownChannels} and refuse a `notify` node naming an id it does
+     * not list, so a provider registered later is refused there until it is.
      */
     registerChannelProvider(id: string, resolve: ChannelProvider): void {
         if (this.channels.has(id) || this.channelProviders.has(id)) {

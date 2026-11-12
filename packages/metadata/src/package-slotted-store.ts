@@ -42,7 +42,11 @@
  * row per `(package, name)`; and a read the registry cannot answer reads the
  * loaders' stored items of the name through {@link readStoreEntry}
  * ({@link slotStoreOf}). A loader's own unscoped read still answers the item
- * of a name written last ({@link lastWrittenOf}), as it did.
+ * of a name written last ({@link lastWrittenOf}), as it did. [#32560] A read
+ * naming no package of an action name a package holds in the registry is
+ * judged over the registry's and the loaders' slots together
+ * ({@link judgesLoaderSlots}), and a package-less registry slot no loader
+ * stores is the platform's, not the environment's ({@link platformSlotsOf}).
  *
  * [#32517] A bundled type (`isBundledStoreType`: `email_template`, one member
  * per `locale`) holds several members in one slot, as `DatabaseLoader` holds a
@@ -116,6 +120,7 @@ import {
   packageScopedHolderSource,
   packageScopedRefusalMessage,
   resolvePackageScopedHolders,
+  type PackageScopedHolder,
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
@@ -229,6 +234,8 @@ export function keyIdentityOf(key: string): string {
  */
 const writeOrder = new WeakMap<ReadonlyMap<string, unknown>, Map<string, number>>();
 let writeSequence = 0;
+/** [#32560, #32517] The views whose write order {@link inheritStoreWriteOrder} took from another store. */
+const inheritedViews = new WeakSet<ReadonlyMap<string, unknown>>();
 
 /** Record that `key` of `store` was just written ({@link readStoreEntry}'s "written last"). */
 export function recordStoreWrite(store: ReadonlyMap<string, unknown>, key: string): void {
@@ -251,6 +258,26 @@ function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[
     if (at > bestAt) { best = key; bestAt = at; }
   }
   return best;
+}
+
+/**
+ * [ADR-0150 D3, #32560] Give `view` (a store assembled from `from`'s slots and
+ * others) `from`'s write order for the keys it took from it, so a read over
+ * the view answers "written last" as the read over `from` does. A key `from`
+ * does not hold counts as written before every key it does.
+ */
+export function inheritStoreWriteOrder(view: ReadonlyMap<string, unknown>, from: ReadonlyMap<string, unknown> | undefined): void {
+  const order = from ? writeOrder.get(from) : undefined;
+  if (!order) return;
+  // [#32517] A slot none of whose members came from `from` still answers its
+  // first member in the view ({@link latestMemberOf}).
+  inheritedViews.add(view);
+  const inherited = new Map<string, number>();
+  for (const key of view.keys()) {
+    const at = order.get(key);
+    if (at !== undefined && view.get(key) === from!.get(key)) inherited.set(key, at);
+  }
+  writeOrder.set(view, inherited);
 }
 
 /** The store key of `packageId`'s item of `name`. */
@@ -513,12 +540,18 @@ function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
  * answer): its first member of the slot answers, the item that view kept for
  * the slot when one key held it. Its sources hand a slot's member written
  * last first (the registry by its write order, the `MemoryLoader`'s
- * `loadSlots`), so the view answers what they answer.
+ * `loadSlots`), so the view answers what they answer. [#32560] A view that
+ * inherited the registry's write order ({@link inheritStoreWriteOrder})
+ * answers by it for a slot the registry holds, and its first member for a
+ * slot only a loader holds.
  */
 export function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
   const members = [...store.keys()].filter((key) => slotOfKey(key) === slot);
   if (members.length === 0) return slot;
-  return writeOrder.has(store) ? writtenLast(store, members) : members[0]!;
+  const order = writeOrder.get(store);
+  if (!order) return members[0]!;
+  if (inheritedViews.has(store) && !members.some((key) => order.has(key))) return members[0]!;
+  return writtenLast(store, members);
 }
 
 /**
@@ -534,6 +567,48 @@ export function latestMembersFirst(store: ReadonlyMap<string, unknown>, keys: re
     ordered.push(latest, ...members.filter((key) => key !== latest));
   }
   return ordered;
+}
+
+/**
+ * [ADR-0150 D3, #32560] Whether a read naming no package of an action name
+ * must be judged over the loaders' stored slots beside `store`'s (the
+ * registry): `store` holds a package's slot of the name. The registry alone
+ * then cannot say whether another package holds the name in a loader only (a
+ * read would pick between two packages), nor whether the environment's own
+ * item stands beside the package in a loader (it answers first), nor whether
+ * a package-less slot of the registry is the environment's or the
+ * platform's ({@link platformSlotsOf}). A name no package holds in the
+ * registry is read there alone, as before: the extra loader read is spent on
+ * the bare action reads that hit a package's slot in memory, and no other.
+ */
+export function judgesLoaderSlots(
+  store: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  packageId: string | null | undefined,
+): boolean {
+  return OWNER_KEYED_SLOT_TYPES.has(type) && !isPackageCaller(packageId)
+    && storeKeysNamed(store, type, name).some((key) => slotPackageOf(key) !== undefined);
+}
+
+/**
+ * [ADR-0150 D3, #32560] Of `registry`'s package-less slots of an action name,
+ * the platform's: those no loader stores (`loaderStore`, the loaders' slots of
+ * the name keyed as the store keys them, {@link slotStoreOf}). An item the
+ * environment authored is stored, so a loader holds it on the same object; an
+ * item only registered in memory (host code or a plugin) is the platform's,
+ * as the protocol's bare action read tells them apart by the environment's
+ * stored row. Empty for every other type.
+ */
+export function platformSlotsOf(
+  registry: ReadonlyMap<string, unknown> | undefined,
+  type: string,
+  name: string,
+  loaderStore: ReadonlyMap<string, unknown>,
+): Set<string> {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return new Set();
+  return new Set(storeKeysNamed(registry, type, name)
+    .filter((key) => slotPackageOf(key) === undefined && !loaderStore.has(key)));
 }
 
 /**
@@ -646,13 +721,24 @@ export function storeRemovalKeys(
   type: string,
   name: string,
   packageId?: string | null,
-): { keys: string[]; packageId?: string } {
+  platformKeys?: ReadonlySet<string>,
+): { keys: string[]; packageId?: string; packagelessOnly?: true } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
   const keys = storeKeysNamed(store, type, name);
   if (isPackageCaller(packageId)) {
     return { keys: keys.filter((key) => slotPackageOf(key) === packageId), packageId };
   }
-  if (store) refuseSeveralPackages(store, type, name, keys);
+  if (store) refuseSeveralPackages(store, type, name, keys, platformKeys);
+  // [ADR-0150 D3, #32560] A removal naming none removes what a read naming
+  // none answers: beside ONE package, an action name's package-less slots
+  // (the environment's own item, which that read answers first) — never the
+  // package's item the read does not answer. `packagelessOnly` says so, so
+  // a store holding the package's item alone keeps it when the judgment is
+  // carried to it (`MetadataLoaderDeleteOptions.packagelessOnly`).
+  if (OWNER_KEYED_SLOT_TYPES.has(type)) {
+    const packageless = keys.filter((key) => slotPackageOf(key) === undefined);
+    if (packageless.length > 0 && packageless.length < keys.length) return { keys: packageless, packagelessOnly: true };
+  }
   return { keys };
 }
 
@@ -665,7 +751,13 @@ export function storeRemovalKeys(
  *
  * @throws {PackageScopedNameRefusedError} two or more packages hold the name.
  */
-function refuseSeveralPackages(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
+function refuseSeveralPackages(
+  store: ReadonlyMap<string, unknown>,
+  type: string,
+  name: string,
+  keys: readonly string[],
+  platformKeys?: ReadonlySet<string>,
+): void {
   const objectsOf = new Map<string, Array<string | undefined>>();
   for (const key of keys) {
     const holder = slotPackageOf(key);
@@ -674,21 +766,62 @@ function refuseSeveralPackages(store: ReadonlyMap<string, unknown>, type: string
     objects.push(OWNER_KEYED_SLOT_TYPES.has(type) ? boundObjectOf(store.get(key)) : undefined);
     objectsOf.set(holder, objects);
   }
-  if (objectsOf.size < 2) return;
+  // [#32560] An action name's package-less slots are holders too: the
+  // platform's beside any package is refused, as the read refuses it, and
+  // the environment's is named beside two packages, as the read names it.
+  const packageless = OWNER_KEYED_SLOT_TYPES.has(type) ? keys.filter((key) => slotPackageOf(key) === undefined) : [];
+  const platformBeside = objectsOf.size > 0 && packageless.some((key) => platformKeys?.has(key));
+  if (objectsOf.size < 2 && !platformBeside) return;
+  const others = packagelessHolders(store, packageless, platformKeys);
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'ambiguous-in-environment',
     type: type as PackageScopedResolvableType,
     name,
     callerPackageId: null,
-    candidates: [...objectsOf.keys()].map((holder) => ({ kind: 'package' as const, packageId: holder })),
+    candidates: [
+      ...[...objectsOf.keys()].map((holder) => ({ kind: 'package' as const, packageId: holder })),
+      ...others.candidates,
+    ],
   };
   const anyBound = [...objectsOf.values()].some((objects) => objects.some((object) => object !== undefined));
+  const sentences = [...(anyBound ? [packageScopedActionOwnersSentence(objectsOf)] : []), ...others.sentences];
   const message = packageScopedRefusalMessage(base);
   throw new PackageScopedNameRefusedError({
     ...base,
-    message: anyBound ? `${message} ${packageScopedActionOwnersSentence(objectsOf)}` : message,
+    message: sentences.length > 0 ? `${message} ${sentences.join(' ')}` : message,
   });
+}
+
+/**
+ * [ADR-0150 D3, #32365, #32560] How a refusal names an action name's
+ * package-less slots `keys`: the environment's own item, and the platform's
+ * for the keys `platformKeys` holds ({@link platformSlotsOf}), each with the
+ * sentence naming the object(s) it binds the name to. Over `DatabaseLoader`'s
+ * row store (whose values are rows, not items) a holder is named without its
+ * sentence: a row does not say which object it binds.
+ */
+function packagelessHolders(
+  store: ReadonlyMap<string, unknown>,
+  keys: readonly string[],
+  platformKeys: ReadonlySet<string> | undefined,
+): { candidates: PackageScopedHolder[]; sentences: string[] } {
+  const candidates: PackageScopedHolder[] = [];
+  const sentences: string[] = [];
+  const environment = keys.filter((key) => !platformKeys?.has(key));
+  const platform = keys.filter((key) => platformKeys?.has(key) === true);
+  const objectsOf = (held: readonly string[]): Array<string | undefined> | undefined =>
+    held.some((key) => Array.isArray(store.get(key))) ? undefined : held.map((key) => boundObjectOf(store.get(key)));
+  for (const [held, holder, whose] of [
+    [environment, { kind: 'environment' as const }, 'The environment\'s own item'],
+    [platform, { kind: 'platform' as const }, 'The platform\'s item'],
+  ] as const) {
+    if (held.length === 0) continue;
+    candidates.push(holder);
+    const objects = objectsOf(held);
+    if (objects) sentences.push(packagelessOwnerSentence(whose, objects));
+  }
+  return { candidates, sentences };
 }
 
 /**
@@ -778,6 +911,7 @@ export function readStoreEntry(
   type: string,
   name: string,
   packageId?: string | null,
+  platformKeys?: ReadonlySet<string>,
 ): { found: true; data: unknown } | { found: false; settled: boolean } {
   if (!store) return { found: false, settled: false };
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
@@ -785,7 +919,7 @@ export function readStoreEntry(
   }
   const identities = [...new Set(storeKeysNamed(store, type, name).map(keyIdentityOf))];
   if (identities.length === 0) return { found: false, settled: false };
-  const answers = identities.map((identity) => readIdentity(store, type, name, identity, packageId));
+  const answers = identities.map((identity) => readIdentity(store, type, name, identity, packageId, platformKeys));
   const found = answers.filter((answer): answer is { key: string } => answer !== undefined && answer !== 'settled');
   if (found.length === 0) {
     return { found: false, settled: answers.some((answer) => answer === 'settled') };
@@ -794,7 +928,7 @@ export function readStoreEntry(
   // judge slots, never members.
   const keys = found.map((answer) => latestMemberOf(store, answer.key));
   if (!isPackageCaller(packageId)) {
-    refuseAcrossOwners(store, type, name, keys);
+    refuseAcrossOwners(store, type, name, keys, platformKeys);
     // [ADR-0150 D3, #32365] The environment's own item answers first: a
     // package-less slot beside one package's answers, whatever object each
     // binds the name to, never the one written last between them.
@@ -826,23 +960,33 @@ export function readStoreEntry(
  *
  * @throws {PackageScopedNameRefusedError} when `keys` span two or more packages.
  */
-function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
+function refuseAcrossOwners(
+  store: ReadonlyMap<string, unknown>,
+  type: string,
+  name: string,
+  keys: readonly string[],
+  platformKeys?: ReadonlySet<string>,
+): void {
   if (!OWNER_KEYED_SLOT_TYPES.has(type) || keys.length < 2) return;
   const objectsOf = new Map<string, Array<string | undefined>>();
-  const packagelessObjects: Array<string | undefined> = [];
+  const packageless: string[] = [];
   for (const key of keys) {
     const packageId = slotPackageOf(key);
     if (packageId === undefined) {
-      packagelessObjects.push(boundObjectOf(store.get(key)));
+      packageless.push(key);
       continue;
     }
     const objects = objectsOf.get(packageId) ?? [];
     objects.push(boundObjectOf(store.get(key)));
     objectsOf.set(packageId, objects);
   }
-  if (objectsOf.size < 2) return;
-  // [#32365] …and the environment's own item beside them is named too: a
-  // refusal names every candidate, and with two packages it answers no one.
+  // [#32560] The platform's item beside any package answers no one either:
+  // it is not the environment's own item, which alone answers first.
+  const platformBeside = objectsOf.size > 0 && packageless.some((key) => platformKeys?.has(key));
+  if (objectsOf.size < 2 && !platformBeside) return;
+  // [#32365] …and the package-less item beside them is named too: a refusal
+  // names every candidate, and with two packages it answers no one.
+  const others = packagelessHolders(store, packageless, platformKeys);
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'ambiguous-in-environment',
@@ -851,21 +995,20 @@ function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, n
     callerPackageId: null,
     candidates: [
       ...[...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
-      ...(packagelessObjects.length > 0 ? [{ kind: 'environment' as const }] : []),
+      ...others.candidates,
     ],
   };
-  const sentences = [packageScopedActionOwnersSentence(objectsOf)];
-  if (packagelessObjects.length > 0) sentences.push(environmentOwnerSentence(packagelessObjects));
+  const sentences = [packageScopedActionOwnersSentence(objectsOf), ...others.sentences];
   throw new PackageScopedNameRefusedError({
     ...base,
     message: `${packageScopedRefusalMessage(base)} ${sentences.join(' ')}`,
   });
 }
 
-/** [#32365] The sentence a refusal appends for the environment's own item(s) of an action name. */
-function environmentOwnerSentence(objects: ReadonlyArray<string | undefined>): string {
+/** [#32365, #32560] The sentence a refusal appends for the environment's own (or the platform's) item(s) of an action name. */
+function packagelessOwnerSentence(whose: string, objects: ReadonlyArray<string | undefined>): string {
   const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
-  return `The environment's own item binds it to ${named.join(' and ')}.`;
+  return `${whose} binds it to ${named.join(' and ')}.`;
 }
 
 /**
@@ -879,6 +1022,7 @@ function readIdentity(
   name: string,
   identity: string,
   packageId: string | null | undefined,
+  platformKeys?: ReadonlySet<string>,
 ): { key: string } | 'settled' | undefined {
   const holders = packageSlotsOf(store, identity);
   if (holders.length === 0) return holdsSlot(store, identity) ? { key: identity } : undefined;
@@ -899,14 +1043,14 @@ function readIdentity(
       ? storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined)
       : [];
     if (packageless.length === 0) throw new PackageScopedNameRefusedError(resolution);
+    const others = packagelessHolders(store, packageless, platformKeys);
     const base: Omit<PackageScopedRefusal, 'message'> = {
       ...resolution,
-      candidates: [...resolution.candidates, { kind: 'environment' as const }],
+      candidates: [...resolution.candidates, ...others.candidates],
     };
-    const objects = packageless.map((key) => boundObjectOf(store.get(key)));
     throw new PackageScopedNameRefusedError({
       ...base,
-      message: `${packageScopedRefusalMessage(base)} ${environmentOwnerSentence(objects)}`,
+      message: `${packageScopedRefusalMessage(base)} ${others.sentences.join(' ')}`,
     });
   }
   return resolution.status === 'resolved' ? { key: resolution.item as string } : undefined;
