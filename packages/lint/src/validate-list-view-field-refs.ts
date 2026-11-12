@@ -863,6 +863,23 @@ const GROUPING_ENTRY_POSITIONS: Array<{ key: string; severity: Sev; axis: Dotted
 /** `FieldType`'s members — the vocabulary the aggregate door judges, and nothing outside it. */
 const FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
 
+/**
+ * [#32449] The `ColumnSummary` member an author writes for a table function —
+ * the aggregate rows of `COLUMN_SUMMARY_AGGREGATION`, read backwards
+ * (`count_distinct` is written `count_unique`; the fieldless `count` row is
+ * `count`). A summary's fix line names members, never functions the schema
+ * would refuse.
+ */
+const SUMMARY_MEMBER_BY_FUNCTION: ReadonlyMap<string, string> = new Map(
+  (Object.entries(COLUMN_SUMMARY_AGGREGATION) as Array<[string, (typeof COLUMN_SUMMARY_AGGREGATION)[ColumnSummary]]>)
+    .flatMap(([member, mapping]) => (mapping.kind === 'aggregate' ? [[mapping.function as string, member] as const] : [])),
+);
+
+/** The member that writes `fn` on a column summary (the function itself when no row maps it). */
+function summaryMemberOf(fn: string): string {
+  return SUMMARY_MEMBER_BY_FUNCTION.get(fn) ?? fn;
+}
+
 /** The nested field positions inside one `columns[]` entry record. */
 const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev }> = [
   // `summary` aggregates a column; a stale name aggregates nothing and the
@@ -1350,16 +1367,15 @@ export function validateListViewFieldRefs(
     if (!isJudgeableAggregateType(fieldType)) return;
     const shape = { type: fieldType, multiple: verdict.meta?.multiple === true };
     if (aggregateAcceptsDeclaration(fn, shape)) return;
-    const spelled = member === fn ? `"${member}"` : `"${member}" (\`${fn}\`)`;
     findings.push({
       severity: 'error',
       rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
       where,
       path,
       message:
-        `summary ${spelled} over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
-        '(400 INVALID_FIELD)',
-      hint: refusedAggregateRemedy(fn, field, shape),
+        `summary "${member}" over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
+        '(400 INVALID_FIELD); a one-page browser footer is no exception',
+      hint: refusedAggregateRemedy(fn, field, shape, summaryMemberOf),
     });
   };
 

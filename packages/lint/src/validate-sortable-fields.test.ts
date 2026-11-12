@@ -1203,9 +1203,9 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     const [onText] = gridFindings([{ field: 'title', type: 'max' }]);
     expect(onText.hint).toBe('Point "max" at a numeric, date/time or boolean field, or aggregate "title" with one its `text` type accepts: count, count_distinct.');
     const [onJson] = gridFindings([{ field: 'payload', type: 'count_distinct' }]);
-    expect(onJson.hint).toBe('Count distinct values of a field that stores one scalar value, or aggregate "payload" with one its `json` type accepts: count.');
+    expect(onJson.hint).toBe('Point "count_distinct" at a field that stores one scalar value, or aggregate "payload" with one its `json` type accepts: count.');
     const [onMulti] = gridFindings([{ field: 'watchers', type: 'count_distinct' }]);
-    expect(onMulti.hint).toBe('Count distinct values of a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
+    expect(onMulti.hint).toBe('Point "count_distinct" at a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
   });
 
   it('[#32449] agrees with the table and `isMultiValueField` on every function over every declared `FieldType`', () => {

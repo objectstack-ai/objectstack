@@ -83,12 +83,12 @@ export function declaredAs(shape: AggregatedFieldShape): string {
   return shape.multiple === true ? `\`${shape.type}\` with \`multiple: true\`` : `\`${shape.type}\``;
 }
 
-/** Where to point `fn` instead — the lead of the remedy, by the row's own accepted class. */
-function retargetLead(fn: string): string {
-  if (fn === 'count_distinct') return 'Count distinct values of a field that stores one scalar value';
-  if (fn === 'min' || fn === 'max') return `Point "${fn}" at a numeric, date/time or boolean field`;
-  if (fn === 'sum') return 'Point "sum" at a numeric field that adds (not a percent)';
-  return `Point "${fn}" at a numeric field`;
+/** Where to point `fn` (written `written` on the caller's surface) instead — the lead of the remedy, by the row's own accepted class. */
+function retargetLead(fn: string, written: string): string {
+  if (fn === 'count_distinct') return `Point "${written}" at a field that stores one scalar value`;
+  if (fn === 'min' || fn === 'max') return `Point "${written}" at a numeric, date/time or boolean field`;
+  if (fn === 'sum') return `Point "${written}" at a numeric field that adds (not a percent)`;
+  return `Point "${written}" at a numeric field`;
 }
 
 /**
@@ -97,11 +97,24 @@ function retargetLead(fn: string): string {
  * the function instead, and the aggregates the field's declaration accepts —
  * read off the same verdict, in the table's order, so the words cannot name a
  * set the verdict was not taken from.
+ *
+ * `spell` writes a table function the way the AUTHOR writes it on the
+ * caller's surface, so the fix line names only values that surface accepts:
+ * an `object-grid` aggregation writes the function itself (the default); a
+ * list-view summary writes a `ColumnSummary` member (`count_unique` for
+ * `count_distinct`), which the caller derives from `COLUMN_SUMMARY_AGGREGATION`.
+ * `spell` also names the function in the lead.
  */
-export function refusedAggregateRemedy(fn: string, field: string, shape: AggregatedFieldShape): string {
+export function refusedAggregateRemedy(
+  fn: string,
+  field: string,
+  shape: AggregatedFieldShape,
+  spell: (fn: string) => string = (name) => name,
+): string {
   const virtual = virtualFieldAggregateRemedy(fn, shape.type);
   if (virtual !== undefined) return virtual;
   const accepted = TABLE_FUNCTIONS.filter((candidate) => aggregateAcceptsDeclaration(candidate, shape));
   const its = shape.multiple === true ? `${declaredAs(shape)} declaration` : `${declaredAs(shape)} type`;
-  return `${retargetLead(fn)}, or aggregate "${field}" with one its ${its} accepts: ${accepted.join(', ')}.`;
+  return `${retargetLead(fn, spell(fn))}, or aggregate "${field}" with one its ${its} accepts: `
+    + `${accepted.map(spell).join(', ')}.`;
 }

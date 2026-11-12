@@ -1530,9 +1530,9 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     ['sum / avg over a non-numeric field (object form, another field)', { field: 'estimate', summary: { type: 'avg', field: 'due_at' } }, '"avg" over "due_at" (`date`)'],
     ['min / max over a string-class field', { field: 'status', summary: 'min' }, '"min" over "status" (`select`)'],
     ['min / max over a reference', { field: 'owner', summary: 'max' }, '"max" over "owner" (`lookup`)'],
-    ['count_unique over a JSON-stored field', { field: 'payload', summary: 'count_unique' }, '"count_unique" (`count_distinct`) over "payload" (`json`)'],
-    ['count_unique over a multi-option field', { field: 'labels', summary: 'count_unique' }, '"count_unique" (`count_distinct`) over "labels" (`tags`)'],
-    ['count_unique over a multi-value declaration', { field: 'watchers', summary: 'count_unique' }, '"count_unique" (`count_distinct`) over "watchers" (`lookup` with `multiple: true`)'],
+    ['count_unique over a JSON-stored field', { field: 'payload', summary: 'count_unique' }, '"count_unique" over "payload" (`json`)'],
+    ['count_unique over a multi-option field', { field: 'labels', summary: 'count_unique' }, '"count_unique" over "labels" (`tags`)'],
+    ['count_unique over a multi-value declaration', { field: 'watchers', summary: 'count_unique' }, '"count_unique" over "watchers" (`lookup` with `multiple: true`)'],
   ])('refuses %s — `error`, at the column\'s `summary`', (_family, column, words) => {
     const findings = withColumns(column);
     expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
@@ -1557,16 +1557,22 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
 
   it('`sum` over a `percent` is refused — a rate does not add — and `formula` carries the store-it remedy', () => {
     const [onRate] = refused(withColumns({ field: 'rate', summary: 'sum' }));
-    expect(onRate.hint).toBe('Point "sum" at a numeric field that adds (not a percent), or aggregate "rate" with one its `percent` type accepts: count, count_distinct, avg, min, max.');
+    expect(onRate.hint).toBe('Point "sum" at a numeric field that adds (not a percent), or aggregate "rate" with one its `percent` type accepts: count, count_unique, avg, min, max.');
     const [onFormula] = refused(withColumns({ field: 'score', summary: 'avg' }));
     expect(onFormula.hint).toMatch(/^The field is computed on read and stores no value/);
   });
 
   it('names the summaries the declaration accepts, read off the door\'s verdict', () => {
     const [onText] = refused(withColumns({ field: 'title', summary: 'max' }));
-    expect(onText.hint).toBe('Point "max" at a numeric, date/time or boolean field, or aggregate "title" with one its `text` type accepts: count, count_distinct.');
+    expect(onText.hint).toBe('Point "max" at a numeric, date/time or boolean field, or aggregate "title" with one its `text` type accepts: count, count_unique.');
     const [onMulti] = refused(withColumns({ field: 'watchers', summary: 'count_unique' }));
-    expect(onMulti.hint).toBe('Count distinct values of a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
+    expect(onMulti.hint).toBe('Point "count_unique" at a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
+    // [#32449] The fix line names ColumnSummary members only — never the function `count_distinct`, which the
+    // schema refuses there. The spec's one virtual-field sentence (`VIRTUAL_FIELD_AGGREGATE_REMEDY`) is shared
+    // by every surface and printed verbatim, so it is the one hint this does not hold.
+    const own = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED && !x.hint.startsWith('The field is computed on read'));
+    expect(own.length).toBeGreaterThan(5);
+    for (const f of own) expect(f.hint, f.hint).not.toContain('count_distinct');
   });
 
   it('judges nothing that compares no value: none, count and the four derived members, over any field', () => {
