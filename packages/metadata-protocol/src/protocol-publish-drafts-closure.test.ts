@@ -775,8 +775,10 @@ describe('[#32666] an object write that makes a field readonly is judged against
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         await liveWritableWithFlow(protocol);
-        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { type: 'screen', runAs: 'system' }));
+        // The object staged FIRST, so it is judged before the flow's draft is
+        // promoted: the live row it reads is still the runAs:'user' flow.
         await stageDraft(protocol, 'object', leaveRequest());
+        await stageDraft(protocol, 'flow', submitFlow('shyx_leave_submit', { type: 'screen', runAs: 'system' }));
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
