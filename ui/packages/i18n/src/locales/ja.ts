@@ -3975,6 +3975,7 @@ const ja = {
       get_authoring_rules: "作成ルールを読む",
       get_metadata_schema: "メタデータの形式を調べる",
       get_package: "パッケージの情報を確認する",
+      get_record_history: "このレコードの履歴を読む",
       list_metadata: "既存のメタデータを一覧表示する",
       list_objects: "既存のオブジェクトを一覧表示する",
       list_packages: "既存のパッケージを一覧表示する",

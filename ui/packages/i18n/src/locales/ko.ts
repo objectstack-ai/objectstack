@@ -3972,6 +3972,7 @@ const ko = {
       get_authoring_rules: "작성 규칙 읽기",
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
+      get_record_history: "이 레코드의 변경 기록 읽기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",

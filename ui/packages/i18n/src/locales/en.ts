@@ -4845,6 +4845,7 @@ const en = {
       get_authoring_rules: 'Read the authoring rules',
       get_metadata_schema: 'Read the metadata format',
       get_package: 'Look at the package',
+      get_record_history: 'Read the record history',
       list_metadata: 'List the existing metadata',
       list_objects: 'List the existing objects',
       list_packages: 'List the existing packages',
