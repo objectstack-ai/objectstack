@@ -401,7 +401,7 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
 describe('[#32517] the unscoped plural reads answer every package\'s item of an unbundled by-package type', () => {
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
-  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission'];
+  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset'];
   const NAME = 'shared_item';
   const item = (packageId: string | undefined, extra: Record<string, unknown> = {}) => ({
     name: NAME,
@@ -460,12 +460,13 @@ describe('[#32517] the unscoped plural reads answer every package\'s item of an 
     expect(keyedLabels(await manager.loadManyKeyed(type))).toEqual([`${NAME}=environment`]);
   });
 
-  it('action: CONTROL — one package\'s action bound to two objects is one item, the one saved last (one row per (package, name))', async () => {
+  it('action: CONTROL — one package\'s action bound to two objects is one item of the unscoped plural read, the binding saved last (as main; `list` serves both)', async () => {
     const loader = new MemoryLoader();
     await loader.save('action', NAME, item(A, { objectName: 'account', label: 'account' }));
     await loader.save('action', NAME, item(A, { objectName: 'contact', label: 'contact' }));
     expect(labels(await loader.loadMany('action'))).toEqual(['contact']);
     expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).loadMany('action'))).toEqual(['contact']);
+    expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).list('action')).sort()).toEqual(['account', 'contact']);
   });
 
   for (const packagelessFirst of [true, false]) {

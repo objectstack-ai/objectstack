@@ -179,7 +179,6 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   const { currentAppName } = useNavigationContext();
   const { pathname, search } = useLocation();
   const { user, activeOrganization } = useAuth();
-  const dispatchNavAction = useNavActionDispatch();
   // The same resolver `UnifiedSidebar` hands `NavigationRenderer`: an entry with
   // no `label` shows its target's current label (objectui#9868).
   const targetLabel = useNavTargetLabel();
@@ -231,6 +230,9 @@ export const NavMenuRenderer: React.FC<NavMenuRendererProps> = ({
   ];
   const appPackageId =
     typeof activeApp?._packageId === 'string' && activeApp._packageId ? (activeApp._packageId as string) : undefined;
+  // An `action` entry reads its action from the app's package (ADR-0150 D5),
+  // as `UnifiedSidebar`'s do.
+  const dispatchNavAction = useNavActionDispatch(appPackageId);
   const capabilityScope = !metadata.readObjectScope
     ? null
     : appPackageId

@@ -148,8 +148,10 @@ export class MemoryLoader implements MetadataLoader {
    * [#32517] One entry per `(package, name)` — each package's slot of the
    * name, and the name's package-less slot — in the order they were first
    * saved: the slot of the package saved last (an action bound to several
-   * objects by one package is one entry, as `DatabaseLoader` holds it in one
-   * row), each with the package it is held for. Keyed by name alone, this
+   * objects by one package is one entry, the binding saved last, as this read
+   * answered it before and as `DatabaseLoader`'s unscoped read answers it;
+   * {@link loadManySlots} serves every binding), each with the package it is
+   * held for. Keyed by name alone, this
    * answered one package's item and folded every other package's away. A
    * package-less slot under a name one package holds is that holder's (D4),
    * so a one-holder name answers its one item saved last, as before.
