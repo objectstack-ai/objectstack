@@ -8,14 +8,7 @@ export const CrmApp = App.create({
   name: 'crm_enterprise',
   label: 'Enterprise CRM',
   icon: 'briefcase',
-  // defaultAgent: 'build',                // ADR-0063 §2 — the resolvable set is exactly two
-                                           // platform agents: `ask` (data surface) / `build`
-                                           // (authoring, e.g. Studio). Any other name parses
-                                           // but binds nothing at chat time. A data app like
-                                           // this one omits the key — `ask` is the default.
-  // hidden: true,                         // ADR-0045 — drop from the App Switcher but keep
-                                           // routable & permission-checked; the shell surfaces
-                                           // hidden apps (e.g. `account`) via the avatar menu.
+  // defaultAgent: 'build',                // only `ask` (the default: omit) or `build` binds — objectstack-ai
   branding: {
     primaryColor: '#4169E1',
     logo: '/assets/crm-logo.png',
@@ -49,6 +42,25 @@ export const CrmApp = App.create({
   ],
 });
 ```
+
+---
+
+## Who sees or opens an app
+
+- **Visibility, per audience.** `tabPermissions: { crm_enterprise: 'hidden' }`
+  (key = app `name`) on a permission set takes the app off its holders' Home
+  tiles, App Switcher and `app:launcher` block: `GET /api/v1/me/apps` drops it,
+  `/api/v1/meta/app` still serves it and its URL still opens. Not an access
+  gate. Across the sets a person holds the most visible value wins: a `visible`
+  entry on the set everyone holds cancels every `hidden`.
+- **Access.** App `requiredPermissions: ['crm.access']` plus `systemPermissions:
+  ['crm.access']` on the holders' permission set. Nobody else is served the app
+  (by name: `403`), admins included until a set grants them the capability.
+- **Everyone.** App `hidden: true` keeps it off the App Switcher for all, still
+  routable and permission-checked; the shell surfaces it (e.g. `account`) from
+  the avatar menu.
+- **No per-position default app.** An app's `isDefault: true` is global: never
+  promise a landing app per position.
 
 ---
 
@@ -94,7 +106,7 @@ named view" concept), plus presentation policy (`userFilters`,
 `appearance.allowedVisualizations`, `userActions`). The old
 `sourceView` ("inherit from a named object view") is **deprecated** legacy: it
 is still honored at runtime as a fallback when the page defines no `columns` of
-its own, but new pages define `columns`/`sort`/`filterBy` on the page.
+its own.
 
 <!-- os:check -->
 ```typescript
@@ -107,7 +119,7 @@ export const TaskWorkbenchPage = definePage({
   object: 'task',
   interfaceConfig: {
     source: 'task',
-    columns: ['subject', 'status', 'due_date'],  // the page IS the view definition
+    columns: ['subject', 'status', 'due_date'],
     sort: [{ field: 'due_date', order: 'asc' }],
     filterBy: [{ field: 'status', operator: 'not_equals', value: 'done' }],
     userFilters: { element: 'dropdown', fields: [{ field: 'status' }] },
@@ -148,9 +160,4 @@ at runtime from the client viewport, because an author
   only for a named-customer requirement a group reference genuinely cannot
   express (a cross-group entry combination, a wizard/pane structure), with that
   reason in a comment beside it. A hand-enumerated section re-copies membership
-  the object already owns and goes stale on the next field added, so rung 3 is
-  an exception, never a default.
-
-> **Rule of thumb: presentation (surface / width / columns) is not metadata.**
-> Write fields + semantic roles; the renderer decides the pixels. Reach for
-> `navigation.mode` / `size` / a `Page` only to *override* — never as the default.
+  the object already owns and goes stale on the next field added.
