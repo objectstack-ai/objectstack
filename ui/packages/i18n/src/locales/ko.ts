@@ -335,6 +335,10 @@ const ko = {
     registryRef: {
       loadFailed: "목록을 불러오지 못했습니다. 이름을 직접 입력할 수 있습니다.",
       notFound: "{{name}} (찾을 수 없음)",
+      holderPackage: "{{item}} · 패키지 {{package}}",
+      holderEnvironment: "{{item}} · 이 환경에서 정의됨",
+      holderUnresolved: "{{name}} (여러 패키지가 제공하며 패키지가 지정되지 않음)",
+      holderNeedsPackage: "이 양식은 권한 세트를 이름으로만 지정합니다. 여러 패키지가 같은 이름의 권한 세트를 제공하는 경우 여기서는 이 환경에서 정의된 것만 선택할 수 있습니다.",
     },
     preferenceOption: {
       allTopics: "모든 주제 ({{value}})",
