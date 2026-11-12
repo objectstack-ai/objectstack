@@ -1203,16 +1203,42 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
     return out;
   };
 
+  /**
+   * The paths where the mirror is DELIBERATELY narrower than the applier, each
+   * with both patterns spelled out. Narrower is the one safe direction: every
+   * value the model can generate is still one the applier accepts. Each entry
+   * must carry its reason; the pin below fails on any drift not listed here and
+   * on any listed entry that no longer drifts.
+   */
+  const DELIBERATE_NARROWER_MIRROR: Record<string, { lenient: string; strict: string; reason: string }> = {
+    // [#32762] The applier also admits the qualified `OBJECT.KEY` view name
+    // when the qualifier is the view's own object: a cross-key rule the
+    // per-leaf mirror cannot state, so the mirror keeps the bare key and the
+    // model cannot generate a qualifier naming another object.
+    'views[].name': {
+      lenient: String(/^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/),
+      strict: String(/^[a-z_][a-z0-9_]*$/),
+      reason: 'qualified OBJECT.KEY admitted on apply, cross-key, not generated',
+    },
+  };
+
   it('every identifier the applier constrains is constrained the same way in the model-facing mirror', () => {
     const lenient = indexPatterns(SolutionBlueprintSchema);
     const strict = indexPatterns(SolutionBlueprintStrictSchema);
     // Only paths BOTH sides carry are comparable — the key-parity gate above
     // owns "which keys exist"; this one owns "what values they accept".
-    const drift = [...lenient.entries()]
+    const drifting = [...lenient.entries()]
       .filter(([path]) => strict.has(path))
-      .filter(([path, pattern]) => strict.get(path) !== pattern)
+      .filter(([path, pattern]) => strict.get(path) !== pattern);
+    const drift = drifting
+      .filter(([path]) => !Object.prototype.hasOwnProperty.call(DELIBERATE_NARROWER_MIRROR, path))
       .map(([path, pattern]) => `${path}: lenient ${pattern ?? 'none'} vs strict ${strict.get(path) ?? 'none'}`);
     expect(drift).toEqual([]);
+    // Every listed exception still drifts, and exactly as listed.
+    for (const [path, expected] of Object.entries(DELIBERATE_NARROWER_MIRROR)) {
+      expect({ path, lenient: lenient.get(path), strict: strict.get(path) })
+        .toEqual({ path, lenient: expected.lenient, strict: expected.strict });
+    }
   });
 
   it('the model cannot emit the leading-digit option value the applier rejects', () => {
@@ -1762,5 +1788,56 @@ describe('blueprint object `icon`', () => {
     const result = SolutionBlueprintStrictSchema.safeParse(bp(missing));
     expect(result.success).toBe(false);
     expect(result.error?.issues.map((i) => i.path.join('.'))).toEqual(['objects.0.icon']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#32762] A blueprint view's `name`: the bare key, or `OBJECT.KEY` qualified
+// with the view's own object — the spelling every stored view record carries.
+// ---------------------------------------------------------------------------
+describe('blueprint view `name` — bare, or qualified with its own object', () => {
+  const view = (name: string, object = 'ticket') => ({
+    summary: 's',
+    objects: [{ name: 'ticket', fields: [{ name: 'title', type: 'text' as const }] }],
+    views: [{ object, name, type: 'list' as const }],
+  });
+  const verdict = (input: unknown) => {
+    const result = SolutionBlueprintSchema.safeParse(input);
+    return result.success ? 'ok' : result.error.issues.map((i) => ({ path: i.path, code: i.code }));
+  };
+
+  it('accepts the bare snake_case key, as before', () => {
+    expect(verdict(view('open_list'))).toBe('ok');
+  });
+
+  it('accepts OBJECT.KEY when the qualifier is the view\'s own object, and carries it as written', () => {
+    expect(verdict(view('ticket.open_list'))).toBe('ok');
+    expect(SolutionBlueprintSchema.parse(view('ticket.open_list')).views?.[0].name).toBe('ticket.open_list');
+  });
+
+  it('refuses a qualifier naming another object, at the view\'s name', () => {
+    expect(verdict(view('case.open_list'))).toEqual([{ path: ['views', 0, 'name'], code: 'custom' }]);
+  });
+
+  it('refuses what is neither spelling, by the pattern, at the view\'s name', () => {
+    for (const name of ['ticket.open.list', 'Ticket.open_list', 'ticket.', '.open_list', 'ticket/open_list', 'open-list']) {
+      expect({ name, verdict: verdict(view(name)) })
+        .toEqual({ name, verdict: [{ path: ['views', 0, 'name'], code: 'invalid_format' }] });
+    }
+  });
+
+  it('keeps the strict mirror on the bare key: the model cannot generate a qualifier naming another object', () => {
+    // The cross-key half of the rule has no per-leaf form, so the mirror stays
+    // narrower than the applier (listed in the VALUE-parity exceptions).
+    const strictName = (SolutionBlueprintStrictSchema as any).shape.views.unwrap().element.shape.name;
+    expect(strictName.safeParse('open_list').success).toBe(true);
+    expect(strictName.safeParse('ticket.open_list').success).toBe(false);
+  });
+
+  it('BlueprintViewSchema on its own judges the same rule', () => {
+    expect(BlueprintViewSchema.safeParse({ object: 'ticket', name: 'ticket.open_list' }).success).toBe(true);
+    const foreign = BlueprintViewSchema.safeParse({ object: 'ticket', name: 'case.open_list' });
+    expect(foreign.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+      .toEqual([{ path: ['name'], code: 'custom' }]);
   });
 });

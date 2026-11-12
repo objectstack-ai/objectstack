@@ -279,7 +279,7 @@ const result = BlueprintAppSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object this view displays (snake_case) |
-| **name** | `string` | ✅ | View machine name (snake_case) |
+| **name** | `string` | ✅ | View machine name: the bare snake_case key (e.g. "ticket_status_board"), or that key qualified with THIS view's `object` as `OBJECT.KEY` (e.g. "ticket.ticket_status_board" on a view whose object is "ticket"), the spelling a stored view record carries. Both spellings name the same view. A qualifier naming any other object is refused. |
 | **label** | `string` | optional | Human-readable view label |
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
 | **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
@@ -356,7 +356,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object this view displays (snake_case) |
-| **name** | `string` | ✅ | View machine name (snake_case) |
+| **name** | `string` | ✅ | View machine name: the bare snake_case key (e.g. "ticket_status_board"), or that key qualified with THIS view's `object` as `OBJECT.KEY` (e.g. "ticket.ticket_status_board" on a view whose object is "ticket"), the spelling a stored view record carries. Both spellings name the same view. A qualifier naming any other object is refused. |
 | **label** | `string` | optional | Human-readable view label |
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
 | **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
@@ -424,7 +424,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Object this view displays (snake_case) |
-| **name** | `string` | ✅ | View machine name (snake_case) |
+| **name** | `string` | ✅ | View machine name: the bare snake_case key (e.g. "ticket_status_board"). |
 | **label** | `string \| null` | ✅ | Human-readable view label, or null |
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null` | ✅ | View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor. |
 | **columns** | `string[] \| null` | ✅ | Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |

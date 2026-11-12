@@ -34,6 +34,7 @@
     },
     "ai/BlueprintView": {
       "sites": [
+        "",
         "filters.element"
       ]
     },
@@ -72,6 +73,7 @@
         "objects.element",
         "objects.element.fields.element",
         "objects.element.fields.element.summaryOperations.filter.lazy",
+        "views.element",
         "views.element.filters.element"
       ]
     },

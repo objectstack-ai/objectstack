@@ -449,6 +449,49 @@ const WIDGET_MEASURE_RULE = 'Name the FIELD, not "total_amount" or "avg_score": 
 const VIEW_START_DATE_FIELD_RULE = 'For type:"calendar" only: the date or datetime field of THIS view\'s object that places each record on the calendar (e.g. "interview_date", "due_date"), carried into the built view as `calendar.startDateField`. snake_case, naming one of the object\'s own fields. SET it on every calendar view; without it the builder binds a date field of its own choosing, which may not be the one meant. Ignored on the other view types (a gantt view takes its dates from `columns`, start before end).';
 
 /**
+ * [#32762] A blueprint view's `name`: the bare snake_case key, or that key
+ * qualified with an object as `OBJECT.KEY` — one optional qualifier segment in
+ * the blueprint's own `SNAKE_CASE` grammar. The qualified spelling is the one a
+ * stored view record carries (`ViewItemNameSchema`, `ui/view.zod.ts`, requires
+ * it) and the one the lint view resolver and objectui's view-id matcher
+ * treat as the bare key's equal when the qualifier is the view's own object
+ * (`resolvesViewId`, `packages/lint/src/lint-view-refs.ts`, kept in lock-step with
+ * objectui's `resolveViewId`).
+ * Which object the qualifier may name is a cross-key rule, judged by
+ * {@link refuseForeignViewQualifier}.
+ */
+const BLUEPRINT_VIEW_NAME = /^(?:[a-z_][a-z0-9_]*\.)?[a-z_][a-z0-9_]*$/;
+
+/** The view `name` rule, one sentence for the describe and the refusal. */
+const VIEW_NAME_RULE = 'View machine name: the bare snake_case key (e.g. "ticket_status_board"), or that key qualified with THIS view\'s `object` as `OBJECT.KEY` (e.g. "ticket.ticket_status_board" on a view whose object is "ticket"), the spelling a stored view record carries. Both spellings name the same view. A qualifier naming any other object is refused.';
+
+/**
+ * [#32762] A qualified view name's qualifier is the view's own `object`. A view
+ * over `ticket` named `case.open_list` would be stored under another object's
+ * name space, where the view resolvers look for a view of `case`, so it is
+ * refused at `['name']`, naming both spellings that are accepted.
+ */
+function refuseForeignViewQualifier(view: unknown, ctx: z.RefinementCtx): void {
+  if (typeof view !== 'object' || view === null) return;
+  const { object, name } = view as Record<string, unknown>;
+  // A name outside the pattern is the pattern's issue alone: judging its
+  // qualifier too would answer one wrong name twice.
+  if (typeof object !== 'string' || typeof name !== 'string' || !BLUEPRINT_VIEW_NAME.test(name)) return;
+  const dot = name.indexOf('.');
+  if (dot < 0) return;
+  const qualifier = name.slice(0, dot);
+  if (qualifier === object) return;
+  const key = name.slice(dot + 1);
+  ctx.addIssue({
+    code: 'custom',
+    path: ['name'],
+    message:
+      `View name '${name}' is qualified with object '${qualifier}', but this view displays object '${object}'. `
+      + `Write the bare key '${key}', or qualify it with this view's own object: '${object}.${key}'.`,
+  });
+}
+
+/**
  * A proposed list/form/kanban/calendar/gallery/gantt view over an object.
  *
  * `filters` and `sort` are what let a view keep the promise its name makes
@@ -465,7 +508,7 @@ const VIEW_START_DATE_FIELD_RULE = 'For type:"calendar" only: the date or dateti
  */
 export const BlueprintViewSchema = lazySchema(() => z.object({
   object: z.string().regex(SNAKE_CASE).describe('Object this view displays (snake_case)'),
-  name: z.string().regex(SNAKE_CASE).describe('View machine name (snake_case)'),
+  name: z.string().regex(BLUEPRINT_VIEW_NAME).describe(VIEW_NAME_RULE),
   label: z.string().optional().describe('Human-readable view label'),
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).default('list')
     .describe('View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list".'),
@@ -485,7 +528,7 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Default record order: [{ field, order }] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{ field: "due_date", order: "asc" }]). Omit for the platform default order.'),
   startDateField: z.string().regex(SNAKE_CASE).optional()
     .describe(VIEW_START_DATE_FIELD_RULE),
-}));
+}).superRefine(refuseForeignViewQualifier));
 export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
 export type BlueprintViewParsed = z.infer<typeof BlueprintViewSchema>;
@@ -767,7 +810,13 @@ const StrictSortItem = z.object({
 
 const StrictView = z.object({
   object: strictIdent('Object this view displays (snake_case)'),
-  name: strictIdent('View machine name (snake_case)'),
+  // [#32762] The bare key only. The lenient side also admits `OBJECT.KEY`
+  // qualified with the view's own object, a cross-key rule this per-leaf mirror
+  // cannot state: admitting a dot here would let the model generate a qualifier
+  // naming another object, legal to propose and refused at apply (the
+  // cloud#1967 failure mode). Narrower here, never wider: every name the mirror
+  // admits, the lenient side admits. The VALUE-parity pin names this one path.
+  name: strictIdent('View machine name: the bare snake_case key (e.g. "ticket_status_board").'),
   label: z.string().nullable().describe('Human-readable view label, or null'),
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).nullable().describe('View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor.'),
   columns: z.array(z.string().regex(SNAKE_CASE)).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
