@@ -129,13 +129,21 @@ export class ScopedContextFacet {
   }
 
   /** The body of `ScopedContext#[SEED_USER_GRANTS]`; the method's docblock there is its contract. */
-  static async seedUserGrants(this: Pick<ScopedContextHost, 'derive' | 'engine' | 'executionContext' | 'facade'>): Promise<ScopedContext> {
+  static async seedUserGrants(this: Pick<ScopedContextHost, 'derive' | 'engine' | 'executionContext' | 'facade'>, opts?: { membershipUnread?: true }): Promise<ScopedContext> {
     const ctx = this.executionContext;
     if (!ctx.userId) return this.facade;
     const needsGrants = !Array.isArray(ctx.permissions);
     const needsPeers = !Array.isArray(ctx.org_user_ids);
+    // [ADR-0093 D8.1, as amended] The membership set the organization wall
+    // reads, by the peer list's rule: carried, it is kept; absent, it is the
+    // resolver's — and, when the resolver could not be read, an empty one: a
+    // membership the hook could not read is not a current one.
+    const needsMembership = !Array.isArray(ctx.accessible_org_ids);
+    if (opts?.membershipUnread) {
+      return needsMembership ? this.derive({ ...ctx, accessible_org_ids: [] }) : this.facade;
+    }
     const needsEmail = !ctx.email;
-    if (!needsGrants && !needsPeers && !needsEmail) return this.facade;
+    if (!needsGrants && !needsPeers && !needsMembership && !needsEmail) return this.facade;
     const grants = await resolveUserAuthzGrants(
       this.engine,
       ctx.userId,
@@ -151,6 +159,7 @@ export class ScopedContextFacet {
       // calls, holding no system permission.
       ...(needsGrants && grants.principalKind ? { principalKind: grants.principalKind, systemPermissions: [] } : {}),
       ...(needsPeers ? { org_user_ids: grants.org_user_ids } : {}),
+      ...(needsMembership ? { accessible_org_ids: grants.accessible_org_ids } : {}),
       ...(needsEmail && grants.email ? { email: grants.email } : {}),
     });
   }
