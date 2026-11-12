@@ -91,12 +91,51 @@ export const TokenStorage = {
 
 /**
  * Better-auth client error shape: a human message plus an HTTP status and an
- * optional machine-readable `code` (e.g. `INVALID_EMAIL_OR_PASSWORD`).
+ * optional machine-readable `code` (e.g. `INVALID_EMAIL_OR_PASSWORD`). The rest
+ * of the JSON body rides along (better-fetch spreads it), which is where
+ * `dependents` and `userMessage` arrive from.
  */
 interface BetterAuthErrorLike {
   message?: string;
   status?: number;
   code?: string;
+  dependents?: unknown;
+  userMessage?: unknown;
+}
+
+/**
+ * One table a refused delete names: plugin-auth's 409 `DELETE_RESTRICTED`
+ * body lists `dependents: [{ object, count }]`, `count` absent where the
+ * server withholds it.
+ */
+interface AuthErrorDependent {
+  object: string;
+  count?: number;
+}
+
+/** The thrown value of every auth-client rejection that goes through {@link toAuthError}. */
+type AuthClientError = Error & {
+  code?: string;
+  dependents?: AuthErrorDependent[];
+  userMessage?: string;
+};
+
+/**
+ * The `dependents` list in the shape the server declares, or `undefined` when
+ * the body carries none: an entry without a non-empty `object` is dropped, and
+ * a `count` that is not a non-negative integer is left out, as the server's own
+ * wire reader does.
+ */
+function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: AuthErrorDependent[] = [];
+  for (const entry of raw) {
+    const object = (entry as { object?: unknown } | null)?.object;
+    if (typeof object !== 'string' || object === '') continue;
+    const count = (entry as { count?: unknown }).count;
+    out.push(typeof count === 'number' && Number.isInteger(count) && count >= 0 ? { object, count } : { object });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /**
@@ -122,15 +161,27 @@ interface BetterAuthErrorLike {
  * producer discarded. `message` is unchanged for every caller — this only stops
  * throwing away the half of the pair that was already being computed.
  * `packages/auth/src/__tests__/org-error-code-4474.test.ts` pins both halves.
+ *
+ * ## The structured half of a refusal survives too (objectstack#32648)
+ *
+ * The same reasoning covers the rest of the body. An organization delete the
+ * server refuses because the organization still owns records answers 409
+ * `DELETE_RESTRICTED` with `dependents: [{ object, count }]`; the console
+ * renders that list itself, by object label, so it is carried on the thrown
+ * error ({@link readDependents}). So is `userMessage`, the producer-marked
+ * user-facing sentence of the error envelope, when the server sends one.
  */
 function toAuthError(
   error: BetterAuthErrorLike,
   fallbackMessage?: string,
-): Error & { code?: string } {
+): AuthClientError {
   const err = new Error(
     error.message ?? fallbackMessage ?? `Auth request failed with status ${error.status}`,
-  ) as Error & { code?: string };
+  ) as AuthClientError;
   if (error.code) err.code = error.code;
+  const dependents = readDependents(error.dependents);
+  if (dependents) err.dependents = dependents;
+  if (typeof error.userMessage === 'string' && error.userMessage.trim()) err.userMessage = error.userMessage;
   return err;
 }
 
