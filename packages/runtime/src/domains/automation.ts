@@ -52,7 +52,8 @@ import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
-import { ExecutionStatus } from '@objectstack/spec/automation';
+import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
+import { nearestName } from '@objectstack/formula';
 import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
@@ -2192,6 +2193,150 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * The slice of the messaging service the notify channel check reads:
+ * `MessagingService.getKnownChannels()` in `@objectstack/service-messaging`,
+ * declared structurally because this package takes no dependency on it (the
+ * `notify` node's own `MessagingServiceSurface` does the same). Every channel
+ * the service knows: the ones registered directly, and each lazy provider
+ * (`email`, `sms`, `push`) whether or not its transport is installed yet.
+ */
+interface NotifyChannelRegistry {
+    getKnownChannels(): ReadonlyArray<{ id: string; configured: boolean }>;
+}
+
+/** One channel name a `notify` node's `channels` carries, and where. */
+interface NotifyChannelEntry {
+    readonly channel: string;
+    /** Its key path below the node's `config.channels`: `[]` for the string form, `[i]` for a list member. */
+    readonly at: readonly number[];
+}
+
+/**
+ * The channel names a `notify` node's `channels` value holds, read the way the
+ * node's executor reads them at run time (`toStringList` in
+ * `service-automation`'s `notify-node.ts`): a string or a list of strings,
+ * read raw, each trimmed, blank entries dropped. An absent value names no
+ * channel (the node then delivers to the inbox, the messaging default), so
+ * nothing here is judged for it.
+ */
+function notifyChannelEntries(value: unknown): NotifyChannelEntry[] {
+    if (Array.isArray(value)) {
+        const entries: NotifyChannelEntry[] = [];
+        value.forEach((member, index) => {
+            if (member == null) return;
+            const channel = String(member).trim();
+            if (channel) entries.push({ channel, at: [index] });
+        });
+        return entries;
+    }
+    if (typeof value === 'string' && value.trim()) return [{ channel: value.trim(), at: [] }];
+    return [];
+}
+
+/**
+ * Refuse, at the `/automation` definition write doors, a `notify` node that
+ * names a channel this deployment does not register (ruling 6810493176, letter
+ * B): a `400 VALIDATION_FAILED` that names each node and channel, located at
+ * the node's `config.channels`, and lists the registered channels as the fix.
+ * `undefined` when there is nothing to refuse, or nothing to judge against.
+ *
+ * A channel is code a plugin registers with the messaging service, never data
+ * an administrator adds later, so a name no plugin registers can only be a
+ * typo or a missing plugin: at run time every delivery on it fails with
+ * `channel 'NAME' not registered`, and the node records a warning, after the
+ * flow was saved and armed with no word to its author. Positions and queues an
+ * approval node names are a different kind of name — runtime data an
+ * administrator adds and removes — and are not judged here.
+ *
+ * ## Why the registry is complete when this reads it
+ *
+ * The channel registry fills during the boot (`messaging-service.ts` says why a
+ * mount may arrive after `kernel:ready`), so an absence is a verdict only once
+ * nothing can still register. Three facts make it one here:
+ *
+ *  - **The kernel's own boot fact.** The check runs only when
+ *    `isRequestKernelReady(context)` answers `true` — the request kernel's
+ *    `hasBootPhaseSettled('kernel:ready')`: every plugin's `start()` and every
+ *    `kernel:ready` handler has run, and no plugin can be added to a kernel
+ *    once its boot has begun (`ObjectKernel.use`). The messaging plugin
+ *    registers the inbox in `init()` and its `email`, `sms` and `push`
+ *    providers from its own `kernel:ready` handler. Before that, or on a deps
+ *    that cannot answer, nothing is judged.
+ *  - **Known, not mounted.** It reads `getKnownChannels()`, which lists a lazy
+ *    provider whose transport is not installed yet (`email` with no email
+ *    service): such a channel can start sending without a flow edit once its
+ *    transport is configured, so a node naming it is never refused for it.
+ *    Only a name the messaging service knows no channel or provider for is.
+ *  - **No registry, no verdict.** With no messaging service the `notify` node
+ *    delivers nothing whatever it names (it records a skipped step), and a
+ *    messaging service with no `getKnownChannels()` (another implementation of
+ *    the service) cannot be enumerated: neither is judged.
+ *
+ * Read per request and recorded nowhere: the answer is the registry as it
+ * stands at this save (AGENTS.md, "Startup registry reads").
+ *
+ * Judged at the save doors only, never in `registerFlow`: the boot pull
+ * registers a package's flows from the automation plugin's `start()`, before
+ * the messaging plugin's `kernel:ready` handler has registered its providers,
+ * and a stored row re-registered later must keep binding as it did when it
+ * was saved. Every node is judged, at any region depth (`collectFlowGraphs`).
+ */
+async function refuseUnknownNotifyChannels(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    flow: unknown,
+): Promise<HttpDispatcherResult | undefined> {
+    if (!flow || typeof flow !== 'object') return undefined;
+    if (deps.isRequestKernelReady?.(context) !== true) return undefined;
+    let messaging: Partial<NotifyChannelRegistry> | undefined;
+    try {
+        messaging = await deps.resolveService(context, 'messaging');
+    } catch {
+        messaging = undefined;
+    }
+    if (typeof messaging?.getKnownChannels !== 'function') return undefined;
+    const known = messaging.getKnownChannels();
+    const knownIds = known.map((entry) => entry.id);
+
+    const lines: string[] = [];
+    const fields: Array<{ field: string; code: string; message: string }> = [];
+    for (const graph of collectFlowGraphs(flow as { nodes?: readonly FlowNodeParsed[] })) {
+        graph.nodes.forEach((node, index) => {
+            if (node.type !== 'notify') return;
+            const config = node.config as { channels?: unknown } | undefined;
+            for (const { channel, at } of notifyChannelEntries(config?.channels)) {
+                if (knownIds.includes(channel)) continue;
+                const field = [...graph.path, 'nodes', index, 'config', 'channels', ...at].join('.');
+                const where = graph.scope ? ` (in ${graph.scope})` : '';
+                const near = nearestName(channel, knownIds);
+                const line =
+                    `node '${node.id}' (\`notify\`)${where} names channel '${channel}' at ${field}, which no plugin ` +
+                    `registers in this deployment${near ? ` — did you mean '${near}'?` : ''}`;
+                lines.push(line);
+                fields.push({ field, code: 'invalid_value', message: line });
+            }
+        });
+    }
+    if (lines.length === 0) return undefined;
+
+    const roster = known.length === 0
+        ? 'This deployment registers no channel.'
+        : `The channels this deployment registers: ${known
+            .map((entry) => `\`${entry.id}\`${entry.configured ? '' : ' (no transport configured yet)'}`)
+            .join(', ')}.`;
+    const message =
+        `Flow '${name}' rejected: ${lines.length} notify channel(s) no plugin registers:\n` +
+        lines.map((line) => `  - ${line}`).join('\n') + '\n' +
+        `${roster} Name one of them in the node's \`channels\`, or install the plugin that provides the channel ` +
+        `and save the flow again. A delivery on a channel nothing registers fails at every run.`;
+    return {
+        handled: true,
+        response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS),
+    };
+}
+
+/**
  * [#20679, ADR-0126 §2] THE LOCKED BASE at this domain's definition-write and
  * removal doors — `PUT /:name`, `DELETE /:name`, and `POST /` onto a name the
  * engine already holds (a create onto an existing name is an overwrite).
@@ -2501,7 +2646,10 @@ async function flowWriteRefusal(
  *  - **Engine first, store second.** The engine's registration is the
  *    stricter validation (strict parse, cycles, regions, node config keys,
  *    predicates), so a definition it refuses is never stored; that refusal is
- *    answered as a 400 by {@link flowDefinitionRefusal}.
+ *    answered as a 400 by {@link flowDefinitionRefusal}. Then the one check
+ *    only a save makes: a `notify` node naming a channel no plugin registers
+ *    is refused as a 400 ({@link refuseUnknownNotifyChannels}), and the
+ *    registration is undone as for a refused save.
  *  - **A save that fails undoes the registration** and relays the store's own
  *    failure, so no answer reports a write that will not survive: a new name
  *    is withdrawn, and a name the engine already held gets that definition
@@ -2546,6 +2694,15 @@ async function registerAndSaveFlow(
         return {
             refused: { handled: true, response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS) },
         };
+    }
+    // A `notify` node naming a channel no plugin registers is refused here,
+    // after the engine's verdict (so a definition it refuses answers that
+    // first) and on the flow it parsed, and undone like a refused save: the
+    // engine gets back what it held, and nothing is stored.
+    const unknownChannel = await refuseUnknownNotifyChannels(deps, context, name, registered);
+    if (unknownChannel) {
+        restoreFlowRegistration(automationService, name, held);
+        return { refused: unknownChannel };
     }
     let packageId: string | undefined;
     if (land) {
