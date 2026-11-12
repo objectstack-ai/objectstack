@@ -7,12 +7,12 @@
 
 fix(driver-sql,objectql,metadata-protocol): publishing a field change on a live object brings the table to the declaration — `date` → `datetime` keeps the time, and `storage: { notNull: false }` drops the NOT NULL
 
-Clause-②: no
+Clause-②: yes (widening) — new public `SqlDriver.applyPublishedColumnChanges` and `ObjectQL.applyPublishedColumnChanges`, a new `widen_date_to_datetime` drift op, an optional `MetadataHostEngine.applyPublishedColumnChanges` member and the new `object-column-changes-not-applied` advisory rule
 Metadata-protocol: none
 
 Publishing a changed object used to update the metadata and leave its table as it was. Two changes the field-type table says pass cleanly did not:
 
-- **`date` → `datetime` on a table with rows.** Every time of day written after the publish was lost. Postgres and MySQL kept the `date` column, and the SQLite driver kept the field registered as a date, so the read cut the value to its day. The publish now widens the column in place (Postgres `timestamptz`, MySQL `DATETIME(3)`; each stored day becomes midnight UTC), and the driver re-registers the field's type on every sync, so a value written afterwards reads back with its time on all three dialects.
+- **`date` → `datetime` on a table with rows.** Every time of day written after the publish was lost. Postgres and MySQL kept the `date` column, and the SQLite driver kept the field registered as a date, so the read cut the value to its day. The publish now widens the column in place (Postgres `timestamptz`, MySQL `DATETIME(3)`; each stored day becomes midnight UTC; on Postgres the widening waits at most 5 seconds for its table lock, and behind a lock held longer it is reported as not applied), and the driver re-registers the field's type on every sync, so a value written afterwards reads back with its time on all three dialects.
 - **`required: true` → `false` with `storage: { notNull: false }`.** The column kept its NOT NULL, so every create that omitted the field was refused by the database although the declaration said it was optional. The publish now relaxes the column.
 
 How it works:

@@ -27,12 +27,18 @@
  * the entry must not appear there. The explicit `storage: { notNull: false }`
  * over a NOT NULL column is reported whatever `required` says, and stays
  * ADR-0113 D5's `needs_confirm`, so dev auto-reconcile still never applies it.
+ *
+ * ## The lock half: Postgres only
+ *
+ * The widening takes ACCESS EXCLUSIVE inside the publish request, so its lock
+ * wait is bounded; behind a held lock it reports the change skipped.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { SqlDriver } from './sql-driver.js';
 import { diffManagedTable, type ManagedDriftEntry, type PhysicalColumn, type SqlDialectName } from './schema-drift.js';
-import { DIALECT_CELLS, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
+import { PUBLISHED_COLUMN_LOCK_WAIT_MS } from './sql-driver-schema-sync.js';
+import { DIALECT_CELLS, PG_CELL, declareDialectCell, type DialectCell } from './live-dialect-matrix.testkit.js';
 
 const MATRIX = 'published column changes (#32590)';
 
@@ -243,3 +249,89 @@ function declarePublishedColumnSuite(cell: DialectCell): void {
 for (const cell of DIALECT_CELLS) {
   declareDialectCell(cell, MATRIX, declarePublishedColumnSuite);
 }
+
+// ── Half 3: the Postgres widening's lock wait is bounded ────────────────────
+
+const LOCKED = 'pub32590_locked';
+const LOCKED_V1 = { name: LOCKED, fields: { start_date: { type: 'date' } } };
+const LOCKED_V2 = { name: LOCKED, fields: { start_date: { type: 'datetime' } } };
+
+/**
+ * The widening runs inside the publish request and takes ACCESS EXCLUSIVE. A
+ * waiting request for that lock queues every later statement on the table
+ * behind it, so the wait is bounded: behind a session that holds the table,
+ * the publish gives up after `PUBLISHED_COLUMN_LOCK_WAIT_MS`, reports the
+ * entry skipped (which the publish answers as its advisory), names the reason
+ * in one `warn` line and leaves the column as it was. Postgres only: the
+ * MySQL arm is a plain `MODIFY`, and SQLite has no widening.
+ */
+function declareLockWaitSuite(cell: DialectCell): void {
+  describe(`the publish's widening behind a held table lock — ${cell.label} (#32590)`, () => {
+    const logged: string[] = [];
+    let driver: SqlDriver;
+    let holder: SqlDriver;
+    const columnType = async () => String(((await driver.getKnex()(LOCKED).columnInfo()) as any).start_date.type).toLowerCase();
+
+    beforeAll(async () => {
+      const sink = (m: unknown) => logged.push(String(m));
+      driver = new SqlDriver(cell.config());
+      (driver as unknown as { logger: unknown }).logger = { info: sink, warn: sink, error: sink, debug: () => {} };
+      holder = new SqlDriver(cell.config());
+      await driver.connect();
+      await holder.connect();
+      await driver.getKnex().schema.dropTableIfExists(LOCKED);
+      await driver.syncSchema(LOCKED, LOCKED_V1);
+      await driver.create(LOCKED, { start_date: '2026-11-12' });
+      await driver.syncSchema(LOCKED, LOCKED_V2);
+    });
+
+    afterAll(async () => {
+      await driver?.getKnex().schema.dropTableIfExists(LOCKED).catch(() => {});
+      await holder?.disconnect().catch(() => {});
+      await driver?.disconnect().catch(() => {});
+    });
+
+    it('gives up within the bound, reports the widening skipped with its reason, and leaves the column `date`', async () => {
+      let release!: () => void;
+      const released = new Promise<void>((r) => { release = r; });
+      let markHeld!: () => void;
+      const held = new Promise<void>((r) => { markHeld = r; });
+      const holding = holder.getKnex().transaction(async (trx) => {
+        await trx.raw('LOCK TABLE ?? IN ACCESS SHARE MODE', [LOCKED]);
+        markHeld();
+        await released;
+      });
+      await held;
+      // Without a bound the publish would wait on this lock forever; the holder
+      // lets go after the bound plus a margin, so that case fails on the
+      // assertions below instead of hanging the file.
+      const safety = setTimeout(release, PUBLISHED_COLUMN_LOCK_WAIT_MS + 10_000);
+      const started = Date.now();
+      let report: { applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] };
+      try {
+        report = await driver.applyPublishedColumnChanges(LOCKED_V2);
+      } finally {
+        clearTimeout(safety);
+        release();
+        await holding;
+      }
+      const waited = Date.now() - started;
+
+      expect(report.applied).toEqual([]);
+      expect(opsOf(report.skipped)).toEqual(['widen_date_to_datetime:start_date']);
+      expect(waited).toBeGreaterThanOrEqual(PUBLISHED_COLUMN_LOCK_WAIT_MS - 250);
+      expect(waited).toBeLessThan(PUBLISHED_COLUMN_LOCK_WAIT_MS + 10_000);
+      expect(await columnType()).toBe('date');
+      expect(logged.some((l) => l.includes(`${LOCKED}.start_date was not widened to timestamptz`) && l.includes('still `date`'))).toBe(true);
+    });
+
+    it('once the lock is released, the next publish applies the widening', async () => {
+      const report = await driver.applyPublishedColumnChanges(LOCKED_V2);
+      expect(opsOf(report.applied)).toEqual(['widen_date_to_datetime:start_date']);
+      expect(report.skipped).toEqual([]);
+      expect(await columnType()).toBe('timestamp with time zone');
+    });
+  });
+}
+
+declareDialectCell(PG_CELL, MATRIX, declareLockWaitSuite);

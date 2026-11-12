@@ -584,9 +584,18 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
  * alters only a column still `date`; a column already widened answers `true`
  * (the state the op asks for holds) and anything else answers `false`
  * (skipped). MySQL's `MODIFY` to the type it already has changes nothing.
+ *
+ * The Postgres lock wait is bounded ({@link PUBLISHED_COLUMN_LOCK_WAIT_MS},
+ * armed with `SET LOCAL`, so it ends with the transaction). This arm runs
+ * inside a publish request, and a waiting ACCESS EXCLUSIVE request queues every
+ * later read and write of the table behind it, so an unbounded wait behind one
+ * long transaction would stall the table and the request together. A lock
+ * timeout answers `false` (skipped) with one `warn` line naming the reason; the
+ * publish then answers its `object-column-changes-not-applied` advisory and
+ * the column stays `date` until the next publish or `os migrate apply`.
  */
 async function widenDateColumnToDatetime(
-  this: Pick<SchemaSyncHost, 'isPostgres' | 'knex' | 'managedObjectFields' | 'nowColumnDefault'>,
+  this: Pick<SchemaSyncHost, 'isPostgres' | 'knex' | 'logger' | 'managedObjectFields' | 'nowColumnDefault'>,
   table: string,
   column: string,
 ): Promise<boolean> {
@@ -598,22 +607,17 @@ async function widenDateColumnToDatetime(
     else if (!isRuntimeDefaultToken(dv) && typeof dv !== 'object') declaredDefault = this.knex.raw('?', [dv]).toQuery();
   }
   if (this.isPostgres) {
-    return this.knex.transaction(async (trx) => {
-      await trx.raw('LOCK TABLE ?? IN ACCESS EXCLUSIVE MODE', [table]);
-      const found = await trx.raw(
-        'SELECT data_type, column_default FROM information_schema.columns '
-          + 'WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?',
-        [table, column],
+    try {
+      return await widenPostgresDateColumn(this.knex, table, column, declaredDefault);
+    } catch (err) {
+      if (!isPostgresLockTimeout(err)) throw err;
+      this.logger.warn(
+        `[schema-drift] ${table}.${column} was not widened to timestamptz: another session held a lock on '${table}' `
+          + `for more than ${PUBLISHED_COLUMN_LOCK_WAIT_MS / 1000}s, so the column is still \`date\`. Publish the object `
+          + 'again, or run "os migrate apply", once the table is idle.',
       );
-      const row = found?.rows?.[0];
-      const dataType = String(row?.data_type ?? '').toLowerCase();
-      if (dataType.startsWith('timestamp')) return true;
-      if (dataType !== 'date') return false;
-      if (row.column_default != null) await trx.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
-      await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE timestamptz USING (??::timestamp AT TIME ZONE 'UTC')`, [table, column, column]);
-      if (declaredDefault !== null) await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${declaredDefault}`, [table, column]);
-      return true;
-    });
+      return false;
+    }
   }
   // MySQL: `MODIFY` restates the WHOLE column, so the nullability is read and
   // repeated (a `MODIFY` without it would make the column nullable) and the
@@ -635,6 +639,39 @@ async function widenDateColumnToDatetime(
   );
   return true;
 }
+
+/**
+ * The Postgres half of {@link widenDateColumnToDatetime}, in one transaction:
+ * bound the lock wait, take the table lock, re-read the column, and alter it
+ * only while it is still `date`. A lock timeout is thrown to the caller.
+ */
+async function widenPostgresDateColumn(knex: Knex, table: string, column: string, declaredDefault: string | null): Promise<boolean> {
+  return knex.transaction(async (trx) => {
+    await trx.raw(`select set_config('lock_timeout', ?, true)`, [`${PUBLISHED_COLUMN_LOCK_WAIT_MS}ms`]);
+    await trx.raw('LOCK TABLE ?? IN ACCESS EXCLUSIVE MODE', [table]);
+    const found = await trx.raw(
+      'SELECT data_type, column_default FROM information_schema.columns '
+        + 'WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?',
+      [table, column],
+    );
+    const row = found?.rows?.[0];
+    const dataType = String(row?.data_type ?? '').toLowerCase();
+    if (dataType.startsWith('timestamp')) return true;
+    if (dataType !== 'date') return false;
+    if (row.column_default != null) await trx.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+    await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE timestamptz USING (??::timestamp AT TIME ZONE 'UTC')`, [table, column, column]);
+    if (declaredDefault !== null) await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${declaredDefault}`, [table, column]);
+    return true;
+  });
+}
+
+/**
+ * [#32590] How long the publish's Postgres column widening waits for its table
+ * lock before it gives up and reports the change not applied. Short on
+ * purpose: while the ACCESS EXCLUSIVE request waits, every later statement on
+ * the table waits behind it.
+ */
+export const PUBLISHED_COLUMN_LOCK_WAIT_MS = 5_000;
 
 /** The body of `SqlDriver#rebuildSqliteTablePatched`; the method's docblock there is its contract. */
 export async function rebuildSqliteTablePatched(this: Pick<SchemaSyncHost, 'applyDeclaredColumnDefault' | 'buildRebuiltColumn' | 'introspectColumns' | 'knex' | 'logger' | 'managedObjectFields' | 'managedObjectIndexes' | 'nowColumnDefault' | 'resolveTenantField' | 'syncTableIndexes'>, table: string, ents: ManagedDriftEntry[]): Promise<ManagedDriftEntry[]> {
