@@ -181,6 +181,8 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
   useMetadataClient: () => client,
 }));
 
+// Paid at collection, not in a case's clock: the view inspector's CEL authoring loads it on demand.
+import '@objectstack/lint';
 import { ObjectView, type ConsoleObjectViewProps } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { UserStateAdaptersProvider, useAttachListStateFamily } from '../context/UserStateAdapters';
