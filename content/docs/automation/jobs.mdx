@@ -82,6 +82,13 @@ key, the `sys_job` row key, and the `jobId` stamped on each execution. There is
 no separate `id` key: it was removed in `@objectstack/spec` 17.0.0 because
 nothing read it, and two jobs differing only in `id` were one job declared twice.
 
+Because the name is the scheduling key, one artifact cannot hold two enabled jobs
+of one name — whether one stack, two package bodies, or a package body and the
+artifact's top level declare them. The job service would keep only the last one
+scheduled, so the runtime schedules **none** of them, and says so at `error`
+with `409 RESOURCE_CONFLICT`, naming every holder and how each job runs; a job
+of that name an earlier install scheduled is stopped. Give each job its own name.
+
 ## Does this deployment run packaged jobs at all?
 
 A job declared by a **package** — every `defineJob` reaching the runtime through
@@ -322,8 +329,9 @@ export const OrdersPullJob = defineJob({
   top-level id. A top-level job that no body declares belongs to no package, so
   it reads with no package: the environment's own mapping, else the one package
   that holds the name. A job name that two package bodies both declare belongs
-  to neither: its run is refused with `409 RESOURCE_CONFLICT` naming both, so
-  give each package's job its own name.
+  to neither: with both jobs enabled neither is scheduled (above), and with one
+  of them disabled the other's run is refused with `409 RESOURCE_CONFLICT`
+  naming both, so give each package's job its own name.
 
   When two packages in that reach hold the name, or only a package outside it
   does, the pull is refused before any call or write, with
