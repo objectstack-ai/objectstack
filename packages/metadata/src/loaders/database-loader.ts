@@ -1741,7 +1741,10 @@ export class DatabaseLoader implements MetadataLoader {
    *    the package the restored body names — must be the slot's. Another
    *    owner's version is refused: naming that owner's row when it still
    *    holds one (the version is that owner's), and `not-held-by-qualifier`
-   *    naming that owner when it holds none (one since removed, S8a);
+   *    naming that owner when it holds none (one since removed, S8a). The
+   *    environment's own version of a name one row slot holds lands in that
+   *    row, as before (M1): a package took over the package-less row, or
+   *    saved after it was removed;
    *  - a version attributed to none (F1: a row written before the column, or
    *    by `SysMetadataRepository`) lands in the slot picked only when the
    *    name has one row slot, as before; with several it is refused naming
@@ -1768,7 +1771,11 @@ export class DatabaseLoader implements MetadataLoader {
     const slotPackage = slotPackageOf(key);
     const recorded = await this.historyVersionAttribution(type, name, targetVersion);
     const versionOwner = recorded !== undefined ? recorded : storedItemPackageId(restoredData);
-    if (versionOwner === undefined) {
+    if (versionOwner === undefined || (versionOwner === null && bySlot.size === 1)) {
+      // Attributed to none, or (M1) the environment's own version of a name
+      // one row slot holds — a package took over the package-less row, or it
+      // was removed and a package saved since: it lands in that one row, as
+      // before. With several row slots it is refused naming every holder.
       refuseSeveralSlots(bySlot, type, name);
     } else if (versionOwner !== (slotPackage ?? null)) {
       if (bySlot.has(storeRowKey(name, versionOwner))) {

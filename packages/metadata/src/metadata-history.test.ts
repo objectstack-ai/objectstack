@@ -420,6 +420,23 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect(labelOf(await rowOf(type, B))).toBe('B5');
       });
 
+      it('M1: one row slot: the environment\'s own version rolls back by name into the one row, as before', async () => {
+        // A takes over the package-less row: the name has one row slot.
+        await loader.save(type, 'x', body('env1'));
+        await loader.save(type, 'x', body('A2', A));
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'A2']]);
+        await manager.rollback(type, 'x', 1);
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row), row.version])).toEqual([[A, 'env1', 3]]);
+        // The other road to one slot: the package-less row removed, then A's saved.
+        await loader.delete(type, 'x');
+        await loader.save(type, 'x', body('env4'));
+        await loader.delete(type, 'x');
+        await loader.save(type, 'x', body('A6', A));
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'A6']]);
+        await manager.rollback(type, 'x', 4);
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual([[A, 'env4']]);
+      });
+
       it('an environment version is not written into a package\'s row', async () => {
         await twoHolders();
         await loader.save(type, 'x', body('env1'));
