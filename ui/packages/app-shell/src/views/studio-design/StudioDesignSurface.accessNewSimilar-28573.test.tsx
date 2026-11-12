@@ -32,6 +32,9 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
+// The pillar reaches `@objectstack/lint`'s dynamic imports; their first load is
+// paid here, at collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/lint';
 import { I18nProvider, createI18n } from '@object-ui/i18n';
 // objectstack#29727 — the zh pins read the studio zh catalogue, which loads lazily.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';

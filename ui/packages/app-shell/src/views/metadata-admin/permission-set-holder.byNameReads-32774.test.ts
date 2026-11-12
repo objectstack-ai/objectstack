@@ -17,6 +17,9 @@
  * Each against a CONTROL: no holding, or another refusal, reads as before.
  */
 import { describe, expect, it } from 'vitest';
+// `catalog-activation`'s dynamic `@objectstack/spec/identity` import is paid at
+// collection, never inside a case's clock (`check:test-source-alias`).
+import '@objectstack/spec/identity';
 import { ledgerAfterSwitch } from './catalog-activation';
 import { holderCandidatesOf, holderCandidatesOfError, holdingOfRead } from './permission-set-holder';
 
