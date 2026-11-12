@@ -87,6 +87,7 @@ import {
   installAttachmentReadVisibility,
 } from './attachment-access-hooks.js';
 import { contributeAttachmentDeleteFloorAlternate } from './attachment-delete-floor-alternate.js';
+import { contributeAttachmentMemberGrant } from './attachment-member-grant.js';
 import {
   FileAttachmentService,
   type FileAttachmentEngine,
@@ -591,7 +592,8 @@ export class StorageServicePlugin implements Plugin {
         // object only when the security service answers `canReadObject`;
         // resolved on every read (the security plugin may start after this
         // one), and without it every read takes the bounded probe.
-        if (typeof (engine as any).registerMiddleware === 'function') {
+        const readVisibilityInstalled = typeof (engine as any).registerMiddleware === 'function';
+        if (readVisibilityInstalled) {
           installAttachmentReadVisibility(engine as any, ctx.logger, () => {
             try {
               return ctx.getService<ISecurityService>('security');
@@ -600,6 +602,25 @@ export class StorageServicePlugin implements Plugin {
             }
           });
         }
+        // Every member's object grant on sys_attachment (read and create),
+        // handed to the member baseline HERE, after the last of the row gates
+        // it relies on, and only when all three are in place: the write rule
+        // above, the read-visibility gate just installed, and the download
+        // door's parent-record check, which binds wherever an auth service and
+        // a queryable engine exist (`buildFileReadAuthorizer`, the same
+        // binding `composeStorageRoutes` makes). On a kernel lacking any of
+        // them the object grant would judge the rows alone, so nothing is
+        // contributed and members stay refused (maintainer ruling; the
+        // reasoning is in `attachment-member-grant.ts`).
+        contributeAttachmentMemberGrant(
+          {
+            writeRule: true,
+            readVisibility: readVisibilityInstalled,
+            downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined,
+          },
+          () => ctx.getService<unknown>('security'),
+          ctx.logger,
+        );
         // Field-reference ownership (ADR-0104 D3 wave 2) — keeps
         // sys_file.ref_object/ref_id/ref_field in step with what records hold,
         // and copies bytes rather than sharing a row when a second field slot
@@ -692,6 +713,14 @@ export class StorageServicePlugin implements Plugin {
         // `PlatformObjectsPlugin` with the `sys_migration` registration it
         // belongs to (#4243) — the ledger and its bookkeeping are platform
         // infrastructure, present with or without this service.
+      } else if (engine) {
+        // An engine the attachment gates cannot be installed on: members get
+        // no attachment grant, and the warning says which gates are missing.
+        contributeAttachmentMemberGrant(
+          { writeRule: false, readVisibility: false, downloadCheck: buildFileReadAuthorizer(toGateRegistry(ctx), engine) !== undefined },
+          () => ctx.getService<unknown>('security'),
+          ctx.logger,
+        );
       }
 
       // ── HTTP routes (existing behaviour) ───────────────────────────

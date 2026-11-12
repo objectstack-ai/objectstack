@@ -408,6 +408,36 @@ export interface OwnershipFloorAlternate {
 }
 
 /**
+ * One permission set an always-on platform service contributes to the member
+ * baseline, through {@link ISecurityService.contributePlatformBaselineSet}.
+ *
+ * The whole shape the seam admits: a name, display text, and read and create
+ * bits on objects the contributor itself registers. Every other permission-set
+ * key and every other object bit is refused, set to `false` included.
+ */
+export interface PlatformBaselineSetContribution {
+  /** Permission set name (snake_case), unique in the security catalog; `explain` shows it. */
+  readonly name: string;
+  /** Display label. */
+  readonly label?: string;
+  /** Human-readable description. */
+  readonly description?: string;
+  /** Read and create, per object the contributor registers. Never `'*'`. */
+  readonly objects: Readonly<Record<string, { readonly allowRead?: boolean; readonly allowCreate?: boolean }>>;
+}
+
+/** What {@link ISecurityService.contributePlatformBaselineSet} answers for an admitted set. */
+export interface PlatformBaselineSetAdmission {
+  /** The admitted set's name. */
+  readonly name: string;
+  /**
+   * Whether the set joined the member baseline. `false` when the deployment
+   * declares no member baseline at all, so the set reaches no member.
+   */
+  readonly joined: boolean;
+}
+
+/**
  * [ADR-0055] Which leg of the master-detail write check refused, in a `deny`
  * from {@link ISecurityService.checkControlledByParentWrite}.
  *
@@ -1402,6 +1432,44 @@ export interface ISecurityService {
     plugin: string,
     alternates: readonly OwnershipFloorAlternate[],
   ): void;
+  /**
+   * Contribute a permission set of the contributor's own to the member
+   * baseline: the sets every signed-in member holds through the `everyone`
+   * anchor (ADR-0090 D5). An always-on platform service calls this from the
+   * place it installs the row gates of the objects it registers, and only once
+   * all of them are installed, so the object-level grant exists only where the
+   * rows are judged. It is not a channel for tenant-installed packages, which
+   * suggest default sets for an administrator to accept instead.
+   *
+   * The implementation registers the set under `contributor`'s package and,
+   * when the deployment declares a member baseline, joins its name to that
+   * baseline. An external member and an agent principal resolve no member
+   * baseline, so neither gains anything from it. Synchronous; open during boot
+   * only.
+   *
+   * **Refuses by throwing a plain `Error`**, with no registered `code`: this is
+   * a boot-time refusal, never a wire answer. A refused call changes nothing.
+   * It refuses when:
+   * - `contributor` is empty, or the boot window has closed;
+   * - the set carries a key other than `name`, `label`, `description` and
+   *   `objects` (a row policy, a field rule, a system permission among them);
+   * - an object is `'*'`, or is not one the engine registry holds with
+   *   `contributor` as its owner;
+   * - an object entry carries a bit other than `allowRead` and `allowCreate`,
+   *   or grants neither;
+   * - the name is a shipped set's, another contributor's or another holder's,
+   *   or the contributor already contributed a set of another name.
+   *
+   * **OPTIONAL, and absence is a defined state, not a bug.** A security service
+   * without the seam omits it. Contributors feature-detect
+   * (`typeof svc.contributePlatformBaselineSet === 'function'`). Absence and a
+   * refusal both leave the baseline as it was, which fails CLOSED: members
+   * hold no grant on the contributor's objects, and nothing is widened.
+   */
+  contributePlatformBaselineSet?(
+    contributor: string,
+    set: PlatformBaselineSetContribution,
+  ): PlatformBaselineSetAdmission;
   /**
    * [ADR-0090 D12] Is permission set `setName` inside the organization
    * boundary? Resolves `null` when it is, otherwise the reason, naming the set
