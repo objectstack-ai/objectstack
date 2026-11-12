@@ -1360,3 +1360,155 @@ describe('[ADR-0106 D1] an action the caller is not shown is answered on every r
         expect((await rowOf(`p_${PERSONAS.system.userId}_REST`))?.budget).toBe(7);
     });
 });
+
+describe('[#32435] describe_object serves what a write needs, as the caller is served the object — the real security layer', () => {
+    const OBJ = 'mcp_write_leave';
+    const DENIED = 'secret_margin';
+    let engine: ObjectQL;
+    let services: Record<string, any>;
+
+    const PERSONAS = {
+        /** Denied one field. */
+        member: { userId: 'usr_member', positions: [] as string[], permissions: ['mcp_write_member'], systemPermissions: [] as string[] },
+        /** Denied nothing: the control. */
+        staff: { userId: 'usr_staff', positions: [] as string[], permissions: ['mcp_write_staff'], systemPermissions: [] as string[] },
+    } as const;
+
+    beforeAll(async () => {
+        engine = new ObjectQL();
+        const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
+        const storeObjects = [SysMetadataObject, SysMetadataHistoryObject, SysMetadataAuditObject] as any[];
+        await driver.initObjects(storeObjects);
+        engine.registerDriver(driver as any, true);
+        await engine.init();
+        for (const o of storeObjects) engine.registry.registerObject(o, '@objectstack/platform-objects');
+        engine.registerApp({
+            id: 'com.objectstack.qa.mcp-describe-write-facts',
+            name: 'MCP describe write facts',
+            version: '1.0.0',
+            type: 'plugin',
+            scope: 'system',
+            objects: [{
+                name: OBJ,
+                label: 'Leave',
+                sharingModel: 'public_read_write',
+                fields: {
+                    subject: { name: 'subject', type: 'text', label: 'Subject', required: true },
+                    leave_type: {
+                        name: 'leave_type',
+                        type: 'select',
+                        label: 'Leave type',
+                        required: true,
+                        options: [{ value: 'annual', label: 'Annual', color: '#0a0' }, { value: 'sick', label: 'Sick' }],
+                        defaultValue: 'annual',
+                    },
+                    [DENIED]: { name: DENIED, type: 'currency', label: 'Margin' },
+                },
+                validations: [
+                    { type: 'script', name: 'subject_not_blank', condition: 'record.subject == ""', message: 'Subject must not be blank.' },
+                    {
+                        type: 'cross_field',
+                        name: 'margin_needs_subject',
+                        fields: [DENIED, 'subject'],
+                        condition: 'record.subject == null',
+                        message: 'A margin needs a subject.',
+                    },
+                    // Names the hidden field in its MESSAGE alone.
+                    { type: 'script', name: 'message_names_hidden', condition: 'record.subject == "x"', message: `Fill ${DENIED} first.` },
+                    { type: 'script', name: 'retired_rule', active: false, condition: 'record.subject == "y"', message: 'Retired.' },
+                ],
+            }],
+        } as never);
+        await engine.syncSchemas();
+        const all = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
+        const sets = [
+            PermissionSetSchema.parse({
+                name: 'mcp_write_member', label: 'Member', objects: { '*': all },
+                fields: { [`${OBJ}.${DENIED}`]: { readable: false, editable: false } },
+            }),
+            PermissionSetSchema.parse({ name: 'mcp_write_staff', label: 'Staff', objects: { '*': all } }),
+        ];
+        const pluginServices: Record<string, unknown> = {
+            manifest: { register: vi.fn() },
+            objectql: engine,
+            metadata: {
+                get: async (type: string, name: string) =>
+                  (type === 'permission' ? sets.find((s: any) => s?.name === name) : engine.getSchema(name)) ?? null,
+                list: async () => sets,
+            },
+        };
+        const ctx = {
+            logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+            registerService: vi.fn((name: string, service: unknown) => { pluginServices[name] = service; }),
+            getService: (name: string) => {
+                if (!(name in pluginServices)) throw new Error(`service not registered: ${name}`);
+                return pluginServices[name];
+            },
+        };
+        const plugin = new SecurityPlugin({ fallbackPermissionSet: 'mcp_write_staff' });
+        await plugin.init(ctx as never);
+        await plugin.start(ctx as never);
+        vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+        services = {
+            protocol: new ObjectStackProtocolImplementation(engine as any),
+            security: pluginServices.security,
+            objectql: engine,
+        };
+        vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    }, 60_000);
+
+    afterAll(async () => {
+        vi.restoreAllMocks();
+        try { await engine?.destroy(); } catch { /* noop */ }
+    });
+
+    const describedFor = async (persona: Record<string, unknown>): Promise<any> =>
+        (await bridgeFor(kernelOver(services), persona)).bridge.describeObject(OBJ);
+    const field = (described: any, name: string) => described.fields.find((f: any) => f.name === name);
+    /** Does `name` occur in `text` as an identifier token? */
+    const mentions = (text: string, name: string) => (text.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? ([] as string[])).includes(name);
+
+    it('a member denied a field is served options, defaults, readonly/system and the rule messages, and nothing of the field', async () => {
+        const described = await describedFor(PERSONAS.member);
+        expect(field(described, 'subject')).toEqual({
+            name: 'subject', type: 'text', label: 'Subject', required: true, readonly: false, system: false,
+        });
+        expect(field(described, 'leave_type')).toEqual({
+            name: 'leave_type',
+            type: 'select',
+            label: 'Leave type',
+            required: true,
+            readonly: false,
+            system: false,
+            options: [{ value: 'annual', label: 'Annual' }, { value: 'sick', label: 'Sick' }],
+            defaultValue: 'annual',
+        });
+        // An audit column the registry injects: never writable, and said so.
+        expect(field(described, 'created_at')).toMatchObject({ readonly: true, system: true });
+        expect(described.validations).toEqual([{
+            name: 'subject_not_blank',
+            type: 'script',
+            message: 'Subject must not be blank.',
+            severity: 'error',
+            events: ['insert', 'update'],
+            fields: [],
+        }]);
+        const text = JSON.stringify(described);
+        expect(mentions(text, DENIED)).toBe(false);
+        expect(text).not.toContain('record.');
+    });
+
+    it('CONTROL — an unrestricted member is served every active rule, the hidden-field ones included', async () => {
+        const described = await describedFor(PERSONAS.staff);
+        expect(described.fields.map((f: any) => f.name)).toContain(DENIED);
+        expect(described.validations.map((r: any) => r.name))
+            .toEqual(['subject_not_blank', 'margin_needs_subject', 'message_names_hidden']);
+        expect(described.validations[1].fields).toEqual([DENIED, 'subject']);
+        const text = JSON.stringify(described);
+        expect(mentions(text, 'retired_rule')).toBe(false);
+        expect(text).not.toContain('record.');
+        // …and it is the answer a deployment with no security service gets.
+        const unsecured = await bridgeFor(kernelOver({ ...services, security: undefined }), PERSONAS.staff);
+        expect(text).toBe(JSON.stringify(await unsecured.bridge.describeObject(OBJ)));
+    });
+});
