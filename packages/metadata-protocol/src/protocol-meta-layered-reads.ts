@@ -64,11 +64,11 @@ import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
-import { isAnotherHoldersCopy, servedHolderAddressOf } from './protocol-meta-item-face.js';
+import { isAnotherHoldersCopy, servedAddressOf } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
-export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'engine' | 'packagelessAddress'>, request: {
+export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'engine' | 'packagelessAddress' | 'shippedArtifactsOf'>, request: {
         type: string;
         name: string;
         /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
@@ -79,8 +79,11 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'en
     // holder's address ({@link getMetaItemLayered}), so the read names its
     // package and the stored rows of other packages (the disabled holder's
     // among them) leave it no ambiguity to refuse.
-    if (servedHolderAddressOf(host.engine?.registry, PLURAL_TO_SINGULAR[type] ?? type, name) !== undefined) return undefined;
+    // [#32354] …and so does a name a disabled package holds through a stored
+    // row ({@link servedAddressOf}), whose served holders the rows name; two
+    // or more of them are refused naming only those, never the disabled one.
     const member = resolveBundleMemberSelector(type, request.member);
+    if (await servedAddressOf(host, PLURAL_TO_SINGULAR[type] ?? type, name, member) !== undefined) return undefined;
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
         ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
@@ -88,7 +91,7 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'en
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
-export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessReadAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'packagelessReadAddress' | 'shippedArtifactsOf' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string;
         name: string;
         packageId?: string;
@@ -151,7 +154,10 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // ({@link servedHolderAddressOf}): its code layer, its overlay rows and its
     // lock. The code layer is otherwise the first composite in registration
     // order, which can be the disabled holder's.
-    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(host.engine?.registry, request.type, request.name);
+    // [#32354] …judged over the stored rows too ({@link servedAddressOf}).
+    const servedAddress = request.packageId
+        ? undefined
+        : await servedAddressOf(host, request.type, request.name, resolveBundleMemberSelector(request.type, request.member));
     if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the

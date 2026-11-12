@@ -4131,6 +4131,8 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof readMetaItemFace> = {
             get engine() { return readEngine(); },
             readMetaItem: (...a) => this.readMetaItem(...a),
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
         };
         return readMetaItemFace.call(host, request, face);
     }
