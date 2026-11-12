@@ -291,6 +291,33 @@ describe('[#32512] the inbox list and its unread count serve no row of a deleted
         expect(listed.unreadCount).toBe(3);
     });
 
+    it('a composition that registers no sys_organization: the engine refuses the read, and the inbox is served as stored', async () => {
+        // The fail-open path rests on the engine THROWING for an unregistered
+        // object; an empty answer would read every organization as deleted.
+        const ql = new ObjectQL();
+        ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+        await ql.init();
+        for (const def of [SYS_USER, SysNotification, InboxMessage, NotificationReceipt]) {
+            ql.registry.registerObject(def as any, '@objectstack/service-messaging');
+        }
+        await ql.syncSchemas();
+        ql.setTenancyPostureProvider(() => 'single');
+        engine = ql;
+        await expect(ql.find('sys_organization', { where: { id: { $in: ['org_x'] } }, fields: ['id'] }, SYSTEM)).rejects.toMatchObject({ code: 'OBJECT_NOT_FOUND' });
+        await ql.getDriverForObject(INBOX_OBJECT)!.create(INBOX_OBJECT, {
+            id: 'm1', user_id: 'user_1', notification_id: 'n1', topic: 't', title: 'kept', body_md: 'kept',
+            organization_id: 'org_x', created_at: '2026-11-01T00:00:00.000Z',
+        });
+        const { logger, warnings } = recordingLogger();
+        const messaging = new MessagingService({ logger, getData: () => ql as any });
+
+        const listed = await messaging.listInbox('user_1');
+
+        expect(listed.notifications.map((n) => n.title)).toEqual(['kept']);
+        expect(listed.unreadCount).toBe(1);
+        expect(warnings).toHaveLength(1);
+    });
+
     it('mark-read is not narrowed: the deleted organization\'s rows can still be cleared by a client that lists them elsewhere', async () => {
         const { ql, messaging, ids } = await bootInbox();
 
