@@ -105,6 +105,7 @@ describe('[#32521] objectql\'s flow sync over the metadata service\'s own plural
     expect([synced.bare, synced.alpha, synced.beta]).toEqual(['env', 'env', 'env']);
     expect(synced.listed).toEqual([`${ALPHA}:${ALPHA}`, `${BETA}:${BETA}`, '-:env']);
     expect(synced.sealed).toEqual([`flow/notify: ${ALPHA} then ${BETA}`]);
+    expect(synced.warned).toBe(1);
   });
 
   it('CONTROL — one package\'s row and a package-less row saved after it (its customization): the package-less flow alone, no warning, as before', async () => {

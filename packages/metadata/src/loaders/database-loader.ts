@@ -1319,10 +1319,10 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * [#32246] {@link readTypeRows} as the unscoped reads answer it: for a
    * by-package type, one row per store slot — the one saved last of the slot
-   * (its highest version), in the order slots first appear — where a name
-   * no package or one package holds is one slot (as when the loader kept one
-   * row per name) and the paragraphs below give the other keys. Every other
-   * type: every row.
+   * (its highest version), in the order slots first appear — where, for an
+   * unbundled type, a name no package or one package holds is one slot (as
+   * when the loader kept one row per name); the paragraphs below give the
+   * other keys, a bundled type's included. Every other type: every row.
    *
    * [#31699 R3-B] A bundled by-package type keeps one row per
    * `(package, name, member)` ({@link unscopedRowKey}): one per name would
