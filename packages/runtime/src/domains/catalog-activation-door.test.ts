@@ -780,11 +780,17 @@ describe('the catalog activation door — a declared webhook two packages declar
         candidates: holders.map((packageId) => ({ kind: 'package', packageId })),
         message: `The webhook "${HOOK}" is held by ${holders.length} packages: ${holders.join('; ')}.`,
     });
-    /** The reader over `holders` of {@link HOOK}, and a harness whose registry knows {@link OWNERS}. */
-    const bootWith = (holders: string[], rows: Row[] = []) => {
+    /**
+     * The reader over `holders` of {@link HOOK} (the served set), and a harness
+     * whose registry knows {@link OWNERS}. `every` is every holder, a disabled
+     * package's included (`holdersOf`, #31699 round 2); omitted, the reader has
+     * no such read.
+     */
+    const bootWith = (holders: string[], rows: Row[] = [], every?: string[]) => {
         const slots = holders.map((packageId) => ({ webhook: { name: HOOK }, packageId, active: true }));
         const h = boot('single', {}, {
             declaredWebhooks: {
+                ...(every ? { async holdersOf(name: string) { return name === HOOK ? every : []; } } : {}),
                 async list() { return slots; },
                 async declaredWebhookNamed(name: string) {
                     if (name !== HOOK || slots.length === 0) return null;
@@ -853,6 +859,32 @@ describe('the catalog activation door — a declared webhook two packages declar
         const h = bootWith([A], [{ package_id: null, active: true }]);
         expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/alpha/${HOOK}`))).toBe(200);
         expect(ledger(h)).toEqual([[A, false]]);
+    });
+
+    // [#31699 round 2, epic red line 1] The door reads the served set, but the
+    // write's `adoptPackageless` is durable and counts every holder: the row a
+    // disabled co-holder shares is never re-attributed to the enabled holder.
+    it('[FROM adopted TO beside it] B disabled: a switch of A, bare or by namespace, writes A\'s own row beside the row naming no package', async () => {
+        for (const path of [`/_activation/webhook/${HOOK}`, `/_activation/webhook/alpha/${HOOK}`]) {
+            const h = bootWith([A], [{ package_id: null, active: false }], [A, B]);
+            expect(statusOf(await flip(h, TENANT_ADMIN(), path, { enabled: true })), path).toBe(200);
+            expect(ledger(h), path).toEqual([[null, false], [A, true]]);
+        }
+    });
+
+    it('CONTROL — every holder is one: the row naming no package is taken over, bare or by namespace (D8)', async () => {
+        for (const path of [`/_activation/webhook/${HOOK}`, `/_activation/webhook/alpha/${HOOK}`]) {
+            const h = bootWith([A], [{ package_id: null, active: true }], [A]);
+            expect(statusOf(await flip(h, TENANT_ADMIN(), path)), path).toBe(200);
+            expect(ledger(h), path).toEqual([[A, false]]);
+        }
+    });
+
+    it('B disabled and alone: its namespace address and the bare one are 404 (nothing served), nothing written', async () => {
+        const h = bootWith([], [], [B]);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/beta/${HOOK}`))).toBe(404);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`))).toBe(404);
+        expect(h.writes).toEqual([]);
     });
 
     it('the namespace address is the webhook\'s alone: any other type with four segments is the shape 400', async () => {

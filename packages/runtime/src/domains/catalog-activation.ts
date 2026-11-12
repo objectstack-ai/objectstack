@@ -171,6 +171,26 @@ interface DeclaredWebhookReader {
     declaredWebhookNamed(name: string): Promise<{ webhook: { name: string }; packageId?: string } | null>;
     /** Every declaration, one per `(package, name)` slot (#31699): read by the qualified door. */
     list?(): Promise<Array<{ webhook: { name: string }; packageId?: string }>>;
+    /**
+     * Every holder of a name, a DISABLED package's included (#31699 round 2).
+     * The declaration reads above answer the served set; `adoptPackageless`
+     * is a durable write and counts this one.
+     */
+    holdersOf?(name: string): Promise<ReadonlyArray<string | null>>;
+}
+
+/**
+ * [ADR-0150 D8, #31699 round 2] Whether the write for a declared webhook may
+ * bind the name's row naming no package to its package: only while that
+ * package is the name's ONE holder, counting every holder, a disabled
+ * package's included. A ledger row outlives a disable, so the row a disabled
+ * co-holder shares is no holder's own (D4) and is never re-attributed to the
+ * enabled one. A reader that cannot count every holder answers by its served
+ * slots, `served`.
+ */
+async function webhookAdoptsPackageless(reader: DeclaredWebhookReader | undefined, name: string, served: number): Promise<boolean> {
+    const every = typeof reader?.holdersOf === 'function' ? (await reader.holdersOf(name)).length : served;
+    return every === 1;
 }
 
 /**
@@ -189,7 +209,10 @@ export const WEBHOOK_LEDGER_ADDRESSING = { addressing: 'package-and-name' } as c
  * (`ambiguous-in-namespace`); none is refused naming the holders there are
  * (`not-held-by-qualifier`), or answered `404` when nothing declares the name
  * or no package declares the namespace. `holders` is how many slots the name
- * has, for the write's `adoptPackageless`.
+ * is served in; the write's `adoptPackageless` counts every holder
+ * ({@link webhookAdoptsPackageless}). The slots are the served set: a
+ * DISABLED package's declaration is not one, so a namespace whose packages
+ * are all disabled is answered as one that declares nothing.
  */
 async function resolveQualifiedWebhook(
     reader: DeclaredWebhookReader,
@@ -520,7 +543,7 @@ export async function handleCatalogActivationWrite(
             };
         }
         entry = address.entry;
-        adoptPackageless = address.holders === 1;
+        adoptPackageless = await webhookAdoptsPackageless(reader, name, address.holders);
     } else if (isDeclarationType(type)) {
         const declaration = DECLARATION_LOOKUPS[type];
         const service = declaration.service ? await deps.resolveService(context, declaration.service) : undefined;
@@ -560,7 +583,10 @@ export async function handleCatalogActivationWrite(
         }
         // [ADR-0150 D8] A bare name resolves to a package only while that
         // package is its one holder: its row naming no package is its own.
-        adoptPackageless = type === 'webhook' && entry?.packageId !== undefined;
+        // [#31699 round 2] One holder among EVERY holder: the served answer
+        // can name the enabled one of two while the other is disabled.
+        adoptPackageless = type === 'webhook' && entry?.packageId !== undefined
+            && await webhookAdoptsPackageless(declaredWebhookReaderOf(service), name, 1);
         if (!entry) {
             const noun = declaration.noun.charAt(0).toUpperCase() + declaration.noun.slice(1);
             return {

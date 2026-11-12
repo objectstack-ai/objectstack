@@ -784,4 +784,139 @@ describe('declared webhooks — one declaration per (package, name) slot (ADR-01
         expect(await source.list()).toEqual([]);
         await expect(source.declaredWebhookNamed('task_changed')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
     });
+    // [#31699 round 2, epic red line 1] A DISABLED package is no holder of what
+    // is served: dispatch, the bare read, the redelivery veto and the name guard
+    // judge the served set, as the registry's merged listing does. The ledger's
+    // row ownership counts every holder: a row outlives a disable. Each case runs
+    // in both registration orders, so no answer leans on which package came first.
+    describe('a disabled co-holder (#31699 round 2)', () => {
+        const ORDERS: Array<[string, Array<[string, any]>]> = [
+            ['alpha first', [[A, ALPHA], [B, BETA]]],
+            ['beta first', [[B, BETA], [A, ALPHA]]],
+        ];
+        const T = 'task_changed';
+        const sorted = <V>(xs: V[]) => [...xs].sort();
+        const guardOver = (engine: FakeEngine, source: DeclaredWebhookSource) => {
+            const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', source);
+            return (packageId?: string) => guard({ source: 'webhook', refId: declaredWebhookRefId(T, packageId) });
+        };
+
+        it.each(ORDERS)('[FROM delivered TO withheld] %s: B disabled is neither delivered nor redelivered; A is, and the bare name is A\'s; re-enabling B resumes it', async (_order, order) => {
+            const registry = registryShipping(order);
+            registry.disablePackage(B);
+            const engine = engineOver(registry);
+            const { enqueuer, realtime, calls, declaredWebhooks } = await startEnqueuer(engine);
+            const judge = guardOver(engine, declaredWebhooks);
+
+            await realtime.publish(taskCreated());
+            await flush();
+            expect(calls.map((c) => c.refId)).toEqual([declaredWebhookRefId(T, A)]);
+            expect((await declaredWebhooks.declaredWebhookNamed(T))?.packageId).toBe(A);
+            expect(await judge(A)).toBeUndefined();
+            expect(await judge(B)).toMatch(new RegExp(`package '${B.replace(/\./g, '\\.')}' is not served: the package is disabled`));
+            expect(sorted([...await declaredWebhooks.holdersOf(T)] as string[])).toEqual([A, B]);
+
+            registry.enablePackage(B);
+            await enqueuer.refresh();
+            calls.length = 0;
+            await realtime.publish(taskCreated('t-2'));
+            await flush();
+            expect(sorted(calls.map((c) => c.refId))).toEqual(sorted([declaredWebhookRefId(T, A), declaredWebhookRefId(T, B)]));
+            expect(await judge(B)).toBeUndefined();
+            await enqueuer.stop();
+        });
+
+        it.each(ORDERS)('[FROM A\'s switch TO no holder\'s] %s: under A enabled and B disabled, a row naming no package is never re-attributed to A', async (_order, order) => {
+            const withRows = (rows: any[], packages = order) => {
+                const registry = registryShipping(packages);
+                registry.disablePackage(B);
+                return new DeclaredWebhookSource(engineOver(registry, { rows: { [LEDGER]: rows } }), undefined);
+            };
+            // Off keeps A off; on turns A on only by A's own row (Q1, as with both enabled).
+            expect(await switches(withRows([slotRow(null, false)]))).toEqual([[A, false]]);
+            const shippedOff = order.map(([id, wh]) => [id, id === A ? { ...wh, isActive: false } : wh] as [string, any]);
+            expect(await switches(withRows([slotRow(null, true)], shippedOff))).toEqual([[A, false]]);
+            expect(await switches(withRows([slotRow(null, true), slotRow(A, true)], shippedOff))).toEqual([[A, true]]);
+            // B's own row stays B's while B is disabled: it never switches A.
+            expect(await switches(withRows([slotRow(B, false)]))).toEqual([[A, true]]);
+        });
+
+        it.each(ORDERS)('CONTROL — %s, both enabled: both delivered and both redeliverable', async (_order, order) => {
+            const engine = engineOver(registryShipping(order));
+            const { enqueuer, realtime, calls, declaredWebhooks } = await startEnqueuer(engine);
+            await realtime.publish(taskCreated());
+            await flush();
+            expect(sorted(calls.map((c) => c.refId))).toEqual(sorted([declaredWebhookRefId(T, A), declaredWebhookRefId(T, B)]));
+            const judge = guardOver(engine, declaredWebhooks);
+            expect([await judge(A), await judge(B)]).toEqual([undefined, undefined]);
+            await enqueuer.stop();
+        });
+
+        it('CONTROL — a lone disabled holder: nothing delivered, nothing to read by name, its redelivery refused; re-enabled, delivered', async () => {
+            const registry = registryShipping([[B, BETA]]);
+            registry.disablePackage(B);
+            const engine = engineOver(registry, { rows: { [LEDGER]: [slotRow(null, false)] } });
+            const { enqueuer, realtime, calls, declaredWebhooks } = await startEnqueuer(engine);
+            await realtime.publish(taskCreated());
+            await flush();
+            expect(calls).toEqual([]);
+            expect(await declaredWebhooks.list()).toEqual([]);
+            expect(await declaredWebhooks.declaredWebhookNamed(T)).toBeNull();
+            // Refused before and after round 2 (it now says why: the FROM → TO case above).
+            expect(await guardOver(engine, declaredWebhooks)(B)).toMatch(/refused/);
+
+            registry.enablePackage(B);
+            await enqueuer.refresh();
+            // Its one holder again: the row naming no package is its switch (D8).
+            expect(await switches(declaredWebhooks)).toEqual([[B, false]]);
+            engine.rows[LEDGER].length = 0;
+            await enqueuer.refresh();
+            await realtime.publish(taskCreated('t-2'));
+            await flush();
+            expect(calls.map((c) => c.refId)).toEqual([declaredWebhookRefId(T, B)]);
+            await enqueuer.stop();
+        });
+
+        it.each(ORDERS)('the name guard judges the served set: %s, B disabled, the conflict names A\'s address alone', async (_order, order) => {
+            const registry = registryShipping(order);
+            registry.disablePackage(B);
+            const hooks: Record<string, (ctx: any) => Promise<void>> = {};
+            bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } },
+                new DeclaredWebhookSource(engineOver(registry), undefined));
+            const err = await hooks.beforeInsert({ input: { data: { name: T } }, session: {} }).then(() => undefined, (e: unknown) => e);
+            expect(err).toBeInstanceOf(DeclaredWebhookNameConflictError);
+            expect((err as Error).message).toContain(`POST /api/v1/security/_activation/webhook/alpha/${T} with`);
+            expect((err as Error).message).not.toContain('/beta/');
+        });
+    });
+
+    // [#31699 round 2, R2-D] A remedy names the slot's namespace address.
+    it('the remedies name the namespace address: the name guard each holder\'s, the redelivery veto the slot\'s', async () => {
+        const hooks: Record<string, (ctx: any) => Promise<void>> = {};
+        bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } },
+            new DeclaredWebhookSource(twoHolders(), undefined));
+        const conflict = await hooks.beforeInsert({ input: { data: { name: 'task_changed' } }, session: {} })
+            .then(() => undefined, (e: unknown) => (e as Error).message);
+        expect(conflict).toContain('switch the declared ones off (POST /api/v1/security/_activation/webhook/alpha/task_changed, '
+            + 'POST /api/v1/security/_activation/webhook/beta/task_changed, each with { "enabled": false })');
+
+        const engine = twoHolders({ [LEDGER]: [slotRow(A, false)] });
+        const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', new DeclaredWebhookSource(engine, undefined));
+        expect(await guard({ source: 'webhook', refId: declaredWebhookRefId('task_changed', A) }))
+            .toContain('(POST /api/v1/security/_activation/webhook/alpha/task_changed with { "enabled": true })');
+    });
+
+    it('CONTROL — the environment\'s own declaration keeps the bare address in both remedies', async () => {
+        const engine = newEngine({ declared: { webhook: [declaredWebhook()] }, rows: { [LEDGER]: [ledgerRow('task_changed', false)] } });
+        const source = new DeclaredWebhookSource(engine, undefined);
+        expect((await source.list()).map((d) => [d.packageId, d.namespace])).toEqual([[undefined, undefined]]);
+        const guard = createWebhookRedeliverGuard(engine as any, 'sys_webhook', source);
+        expect(await guard({ source: 'webhook', refId: declaredWebhookRefId('task_changed') }))
+            .toContain('(POST /api/v1/security/_activation/webhook/task_changed with { "enabled": true })');
+        const hooks: Record<string, (ctx: any) => Promise<void>> = {};
+        bindDeclaredWebhookNameGuard({ registerHook: (event, handler) => { hooks[event] = handler; } }, source);
+        expect(await hooks.beforeInsert({ input: { data: { name: 'task_changed' } }, session: {} })
+            .then(() => undefined, (e: unknown) => (e as Error).message))
+            .toContain('switch the declared one off (POST /api/v1/security/_activation/webhook/task_changed with { "enabled": false })');
+    });
 });

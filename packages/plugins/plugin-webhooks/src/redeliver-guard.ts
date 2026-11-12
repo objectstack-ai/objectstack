@@ -85,6 +85,7 @@
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
     DeclaredWebhookAmbiguousError,
+    declaredWebhookActivationPath,
     declaredWebhookAddressOfRefId,
     type DeclaredWebhookReader,
 } from './declared-webhooks.js';
@@ -222,6 +223,16 @@ async function judgeDeclared(
         );
     }
     if (!declaration) {
+        // [#31699 round 2] The slot's package still declares it but is
+        // disabled: a disabled package's webhooks are not served, so neither
+        // dispatched nor redelivered, until the package is enabled again.
+        if (address.packageId !== undefined && (await declared?.holdersOf?.(name))?.includes(address.packageId)) {
+            return (
+                `declared webhook '${name}' of package '${address.packageId}' is not served: the package is disabled, `
+                + 'and a disabled package\'s webhooks are not dispatched, so this delivery is refused. Enable the '
+                + 'package, then redeliver.'
+            );
+        }
         return (
             `the declared webhook '${name}' this delivery belongs to is no longer declared by the application, so `
             + 'there is nothing left to say whether it may still be signed and sent, and it is refused. Declare the '
@@ -232,7 +243,7 @@ async function judgeDeclared(
         return (
             `declared webhook '${name}' is switched off, and a switched-off webhook is skipped by the dispatcher, `
             + 'so this delivery is refused rather than sent to an endpoint that was switched off. Fix: switch it on '
-            + `(POST /api/v1/security/_activation/webhook/${name} with { "enabled": true }), then redeliver.`
+            + `(POST ${declaredWebhookActivationPath(name, declaration.namespace)} with { "enabled": true }), then redeliver.`
         );
     }
     return undefined;

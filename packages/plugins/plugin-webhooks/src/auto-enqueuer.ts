@@ -24,6 +24,7 @@ import {
     type LegacyDefinitionCredentialKey,
 } from './webhook-legacy-cleartext.js';
 import {
+    declaredWebhookActivationPath,
     declaredWebhookRefId,
     type DeclaredWebhook,
     type DeclaredWebhookReader,
@@ -523,7 +524,9 @@ export class AutoEnqueuer {
      * whatever its provenance — answers as itself and the declaration is
      * withheld, said once per name (regime C; `declared-webhooks.ts`). That is
      * what keeps a declared webhook from firing twice beside a row of its name,
-     * and a row's `active: false` in force.
+     * and a row's `active: false` in force. A row names no package, so it is
+     * matched by name, the safe direction (#31699): every slot of the name is
+     * withheld, whichever package declares it, and none fires beside the row.
      */
     private async resolveDeclared(): Promise<
         { subscriptions: CachedSubscription[] } | undefined
@@ -564,7 +567,10 @@ export class AutoEnqueuer {
         for (const d of declared) {
             const name = d.webhook.name;
             if (heldByRow.has(name)) {
-                this.reportDeclarationWithheld(name);
+                this.reportDeclarationWithheld(
+                    name,
+                    declared.filter((s) => s.webhook.name === name).map((s) => declaredWebhookActivationPath(name, s.namespace)),
+                );
                 continue;
             }
             // `active` is the declared `isActive`, or the activation ledger's switch over it.
@@ -614,7 +620,7 @@ export class AutoEnqueuer {
      * the row is in force and dispatching (or switched off on purpose), so
      * nothing claimed is being lost.
      */
-    private reportDeclarationWithheld(name: string): void {
+    private reportDeclarationWithheld(name: string, switches: readonly string[]): void {
         if (this.declarationWithheldReported.has(name)) return;
         this.declarationWithheldReported.add(name);
         this.logger?.warn?.(
@@ -622,7 +628,9 @@ export class AutoEnqueuer {
                 'of the same name answers for it (a row that held the name before a package declared it). The row ' +
                 'stays in force as it is. To return to the ' +
                 'declaration, delete the row; to change the declared webhook, author a copy under a new name and ' +
-                `switch the declared one off (POST /api/v1/security/_activation/webhook/${name} with ` +
+                (switches.length > 1
+                    ? `switch the declared ones off (${switches.map((path) => `POST ${path}`).join(', ')}, each with `
+                    : `switch the declared one off (POST ${switches[0] ?? declaredWebhookActivationPath(name)} with `) +
                 '{ "enabled": false }).',
             { webhook: name },
         );

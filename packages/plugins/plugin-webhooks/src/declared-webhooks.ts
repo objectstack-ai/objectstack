@@ -171,6 +171,16 @@ export function declaredWebhookAddressOfRefId(refId: string): { packageId?: stri
     return slash < 0 ? { name: rest } : { packageId: rest.slice(0, slash), name: rest.slice(slash + 1) };
 }
 
+/**
+ * [ADR-0150 D5, #31699] The activation door's address of one declared
+ * webhook slot, as a remedy names it: `webhook/NS/NAME` for a package's
+ * declaration whose namespace is known, which answers whatever else declares
+ * the name, and the bare `webhook/NAME` for the environment's own.
+ */
+export function declaredWebhookActivationPath(name: string, namespace?: string): string {
+    return `/api/v1/security/_activation/${WEBHOOK_ACTIVATION_TYPE}/${namespace ? `${namespace}/` : ''}${name}`;
+}
+
 interface Logger {
     warn?: (msg: string, meta?: unknown) => void;
 }
@@ -181,6 +191,8 @@ export interface DeclaredWebhook {
     webhook: WebhookParsed;
     /** The package that ships it (the registry item's `_packageId`), when one does. */
     packageId?: string;
+    /** That package's namespace, when the registry knows it: the door's `webhook/NS/NAME` (#31699). */
+    namespace?: string;
     /** In force on this deployment: the ledger row's `active` when one exists, else the declared `isActive`. */
     active: boolean;
 }
@@ -206,6 +218,14 @@ export interface DeclaredWebhookReader {
      * when that holder declares none. Never another holder's.
      */
     declaredWebhookAt(packageId: string | null, name: string): Promise<DeclaredWebhook | null>;
+    /**
+     * [#31699 round 2] Every holder of `name` (`null`: the environment's), a
+     * DISABLED package's included, or none when nothing declares it. The
+     * three reads above answer the served set; a durable write counts every
+     * holder (the activation door's `adoptPackageless`), so the ledger row a
+     * disabled co-holder shares is never re-attributed to the enabled one.
+     */
+    holdersOf?(name: string): Promise<ReadonlyArray<string | null>>;
 }
 
 /**
@@ -233,22 +253,62 @@ export class DeclaredWebhookAmbiguousError extends Error {
     }
 }
 
-/** The engine's `SchemaRegistry`, when it carries the slice the package-scoped resolver reads. */
-function packageScopedRegistryOf(engine: unknown): PackageScopedRegistry | undefined {
+/**
+ * The engine's `SchemaRegistry`, when it carries the slice the package-scoped
+ * resolver reads, in two readings (#31699 round 2, epic red line 1):
+ *
+ *  - `served`: a DISABLED package is no holder, as the merged listings and the
+ *    by-name read withhold its item (#25308; the registry's own served slice in
+ *    `refuseAmbiguousObjectLessAction`). Dispatch, the bare read, the
+ *    redelivery veto and the name guard judge this one, so a disabled
+ *    co-holder's declaration is neither delivered nor redelivered, and never
+ *    makes the enabled holder's bare read refuse.
+ *  - `every`: every holder, disabled or not. The activation ledger's row
+ *    ownership reads this one: a row is durable and outlives a disable, so a
+ *    disabled holder's own row stays its own, and a row naming no package is
+ *    no holder's while two packages declare the name (ADR-0150 D4), whichever
+ *    of them is enabled.
+ */
+function packageScopedRegistryOf(engine: unknown): { served: PackageScopedRegistry; every: PackageScopedRegistry } | undefined {
     let reg: unknown;
     try {
         reg = (engine as { _registry?: unknown } | undefined)?._registry;
     } catch {
         return undefined;
     }
-    const r = reg as Partial<Record<keyof PackageScopedRegistry, unknown>> | undefined;
-    return typeof r?.packageScopedHoldersOf === 'function'
+    const r = reg as (Partial<Record<keyof PackageScopedRegistry, unknown>> & { isPackageDisabled?: unknown }) | undefined;
+    if (!(typeof r?.packageScopedHoldersOf === 'function'
         && typeof r.getPackageScopedItem === 'function'
         && typeof r.getEnvironmentScopedItem === 'function'
         && typeof r.getPackage === 'function'
-        && typeof r.getAllPackages === 'function'
-        ? (reg as PackageScopedRegistry)
-        : undefined;
+        && typeof r.getAllPackages === 'function')) return undefined;
+    const every = reg as PackageScopedRegistry;
+    const isDisabled = typeof r.isPackageDisabled === 'function'
+        ? (packageId: string) => (r.isPackageDisabled as (id: string) => boolean).call(reg, packageId) === true
+        : () => false;
+    const served: PackageScopedRegistry = {
+        getPackage: (id) => every.getPackage(id),
+        getAllPackages: () => every.getAllPackages(),
+        packageScopedHoldersOf: (type, name) => every.packageScopedHoldersOf(type, name).filter((id) => !isDisabled(id)),
+        getPackageScopedItem: (type, name, packageId, member) =>
+            isDisabled(packageId) ? undefined : every.getPackageScopedItem(type, name, packageId, member),
+        getEnvironmentScopedItem: (type, name, member) => every.getEnvironmentScopedItem(type, name, member),
+    };
+    return { served, every };
+}
+
+/** Every holder of `name` the registry holds, a disabled package's included (`null`: the environment). */
+function everyHolderOf(every: PackageScopedRegistry, name: string): Array<string | null> {
+    return [
+        ...(every.getEnvironmentScopedItem('webhook', name) !== undefined ? [null] : []),
+        ...every.packageScopedHoldersOf('webhook', name).filter((packageId) => every.getPackageScopedItem('webhook', name, packageId) !== undefined),
+    ];
+}
+
+/** The namespace package `packageId` declares, when the registry holds the package. */
+function namespaceOf(registry: PackageScopedRegistry | undefined, packageId: string): string | undefined {
+    const namespace = (registry?.getPackage(packageId) as { manifest?: { namespace?: unknown } } | undefined)?.manifest?.namespace;
+    return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
 }
 
 /** One `(package, name)` slot of a declared name: its raw item and its holder (`null`: the environment). */
@@ -286,21 +346,29 @@ function listedRefusal(name: string, holders: ReadonlyArray<string | null>): Pac
 function slotsOf(
     name: string,
     listed: readonly unknown[],
-    registry: PackageScopedRegistry | undefined,
-): { slots: DeclaredSlot[]; bare?: { packageId: string | null } | { refusal: PackageScopedRefusal } } {
+    registry: { served: PackageScopedRegistry; every: PackageScopedRegistry } | undefined,
+): {
+    slots: DeclaredSlot[];
+    holders: Array<string | null>;
+    bare?: { packageId: string | null } | { refusal: PackageScopedRefusal };
+} {
     if (registry) {
-        const env = registry.getEnvironmentScopedItem('webhook', name);
+        const { served, every } = registry;
+        const env = served.getEnvironmentScopedItem('webhook', name);
         const slots: DeclaredSlot[] = env !== undefined ? [{ raw: env, packageId: null }] : [];
-        for (const packageId of registry.packageScopedHoldersOf('webhook', name)) {
-            const raw = registry.getPackageScopedItem('webhook', name, packageId);
+        for (const packageId of served.packageScopedHoldersOf('webhook', name)) {
+            const raw = served.getPackageScopedItem('webhook', name, packageId);
             if (raw !== undefined) slots.push({ raw, packageId });
         }
+        const holders = everyHolderOf(every, name);
         if (slots.length > 0) {
-            const resolved = resolvePackageScopedName(registry, { type: 'webhook', name });
-            if (resolved.status === 'refused') return { slots, bare: { refusal: resolved } };
-            if (resolved.status === 'not-found') return { slots };
-            return { slots, bare: { packageId: resolved.holder.kind === 'package' ? resolved.holder.packageId : null } };
+            const resolved = resolvePackageScopedName(served, { type: 'webhook', name });
+            if (resolved.status === 'refused') return { slots, holders, bare: { refusal: resolved } };
+            if (resolved.status === 'not-found') return { slots, holders };
+            return { slots, holders, bare: { packageId: resolved.holder.kind === 'package' ? resolved.holder.packageId : null } };
         }
+        // Every holder the registry knows is disabled: nothing is served, never the listed items.
+        if (holders.length > 0) return { slots: [], holders };
         // Not the registry's (the metadata service's items): slotted as listed.
     }
     const byHolder = new Map<string | null, unknown[]>();
@@ -310,15 +378,16 @@ function slotsOf(
     }
     const holders = [...byHolder.keys()];
     if ([...byHolder.values()].some((items) => items.length > 1) || (byHolder.has(null) && holders.length > 1)) {
-        return { slots: [], bare: { refusal: listedRefusal(name, holders) } };
+        return { slots: [], holders, bare: { refusal: listedRefusal(name, holders) } };
     }
     const slots = [...byHolder].map(([packageId, [raw]]) => ({ raw, packageId }));
-    return { slots, bare: slots.length === 1 ? { packageId: slots[0].packageId } : { refusal: listedRefusal(name, holders) } };
+    return { slots, holders, bare: slots.length === 1 ? { packageId: slots[0].packageId } : { refusal: listedRefusal(name, holders) } };
 }
 
 /**
  * [ADR-0131 D6, ADR-0150 D4/D8] The switch of slot `slot` of a name whose
- * slots are `slots` (`null`: the environment's), from the name's ledger rows
+ * holders are `slots` (`null`: the environment's; every holder, a disabled
+ * package's included, since a row outlives a disable), from the name's ledger rows
  * by package (`null`: a row naming no package): `undefined` is the declared
  * `isActive`. The slot's own row answers. With none, the rows that are no
  * slot's own (naming no package while the environment declares nothing of the
@@ -395,8 +464,8 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
     private refusals = new Map<string, PackageScopedRefusal>();
     /** Per name, the slot a caller with no package is served: its package, `null` for the environment's. */
     private bare = new Map<string, string | null>();
-    /** Per name, the holder of every slot the last read found (`null`: the environment). */
-    private slots = new Map<string, Array<string | null>>();
+    /** Per name, every holder the last read found, a disabled package's included (`null`: the environment). */
+    private holders = new Map<string, Array<string | null>>();
 
     constructor(
         private readonly engine: unknown,
@@ -409,10 +478,11 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         if (parsed.length === 0) return [];
         const ledger = await readWebhookActivation(this.engine, this.logger);
         for (const [name, rows] of ledger) this.reportUnownedRows(name, rows);
-        return parsed.map(({ webhook, packageId }) => ({
+        return parsed.map(({ webhook, packageId, namespace }) => ({
             webhook,
             ...(packageId !== undefined ? { packageId } : {}),
-            active: webhookSlotSwitch(ledger.get(webhook.name), packageId ?? null, this.slots.get(webhook.name) ?? [])
+            ...(namespace !== undefined ? { namespace } : {}),
+            active: webhookSlotSwitch(ledger.get(webhook.name), packageId ?? null, this.holders.get(webhook.name) ?? [])
                 ?? webhook.isActive !== false,
         }));
     }
@@ -433,9 +503,19 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         return declared.find((d) => d.webhook.name === name && (d.packageId ?? null) === packageId) ?? null;
     }
 
+    async holdersOf(name: string): Promise<ReadonlyArray<string | null>> {
+        if (!name) return [];
+        const registry = packageScopedRegistryOf(this.engine);
+        const held = registry ? everyHolderOf(registry.every, name) : [];
+        if (held.length > 0) return held;
+        // Not the registry's (the metadata service's items): the holders as listed.
+        this.parseDeclared();
+        return [...(this.holders.get(name) ?? [])];
+    }
+
     /** A row no slot owns, under two or more slots (module doc, "The switch"): said once per name. */
     private reportUnownedRows(name: string, rows: ReadonlyMap<string | null, boolean>): void {
-        const slots = this.slots.get(name) ?? [];
+        const slots = this.holders.get(name) ?? [];
         const unowned = [...rows.keys()].filter((packageId) => !slots.includes(packageId));
         if (slots.length < 2 || unowned.length === 0 || this.unownedReported.has(name)) return;
         this.unownedReported.add(name);
@@ -451,8 +531,8 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         );
     }
 
-    private parseDeclared(): Array<{ webhook: WebhookParsed; packageId?: string }> {
-        const out: Array<{ webhook: WebhookParsed; packageId?: string }> = [];
+    private parseDeclared(): Array<{ webhook: WebhookParsed; packageId?: string; namespace?: string }> {
+        const out: Array<{ webhook: WebhookParsed; packageId?: string; namespace?: string }> = [];
         const listedByName = new Map<string, unknown[]>();
         const nameless: unknown[] = [];
         for (const raw of readDeclaredWebhookItems(this.engine, this.metadataService)) {
@@ -463,10 +543,10 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         const registry = packageScopedRegistryOf(this.engine);
         const refusals = new Map<string, PackageScopedRefusal>();
         const bare = new Map<string, string | null>();
-        const slotsByName = new Map<string, Array<string | null>>();
+        const holdersByName = new Map<string, Array<string | null>>();
         for (const [name, listed] of listedByName) {
-            const { slots, bare: served } = slotsOf(name, listed, registry);
-            slotsByName.set(name, slots.map((s) => s.packageId));
+            const { slots, holders, bare: served } = slotsOf(name, listed, registry);
+            holdersByName.set(name, holders);
             if (served && 'refusal' in served) {
                 refusals.set(name, served.refusal);
                 if (slots.length === 0 && !this.refusalReported.has(name)) {
@@ -481,13 +561,15 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
             }
             for (const { raw, packageId } of slots) {
                 const webhook = this.parseItem(raw);
-                if (webhook) out.push({ webhook, ...(packageId !== null ? { packageId } : {}) });
+                if (!webhook) continue;
+                const namespace = packageId !== null ? namespaceOf(registry?.every, packageId) : undefined;
+                out.push({ webhook, ...(packageId !== null ? { packageId } : {}), ...(namespace ? { namespace } : {}) });
             }
         }
         for (const raw of nameless) this.parseItem(raw);
         this.refusals = refusals;
         this.bare = bare;
-        this.slots = slotsByName;
+        this.holders = holdersByName;
         return out;
     }
 
@@ -585,12 +667,19 @@ export class DeclaredWebhookNameConflictError extends Error {
     readonly status = 409;
     /** The declared webhook whose name the write would take. */
     readonly webhook: string;
-    constructor(name: string, write: 'create' | 'rename') {
+    /**
+     * @param switches - The activation door's address of each declaration of
+     *   the name ({@link declaredWebhookActivationPath}): a package's names its
+     *   namespace (#31699), so a name two packages declare gets one per holder.
+     */
+    constructor(name: string, write: 'create' | 'rename', switches: readonly string[] = [declaredWebhookActivationPath(name)]) {
         super(
             `webhook '${name}' is declared by the application, so `
                 + (write === 'create' ? 'a new webhook cannot take its name' : 'no webhook can be renamed to it')
                 + `. Declared webhooks are read-only: to customise '${name}', create your own webhook under another `
-                + `name and switch the declared one off (POST /api/v1/security/_activation/${WEBHOOK_ACTIVATION_TYPE}/${name} `
+                + (switches.length > 1
+                    ? `name and switch the declared ones off (${switches.map((path) => `POST ${path}`).join(', ')}, each `
+                    : `name and switch the declared one off (POST ${switches[0] ?? declaredWebhookActivationPath(name)} `)
                 + 'with { "enabled": false }).',
         );
         this.name = 'DeclaredWebhookNameConflictError';
@@ -615,7 +704,7 @@ export function bindDeclaredWebhookNameGuard(
         registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void;
         unregisterHooksByPackage?(packageId: string): number;
     },
-    declared: Pick<DeclaredWebhookReader, 'declaredWebhookNamed'>,
+    declared: Pick<DeclaredWebhookReader, 'declaredWebhookNamed'> & Partial<Pick<DeclaredWebhookReader, 'list'>>,
     object: string = 'sys_webhook',
 ): void {
     engine.unregisterHooksByPackage?.(DECLARED_WEBHOOK_NAME_GUARD_PACKAGE);
@@ -633,15 +722,18 @@ export function bindDeclaredWebhookNameGuard(
         }
         // [ADR-0150 D3, #31699] A name two packages declare is declared: the
         // by-name read refuses to pick one of them, and the write is refused
-        // for the name, as for one holder's.
-        const taken = await declared.declaredWebhookNamed(data.name).then(
-            (d) => d !== null,
-            (err: unknown) => {
-                if (err instanceof DeclaredWebhookAmbiguousError) return true;
-                throw err;
+        // for the name, as for one holder's, naming each holder's address.
+        const switches = await declared.declaredWebhookNamed(data.name).then(
+            (d) => (d ? [declaredWebhookActivationPath(d.webhook.name, d.namespace)] : undefined),
+            async (err: unknown) => {
+                if (!(err instanceof DeclaredWebhookAmbiguousError)) throw err;
+                const slots = (await declared.list?.())?.filter((d) => d.webhook.name === data.name) ?? [];
+                return slots.length > 0
+                    ? slots.map((d) => declaredWebhookActivationPath(d.webhook.name, d.namespace))
+                    : [declaredWebhookActivationPath(data.name, '<namespace>')];
             },
         );
-        if (taken) throw new DeclaredWebhookNameConflictError(data.name, insert ? 'create' : 'rename');
+        if (switches) throw new DeclaredWebhookNameConflictError(data.name, insert ? 'create' : 'rename', switches);
     };
     const opts = { object, packageId: DECLARED_WEBHOOK_NAME_GUARD_PACKAGE, priority: 100 };
     engine.registerHook('beforeInsert', guard(true), opts);
