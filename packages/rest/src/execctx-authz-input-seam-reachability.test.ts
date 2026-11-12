@@ -89,6 +89,10 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
@@ -634,7 +638,7 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     expect(captured.body?.success).not.toBe(true);
   });
 
-  it('⚠️ MEASURED PERMISSIVE (mechanism): with the posture absent the resolver ADMITS the ex-member as a full principal', async () => {
+  it('[ADR-0093 D8.1, as amended] with the posture absent, a key its owner\'s membership no longer backs is refused all the same', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
@@ -646,16 +650,14 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
         getSession: async () => undefined,
         tenancyPosture: undefined,
       } as any);
-      // [#14273 A1] No refusal fired — the warn line is the refusal's only
-      // surface and it is silent: an ADMISSION, not a quiet refusal.
-      expect(warnSpy.mock.calls
+      // The membership rule reads no posture: the same refusal, said out loud
+      // the same way, as under `isolated` above.
+      expect(authz.userId).toBeUndefined();
+      const refused = warnSpy.mock.calls
         .map((c: unknown[]) => c.map(String).join(' '))
-        .filter((l: string) => l.includes('API key refused'))).toHaveLength(0);
-      expect(authz.userId).toBe('u_exmember');
-      // The membership fact is IN HAND and says "not a member of org_A" — the
-      // refusal was gated off by the missing posture, not by missing data.
-      expect(authz.accessible_org_ids).not.toContain('org_A');
-      expect(authz.tenantId).toBe('org_A');
+        .filter((l: string) => l.includes('API key refused'));
+      expect(refused).toHaveLength(1);
+      expect(refused[0]).toContain('API key refused (organization_membership_ended)');
     } finally {
       warnSpy.mockRestore();
     }
@@ -667,17 +669,20 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     //     expect(a.status).toBe(200);
     const failed = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'factory-throws' });
     const absent = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'unregistered' });
-    const a = await drive(mount(serverWith(viaKernelManager(failed))), { 'x-api-key': RAW_EXMEMBER_KEY });
-    const b = await drive(mount(serverWith(viaKernelManager(absent))), { 'x-api-key': RAW_EXMEMBER_KEY });
+    // Driven with a CURRENT member's key: since ADR-0093 D8.1 was amended the
+    // ex-member's key is refused on the `unregistered` leg too, and an
+    // outage is not selective, so the member's key tells the two legs apart.
+    const a = await drive(mount(serverWith(viaKernelManager(failed))), { 'x-api-key': RAW_MEMBER_KEY });
+    const b = await drive(mount(serverWith(viaKernelManager(absent))), { 'x-api-key': RAW_MEMBER_KEY });
     expect(a).not.toEqual(b);
     // Registered and FAILED ⇒ the outage it is.
     expect(a.status).toBe(503);
     // ⭐ THE OTHER HALF, and the one that keeps this repair honest: the
     // `unregistered` leg is the SUPPORTED no-tenancy composition (no wall
-    // exists; an org-stamped key working there is by design) and it must be
-    // completely UNCHANGED. A repair that made this 503 too would have broken
-    // every single-tenant embedder — that is why the brand, not the catch, is
-    // the discriminator.
+    // exists; a current member's key working there is by design) and it must
+    // be completely UNCHANGED. A repair that made this 503 too would have
+    // broken every single-tenant embedder — that is why the brand, not the
+    // catch, is the discriminator.
     expect(b.status).toBe(200);
     expect(b.body?.success).toBe(true);
   });
@@ -747,19 +752,35 @@ describe('[#15256] §3 — single-kernel provider path: the posture is derived, 
     expect(recB.calls).toBeGreaterThan(0);
   });
 
-  it('ABLATION: remove the provider and the ex-member key is served again — 200, the exact row this card repaired', async () => {
+  it('ABLATION: remove the provider and the organization-less key is no longer refused at the door — the posture-conditional refusal is not decided', async () => {
     // The one thing removed is the provider this card wired; every other fact
-    // — the healthy `isolated` tenancy service, the engine fixture, the key,
-    // the route — is byte-identical to the leg above. A pin that cannot go red
-    // has measured nothing, and this is the leg that shows it can.
+    // — the healthy `isolated` tenancy service, the engine fixture, the route
+    // — is byte-identical to the leg above. A pin that cannot go red has
+    // measured nothing, and this is the leg that shows it can. Since ADR-0093
+    // D8.1 was amended the membership rule reads no posture, so the refusal
+    // the provider still decides is the org-less key's `organization_required`.
+    const wired = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'healthy-isolated' });
+    const refused = await drive(mount(serverWith(viaProviders(wired))), { 'x-api-key': RAW_ORGLESS_KEY });
+    expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
     const rec = { calls: 0 };
     const kernel = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: { recording: rec } });
-    const served = await drive(
+    const admitted = await drive(
+      mount(serverWith(viaProviders(kernel, { omitTenancy: true }))),
+      { 'x-api-key': RAW_ORGLESS_KEY },
+    );
+    expect(admitted.status).not.toBe(ANONYMOUS_DENY_STATUS);
+    expect(admitted.status).not.toBe(503);
+    expect(rec.calls).toBe(0);
+  });
+
+  it('[ADR-0093 D8.1, as amended] with the provider removed, the ex-member key stays refused at the door — 401', async () => {
+    const rec = { calls: 0 };
+    const kernel = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: { recording: rec } });
+    const refused = await drive(
       mount(serverWith(viaProviders(kernel, { omitTenancy: true }))),
       { 'x-api-key': RAW_EXMEMBER_KEY },
     );
-    expect(served.status).toBe(200);
-    expect(served.body?.success).toBe(true);
+    expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
     expect(rec.calls).toBe(0);
   });
 
@@ -770,14 +791,20 @@ describe('[#15256] §3 — single-kernel provider path: the posture is derived, 
     expect(served.body?.success).toBe(true);
   });
 
-  it('UNCHANGED: with NO tenancy service registered the provider path still serves — the supported no-tenancy composition', async () => {
+  it('UNCHANGED: with NO tenancy service registered the provider path still serves a current member — the supported no-tenancy composition', async () => {
     // The other half of decision 1 option A, at this seam: "never registered"
     // is branded and stays quiet. A repair that made this a 503 (or a 401)
     // would have broken every embedder composing a kernel without tenancy.
     const kernel = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'unregistered' });
-    const served = await drive(mount(serverWith(viaProviders(kernel))), { 'x-api-key': RAW_EXMEMBER_KEY });
+    const served = await drive(mount(serverWith(viaProviders(kernel))), { 'x-api-key': RAW_MEMBER_KEY });
     expect(served.status).toBe(200);
     expect(served.body?.success).toBe(true);
+  });
+
+  it('[ADR-0093 D8.1, as amended] with NO tenancy service registered, a key its owner\'s membership no longer backs is refused — 401', async () => {
+    const kernel = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'unregistered' });
+    const refused = await drive(mount(serverWith(viaProviders(kernel))), { 'x-api-key': RAW_EXMEMBER_KEY });
+    expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
   });
 
   it('REGISTERED AND FAILING on the provider path is a 503 outage — decision 1 option A, both halves of the seam', async () => {

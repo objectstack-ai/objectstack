@@ -131,6 +131,9 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
 
 import { InterfacesPillar } from './StudioDesignSurface';
+// The source loads `@objectstack/lint` with a function-body `import()`: paid
+// here, at collection, never inside a case's clocked window.
+import '@objectstack/lint';
 import { registerMetadataPreview } from '../metadata-admin/preview-registry';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { registerMetadataDefaultInspector } from '../metadata-admin/default-inspector-registry';
@@ -185,6 +188,9 @@ function NavHost() {
 }
 beforeEach(() => {
   dirtyReports.length = 0;
+  // The entries a save leaves out are held in this browser (`writeHeldNav`):
+  // each case starts from a browser that holds none.
+  localStorage.clear();
 });
 
 /** The pillar's rail: the innermost navigation landmark that lists the app's items. */
@@ -355,5 +361,56 @@ describe('Interfaces nav save — its banner goes once a nav save lands (objectu
     expect(server.appSaves[0].accepted).toBe(true);
     await settle();
     expect(screen.getByText('Home page could not be read')).toBeInTheDocument();
+  });
+});
+
+describe('Interfaces nav — an entry left out for want of a target survives a reload, marked incomplete', () => {
+  it('a reload before the target is picked still shows the entry in its place, and the server never holds it', async () => {
+    const first = render(<NavHost />);
+    await openEditing();
+    addItem();
+    await waitFor(() => expect(server.appSaves).toHaveLength(1), { timeout: 8000 });
+    await settle();
+    first.unmount();
+
+    // The reload: a fresh mount reads the app (now its draft) again.
+    render(<NavHost />);
+    await screen.findByRole('button', { name: /Landing menu/ }, { timeout: 8000 });
+    await waitFor(() => expect(rail().textContent).toContain('Item 3'), { timeout: 8000 });
+    const row = within(rail()).getByRole('button', { name: /Item 3/ });
+    expect(row.textContent).toContain('Incomplete');
+    expect(rail().textContent).not.toContain('nav_item_3');
+    // The draft the server holds is the navigation the spec takes, without it.
+    expect(server.drafts.get(key('app', APP.name))?.navigation).toEqual(NAV);
+    // A second "Add nav item" does not take the held entry's place.
+    await openEditing();
+    addItem();
+    expect(rail().textContent).toContain('Item 4');
+  });
+
+  it('removing it after the reload drops what this browser holds', async () => {
+    const first = render(<NavHost />);
+    await openEditing();
+    addItem();
+    await waitFor(() => expect(server.appSaves).toHaveLength(1), { timeout: 8000 });
+    await settle();
+    first.unmount();
+    expect(Object.keys(localStorage).filter((k) => k.startsWith('studio-held-nav:'))).toHaveLength(1);
+
+    render(<NavHost />);
+    await openEditing();
+    const row = within(rail()).getByRole('button', { name: /Item 3/ });
+    fireEvent.click(within(row).getByRole('button', { name: 'Remove nav item' }));
+    await waitFor(() => expect(server.appSaves).toHaveLength(2), { timeout: 8000 });
+    expect(server.appSaves[1]).toEqual({ navigation: NAV, accepted: true });
+    expect(Object.keys(localStorage).filter((k) => k.startsWith('studio-held-nav:'))).toHaveLength(0);
+  });
+
+  it('the control: a browser that holds nothing for the app shows the app as the server holds it', async () => {
+    render(<NavHost />);
+    await screen.findByRole('button', { name: /Landing menu/ }, { timeout: 8000 });
+    await settle();
+    expect(rail().textContent).not.toContain('Item 3');
+    expect(rail().textContent).not.toContain('Incomplete');
   });
 });

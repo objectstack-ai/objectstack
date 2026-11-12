@@ -61,7 +61,7 @@ import {
   attachmentManagerSet,
 } from './fixtures/attachments-fixture.js';
 import { buildCmtOpen, buildCmtPrivate, buildCmtReadonly, commentManagerSet } from './fixtures/comments-fixture.js';
-import { armedWhen, assertArmed, leaveOrganization, principalArmed, resolveAuthzFor } from './armed.js';
+import { armedWhen, assertArmed, principalArmed, regradeOutsideMemberFloor, resolveAuthzFor } from './armed.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
@@ -141,8 +141,9 @@ interface Booted {
 /**
  * Boot the stack and sign `email` up. [ADR-0131 D3] Every boot is the
  * production `single` shape, so the sign-up is a member of the Default
- * Organization; the OUTSIDE class is that user removed from it (an
- * administrator's act), not an org-less boot, which no longer exists.
+ * Organization; the OUTSIDE class is that user re-graded to a membership
+ * grade outside the ownership floor's `org_member` domain (an administrator's
+ * act), not an org-less boot, which no longer exists.
  */
 async function boot(inside: boolean, email: string): Promise<Booted> {
   const rootDir = mkdtempSync(join(tmpdir(), 'predicate-write-nm-'));
@@ -173,18 +174,12 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
     }, { context: SYS });
   }
   if (!inside) {
-    token = await leaveOrganization(stack, email);
-    // The OUTSIDE principal holds no `sys_member` row — so no `org_member` —
-    // while its session keeps the Default Organization as its active one: under
-    // `single` a session's organization claim is kept without a membership row
-    // (`vetOrganizationClaim`), which is the state a session that selected the
-    // organization before its user was removed is left in. That claim is what
-    // lets the grants above apply to a principal outside the floor's domain;
-    // with no active organization no stored grant applies at all.
-    const sessions = await ql.find('sys_session', { where: { user_id: userId }, limit: 20, context: SYS });
-    for (const s of Array.isArray(sessions) ? sessions : sessions?.records ?? []) {
-      await ql.update('sys_session', { id: s.id, active_organization_id: orgId }, { context: SYS });
-    }
+    // [ADR-0093 D8.1, as amended] The OUTSIDE principal is a CURRENT member
+    // whose grade maps to no `org_member` position, so no write-class row
+    // filter binds it; its fresh session resolves the Default Organization from
+    // that membership, so the grants above apply. A user with no membership at
+    // all reaches none of the organization's data under any posture.
+    token = await regradeOutsideMemberFloor(stack, email, orgId);
   }
   return { stack, rootDir, ql, adminId, userId, token };
 }

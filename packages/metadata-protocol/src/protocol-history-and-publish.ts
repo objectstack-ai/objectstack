@@ -58,6 +58,7 @@ import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 // [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
 import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
 import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-question.js';
+import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -152,7 +153,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // ran, so the registry still serves this body; the heal
                 // re-registers the active row the store now serves, the one just
                 // restored, without opening another write-through caller.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package the restored row is bound to.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             } else {
                 await args.repo.delete(ref, {
                     parentVersion: item.version, actor, source, message, intent,
@@ -161,7 +163,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // …and a removed row's heal, as `revertCommit`'s removal takes
                 // it: the registry never registered this row, so it is left
                 // serving what it served before the publish.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package of the row it deleted.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             }
             // A drain that failed left the draft row in place (#4981): it is
             // still pending, and putting it back again would conflict with it.
@@ -175,7 +178,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // item's entry from the active rows the store now serves, the
                 // state the undo above just restored — the route the stored-row
                 // census asks of every write.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package of the active row the undo left.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             }
         } catch (error) {
             notUndone.push({ item, error });
@@ -711,6 +715,14 @@ export class ProtocolHistoryAndPublishFacet {
             /** What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly` was stated. */
             result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
             /**
+             * [#32369] What a judge-only call judged: the draft body the
+             * promotion would make active and the package it would write it
+             * under, for `publishPackageDrafts`' Phase 0 to judge the batch's
+             * objects as one unit. Present only on a judge-only call that read
+             * a draft.
+             */
+            judged?: { body: unknown; packageId: string | null };
+            /**
              * [#32396] The draft row this promotion consumed — the body and
              * hash it judged and `repo.promoteDraft` promoted (`expectedDraftHash`
              * holds the two to one row). `publishPackageDrafts` puts it back
@@ -1190,7 +1202,13 @@ export class ProtocolHistoryAndPublishFacet {
         if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         // [#32396] Every refusal above has had its turn; a judge-only call stops
         // here, before the one write this method makes.
-        if (request.judgeOnly) return { singularType, advisories: runtimeAdvisories };
+        if (request.judgeOnly) {
+            return {
+                singularType,
+                advisories: runtimeAdvisories,
+                ...(draftForGate ? { judged: { body: draftForGate.body, packageId: promoteInto } } : {}),
+            };
+        }
         const artifactBacked = host.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
@@ -1422,7 +1440,7 @@ export class ProtocolHistoryAndPublishFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#publishPackageDrafts`; the method's docblock there is its contract. */
-    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
+    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applyRegistryWriteThrough' | 'applySeedBodies' | 'classifyObjectContribution' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
         packageId: string;
         actor?: string;
         /**
@@ -1971,6 +1989,10 @@ export class ProtocolHistoryAndPublishFacet {
             advisories: RuntimeAuthoringIssue[];
         };
         const promoted: PromotedDraft[] = [];
+        // [#32369] The promoted objects as the registry registers them, and the
+        // order the unit admits them in (assigned inside the transaction).
+        let promotedObjects: BatchObjectRow[] = [];
+        let admittedOrder: readonly number[] = [];
         // (assigned inside the transaction closure — keep the wide type)
         let commit = null as { commitId: string } | null;
         // ADR-0119 D1 — `transaction` is contract-declared, so this reaches it
@@ -2049,7 +2071,7 @@ export class ProtocolHistoryAndPublishFacet {
                 : `publish app package '${request.packageId}'`,
         });
         /** Tag the causal item on the error that aborts the batch (the `catch` below reads it). */
-        const tagCausal = (e: unknown, d: (typeof ordered)[number]): Error => {
+        const tagCausal = (e: unknown, d: Pick<(typeof ordered)[number], 'type' | 'name' | 'member'>): Error => {
             const err = e instanceof Error ? e : new Error(String(e));
             (err as { __batchItem?: unknown }).__batchItem = d;
             return err;
@@ -2057,13 +2079,26 @@ export class ProtocolHistoryAndPublishFacet {
         try {
             // ═══ [#32396] Phase 0 — judge the whole batch, write nothing ═══
             if (!canRollBack) {
+                const judgedObjects: BatchObjectRow[] = [];
+                const judgedDrafts: Array<(typeof ordered)[number]> = [];
                 for (const d of ordered) {
                     try {
-                        await this.promoteDraftForPublish({ ...promotionRequest(d), judgeOnly: true });
+                        const { singularType, judged } = await this.promoteDraftForPublish({ ...promotionRequest(d), judgeOnly: true });
+                        if (judged && isBatchObjectType(singularType)) {
+                            judgedObjects.push({ type: singularType, name: d.name, body: judged.body, packageId: judged.packageId });
+                            judgedDrafts.push(d);
+                        }
                     } catch (e: unknown) {
                         throw tagCausal(e, d);
                     }
                 }
+                // [#32369, ADR-0144 D2 and D6] …and the drafts' objects as ONE
+                // unit, the question Phase 1 asks once every draft is promoted
+                // (below): asked here too, so a pair the registry refuses
+                // refuses the batch with nothing promoted, rather than after
+                // every promotion and an undo of each.
+                const [firstRefused] = judgeBatchObjectRegistrations(this, judgedObjects).refused;
+                if (firstRefused) throw tagCausal(firstRefused[1], judgedDrafts[firstRefused[0]]!);
             }
             await inTxn(async () => {
                 for (const d of ordered) {
@@ -2097,6 +2132,27 @@ export class ProtocolHistoryAndPublishFacet {
                         throw tagCausal(e, d);
                     }
                 }
+                // [#32369, ADR-0144 D2 and D6] The promoted objects as ONE unit,
+                // now that every draft is promoted: each promotion asked the
+                // registry about its body alone (`'package-publish'` is
+                // `'body-only'`, so a later draft can complete a pair, #29673),
+                // and nothing asked the pair once the package was whole. A row
+                // the registry refuses — at registration (D6's roll-up door) or
+                // against the unit (the follow door) — refuses the batch with
+                // that row as its cause, before the commit is recorded: the
+                // transaction rolls the promotions back, and the refusal is
+                // answered in `failed[]`. A runtime that cannot roll back asked
+                // the same question in Phase 0, before any promotion; asked
+                // again here, as Phase 1 judges each draft again, a refusal
+                // only the promoted bodies provoke is undone by the `catch`
+                // below.
+                promotedObjects = promoted.map((p) => ({
+                    type: p.singularType, name: p.d.name, body: p.body, packageId: p.packageId,
+                }));
+                const unitVerdict = judgeBatchObjectRegistrations(this, promotedObjects);
+                const [firstRefused] = unitVerdict.refused;
+                if (firstRefused) throw tagCausal(firstRefused[1], promoted[firstRefused[0]]!.d);
+                admittedOrder = unitVerdict.order;
                 // ADR-0067 — record this turn as ONE commit, INSIDE the same
                 // transaction as the promotions it describes: the commit row and
                 // the published state land or roll back together, so a recorded
@@ -2375,6 +2431,12 @@ export class ProtocolHistoryAndPublishFacet {
             });
         }
 
+        // [#32369] The promoted objects registered in the order the unit admits
+        // them, before the per-item side effects below register each again in
+        // publish order: a draft whose pair a later draft completes is then
+        // registered after its sibling, not refused (and only logged) at its
+        // own write-through ahead of it.
+        await registerAdmittedBatchRows(this, promotedObjects, admittedOrder);
         for (const p of promoted) {
             // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
             // discipline every advisory-carrying door follows: an advisory-free
@@ -2468,14 +2530,14 @@ export class ProtocolHistoryAndPublishFacet {
         let probes: import('./build-probes.js').BuildProbeReport | undefined;
         if (published.length > 0) {
             try {
-                const { runBuildProbes } = await import('./build-probes.js');
+                const { publishedItemReader, runBuildProbes } = await import('./build-probes.js');
                 const analytics = this.getServicesRegistry?.().get('analytics');
                 probes = await runBuildProbes({
                     engine: this.engine as any,
-                    getItem: async (type, name) => {
-                        const wrapper: any = await (this.facade as any).getMetaItem({ type, name });
-                        return wrapper?.item ?? wrapper ?? undefined;
-                    },
+                    // [ADR-0150 D3, #31700] A widget's dataset is resolved FROM
+                    // the publishing package, so each namespace's publish
+                    // probes its own dataset of a name two namespaces hold.
+                    getItem: publishedItemReader(this.facade as any, request.packageId),
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,

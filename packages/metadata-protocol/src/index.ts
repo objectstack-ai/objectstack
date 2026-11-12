@@ -90,6 +90,10 @@ export {
     ensureUserPermissionSetPackagelessIndex,
     createUserPermissionSetGuardAtSchemaSync,
     buildUserPermissionSetPackagelessIndexSql,
+    // [#32460] The build's own catalog read ("does the guard stand?"), for
+    // `os migrate plan`: it lists the guard `os migrate apply` would build,
+    // and nothing where this statement finds the guard standing.
+    buildUserPermissionSetPackagelessIndexPresenceSql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
     resolveUserPermissionSetIndexSeam,
     buildUserPermissionSetOldKeySql,
@@ -361,11 +365,12 @@ export {
   seedLoadPartialWrites,
   type SeedLoadPartialWrites,
 } from './seed-loader.js';
-export { runBuildProbes } from './build-probes.js';
+export { publishedItemReader, runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,
   BuildProbeReport,
   RunBuildProbesOptions,
   ProbeEngine,
   ProbeAnalytics,
+  ProbeItemProtocol,
 } from './build-probes.js';

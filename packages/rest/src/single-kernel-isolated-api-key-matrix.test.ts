@@ -44,6 +44,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
+// The source under test reaches `@objectstack/objectql` only through a dynamic import inside a
+// handler; paid here at module scope so the first load lands during collection,
+// not inside a clocked window (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 import { hashApiKey, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
@@ -403,29 +407,29 @@ describe('[#15256] §3 — an organization-less key under `isolated`', () => {
 });
 
 // ---------------------------------------------------------------------------
-// §4 — THE ABLATION. Remove the provider; the ex-member row comes back.
+// §4 — THE ABLATION. Remove the provider; the posture-conditional admission
+// comes back.
 //
 // One variable changes: the tenancy provider decision 1A wired. The tenancy
 // service, the engine, the keys, the routes and the store are byte-identical to
-// §2. A pin that cannot go red has measured nothing.
+// §2. A pin that cannot go red has measured nothing. Since ADR-0093 D8.1 was
+// amended the membership rule reads no posture, so the ex-member key stays
+// refused with the provider removed; what the ablation still moves is the
+// posture-conditional `organization_required` refusal of the org-less key.
 // ---------------------------------------------------------------------------
 
-describe('[#15256] §4 — ablation: without the provider, the measured leak returns', () => {
-    it('the ex-member READS the other organization again — GET 200, total 2', async () => {
+describe('[#15256] §4 — ablation: without the provider, the posture-conditional admission returns', () => {
+    it('[ADR-0093 D8.1, as amended] a key its owner\'s membership no longer backs is refused without the provider too — GET 401', async () => {
         const h = setup({ omitTenancyProvider: true });
         const res = await callGet(h.rest, RAW_EXMEMBER_KEY);
-        expect(res.statusCode).toBe(200);
-        expect(res.body.total).toBe(2);
-        expect(res.body.value.map((r: BusinessUnitRow) => r.id)).toEqual(['bu_a1', 'bu_a2']);
+        expect(res.statusCode).toBe(ANONYMOUS_DENY_STATUS);
     });
 
-    it('the ex-member WRITES into it again — POST 201, the row read back from the store carries `org_alpha` / `u_exmember`', async () => {
+    it('[ADR-0093 D8.1, as amended] ...and POST is 401 with NOTHING landed — read back from the store', async () => {
         const h = setup({ omitTenancyProvider: true });
         const res = await callPost(h.rest, RAW_EXMEMBER_KEY, 'w-exmember');
-        expect(res.statusCode).toBe(201);
-        const landed = h.store().filter((r) => r.name === 'w-exmember');
-        expect(landed).toHaveLength(1);
-        expect(landed[0]).toMatchObject({ organization_id: 'org_alpha', created_by: 'u_exmember' });
+        expect(res.statusCode).toBe(ANONYMOUS_DENY_STATUS);
+        expect(h.store().filter((r) => r.name === 'w-exmember')).toHaveLength(0);
     });
 
     it('the organization-less key goes back to the silent empty set — 200, total 0', async () => {
@@ -435,11 +439,13 @@ describe('[#15256] §4 — ablation: without the provider, the measured leak ret
         expect(res.body.total).toBe(0);
     });
 
-    it('and NOTHING is said about any of it — no refusal line, because no refusal was decided', async () => {
+    it('the one line said is the membership refusal — the posture-conditional refusal was not decided', async () => {
         const h = setup({ omitTenancyProvider: true });
         await callGet(h.rest, RAW_EXMEMBER_KEY);
         await callGet(h.rest, RAW_ORGLESS_KEY);
-        expect(h.warnings().filter((l) => l.includes('API key refused'))).toHaveLength(0);
+        const lines = h.warnings().filter((l) => l.includes('API key refused'));
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('organization_membership_ended');
     });
 
     it('NARROWNESS: the member control is UNCHANGED by the ablation — the provider is what moved, not the fixture', async () => {
