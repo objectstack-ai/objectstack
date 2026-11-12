@@ -1300,7 +1300,10 @@ export class MetadataManager implements IMetadataService {
     const existed = typeStore.has(key) || replaces.length > 0;
     if (data !== null && typeof data === 'object' && this.storedPackagelessRows.has(data)) {
       const before = typeStore.get(key);
-      if (before !== null && typeof before === 'object' && before !== data && !this.loadedFrom.has(before)) this.storedRowsOverOwnItems.add(data);
+      // [review S3] A row that replaces a marked row (the pass run again) carries its mark.
+      if (before !== null && typeof before === 'object' && before !== data && (!this.loadedFrom.has(before) || this.storedRowsOverOwnItems.has(before))) {
+        this.storedRowsOverOwnItems.add(data);
+      }
     }
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);

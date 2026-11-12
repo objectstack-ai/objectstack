@@ -2093,15 +2093,21 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   /**
    * The real pass (`MetadataPlugin._loadFromFileSystem`) over one database
    * loader, on a host that declares `hostPackage`; `inMemory` packages' items
-   * of `helper` are registered in memory before it.
+   * of `helper` are registered in memory before it. `passes` runs it that
+   * many times on the same manager, the loader's cache kept between runs or
+   * dropped (`keepCache`).
    */
-  const bootPass = async (hostPackage?: string, inMemory: string[] = []) => {
+  const bootPass = async (hostPackage?: string, inMemory: string[] = [], passes = 1, keepCache = false) => {
     const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
     (m as any).loaders.clear();
-    m.registerLoader(new DatabaseLoader({ driver }));
+    const loader = new DatabaseLoader({ driver });
+    m.registerLoader(loader);
     for (const packageId of inMemory) registerOwn(m, packageId);
-    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    for (let pass = 0; pass < passes; pass++) {
+      if (pass > 0 && !keepCache) loader.invalidateAll();
+      await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    }
     return m;
   };
   /** `packageId`'s own item of `helper`, registered in memory (code). */
@@ -2236,10 +2242,10 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
 
   /** One composition: the host's package, the stored rows, items in memory before the pass, and after it. */
   type InMemoryCell = [hostPackage: string, rows: Row[], before: string[], after: string[]];
-  const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell) => {
+  const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell, passes = 1, keepCache = false) => {
     driver = createMockDriver();
     await seedRows(rows);
-    const m = await bootPass(hostPackage, before);
+    const m = await bootPass(hostPackage, before, passes, keepCache);
     for (const packageId of after) registerOwn(m, packageId);
     return bareAnswers(m);
   };
@@ -2301,6 +2307,41 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
       refused(BETA, ALPHA, 'environment'),
       refused(HOST, ALPHA, 'environment'),
     ]);
+  });
+
+  /**
+   * [#32791, review S3] The pass run again on the same manager hands out a
+   * new row object, which replaces the marked row in the host's slot. The
+   * new row carries the mark, so ruling B's compositions (and r1's S1(c)
+   * cell, in either save order) stay refused, with the loader's cache kept
+   * or dropped between the runs, as on main. Without the carried mark the
+   * slot was set aside and the read answered the package-less row.
+   */
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside a second package\'s row or item: still refused naming both packages and the environment (review S3)', async () => {
+    const cells: [InMemoryCell, string[]][] = [
+      [[ALPHA, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null], [BETA]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [ALPHA, BETA], []], [ALPHA, BETA, 'environment']],
+      [[ALPHA, [[null]], [BETA, ALPHA], []], [BETA, ALPHA, 'environment']],
+      [[HOST, [[ALPHA], [null]], [HOST], []], [HOST, ALPHA, 'environment']],
+      [[HOST, [[null], [ALPHA]], [HOST], []], [HOST, ALPHA, 'environment']],
+    ];
+    const seen: unknown[] = [];
+    const expected: unknown[] = [];
+    for (const keepCache of [false, true]) {
+      for (const [cell, candidates] of cells) {
+        seen.push(await bareAfterPass(cell, 2, keepCache));
+        expected.push([REFUSED(...candidates), REFUSED(...candidates)]);
+      }
+    }
+    expect(seen).toEqual(expected);
+  });
+
+  it('CONTROL action, the pass run twice on the same manager after the stamped row replaced the host\'s package\'s item in memory, beside no other package: the bare read still answers the package-less row (review S3)', async () => {
+    const seen: unknown[] = [];
+    for (const keepCache of [false, true]) seen.push(await bareAfterPass([ALPHA, [[null]], [ALPHA], []], 2, keepCache));
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
   });
 
   it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside no other package: the bare read answers the package-less row', async () => {
