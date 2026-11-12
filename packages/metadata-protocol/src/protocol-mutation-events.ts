@@ -41,6 +41,11 @@ export interface MetadataMutationEvent {
      *
      * Producers stamp the binding the write resolved, through `boundPackageOf`,
      * never a request's value verbatim.
+     *
+     * [#31698] The awaited projector's event ({@link MetadataMutationProjector})
+     * carries it for `permission` alone, the one type whose projector (the
+     * security catalog's echo) keeps a copy per `(package, name)`; every other
+     * type's projector event omits it.
      */
     packageId?: string | null;
 }
