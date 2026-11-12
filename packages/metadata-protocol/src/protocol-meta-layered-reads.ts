@@ -56,7 +56,7 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { judgeBareActionRead, rethrowPackageScopedRefusal, serviceAnswerFitsBareAction } from './protocol-meta-item-reads.js';
+import { judgeBareActionRead, judgeDroppedServiceRefusal, rethrowPackageScopedRefusal, serviceAnswerFitsBareAction } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -80,7 +80,7 @@ export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'pa
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItemLayered`; the method's docblock there is its contract. */
-export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessReadAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessReadAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'resolveRowlessExpandedView' | 'resolveWritePackageScope' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string;
         name: string;
         packageId?: string;
@@ -217,7 +217,14 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
         // [ADR-0150 D3, #32244] The store's package-scoped refusal is an
         // answer, never "no code layer" ({@link rethrowPackageScopedRefusal});
         // anything else is ignored, as before.
-        rethrowPackageScopedRefusal(host, request.type, error);
+        const dropped = rethrowPackageScopedRefusal(host, request.type, error);
+        // [ADR-0150 D3, #32560] …and a dropped one naming the service's
+        // package-less item is judged as the plain read judges it
+        // ({@link judgeDroppedServiceRefusal}).
+        if (dropped !== undefined && !request.packageId && request.type === 'action') {
+            const answer = await judgeDroppedServiceRefusal(host, request.name, dropped);
+            if (answer !== undefined) code = answer.item;
+        }
     }
     if (code === null) {
         // Prefer the artifact-only lookup so an overlay row hydrated
