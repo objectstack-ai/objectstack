@@ -5,7 +5,7 @@
 
 fix(objectql, metadata-protocol): the save or publish that makes a stored computed field compute something new fills the object's existing rows, and says so per field
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 A stored computed field (a non-`formula` field declaring `expression`) is computed on every insert and update and on nothing else. Adding one to an object that already held rows, turning a `formula` into one (`type: 'number'` with the same `expression`, the remedy the platform now prescribes for a total over a formula), or changing its expression left every existing row NULL or holding the old value, so a dataset `sum` over it read 0 or too little with no error. `os migrate stored-expressions --apply` filled them, but it needs a direct database URL, which a hosted tenant does not have, and the save said nothing.
