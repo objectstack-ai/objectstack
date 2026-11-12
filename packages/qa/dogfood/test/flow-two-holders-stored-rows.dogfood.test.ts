@@ -38,8 +38,13 @@ const NAME = 'qa_helper_32521';
 /** A `sys_metadata` driver over one in-memory table: just what `DatabaseLoader` reads and writes. */
 function memoryDriver() {
     const rows = new Map<string, Record<string, unknown>>();
+    // Equality only; it refuses what it does not implement.
     const match = (row: Record<string, unknown>, where: Record<string, unknown> = {}) =>
-        Object.entries(where).every(([k, v]) => row[k] === v);
+        Object.entries(where).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`memoryDriver: unsupported WHERE combinator '${k}'`);
+            if (v !== null && typeof v === 'object') throw new Error(`memoryDriver: unsupported WHERE operator on '${k}'`);
+            return row[k] === v;
+        });
     return {
         name: 'qa-memory', version: '1', supports: {},
         connect: vi.fn(), disconnect: vi.fn(), checkHealth: vi.fn(async () => true), execute: vi.fn(),
