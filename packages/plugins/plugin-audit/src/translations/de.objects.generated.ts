@@ -342,6 +342,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Row IDs",
         help: "JSON array of the sealed row ids"
       },
+      leaf_hashes: {
+        label: "Leaf Hashes",
+        help: "JSON array of each sealed row's leaf hash, in the order of the row ids; checked against the signed root"
+      },
       root: {
         label: "Merkle Root"
       },

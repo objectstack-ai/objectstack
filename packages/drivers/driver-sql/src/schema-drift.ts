@@ -3113,6 +3113,16 @@ export function diffManagedIndexes(args: {
     // (#4884 — the boot advised dropping `idx_sys_metadata_overlay_draft`, the
     // partial UNIQUE enforcing draft-overlay uniqueness, on a healthy fresh DB).
     if (isRuntimeManagedIndex(p, runtimeCreated, tenantField)) continue;
+    // A hash-shadow carrier whose generation expression could NOT be read
+    // (`shadowKey` unresolved) gets the answer the widening and redefinition
+    // arms above give it: kept, nothing offered. We know by name that it is a
+    // driver-owned UNIQUE, but not WHAT it hashes, and the remedy below is a
+    // DROP — {@link isHashShadowCarrier}: never destroyed on a guess. The
+    // degraded outcome is a missing finding, never a dropped constraint.
+    //
+    // ⛔ The `!p.shadowKey` half is load-bearing, as in the redefinition arm: a
+    // RESOLVED orphan carrier is still an orphan and still offered below.
+    if (isHashShadowCarrier(p) && !p.shadowKey) continue;
     // Commit cd1348802: an orphaned shadow carrier is still an orphan — its declaration
     // is gone, and `drop_index` is the right remedy — but the report must name
     // the constraint it enforced, not the digest column it stored.
