@@ -2226,38 +2226,77 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     expect(await bareAnswers(inMemory)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
   });
 
+  /** One composition: the host's package, the stored rows, items in memory before the pass, and after it. */
+  type InMemoryCell = [hostPackage: string, rows: Row[], before: string[], after: string[]];
+  const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell) => {
+    driver = createMockDriver();
+    await seedRows(rows);
+    const m = await bootPass(hostPackage, before);
+    for (const packageId of after) registerOwn(m, packageId);
+    return bareAnswers(m);
+  };
+
   /**
-   * [#32791] A package's item registered in memory and the package-less row
-   * the pass stamped with the host's package: the row is counted once, as the
-   * store files it beside that holder (its customization). An item the
-   * host's package held in memory before the pass is replaced in that slot by
-   * the pass's own write of the stamped row, so the slot holds the row alone.
-   * BEFORE (main): refused naming the host.
+   * [#32791] A package's item registered in memory, and the package-less row
+   * the pass stamped with the host's package into a slot no other item held:
+   * the row is counted once, as the store files it beside that one holder
+   * (its customization). BEFORE (main): refused naming the host's package too.
    */
-  it('action, items in memory beside the package-less row the pass stamped: the row is counted once', async () => {
-    const seen: unknown[] = [];
-    for (const [hostPackage, rows, before, after] of [
+  it('action, one package\'s item in memory beside the package-less row the pass stamped into an empty slot: the row is counted once', async () => {
+    const cells: InMemoryCell[] = [
       [HOST, [[null]], [], [ALPHA]],
       [HOST, [[null]], [ALPHA], []],
-      [HOST, [[ALPHA], [null]], [HOST], []],
+      [ALPHA, [[null]], [HOST], []],
+    ];
+    const seen: unknown[] = [];
+    for (const cell of cells) seen.push(await bareAfterPass(cell));
+    expect(seen).toEqual(cells.map(() => ['env', 'env']));
+  });
+
+  it('action, two packages\' items in memory beside the package-less row the pass stamped, in either order: the bare read is refused naming both and the environment, never the host (BEFORE: the host named too)', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
       [HOST, [[BETA], [null]], [ALPHA], []],
+      [HOST, [[null]], [ALPHA], [BETA]],
+      [HOST, [[null]], [ALPHA, BETA], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = REFUSED(ALPHA, BETA, 'environment');
+    expect(seen).toEqual([[refused, refused], [refused, refused], [refused, refused]]);
+  });
+
+  /**
+   * [#32791, epic ruling B] The pass's own write of the stamped row can
+   * replace an item the host's package held in memory before it. That item's
+   * package held the name, so its slot is a holder, not only the row: beside
+   * a second package's row or item the name has two holders and the bare
+   * read is refused, as on main (D4 makes the row a customization only of a
+   * name exactly one package holds). Beside no other package, the row is
+   * the one holder's. BEFORE (this branch at `031037638d`, the slot set
+   * aside): the package-less row, a pick between two packages.
+   */
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside a second package\'s row or item in either order: the bare read is refused naming both packages and the environment', async () => {
+    const seen: unknown[] = [];
+    for (const cell of [
       [ALPHA, [[BETA], [null]], [ALPHA], []],
+      [ALPHA, [[null], [BETA]], [ALPHA], []],
       [ALPHA, [[null]], [ALPHA], [BETA]],
-    ] as Array<[string, Row[], string[], string[]]>) {
-      driver = createMockDriver();
-      await seedRows(rows);
-      const m = await bootPass(hostPackage, before);
-      for (const packageId of after) registerOwn(m, packageId);
-      seen.push(await bareAnswers(m));
-    }
+      [ALPHA, [[null]], [ALPHA, BETA], []],
+      [ALPHA, [[null]], [BETA, ALPHA], []],
+      [HOST, [[ALPHA], [null]], [HOST], []],
+    ] as InMemoryCell[]) seen.push(await bareAfterPass(cell));
+    const refused = (...candidates: string[]) => [REFUSED(...candidates), REFUSED(...candidates)];
     expect(seen).toEqual([
-      ['env', 'env'],
-      ['env', 'env'],
-      ['env', 'env'],
-      [REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')],
-      ['env', 'env'],
-      ['env', 'env'],
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(ALPHA, BETA, 'environment'),
+      refused(BETA, ALPHA, 'environment'),
+      refused(HOST, ALPHA, 'environment'),
     ]);
+  });
+
+  it('CONTROL action, the stamped row replacing the host\'s package\'s item in memory, beside no other package: the bare read answers the package-less row', async () => {
+    expect(await bareAfterPass([ALPHA, [[null]], [ALPHA], []])).toEqual(['env', 'env']);
   });
 
   /**

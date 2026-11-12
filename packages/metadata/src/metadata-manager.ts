@@ -627,6 +627,13 @@ export class MetadataManager implements IMetadataService {
    * one with the host's package before it registers it ({@link slotViewOf}).
    */
   private readonly storedPackagelessRows = new WeakSet<object>();
+  /**
+   * [ADR-0150 D4, #32791] The {@link storedPackagelessRows} whose registration
+   * replaced an item no loader handed out (one registered in memory or by
+   * code): that item's package held the name before the row took its slot, so
+   * the slot is a holder, not only the row ({@link slotViewOf}).
+   */
+  private readonly storedRowsOverOwnItems = new WeakSet<object>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
@@ -1225,6 +1232,10 @@ export class MetadataManager implements IMetadataService {
     const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
+    if (data !== null && typeof data === 'object' && this.storedPackagelessRows.has(data)) {
+      const before = typeStore.get(key);
+      if (before !== null && typeof before === 'object' && before !== data && !this.loadedFrom.has(before)) this.storedRowsOverOwnItems.add(data);
+    }
     for (const replaced of replaces) typeStore.delete(replaced);
     typeStore.set(key, data);
     recordStoreWrite(typeStore, key);
@@ -1450,9 +1461,11 @@ export class MetadataManager implements IMetadataService {
    * else the environment's own item) in place of the loader's copy of the
    * row, and keeps the write order of the registry slot it came from, so one
    * row is counted once, never as the host's package and as the environment.
-   * A package's own item, a host's own item that no stored row is, and an
+   * A package's own item, a host's own item that no stored row is, an
    * unstamped row the registry's own write rule filed in its one holder's
-   * slot (that holder's customization) keep their slots. A removal judges
+   * slot (that holder's customization), and a row whose registration replaced
+   * an item no loader handed out ({@link storedRowsOverOwnItems}: that item's
+   * package holds the name) keep their slots. A removal judges
    * the view without `asStored`, so in that composition the read and the
    * removal naming no package do not count the same holders.
    */
@@ -1475,6 +1488,7 @@ export class MetadataManager implements IMetadataService {
         if (
           asStored && stampedWith !== undefined && data !== null && typeof data === 'object'
           && this.storedPackagelessRows.has(data) && indexedItemPackageId(data) === stampedWith
+          && !this.storedRowsOverOwnItems.has(data)
         ) {
           const stored = storeSlotKey(type, name, undefined, data);
           if (loaderStore.has(stored)) {
