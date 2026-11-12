@@ -303,7 +303,7 @@ describe('SmtpTransport — a message\'s content reaches the wire only as a stri
 
   for (const shape of ['path', 'href'] as const) {
     for (const leg of ['the SMTP transport', 'the SMTP transport with transportOptions turning the flags off'] as const) {
-      it(`an attachment content \`{ ${shape} }\` over ${leg}: the send rejects, no canary on the wire, no request`, async () => {
+      it(`content \`{ ${shape} }\` over ${leg}: the send rejects, and the transport reads no file and fetches no URL`, async () => {
         const { file, url } = await fixtures();
         server = await startFakeSmtp();
         const transport = new SmtpTransport({
@@ -324,7 +324,7 @@ describe('SmtpTransport — a message\'s content reaches the wire only as a stri
       }, 20_000);
     }
 
-    it(`an attachment content \`{ ${shape} }\` over a transportOptions plugin transport: rejects, nothing read, no request`, async () => {
+    it(`content \`{ ${shape} }\` over a transportOptions plugin transport: the send rejects, and the transport reads no file and fetches no URL`, async () => {
       const { file, url } = await fixtures();
       const rendered: string[] = [];
       const transport = new SmtpTransport({
