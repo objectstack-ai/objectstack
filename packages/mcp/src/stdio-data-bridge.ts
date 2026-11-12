@@ -145,7 +145,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
-import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
+import { describeServedObject, metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
@@ -1148,22 +1148,12 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async describeObject(name: string): Promise<unknown | null> {
       const def = (await servedView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
-      const fields = def.fields ?? {};
       // The field list is an ARRAY here, not the stored map: `validate_expression`
       // reads `Array.isArray(def.fields)` off this very value, and the HTTP
       // bridge projects the same shape. A map would type-check and silently
       // leave that tool with zero fields in scope.
-      return {
-        name: def.name,
-        label: def.label ?? def.name,
-        fields: Object.entries(fields).map(([key, f]) => ({
-          name: key,
-          type: f?.type,
-          label: f?.label ?? key,
-          required: f?.required ?? false,
-        })),
-        enableFeatures: def.enable ?? {},
-      };
+      // [#32435] …each field and rule carrying what a write needs.
+      return describeServedObject(def);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served
