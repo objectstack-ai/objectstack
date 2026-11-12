@@ -135,3 +135,195 @@ describe.each([
         }
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#32354, ADR-0150 D3] The row layer judges a name's holders over the served
+// set too. A holder is a registry holder or a package a stored row of the name
+// is bound to; when one of them is disabled, the bare doors read at the one
+// served holder's address, answer the missing name when none is served, and
+// refuse naming only the served holders when two or more are. An exact address
+// naming a disabled package is that package's withheld item whether it holds
+// the name in the registry or only as a stored row.
+//
+// Measured on the #32183 head (6655b742, step 0 of #32354): stored rows only,
+// rows bound to an enabled and a disabled package, the answer followed save
+// order (the disabled row saved first: 404 on the plain read, /layers and
+// /published; the enabled row first: its row served, /layers 409 naming the
+// disabled package). `?package=DISABLED` of a name an enabled package ships in
+// code and the disabled one holds only as a row served the row's body under the
+// enabled package's envelope.
+// ---------------------------------------------------------------------------
+
+const ROW_E = 'com.qa.row_alpha';
+const ROW_F = 'com.qa.row_gamma';
+const ROW_D = 'com.qa.row_beta';
+const rowTag = (id: string) => (id === ROW_D ? 'disabled' : id === ROW_F ? 'third' : 'enabled');
+const rowPackageOf = (id: string) => ({
+    id, name: id.split('.').pop(), namespace: id.split('.').pop(), version: '1.0.0', type: 'app', objects: [],
+    dashboards: [
+        // Case 3: one package ships the name in code, the other holds it only as a stored row.
+        ...(id === ROW_E ? [{ name: 'e_ships_dash', label: 'enabled code', widgets: [] }] : []),
+        ...(id === ROW_D ? [{ name: 'd_ships_dash', label: 'disabled code', widgets: [] }] : []),
+        // Case 2 CONTROL: both ship it.
+        ...(id !== ROW_F ? [{ name: 'both_ship_dash', label: `${rowTag(id)} code`, widgets: [] }] : []),
+    ],
+});
+
+async function bootRowKernel(order: readonly string[], file: string): Promise<Booted> {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    const root = mkdtempSync(join(tmpdir(), 'os-meta-row-holder-'));
+    const engine = new ObjectQL();
+    engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: file }, useNullAsDefault: true }) as any, true);
+    await kernel.use(new MetadataPlugin({ watch: false, rootDir: root }));
+    await kernel.use(new ObjectQLPlugin({ ql: engine }));
+    const host: Plugin = {
+        name: 'qa.row-holder-host',
+        dependencies: ['com.objectstack.engine.objectql'],
+        init: async (ctx: PluginContext) => {
+            for (const id of order) await ctx.getService<ManifestDoor>('manifest').register(rowPackageOf(id));
+        },
+    };
+    await kernel.use(host);
+    await kernel.bootstrap();
+    await engine.syncSchemas();
+    return { kernel, engine, root };
+}
+
+const layStoredRow = (engine: ObjectQL, name: string, packageId: string | null, label: string) => engine.insert('sys_metadata', {
+    type: 'dashboard', name, namespace: 'default', package_id: packageId, scope: 'platform', strategy: 'merge', state: 'active', version: 1,
+    metadata: JSON.stringify({ name, label, widgets: [] }),
+}, { context: { isSystem: true } } as any);
+
+const unwrap = (body: any) => body?.data ?? body;
+const noDisabledTrace = (answers: ReadonlyArray<{ body: unknown }>) => {
+    for (const answer of answers) {
+        const text = JSON.stringify(answer.body ?? null);
+        expect(text).not.toMatch(/disabled (code|row)/);
+        expect(text).not.toContain(ROW_D);
+    }
+};
+
+async function expectServedRow(kernel: ObjectKernel, name: string, label: string, packageId: string) {
+    const read = await get(kernel, `/meta/dashboard/${name}`);
+    expect([read.status, unwrap(read.body)?.item?.label, unwrap(read.body)?.packageId], JSON.stringify(read.body)).toEqual([200, label, packageId]);
+    const layers = await get(kernel, `/meta/dashboard/${name}/layers`);
+    expect([layers.status, unwrap(layers.body)?.overlay?.label, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body))
+        .toEqual([200, label, label]);
+    const published = await get(kernel, `/meta/dashboard/${name}/published`);
+    expect([published.status, unwrap(published.body)?.label], JSON.stringify(published.body)).toEqual([200, label]);
+    const exact = await get(kernel, `/meta/dashboard/${name}`, { package: ROW_D });
+    expect([exact.status, codeOf(exact.body)], JSON.stringify(exact.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+    noDisabledTrace([read, layers, published, exact]);
+}
+
+describe.each([
+    { regOrder: 'disabled first', registered: [ROW_D, ROW_E, ROW_F] },
+    { regOrder: 'enabled first', registered: [ROW_E, ROW_F, ROW_D] },
+])('[#32354] stored rows judged over the served set, packages registered $regOrder', ({ registered }) => {
+    const roots: string[] = [];
+    afterAll(() => { for (const dir of roots) rmSync(dir, { recursive: true, force: true }); });
+    const freshFile = () => {
+        const dir = mkdtempSync(join(tmpdir(), 'os-meta-row-holder-db-'));
+        roots.push(dir);
+        return join(dir, 'meta.sqlite');
+    };
+    const down = async (booted: Booted) => {
+        if (booted.kernel.getState() === 'running') await booted.kernel.shutdown();
+        roots.push(booted.root);
+    };
+
+    it.each([
+        { saveOrder: 'disabled row saved first', saved: [ROW_D, ROW_E] },
+        { saveOrder: 'enabled row saved first', saved: [ROW_E, ROW_D] },
+    ])('case 1, $saveOrder: no package ships the name; the plain read, /layers and /published serve the enabled row, before and after a reboot', async ({ saved }) => {
+        const file = freshFile();
+        let booted = await bootRowKernel(registered, file);
+        try {
+            for (const id of saved) await layStoredRow(booted.engine, 'rows_only_dash', id, `${rowTag(id)} row`);
+            // CONTROL: enabled, the disabled package's own address serves its row.
+            const own = await get(booted.kernel, '/meta/dashboard/rows_only_dash', { package: ROW_D });
+            expect([own.status, unwrap(own.body)?.item?.label]).toEqual([200, 'disabled row']);
+            booted.engine.registry.disablePackage(ROW_D);
+            await expectServedRow(booted.kernel, 'rows_only_dash', 'enabled row', ROW_E);
+            // Re-enabled: the two rows are two holders again, and /layers refuses naming both.
+            booted.engine.registry.enablePackage(ROW_D);
+            const layers = await get(booted.kernel, '/meta/dashboard/rows_only_dash/layers');
+            expect([layers.status, codeOf(layers.body)]).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(JSON.stringify(layers.body)).toContain(ROW_D);
+        } finally {
+            await down(booted);
+        }
+        // After a reboot the registry holds one of the two rows (one bare slot per name).
+        booted = await bootRowKernel(registered, file);
+        try {
+            booted.engine.registry.disablePackage(ROW_D);
+            await expectServedRow(booted.kernel, 'rows_only_dash', 'enabled row', ROW_E);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('case 1, the disabled package ships the name in code and the enabled one holds it only as a stored row: the enabled row is served', async () => {
+        const booted = await bootRowKernel(registered, freshFile());
+        try {
+            await layStoredRow(booted.engine, 'd_ships_dash', ROW_E, 'enabled row');
+            booted.engine.registry.disablePackage(ROW_D);
+            await expectServedRow(booted.kernel, 'd_ships_dash', 'enabled row', ROW_E);
+            const exact = await get(booted.kernel, '/meta/dashboard/d_ships_dash', { package: ROW_E });
+            expect([exact.status, unwrap(exact.body)?.item?.label], JSON.stringify(exact.body)).toEqual([200, 'enabled row']);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, with details.candidates', async () => {
+        const booted = await bootRowKernel(registered, freshFile());
+        try {
+            for (const id of [ROW_D, ROW_E, ROW_F]) await layStoredRow(booted.engine, 'three_rows_dash', id, `${rowTag(id)} row`);
+            booted.engine.registry.disablePackage(ROW_D);
+            for (const path of ['/meta/dashboard/three_rows_dash', '/meta/dashboard/three_rows_dash/layers']) {
+                const refused = await get(booted.kernel, path);
+                expect([refused.status, codeOf(refused.body)], JSON.stringify(refused.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+                const candidates = (refused.body?.error?.details ?? refused.body?.details)?.candidates;
+                expect([...(candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(refused.body)).toEqual([ROW_E, ROW_F].sort());
+                noDisabledTrace([refused]);
+            }
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('case 3: ?package=DISABLED, where the enabled package ships the name in code and the disabled one holds it only as a stored row, is the withheld 404', async () => {
+        const booted = await bootRowKernel(registered, freshFile());
+        try {
+            await layStoredRow(booted.engine, 'e_ships_dash', ROW_D, 'disabled row');
+            // CONTROL: enabled, that address serves the row.
+            const own = await get(booted.kernel, '/meta/dashboard/e_ships_dash', { package: ROW_D });
+            expect([own.status, unwrap(own.body)?.item?.label]).toEqual([200, 'disabled row']);
+            booted.engine.registry.disablePackage(ROW_D);
+            const exact = await get(booted.kernel, '/meta/dashboard/e_ships_dash', { package: ROW_D });
+            expect([exact.status, codeOf(exact.body)], JSON.stringify(exact.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+            const bare = await get(booted.kernel, '/meta/dashboard/e_ships_dash');
+            expect([bare.status, unwrap(bare.body)?.item?.label]).toEqual([200, 'enabled code']);
+            noDisabledTrace([exact, bare]);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+
+    it('case 2 CONTROL: the environment\'s package-less row of a name an enabled and a disabled package both ship never makes /layers take the disabled holder\'s code layer', async () => {
+        const booted = await bootRowKernel(registered, freshFile());
+        try {
+            await layStoredRow(booted.engine, 'both_ship_dash', null, 'environment row');
+            booted.engine.registry.disablePackage(ROW_D);
+            // overlaySlotBinding answers the environment's item only when no package ships the name.
+            expect((booted.engine.registry as any).getEnvironmentScopedItem('dashboard', 'both_ship_dash')).toBeUndefined();
+            const layers = await get(booted.kernel, '/meta/dashboard/both_ship_dash/layers');
+            expect([layers.status, unwrap(layers.body)?.code?.label, unwrap(layers.body)?.effective?.label], JSON.stringify(layers.body))
+                .toEqual([200, 'enabled code', 'environment row']);
+            noDisabledTrace([layers]);
+        } finally {
+            await down(booted);
+        }
+    }, 120_000);
+});
