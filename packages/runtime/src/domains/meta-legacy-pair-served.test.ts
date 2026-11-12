@@ -356,16 +356,26 @@ describe('#32501 — a stored row at an exact address wears the envelope of the 
     }, 60_000);
 
     // [#32808 review S1] No stored row: the App pair's own address is refused on the
-    // real engine too. BASE (main 2f80f2897): the module-first cases answered 200
-    // with the first registered module's item on both doors; with alpha registered
-    // ahead of the modules both doors already answered 409 (the order controls).
+    // real engine too, at `?package=` and at the installed pair's namespace on the
+    // qualified path. BASE (main 2f80f2897): the module-first cases answered 200
+    // with the first registered module's item on all three doors; with alpha
+    // registered ahead of the modules all three already answered 409 (the order
+    // controls).
     it.each([
         ['one first, no other shipper', [ONE, TWO]], ['two first, no other shipper', [TWO, ONE]],
         ['alpha, then one', [ALPHA, ONE, TWO]], ['alpha, then two', [ALPHA, TWO, ONE]],
-    ] as const)('no stored row, two modules of the App holding the name (%s): the App pair is refused naming both, on the plain read and `/layers`', async (_order, shippers) => {
-        const { read } = await bootShippers(shippers);
-        for (const path of ['/meta/dashboard/d', '/meta/dashboard/d/layers']) {
-            const answer = await read(path, { package: `${SUITE}.custom` });
+    ] as const)('no stored row, two modules of the App holding the name (%s): the App pair is refused naming both, on the plain read, `/layers` and the qualified path', async (_order, shippers) => {
+        const { engine, read } = await bootShippers(shippers);
+        // The installed pair's namespace qualifies the same address on the qualified path.
+        engine.registry.installPackage({
+            id: `${SUITE}.custom`, name: 'suite custom', version: '0.1.0', type: 'module', namespace: 'suite_custom', dependencies: { [SUITE]: '^1' },
+        } as any, 'authored');
+        for (const [path, query] of [
+            ['/meta/dashboard/d', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/d/layers', { package: `${SUITE}.custom` }],
+            ['/meta/dashboard/suite_custom/d', {}],
+        ] as const) {
+            const answer = await read(path, query);
             expect([answer.status, answer.body?.error?.code], `${path} ${JSON.stringify(answer.body).slice(0, 400)}`)
                 .toEqual([409, 'RESOURCE_CONFLICT']);
             for (const id of [ONE, TWO]) expect(String(answer.body?.error?.message)).toContain(`package "${id}"`);
