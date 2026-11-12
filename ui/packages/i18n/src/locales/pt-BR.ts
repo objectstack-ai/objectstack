@@ -409,6 +409,9 @@ const pt = {
       tomorrow: "Amanhã",
       clear: "Limpar data",
       openCalendar: "Abrir calendário",
+      time: "Horário",
+      hour: "Hora",
+      minute: "Minuto",
       invalid:
         "Não salvo: “{{value}}” não é uma data. Digite no formato {{format}} ou escolha no calendário.",
     },

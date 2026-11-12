@@ -19,8 +19,9 @@
 
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
+import { zh } from '@object-ui/i18n/locales';
 import { DatePickerField, DateTimePickerField } from './DatePickerField';
 
 afterEach(() => cleanup());
@@ -225,5 +226,111 @@ describe('DateTimePickerField — writes an ISO instant (objectui#12622)', () =>
       fireEvent.click(day);
     });
     expect(onChange).toHaveBeenCalledWith(new Date(2026, 9, 20, 9, 15).toISOString());
+  });
+});
+
+/**
+ * objectstack#32589 — the `datetime` face's popover picks the time too: an
+ * hour and a minute control under the calendar, so a time is chosen without
+ * typing the whole value. A time pick writes the ISO instant of the local wall
+ * clock `<day>T<HH:mm>`, through the same `fromDateTimeInputValue` the text box
+ * uses, so what is written reads back as the time picked.
+ */
+describe('DateTimePickerField — the popover picks the time (objectstack#32589)', () => {
+  const openPicker = () => fireEvent.click(screen.getByTestId('date-picker-trigger'));
+  const choose = async (control: 'date-picker-hour' | 'date-picker-minute', option: string) => {
+    fireEvent.click(await screen.findByTestId(control));
+    const listbox = await screen.findByRole('listbox');
+    fireEvent.click(within(listbox).getByRole('option', { name: option }));
+  };
+  const dayButton = (y: number, m: number, d: number) =>
+    waitFor(() => {
+      const el = document.body.querySelector(`button[data-day="${new Date(y, m, d).toLocaleDateString()}"]`);
+      if (!el) throw new Error('calendar not open');
+      return el as HTMLButtonElement;
+    });
+
+  it('an hour pick writes that hour on the value day, keeping its minute', async () => {
+    const onChange = vi.fn();
+    render(<DateTimePickerField value={new Date(2026, 10, 12, 9, 15).toISOString()} onChange={onChange} field={DT_FIELD} />);
+    openPicker();
+    expect(within(await screen.findByTestId('date-picker-time')).getByTestId('date-picker-hour').textContent).toBe('09 AM');
+    await choose('date-picker-hour', '06 PM');
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(new Date(2026, 10, 12, 18, 15).toISOString());
+  });
+
+  it('a minute pick writes that minute, keeping the hour', async () => {
+    const onChange = vi.fn();
+    render(<DateTimePickerField value={new Date(2026, 10, 12, 18, 0).toISOString()} onChange={onChange} field={DT_FIELD} />);
+    openPicker();
+    await choose('date-picker-minute', '30');
+    expect(onChange).toHaveBeenCalledWith(new Date(2026, 10, 12, 18, 30).toISOString());
+  });
+
+  it('a picked time round-trips: the written value reads back as the time picked', async () => {
+    const onChange = vi.fn();
+    const { container, rerender } = render(
+      <DateTimePickerField value={new Date(2026, 10, 12, 9, 15).toISOString()} onChange={onChange} field={DT_FIELD} />,
+    );
+    openPicker();
+    await choose('date-picker-hour', '06 PM');
+    const written = onChange.mock.calls[0][0] as string;
+    rerender(<DateTimePickerField value={written} onChange={onChange} field={DT_FIELD} />);
+    expect(textBox(container).value).toBe('11/12/2026, 06:15 PM');
+    expect(screen.getByTestId('date-picker-hour').textContent).toBe('06 PM');
+    expect(screen.getByTestId('date-picker-minute').textContent).toBe('15');
+  });
+
+  it('a minute off the 5-minute grid is shown and kept', async () => {
+    render(<DateTimePickerField value={new Date(2026, 10, 12, 9, 17).toISOString()} onChange={() => {}} field={DT_FIELD} />);
+    openPicker();
+    expect((await screen.findByTestId('date-picker-minute')).textContent).toBe('17');
+  });
+
+  it('with no value, a day pick writes the day at 00:00, keeps the popover open and focuses the hour', async () => {
+    const onChange = vi.fn();
+    render(<DateTimePickerField value="" onChange={onChange} field={DT_FIELD} />);
+    openPicker();
+    const day = await dayButton(new Date().getFullYear(), new Date().getMonth(), 1);
+    act(() => {
+      fireEvent.click(day);
+    });
+    const d = new Date();
+    expect(onChange).toHaveBeenCalledWith(new Date(d.getFullYear(), d.getMonth(), 1, 0, 0).toISOString());
+    const hour = screen.getByTestId('date-picker-hour');
+    expect(hour).toBeTruthy();
+    expect(document.activeElement).toBe(hour);
+  });
+
+  it('with no value, a time pick writes it on today', async () => {
+    const onChange = vi.fn();
+    render(<DateTimePickerField value="" onChange={onChange} field={DT_FIELD} />);
+    openPicker();
+    await choose('date-picker-hour', '06 PM');
+    const d = new Date();
+    expect(onChange).toHaveBeenCalledWith(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 18, 0).toISOString());
+  });
+
+  it('zh session: the controls are named by the zh pack and the hours read in the zh clock', async () => {
+    render(inSession('zh', <DateTimePickerField value={new Date(2026, 10, 12, 18, 0).toISOString()} onChange={() => {}} field={DT_FIELD} />));
+    openPicker();
+    const hour = await screen.findByRole('combobox', { name: zh.fields.datePicker.hour });
+    expect(hour.textContent).toBe('18时');
+    expect(screen.getByRole('combobox', { name: zh.fields.datePicker.minute })).toBeTruthy();
+    expect(screen.getByRole('group', { name: zh.fields.datePicker.time })).toBeTruthy();
+  });
+
+  it('CONTROL: the date face has no time row, and a day pick closes the popover', async () => {
+    const onChange = vi.fn();
+    render(<DatePickerField value="2026-10-16" onChange={onChange} field={FIELD} />);
+    openPicker();
+    const day = await dayButton(2026, 9, 20);
+    expect(screen.queryByTestId('date-picker-time')).toBeNull();
+    act(() => {
+      fireEvent.click(day);
+    });
+    expect(onChange).toHaveBeenCalledWith('2026-10-20');
+    await waitFor(() => expect(document.body.querySelector('button[data-day]')).toBeNull());
   });
 });

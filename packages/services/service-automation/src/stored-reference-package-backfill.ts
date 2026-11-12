@@ -7,7 +7,7 @@
  *
  * | Row | Table . name column | Gains | Rows asked |
  * |:--|:--|:--|:--|
- * | R8 | `sys_automation_run.flow_name` | `flow_package` | `paused` rows: a paused run resumes by it; terminal history rows are not backfilled (a new one is written with its package, #31696) |
+ * | R8 | `sys_automation_run.flow_name` | `flow_package` | every row, paused and terminal: a paused run resumes by it, and a history row reads as its package's run once a second package holds the name (#31696) |
  * | R9 | `sys_flow_credential.flow_name` | `flow_package` | every row |
  * | R11 | `sys_connector_connection.connector_name` | `connector_package` | every row |
  *
@@ -73,7 +73,7 @@ export interface StoredReference {
     readonly nameColumn: string;
     /** The column this backfill fills. */
     readonly packageColumn: string;
-    /** The rows asked, beyond "the package column is null" (R8: paused runs only). */
+    /** The rows asked, beyond "the package column is null" (none of the three narrows it). */
     readonly where?: Record<string, unknown>;
 }
 
@@ -85,7 +85,6 @@ export const STORED_AUTOMATION_REFERENCES: readonly StoredReference[] = Object.f
         object: 'sys_automation_run',
         nameColumn: 'flow_name',
         packageColumn: 'flow_package',
-        where: { status: 'paused' },
     },
     { row: 'R9', type: 'flow', object: 'sys_flow_credential', nameColumn: 'flow_name', packageColumn: 'flow_package' },
     { row: 'R11', type: 'connector', object: 'sys_connector_connection', nameColumn: 'connector_name', packageColumn: 'connector_package' },

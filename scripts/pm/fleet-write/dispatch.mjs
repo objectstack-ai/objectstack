@@ -267,6 +267,20 @@
  *     was judged inside the run (the executor fails the action when the
  *     answer lists fewer than sent), so a login sent and absent here is
  *     another actor's later write, said on the row's line;
+ *   - every `pr_create` row, and an `issue_create` row whose action sent
+ *     `labels`, ALSO carries the labels as the platform lists them, the
+ *     names sent and any sent name not among them (`labelsReading`;
+ *     `--json` carries all three), and its line says them AFTER the
+ *     assignees clause (`labelsText`): either "every label sent is among
+ *     them", naming the sent set, or a ⚠️ naming each one missing — so a
+ *     reader judges "every label sent is listed" from the line alone, which
+ *     is the read-back `.claude/agents/os-dev.md` asks of a dev's
+ *     `skip-changeset`. A READING, never a verdict, as the assignees are: a
+ *     `pr_create`'s labels leg was judged inside the run against its answer
+ *     (`labelled`), so a name sent and absent here was removed by a later
+ *     write (a whole-set label PUT strips one); an `issue_create`'s labels
+ *     ride the create body and no run judges them, so the line says the
+ *     create may have dropped one;
  *   - the five advisory rows that write are NOT read back here, by
  *     construction, and that is no missed case. `advisory_report` and `advisory_create` carry
  *     prose (`summary`, `description`, so each is content-creating for rule
@@ -1176,6 +1190,7 @@ export function readBackTargets(payload) {
     const target = { action: i + 1, op: a.op, sent: a.body };
     for (const key of ['issue', 'comment_id', 'title', 'head']) if (key in a) target[key] = a[key];
     if (Array.isArray(a.assignees)) target.assignees = [...a.assignees];
+    if (Array.isArray(a.labels)) target.labels = [...a.labels];
     out.push(target);
   });
   return out;
@@ -1191,6 +1206,18 @@ export function assigneesReading(target, stored) {
   const sent = Array.isArray(target?.assignees) ? target.assignees : [];
   const assigneesMissing = sent.filter((login) => !assignees.some((l) => l.toLowerCase() === login.toLowerCase()));
   return { assignees, assigneesMissing };
+}
+
+/**
+ * A row's labels (header): what the pull or issue lists, the names the action
+ * sent, and which of those are not among them — matched case-insensitively,
+ * as GitHub matches a label name. A reading, never a verdict. Pure.
+ */
+export function labelsReading(target, stored) {
+  const labels = Array.isArray(stored?.labels) ? stored.labels.map((l) => (typeof l === 'string' ? l : typeof l?.name === 'string' ? l.name : null)).filter(Boolean) : [];
+  const labelsSent = Array.isArray(target?.labels) ? [...target.labels] : [];
+  const labelsMissing = labelsSent.filter((name) => !labels.some((l) => l.toLowerCase() === String(name).toLowerCase()));
+  return { labels, labelsSent, labelsMissing };
 }
 
 const replacementCount = (s) => (String(s ?? '').match(/\uFFFD/gu) ?? []).length;
@@ -1238,10 +1265,10 @@ export function strokeReadBackState(rows) {
 /** The transcript line for one read-back row. Pure. */
 export function readBackLine(row) {
   const head = `fleet-write: read-back action ${row.action} ${row.op}${row.where ? ` ${row.where}` : ''}`;
-  if (row.verdict === 'landed') return `${head}: ${row.sentBytes} byte(s) sent, ${row.storedBytes} stored — ${row.cls}; every byte sent is on the platform.${assigneesText(row)}`;
+  if (row.verdict === 'landed') return `${head}: ${row.sentBytes} byte(s) sent, ${row.storedBytes} stored — ${row.cls}; every byte sent is on the platform.${assigneesText(row)}${labelsText(row)}`;
   if (row.verdict === 'unverified') return `${head}: ⚠️ UNVERIFIED — ${row.why ?? `the stored body could not be read (${row.cls})`}.`;
   const fffd = row.replacements > 0 ? ` The stored body carries ${row.replacements} U+FFFD replacement character(s) the sent one does not — the mark of a byte-level split upstream.` : '';
-  return `${head}: ✗ NOT STORED — sent ${row.sentBytes} byte(s), stored ${row.storedBytes}; first difference at byte ${row.offset}: sent ${row.sentContext} | stored ${row.storedContext}.${fffd}${assigneesText(row)}`;
+  return `${head}: ✗ NOT STORED — sent ${row.sentBytes} byte(s), stored ${row.storedBytes}; first difference at byte ${row.offset}: sent ${row.sentContext} | stored ${row.storedContext}.${fffd}${assigneesText(row)}${labelsText(row)}`;
 }
 
 /** The assignees clause of a pr_create row's line (header): what the pull lists, and any login sent that is not among them — said, never judged. Pure. */
@@ -1250,6 +1277,27 @@ export function assigneesText(row) {
   const listed = ` Assignees as the pull lists them: ${row.assignees.length ? row.assignees.join(', ') : 'none'}.`;
   const missing = Array.isArray(row.assigneesMissing) && row.assigneesMissing.length ? ` ⚠️ sent ${row.assigneesMissing.join(', ')} not among them — the leg landed inside the run, so read the pull's timeline for the later write.` : '';
   return `${listed}${missing}`;
+}
+
+/**
+ * The labels clause of a row's line (header), after the assignees clause:
+ * what the pull or issue lists, then either every name sent (all among them),
+ * a ⚠️ naming each one sent and not among them, or that none was sent — so
+ * "every label sent is listed" is judged from the line alone. Said, never
+ * judged. Pure.
+ */
+export function labelsText(row) {
+  if (!Array.isArray(row.labels)) return '';
+  const isPr = row.op === 'pr_create';
+  const listed = ` Labels as the ${isPr ? 'pull' : 'issue'} lists them: ${row.labels.length ? row.labels.join(', ') : 'none'}.`;
+  const sent = Array.isArray(row.labelsSent) ? row.labelsSent : [];
+  const missing = Array.isArray(row.labelsMissing) ? row.labelsMissing : [];
+  if (!sent.length) return `${listed} None sent.`;
+  if (!missing.length) return `${listed} Every label sent is among them: ${sent.join(', ')}.`;
+  const why = isPr
+    ? "the labels leg landed inside the run, so a later write removed it: read the pull's timeline"
+    : "no run judges an issue_create's labels, so the create may have dropped it or a later write removed it: read the issue's timeline";
+  return `${listed} ⚠️ sent ${missing.join(', ')} not among them — ${why}.`;
 }
 
 /** What the CLI prints on a `failure` the read-back measured. */
@@ -2045,7 +2093,7 @@ export async function readBackStroke(payload, { dispatchedAt, annotations = [] }
       const r = await rest(api, `/repos/${repo}/issues/${named.number}`, {}, t);
       if (r.status === 200 && r.json) {
         if (r.json.id !== undefined) taken.add(r.json.id);
-        rows.push({ ...judged(where, r.json.body), foundBy: 'annotation' });
+        rows.push({ ...judged(where, r.json.body), foundBy: 'annotation', ...(Array.isArray(target.labels) ? labelsReading(target, r.json) : {}) });
       } else rows.push({ ...unread(target, where, r), foundBy: 'annotation' });
       continue;
     }
@@ -2081,7 +2129,7 @@ export async function readBackStroke(payload, { dispatchedAt, annotations = [] }
         continue;
       }
       taken.add(hit.id);
-      rows.push({ ...judged(`${repo}#${hit.number}`, hit.body), ...(isPr ? assigneesReading(target, hit) : { foundBy: 'list' }) });
+      rows.push({ ...judged(`${repo}#${hit.number}`, hit.body), ...(isPr ? assigneesReading(target, hit) : { foundBy: 'list' }), ...(isPr || Array.isArray(target.labels) ? labelsReading(target, hit) : {}) });
       continue;
     }
     // `comment`: only the body finds a new comment, so a body that matches nothing is unverified, never not-stored.
@@ -3006,6 +3054,24 @@ export async function selfTest() {
       const unassigned = await drive({ ...OK_RUN, store: pullListing([]) }, { stroke: prAssigned });
       t('…a login sent and absent on the pull is SAID on the line and in the row — the leg landed inside the run, so this is a reading, never a verdict', [unassigned.state, unassigned.readBack?.rows?.[0]?.verdict, unassigned.readBack?.rows?.[0]?.assigneesMissing, readBackLine(unassigned.readBack.rows[0]).includes('sent marchtian not among them')], ['success', 'landed', ['marchtian'], true]);
       t('…and a pr_create that sent none carries the list the pull shows and nothing missing; an issue row carries neither', [pr.readBack?.rows?.[0]?.assignees, pr.readBack?.rows?.[0]?.assigneesMissing, 'assignees' in (good.readBack?.rows?.[0] ?? {})], [[], [], false]);
+      // The labels clause (header): the os-dev read-back of a dev's `skip-changeset` is THIS line, so it lists every label sent or names the one missing.
+      const prLabelled = strokeOf([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: B, assignees: ['marchtian'], labels: ['skip-changeset'] }]);
+      const labelledListing = (labels) => ({ [PULLS]: (q) => ({ status: 200, json: q.get('head') === 'objectstack-ai:claude/issue-1-x' ? [{ id: 31, number: 20600, created_at: at(4_000), body: `${B.replace(/\n+$/u, '')}${PR_TAIL}`, assignees: [{ login: 'marchtian' }], labels }] : [] }) });
+      t('readBackTargets carries the labels an action sent, as it carries its assignees', readBackTargets({ actions: [{ op: 'pr_create', title: 'T', head: 'h', base: 'main', body: 'b', labels: ['skip-changeset'] }] })[0]?.labels, ['skip-changeset']);
+      const labelledOk = await drive({ ...OK_RUN, store: labelledListing([{ name: 'skip-changeset' }, { name: 'size/S' }]) }, { stroke: prLabelled });
+      const okRow = labelledOk.readBack?.rows?.[0] ?? {};
+      t("⭐ pr_create with labels: the row carries the pull's labels as listed, the names sent and none missing, and the verdict is the body's", [labelledOk.state, okRow.verdict, okRow.labels, okRow.labelsSent, okRow.labelsMissing], ['success', 'landed', ['skip-changeset', 'size/S'], ['skip-changeset'], []]);
+      t("…the line lists every label sent, AFTER the assignees clause it leaves byte-for-byte as it was — the reader judges 'every label sent is listed' from the line alone", readBackLine(okRow).endsWith(`${assigneesText(okRow)} Labels as the pull lists them: skip-changeset, size/S. Every label sent is among them: skip-changeset.`) && assigneesText(okRow) === ' Assignees as the pull lists them: marchtian.', true, readBackLine(okRow));
+      const stripped = await drive({ ...OK_RUN, store: labelledListing([{ name: 'size/S' }]) }, { stroke: prLabelled });
+      const strippedRow = stripped.readBack?.rows?.[0] ?? {};
+      t('⭐ …a label sent and absent from the pull is SAID on the line and in the row — the leg landed inside the run, so a later write removed it: a reading, never a verdict', [stripped.state, strippedRow.verdict, strippedRow.labelsMissing, readBackLine(strippedRow).includes('Labels as the pull lists them: size/S. ⚠️ sent skip-changeset not among them'), readBackLine(strippedRow).includes('Every label sent')], ['success', 'landed', ['skip-changeset'], true, false], readBackLine(strippedRow));
+      t('…a name is matched as GitHub matches one, case-insensitively', labelsReading({ labels: ['Skip-Changeset'] }, { labels: [{ name: 'skip-changeset' }] }).labelsMissing, []);
+      t('…a not-stored row says its labels too, after its first difference', readBackLine({ action: 1, op: 'pr_create', verdict: 'not-stored', sentBytes: 2, storedBytes: 1, offset: 1, sentContext: 'a', storedContext: 'b', replacements: 0, assignees: [], labels: [], labelsSent: ['skip-changeset'], labelsMissing: ['skip-changeset'] }).includes('stored b. Assignees as the pull lists them: none. Labels as the pull lists them: none. ⚠️ sent skip-changeset not among them'), true);
+      t('…a pr_create that sent no labels says the list the pull shows and that none was sent', [pr.readBack?.rows?.[0]?.labels, pr.readBack?.rows?.[0]?.labelsSent, readBackLine(pr.readBack.rows[0]).endsWith('Labels as the pull lists them: none. None sent.')], [[], [], true], readBackLine(pr.readBack.rows[0]));
+      const issueLabelled = await drive({ ...OK_RUN, store: { [ISSUES]: { status: 200, json: [{ id: 8, number: 20998, title: 'Card', created_at: at(3_000), body: B, labels: [{ name: 'finding' }] }] } } }, { stroke: strokeOf([{ op: 'issue_create', title: 'Card', body: B, labels: ['finding', 'pm:queue'] }]) });
+      const issueRow = issueLabelled.readBack?.rows?.[0] ?? {};
+      t("an issue_create that sent labels shares the clause — its line names the issue, and a missing one says no run judges an issue_create's labels", [issueLabelled.state, issueRow.labels, issueRow.labelsMissing, readBackLine(issueRow).includes('Labels as the issue lists them: finding. ⚠️ sent pm:queue not among them') && readBackLine(issueRow).includes("no run judges an issue_create's labels")], ['success', ['finding'], ['pm:queue'], true], readBackLine(issueRow));
+      t('…and an issue row whose action sent no labels carries no labels clause — its line is unchanged', ['labels' in (created.readBack?.rows?.[0] ?? {}), 'labels' in (good.readBack?.rows?.[0] ?? {}), readBackLine(good.readBack.rows[0]).includes('Labels')], [false, false, false]);
       const labels = await drive(OK_RUN, { stroke: strokeOf([{ op: 'labels_add', issue: 1, labels: ['a'] }]) });
       t('a stroke carrying no body reads nothing back: success, read-back none, no request beyond the dispatch and the run', [labels.state, labels.readBack?.state, labels.seen.filter((s) => !s.call.includes('/actions/runs') && s.call !== DISPATCH).length], ['success', 'none', 0]);
       t("the callers' one vocabulary: failure + notStored → 4, failure → 5, unverified → 6", [exitForResult({ state: 'failure', notStored: true }), exitForResult({ state: 'failure' }), exitForResult({ state: 'unverified' })], [EXIT_NOT_STORED, EXIT_PLATFORM_REFUSAL, EXIT_UNCONFIRMED]);
@@ -4561,7 +4627,7 @@ export async function main(argv, deps = {}) {
         not_stored: result.notStored === true,
         run: result.run,
         dispatched_at: new Date(result.dispatchedAt).toISOString(),
-        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null, assignees: r.assignees ?? null, assignees_missing: r.assigneesMissing ?? null })),
+        read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null, assignees: r.assignees ?? null, assignees_missing: r.assigneesMissing ?? null, labels: r.labels ?? null, labels_sent: r.labelsSent ?? null, labels_missing: r.labelsMissing ?? null })),
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
         advisories: (result.annotations?.advisories ?? []).map((a) => ({ action: a.action, op: a.op, ghsa_id: a.ghsaId })),
         // A read's outcome, its counts and field names alone — ⛔ never its text, which --reveal alone prints, above.

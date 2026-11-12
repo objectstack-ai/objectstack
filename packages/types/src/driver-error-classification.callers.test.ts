@@ -418,6 +418,10 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
     calls: 1,
     sentinelPin: 'packages/cli/src/commands/db/clean.operator-text-21418.test.ts',
   },
+  'packages/cli/src/utils/schema-sync-indexes.ts': {
+    calls: 2,
+    sentinelPin: 'packages/cli/src/utils/schema-sync-indexes.operator-text-21418.test.ts',
+  },
   'packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts': {
     calls: 1,
     sentinelPin: 'packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.test.ts',

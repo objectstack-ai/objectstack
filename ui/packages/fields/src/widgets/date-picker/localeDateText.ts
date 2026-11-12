@@ -157,6 +157,35 @@ export function parseLocaleDateText(text: string, locale: string, withTime: bool
   return `${day}T${pad2(hour)}:${pad2(minute)}`;
 }
 
+/**
+ * The label of one hour (`0`-`23`) in the date-time picker's hour control:
+ * the locale's own two-digit hour, on the same clock the text box shows
+ * (`02 PM` in `en`, `14时` in `zh`, `14 Uhr` in `de`), with Latin digits.
+ */
+export function localeHourLabel(hour: number, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    hour: '2-digit',
+    timeZone: 'UTC',
+    numberingSystem: 'latn',
+  }).format(Date.UTC(2026, 0, 1, hour));
+}
+
+/**
+ * The minutes the date-time picker's minute control offers: every `step`
+ * minutes from `00`, plus `current` (a value's own minute, `00`-`59`) when it
+ * is off that grid, so a stored `09:17` is shown and kept as it is. Two-digit
+ * strings, ascending.
+ */
+export function minuteOptions(step: number, current?: string): string[] {
+  const options: string[] = [];
+  for (let m = 0; m < 60; m += step) options.push(pad2(m));
+  if (current && /^\d{2}$/.test(current) && Number(current) < 60 && !options.includes(current)) {
+    options.push(current);
+    options.sort();
+  }
+  return options;
+}
+
 /** The local calendar day of `d` as `YYYY-MM-DD`. */
 export function toLocalDay(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
