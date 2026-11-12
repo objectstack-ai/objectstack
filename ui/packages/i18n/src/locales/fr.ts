@@ -4652,6 +4652,10 @@ const fr = {
         skill_one: '{{count}} compétence d’IA',
         skill_many: '{{count}} de compétences d’IA',
         skill_other: '{{count}} compétences d’IA',
+        datasource: '{{count}} sources de données',
+        datasource_one: '{{count}} source de données',
+        datasource_many: '{{count}} de sources de données',
+        datasource_other: '{{count}} sources de données',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

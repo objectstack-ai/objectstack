@@ -4796,6 +4796,11 @@ const ru = {
         skill_few: 'ИИ-навыки: {{count}}',
         skill_many: 'ИИ-навыки: {{count}}',
         skill_other: 'ИИ-навыки: {{count}}',
+        datasource: 'Источники данных: {{count}}',
+        datasource_one: 'Источник данных: {{count}}',
+        datasource_few: 'Источники данных: {{count}}',
+        datasource_many: 'Источники данных: {{count}}',
+        datasource_other: 'Источники данных: {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

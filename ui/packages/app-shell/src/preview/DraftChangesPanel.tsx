@@ -888,6 +888,8 @@ const TYPE_COUNT: Readonly<Record<string, (t: Translate, count: number) => strin
   position: (t, count) => t('preview.changes.typeCount.position', { count, defaultValue: '{{count}} positions' }),
   tool: (t, count) => t('preview.changes.typeCount.tool', { count, defaultValue: '{{count}} AI tools' }),
   skill: (t, count) => t('preview.changes.typeCount.skill', { count, defaultValue: '{{count}} AI skills' }),
+  datasource: (t, count) =>
+    t('preview.changes.typeCount.datasource', { count, defaultValue: '{{count}} datasources' }),
 };
 
 /** The types {@link TYPE_COUNT} names, for the test that holds it to the spec's registry. */

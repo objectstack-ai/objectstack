@@ -3557,9 +3557,9 @@ const zhHant = {
         translation: '翻譯 {{count}}',
         translation_one: '翻譯 {{count}}',
         translation_other: '翻譯 {{count}}',
-        mapping: '欄位對應 {{count}}',
-        mapping_one: '欄位對應 {{count}}',
-        mapping_other: '欄位對應 {{count}}',
+        mapping: '欄位對映 {{count}}',
+        mapping_one: '欄位對映 {{count}}',
+        mapping_other: '欄位對映 {{count}}',
         seed: '種子資料 {{count}}',
         seed_one: '種子資料 {{count}}',
         seed_other: '種子資料 {{count}}',
@@ -3581,6 +3581,9 @@ const zhHant = {
         skill: 'AI 技能 {{count}}',
         skill_one: 'AI 技能 {{count}}',
         skill_other: 'AI 技能 {{count}}',
+        datasource: '資料來源 {{count}}',
+        datasource_one: '資料來源 {{count}}',
+        datasource_other: '資料來源 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
@@ -3596,10 +3599,10 @@ const zhHant = {
       securityBlockTitle_other: '釋出會被拒絕 —— 有 {{count}} 項需要先做出決定',
       securityBlockWhere: '請在物件的“設定 → 記錄共享模型”中修改後重新發布。',
       securityRule: {
-        owdUnset: '未宣告記錄共享模型（sharingModel）。執行階段會以 private 處理，但這個基準必須是明確做出的決定。',
-        owdAlias: '記錄共享模型（sharingModel）不是規範值，執行階段會以 private 處理此物件。',
-        cbpNoRelation: '存取權限由父物件控制，但沒有指向父物件的必填主從欄位，因此所有讀取都會被拒絕、所有寫入都會被拒收。',
-        cbpAmbiguousRelation: '存取權限由父物件控制，但有多個必填主從欄位指向父物件，無法確定父物件：所有讀取都會被拒絕、所有寫入都會被拒收。',
+        owdUnset: '未宣告記錄共享模型（sharingModel）。執行環境會按 private 處理，但這個基線必須是明確做出的決定。',
+        owdAlias: '記錄共享模型（sharingModel）不是規範取值，執行環境會按 private 處理此物件。',
+        cbpNoRelation: '訪問權限由父物件控制，但沒有指向父物件的必填主從欄位，因此所有讀取都被拒絕、所有寫入都被拒收。',
+        cbpAmbiguousRelation: '訪問權限由父物件控制，但有多個必填主從欄位指向父物件，無法確定父物件：所有讀取都被拒絕、所有寫入都被拒收。',
       },
     },
     // ADR-0045 — the materialized-but-unlisted app banner

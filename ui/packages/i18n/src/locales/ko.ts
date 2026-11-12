@@ -4524,6 +4524,9 @@ const ko = {
         skill: 'AI 스킬 {{count}}',
         skill_one: 'AI 스킬 {{count}}',
         skill_other: 'AI 스킬 {{count}}',
+        datasource: '데이터 소스 {{count}}',
+        datasource_one: '데이터 소스 {{count}}',
+        datasource_other: '데이터 소스 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

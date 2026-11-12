@@ -3581,6 +3581,9 @@ const zh = {
         skill: 'AI 技能 {{count}}',
         skill_one: 'AI 技能 {{count}}',
         skill_other: 'AI 技能 {{count}}',
+        datasource: '数据源 {{count}}',
+        datasource_one: '数据源 {{count}}',
+        datasource_other: '数据源 {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.

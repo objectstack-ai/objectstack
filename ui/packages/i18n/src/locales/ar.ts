@@ -5046,6 +5046,13 @@ const ar = {
         skill_few: 'مهارات ذكاء اصطناعي {{count}}',
         skill_many: 'مهارات ذكاء اصطناعي {{count}}',
         skill_other: 'مهارات ذكاء اصطناعي {{count}}',
+        datasource: 'مصادر بيانات {{count}}',
+        datasource_zero: 'مصادر بيانات {{count}}',
+        datasource_one: 'مصدر بيانات {{count}}',
+        datasource_two: 'مصادر بيانات {{count}}',
+        datasource_few: 'مصادر بيانات {{count}}',
+        datasource_many: 'مصادر بيانات {{count}}',
+        datasource_other: 'مصادر بيانات {{count}}',
       },
       // objectui#12929 — the unchecked choice under an added object field whose
       // literal default the batch publish can write into the existing records.
