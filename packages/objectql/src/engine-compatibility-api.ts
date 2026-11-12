@@ -11,6 +11,10 @@
  * without DDL), `syncObjectSchema` (the same for one object, on demand) and
  * `removePackage` (a package's hooks, actions and objects removed).
  *
+ * [#32590] One body here was not moved: `applyPublishedColumnChanges` (the
+ * metadata publish's column half), written beside `syncObjectSchema` and
+ * reached the same way.
+ *
  * A MOVE, not a redesign. Each exported function below is the body of the
  * `ObjectQL` method of the same name as it stood, re-indented one level and
  * otherwise unedited: the same registry calls, the same two refusals before
@@ -185,33 +189,11 @@ export async function syncSchemas(
   }
 }
 
-/**
- * [#32590] What `syncObjectSchema` asks of the sync beyond creating and adding.
- * `applyPublishedColumnChanges`: also bring the existing table's columns to the
- * declaration for every divergence the driver classes `safe` — the metadata
- * publish's request, never the boot's.
- */
-export interface SyncObjectSchemaOptions {
-  applyPublishedColumnChanges?: boolean;
-}
-
-/**
- * [#32590] The column changes a publish asked the driver to apply: the ones it
- * applied, and the ones it did not (the dialect cannot, or the DDL failed),
- * each with the driver's own finding text. The shape of a driver-sql drift
- * entry, read structurally.
- */
-export interface PublishedColumnChangeReport {
-  applied: ReadonlyArray<{ table: string; column?: string; op: { type: string } }>;
-  skipped: ReadonlyArray<{ table: string; column?: string; op: { type: string }; message: string }>;
-}
-
 /** The body of `ObjectQL#syncObjectSchema`; the method's docblock there is its contract. */
 export async function syncObjectSchema(
   this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject'>,
   objectName: string,
-  options: SyncObjectSchemaOptions = {},
-): Promise<PublishedColumnChangeReport | undefined> {
+): Promise<void> {
   // The storage layer's object, as {@link syncSchemas} reads it.
   const obj = this._registry.getStorageObject(objectName) as any;
   if (!obj) return;
@@ -230,10 +212,39 @@ export async function syncObjectSchema(
   if (typeof (driver as any).syncSchema !== 'function') return;
   const tableName = StorageNameMapping.resolveTableName(obj);
   await (driver as any).syncSchema(tableName, obj);
-  // [#32590] A driver without the door (memory, Mongo) has no column type or
-  // constraint to bring to the declaration, so there is nothing to report.
-  if (options.applyPublishedColumnChanges !== true) return;
-  if (typeof (driver as any).applyPublishedColumnChanges !== 'function') return;
+}
+
+/**
+ * [#32590] The column changes a publish asked the driver to apply: the ones it
+ * applied, and the ones it did not (the dialect cannot, or the DDL failed),
+ * each with the driver's own finding text. The shape of a driver-sql drift
+ * entry, read structurally.
+ */
+export interface PublishedColumnChangeReport {
+  applied: ReadonlyArray<{ table: string; column?: string; op: { type: string } }>;
+  skipped: ReadonlyArray<{ table: string; column?: string; op: { type: string }; message: string }>;
+}
+
+/**
+ * [#32590] The body of `ObjectQL#applyPublishedColumnChanges`; the method's
+ * docblock there is its contract. Not a moved body: written here beside
+ * {@link syncObjectSchema}, whose object and driver lookups it repeats, so the
+ * two read the same storage object the same way.
+ */
+export async function applyPublishedColumnChanges(
+  this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject'>,
+  objectName: string,
+): Promise<PublishedColumnChangeReport | undefined> {
+  const obj = this._registry.getStorageObject(objectName) as any;
+  if (!obj) return undefined;
+  const driver = this.getDriverForObject(objectName);
+  if (!driver) return undefined;
+  // The remote owns a federated object's schema: nothing here alters it.
+  if (isFederatedObject(obj)) return undefined;
+  if (typeof (driver as any).applyPublishedColumnChanges !== 'function') return undefined;
+  // The driver diffs the PHYSICAL table, so it is handed the object under the
+  // table name its sync resolved.
+  const tableName = StorageNameMapping.resolveTableName(obj);
   return (driver as any).applyPublishedColumnChanges({ ...obj, name: tableName }) as Promise<PublishedColumnChangeReport>;
 }
 

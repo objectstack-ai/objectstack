@@ -1132,6 +1132,13 @@ export const REMOTE_FACE_ANSWERS = {
   // "Remote schema drift" above for which entries, and why only those).
   detectManagedDrift: 'remote',
   applyMigrationEntries: 'remote',
+  // [#32590] The publish's column half: the inherited body reads this face's
+  // own `detectManagedDrift` and `applyMigrationEntries` (late-bound through
+  // the instance), so it diffs the remote catalog and applies what the remote
+  // transport can; an entry that needs a table rebuild comes back `skipped`
+  // with this face's reason, which the publish reports. `deferredDdl` reads
+  // `false` here (arming is refused), so nothing short-circuits it.
+  applyPublishedColumnChanges: 'inherited',
   planMediaColumnMove: 'refused',
   // [cloud#3652 D3] Declared renames: this face renames no column (the
   // transport has no `RENAME COLUMN` door). The limit names that; the plan

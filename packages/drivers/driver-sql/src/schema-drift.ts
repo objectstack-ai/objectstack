@@ -1111,20 +1111,20 @@ export function diffManagedTable(args: {
     if (expectNullable && !col.nullable && field.storage?.notNull === false && fieldName !== ceremonyOwnedNullability) {
       // [#32590] The author DECLARED the column nullable — `storage: { notNull:
       // false }`, written out, not merely absent. The column constraint is the
-      // declaration's to own (ADR-0113 D2), so this column is the "deliberately
-      // relax" ADR-0113 D5 names, said by the author, and the two reasons the
-      // undeclared branch below gives for never applying it do not hold here:
-      // there is no `storage.notNull` left to ratify the constraint with, and
-      // no protection someone else added that a `safe` class would strip — the
-      // declaration removed it in so many words. Relaxing NOT NULL cannot lose
-      // data and cannot fail, which is the `safe` class, so a publish of the
-      // object applies it. Until then every write that omits the field is
-      // refused by the database, `required: false` notwithstanding.
+      // declaration's to own (ADR-0113 D2), and this is the "deliberately
+      // relax" ADR-0113 D5 names, said by the author in so many words: until it
+      // is applied, every write that omits the field is refused by the
+      // database, `required` notwithstanding. So the entry is reported whatever
+      // `required` says (D5's silence is for the legacy shape below, which
+      // carries no `storage` at all), and its message says what the declaration
+      // says rather than "declares no storage constraint".
       //
-      // ⛔ Only the explicit `false`. An ABSENT `storage.notNull` stays the
-      // undeclared case below, unchanged: `needs_confirm`, or silent under
-      // `required: true` — that is every pre-protocol-17 source, whose NOT NULL
-      // its author once meant.
+      // ⛔ The CATEGORY stays D5's `needs_confirm`, never `safe`: dev
+      // auto-reconcile (`autoMigrate: 'safe'`) still does not apply it at
+      // boot. What applies it is the publish of this declaration
+      // (`applyPublishedColumnChanges`, which selects exactly this entry by
+      // the explicit `false`) or `os migrate apply` — both a deliberate act.
+      // An ABSENT `storage.notNull` stays the undeclared case below, unchanged.
       out.push({
         kind: 'nullability_mismatch',
         remoteName: table,
@@ -1133,12 +1133,12 @@ export function diffManagedTable(args: {
         expected: 'NULL',
         actual: 'NOT NULL',
         severity: 'warning',
-        category: 'safe',
+        category: 'needs_confirm',
         op: { type: 'relax_not_null', table, column: fieldName },
         message:
           `${table}.${fieldName}: the column is NOT NULL but the metadata declares ` +
           `\`storage: { notNull: false }\`, so the database refuses every write that omits the field. ` +
-          `Relaxing the column cannot lose data: publishing the object applies it, or run "os migrate apply".`,
+          `Relaxing the column cannot lose data: publishing the object applies it, or relax it deliberately via "os migrate apply".`,
       });
     } else if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
       // Column STRICTER than its declaration — and the field is not even

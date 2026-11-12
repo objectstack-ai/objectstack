@@ -1454,6 +1454,24 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
   }
 }
 
+/**
+ * [#32590] Is this drift entry a column change the publish of the declaration
+ * applies? Every `safe` column entry — the class that cannot lose data or fail
+ * on existing rows (a wider varchar, a dropped runtime-token DEFAULT, a `date`
+ * column widened to the declared `datetime`) — and the one `needs_confirm`
+ * entry whose declaration says so in words: a NOT NULL column whose field
+ * declares `storage: { notNull: false }`. That entry stays `needs_confirm` for
+ * dev auto-reconcile (ADR-0113 D5, "never auto-applied"); the publish of that
+ * declaration IS the deliberate relax D5 asks for. Index entries are not column
+ * changes and stay with `os migrate apply`, which owns their build window.
+ */
+function isPublishedColumnChange(d: ManagedDriftEntry, fields: Record<string, any> | undefined): boolean {
+  if (isIndexDriftOp(d.op)) return false;
+  if (d.category === 'safe') return true;
+  return d.op.type === 'relax_not_null' && d.category === 'needs_confirm'
+    && fields?.[d.op.column]?.storage?.notNull === false;
+}
+
 /** The body of `SqlDriver#applyPublishedColumnChanges`; the method's docblock there is its contract. */
 export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'applyMigrationEntries' | 'deferredDdl' | 'detectManagedDrift' | 'logger'>, obj: { name: string; fields?: Record<string, any>; indexes?: any[] }): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
   // A deferred-DDL driver (`os migrate plan`) records schema work and runs
@@ -1463,7 +1481,7 @@ export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'ap
   // read and applied over another transport (the Turso REMOTE face) answers
   // both, and says which entries it cannot perform.
   const drift = await this.detectManagedDrift([obj]);
-  const changes = drift.filter((d) => d.category === 'safe' && !isIndexDriftOp(d.op));
+  const changes = drift.filter((d) => isPublishedColumnChange(d, obj.fields));
   if (changes.length === 0) return { applied: [], skipped: [] };
   const result = await this.applyMigrationEntries(changes, { allowDestructive: false });
   for (const d of result.applied) {

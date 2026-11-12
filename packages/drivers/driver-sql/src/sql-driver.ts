@@ -5634,13 +5634,15 @@ export class SqlDriver implements IDataDriver {
 
   /**
    * [#32590] Bring one PUBLISHED object's table to its declaration, for every
-   * column divergence the differ classes `safe` — a loosening that cannot lose
-   * data and cannot fail: a `date` column under a field now declared
-   * `datetime` (`widen_date_to_datetime`), a NOT NULL column under
-   * `storage: { notNull: false }` (`relax_not_null`), a varchar narrower than a
-   * declared `maxLength` (`widen_varchar`), a runtime-token column DEFAULT
-   * (`drop_column_default`). Index entries are left to the sync's own index
-   * work and to `os migrate apply`.
+   * column divergence that cannot lose data and cannot fail on existing rows:
+   * the `safe` column entries — a `date` column under a field now declared
+   * `datetime` (`widen_date_to_datetime`), a varchar narrower than a declared
+   * `maxLength` (`widen_varchar`), a runtime-token column DEFAULT
+   * (`drop_column_default`) — and a NOT NULL column under a field that
+   * declares `storage: { notNull: false }` in words (`relax_not_null`, which
+   * stays `needs_confirm` for dev auto-reconcile, ADR-0113 D5: the publish of
+   * that declaration is the deliberate relax). Index entries are left to the
+   * sync's own index work and to `os migrate apply`.
    *
    * The metadata publish calls it after the object's storage sync
    * (`ObjectQL.syncObjectSchema` with `applyPublishedColumnChanges`), so the
@@ -5648,8 +5650,14 @@ export class SqlDriver implements IDataDriver {
    * save. It is NOT the boot's reconcile ({@link reconcileAndWarnDrift}), and
    * it does not read `autoMigrate` or `NODE_ENV`: a boot never alters an
    * existing column in production, because nobody asked it to; a publish is
-   * the author asking, for this object, and only for the `safe` class. A
-   * `needs_confirm` or `destructive` divergence is never applied here.
+   * the author asking, for this object, and only for the changes above. Any
+   * other `needs_confirm` entry (a NOT NULL nobody declared either way) and
+   * every `destructive` one are never applied here.
+   *
+   * Through the public {@link applyMigrationEntries}, so a face that applies
+   * over another transport (the Turso REMOTE face) answers for itself. Like
+   * any explicit run, that closes the concurrent index builds' deferral window
+   * (#31901): the next concurrent build waits its bound once more.
    *
    * @returns the entries applied and those skipped — the dialect cannot
    *   perform the op (the Turso REMOTE transport cannot rebuild a table), or
