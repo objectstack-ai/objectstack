@@ -14,6 +14,10 @@
  * saved. `loadSlots` / `loadManySlots` answer every slot; `load`, `loadMany`
  * and `loadManyKeyed` still answer one item per name, the one saved last, as
  * they did. Every other type is held by name, as before.
+ *
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`)
+ * answers `loadMany` / `loadManyKeyed` one entry per `(package, name, member)`,
+ * as `DatabaseLoader` does: here a slot holds one member, so every slot.
  */
 
 import type {
@@ -27,6 +31,7 @@ import type {
 import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
   lastWrittenOf,
   recordStoreWrite,
   slotPackageOf,
@@ -115,8 +120,12 @@ export class MemoryLoader implements MetadataLoader {
     return Array.from(typeStore, ([key, data]) => keyedSlot<T>(key, data));
   }
 
-  /** One entry per name, in the order names were first saved: its slot saved last. */
+  /**
+   * One entry per name, in the order names were first saved: its slot saved
+   * last. [#31699 R3-B] A bundled type: every slot, each under its name.
+   */
   private latestByName<T>(type: string, typeStore: Map<string, any>): MetadataKeyedItem<T>[] {
+    if (isBundledStoreType(type)) return Array.from(typeStore, ([key, data]) => ({ name: storedNameOf(key), data: data as T }));
     const names = [...new Set(Array.from(typeStore.keys(), storedNameOf))];
     return names.map((name) => ({ name, data: lastWrittenOf(typeStore, type, name) as T }));
   }

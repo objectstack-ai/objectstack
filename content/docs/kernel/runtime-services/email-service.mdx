@@ -17,6 +17,8 @@ services.email.sendTemplate(input: SendTemplateInput): Promise<SendEmailResult>
 
 `services.email.getDefaultFrom?.()` returns the configured sender, the `from` that `send()` uses when the input names none. It is `undefined` when no sender is configured.
 
+`SendTemplateInput` and `RenderTemplateInput` take an optional `callerPackageId`: the package the send is made from. The template name is then resolved from that package: its own template, else the one holder in its declared dependency closure, else `409 RESOURCE_CONFLICT` naming every candidate. A send that names no package reads the environment's own template, else the one package holder, else `409` naming every holder. The eight platform-requested `auth.*` mails resolve environment-wide whatever is passed. A flow's `notify` node passes its flow's package for you.
+
 ## Over HTTP
 
 `POST /api/v1/email/send` (`client.email.send`) hands a message to `send()`. Plugins and flows call `send()` directly and are not affected by what follows. The HTTP door checks four things first, and refuses a failure with `403 PERMISSION_DENIED` before anything is sent:
