@@ -2134,11 +2134,13 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     expect(await answer(m, 'action')).toBe('env');
   });
 
-  it('CONTROL every by-package type, one package\'s row and a package-less row: the bare read answers the row the pass registered — the package-less row saved last, the holder\'s row saved last — on a host declaring no package, the holder, or another', async () => {
+  it('CONTROL every by-package type, one package\'s row and a package-less row: the bare read answers the row the pass registered — the package-less row saved last, the holder\'s row saved last — on a host declaring no package, the holder, or another (action\'s package-less row saved last on another host: the first case)', async () => {
     const seen: unknown[] = [];
+    const cells = (type: string, order: string) =>
+      [undefined, ALPHA, HOST].filter((hostPackage) => !(type === 'action' && order === 'package-less row saved last' && hostPackage === HOST));
     for (const type of UNBUNDLED) {
       for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
-        for (const hostPackage of [undefined, ALPHA, HOST]) {
+        for (const hostPackage of cells(type, order)) {
           driver = createMockDriver();
           if (order === 'package-less row saved last') {
             await seed(type, ALPHA, 1);
@@ -2152,9 +2154,10 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
       }
     }
     expect(seen).toEqual(UNBUNDLED.flatMap((type) => [
-      ...[undefined, ALPHA, HOST].map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
-      ...[undefined, ALPHA, HOST].map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
+      ...cells(type, 'package-less row saved last').map((hostPackage) => [type, 'package-less row saved last', hostPackage ?? 'no host package', 'env']),
+      ...cells(type, 'package-less row saved first').map((hostPackage) => [type, 'package-less row saved first', hostPackage ?? 'no host package', ALPHA]),
     ]));
+    expect(seen).toHaveLength(UNBUNDLED.length * 6 - 1);
   });
 
   it('CONTROL action, the host\'s own item registered in memory beside one package\'s stored row: the host is a holder — the bare read is refused naming both', async () => {
