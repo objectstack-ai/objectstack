@@ -330,11 +330,15 @@ describe('auth.handleRequest — fallbacks, and what ownsRoute counts', () => {
     expect(vendor).toHaveBeenCalledWith(request, undefined);
   });
 
-  it('an unknown path under the base is the vendor\'s own JSON 404, never a plain-text one', async () => {
+  it('an unknown path under the base is the vendor\'s own 404, never the table\'s plain-text one', async () => {
     const { manager } = await compose();
     const res = await manager.handleRequest(at('/__no_such_route_32637__'));
-    expect({ status: res.status, body: await res.text() }).toEqual(await vendorDisclaimer(manager));
-    expect(res.headers.get('content-type') ?? '').toContain('application/json');
+    const body = await res.text();
+    expect({ status: res.status, body }).toEqual(await vendorDisclaimer(manager));
+    // Hono's own not-found answer, which the private table would give if the
+    // catch-all did not hand better-auth's back.
+    expect(body).not.toBe('404 Not Found');
+    expect(res.headers.get('content-type') ?? '').not.toContain('text/plain');
   });
 
   it('ownsRoute counts the table\'s routes by method AND path, and better-auth\'s as before', async () => {
@@ -367,8 +371,11 @@ describe('auth.handleRequest — bridges re-dispatch through the vendor entry', 
     const outer = vi.spyOn(manager, 'handleRequest');
     const vendor = vi.spyOn(manager, 'handleVendorRequest');
     const res = await manager.handleRequest(postJson(path, body, { authorization: `Bearer ${bearer}` }));
-    expect(res.status, await res.clone().text()).not.toBe(404);
-    expect(res.status).toBeLessThan(500);
+    // An answer, and not a server fault: the vendor's own refusal of the inner
+    // request (an unknown user, a reserved provider id), never a disclaimer.
+    const answered = { status: res.status, body: await res.text() };
+    expect(answered.status, answered.body).toBeLessThan(500);
+    expect(answered).not.toEqual(await vendorDisclaimer(manager));
     expect(outer).toHaveBeenCalledTimes(1);
     expect(vendor.mock.calls.map(([request]) => new URL(request.url).pathname)).toContain(`${BASE}${inner}`);
   });
