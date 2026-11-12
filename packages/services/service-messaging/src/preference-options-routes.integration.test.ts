@@ -124,9 +124,15 @@ function door(setup: DoorSetup) {
         // its session names — under every tenancy posture the claim is kept
         // only while one backs it (ADR-0093 D8.1, as amended).
         getEngine: () => ({
-            find: async (object: string, q: any = {}) => object === 'sys_member'
-                ? MEMBERSHIPS.filter((row) => Object.entries(q?.where ?? {}).every(([k, v]) => (row as Record<string, unknown>)[k] === v))
-                : [],
+            find: async (object: string, q: any = {}) => {
+                if (object !== 'sys_member') return [];
+                const rows = MEMBERSHIPS.filter((row) => Object.entries(q?.where ?? {}).every(([k, v]) => {
+                    // Scalar equality only: a combinator is refused, never read as a field name.
+                    if (k.startsWith('$')) throw new Error(`membership double: ${k} is not implemented`);
+                    return (row as Record<string, unknown>)[k] === v;
+                }));
+                return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+            },
         }),
         getAuth: () => auth as never,
         tenancy: undefined,

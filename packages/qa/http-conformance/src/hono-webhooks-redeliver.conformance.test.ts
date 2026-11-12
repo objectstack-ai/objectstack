@@ -95,7 +95,12 @@ class FixturePlugin implements Plugin {
             registry: { listItems: () => [], getObject: () => undefined },
             async find(object: string, query?: any) {
                 if (object !== 'sys_member') return [];
-                return memberships.filter((row) => Object.entries(query?.where ?? {}).every(([k, v]) => row[k] === v));
+                const rows = memberships.filter((row) => Object.entries(query?.where ?? {}).every(([k, v]) => {
+                    // Scalar equality only: a combinator is refused, never read as a field name.
+                    if (k.startsWith('$')) throw new Error(`membership double: ${k} is not implemented`);
+                    return row[k] === v;
+                }));
+                return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
             },
             async findOne(object: string, opts?: any) {
                 assertEngineFindOnePredicate(object, opts);

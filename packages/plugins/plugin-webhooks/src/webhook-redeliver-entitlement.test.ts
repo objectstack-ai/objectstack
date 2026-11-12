@@ -434,7 +434,9 @@ describe('the door\'s tenancy resolver, on a real ObjectKernel registry', () => 
             headers: new Headers(),
             ql: {
                 async find(object: string, query?: any) {
-                    return object === 'sys_member' ? memberships.filter((row) => matches(row, query?.where)) : [];
+                    if (object !== 'sys_member') return [];
+                    const rows = memberships.filter((row) => matches(row, query?.where));
+                    return typeof query?.limit === 'number' ? rows.slice(0, query.limit) : rows;
                 },
             },
             authService: undefined,
