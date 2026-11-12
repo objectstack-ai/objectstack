@@ -39,6 +39,7 @@ export const esESGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_commit.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_history.fields.checksum.label": "4fe7cc0967282ec9",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
+  "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
   "objects.sys_notification.fields.actor_id.label": "b155813f8a7f06e3",
   "objects.sys_oauth_access_token.fields.id.label": "00b0385c9c152888",
   "objects.sys_oauth_access_token.fields.token.label": "6e8de3393d2cee54",

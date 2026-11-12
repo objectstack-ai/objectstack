@@ -20,7 +20,9 @@
  * arguments it always sent and gets back exactly what the single door would
  * give it, an answer or the error that query is refused with. Which queries
  * share a request is the data source's business: the coalescer hands it
- * every query of one package and one preview intent asked in one window, and
+ * every query of one caller package, one exact qualifier and one preview
+ * intent asked in one window (a batch request names its package once, so two
+ * packages' queries never share one), and
  * the data source splits by its own bounds. A query alone in its window (a
  * widget mounted alone, a one-widget refetch) goes through the single door
  * unchanged, and so does every query of a data source with no batch door.
@@ -30,7 +32,10 @@ import { createContext, useMemo } from 'react';
 
 /** `queryDataset`'s third argument, as the dashboard callers pass it. */
 export interface DatasetQueryOptions {
+  /** The exact qualifier `?package=` (ADR-0150 D5). */
   packageId?: string;
+  /** The reader's package, `?callerPackage=` (ADR-0150 D3): the dashboard's own served package. */
+  callerPackage?: string;
   previewDrafts?: boolean;
 }
 
@@ -71,8 +76,8 @@ interface PendingQuery {
  * The coalescer for `source`. With no batch door on `source` it is the single
  * door itself. Otherwise the queries asked before the current task ends (a
  * microtask, which every widget effect of one commit runs ahead of) are sent
- * together, grouped by package and preview intent: a batch request reads its
- * package and its preview intent once, for every query it carries.
+ * together, grouped by caller package, exact qualifier and preview intent: a
+ * batch request reads each of them once, for every query it carries.
  */
 export function createDatasetQueryCoalescer(source: DatasetBatchCapableSource): DatasetQueryCoalescer {
   if (typeof source.queryDatasetBatch !== 'function') {
@@ -86,7 +91,7 @@ export function createDatasetQueryCoalescer(source: DatasetBatchCapableSource): 
     const groups = new Map<string, PendingQuery[]>();
     for (const query of asked) {
       const options = query.args[2];
-      const key = JSON.stringify([options?.packageId ?? null, options?.previewDrafts ?? null]);
+      const key = JSON.stringify([options?.callerPackage ?? null, options?.packageId ?? null, options?.previewDrafts ?? null]);
       const group = groups.get(key);
       if (group) group.push(query); else groups.set(key, [query]);
     }
