@@ -859,32 +859,6 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE')).toBeUndefined();
   });
 
-  it('[#32408, contract review F6] another App\'s pair row that makes an owner a holder is counted: Y\'s exact read refuses an undeclared row naming both owners, and the registry binds it to no package alike', async () => {
-    const B = 'com.beta.base';
-    const P = 'com.beta.basep';
-    const Q = 'com.beta.baseq';
-    const U = 'com.acme.suiteu';
-    registry.installPackage(manifest(B), 'code');
-    registry.installPackage({ ...(memberOf(P) as object), dependencies: { [B]: '^1.0.0' } } as never, 'code');
-    registry.installPackage({ ...(memberOf(Q) as object), dependencies: { [B]: '^1.0.0', [P]: '^1.0.0' } } as never, 'code');
-    registry.installPackage({ ...(memberOf(U) as object), namespace: 'suite', dependencies: { [APP]: '^1.0.0', [P]: '^1.0.0' } } as never, 'code');
-    tpl('en-US', P);
-    tpl('de-DE', Q);
-    tpl('fr-FR', U);
-    tpl('it-IT', Y);
-    const bFr = { name: 'welcome', label: 'b pair fr-FR', locale: 'fr-FR', subject: 'b', bodyHtml: '<p>b</p>' };
-    const aEs = { name: 'welcome', label: 'pair es-ES', locale: 'es-ES', subject: 'a', bodyHtml: '<p>a</p>' };
-    rows.push({ id: 'row_b_fr', type: 'email_template', name: 'welcome', state: 'active', package_id: `${B}.custom`, bundle_member: 'fr-FR', metadata: JSON.stringify(bFr) });
-    rows.push({ id: 'row_es', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'es-ES', metadata: JSON.stringify(aEs) });
-    registry.registerItem('email_template', { ...bFr, _packageId: `${B}.custom`, _provenance: 'org' }, 'name' as never);
-    registry.registerItem('email_template', { ...aEs, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
-    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([P, U, Y]);
-    const err = await refusalOf(() => read(Y, 'es-ES'));
-    expect([err.code, err.status]).toEqual(['RESOURCE_CONFLICT', 409]);
-    expect(err.refusal.candidates).toEqual([{ kind: 'package', packageId: U }, { kind: 'package', packageId: Y }]);
-    expect(registry.getPackageScopedItem('email_template', 'welcome', Y, 'es-ES')).toBeUndefined();
-  });
-
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
     tpl('en-US', X);
     pairRow();

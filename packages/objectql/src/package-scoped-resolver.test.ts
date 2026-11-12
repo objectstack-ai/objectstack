@@ -592,8 +592,8 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect([templateOf(Z, 'de-DE'), templateOf(W, 'de-DE')]).toEqual([undefined, undefined]);
   });
 
-  it('unbound, beside an owner that another App\'s pair row makes a holder → no package, as `?package=Y` refuses it naming both (contract review F6; BASE at a8b63c29: Y)', () => {
-    // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row, which binds to P (Q is an addition).
+  it('CONTROL — unbound, while another App\'s pair stores an undeclared row of the name → no package: the count would wait on that pair\'s (contract review F6, epic seat 1\'s ruling; BASE at a8b63c29: Y)', () => {
+    // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row (owners P and Q).
     // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
     // Both undeclared rows are admitted at the save door (measured).
     const B = 'com.beta.base';
@@ -612,9 +612,10 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
       ...body('email_template', 'welcome', 'bpair'), locale: 'fr-FR', _packageId: `${B}.custom`, _provenance: 'org',
     }, 'name' as never);
     pairRow('email_template', 'welcome', 'pair', undefined, 'es-ES');
-    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', P, 'fr-FR')?.label).toBe('bpair template');
-    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([P, U, Y]);
+    // Each pair's row would wait on the other pair's count, so neither binds (the exact read serves both: #32561).
+    expect(registry.getPackageScopedItem('email_template', 'welcome', P, 'fr-FR')).toBeUndefined();
     expect([templateOf(U, 'es-ES'), templateOf(Y, 'es-ES')]).toEqual([undefined, undefined]);
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'es-ES')).toBeUndefined();
   });
 
   it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
