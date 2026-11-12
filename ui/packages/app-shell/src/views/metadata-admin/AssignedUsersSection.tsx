@@ -100,13 +100,18 @@ import { usePermissions } from '@object-ui/permissions';
 import { extractWriteErrorMessage, useAdapter, useMetadata } from '@object-ui/react';
 import { Plus, X, Users, Loader2, AlertCircle } from 'lucide-react';
 import { useMetadataLocale } from './i18n.js';
+import { PermissionSetHolderPick } from './PermissionSetHolderPick.js';
 import { isZhLocale } from './schema-field-label.js';
 import { membershipOrganization, readOrganizationMemberIds, type MemberFilter } from './organization-members.js';
 import {
+  candidatePackage,
+  holderCandidatesOfError,
   holderPackageOf,
   holdingPackage,
+  PermissionSetHolderConflict,
   positionReach,
   storedGrantHolders,
+  type PermissionSetHolderCandidate,
   type PermissionSetHolding,
 } from './permission-set-holder.js';
 
@@ -189,6 +194,11 @@ function useCopy() {
             viaPosition: (p: string) => '经岗位 ' + p,
             everyoneNote: '所有登录成员都持有此权限集。',
             positionHeldHint: '经岗位持有 — 在岗位的指派中移除。',
+            unresolvedTitle: '未归属的授权',
+            unresolvedNote:
+              '多个包持有此名称，而这些授权未指明其中任何一个包，因此不授予任何权限。请移除后，在要授予的持有者下重新添加。',
+            overCountNote:
+              '此列表包含经某些岗位持有的人：这些岗位所属的包也持有此名称，服务端可能将其读作该包的权限集。列表因此可能多计，但不会少计持有此权限集的人。',
           }
         : {
             title: 'Assigned Users',
@@ -217,6 +227,11 @@ function useCopy() {
             viaPosition: (p: string) => 'via position ' + p,
             everyoneNote: 'Every signed-in member holds this set.',
             positionHeldHint: 'Held via a position — remove it on the position’s assignments.',
+            unresolvedTitle: 'Unresolved grants',
+            unresolvedNote:
+              'More than one package holds this name, and these grants name none of them, so they grant nothing. Remove them and add the user again under the holder you mean.',
+            overCountNote:
+              'This list includes people who hold a position whose package also holds this name; the server may read that position as the package’s set instead. So the list may count more people than hold this set, never fewer.',
           },
     [zh],
   );
@@ -296,6 +311,33 @@ export function positionsDistributing(
 }
 
 /**
+ * objectstack#32774 — of {@link positionsDistributing}'s positions for a
+ * `holding`, those listed although the server may read them as another
+ * holder's set: a position served under a package that holds the name, kept
+ * for this holder as the environment's reference (an override of it would be,
+ * the shipped position is not — `positionReach`), or one judged by its
+ * package's dependencies. The section lists them so it never says fewer
+ * people than hold the set, and says that it may say more.
+ */
+export function positionsMaybeOtherHolders(
+  positions: readonly unknown[],
+  setName: string,
+  holding: PermissionSetHolding,
+): string[] {
+  const out: string[] = [];
+  for (const raw of positions) {
+    const p = raw as { name?: unknown; permissionSets?: unknown } | null;
+    if (typeof p?.name !== 'string' || !p.name) continue;
+    if (!Array.isArray(p.permissionSets) || !p.permissionSets.includes(setName)) continue;
+    const reach = positionReach(raw, holding.holders);
+    if (reach === 'closure' || (reach.length > 1 && reach.includes(holding.packageId) && reach[0] !== holding.packageId)) {
+      out.push(p.name);
+    }
+  }
+  return out;
+}
+
+/**
  * The labels of the registry's `position` definitions, by name — the list
  * {@link positionsDistributing} reads, which `/meta/position` serves in the
  * caller's language (objectui#13477). A definition with no label has no entry,
@@ -325,6 +367,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
   const onHoldersReadRef = React.useRef(onHoldersRead);
   onHoldersReadRef.current = onHoldersRead;
   const c = useCopy();
+  const locale = useMetadataLocale();
 
   const metadataStore = useMetadata();
   // Read through a ref: the store's context value is rebuilt whenever any
@@ -333,6 +376,25 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
   metadataStoreRef.current = metadataStore;
   const [rows, setRows] = React.useState<AssignedRow[]>([]);
   const [everyoneBound, setEveryoneBound] = React.useState(false);
+  /**
+   * objectstack#32774 — direct grants the resolver reads as no holder's
+   * (`storedGrantHolders` is empty: a grant naming no package, or one that
+   * holds no set of the name, under a name more than one package holds). They
+   * grant nothing, so they are not this holder's rows and are not counted;
+   * they are shown apart, for the administrator to remove. Always empty with
+   * no holding.
+   */
+  const [unresolved, setUnresolved] = React.useState<AssignedRow[]>([]);
+  /** Some listed position may be another holder's set on the server (`positionsMaybeOtherHolders`). */
+  const [mayOverCount, setMayOverCount] = React.useState(false);
+  /**
+   * objectstack#32774 — a refused Add naming the name's holders, shown as the
+   * pick the other doors show; choosing one sends the grants again with that
+   * holder's package. The users still to grant ride with it.
+   */
+  const [addConflict, setAddConflict] = React.useState<{ conflict: PermissionSetHolderConflict; userIds: string[] } | null>(
+    null,
+  );
   const [loading, setLoading] = React.useState(true);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
@@ -394,13 +456,19 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
     try {
       // Direct grants, by the set's NAME — under more than one holder, the
       // ones the resolver reads as this holder's (module doc).
-      const grants = asArray(
+      const allGrants = asArray(
         await adapter.find(GRANT_OBJECT, { $filter: { permission_set: permissionSetName }, $top: 500 }),
-      ).filter(
-        (g: { permission_set_package?: unknown } | null) =>
-          !holding ||
-          storedGrantHolders(holderPackageOf(g?.permission_set_package), holding.holders).includes(holding.packageId),
       );
+      const reachOf = (g: { permission_set_package?: unknown } | null) =>
+        holding ? storedGrantHolders(holderPackageOf(g?.permission_set_package), holding.holders) : null;
+      const grants = allGrants.filter((g: { permission_set_package?: unknown } | null) => {
+        const reach = reachOf(g);
+        return reach === null || reach.includes(holding!.packageId);
+      });
+      const unresolvedGrants = allGrants.filter((g: { permission_set_package?: unknown } | null) => {
+        const reach = reachOf(g);
+        return reach !== null && reach.length === 0;
+      });
 
       // Effective holders = direct grants ∪ holders of every position that
       // distributes the set (objectui#2382). In the ADR-0090 model positions
@@ -409,10 +477,14 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
       let positionNames: string[] = [];
       let labelByPosition = new Map<string, string>();
       let boundEveryone = false;
+      let overCount = false;
       try {
         const positions = await metadataStoreRef.current.ensureType('position');
         labelByPosition = positionLabels(positions);
         const names = positionsDistributing(positions, permissionSetName, holding);
+        overCount =
+          !!holding &&
+          positionsMaybeOtherHolders(positions, permissionSetName, holding).some((n) => !ANCHOR_POSITIONS.has(n));
         // The audience anchors are implicit memberships — `everyone` is every
         // signed-in member; enumerating them as rows would be noise. Surface
         // a note instead and expand only the explicit positions.
@@ -447,8 +519,14 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
       }
 
       const userIds = [...viaByUser.keys()];
-      const users = userIds.length
-        ? asArray(await adapter.find('sys_user', { $filter: { id: { $in: userIds } }, $top: 1000 }))
+      const unresolvedIds = unresolvedGrants
+        .map((g: { user_id?: unknown } | null) => (g?.user_id ? String(g.user_id) : ''))
+        .filter((uid: string) => uid !== '');
+      const readIds = [...userIds, ...unresolvedIds.filter((uid: string) => !viaByUser.has(uid))].filter(
+        (uid, i, all) => all.indexOf(uid) === i,
+      );
+      const users = readIds.length
+        ? asArray(await adapter.find('sys_user', { $filter: { id: { $in: readIds } }, $top: 1000 }))
         : [];
       const byId = new Map(users.map((u: any) => [String(u.id), u]));
       setRows(
@@ -463,11 +541,29 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
           };
         }),
       );
+      setUnresolved(
+        unresolvedGrants
+          .filter((g: { user_id?: unknown } | null) => !!g?.user_id)
+          .map((g: { id?: unknown; user_id?: unknown }) => {
+            const uid = String(g.user_id);
+            const u = byId.get(uid);
+            return {
+              grantId: String(g.id),
+              userId: uid,
+              name: u ? personLabel(u) : uid,
+              email: u?.email ?? '',
+              via: [{ kind: 'direct' as const }],
+            };
+          }),
+      );
+      setMayOverCount(overCount);
       setEveryoneBound(boundEveryone);
       setReadFailure(null);
       onHoldersReadRef.current?.(userIds.length, permissionSetName);
     } catch (err) {
       setRows([]);
+      setUnresolved([]);
+      setMayOverCount(false);
       setEveryoneBound(false);
       setReadFailure({ said: refusalSentence(err) });
     } finally {
@@ -482,28 +578,43 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
   const assignedIds = React.useMemo(() => new Set(rows.map((r) => r.userId)), [rows]);
   const addressing = holdingPackage(holding);
 
+  /**
+   * Grant the set to `userIds`, in order. `packageId` names the holder's
+   * package in the grant's stored column; omitted, the holder this section is
+   * for, named only where the name alone does not address it.
+   * objectstack#32774 — a refusal naming the name's holders (either error
+   * body, read by `holderCandidatesOfError`) becomes the pick, with the users
+   * not yet granted; ⛔ no holder is chosen here.
+   */
   const addUsers = React.useCallback(
-    async (records: any[]) => {
+    async (userIds: string[], packageId: string | undefined) => {
       setBusy(true);
       setError(null);
+      setAddConflict(null);
+      let at = 0;
       try {
-        for (const u of records || []) {
-          const uid = u?.id != null ? String(u.id) : null;
-          if (!uid || assignedIds.has(uid)) continue;
+        for (; at < userIds.length; at++) {
           // By name: no catalog row is read and no legacy
           // `permission_set_id` is written (module doc). The holder's package
           // only where the name alone does not address it.
           await adapter.create(GRANT_OBJECT, {
-            user_id: uid,
+            user_id: userIds[at],
             permission_set: permissionSetName,
-            ...(addressing ? { permission_set_package: addressing } : {}),
+            ...(packageId ? { permission_set_package: packageId } : {}),
           });
         }
         await load();
       } catch (err: any) {
+        const candidates = holderCandidatesOfError(err);
         const raw = String(err?.body?.error ?? err?.error ?? err?.message ?? '');
         const capMatch = raw.match(/(\d+)\s*of\s*(\d+)\s*seat/i);
-        if (/cap reached|seat cap|ai[-_ ]?seat/i.test(raw)) {
+        if (candidates) {
+          setAddConflict({
+            conflict: new PermissionSetHolderConflict(refusalSentence(err) || c.addFailed, candidates),
+            userIds: userIds.slice(at),
+          });
+          if (at > 0) await load();
+        } else if (/cap reached|seat cap|ai[-_ ]?seat/i.test(raw)) {
           setError(c.seatFull(capMatch ? Number(capMatch[2]) : rows.length));
         } else {
           const cleaned = raw.replace(/^\s*\[[^\]]*\]\s*/, '').trim();
@@ -514,7 +625,28 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
         setPickerOpen(false);
       }
     },
-    [adapter, permissionSetName, addressing, assignedIds, load, rows.length, c],
+    [adapter, permissionSetName, load, rows.length, c],
+  );
+
+  const addPicked = React.useCallback(
+    async (records: any[]) => {
+      const userIds: string[] = [];
+      for (const u of records || []) {
+        const uid = u?.id != null ? String(u.id) : null;
+        if (!uid || assignedIds.has(uid)) continue;
+        userIds.push(uid);
+      }
+      await addUsers(userIds, addressing);
+    },
+    [addUsers, addressing, assignedIds],
+  );
+
+  const pickAddHolder = React.useCallback(
+    (candidate: PermissionSetHolderCandidate) => {
+      if (!addConflict) return;
+      void addUsers(addConflict.userIds, candidatePackage(candidate));
+    },
+    [addConflict, addUsers],
   );
 
   /**
@@ -607,10 +739,26 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
         </div>
       )}
 
+      {addConflict && (
+        <div className="mb-3" data-testid="assigned-users-add-pick">
+          <PermissionSetHolderPick conflict={addConflict.conflict} locale={locale} busy={busy} onPick={pickAddHolder} />
+        </div>
+      )}
+
       {everyoneBound && (
         <div className="mb-3 flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           <Users className="h-3.5 w-3.5 mt-0.5 shrink-0" />
           <span>{c.everyoneNote}</span>
+        </div>
+      )}
+
+      {!loading && !readFailure && mayOverCount && (
+        <div
+          className="mb-3 flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+          data-testid="assigned-users-over-count"
+        >
+          <Users className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+          <span>{c.overCountNote}</span>
         </div>
       )}
 
@@ -683,6 +831,44 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
         </ul>
       )}
 
+      {!loading && !readFailure && unresolved.length > 0 && (
+        <div className="mt-4" data-testid="assigned-users-unresolved">
+          <div className="mb-1 flex items-center gap-2 text-sm font-medium">
+            <AlertCircle className="h-4 w-4 text-muted-foreground" />
+            <span>{c.unresolvedTitle}</span>
+          </div>
+          <p className="mb-2 text-xs text-muted-foreground">{c.unresolvedNote}</p>
+          <ul className="divide-y rounded-md border">
+            {unresolved.map((r) => (
+              <li key={r.grantId ?? r.userId} className="flex items-center gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-sm truncate">{r.name}</span>
+                  {r.email && r.email !== r.name && (
+                    <div className="text-xs text-muted-foreground truncate">{r.email}</div>
+                  )}
+                </div>
+                {canRemove && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setError(null);
+                      setPendingRemove(r);
+                    }}
+                    aria-label={c.remove}
+                    title={c.remove}
+                    data-testid={`assigned-users-unresolved-remove-${r.userId}`}
+                    className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive shrink-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {canAdd && (
         <RecordPickerDialog
           open={pickerOpen}
@@ -698,7 +884,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
           title={c.pickTitle}
           baseFilter={memberFilter}
           onSelect={() => {}}
-          onSelectRecords={(records: any[]) => void addUsers(records)}
+          onSelectRecords={(records: any[]) => void addPicked(records)}
         />
       )}
       <AlertDialog

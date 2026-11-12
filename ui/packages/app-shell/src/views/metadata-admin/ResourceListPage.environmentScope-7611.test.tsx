@@ -377,3 +377,37 @@ describe('a permission set more than one package holds: one switch per holder (o
     });
   });
 });
+
+describe("the confirm names the holder it switches, by that holder's label (objectstack#32774 item 1)", () => {
+  // Two holders of one name, each with its own label: the second row's label
+  // is never the first row's.
+  const HELD_TWICE = [
+    { name: 'sales_rep', label: 'Sales Rep (CRM)', _packageId: 'com.acme.crm', _provenance: 'package' },
+    { name: 'sales_rep', label: 'Sales Rep (Sales)', _packageId: 'com.acme.sales', _provenance: 'package' },
+  ];
+  beforeEach(() => {
+    ITEMS.push(...HELD_TWICE);
+  });
+  afterEach(() => {
+    ITEMS.splice(ITEMS.length - HELD_TWICE.length, HELD_TWICE.length);
+  });
+
+  it("titles the confirm with the switched holder's label and names its package", async () => {
+    mount('?scope=environment');
+    fireEvent.click(await screen.findByTestId('catalog-active-sales_rep@com.acme.sales'));
+    const dialog = await screen.findByTestId('catalog-deactivate-dialog');
+    expect(dialog.textContent).toContain(tFormat('engine.catalog.deactivate.title', 'en-US', { name: 'Sales Rep (Sales)' }));
+    expect(dialog.textContent).not.toContain('Sales Rep (CRM)');
+    expect(screen.getByTestId('catalog-deactivate-holder').textContent).toBe(
+      tFormat('perm.holder.pick.package', 'en-US', { package: 'com.acme.sales' }),
+    );
+  });
+
+  it('CONTROL: a name with one holder is titled by its label, with no holder line', async () => {
+    mount('?scope=environment');
+    fireEvent.click(await screen.findByTestId('catalog-active-admin_full_access'));
+    const dialog = await screen.findByTestId('catalog-deactivate-dialog');
+    expect(dialog.textContent).toContain(tFormat('engine.catalog.deactivate.title', 'en-US', { name: 'Administrator' }));
+    expect(screen.queryByTestId('catalog-deactivate-holder')).toBeNull();
+  });
+});
