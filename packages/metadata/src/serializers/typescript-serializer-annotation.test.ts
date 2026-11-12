@@ -49,7 +49,7 @@ const REPRESENTATIVE: Record<string, Record<string, unknown>> = {
   picklist: { name: 'industry', label: 'Industry', options: [{ label: 'Technology', value: 'technology' }] },
   datasource: { name: 'warehouse', driver: 'sqlite', config: {} },
   analytics_cube: { name: 'account_cube', sql: 'account', measures: {}, dimensions: {} },
-  page: { name: 'account_home', label: 'Account Home', regions: [] },
+  page: { name: 'account_home', label: 'Account Home', type: 'home', regions: [] },
   dashboard: { name: 'ops', label: 'Ops', widgets: [] },
   app: { name: 'sales', label: 'Sales' },
   action: { name: 'close_account', label: 'Close', type: 'script', target: 'close_account' },
