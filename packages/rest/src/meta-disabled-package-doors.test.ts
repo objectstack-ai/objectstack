@@ -623,7 +623,7 @@ describe('[#32607] RestServer: two enabled row holders and no shipper', () => {
         expect([read.status, read.body?.code], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect([...(read.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
             .toEqual([OTHER_PKG, THIRD_PKG].sort());
-        // The layered door and /published answer the refusal by its sentence (#32622): both holders named, no row served.
+        // `/published` answers the plain read's refusal; `/layers` keeps the package-less writes' own (#28337). Both name both holders and serve no row.
         for (const answer of [await host.layers('dashboard', 'two_rows_dash'), await host.published('dashboard', 'two_rows_dash')]) {
             expect(answer.status, JSON.stringify(answer.body)).toBe(409);
             for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(answer.body)).toContain(pkg);

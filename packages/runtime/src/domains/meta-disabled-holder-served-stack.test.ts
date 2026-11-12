@@ -338,9 +338,10 @@ describe.each([
 // holder is served as before.
 //
 // Measured on the #32183 head plus #32354's work (step 0 of #32607): the plain
-// read and `/published` served the row saved first (`/published` on this
-// dispatcher served the first package by id in every order), while `/layers`
-// refused 409 naming both, before and after a reboot.
+// read and `/published` served one row (the plain read the row saved first,
+// `/published` on this dispatcher the same package in every order), while
+// `/layers` refused 409 naming both, before and after a reboot. `/layers` keeps
+// that refusal, the package-less writes' own (#28337).
 // ---------------------------------------------------------------------------
 
 describe.each([
@@ -363,7 +364,7 @@ describe.each([
         expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect([...(read.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
             .toEqual([ROW_E, ROW_F].sort());
-        // The layered door and /published answer the refusal by its sentence (#32622): both holders named, no row served.
+        // `/published` answers the plain read's refusal; `/layers` keeps the package-less writes' own (#28337). Both name both holders and serve no row.
         for (const door of ['layers', 'published']) {
             const answer = await get(booted.kernel, `/meta/dashboard/${name}/${door}`);
             expect([answer.status, codeOf(answer.body), door], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT', door]);
