@@ -756,7 +756,16 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.registerFunction.call(hooksAndFunctionsHost.of(this), name, handler, packageIdOrOptions);
   }
 
-  /** Look up a registered function by name. */
+  /**
+   * Look up a registered function by name, with no package: the last
+   * registration of the name. [ADR-0150 D3/D4, #31700; epic seat ruling R2-C]
+   * A name two packages hold (two namespaces may each bind one) is refused,
+   * `409 RESOURCE_CONFLICT` naming every holder, never answered with one of
+   * them; a reader that knows its package resolves through
+   * {@link functionHoldersOf}.
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.resolveFunction.call(hooksAndFunctionsHost.of(this), name);
@@ -768,7 +777,9 @@ export class ObjectQL implements IObjectQLEngine {
    * it"; a caller that must also report what the call did (the automation
    * engine's `script` node, feeding the #4354 run summary) needs the
    * declaration, and reading it off the same registry keeps the two from
-   * drifting.
+   * drifting. Refused alike for a name two packages hold (above).
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -784,8 +795,8 @@ export class ObjectQL implements IObjectQLEngine {
    * over, in the calling flow's package. A snapshot, taken at the call. The flow
    * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
    * a hook's own package's entry from it. `resolveFunction` and
-   * `resolveFunctionEntry` keep answering the one last-registered entry per
-   * name.
+   * `resolveFunctionEntry` answer the one last-registered entry per name, and
+   * refuse a name two packages hold (#31700).
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).

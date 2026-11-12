@@ -154,7 +154,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // ran, so the registry still serves this body; the heal
                 // re-registers the active row the store now serves, the one just
                 // restored, without opening another write-through caller.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package the restored row is bound to.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             } else {
                 await args.repo.delete(ref, {
                     parentVersion: item.version, actor, source, message, intent,
@@ -163,7 +164,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // …and a removed row's heal, as `revertCommit`'s removal takes
                 // it: the registry never registered this row, so it is left
                 // serving what it served before the publish.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package of the row it deleted.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             }
             // A drain that failed left the draft row in place (#4981): it is
             // still pending, and putting it back again would conflict with it.
@@ -177,7 +179,8 @@ async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' 
                 // item's entry from the active rows the store now serves, the
                 // state the undo above just restored — the route the stored-row
                 // census asks of every write.
-                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+                // [#32366] For the package of the active row the undo left.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.packageId, item.d.member);
             }
         } catch (error) {
             notUndone.push({ item, error });
@@ -2561,14 +2564,14 @@ export class ProtocolHistoryAndPublishFacet {
         let probes: import('./build-probes.js').BuildProbeReport | undefined;
         if (published.length > 0) {
             try {
-                const { runBuildProbes } = await import('./build-probes.js');
+                const { publishedItemReader, runBuildProbes } = await import('./build-probes.js');
                 const analytics = this.getServicesRegistry?.().get('analytics');
                 probes = await runBuildProbes({
                     engine: this.engine as any,
-                    getItem: async (type, name) => {
-                        const wrapper: any = await (this.facade as any).getMetaItem({ type, name });
-                        return wrapper?.item ?? wrapper ?? undefined;
-                    },
+                    // [ADR-0150 D3, #31700] A widget's dataset is resolved FROM
+                    // the publishing package, so each namespace's publish
+                    // probes its own dataset of a name two namespaces hold.
+                    getItem: publishedItemReader(this.facade as any, request.packageId),
                     published,
                     ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
                     organizationId: null,

@@ -46,9 +46,30 @@ function fakeEngine() {
   };
 }
 
-async function bootEmail() {
+/** A durable-looking queue double: it records publishes and never delivers on its own. */
+function fakeQueue() {
+  const published: Array<{ queue: string; data: any }> = [];
+  return {
+    published,
+    async publish(queue: string, data: any) { published.push({ queue, data }); return `msg-${published.length}`; },
+    async subscribe() { /* the worker half is pinned in plugin-email */ },
+    async unsubscribe() { /* noop */ },
+  };
+}
+
+interface EmailBootOptions {
+  /** A transport double in place of the `log` provider. */
+  transport?: { send: (...args: any[]) => Promise<{ messageId: string }> };
+  /** `false` ⇒ no `sys_email` persistence. */
+  persist?: boolean;
+  /** Queue delivery on, over this queue double. */
+  queue?: ReturnType<typeof fakeQueue>;
+}
+
+async function bootEmail(opts: EmailBootOptions = {}) {
   const engine = fakeEngine();
   const services: Record<string, unknown> = { manifest: { register: () => {} }, objectql: engine };
+  if (opts.queue) services.queue = opts.queue;
   const hooks: Record<string, Array<() => Promise<void> | void>> = {};
   const ctx = {
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -59,15 +80,20 @@ async function bootEmail() {
     registerService: (name: string, svc: unknown) => { services[name] = svc; },
     hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
   };
-  const plugin = new EmailServicePlugin({ provider: 'log', defaultFrom: 'no-reply@acme.example' });
+  const plugin = new EmailServicePlugin({
+    ...(opts.transport ? { transport: opts.transport } : { provider: 'log' as const }),
+    defaultFrom: 'no-reply@acme.example',
+    ...(opts.persist === false ? { persist: false } : {}),
+    ...(opts.queue ? { queueDelivery: true } : {}),
+  });
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   for (const fn of hooks['kernel:ready'] ?? []) await fn();
   return { service: services.email as IEmailService, rows: engine.rows };
 }
 
-async function boot() {
-  const { service, rows } = await bootEmail();
+async function boot(opts: EmailBootOptions = {}) {
+  const { service, rows } = await bootEmail(opts);
   const server = new HonoHttpServer(0);
   const rest = new RestServer(
     server as any,
@@ -217,5 +243,105 @@ describe('POST /api/v1/email/send — a non-string subject / text / html is the 
 
     expect(out.status).toBe(200);
     expect(out.body.status).toBe('sent');
+  });
+});
+
+describe('POST /api/v1/email/send — an attachment\'s content is a string or a Buffer', () => {
+  // Fixtures name no real file and no real host: the door must refuse before
+  // anything could read them.
+  const FILE_REF = 'attachment-fixture/never-read.txt';
+  const URL_REF = 'http://127.0.0.1:9/never-fetched';
+
+  /** Every refused shape a JSON body can carry, as `[what, attachments]`. */
+  const REFUSED: Array<[string, unknown]> = [
+    ['an object as content', [{ filename: 'a.txt', content: { a: 1 } }]],
+    ['a `{ path }` object as content', [{ filename: 'a.txt', content: { path: FILE_REF } }]],
+    ['an `{ href }` object as content', [{ filename: 'a.txt', content: { href: URL_REF } }]],
+    ['a stream, as a JSON body carries one, as content', [{ filename: 'a.txt', content: { readable: true, _readableState: {} } }]],
+    ['a typed array, as a JSON body carries one, as content', [{ filename: 'a.bin', content: JSON.parse(JSON.stringify(new Uint8Array([1, 2]))) }]],
+    ['a Buffer\'s JSON form as content', [{ filename: 'a.bin', content: JSON.parse(JSON.stringify(Buffer.from('hi'))) }]],
+    ['`null` content', [{ filename: 'a.txt', content: null }]],
+    ['no content', [{ filename: 'a.txt' }]],
+    ['a second attachment with an object as content', [{ filename: 'ok.txt', content: 'ok' }, { filename: 'b.txt', content: { path: FILE_REF } }]],
+    ['a non-array `attachments` (an object)', { filename: 'a.txt', content: 'x' }],
+    ['a non-array `attachments` (a string)', 'a.txt'],
+    ['a `null` element', [null]],
+  ];
+
+  const MODES: Array<[string, () => EmailBootOptions]> = [
+    ['persistence on', () => ({})],
+    ['persistence off', () => ({ persist: false })],
+    ['queue delivery on', () => ({ queue: fakeQueue() })],
+  ];
+
+  for (const [mode, options] of MODES) {
+    for (const [what, attachments] of REFUSED) {
+      it(`${mode} — ${what}: 400 VALIDATION_FAILED, the transport is never called, and no queued row`, async () => {
+        const transport = { send: vi.fn(async () => ({ messageId: '<never@x>' })) };
+        const opts = options();
+        const { post, rows } = await boot({ ...opts, transport });
+        const out = await post({ to: OK, subject: 'x', text: 'x', attachments });
+
+        expect(out.status).toBe(400);
+        expect(out.body.code).toBe('VALIDATION_FAILED');
+        expect(String(out.body.error)).toMatch(/^`attachments(\[\d+\](\.content)?)?` must be /);
+        // The refusal names the position and the kind, never the value.
+        expect(String(out.body.error)).not.toContain(FILE_REF);
+        expect(String(out.body.error)).not.toContain(URL_REF);
+        expect(transport.send).not.toHaveBeenCalled();
+        expect(rows.filter((r) => r.row.status === 'queued')).toEqual([]);
+        expect(opts.queue?.published ?? []).toEqual([]);
+      });
+    }
+  }
+
+  it('names the index of the attachment it refuses', async () => {
+    const { post } = await boot({ transport: { send: vi.fn(async () => ({ messageId: '<m@x>' })) } });
+    const out = await post({
+      to: OK, subject: 'x', text: 'x',
+      attachments: [{ filename: 'ok.txt', content: 'ok' }, { filename: 'b.txt', content: { a: 1 } }],
+    });
+
+    expect(out.status).toBe(400);
+    expect(String(out.body.error).startsWith('`attachments[1].content` must be a string or a Buffer, not ')).toBe(true);
+  });
+
+  it('CONTROL — a string attachment with a `cid` still sends (persistence on and off)', async () => {
+    for (const opts of [{}, { persist: false }] as EmailBootOptions[]) {
+      const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+      const { post } = await boot({ ...opts, transport });
+      const out = await post({
+        to: OK, subject: 'x', html: '<img src="cid:logo">',
+        attachments: [{ filename: 'logo.txt', content: 'logo', cid: 'logo' }],
+      });
+
+      expect(out.status).toBe(200);
+      expect(out.body.status).toBe('sent');
+      expect(transport.send).toHaveBeenCalledTimes(1);
+      expect((transport.send.mock.calls[0] as any[])[0].attachments).toEqual([
+        { filename: 'logo.txt', content: 'logo', cid: 'logo' },
+      ]);
+    }
+  });
+
+  it('CONTROL — queue delivery on: a string attachment with a `cid` is queued, its row carrying the attachment', async () => {
+    // The worker's rebuild of the queued row is pinned in plugin-email's
+    // queue-delivery suite; this leg shows the door's queued path is live.
+    const queue = fakeQueue();
+    const transport = { send: vi.fn(async () => ({ messageId: '<m@x>' })) };
+    const { post, rows } = await boot({ transport, queue });
+    const out = await post({
+      to: OK, subject: 'x', html: '<img src="cid:logo">',
+      attachments: [{ filename: 'logo.txt', content: 'logo', cid: 'logo' }],
+    });
+
+    expect(out.status).toBe(200);
+    expect(out.body.status).toBe('queued');
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(queue.published).toHaveLength(1);
+    expect(queue.published[0]!.data).toMatchObject({ rowId: out.body.id });
+    const row = rows.find((r) => r.row.id === out.body.id)!.row;
+    expect(row.status).toBe('queued');
+    expect(JSON.parse(String(row.attachments_json))[0]).toMatchObject({ filename: 'logo.txt', cid: 'logo' });
   });
 });

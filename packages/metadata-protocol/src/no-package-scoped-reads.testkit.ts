@@ -18,9 +18,18 @@
  * the bare action read's own judge (`SchemaRegistry.refuseAmbiguousObjectLessAction`,
  * #31697) refuses nothing, and the read of that narrowed type is judged rather
  * than refused as unjudgeable.
+ *
+ * [#31696] `flow` is the one narrowed type `SchemaRegistry` reads by package
+ * (`readsByPackage`): its bare read goes through `resolveItem`, which here is
+ * the double's own `getItem` read (nothing, for a double with none), as the
+ * registry's resolver answers a name one holder (or none) holds.
  */
 export const NO_PACKAGE_SCOPED_READS = Object.freeze({
-    readsByPackage: (_type: string): boolean => false,
+    readsByPackage: (type: string): boolean => type === 'flow',
+    resolveItem(this: { getItem?(type: string, name: string, packageId?: string, member?: string): unknown },
+        type: string, name: string, callerPackageId?: string | null, member?: string): unknown {
+        return typeof this.getItem === 'function' ? this.getItem(type, name, callerPackageId ?? undefined, member) : undefined;
+    },
     packageScopedHoldersOf: (_type: string, _name: string): string[] => [],
     getEnvironmentScopedItem: (_type: string, _name: string, _member?: string): unknown => undefined,
     getPackageScopedItem: (_type: string, _name: string, _packageId: string, _member?: string): unknown => undefined,

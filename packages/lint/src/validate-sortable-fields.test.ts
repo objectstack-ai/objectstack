@@ -20,7 +20,9 @@ import {
   indexObjectSortability,
 } from './validate-sortable-fields.js';
 import { resolveObjectSortability } from '@objectstack/spec/api';
-import { ComponentPropsMap } from '@objectstack/spec/ui';
+import { COLUMN_SUMMARY_AGGREGATION, ComponentPropsMap } from '@objectstack/spec/ui';
+import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, validateListViewFieldRefs } from './validate-list-view-field-refs.js';
+import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { indexObjectSearchTargets } from './validate-searchable-fields.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 import { explainRule } from './rule-explanations.js';
@@ -1277,6 +1279,135 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
   });
 });
 
+// [#32503] An `object-grid` block's `properties.columns[].summary` — the list
+// view's own column entry, on a third carrier — is judged by the list view's
+// own verdict and reported under the list view's id, from the grid walk.
+const columnGridStack = (columns: unknown, extra: Record<string, unknown> = {}) => ({
+  objects: [{ name: 'grid_task', fields: gridTaskFields }, { name: 'crm_opportunity', fields: opportunityFields }],
+  pages: [{
+    name: 'board',
+    type: 'app',
+    regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', columns, ...extra } }] }],
+  }],
+});
+const columnFindings = (columns: unknown, extra?: Record<string, unknown>) =>
+  validateSortableFields(columnGridStack(columns, extra)).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+const COLUMN_PATH = 'pages[0].regions[0].components[0].properties.columns';
+
+describe('validateSortableFields — object-grid column summaries over a refused field type (#32503)', () => {
+  it('refuses `sum` over a text column, at `error`, under the list view\'s id, at the summary\'s path', () => {
+    const findings = columnFindings([{ field: 'hours', summary: 'sum' }, { field: 'title', summary: 'sum' }]);
+    expect(findings.map((f) => [f.severity, f.rule, f.where, f.path])).toEqual([
+      ['error', LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, 'page "board" · object-grid › columns[1].summary', `${COLUMN_PATH}[1].summary`],
+    ]);
+    expect(findings[0].message).toContain('summary "sum" over "title" (`text`) is refused by the aggregate door');
+  });
+
+  it.each([
+    ['the object form aggregates `summary.field`, not the column', { field: 'hours', summary: { type: 'avg', field: 'notes' } }, '"avg" over "notes"'],
+    ['`count_unique` lowers to `count_distinct`, refused over a JSON-stored field', { field: 'labels', summary: 'count_unique' }, '"count_unique" over "labels"'],
+    ['`min` over a string-class field', { field: 'stage', summary: 'min' }, '"min" over "stage"'],
+    ['`count_unique` over a multi-value declaration', { field: 'watchers', summary: { type: 'count_unique' } }, '"count_unique" over "watchers"'],
+    ['`sum` over a `formula` (virtual) field', { field: 'score', summary: 'sum' }, '"sum" over "score"'],
+  ])('refuses %s', (_case, column, spelled) => {
+    const findings = columnFindings([column]);
+    expect(findings.map((f) => f.path)).toEqual([`${COLUMN_PATH}[0].summary`]);
+    expect(findings[0].message).toContain(spelled);
+  });
+
+  it('passes what the door accepts: `sum` over a number, `min` / `max` over a date, `avg` over a percent, `sum` over a boolean', () => {
+    expect(columnFindings([
+      { field: 'hours', summary: 'sum' },
+      { field: 'due_on', summary: 'min' },
+      { field: 'closed_at', summary: { type: 'max' } },
+      { field: 'rate', summary: 'avg' },
+      { field: 'done', summary: 'sum' },
+      { field: 'title', summary: { type: 'sum', field: 'cost' } },
+      { field: 'stage', summary: 'count_unique' },
+    ])).toEqual([]);
+  });
+
+  it('judges nothing that compares no value: `none`, `count`, the filled / empty members, a string column list', () => {
+    expect(columnFindings([
+      { field: 'title', summary: 'none' },
+      { field: 'title', summary: 'count' },
+      { field: 'payload', summary: 'count_filled' },
+      { field: 'labels', summary: 'percent_empty' },
+    ])).toEqual([]);
+    expect(columnFindings(['title', 'notes'])).toEqual([]);
+  });
+
+  it('skips what it cannot judge: an unknown field, a dotted path, an object the stack does not define, no binding', () => {
+    expect(columnFindings([{ field: 'nope', summary: 'sum' }, { field: 'account.amount', summary: 'avg' }])).toEqual([]);
+    expect(columnFindings([{ field: 'title', summary: 'sum' }], { objectName: 'elsewhere_object' })).toEqual([]);
+    expect(columnFindings([{ field: 'title', summary: 'sum' }], { objectName: undefined })).toEqual([]);
+  });
+
+  it('binds the block by its `dataSource.object` first, then `properties.objectName`', () => {
+    const stack = columnGridStack([{ field: 'name', summary: 'sum' }]);
+    const grid = (stack.pages[0].regions[0].components[0] as Record<string, unknown>);
+    expect(validateSortableFields(stack).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED)).toEqual([]);
+    grid.dataSource = { object: 'crm_opportunity' };
+    expect(validateSortableFields(stack).map((f) => f.rule)).toEqual([LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED]);
+  });
+
+  it('judges the columns and the aggregations of one block side by side, each under its own id', () => {
+    const findings = validateSortableFields(columnGridStack(
+      [{ field: 'title', summary: 'sum' }],
+      { aggregations: [{ field: 'notes', type: 'avg' }] },
+    ));
+    expect(findings.map((f) => [f.rule, f.path])).toEqual([
+      [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, `${COLUMN_PATH}[0].summary`],
+      [GRID_AGGREGATION_FIELD_TYPE_REFUSED, 'pages[0].regions[0].components[0].properties.aggregations[0]'],
+    ]);
+  });
+
+  it('gives the verdict, the words and the fix a list view\'s column gives, for every member over every declared `FieldType`', () => {
+    let refused = 0;
+    for (const member of Object.keys(COLUMN_SUMMARY_AGGREGATION)) {
+      for (const type of FieldType.options) {
+        for (const multiple of [false, true]) {
+          const fields = { probe: { type, label: 'Probe', ...(multiple ? { multiple } : {}) } };
+          const column = { field: 'probe', summary: member };
+          const onGrid = validateSortableFields({
+            objects: [{ name: 'grid_task', fields }],
+            pages: [{ name: 'board', type: 'app', regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', columns: [column] } }] }] }],
+          }).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+          const onListView = validateListViewFieldRefs({
+            objects: [{ name: 'grid_task', fields, listViews: { all: { type: 'grid', columns: [column] } } }],
+          }).filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+          const label = `${member} over ${type}${multiple ? ' (multiple)' : ''}`;
+          expect(onGrid.map((f) => [f.severity, f.message, f.hint]), label)
+            .toEqual(onListView.map((f) => [f.severity, f.message, f.hint]));
+          refused += onGrid.length;
+        }
+      }
+    }
+    // Non-vacuity: the sweep refused pairs on both carriers, not zero against zero.
+    expect(refused).toBeGreaterThan(0);
+  });
+
+  it('is refused at the page publish door', () => {
+    const page = {
+      name: 'board',
+      type: 'app',
+      regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', columns: [{ field: 'title', summary: 'sum' }] } }] }],
+    };
+    const context = { objects: [{ name: 'grid_task', fields: gridTaskFields }] };
+    const refused = runRuntimeAuthoringRules({ type: 'page', item: page, context }).errors
+      .filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(refused).toHaveLength(1);
+    const accepted = { ...page, regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', columns: [{ field: 'hours', summary: 'sum' }] } }] }] };
+    expect(runRuntimeAuthoringRules({ type: 'page', item: accepted, context }).errors
+      .filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED)).toEqual([]);
+  });
+
+  it('`os explain` names the object-grid carrier', () => {
+    const text = explanationOf(LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    for (const fact of ['`object-grid`', '`properties.columns`', 'saved']) expect(text, fact).toContain(fact);
+  });
+});
+
 describe('[#22161] one-line verdicts — the three sort ids', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each id fired at least once, so the shape
@@ -1287,7 +1418,11 @@ describe('[#22161] one-line verdicts — the three sort ids', () => {
     // [#32144] The grid-aggregation verdict rides the same member and is held
     // to the same shape.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual(
-      [...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED, GRID_AGGREGATION_FIELD_TYPE_REFUSED].sort(),
+      [
+        ...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED, GRID_AGGREGATION_FIELD_TYPE_REFUSED,
+        // [#32503] The grid's column summaries, under the list view's id.
+        LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
+      ].sort(),
     );
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');

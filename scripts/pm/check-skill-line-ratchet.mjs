@@ -1446,7 +1446,12 @@ export const CEILINGS = new Map([
   // that file's standing headroom, so its row does not move. Not a
   // CROSS_FILE_MOVES destination, so no `ruledRaises` record applies. Landed
   // count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/execution-duties.md', 188],
+  // Raised 188 → 189 by the addition-side enumeration-row ruling — an ORDINARY
+  // raise, ⛔ not a cross-file move. One line under the implementation-card
+  // file-surface line naming the exception lanes/skills.md defines. Ordered by
+  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
+  // ruling record 6184799323 (letter B). Measured delta +1; headroom 0.
+  ['.claude/skills/pm-dispatch/references/execution-duties.md', 189],
   // New file, landed at its own count (headroom 0, same convention as every
   // entry above): the filing gate and the grading/reading criteria the triage
   // seat applies. A new pm-dispatch references file belongs in this map by the
@@ -1562,7 +1567,15 @@ export const CEILINGS = new Map([
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
-  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 33],
+  // Raised 33 → 35 by the addition-side enumeration-row ruling — an ORDINARY
+  // raise, ⛔ not a cross-file move. Two lines under the product-lane bar on
+  // `skills/**`: the PR that adds an authorable top-level key or a bound live
+  // member adds its enumeration row itself, and what that row is. Ordered by
+  // ruling record 6819475461 (maintainer, verbatim: 「同意 A」); authorized under
+  // ruling record 6184799323 (letter B). Two lines, measured: rule plus
+  // definition do not fit the 120-byte cap as one; they land at 113 B and 115 B.
+  // Measured delta +2; headroom 0.
+  ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
   // Lowered 46 → 43 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
