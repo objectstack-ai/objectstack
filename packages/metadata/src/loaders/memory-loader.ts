@@ -17,7 +17,9 @@
  *
  * [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`)
  * answers `loadMany` / `loadManyKeyed` one entry per `(package, name, member)`,
- * as `DatabaseLoader` does: here a slot holds one member, so every slot.
+ * as `DatabaseLoader` does. [#32517] Each member of a slot is saved under its
+ * own key (`memberKeyOf`), so a second locale of one package's template no
+ * longer overwrites the first: every key is one member.
  */
 
 import type {
@@ -54,7 +56,8 @@ export class MemoryLoader implements MetadataLoader {
   };
 
   // Storage: Type -> Key -> Data. The key is the name, or for a type stored
-  // per `(package, name)` the registry's store key (a package's slot).
+  // per `(package, name)` the registry's store key (a package's slot; a
+  // bundled type's member under its slot, [#32517]).
   private storage = new Map<string, Map<string, any>>();
 
   /** [#32246] For a type stored per `(package, name)`: the slot of the name saved last. */
@@ -122,7 +125,8 @@ export class MemoryLoader implements MetadataLoader {
 
   /**
    * One entry per name, in the order names were first saved: its slot saved
-   * last. [#31699 R3-B] A bundled type: every slot, each under its name.
+   * last. [#31699 R3-B] A bundled type: every key (each slot's every member,
+   * [#32517]), each under its name.
    */
   private latestByName<T>(type: string, typeStore: Map<string, any>): MetadataKeyedItem<T>[] {
     if (isBundledStoreType(type)) return Array.from(typeStore, ([key, data]) => ({ name: storedNameOf(key), data: data as T }));
@@ -183,7 +187,8 @@ export class MemoryLoader implements MetadataLoader {
    * [ADR-0150 D3/D4, #32246] For a type stored per `(package, name)`: with
    * `options.packageId`, every slot of the name held for that package (an
    * object-bound action's included, as `DatabaseLoader`'s one row of the
-   * package holds it) — ⛔ never another package's item; with none, by the
+   * package holds it; a bundled type's every member, [#32517]) — ⛔ never
+   * another package's item; with none, by the
    * registry's removal rule (`storeRemovalKeys`): every slot of the name
    * while at most one package holds it, refused
    * (`PackageScopedNameRefusedError`) when two or more do.
