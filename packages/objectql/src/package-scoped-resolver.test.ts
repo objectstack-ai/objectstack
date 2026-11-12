@@ -562,6 +562,36 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect(templateOf(Z, 'fr-FR')).toBe('zeta template');
   });
 
+  it('unbound, beside a package of the App that a pair row binds a member another holder ships → no package, as `?package=X` refuses it naming both (contract review F4 b; BASE at d9d3621f: X)', () => {
+    // The declared en-US row is admitted while Z ships en-US and outlives an upgrade of Z that drops it (measured at the save door).
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP, X]) as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pairz', Z, 'en-US');
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, Z]);
+    expect(templateOf(Z, 'en-US')).toBe('pairz template');
+    expect([templateOf(X, 'de-DE'), templateOf(Z, 'de-DE')]).toEqual([undefined, undefined]);
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'de-DE')).toBeUndefined();
+  });
+
+  it('unbound, beside an addition of a package of the App to a holder outside the App → the one package of the App holding the name, as `?package=X` reads it (contract review F4 a; BASE at d9d3621f: no package)', () => {
+    const W = 'com.other.west';
+    const Z = 'com.acme.zeta';
+    install(W);
+    // Z reaches two Apps; its namespace picks the App A (`appOf`), so A's pair customizes it.
+    registry.installPackage({ ...(manifest(Z, [APP, W], 'suite') as object), type: 'module' } as never, 'code');
+    ship('email_template', 'welcome', X);
+    ship('email_template', 'welcome', W);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, W]);
+    expect(metadataCore.appOf(Z, metadataCore.installedManifestsOf(registry)), 'Z is a package of the App').toBe(APP);
+    expect(templateOf(X, 'de-DE')).toBe('pair template');
+    expect([templateOf(Z, 'de-DE'), templateOf(W, 'de-DE')]).toEqual([undefined, undefined]);
+  });
+
   it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
     ship('page', 'home', X);
     pairRow('page', 'home', 'pair');

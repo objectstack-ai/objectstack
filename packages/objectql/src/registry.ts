@@ -8769,13 +8769,15 @@ export class SchemaRegistry {
    *
    * The undeclared arms count the holders the exact read counts
    * (`packageScopedHoldersOf`, which the exact read passes): for a bundled
-   * type, a package whose holding is a bundle ADDITION to another owner's
-   * bundle holds no name (#28802), so it is no second owner. The addition is
-   * judged as {@link packageScopedHoldersOf} judges it, on each owner's
-   * composite members and the bare-slot rows stored under the owner itself;
-   * a customization pair's rows are left out of that count, since the members
-   * a pair row adds are what this answer decides. A row that declares an
-   * addition's package as its base is still that package's.
+   * type, a package whose holding is a bundle ADDITION to another holder's
+   * bundle holds no name (#28802), so it is no second owner. The
+   * addition is judged as {@link packageScopedHoldersOf} judges it, over every
+   * holder of the name with every row bound to it ({@link ownersHoldingAName}):
+   * a row declaring a package as its base makes that package hold the row's
+   * member, so it is no addition when another holder ships that member (an
+   * undeclared row beside it is then no package's, as the exact read refuses
+   * it naming both). A row that declares an addition's package as its base is
+   * still that package's.
    *
    * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
    * `pairId` customizes: the row keeps the per-package reading of
@@ -8783,6 +8785,22 @@ export class SchemaRegistry {
    */
   private pairRowBinding(type: string, pairId: string, item: unknown, name: string, collection: Map<string, any>,
     composite: ReadonlySet<string>): string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER {
+    const settled = this.settledPairRowBinding(pairId, item, composite);
+    if (!Array.isArray(settled)) return settled as string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const named = this.ownersHoldingAName(type, name, collection, settled as readonly string[], item, composite);
+    return named.length === 1 ? named[0] : undefined;
+  }
+
+  /**
+   * [#32408] The arms of {@link pairRowBinding} that read the row and the
+   * holders alone: {@link NOT_A_PAIR_ROW_OF_A_HOLDER}, the declared holder (or
+   * `undefined` for a declared non-owner), or the App whose own pair it is.
+   * The owners, as an array, when none of those answers: the undeclared row
+   * of a pair two or more holders share, which only a count of the holders'
+   * members decides ({@link ownersHoldingAName}).
+   */
+  private settledPairRowBinding(pairId: string, item: unknown, composite: ReadonlySet<string>):
+    string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER | readonly string[] {
     if (customizationBasePackageId(pairId) === null) return NOT_A_PAIR_ROW_OF_A_HOLDER;
     const installed = installedManifestsOf(this);
     const owners = [...composite].filter((holder) => isPairOf(pairId, holder, installed));
@@ -8795,32 +8813,44 @@ export class SchemaRegistry {
       return pair.ok && pair.value === pairId;
     });
     if (app !== undefined) return app;
-    const named = this.ownersHoldingAName(type, name, collection, owners, item);
-    return named.length === 1 ? named[0] : undefined;
+    return owners.length === 1 ? owners[0] : owners;
   }
 
   /**
    * [#28802, #32408] `owners` less every one whose holding of the bundled
-   * `(type, name)` is an addition to another owner's bundle
-   * ({@link isBundleAddition}), judged on each owner's composite members and
-   * the bare-slot rows stored under the owner itself (the rows
-   * {@link overlaySlotBinding} binds to their own stamp). An addition that
-   * ships the member `row` is ITS member too, so it stays an owner: the row
-   * may customize that package's member, and two owners bind it to no
-   * package (never a guess). `owners` unchanged for a type that is no
-   * bundle, or with fewer than two.
+   * `(type, name)` is an addition to another holder's bundle
+   * ({@link isBundleAddition}), judged as {@link packageScopedHoldersOf}
+   * judges it: over EVERY holder of the name (a package outside the App
+   * included, so an owner that adds to it is an addition), each holder's
+   * members being its composite members and the bare-slot rows that bind to
+   * it ({@link bundleMembersHeldBy}) — a pair row declaring the holder, a
+   * per-package pair's row, the holder's own stored row. Only the rows this
+   * very arm decides (an undeclared row of a pair several holders share) are
+   * left out of the count, since the members they add are what it answers.
+   * An addition that ships the member `row` is ITS member too, so it stays an
+   * owner: the row may customize that package's member, and two owners bind
+   * it to no package (never a guess). `owners` unchanged for a type that is
+   * no bundle, or with fewer than two.
    */
-  private ownersHoldingAName(type: string, name: string, collection: Map<string, any>, owners: string[], row: unknown): string[] {
+  private ownersHoldingAName(type: string, name: string, collection: Map<string, any>, owners: readonly string[],
+    row: unknown, composite: ReadonlySet<string>): readonly string[] {
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (!disc || owners.length < 2) return owners;
-    const bare = this.bareSlotEntriesOf(type, collection, name);
-    const membersOf = new Map<string, Set<string>>();
-    for (const id of owners) {
-      const { local } = collectBundle(collection, name, disc, id);
-      const own = bare.filter(({ item }) => (item as { _packageId?: unknown } | null | undefined)?._packageId === id);
-      membersOf.set(id, new Set([...local, ...own].map((e) => discriminatorValue(e.item, disc.field) || disc.canonical)));
+    const bound = new Map<string, unknown[]>();
+    for (const { item } of this.bareSlotEntriesOf(type, collection, name)) {
+      const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+      if (typeof stamped === 'string' && !composite.has(stamped)
+        && Array.isArray(this.settledPairRowBinding(stamped, item, composite))) continue;
+      const holder = this.overlaySlotBinding(type, item, name, collection, composite);
+      if (typeof holder === 'string') bound.set(holder, [...(bound.get(holder) ?? []), item]);
     }
-    const rowMember = discriminatorValue(row, disc.field) || disc.canonical;
+    const memberOf = (item: unknown) => discriminatorValue(item, disc.field) || disc.canonical;
+    const membersOf = new Map<string, Set<string>>();
+    for (const id of new Set([...composite, ...bound.keys()])) {
+      const { local } = collectBundle(collection, name, disc, id);
+      membersOf.set(id, new Set([...local.map((e) => e.item), ...(bound.get(id) ?? [])].map(memberOf)));
+    }
+    const rowMember = memberOf(row);
     return owners.filter((id) => membersOf.get(id)!.has(rowMember) || !this.isBundleAddition(id, membersOf));
   }
 
