@@ -25,7 +25,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import '@objectstack/metadata';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, publishedItemReader, runBuildProbes } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { defineStack } from '@objectstack/spec';
 import { HttpDispatcher } from '../http-dispatcher.js';
@@ -585,6 +585,106 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
 });
 
 /**
+ * [#32250, ADR-0150 D5; Refs #32622] The dispatcher's layered read of a name
+ * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
+ * holders as `details.candidates`, as the item read does. The refusal leaves
+ * through `errorFromThrown`, which composes `details` from
+ * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
+ * row's layered refusal, and the REST `/layers` door, are not.
+ */
+describe('#32250 — the dispatcher /layers 409 names the holders', () => {
+    it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {
+        ship('dashboard', 'sales', A);
+        ship('dashboard', 'sales', B);
+        const answer = await read('/dashboard/sales/layers');
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(answer.body?.error?.details?.candidates).toEqual([
+            { kind: 'package', packageId: A },
+            { kind: 'package', packageId: B },
+        ]);
+    });
+
+    it('CONTROL — one holder: its layers are served', async () => {
+        ship('dashboard', 'sales', A);
+        const answer = await read('/dashboard/sales/layers');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    });
+});
+
+/**
+ * [ADR-0150 D3, #31700] A dataset name is held once per NAMESPACE now, so two
+ * namespaces may each hold `qa_ds`. A publish's runtime probes
+ * (`publishPackageDrafts` → `runBuildProbes`) read each widget's dataset
+ * through `publishedItemReader`: resolved FROM the publishing package by the
+ * caller arm (`resolveCallerPackageAddress`, #32310 above), then read at the
+ * holder's exact address. So publishing either package probes ITS OWN
+ * dataset. Over the real protocol and the real registry.
+ *
+ * BASE (main f0f729e7): the probes read the dataset by its bare name, which
+ * two holders refuse (`409 RESOURCE_CONFLICT`), so neither package's widget
+ * was probed and each receipt carried `widget_not_probed`.
+ */
+describe('[#31700] a publish probes the dataset its own package resolves (ADR-0150 D3)', () => {
+    let protocol: ObjectStackProtocolImplementation;
+    const dataset = (packageId: string) => ({
+        name: 'qa_ds',
+        label: `${packageId} dataset`,
+        object: `${packageId.split('.').pop()}_item`,
+        measures: [{ name: 'total', aggregate: 'count' }],
+    });
+    const dashboard = (name: string) => ({ name, label: name, widgets: [{ id: 'w', dataset: 'qa_ds', values: ['total'] }] });
+
+    beforeEach(() => {
+        for (const id of [A, B]) registry.registerItem('dataset', dataset(id), 'name' as never, id);
+        registry.registerItem('dashboard', dashboard('board_alpha'), 'name' as never, A);
+        registry.registerItem('dashboard', dashboard('board_beta'), 'name' as never, B);
+        protocol = new ObjectStackProtocolImplementation({
+            registry,
+            find: vi.fn().mockResolvedValue([{ id: 'r1' }]),
+            findOne: vi.fn().mockResolvedValue(null),
+            insert: vi.fn(),
+            update: vi.fn(),
+            delete: vi.fn(),
+            count: vi.fn().mockResolvedValue(0),
+            aggregate: vi.fn().mockResolvedValue([]),
+        } as never);
+    });
+
+    async function probePublishOf(packageId: string | undefined, board: string) {
+        const queried: string[] = [];
+        const report = await runBuildProbes({
+            engine: { find: async () => [{ id: 'r1' }] },
+            getItem: publishedItemReader(protocol as never, packageId),
+            analytics: {
+                queryDataset: async (body: any) => {
+                    queried.push(body.label);
+                    return { rows: [{ total: 1 }] };
+                },
+            },
+            published: [{ type: 'dashboard', name: board }],
+        });
+        return { report, queried };
+    }
+
+    it('two namespaces each hold `qa_ds`: publishing either package probes its own dataset', async () => {
+        for (const [packageId, board] of [[A, 'board_alpha'], [B, 'board_beta']] as const) {
+            const { report, queried } = await probePublishOf(packageId, board);
+            expect(report.issues, packageId).toEqual([]);
+            expect(report.checked.widgets, packageId).toBe(1);
+            expect(queried, packageId).toEqual([`${packageId} dataset`]);
+        }
+    });
+
+    it('CONTROL — the bare read of the name is still refused naming both holders, as the probes read it before', async () => {
+        const { report, queried } = await probePublishOf(undefined, 'board_alpha');
+        expect(queried).toEqual([]);
+        expect(report.issues).toHaveLength(1);
+        expect(report.issues[0]).toMatchObject({ code: 'widget_not_probed', ref: { type: 'dataset', name: 'qa_ds' } }); // adr0112-ok: D6c build-probe diagnostics code
+        expect(report.issues[0]!.message).toContain(`2 holders (${A}, ${B})`);
+    });
+});
+
+/**
  * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name`, its `/layers`
  * and its `/published` on the dispatcher, judged over every holder as on
  * `RestServer`: the platform's package-less item (no stored row behind it)
@@ -603,8 +703,9 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
     const pkg = (packageId: string) => ({ kind: 'package', packageId });
     const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, answer.body?.error?.code, answer.body?.error?.details?.candidates];
     const DOORS = ['/action/approve', '/action/approve/layers', '/action/approve/published'];
-    // `/layers` and `/published` carry the refusal's text, not its
-    // `details.candidates`: each holder is read from the message there.
+    // Each holder is read from the refusal's text, and, since #32250 carried a
+    // thrown refusal's candidates through `resolveThrownHttpError`, from its
+    // `details.candidates` on all three doors (before it, the item read only).
     const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
     const refusalOf = (answer: { status?: number; body?: any }) => {
         const message = String(answer.body?.error?.message ?? '');
@@ -617,9 +718,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), { kind: 'platform' }]);
     });
 
     it('beside two packages\' on two objects: 409 naming both packages and the package-less holder, on all three doors', async () => {
@@ -629,9 +729,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A, B], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
     });
 
     it('a disabled package registered before the one enabled holder: the item read answers the enabled holder', async () => {

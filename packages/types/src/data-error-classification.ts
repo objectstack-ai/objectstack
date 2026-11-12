@@ -33,6 +33,7 @@ import {
     demotedDeclaredCode,
     declaredUserMessage,
     declaredRefusalMessage,
+    packageScopedRefusalCandidates,
     UNDECLARED_HOOK_REFUSAL_CODE,
 } from './thrown-http-error.js';
 import { isScriptFaultMessage, sandboxBusinessMessage } from './sandbox-business-message.js';
@@ -1643,12 +1644,21 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // question {@link thrownCodeFields} asks, so which bodies carry a
         // `code` at all is unchanged here; only the VALUE can move, and only
         // for a spelling the ADR-0112 union does not contain.
+        //
+        // [#32250, ADR-0150 D5] A package-scoped refusal (a write hook's
+        // `409 RESOURCE_CONFLICT` naming no one item, e.g. a permission-set
+        // grant naming a set two packages ship) names its holders as
+        // `details.candidates`, the member the `/actions` and `/meta` doors
+        // answer; appended last, so every key this body carried keeps its
+        // position. Every other declared refusal answers as it did.
+        const candidates = packageScopedRefusalCandidates(error);
         return {
             status: declaredStatus,
             body: {
                 error: msg,
                 ...thrownCodeFields(error, declaredStatus),
                 ...(object ? { object } : {}),
+                ...(candidates ? { details: { candidates } } : {}),
             },
         };
     }

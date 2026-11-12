@@ -50,13 +50,26 @@
 
 import { currencyForLocale, isValueDomainMember } from '@objectstack/spec/shared';
 import { getSettingsNamespace, listSettingsManifests } from './api';
-import type { ResolvedSettingValue, SettingsManifest, Specifier } from './types';
+import {
+  resolveLabel,
+  type ResolvedSettingValue,
+  type SettingsLiveValue,
+  type SettingsManifest,
+  type SettingsNamespacePayload,
+  type Specifier,
+} from './types';
 
 /** The settings namespace that owns the workspace's regional defaults. */
 export const LOCALIZATION_NAMESPACE = 'localization';
 
 /** The settings namespace that owns outbound mail delivery. */
 export const MAIL_NAMESPACE = 'mail';
+
+/** The settings namespace that owns the built-in AI (Setup → AI & Embedder). */
+export const AI_NAMESPACE = 'ai';
+
+/** The `ai` key whose value in the running system the server states (`live.provider`). */
+export const AI_PROVIDER_KEY = 'provider';
 
 /** The key the localization cascade resolves the workspace's zone from. */
 export const TIMEZONE_KEY = 'timezone';
@@ -89,7 +102,8 @@ export type ChecklistRowId =
   | 'timezone'
   | 'currency'
   | 'mail'
-  | 'invite';
+  | 'invite'
+  | 'ai_provider';
 
 /**
  * Where the "this administrator hid the checklist" record lives, per workspace
@@ -446,7 +460,46 @@ export function hasInvitedColleagues(
   return members.length > 1 || invitations.some((invitation) => invitation?.status === 'pending');
 }
 
-/** The settings half of the checklist: the localization namespace and, when the session may write it, mail. */
+/**
+ * The built-in AI row: the provider the RUNNING system uses, as the server
+ * states it (`live.provider` of `GET /api/settings/ai`), and the option that
+ * names it.
+ */
+export interface AiProviderState {
+  /** A provider is in use: the stated value is one, from the settings or the boot environment. */
+  done: boolean;
+  /** The stated value, or `null` when none is in use. */
+  value: string | null;
+  /** Where the running system took it from. */
+  source: SettingsLiveValue['source'];
+  /** The manifest's label for `value`, when its `provider` option table carries it. */
+  optionLabel?: string;
+}
+
+/**
+ * The built-in AI row from the `ai` namespace's payload, or `undefined` when
+ * the server states nothing about the provider.
+ *
+ * Read from `live.provider`, never from `values.provider`: a stored value says
+ * what was saved, and the runtime can run a provider it detected from its own
+ * boot environment while nothing is saved. A payload without the statement is
+ * "unknown", not "none in use", so the row is left out rather than shown as not
+ * done (a server older than the statement answers exactly that).
+ */
+export function aiProviderState(payload: Pick<SettingsNamespacePayload, 'manifest' | 'live'>): AiProviderState | undefined {
+  const stated = payload.live?.[AI_PROVIDER_KEY];
+  if (!stated || typeof stated !== 'object') return undefined;
+  const { value, source } = stated;
+  if (source !== 'settings' && source !== 'environment' && source !== 'none') return undefined;
+  const inUse = source !== 'none' && typeof value === 'string' && value !== '';
+  if (!inUse) return { done: false, value: null, source: 'none' };
+  const spec = payload.manifest.specifiers.find((s) => s.key === AI_PROVIDER_KEY);
+  const option = (spec?.options ?? []).find((o) => String(o.value) === value);
+  const label = option ? resolveLabel(option.label) : undefined;
+  return { done: true, value, source, ...(label ? { optionLabel: label } : {}) };
+}
+
+/** The settings half of the checklist: the localization namespace and, when the session may write them, mail and the built-in AI. */
 export interface ChecklistSettingsState {
   localization: {
     manifest: SettingsManifest;
@@ -454,6 +507,11 @@ export interface ChecklistSettingsState {
   };
   /** `undefined` when this session may not write mail, or its read failed. */
   mail?: { done: boolean };
+  /**
+   * `undefined` when this session may not write `ai`, its read failed, or the
+   * server states no provider ({@link aiProviderState}).
+   */
+  ai?: AiProviderState;
 }
 
 /**
@@ -493,6 +551,15 @@ export async function readChecklistSettings(
     } catch {
       // A mail read that fails leaves the row out: the checklist says nothing
       // about a setting it could not read, rather than "not set".
+    }
+  }
+  const aiListed = manifests.find((m) => m.namespace === AI_NAMESPACE);
+  if (aiListed && mayWrite(aiListed, systemPermissions)) {
+    try {
+      const ai = aiProviderState(await getSettingsNamespace(AI_NAMESPACE));
+      if (ai) state.ai = ai;
+    } catch {
+      // Unreadable: the row is left out, as for mail.
     }
   }
   return state;
