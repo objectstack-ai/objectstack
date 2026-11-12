@@ -31,28 +31,32 @@
  * seeded rows above the counter** — on a database already ground past them
  * every create succeeds on attempt 1 and the defect is invisible.
  *
- * # Why the retry cannot be decided from the error text
+ * # Why the retry cannot be decided from the error text ALONE
  *
  * The obvious predicate — "retry when the conflicting column is this autonumber
  * field" — needs `uniqueViolationColumn()` (#6544) to name a column. On the
- * configuration this card was filed against it never does, for two independent
- * reasons, both measured and both pinned below:
+ * configuration this card was filed against it now does on the index this repo
+ * builds today, and still cannot on the one it built before; both measured and
+ * both pinned below:
  *
- *  - the filing's own message is a **composite** —
+ *  - the filing's own message is the tenant composite —
  *    `UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number`
- *    — and `uniqueViolationColumn` refuses composites by contract. Since
- *    ADR-0131 D1 that is again exactly what this repo builds **today**: the
- *    tenanted unique index is the plain `(organization_id, field)`;
- *  - a database still carrying the ADR-0120 D3 index is narrower still: its
+ *    — and since ADR-0131 D1 that plain `(organization_id, field)` is again
+ *    exactly what this repo builds. Its organization part is the implied scope
+ *    of an organization-scoped unique field, not an authored column, so
+ *    `uniqueViolationColumn` sets it aside and names `case_number`: the column
+ *    decides (state 1), with no data probe;
+ *  - a database still carrying the ADR-0120 D3 index is narrower: its
  *    `(COALESCE(organization_id,'__global__'), field)` is an *expression*
  *    index, on which SQLite reports `UNIQUE constraint failed: index 'uniq_…'`
  *    and names no column at all.
  *
  * So the "column not determinable" limb is not an edge case on this path — it
- * is the only limb that ever runs for a tenanted autonumber. The discriminator
- * is therefore the DATA (`autoNumberValueExists`): if the value this driver
- * just generated is already present, the collision was this counter's. If it is
- * not, the duplicate is on a value the caller typed and the 409 is theirs.
+ * is the limb a legacy expression index and every MySQL deployment always run.
+ * There the discriminator is the DATA (`autoNumberValueExists`): if the value
+ * this driver just generated is already present, the collision was this
+ * counter's. If it is not, the duplicate is on a value the caller typed and the
+ * 409 is theirs.
  *
  * # On the assertion style
  *
@@ -209,13 +213,13 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
     expect(await lastValue('orgA')).toBe(before);
   });
 
-  it('pins WHY the column-name predicate cannot carry this decision', async () => {
+  it('pins WHICH index shapes the column-name predicate can carry this decision on', async () => {
     await driver.initObjects([CRM_CASE]);
 
     // 1. What this repo builds today (ADR-0131 D1): the PLAIN tenant composite,
-    //    on which SQLite reports both columns — a composite, which
-    //    `uniqueViolationColumn` refuses by contract. This is the filing's own
-    //    message, byte for byte.
+    //    on which SQLite reports both columns. The organization part is the
+    //    implied scope, so `uniqueViolationColumn` names the autonumber field.
+    //    This is the filing's own message, byte for byte.
     const indexes: any[] = await knex().raw(
       `select name, sql from sqlite_master where type='index' and tbl_name='crm_case'`,
     );
@@ -234,7 +238,7 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
     expect((caught as Error).message).toContain(
       'UNIQUE constraint failed: crm_case.organization_id, crm_case.case_number',
     );
-    expect(uniqueViolationColumn(caught)).toBeUndefined();
+    expect(uniqueViolationColumn(caught)).toBe('case_number');
 
     // 2. And a database still carrying the ADR-0120 D3 expression composite —
     //    built before ADR-0131 D1, honoured as it stands — is refused for the
@@ -309,12 +313,28 @@ describe('[#5495] autonumber sequence re-seed on a provable collision', () => {
       expect(await route(err)).toEqual([]);
     });
 
-    it('state 3 — Postgres composite DETAIL names no single column, so the DATA decides', async () => {
+    it('state 1 — Postgres tenant composite DETAIL: the implied organization part is set aside, so the column decides', async () => {
       const err: any = new Error('insert into "crm_case" … - duplicate key value violates unique constraint "uniq_crm_case_org_case"');
       err.code = '23505';
       err.detail = 'Key (organization_id, case_number)=(orgA, CASE-00001) already exists.';
+      expect(uniqueViolationColumn(err)).toBe('case_number');
+      expect(await route(err)).toEqual(['case_number']);
+      // Decided WITHOUT probing the data: a reservation whose value was never
+      // written still routes as ours, which only the column limb can answer.
+      const unwritten = { ...reservation, value: 'CASE-99999' };
+      const colliding = await (driver as any).collidingAutoNumberReservations(err, [unwritten]);
+      expect(colliding.map((r: any) => r.field)).toEqual(['case_number']);
+    });
+
+    it('state 3 — Postgres legacy COALESCE expression DETAIL names no column, so the DATA decides', async () => {
+      const err: any = new Error('insert into "crm_case" … - duplicate key value violates unique constraint "uniq_crm_case_org_case"');
+      err.code = '23505';
+      err.detail = "Key (COALESCE(organization_id, '__global__'::text), case_number)=(orgA, CASE-00001) already exists.";
       expect(uniqueViolationColumn(err)).toBeUndefined();
       expect(await route(err)).toEqual(['case_number']);
+      // …and the data, not a column, is what answered: an unwritten value is not ours.
+      const unwritten = { ...reservation, value: 'CASE-99999' };
+      expect(await (driver as any).collidingAutoNumberReservations(err, [unwritten])).toEqual([]);
     });
 
     it('state 3 — MySQL can only ever name an index, so the DATA decides there always', async () => {
