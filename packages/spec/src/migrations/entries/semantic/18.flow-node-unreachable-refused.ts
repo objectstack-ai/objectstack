@@ -11,7 +11,8 @@ export const entry: SemanticMigration = {
   surface:
     'automation.Flow.nodes and automation.Flow.edges on a flow saved live or published through the metadata '
     + 'doors (PUT /api/v1/meta/flow/NAME live save, the per-item publish, POST /api/v1/packages/PKG/publish-drafts, '
-    + 'and the restore doors POST /api/v1/meta/flow/NAME/rollback and POST /api/v1/packages/PKG/commits/COMMIT/revert; '
+    + 'and the restore doors POST /api/v1/meta/flow/NAME/rollback, POST /api/v1/packages/PKG/commits/COMMIT/revert '
+    + 'and POST /api/v1/packages/PKG/rollback; '
     + 'Studio, REST and MCP authors) and on a flow os validate / os build / os lint / os verify judge: a top-level node that no '
     + 'edge path from the flow\'s first start node reaches, a second start node included. Every edge type counts '
     + 'as a path (default, conditional, fault, back); a boundary_event node and the nodes only it leads to, and '
@@ -36,7 +37,7 @@ export const entry: SemanticMigration = {
     + 'findings whatever the stored row held; a draft stored earlier is judged at its publish and blocks its '
     + 'package\'s publish until fixed; a history version stored before the release that holds an unreached node can '
     + 'no longer be restored (the same 422); deleting the flow, or saving it as a draft, still works. '
-    + 'OS_ALLOW_UNLINTED_METADATA_WRITES=1 turns the save and publish refusal into a logged warning for a '
+    + 'OS_ALLOW_UNLINTED_METADATA_WRITES=1 turns the save, publish and restore refusal into a logged warning for a '
     + 'migration window. There is no mechanical rewrite: the node never ran, so deleting it keeps what the flow '
     + 'did and wiring it in changes it, and whether the author meant the step to run is a judgement about the flow.',
   acceptanceCriteria:
