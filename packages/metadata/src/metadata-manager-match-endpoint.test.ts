@@ -1045,14 +1045,23 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     }
   });
 
-  it.each(UNBUNDLED)('%s: the loaders\' unscoped reads still answer one item per name, the one saved last (unchanged)', async (type) => {
+  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the door\'s plural reads answer every package\'s item [#32517], the database\'s one row per name (unchanged)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
       expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
-      expect(labelsOf(await peer.loadMany(type))).toEqual([label(type, B)]);
-      expect((await peer.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
     }
+    const database = ctx.peer(['database']);
+    expect(labelsOf(await database.loadMany(type))).toEqual([label(type, B)]);
+    expect((await database.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
+    // [#32517] BASE: the door's plural reads folded the two packages' slots
+    // into the one saved last, `[label(type, B)]`.
+    const door = ctx.peer(['door']);
+    expect(labelsOf(await door.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+    expect((await door.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([
+      [nameOf(type), label(type, A)],
+      [nameOf(type), label(type, B)],
+    ]);
   });
 
   it.each(SLOTTED)('%s: with one package\'s slot in the registry, `list` adds the other package\'s stored item, and no second copy of the first (BASE: the registry\'s item only)', async (type) => {

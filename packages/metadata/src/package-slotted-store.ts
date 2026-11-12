@@ -207,6 +207,10 @@ export function recordStoreWrite(store: ReadonlyMap<string, unknown>, key: strin
 }
 
 /** Of `keys`, the one written last (the last in the store's order when none was recorded). */
+export function lastWrittenKeyOf(store: ReadonlyMap<string, unknown>, keys: readonly string[]): string {
+  return writtenLast(store, keys);
+}
+
 function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[]): string {
   const order = writeOrder.get(store);
   let best = keys[keys.length - 1]!;
@@ -348,6 +352,48 @@ export function bundleEntryKey(type: string, name: string, data: unknown, packag
   return JSON.stringify([packageId ?? storedItemPackageId(data) ?? null, name, storedBundleMemberOf(type, data) ?? null]);
 }
 
+/**
+ * [#32517] The identity each entry of an unscoped plural read (`loadMany`,
+ * `loadManyKeyed`) is kept once per, over every loader's entries in loader
+ * order; `undefined` for an entry with no name (always kept).
+ *
+ *  - a type outside {@link PACKAGE_SLOTTED_STORE_TYPES}: its name, as before;
+ *  - a bundled type: `(package, name, member)` ({@link bundleEntryKey}), as
+ *    before;
+ *  - an unbundled type stored per `(package, name)`: `(package, name)`, so two
+ *    packages' items of one name are both kept, where a key of the name alone
+ *    kept the first loader's one. An entry that carries no package, under a
+ *    name exactly one package holds among the entries, is that holder's (D4:
+ *    its customization, never a second item), so a one-holder name keeps one
+ *    entry — the first, as before. One package's action bound to several
+ *    objects is one `(package, name)`, as `DatabaseLoader`'s row holds it.
+ */
+export function pluralEntryKeys(
+  type: string,
+  entries: ReadonlyArray<{ readonly name: unknown; readonly data: unknown; readonly packageId?: string }>,
+): Array<string | undefined> {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) {
+    return entries.map(({ name, data, packageId }) => (typeof name !== 'string'
+      ? undefined
+      : bundleEntryKey(type, name, data, packageId) ?? name));
+  }
+  const packageOf = entries.map(({ data, packageId }) => (isPackageCaller(packageId) ? packageId : storedItemPackageId(data)));
+  const holders = new Map<string, Set<string>>();
+  entries.forEach(({ name }, at) => {
+    const holder = packageOf[at];
+    if (typeof name !== 'string' || holder === undefined) return;
+    let held = holders.get(name);
+    if (!held) holders.set(name, (held = new Set()));
+    held.add(holder);
+  });
+  return entries.map(({ name }, at) => {
+    if (typeof name !== 'string') return undefined;
+    const held = holders.get(name);
+    const holder = packageOf[at] ?? (held?.size === 1 ? [...held][0] : undefined);
+    return JSON.stringify([holder ?? null, name]);
+  });
+}
+
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */
 export function storeKeysNamed(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): string[] {
   if (!store) return [];
@@ -374,8 +420,12 @@ function holdsSlot(store: ReadonlyMap<string, unknown>, slot: string): boolean {
   return false;
 }
 
-/** [#32517] Of `slot`'s members in `store`, the key written last ({@link writtenLast}); the slot itself when none is held. */
-function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
+/**
+ * [#32517] Of `slot`'s members in `store`, the key written last
+ * ({@link writtenLast}) — the one item the slot held before a bundle's members
+ * had keys of their own; the slot itself when none is held.
+ */
+export function latestMemberOf(store: ReadonlyMap<string, unknown>, slot: string): string {
   const members = [...store.keys()].filter((key) => slotOfKey(key) === slot);
   return members.length === 0 ? slot : writtenLast(store, members);
 }

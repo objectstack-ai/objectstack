@@ -215,6 +215,19 @@ describe('[#32517] a bundled type keeps one item per (package, name, member) in 
     expect(await manager.list('email_template'), 'the customization went with its holder\'s slot').toEqual([]);
   });
 
+  it('list order: each slot\'s member written last first (the one item each slot listed before), then the other members — registry and door alike', async () => {
+    const order = (items: unknown[]) => (items as Array<{ subject: string }>).map((item) => item.subject);
+    expect(order(await registered(...ONE_HOLDER()).list('email_template'))).toEqual([`${ALPHA}:fr-FR`, `${ALPHA}:en-US`]);
+    expect(order(await registered(...TWO_HOLDERS()).list('email_template'))).toEqual(
+      [`${ALPHA}:fr-FR`, `${BETA}:fr-FR`, `${ALPHA}:en-US`, `${BETA}:en-US`],
+    );
+    expect(order(await (await stored(...TWO_HOLDERS())).manager.list('email_template'))).toEqual(
+      [`${ALPHA}:fr-FR`, `${BETA}:fr-FR`, `${ALPHA}:en-US`, `${BETA}:en-US`],
+    );
+    const rewritten = registered(...ONE_HOLDER(), member(ALPHA, 'en-US', 'en again'));
+    expect(order(await rewritten.list('email_template'))).toEqual(['en again', `${ALPHA}:fr-FR`]);
+  });
+
   it('a second write of one member replaces that member only', async () => {
     const manager = registered(...ONE_HOLDER(), member(ALPHA, 'fr-FR', 'fr again'));
     expect(subjects(await manager.list('email_template'))).toEqual([`${ALPHA}:en-US`, 'fr again']);
