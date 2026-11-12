@@ -349,3 +349,180 @@ describe('MCP action tools: namespace and face (ADR-0150)', () => {
     expect(text).toContain('com.hr');
   });
 });
+
+// [ADR-0150 D6] One name bound to several objects lists one row per binding,
+// each with its own face (the platform binds `invite_user` to four identity
+// objects, one of them record-scoped). `run_action` takes a listed face as
+// `actionName` and runs that one binding by its address, read back against the
+// caller's own listing; the bare name stays ambiguous.
+describe('MCP action tools: run_action takes a listed face (ADR-0150 D6)', () => {
+  let runtime: MCPServerRuntime;
+
+  beforeEach(() => {
+    runtime = new MCPServerRuntime({ name: 'objectstack-test', version: '9.9.9' });
+  });
+
+  const invite = (objectName: string, requiresRecord = false) => ({
+    name: 'invite_user',
+    objectName,
+    namespace: 'sys',
+    face: `${objectName}-invite_user`,
+    label: 'Invite User',
+    type: 'api',
+    requiresRecord,
+    requiresConfirmation: false,
+    aiExposed: true,
+  });
+
+  /** The runtime's answers, modelled: a bare name four objects bind is refused as ambiguous. */
+  function faceBridge() {
+    const bridge = makeBridge();
+    return Object.assign(bridge, {
+      async listActions() {
+        bridge.calls.push(['listActions']);
+        return [
+          invite('sys_user'),
+          invite('sys_organization', true),
+          invite('sys_member'),
+          invite('sys_invitation'),
+          // Not exposed to AI on a system object: the listing withholds it.
+          { name: 'rotate_key', objectName: 'sys_api_key', namespace: 'sys', face: 'sys_api_key-rotate_key',
+            label: 'Rotate', type: 'script', requiresRecord: true, requiresConfirmation: true },
+          { name: 'complete_task', objectName: 'todo_task', namespace: 'todo', face: 'todo_task-complete_task',
+            label: 'Mark Complete', type: 'script', requiresRecord: true, requiresConfirmation: false },
+        ];
+      },
+      async runAction(name: string, input: any) {
+        bridge.calls.push(['runAction', name, input]);
+        if (name === 'invite_user' && !input?.objectName) {
+          throw Object.assign(
+            new Error("Action 'invite_user' exists on multiple objects (sys_user, sys_organization, sys_member, "
+              + 'sys_invitation); pass objectName to disambiguate'),
+            { code: 'VALIDATION_ERROR', status: 400 },
+          );
+        }
+        return { ok: true, action: name, objectName: input?.objectName ?? 'todo_task', result: { status: 'done' } };
+      },
+    });
+  }
+
+  const run = async (bridge: any, args: Record<string, unknown>) => {
+    const { json } = await call(runtime, toolsCall(1, 'run_action', args), bridge);
+    const text: string = json.result.content[0].text;
+    let payload: any;
+    try { payload = JSON.parse(text); } catch { payload = { text }; }
+    return { isError: json.result.isError === true, payload, text };
+  };
+  const runCalls = (bridge: any) => bridge.calls.filter((c: any[]) => c[0] === 'runAction');
+
+  it('list_actions hands each binding of one name its own face', async () => {
+    const { json } = await call(runtime, toolsCall(1, 'list_actions', {}), faceBridge());
+    const payload = JSON.parse(json.result.content[0].text);
+    const invites = payload.actions.filter((a: any) => a.name === 'invite_user');
+    expect(invites.map((a: any) => a.face)).toEqual([
+      'sys_user-invite_user', 'sys_organization-invite_user', 'sys_member-invite_user', 'sys_invitation-invite_user',
+    ]);
+  });
+
+  it('a listed face runs its one binding: the bridge receives the name, objectName and namespace', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'sys_member-invite_user', params: { email: 'a@example.com', role: 'member' } });
+    expect(r.isError, r.text).toBe(false);
+    expect(r.payload).toMatchObject({ ok: true, action: 'invite_user', objectName: 'sys_member' });
+    const calls = runCalls(bridge);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toBe('invite_user');
+    expect(calls[0][2]).toMatchObject({
+      objectName: 'sys_member', namespace: 'sys', params: { email: 'a@example.com', role: 'member' },
+    });
+  });
+
+  it('the record-scoped twin\'s face runs that binding with its record id', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, {
+      actionName: 'sys_organization-invite_user', recordId: 'org_1', params: { email: 'a@example.com', role: 'member' },
+    });
+    expect(r.isError, r.text).toBe(false);
+    const calls = runCalls(bridge);
+    expect(calls[0][1]).toBe('invite_user');
+    expect(calls[0][2]).toMatchObject({ objectName: 'sys_organization', namespace: 'sys', recordId: 'org_1' });
+  });
+
+  it('a face no listed row carries is not found, and nothing runs', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'sys_team-invite_user' });
+    expect(r.isError).toBe(true);
+    expect(r.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(runCalls(bridge)).toHaveLength(0);
+  });
+
+  it('the face of an action the caller is not shown is not found, and nothing runs', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'sys_api_key-rotate_key', recordId: 'k1' });
+    expect(r.isError).toBe(true);
+    expect(r.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(runCalls(bridge)).toHaveLength(0);
+  });
+
+  it('a face the listing refuses as shared is not found, naming why', async () => {
+    const bridge = faceBridge();
+    const twin = (objectName: string) => ({ ...invite(objectName), face: 'shared-face' });
+    Object.assign(bridge, {
+      async listActions() {
+        return [twin('sys_user'), twin('sys_member')];
+      },
+    });
+    const r = await run(bridge, { actionName: 'shared-face' });
+    expect(r.isError).toBe(true);
+    expect(r.payload.error).toMatchObject({ code: 'RESOURCE_NOT_FOUND', status: 404 });
+    expect(r.payload.error.message).toContain('sys_member');
+    expect(runCalls(bridge)).toHaveLength(0);
+  });
+
+  it('a face with a disagreeing objectName or namespace is refused, and nothing runs', async () => {
+    const bridge = faceBridge();
+    for (const extra of [{ objectName: 'sys_user' }, { namespace: 'crm' }]) {
+      const r = await run(bridge, { actionName: 'sys_member-invite_user', ...extra });
+      expect(r.isError).toBe(true);
+      expect(r.payload.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    }
+    expect(runCalls(bridge)).toHaveLength(0);
+  });
+
+  it('a face with its own objectName and namespace runs as the face alone', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'sys_member-invite_user', objectName: 'sys_member', namespace: 'sys' });
+    expect(r.isError, r.text).toBe(false);
+    expect(runCalls(bridge)[0][2]).toMatchObject({ objectName: 'sys_member', namespace: 'sys' });
+  });
+
+  it('CONTROL: a name with objectName reaches the bridge as before, with no namespace key', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'invite_user', objectName: 'sys_member', params: { email: 'a@example.com' } });
+    expect(r.isError, r.text).toBe(false);
+    const calls = runCalls(bridge);
+    expect(calls[0][1]).toBe('invite_user');
+    expect(calls[0][2].objectName).toBe('sys_member');
+    expect(Object.keys(calls[0][2])).not.toContain('namespace');
+  });
+
+  it('CONTROL: a unique bare name reaches the bridge as before, never read against the listing', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'complete_task', recordId: 't1' });
+    expect(r.isError, r.text).toBe(false);
+    expect(bridge.calls.some((c: any[]) => c[0] === 'listActions')).toBe(false);
+    const calls = runCalls(bridge);
+    expect(calls[0][1]).toBe('complete_task');
+    expect(calls[0][2].objectName).toBeUndefined();
+    expect(Object.keys(calls[0][2])).not.toContain('namespace');
+  });
+
+  it('CONTROL: an ambiguous bare name still answers the runtime\'s refusal', async () => {
+    const bridge = faceBridge();
+    const r = await run(bridge, { actionName: 'invite_user', params: { email: 'a@example.com' } });
+    expect(r.isError).toBe(true);
+    expect(r.payload.error).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(r.payload.error.message).toContain('exists on multiple objects');
+    expect(runCalls(bridge)[0][2].objectName).toBeUndefined();
+  });
+});

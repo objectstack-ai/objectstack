@@ -525,6 +525,80 @@ function faceListOfActions(actions: readonly McpActionSummary[]): {
   };
 }
 
+/**
+ * [ADR-0150 D6] Whether `run_action`'s `actionName` is a listed face rather
+ * than an action name. No action name admits `-` (`SnakeCaseIdentifierSchema`),
+ * and both ruled face forms (`OBJECT-ACTION`, `NS-NAME`, and the hashed long
+ * form) carry one, so a `-` names a face and a name never collides with one.
+ */
+function isActionFace(actionName: string): boolean {
+  return actionName.includes('-');
+}
+
+/** The address a listed face names: what `run_action` forwards to the bridge. */
+interface ResolvedActionFace {
+  name: string;
+  objectName?: string;
+  namespace?: string;
+}
+
+/**
+ * [ADR-0150 D6] `run_action`'s face resolution: a face is read back against the
+ * caller's OWN `list_actions` rows, with the listing's visibility filter and
+ * its refused-face rule, so `run_action` accepts exactly the faces
+ * `list_actions` hands this caller. Two actions bound under one name (the
+ * platform binds `invite_user` to four objects) list one row each, and each
+ * row's face names that one binding, where the bare name is refused as
+ * ambiguous.
+ *
+ * Answers the resolved address, or the tool error: a face no visible row
+ * carries is not found, as an unknown name is; a face given with an
+ * `objectName` or `namespace` that names another binding is refused, never
+ * resolved in favour of either.
+ */
+async function resolveActionFace(
+  bridge: McpActionBridge,
+  allowSystem: boolean,
+  face: string,
+  objectName: string | undefined,
+  namespace: string | undefined,
+): Promise<{ address: ResolvedActionFace } | { refusal: ReturnType<typeof codedErrorResult> }> {
+  const listed = await bridge.listActions();
+  const faced = faceListOfActions(allowSystem ? listed : listed.filter(isListableAction));
+  const row = faced.actions.find((a) => a.face === face);
+  if (!row) {
+    const shared = faced.refusedFaces.find((r) => r.face === face);
+    return {
+      refusal: codedErrorResult({
+        code: StandardErrorCode.enum.RESOURCE_NOT_FOUND,
+        status: 404,
+        message: shared
+          ? `Action face "${face}" names no one action: ${shared.reason}`
+          : `Action face "${face}" not found: list_actions lists no action under that face for you. `
+            + 'Pass a face list_actions lists, or the action\'s name with its objectName and namespace.',
+      }),
+    };
+  }
+  const disagrees: string[] = [];
+  if (objectName !== undefined && objectName !== row.objectName) {
+    disagrees.push(`objectName "${objectName}" (the face's is ${row.objectName ? `"${row.objectName}"` : 'none'})`);
+  }
+  if (namespace !== undefined && namespace !== row.namespace) {
+    disagrees.push(`namespace "${namespace}" (the face's is ${row.namespace ? `"${row.namespace}"` : 'none'})`);
+  }
+  if (disagrees.length > 0) {
+    return {
+      refusal: codedErrorResult({
+        code: StandardErrorCode.enum.VALIDATION_ERROR,
+        status: 400,
+        message: `Action face "${face}" names action "${row.name}", but the call also passes ${disagrees.join(' and ')}. `
+          + 'Pass the face alone, or the name with its own objectName and namespace.',
+      }),
+    };
+  }
+  return { address: { name: row.name, objectName: row.objectName, namespace: row.namespace } };
+}
+
 function systemObjectActionRefusal(actionName: string, objectName: string): string {
   return (
     `Action "${actionName}" on system object "${objectName}" is not exposed via MCP: a system object's action is ` +
@@ -2803,7 +2877,9 @@ export function registerActionTools(
         'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
         'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
         'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
-        'and that the caller is permitted to run are returned. Use run_action to invoke one. An action that ' +
+        'and that the caller is permitted to run are returned. Use run_action to invoke one. One name can be ' +
+        'listed on several rows, one per object it is bound to: each row carries its own face, and run_action ' +
+        'takes that face as actionName (or the row\'s name with its objectName and namespace). An action that ' +
         'carries "unavailable" cannot be run with the credential you connected with: run_action would refuse ' +
         'it with unavailable.code, and unavailable.reason says why and what would let it run, so tell the ' +
         'user instead of calling it.',
@@ -2831,7 +2907,9 @@ export function registerActionTools(
     note('run_action'),
     {
       description:
-        'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic — ' +
+        'Invoke a business action by name (see list_actions). When list_actions lists a name on several rows, ' +
+        'pass the row\'s face as actionName (or the name with the row\'s objectName and namespace); the bare ' +
+        'name alone is refused as ambiguous. Runs the app\'s registered business logic — ' +
         'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
@@ -2860,7 +2938,12 @@ export function registerActionTools(
           },
         },
         {
-        actionName: z.string().describe('The action name from list_actions, e.g. "complete_task"'),
+        actionName: z
+          .string()
+          .describe(
+            'The action name from list_actions, e.g. "complete_task", or a listed row\'s face, e.g. '
+            + '"todo_task-complete_task". Pass the face when list_actions lists the name on several rows.',
+          ),
         objectName: z
           .string()
           .optional()
@@ -2916,7 +2999,8 @@ export function registerActionTools(
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) => {
-      const { actionName, objectName, namespace, recordId, params } = args;
+      const { recordId, params } = args;
+      let { actionName, objectName, namespace } = args;
       // Read off the constant, so the member's spelling has exactly one
       // authority in this package (the schema key above is the same constant).
       const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
@@ -2924,6 +3008,14 @@ export function registerActionTools(
         return errorResult('actionName is required');
       }
       try {
+        // [ADR-0150 D6] A listed face names one binding: read it back against
+        // this caller's listing and run that binding by its address. A name
+        // (no `-`) takes the path below exactly as before.
+        if (isActionFace(actionName)) {
+          const resolved = await resolveActionFace(bridge, allowSystem, actionName, objectName, namespace);
+          if ('refusal' in resolved) return resolved.refusal;
+          ({ name: actionName, objectName, namespace } = resolved.address);
+        }
         // [#27681] A `sys_*` action runs only where `list_actions` would list
         // it: the bridge's own listing is what attests the author's
         // `ai.exposed` (see `isListableAction`). A name with no `objectName`
