@@ -1460,7 +1460,7 @@ export class MetadataManager implements IMetadataService {
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    const storedRows: Array<{ key: string; data: unknown }> = [];
+    const storedRows: unknown[] = [];
     const storedKeys = new Set<string>();
     // [#32517] Each slot's member written last first: a slot no key of which
     // came from the registry answers its first member (`latestMemberOf`).
@@ -1470,7 +1470,7 @@ export class MetadataManager implements IMetadataService {
         if (asStored && slotPackageOf(key) !== undefined && data !== null && typeof data === 'object' && this.storedPackagelessRows.has(data)) {
           const stored = storeSlotKey(type, name, undefined, data);
           if (loaderStore.has(stored)) {
-            storedRows.push({ key, data });
+            storedRows.push(data);
             storedKeys.add(stored);
             continue;
           }
@@ -1482,15 +1482,12 @@ export class MetadataManager implements IMetadataService {
       if (!view.has(key) && !storedKeys.has(key)) view.set(key, data);
     }
     // [#32791] The row the boot pass primed, over the loader's copy of the
-    // slot it fills: it is the item the registry answered for the name.
-    const aliases = new Map<string, string>();
-    for (const { key, data } of storedRows) {
-      const at = packagelessWriteKeyOf(view, type, name, data);
-      view.set(at, data);
-      aliases.set(at, key);
-    }
+    // slot it fills (its holder's row: the customization shadows it, D4). It
+    // is filed under a key the registry does not hold, so, like a loader's
+    // item, it inherits no write order below.
+    for (const data of storedRows) view.set(packagelessWriteKeyOf(view, type, name, data), data);
     // [#32560] "Written last" over the view is the registry's own order.
-    inheritStoreWriteOrder(view, registryStore, aliases);
+    inheritStoreWriteOrder(view, registryStore);
     return view;
   }
 

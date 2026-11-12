@@ -264,15 +264,9 @@ function writtenLast(store: ReadonlyMap<string, unknown>, keys: readonly string[
  * [ADR-0150 D3, #32560] Give `view` (a store assembled from `from`'s slots and
  * others) `from`'s write order for the keys it took from it, so a read over
  * the view answers "written last" as the read over `from` does. A key `from`
- * does not hold counts as written before every key it does. [#32791] A view
- * key `aliases` maps to the key of `from` its item was taken from (the view
- * filed that item under another key) inherits that key's order.
+ * does not hold counts as written before every key it does.
  */
-export function inheritStoreWriteOrder(
-  view: ReadonlyMap<string, unknown>,
-  from: ReadonlyMap<string, unknown> | undefined,
-  aliases?: ReadonlyMap<string, string>,
-): void {
+export function inheritStoreWriteOrder(view: ReadonlyMap<string, unknown>, from: ReadonlyMap<string, unknown> | undefined): void {
   const order = from ? writeOrder.get(from) : undefined;
   if (!order) return;
   // [#32517] A slot none of whose members came from `from` still answers its
@@ -280,9 +274,8 @@ export function inheritStoreWriteOrder(
   inheritedViews.add(view);
   const inherited = new Map<string, number>();
   for (const key of view.keys()) {
-    const fromKey = aliases?.get(key) ?? key;
-    const at = order.get(fromKey);
-    if (at !== undefined && view.get(key) === from!.get(fromKey)) inherited.set(key, at);
+    const at = order.get(key);
+    if (at !== undefined && view.get(key) === from!.get(key)) inherited.set(key, at);
   }
   writeOrder.set(view, inherited);
 }
