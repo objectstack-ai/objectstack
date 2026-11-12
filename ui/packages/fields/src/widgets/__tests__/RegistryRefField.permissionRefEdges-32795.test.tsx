@@ -23,6 +23,10 @@
  *  - item 5: the read cell labels a name more than one holder serves by the
  *    holder the row's package column names, where the row carries that column;
  *    one holder, or a row without the column: by name, as before (CONTROL).
+ *
+ * objectstack#32833 item 3: an author's `formObject` is kept where the form has
+ * no object to stamp, and an action param is never stamped, so it takes a bare
+ * name.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import React from 'react';
@@ -31,7 +35,7 @@ import '@testing-library/jest-dom';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { PermissionRefField } from '../RegistryRefField';
 import { PermissionRefCell } from '../RegistryRefCell';
-import { FORM_OBJECT_KEY, withFormObject } from '../permissionSetHolders';
+import { FORM_OBJECT_KEY, withFormObject, holderPackageFieldOf } from '../permissionSetHolders';
 
 type Header = { name: string; label?: string; packageId?: string };
 
@@ -201,5 +205,46 @@ describe('objectstack#32795 item 5 — the read cell labels by (package, name) w
     expect(cellText(0)).toHaveTextContent(/^Sales \(CRM\)$/);
     expect(cellText(1)).toHaveTextContent(/^Sales \(CRM\)$/);
     expect(cellText(2)).toHaveTextContent(/^Sales \(CRM\)$/);
+  });
+});
+
+describe('objectstack#32833 item 3 — where the form does not stamp its object', () => {
+  it('a `formObject` an author wrote is kept when the widget key or the object name is missing, and the form stamp wins when present', () => {
+    const authored = { ...GRANT_DEF, [FORM_OBJECT_KEY]: 'crm_deal' };
+    // No object name to stamp: the definition is handed on as written.
+    expect(withFormObject(authored, undefined)).toBe(authored);
+    expect(withFormObject(authored, '')).toBe(authored);
+    // Not a widget that reads the key: handed on as written, whatever it carries.
+    const noWidget = { type: 'text', label: 'Permission Set', [FORM_OBJECT_KEY]: 'sys_user_permission_set' };
+    expect(withFormObject(noWidget, 'crm_deal')).toBe(noWidget);
+    // A form that knows its object stamps it over the authored value.
+    expect(withFormObject(authored, 'sys_user_permission_set')).toEqual({ ...GRANT_DEF, [FORM_OBJECT_KEY]: 'sys_user_permission_set' });
+  });
+
+  it('an action param (`create_user`’s `permissionSet`) is never stamped and takes a bare name: package options disabled, a click writes nothing', async () => {
+    const onAutofill = vi.fn();
+    const onChange = vi.fn();
+    const param = { type: 'text', label: 'Permission Set', widget: 'permission-ref' };
+    render(
+      <PermissionRefField
+        name="permissionSet"
+        value=""
+        onChange={onChange}
+        field={param as any}
+        dataSource={lister(TWO_PACKAGES)}
+        dependentValues={{}}
+        onAutofill={onAutofill}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('combobox'));
+    expect(optionOf(CRM)).toHaveAttribute('aria-disabled', 'true');
+    expect(optionOf(HR)).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(optionOf(CRM));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(onAutofill).not.toHaveBeenCalled();
+    // Even stamped with the grant object, a param's column is not the grant's name column.
+    expect(holderPackageFieldOf('sys_user_permission_set', 'permissionSet')).toBeNull();
+    expect(holderPackageFieldOf(undefined, 'permission_set')).toBeNull();
+    expect(holderPackageFieldOf('sys_user_permission_set', 'permission_set')).toBe('permission_set_package');
   });
 });

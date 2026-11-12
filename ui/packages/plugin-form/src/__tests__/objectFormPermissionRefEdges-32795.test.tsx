@@ -20,6 +20,15 @@
  *    `seedCreateValues`), so a seed is not shown as a pick the save would not
  *    write; the screen and the payload agree. `createHolderPackagePayload` is
  *    unchanged: a value equal to the seed is still not sent.
+ *
+ * objectstack#32833 — after those edges:
+ *
+ *  - item 1: the tabbed and wizard forms' seed drop, by a rendered save;
+ *  - item 2: a create's values and its baseline come from one call, so a
+ *    package an unnamed definition's seed keeps is no pick and is not sent;
+ *  - item 6: the modal and drawer record forms write a picked holder's package
+ *    through the record form's create step (`createWritePayload`); one holder
+ *    writes the name alone (CONTROL).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, waitFor, fireEvent, cleanup, screen, act } from '@testing-library/react';
@@ -301,5 +310,108 @@ describe('objectstack#32833 item 6 — the modal and drawer record forms carry a
       expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user' });
       expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
     });
+  });
+});
+
+describe('objectstack#32833 item 1 — the tabbed and wizard forms drop a seeded package on a rendered save', () => {
+  const SECTIONS = [{ name: 'main', label: 'Main', fields: ['permission_set', 'note'] }];
+  const LAYOUTS: Array<[string, React.ComponentType<any>, string]> = [
+    ['TabbedForm', TabbedForm as any, 'tabbed'],
+    ['WizardForm', WizardForm as any, 'wizard'],
+  ];
+  function mountLayout(Container: React.ComponentType<any>, formType: string, objectSchema: Record<string, unknown>, schema: Record<string, unknown>) {
+    const ds = dataSourceFor(objectSchema);
+    const view = render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <Container
+          schema={{ type: 'object-form', formType, objectName: GRANT_SCHEMA.name, mode: 'create', sections: SECTIONS, ...schema } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererProvider>,
+    );
+    return { ds, ...view };
+  }
+  const SEEDED = { initialData: { permission_set: 'sales_user', permission_set_package: 'com.acme.crm', note: 'n' } };
+
+  describe.each(LAYOUTS)('%s', (_name, Container, formType) => {
+    it('opens on the name as the server reads it, and saves the name alone', async () => {
+      const { ds, container } = mountLayout(Container, formType, GRANT_SCHEMA, SEEDED);
+      const trigger = await screen.findByRole('combobox');
+      await waitFor(() => expect(trigger).toHaveTextContent(ENV));
+      await submit(container);
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', note: 'n' });
+      expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
+    });
+
+    it('a package the user then picks is a change, and is saved beside the name', async () => {
+      const { ds, container } = mountLayout(Container, formType, GRANT_SCHEMA, SEEDED);
+      const trigger = await openPicker();
+      await act(async () => {
+        fireEvent.click(await optionOf(CRM));
+      });
+      await waitFor(() => expect(trigger).toHaveTextContent(CRM));
+      await submit(container);
+      await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+      expect(ds.create.mock.calls[0][1]).toMatchObject({
+        permission_set: 'sales_user',
+        permission_set_package: 'com.acme.crm',
+      });
+    });
+  });
+});
+
+describe("objectstack#32833 item 2 — a create's values and its baseline come from one call", () => {
+  // A definition with no `name`: `seedCreateValues` cannot tell the grant and
+  // keeps a seeded package, so the form holds it AND the baseline holds it.
+  const UNNAMED_GRANT_SCHEMA = { fields: FIELDS };
+  const values = { permission_set: 'sales_user', permission_set_package: 'com.acme.crm' };
+  const save = (formValues: Record<string, unknown>, createBaseline: Record<string, unknown>) =>
+    formWritePayload(formValues, { mode: 'create', objectName: 'sys_user_permission_set' }, {
+      objectSchema: GRANT_SCHEMA as any,
+      canEdit: undefined,
+      snapshot: null,
+      createBaseline,
+    }).writePayload;
+
+  it('a seed kept by an unnamed definition is in the values and the baseline alike, so it is no pick and is not sent', () => {
+    const seed = seedCreateValues(UNNAMED_GRANT_SCHEMA as any, values);
+    expect(seed).toStrictEqual(values);
+    expect(save(seed, seed)).toStrictEqual({ permission_set: 'sales_user' });
+  });
+
+  it('a baseline built apart from the values (a second seed that drops the key) would turn the seed into a pick', () => {
+    // Why the invariant is one call: this is the shape a seeding path outside
+    // `seedCreateValues` / `formOpeningValues` would hand the save.
+    const seed = seedCreateValues(UNNAMED_GRANT_SCHEMA as any, values);
+    const otherBaseline = seedCreateValues(GRANT_SCHEMA as any, values);
+    expect(save(seed, otherBaseline)).toStrictEqual(values);
+  });
+
+  it.each([
+    ['TabbedForm', TabbedForm as any, 'tabbed'],
+    ['WizardForm', WizardForm as any, 'wizard'],
+  ])('%s, rendered on an unnamed definition with a seeded package, saves the name alone', async (_name, Container, formType) => {
+    const ds = dataSourceFor(UNNAMED_GRANT_SCHEMA);
+    const { container } = render(
+      <SchemaRendererProvider dataSource={ds as any}>
+        <Container
+          schema={{
+            type: 'object-form',
+            formType,
+            objectName: 'sys_user_permission_set',
+            mode: 'create',
+            sections: [{ name: 'main', label: 'Main', fields: ['permission_set', 'note'] }],
+            initialData: { ...values, note: 'n' },
+          } as any}
+          dataSource={ds as any}
+        />
+      </SchemaRendererProvider>,
+    );
+    await screen.findByRole('combobox');
+    await submit(container);
+    await waitFor(() => expect(ds.create).toHaveBeenCalledTimes(1));
+    expect(ds.create.mock.calls[0][1]).toMatchObject({ permission_set: 'sales_user', note: 'n' });
+    expect(ds.create.mock.calls[0][1]).not.toHaveProperty('permission_set_package');
   });
 });
