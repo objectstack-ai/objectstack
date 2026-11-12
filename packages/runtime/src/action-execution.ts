@@ -2777,6 +2777,11 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         ...(Array.isArray(ec?.positions) && ec.positions.length ? { positions: ec.positions } : {}),
         ...(Array.isArray(ec?.permissions) && ec.permissions.length ? { permissions: ec.permissions } : {}),
         ...(ec?.tenantId ? { tenantId: ec.tenantId } : {}),
+        // [ADR-0093 D8.1, as amended] The caller's already-resolved membership
+        // set, the trigger door's twin (`buildAutomationContext`): forwarded
+        // empty too, since an empty set is the answer the organization wall
+        // reads. See `SeededRunContext.accessible_org_ids`.
+        ...(Array.isArray(ec?.accessible_org_ids) ? { accessible_org_ids: [...ec.accessible_org_ids] } : {}),
         // [#28099] The caller's already-resolved posture rung, the trigger
         // door's twin (`buildAutomationContext`): never re-derived or raised,
         // absent when the request carries none. See `AutomationContext.posture`.

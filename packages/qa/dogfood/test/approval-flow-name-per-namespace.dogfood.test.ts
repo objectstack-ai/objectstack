@@ -141,5 +141,9 @@ describe('an approval request reads its flow from its own slot once a second nam
     const refused = await act(control.id, 'revise');
     expect([refused.status, refused.code], JSON.stringify(refused.body)).toEqual([409, 'RESOURCE_CONFLICT']);
     expect([refused.message.includes(ALPHA), refused.message.includes(IOTA), (await stored(control.id)).status]).toEqual([true, true, 'pending']);
+    // Its read is served without the route and steps (row 20): the refusal, never iota's flow.
+    const unread = await call('GET', `/approvals/requests/${control.id}`);
+    const unreadRow = unread.body?.data ?? unread.body;
+    expect([unread.status, unreadRow?.status, unreadRow?.flow_route, unreadRow?.flow_steps], JSON.stringify(unread.body)).toEqual([200, 'pending', undefined, undefined]);
   });
 });

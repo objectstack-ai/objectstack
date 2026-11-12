@@ -9042,7 +9042,8 @@ export class ApprovalService implements IApprovalService {
    * builds a mentioned user's: their own grants by the resolver every request
    * envelope comes from (`resolveUserAuthzGrants`), with the organization kept
    * only while `vetOrganizationClaim` — the session arm of
-   * `resolveAuthzContext` — backs it under the posture in force. An e-mail
+   * `resolveAuthzContext` — backs it, under every posture since ADR-0093 D8.1
+   * was amended (the posture argument is no longer read). An e-mail
    * address names the account that carries it; one that no account carries
    * has no envelope (`undefined`).
    */

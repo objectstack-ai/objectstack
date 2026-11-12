@@ -3961,6 +3961,9 @@ describe('explainAccessForCaller (ADR-0090 D6/D12)', () => {
         { user_id: 'u_west_1', permission_set_id: 'ps_sub', permission_set: 'sub_admin', organization_id: 'org_alpha' },
       );
       b.h.tables.sys_permission_set.push({ id: 'ps_sub', name: 'sub_admin' });
+      // A current member of org_alpha: the organization a grant applies in is
+      // one a current membership backs (ADR-0093 D8.1, as amended).
+      (b.h.tables.sys_member ??= []).push({ user_id: 'u_west_1', organization_id: 'org_alpha', role: 'member' });
       return b;
     };
     const hr = (tenantId?: string) => ({
@@ -4022,6 +4025,7 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
   }) => {
     const tables: Record<string, any[]> = {
       sys_user: [{ id: AGENT, email: 'agent@x' }],
+      sys_member: [],
       sys_user_position: [],
       sys_user_permission_set: [],
       sys_permission_set: [],
@@ -4029,6 +4033,10 @@ describe('SecurityPlugin — ADR-0090 D10 agent intersection', () => {
     };
     if (opts.delegatorSets !== null) {
       tables.sys_user.push({ id: DELEGATOR, email: 'delegator@x' });
+      // The delegator is a current member of the organization the agent acts
+      // in — the delegation is bounded by that membership (ADR-0093 D8.1, as
+      // amended: under every posture).
+      tables.sys_member.push({ user_id: DELEGATOR, organization_id: D10_ORG, role: 'member' });
       // Direct grants: a position grants only what its definition names, and
       // this harness declares no position definitions.
       for (const p of opts.delegatorSets) {

@@ -24,7 +24,16 @@ import { render, screen, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NavigationItemSchema } from '@objectstack/spec/ui';
 
-import { AppNavCanvas, navPayloadOf } from './AppNavCanvas';
+import {
+  AppNavCanvas,
+  heldNavEntriesOf,
+  heldNavKey,
+  isIncompleteNavEntry,
+  navPayloadOf,
+  readHeldNav,
+  withHeldNavEntries,
+  writeHeldNav,
+} from './AppNavCanvas';
 
 afterEach(cleanup);
 
@@ -211,5 +220,77 @@ describe('AppNavCanvas — the remove control is reachable by keyboard (objectui
     await user.keyboard(keys);
     expect(onPatch).toHaveBeenCalledTimes(1);
     expect(onPatch).toHaveBeenCalledWith({ navigation: [NAV[0]] });
+  });
+});
+
+describe('held nav entries — an entry a save leaves out is put back in its place on the next read', () => {
+  const home = { id: 'nav_home', type: 'page', pageName: 'home' };
+  const reports = { id: 'nav_reports', type: 'group', children: [{ id: 'nav_r1', type: 'report', reportName: 'won' }] };
+  const unboundTop = { id: 'nav_item_2', type: 'object' };
+  const unboundKid = { id: 'nav_item_9', type: 'page' };
+  const editor = [home, unboundTop, { ...reports, children: [...reports.children, unboundKid] }];
+
+  it('holds exactly what navPayloadOf leaves out, with its parent and index', () => {
+    expect(heldNavEntriesOf(editor)).toEqual([
+      { parent: null, index: 1, entry: unboundTop },
+      { parent: 'nav_reports', index: 1, entry: unboundKid },
+    ]);
+    // The control: a navigation every entry of which names a target holds nothing.
+    expect(heldNavEntriesOf(navPayloadOf(editor))).toEqual([]);
+  });
+
+  it('puts each held entry back where the editor held it, over the navigation the save sent', () => {
+    expect(withHeldNavEntries(navPayloadOf(editor), heldNavEntriesOf(editor))).toEqual(editor);
+  });
+
+  it('puts nothing back that the navigation already holds, nor into a parent that is gone; nothing put back returns the list itself', () => {
+    const sent = navPayloadOf(editor);
+    const boundSince = [home, { id: 'nav_item_2', type: 'object', objectName: 'account' }, sent[1]];
+    const held = heldNavEntriesOf(editor);
+    expect(withHeldNavEntries(boundSince, held.slice(0, 1))).toBe(boundSince);
+    const groupGone = [home];
+    expect(withHeldNavEntries(groupGone, held.slice(1))).toBe(groupGone);
+  });
+
+  it('isIncompleteNavEntry is the save\'s own rule', () => {
+    expect(isIncompleteNavEntry(unboundTop)).toBe(true);
+    expect(isIncompleteNavEntry({ id: 'nav_item_3' })).toBe(true);
+    expect(isIncompleteNavEntry(home)).toBe(false);
+    expect(isIncompleteNavEntry(reports)).toBe(false);
+    expect(isIncompleteNavEntry(null)).toBe(false);
+  });
+
+  it('round-trips through browser storage, and none removes the key', () => {
+    const key = heldNavKey('org_1', 'com.acme.app', 'acme_app');
+    expect(key).toBe('studio-held-nav:org_1:com.acme.app:acme_app');
+    writeHeldNav(key, heldNavEntriesOf(editor));
+    expect(readHeldNav(key)).toEqual(heldNavEntriesOf(editor));
+    writeHeldNav(key, []);
+    expect(localStorage.getItem(key)).toBeNull();
+    expect(readHeldNav(key)).toEqual([]);
+  });
+
+  it('reads a malformed stored value as nothing held', () => {
+    const key = heldNavKey(null, 'com.acme.app', 'acme_app');
+    localStorage.setItem(key, '{not json');
+    expect(readHeldNav(key)).toEqual([]);
+    localStorage.setItem(key, JSON.stringify([{ parent: null, index: 0, entry: { type: 'object' } }]));
+    expect(readHeldNav(key)).toEqual([]);
+    localStorage.removeItem(key);
+  });
+});
+
+describe('the canvas marks an entry with no target as incomplete', () => {
+  it('an unbound entry carries the mark and a bound one does not', () => {
+    render(
+      <AppNavCanvas
+        draft={{ navigation: [{ id: 'nav_home', type: 'page', label: 'Home', pageName: 'home' }, { id: 'nav_item_2', type: 'object' }] }}
+        rootKey="navigation"
+        selection={null}
+      />,
+    );
+    const marks = screen.getAllByText('Incomplete');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].closest('button')?.textContent).toContain('Item 2');
   });
 });

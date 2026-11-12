@@ -1336,6 +1336,126 @@ describe('per-package loader storage for every type stored per package (ADR-0150
 });
 
 /**
+ * [#32352, card amendment S7] An action's removal over the artifact door's
+ * `MemoryLoader` and a `DatabaseLoader`: the manager judges holders by package
+ * over every slot of the name, as `DatabaseLoader` keys its rows (`(package,
+ * name)`, whatever object the action is bound to), so the two agree.
+ *
+ * BASE (main 89d815c5): the manager counted only the object-less slot's
+ * holders, so a bare removal of a name two packages bind passed its judgment;
+ * the door's store dropped every slot, `DatabaseLoader.delete` counted two
+ * holders and threw, the manager logged that as a failed delete, dropped the
+ * registry's slots and announced `deleted` — while both rows stayed and kept
+ * answering `list` and `get`.
+ */
+describe('[#32352] an action\'s removal: the manager\'s holder count agrees with the loaders\' row key (ADR-0150 D3/D4, S7)', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const NAME = 'digest';
+  const item = (packageId: string, objectName: string | undefined) => ({
+    name: NAME,
+    label: packageId === A ? 'alpha' : 'beta',
+    type: 'script',
+    _packageId: packageId,
+    _provenance: 'package',
+    ...(objectName === undefined ? {} : { objectName }),
+  });
+
+  async function boot(holders: ReadonlyArray<readonly [string, string | undefined]>) {
+    const { driver, rows } = rowDriver();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+    const published: RealtimeEventPayload[] = [];
+    manager.setRealtimeService({
+      publish: async (event: RealtimeEventPayload) => { published.push(event); },
+      subscribe: async () => 'sub-1',
+      unsubscribe: async () => undefined,
+    } as IRealtimeService);
+    const door = new MemoryLoader();
+    for (const [packageId, objectName] of holders) {
+      await door.save('action', NAME, item(packageId, objectName));
+      await manager.register('action', NAME, item(packageId, objectName), { notify: false });
+    }
+    manager.registerLoader(door);
+    const watched: MetadataWatchEvent[] = [];
+    manager.subscribe('action', (event) => { watched.push(event); });
+    published.length = 0;
+    const served = async () => ((await manager.list('action')) as any[]).map((entry) => entry.label);
+    const doorHolders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId);
+    const rowHolders = () => rows('action').map((row) => row.package_id);
+    const loggedErrors = (manager as any).logger.error as ReturnType<typeof vi.fn>;
+    return { manager, published, watched, served, doorHolders, rowHolders, loggedErrors };
+  }
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+    ['one bound, one object-less', 'alpha_item', undefined],
+  ] as const)('two packages\' action %s: a removal naming none is refused (409) naming both, before anything is touched — registry, door and rows kept, nothing announced, no failed delete logged (BASE: registry and door dropped, rows kept, `deleted` announced)', async (_shape, alphaObject, betaObject) => {
+    const ctx = await boot([[A, alphaObject], [B, betaObject]]);
+    expect(ctx.rowHolders(), 'a row per package').toEqual([A, B]);
+    const err = await ctx.manager.unregister('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the removal refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(await ctx.served()).toEqual(['alpha', 'beta']);
+    expect(await ctx.doorHolders()).toEqual([A, B]);
+    expect(ctx.rowHolders()).toEqual([A, B]);
+    expect(ctx.published).toEqual([]);
+    expect(ctx.watched).toEqual([]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+  ] as const)('two packages\' action %s: a removal naming one package takes its registry slot, door entry and row, keeps the other\'s, and names it on the event (BASE: its registry slot stayed and was served)', async (_shape, alphaObject, betaObject) => {
+    const ctx = await boot([[A, alphaObject], [B, betaObject]]);
+    await ctx.manager.unregister('action', NAME, { packageId: A });
+    expect(await ctx.manager.get('action', NAME, A), 'the removed package\'s action is gone').toBeUndefined();
+    expect(await ctx.served()).toEqual(['beta']);
+    expect(await ctx.doorHolders()).toEqual([B]);
+    expect(ctx.rowHolders()).toEqual([B]);
+    expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([A]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+    ['one bound, one object-less', 'alpha_item', undefined],
+  ] as const)('the artifact door\'s `MemoryLoader`, asked directly: `delete(\'action\', name)` naming no package, of a name two packages\' actions %s hold, is the same 409 naming both, and keeps every slot (BASE: it deleted every slot); naming a package takes every slot of that package only', async (_shape, alphaObject, betaObject) => {
+    const door = new MemoryLoader();
+    await door.save('action', NAME, item(A, alphaObject));
+    await door.save('action', NAME, item(B, betaObject));
+    const holders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId);
+    const err = await door.delete('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the door refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(err!.message.toLowerCase()).toContain(`package "${A}" binds it to object "${alphaObject}"`);
+    expect(await holders(), 'nothing deleted').toEqual([A, B]);
+    await door.delete('action', NAME, { packageId: A });
+    expect(await holders()).toEqual([B]);
+  });
+
+  it('CONTROL — one package\'s bound action: a removal naming none takes its slot, door entry and row, as before', async () => {
+    const ctx = await boot([[A, 'alpha_item']]);
+    await ctx.manager.unregister('action', NAME);
+    expect(await ctx.served()).toEqual([]);
+    expect(await ctx.doorHolders()).toEqual([]);
+    expect(ctx.rowHolders()).toEqual([]);
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+});
+
+/**
  * [#32353] The non-slotted half of #32246: a removal of a type outside
  * `PACKAGE_SLOTTED_STORE_TYPES` deletes the artifact door's in-memory copy
  * too, by name, so the removed item stops answering. Pinned per first-party
