@@ -87,10 +87,11 @@ interface ExactQualifierRegistry {
     /**
      * [#32561] The package the registry binds a stored row of `(type, name)`
      * to (objectql's `overlayRowBinding`, the one owner rule every registry
-     * reader asks): a package id, `null` for the environment's own item, or
-     * `undefined` for no package. The exact read adopts it for an undeclared
-     * pair row ({@link pairRowOnAddress}); a registry without it keeps the
-     * exact read's own count.
+     * reader asks, counted over the served holders as this read counts them):
+     * a package id, `null` for the environment's own item, or `undefined` for
+     * no package. The exact read adopts it for an undeclared pair row
+     * ({@link pairRowOnAddress}); a registry without it keeps the exact read's
+     * own count.
      */
     overlayRowBinding?(type: string, name: string, item: unknown): string | null | undefined;
 }
@@ -687,7 +688,10 @@ function registryRowBinding(
  *   binds a row whose count would read another shared pair's undeclared row
  *   to no package) is no owner of it: not this address's member, so the
  *   address answers its own shipped item (epic ruling, red line 2). The
- *   exact read adopts the registry's count rather than counting again.
+ *   exact read adopts the registry's count rather than counting again. Both
+ *   count the served holders (a disabled package holds no name, ADR-0150
+ *   D3): with one of two holders disabled, the row stays the enabled one's
+ *   member (#32183, epic ruling R4-A).
  * - Else (the sole owner is a base, or no holder pairs it) it is served.
  */
 export function pairRowOnAddress(

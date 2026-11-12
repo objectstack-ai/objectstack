@@ -1005,6 +1005,31 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       expect(labelOf(await read(Y, 'it-IT'))).toBe('suitey it-IT');
       expect(labelOf(await read(P, 'en-US'))).toBe('basep en-US');
     });
+
+    // [#32561 residual 3, epic ruling R4-A] The adoption counts the served
+    // holders, as the exact read counts its own: a disabled package holds no
+    // name (ADR-0150 D3). With one of two holders disabled, the undeclared
+    // row stays the enabled holder's on its address, in its list and in its
+    // execution list, while the registry's own binding, over every holder,
+    // binds it to no package (a disable never moves it). Re-enabled, refused
+    // naming both. Every-holder adoption would withhold it at X: ablation.
+    it.each([['enabled holder first', [X, Y]], ['disabled holder first', [Y, X]]] as const)('CONTROL — one of the two holders disabled (%s): the enabled holder\'s address keeps the undeclared row the registry binds to no package; re-enabled, refused naming both', async (_order, order) => {
+      for (const id of order) tpl('en-US', id);
+      const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+      rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+      registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+      registry.disablePackage(Y);
+      expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE'), 'the registry\'s own binding counts every holder').toBeUndefined();
+      expect(registry.overlayRowBinding('email_template', 'welcome', { ...pairDe, _packageId: PAIR }), 'the adoption counts the served holders').toBe(X);
+      expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+      expect(await listed(X)).toContain('pair de-DE');
+      expect(await forSend(X)).toContain('pair de-DE');
+      registry.enablePackage(Y);
+      const err = await refusalOf(() => read(X, 'de-DE'));
+      expect([err.status, err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort()]).toEqual([409, [X, Y]]);
+      expect(await listed(X)).not.toContain('pair de-DE');
+    });
+
   });
 
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {

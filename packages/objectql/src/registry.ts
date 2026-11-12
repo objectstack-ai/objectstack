@@ -8906,16 +8906,27 @@ export class SchemaRegistry {
   /**
    * [#32561] The package a stored row `item` of `(type, name)` binds to, read
    * by the one rule every overlay-slot reader asks ({@link overlaySlotBinding},
-   * {@link pairRowBinding} for a customization pair's row): a package id,
-   * `null` for the environment's own item, or `undefined` for no package. The
-   * exact read (`pairRowOnAddress`, `@objectstack/metadata-protocol`) adopts
-   * it for an undeclared pair row, so `?package=X` never serves a row the
-   * registry binds to no package (epic ruling on #32561, red line 2). Read-only.
+   * {@link pairRowBinding} for a customization pair's row), over the holders
+   * the exact read serves: a package id, `null` for the environment's own
+   * item, or `undefined` for no package. The exact read (`pairRowOnAddress`,
+   * `@objectstack/metadata-protocol`) adopts it for an undeclared pair row, so
+   * `?package=X` never serves a row this binds to no package: one a bundle
+   * addition that ships the row's member could own too, or one whose count
+   * would read another shared pair's undeclared row (epic ruling on #32561,
+   * red line 2). Read-only.
+   *
+   * A disabled package holds no name (ADR-0150 D3, as
+   * {@link packageScopedHoldersOf} counts by default), so it is left out of
+   * this count, as the exact read leaves it out of its own: with one of two
+   * holders disabled, the enabled one's address keeps the row (#32183, epic
+   * ruling R4-A). {@link overlaySlotBinding} itself counts every holder, so
+   * a disable never moves the binding the registry's own readers answer.
    */
   overlayRowBinding(type: string, name: string, item: unknown): string | null | undefined {
     const collection = this.metadata.get(type);
     if (!collection) return undefined;
-    return this.overlaySlotBinding(type, item, name, collection);
+    const served = new Set(this.compositeHoldersOf(collection, name).filter((id) => !this.isPackageDisabled(id)));
+    return this.overlaySlotBinding(type, item, name, collection, served);
   }
 
   /**
@@ -8958,7 +8969,9 @@ export class SchemaRegistry {
    * holder set before {@link packageScopedHoldersOf} filters the served
    * ones): a binding never moves with a reversible disable (ADR-0150 D3,
    * #32183). The exact read counts the served holders, so with one of two
-   * owners disabled it serves a row this binds to no package (#32561).
+   * owners disabled it serves a row this binds to no package: it adopts this
+   * binding over the served holders only ({@link overlayRowBinding}, #32561),
+   * as the enabled holder's address keeps the row (epic ruling R4-A).
    *
    * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
    * `pairId` customizes: the row keeps the per-package reading of
