@@ -163,8 +163,9 @@ async function openRecordPage(config: I18nConfig = EN) {
           <Routes>
             <Route path={`/apps/demo/${OBJECT}`} element={<h1>Invoice list</h1>} />
             <Route path="/home" element={<h1>Home page</h1>} />
+            {/* The console's record route: the list link is built from its `:appName`. */}
             <Route
-              path="*"
+              path="/apps/:appName/:objectName/record/:recordId"
               element={
                 <RecordDetailView
                   dataSource={ds as never}
