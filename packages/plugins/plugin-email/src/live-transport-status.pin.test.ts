@@ -56,7 +56,7 @@ function fakeSettings(values: Record<string, Resolved>) {
   };
 }
 
-async function boot(mailValues: Record<string, Resolved>) {
+async function boot(mailValues: Record<string, Resolved>, opts: EmailServicePluginOptions = {}) {
   const settings = fakeSettings({
     provider: { value: 'smtp', source: 'default' },
     smtp_port: { value: 587, source: 'default' },
@@ -77,7 +77,7 @@ async function boot(mailValues: Record<string, Resolved>) {
     registerService: (name: string, svc: unknown) => { services[name] = svc; },
     hook: (name: string, fn: () => Promise<void> | void) => { (hooks[name] ??= []).push(fn); },
   };
-  const plugin = new EmailServicePlugin({});
+  const plugin = new EmailServicePlugin(opts);
   await plugin.init(ctx as never);
   await plugin.start(ctx as never);
   for (const fn of hooks['kernel:ready'] ?? []) await fn();
@@ -111,6 +111,29 @@ describe('describeLiveMailTransport — the reading of isConfigured()', () => {
 });
 
 describe('EmailServicePlugin — the statement Setup → Email makes', () => {
+  // A save the server accepts can still fail to build a transport here (a
+  // stored provider with no key, as an older release could save it); the
+  // previous transport stays live. Driven through the fake settings surface,
+  // because the served door refuses such a save before the plugin sees it.
+  it("a save that cannot replace a settings-built transport keeps it live but states no provider: 'settings' would be stale", async () => {
+    const { settings, service } = await boot({
+      provider: { value: 'smtp', source: 'global' },
+      smtp_host: { value: 'smtp.saved.test', source: 'global' },
+    });
+    expect((await settings.read())?.values).toEqual({ provider: { value: 'smtp', source: 'settings' } });
+    settings.emitSave({ provider: { value: 'postmark', source: 'global' } });
+    const statement = await settings.read();
+    expect(service.options.transport).toBeInstanceOf(SmtpTransport);
+    expect(statement?.bannerSeverity).toBe('info');
+    expect(statement?.values).toBeUndefined();
+  });
+
+  it("a save that cannot replace the boot transport leaves it 'environment'", async () => {
+    const { settings } = await boot({}, { provider: 'smtp', providerOptions: { host: 'smtp.boot.test' } });
+    settings.emitSave({ provider: { value: 'postmark', source: 'global' } });
+    expect((await settings.read())?.values).toEqual({ provider: { value: 'smtp', source: 'environment' } });
+  });
+
   it('the out-of-the-box state (provider smtp, no host) says nothing leaves this machine', async () => {
     const { settings, service } = await boot({});
     expect(settings.registered).toBe(true);
@@ -214,8 +237,12 @@ describe('GET /api/settings/mail — live.provider states the provider in use', 
   }
 
   /** Boot the plugin against a real settings service holding `saved`, and mount its routes. */
-  async function serve(saved: Record<string, unknown>, opts: EmailServicePluginOptions = {}) {
-    const settings = new SettingsService({ env: {} });
+  async function serve(
+    saved: Record<string, unknown>,
+    opts: EmailServicePluginOptions = {},
+    env: Record<string, string> = {},
+  ) {
+    const settings = new SettingsService({ env });
     settings.registerManifest(mailSettingsManifest);
     if (Object.keys(saved).length > 0) await settings.setMany('mail', saved);
     const engine = { async find() { return []; } };
@@ -290,6 +317,18 @@ describe('GET /api/settings/mail — live.provider states the provider in use', 
     const data = await read();
     expect(data.live).toEqual({ provider: { value: 'smtp', source: 'settings' } });
     expect(banner(data)).toEqual({ label: 'Mail is delivered through SMTP (smtp.saved.test:587)', bannerSeverity: 'info' });
+  });
+
+  it("settings: an API provider the namespace resolves (OS_MAIL_*-locked) reads as the option that names it", async () => {
+    const { read } = await serve({}, {}, { OS_MAIL_PROVIDER: 'resend', OS_MAIL_API_KEY: 're_locked_key' });
+    const data = await read();
+    expect(data.live).toEqual({ provider: { value: 'resend', source: 'settings' } });
+    expect(JSON.stringify(data.live)).not.toContain('re_locked_key');
+  });
+
+  it("settings: an OS_MAIL_*-locked SMTP host is what the namespace resolves, so it reads 'settings'", async () => {
+    const { read } = await serve({}, {}, { OS_MAIL_PROVIDER: 'smtp', OS_MAIL_SMTP_HOST: 'smtp.locked.test' });
+    expect((await read()).live).toEqual({ provider: { value: 'smtp', source: 'settings' } });
   });
 
   it('follows a save: a boot SMTP replaced from the page reads settings, then "None (log only)" reads none', async () => {

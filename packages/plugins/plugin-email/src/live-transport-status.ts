@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { IEmailTransport } from '@objectstack/spec/contracts';
+import type { SettingsNamespacePayload } from '@objectstack/spec/system';
 import { resolveLocale } from '@objectstack/core';
 import { SmtpTransport } from './transports/smtp.js';
 import { ResendTransport } from './transports/resend.js';
@@ -42,11 +43,12 @@ export interface LiveMailTransportStatus {
  */
 export type LiveMailTransportOrigin = 'settings' | 'environment';
 
-/** The `provider` key's value in the running system: one of its options, or `null` when nothing delivers. */
-export interface LiveMailProviderValue {
-  value: string | null;
-  source: LiveMailTransportOrigin | 'none';
-}
+/**
+ * The `provider` key's value in the running system: one of its options, or
+ * `null` when nothing delivers. Typed from the spec's served `live` entry, so a
+ * change to that shape fails this package's type-check.
+ */
+export type LiveMailProviderValue = NonNullable<SettingsNamespacePayload['live']>[string];
 
 /** The part of `EmailService` the statement reads. */
 export interface LiveMailTransportSource {
