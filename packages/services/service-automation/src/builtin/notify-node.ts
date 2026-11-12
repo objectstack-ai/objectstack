@@ -421,16 +421,18 @@ interface AddressedRecipient {
  * `user:` value on as the recipient id with no lookup at all; the email
  * channel then sends to any recipient id that is address-shaped. So both
  * `a@b.c` and `user:a@b.c` (and `user:user:a@b.c`, whose remainder is itself
- * address-shaped) reach the mail as an address. `role:` and `team:` yield
- * user ids. `owner_of:` reads a stored owner field, which record writes put
- * there, not the expression, so it is not screened.
+ * address-shaped) reach the mail as an address. `role:`, `team:` and the
+ * `org:` namespace (`org:members`, the emitting organization's members;
+ * any other `org:` value resolves to nobody) yield user ids. `owner_of:`
+ * reads a stored owner field, which record writes put there, not the
+ * expression, so it is not screened.
  */
 function mailedAddressOf(recipient: string): string | undefined {
     if (recipient.startsWith('user:')) {
         const rest = recipient.slice('user:'.length);
         return readsAsAddress(rest) ? rest : undefined;
     }
-    if (/^(role|team|owner_of):/.test(recipient)) return undefined;
+    if (/^(role|team|owner_of|org):/.test(recipient)) return undefined;
     return readsAsAddress(recipient) ? recipient : undefined;
 }
 

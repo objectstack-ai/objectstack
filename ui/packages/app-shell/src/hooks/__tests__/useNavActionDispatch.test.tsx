@@ -133,3 +133,57 @@ describe('useNavActionDispatch', () => {
     expect(toastError).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * objectstack#32367 — [ADR-0150 D5, row E2] a nav item is written inside its
+ * app's package, so its action is read from that package. A bare read of a
+ * name two enabled packages hold is refused `409 RESOURCE_CONFLICT`, which the
+ * provider's `getItem` answers as `null`, so without the package neither app
+ * could open its action. The double below answers as the server does: the
+ * package's own item for `?package=`, nothing for the bare read of a shared
+ * name.
+ */
+describe('useNavActionDispatch — an action name two packages hold', () => {
+  const held: Record<string, Record<string, unknown>> = {
+    'com.acme.alpha': { name: 'approve', type: 'url', target: '/alpha/approve', _packageId: 'com.acme.alpha' },
+    'com.acme.beta': { name: 'approve', type: 'url', target: '/beta/approve', _packageId: 'com.acme.beta' },
+  };
+
+  async function dispatchFrom(packageId: string | undefined, item: unknown) {
+    const { result } = renderHook(() => useNavActionDispatch(packageId));
+    await act(async () => {
+      result.current(item as never);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  beforeEach(() => {
+    getItem.mockImplementation((_type: string, _name: string, options?: { packageId?: string }) =>
+      Promise.resolve(options?.packageId ? (held[options.packageId] ?? null) : null),
+    );
+  });
+
+  it("each app's nav item opens the action its own package holds", async () => {
+    const item = navItem({ id: 'nav_approve', actionDef: { actionName: 'approve' } });
+
+    await dispatchFrom('com.acme.alpha', item);
+    await dispatchFrom('com.acme.beta', item);
+
+    expect(getItem.mock.calls).toEqual([
+      ['action', 'approve', { packageId: 'com.acme.alpha' }],
+      ['action', 'approve', { packageId: 'com.acme.beta' }],
+    ]);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[0][0]).toMatchObject({ target: '/alpha/approve', _packageId: 'com.acme.alpha' });
+    expect(execute.mock.calls[1][0]).toMatchObject({ target: '/beta/approve', _packageId: 'com.acme.beta' });
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: an app with no package keeps the bare read', async () => {
+    await dispatchFrom(undefined, navItem());
+
+    expect(getItem.mock.calls).toEqual([['action', 'export_data']]);
+  });
+});

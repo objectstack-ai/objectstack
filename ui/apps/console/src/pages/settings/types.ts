@@ -174,9 +174,26 @@ export interface ResolvedSettingValue<T = unknown> {
   }>;
 }
 
+/**
+ * One key's value in the RUNNING system, as the namespace's owner states it
+ * (service-settings `SettingsLiveValue`). `value` is one of the key's options,
+ * `null` exactly when `source` is `'none'`; `'environment'` means the runtime
+ * detected it from its own boot environment, outside the namespace.
+ */
+export interface SettingsLiveValue {
+  value: string | null;
+  source: 'settings' | 'environment' | 'none';
+}
+
 export interface SettingsNamespacePayload {
   manifest: SettingsManifest;
   values: Record<string, ResolvedSettingValue>;
+  /**
+   * What some keys hold in the running system, beside `values`, which only
+   * says what is stored. Absent, or a key missing from it, means "not stated",
+   * which is not `source: 'none'`.
+   */
+  live?: Record<string, SettingsLiveValue>;
 }
 
 export interface SettingsActionResult {

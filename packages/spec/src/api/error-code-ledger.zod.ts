@@ -603,6 +603,14 @@ export const ERROR_CODE_LEDGER = {
     // carries more than the door accepts — one code a client branches on
     // without reading the status. Provenance, not identity (see above).
     'PAYLOAD_TOO_LARGE',
+    // [#32734] 409 from `create_upload_link` for a file field of a record a
+    // pending approval locks (`record-file-access.ts`, asked of
+    // `IApprovalService.getRecordLock` before a link is minted), so no link is
+    // issued that the record-lock hook would refuse on use. Second EMITTER of
+    // the code `@objectstack/plugin-approvals` registers for that hook's own
+    // refusal, which the upload-link door relays as it was thrown. Provenance,
+    // not identity (see above).
+    'RECORD_LOCKED',
     'UPLOAD_SESSION_EXPIRED',     // chunk/complete against a session past its own expires_at (#7667)
     'UPLOAD_SESSION_NOT_FOUND',
   ],
@@ -1838,7 +1846,7 @@ export const ERROR_CODE_LEDGER = {
     // `os validate` / `os build` for an unmarked default export — see its row.
     'STACK_PROVENANCE_MISSING',                  // the value was not built by `defineStack` / `composeStacks` (`hasStackProvenance` is false)
     'STACK_SCHEMA_INVALID',                      // `ObjectStackDefinitionSchema.safeParse` failed; `issues` carries the zod issues structurally
-    'STACK_SINGLE_APP_VIOLATION',                // an `app` package declares more than one app (ADR-0019 D3)
+    'STACK_SINGLE_APP_VIOLATION',                // an `app` or `module` package declares more than one app (ADR-0019 D3 as amended)
     'STACK_TRIGGER_CAPABILITY_REQUIRED',         // an auto-launched flow while `requires` omits `triggers` or `automation` (the pair installs its trigger)
     // [ADR-0131 D6] The eighth `defineStack` refusal, same family and same
     // reading (`door: 'none'`, `status: 422`): the package permits the

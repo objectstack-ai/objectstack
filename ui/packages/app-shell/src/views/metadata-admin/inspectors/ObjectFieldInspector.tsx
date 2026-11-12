@@ -50,6 +50,7 @@
 import * as React from 'react';
 import {
   BASE_FIELD_DISPLAY_WHITELIST,
+  COMPUTED_VALUE_TYPES,
   FieldSchema,
   isAggregateCompatibleWithFieldType,
   isBodyTableRelationship,
@@ -63,6 +64,7 @@ import {
 } from '@objectstack/spec/data';
 import { ValueDomainSchema } from '@objectstack/spec/shared';
 import { detectStatusField, type StatusFieldSource } from '@object-ui/types';
+import { isExpressionComputedField } from '@object-ui/core';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
 import {
   assertObjectMetadataWritable,
@@ -549,6 +551,27 @@ function isComputed(type: string): boolean {
   return type === 'formula' || type === 'summary';
 }
 
+/**
+ * Whether the inspector offers the STORED expression editor on this field.
+ *
+ * `FieldSchema.expression` on any field but a `formula` makes the field
+ * computed by the engine from the row each write stores, and stored, so a
+ * client-sent value never stands. That is the remedy the refusal of `sum` /
+ * `avg` over a formula prescribes (`VIRTUAL_FIELD_AGGREGATE_REMEDY`, #32443
+ * ruling B): a field of the formula's return type carrying the same
+ * expression. The editor is offered on every type whose value is otherwise
+ * written by a client: the spec's server-computed write set,
+ * `COMPUTED_VALUE_TYPES` (`formula`, `summary`, `autonumber`), read here and
+ * never re-listed, is the complement. A `formula` keeps its own editor; a
+ * `summary` or `autonumber` value already has its producer, so an expression
+ * is not offered there, but one the field already carries is still shown so
+ * the key the engine acts on is never invisible.
+ */
+function offersStoredExpression(type: string, def: Record<string, unknown>): boolean {
+  if (type === 'formula') return false;
+  return !COMPUTED_VALUE_TYPES.has(type) || isExpressionComputedField(def);
+}
+
 function isNumeric(type: string): boolean {
   return type === 'number' || type === 'currency' || type === 'percent';
 }
@@ -790,12 +813,12 @@ function DisplayPatchLock({ children, className }: { children: React.ReactNode; 
 
 /**
  * The CEL editors this inspector mounts, as aggregation keys. Errors are
- * counted PER SITE rather than into one running total: the four editors lint
+ * counted PER SITE rather than into one running total: the editors lint
  * independently and asynchronously, so a single shared counter would let
  * whichever reported last overwrite the others — the multi-source aggregation
  * bug that lets a still-broken rule hand back a writable Save (objectui#4306).
  */
-type CelSite = 'formula' | 'visibleWhen' | 'readonlyWhen' | 'requiredWhen';
+type CelSite = 'formula' | 'storedExpression' | 'visibleWhen' | 'readonlyWhen' | 'requiredWhen';
 
 export function ObjectFieldInspector({
   selection,
@@ -933,6 +956,7 @@ export function ObjectFieldInspector({
       ? (entry.def.type as string)
       : 'text'
     : null;
+  const storedExpressionOffered = entry !== null && fieldType !== null && offersStoredExpression(fieldType, entry.def);
   // The map is STAMPED with the field it describes, and the stale-verdict
   // rules are read at aggregation time rather than repaired by reset effects.
   // Deriving beats correcting here: an effect-based prune leaves a one-render
@@ -965,10 +989,13 @@ export function ObjectFieldInspector({
       // a verdict it left behind would wedge Save shut with no editor on
       // screen to fix it (#4306 ruling item 2).
       if (site === 'formula' && fieldType !== 'formula') continue;
+      // The same holds for the stored-expression editor, which exists only
+      // while `offersStoredExpression` answers yes for the field on screen.
+      if (site === 'storedExpression' && !storedExpressionOffered) continue;
       total += count ?? 0;
     }
     return total;
-  }, [celErrors, name, fieldType]);
+  }, [celErrors, name, fieldType, storedExpressionOffered]);
   const onBlockingIssuesChangeRef = React.useRef(onBlockingIssuesChange);
   React.useEffect(() => {
     onBlockingIssuesChangeRef.current = onBlockingIssuesChange;
@@ -1397,6 +1424,19 @@ export function ObjectFieldInspector({
   // objectui#11786 — read off the field as it stands, for the hints below.
   const heldNeed = locked ? null : guardHeldNeed(entry.name, def);
 
+  // A stored field computed from its `expression` (a formula is computed by
+  // its type, and keeps its own readings).
+  const computedByExpression = type !== 'formula' && isExpressionComputedField(def);
+  // The siblings an expression may read: every field but this one (a field
+  // computed from itself is circular), named as every other surface names it.
+  const siblingFieldNames = view.entries.map((e) => e.name).filter((n) => n !== entry.name);
+  const siblingFieldOptions = view.entries
+    .filter((e) => e.name !== entry.name)
+    .map((e) => {
+      const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
+      return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
+    });
+
   const shell = (
     <InspectorShell
       kindLabel={tr('designer.field.kind')}
@@ -1509,7 +1549,11 @@ export function ObjectFieldInspector({
           disabled={displayLocked('description')}
           rows={2}
         />
-        {defaultValueKind(type) && (
+        {/* A field computed from its `expression` takes no default: the
+            engine overwrites the value on every write, as it does a
+            formula's, so it reads as computed here too. A default it already
+            carries stays on the field untouched. */}
+        {defaultValueKind(type) && !computedByExpression && (
           <DisplayPatchLock>
             <DefaultValueField
               kind={defaultValueKind(type)!}
@@ -1651,20 +1695,19 @@ export function ObjectFieldInspector({
                 placeholder="record.amount * 0.2"
                 objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
                 // A formula may reference every sibling, not itself (circular).
-                fieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
-                fieldOptions={view.entries
-                  .filter((e) => e.name !== entry.name)
-                  .map((e) => {
-                    const source = typeof e.def.label === 'string' && e.def.label ? e.def.label : e.name;
-                    const objectName = typeof (draft as any).name === 'string' ? ((draft as any).name as string) : '';
-                    return { name: e.name, label: objectName ? fieldLabel(objectName, e.name, source) : source };
-                  })}
+                fieldNames={siblingFieldNames}
+                fieldOptions={siblingFieldOptions}
                 scope="record"
                 roots={FORMULA_ROOTS}
                 role="value"
                 t={tr}
               />
             </DisplayPatchLock>
+          )}
+          {type === 'formula' && (
+            <p data-testid="field-formula-stored-hint" className="text-[11px] leading-snug text-muted-foreground">
+              {tr('designer.field.formula.storedHint')}
+            </p>
           )}
           {type === 'summary' && (
             <DisplayPatchLock>
@@ -1763,15 +1806,56 @@ export function ObjectFieldInspector({
         </Section>
       )}
 
+      {/* Computed value: a stored field's `expression` (see `offersStoredExpression`). */}
+      {storedExpressionOffered && (
+        <Section title={tr('designer.field.section.computed')}>
+          <DisplayPatchLock>
+            <CelPredicateField
+              id={`field-stored-expression-${entry.name}`}
+              label={tr('designer.field.storedExpression')}
+              value={readPredicate(def.expression)}
+              // Empty clears the key outright, so a field nobody computes
+              // carries no `expression` at all (objectui#12681).
+              onChange={(v) => {
+                const next = writePredicate(def.expression, v);
+                if (next === undefined) unsetDefKey('expression');
+                else patchDef({ expression: next });
+              }}
+              onLintChange={(issues) => reportCel('storedExpression', issues)}
+              disabled={locked}
+              placeholder="record.amount * 0.2"
+              objectName={objectName || undefined}
+              // The engine computes it as it computes a formula, over the
+              // row the write stores: `record` is the one root it binds.
+              fieldNames={siblingFieldNames}
+              fieldOptions={siblingFieldOptions}
+              scope="record"
+              roots={FORMULA_ROOTS}
+              role="value"
+              t={tr}
+            />
+          </DisplayPatchLock>
+          <p
+            data-testid={computedByExpression ? 'field-stored-expression-computed' : 'field-stored-expression-hint'}
+            className="text-[11px] leading-snug text-muted-foreground"
+          >
+            {tr(computedByExpression ? 'designer.field.storedExpression.computed' : 'designer.field.storedExpression.hint')}
+          </p>
+        </Section>
+      )}
+
       {/* Advanced */}
       <Section title={tr('designer.field.section.advanced')}>
         <DisplayPatchLock>
           <div className="grid grid-cols-2 gap-2">
+            {/* A field computed from its `expression` is read-only on every
+                write surface whatever `readonly` says, so the box reads ticked
+                and cannot be cleared; nothing is written for it. */}
             <InspectorCheckboxField
               label={tr('designer.field.readonly')}
-              value={!!def.readonly}
+              value={!!def.readonly || computedByExpression}
               onCommit={(v) => patchDef({ readonly: v || undefined })}
-              disabled={locked}
+              disabled={locked || computedByExpression}
             />
             <InspectorCheckboxField
               label={tr('designer.field.hidden')}

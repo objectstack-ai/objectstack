@@ -337,8 +337,9 @@ export interface DashboardRendererProps
 
 const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps>(
   ({ schema, className, dataSource: dataSourceProp, onRefresh, recordCount, userActions, designMode, selectedWidgetId, onWidgetClick, onWidgetsReorder, modalHandler, scriptHandlers, hideHeaderText, onRefreshStateChange, localized, ...props }: DashboardRendererProps & { [key: string]: any }, ref) => {
-    // ADR-0150 D5 — the package this dashboard is served from: its widgets'
-    // datasets were authored against it, so each dataset query names it.
+    // The package this dashboard is served from: its widgets' datasets were
+    // authored against it, so each dataset query names it as the reader's
+    // package (`callerPackage`, ADR-0150 D3).
     const dashboardPackageId = servedPackageId(schema);
     // objectui#10815 — the adapter every child of this dashboard reads, resolved
     // ONCE here the way the page-embeddable blocks of the family resolve theirs

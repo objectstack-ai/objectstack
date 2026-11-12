@@ -78,6 +78,11 @@ export function createMemoryMetadata() {
     async unregister(type: string, name: string): Promise<void> {
       getTypeMap(type).delete(name);
     },
+    // [#31698] Mirror MetadataManager.unregisterInMemory: this store keeps one
+    // entry per name and persists nothing, so it is `unregister` without the await.
+    unregisterInMemory(type: string, name: string): void {
+      getTypeMap(type).delete(name);
+    },
     async exists(type: string, name: string): Promise<boolean> {
       return getTypeMap(type).has(name);
     },

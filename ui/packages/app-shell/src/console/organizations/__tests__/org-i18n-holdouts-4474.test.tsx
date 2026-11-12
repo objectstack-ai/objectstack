@@ -45,10 +45,10 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { I18nProvider } from '@object-ui/i18n';
+import { I18nProvider, transformSpecTranslations } from '@object-ui/i18n';
 import { builtInLocales } from '@object-ui/i18n/locales';
 
 // ── Mocks: everything EXCEPT i18n ────────────────────────────────────────────
@@ -66,8 +66,12 @@ const rejectInvitation = vi.fn();
 const switchOrganization = vi.fn();
 const createOrganization = vi.fn();
 const getAuthConfig = vi.fn();
+const updateOrganization = vi.fn();
+const deleteOrganization = vi.fn();
+const leaveOrganization = vi.fn();
 
-const auth: { role: string | null } = { role: 'owner' };
+// `user` stays unset outside the settings-page block, as it always was here.
+const auth: { role: string | null; user?: { id: string } } = { role: 'owner' };
 
 vi.mock('@object-ui/auth', async (importActual) => ({
   ...(await importActual<typeof import('@object-ui/auth')>()),
@@ -85,6 +89,10 @@ vi.mock('@object-ui/auth', async (importActual) => ({
     switchOrganization,
     createOrganization,
     getAuthConfig,
+    updateOrganization,
+    deleteOrganization,
+    leaveOrganization,
+    user: auth.user,
     isAuthenticated: true,
     isLoading: false,
     activeMember: auth.role === null ? null : { role: auth.role },
@@ -174,12 +182,15 @@ vi.mock('lucide-react', async (importOriginal) => {
 });
 
 vi.mock('../provisionEnvironment', () => ({ provisionProductionEnvironment: vi.fn() }));
+// The settings page's environment read is not the subject; `unknown` leaves its form as it always was.
+vi.mock('../manage/orgEnvironments', () => ({ readOrgEnvironmentPresence: vi.fn(async () => 'unknown') }));
 
 import { InviteMemberDialog } from '../manage/InviteMemberDialog';
 import { MembersPage } from '../manage/MembersPage';
 import { InvitationsPage } from '../manage/InvitationsPage';
 import { AcceptInvitationPage } from '../manage/AcceptInvitationPage';
 import { CreateWorkspaceDialog } from '../CreateWorkspaceDialog';
+import { SettingsPage } from '../manage/SettingsPage';
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -445,5 +456,135 @@ describe('#4474 family 3 — icon-only buttons carry a translated aria-label —
     await waitFor(() => expect(screen.getByTestId('invitations-page')).toBeInTheDocument());
     expect(screen.getByLabelText('Copy invitation link')).toBeInTheDocument();
     expect(screen.getByLabelText('Cancel invitation')).toBeInTheDocument();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// objectstack#32648 — the organization delete the server refuses
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('objectstack#32648 — a refused organization delete is listed by object label, in the session language', () => {
+  /**
+   * plugin-auth's 409 as `@object-ui/auth` throws it: the code, the server's
+   * English sentence (API names in it), and the structured `dependents`.
+   */
+  const refusedDelete = (extra: Record<string, unknown> = {}): Error => {
+    const err = new Error(
+      'This organization still owns records in sys_environment (2), sys_domain (2), ' +
+        'sys_billing_invoice (1), sys_billing_invoice_line (3). ' +
+        'Delete or move those records first, then delete the organization.',
+    ) as Error & Record<string, unknown>;
+    err.code = 'DELETE_RESTRICTED';
+    err.dependents = [
+      { object: 'sys_environment', count: 2 },
+      { object: 'sys_domain', count: 2 },
+      { object: 'sys_billing_invoice', count: 1 },
+      { object: 'sys_billing_invoice_line', count: 3 },
+    ];
+    Object.assign(err, extra);
+    return err;
+  };
+
+  /**
+   * The server translation bundle the console loads at sign-in
+   * (`/api/v1/i18n/translations/:locale`), through the same transform and the
+   * same `loadLanguage` door. The two billing objects have no entry, as on a
+   * runtime whose bundle does not translate them.
+   */
+  const serverBundle = (labels: Record<string, string>) =>
+    transformSpecTranslations({
+      objects: Object.fromEntries(Object.entries(labels).map(([name, label]) => [name, { label }])),
+    });
+
+  const renderSettings = (lang: 'en' | 'zh', labels: Record<string, string>) =>
+    render(<SettingsPage />, {
+      wrapper: ({ children }: { children: React.ReactNode }) => (
+        <I18nProvider
+          config={{ defaultLanguage: lang, detectBrowserLanguage: false }}
+          loadLanguage={async () => serverBundle(labels)}
+        >
+          {children}
+        </I18nProvider>
+      ),
+    });
+
+  async function confirmDelete() {
+    fireEvent.click(await screen.findByTestId('settings-delete-btn'));
+    fireEvent.change(screen.getByTestId('delete-confirm-slug-input'), { target: { value: 'acme' } });
+    fireEvent.click(screen.getByTestId('delete-confirm-btn'));
+    return screen.findByTestId('delete-refusal');
+  }
+
+  const items = () => screen.queryAllByTestId('delete-refusal-item').map((li) => li.textContent);
+
+  beforeEach(() => {
+    auth.user = { id: 'u-1' };
+    deleteOrganization.mockRejectedValue(refusedDelete());
+  });
+  afterEach(() => {
+    auth.user = undefined;
+  });
+
+  it('zh: the dialog states the refusal in Chinese and lists labels and counts, with no API name and no server English', async () => {
+    renderSettings('zh', { sys_environment: '环境', sys_domain: '域名' });
+    const refusal = await confirmDelete();
+
+    expect(deleteOrganization).toHaveBeenCalledWith('org-42');
+    expect(refusal).toHaveTextContent('该组织中仍有记录，暂时无法删除。请先删除或迁移以下记录，然后重试。');
+    await waitFor(() => expect(items()).toEqual(['环境2', '域名2', '其他记录4']));
+    expect(document.body.textContent).not.toContain('sys_');
+    expect(document.body.textContent).not.toContain('still owns records');
+    expect(toastError).not.toHaveBeenCalled();
+    // The delete cannot succeed until the records are gone, so it is not offered again.
+    expect(screen.getByTestId('delete-confirm-btn')).toBeDisabled();
+  });
+
+  it('zh: the danger zone and the confirm dialog state the real contract, not "all data is deleted"', async () => {
+    renderSettings('zh', {});
+    fireEvent.click(await screen.findByTestId('settings-delete-btn'));
+    const page = screen.getByTestId('settings-page').textContent ?? '';
+    expect(page).toContain('永久删除该组织及其成员和邀请。组织中仍有记录时无法删除：请先删除或迁移这些记录。');
+    expect(document.body.textContent).toContain('若组织中仍有记录，删除将被拒绝，且不会移除任何内容。');
+    expect(document.body.textContent).not.toContain('全部数据');
+    expect(document.body.textContent).not.toContain('所有数据将被永久删除');
+  });
+
+  it('en: the same refusal reads in English console copy, labelled the same way', async () => {
+    renderSettings('en', { sys_environment: 'Environment', sys_domain: 'Domain' });
+    const refusal = await confirmDelete();
+    expect(refusal).toHaveTextContent(
+      'This organization still holds records, so it can’t be deleted yet. Delete or move these records first, then try again.',
+    );
+    await waitFor(() => expect(items()).toEqual(['Environment2', 'Domain2', 'Other records4']));
+    expect(document.body.textContent).not.toContain('sys_');
+    expect(document.body.textContent).not.toContain('still owns records');
+  });
+
+  it('with no label resolvable, every dependent is counted on the one "other records" line', async () => {
+    renderSettings('zh', {});
+    await confirmDelete();
+    expect(items()).toEqual(['其他记录8']);
+    expect(document.body.textContent).not.toContain('sys_');
+  });
+
+  it('a producer-marked userMessage is the frame sentence when the server sends one', async () => {
+    deleteOrganization.mockRejectedValue(refusedDelete({ userMessage: '该组织仍有数据（服务端译文）。' }));
+    renderSettings('zh', { sys_environment: '环境', sys_domain: '域名' });
+    const refusal = await confirmDelete();
+    expect(refusal).toHaveTextContent('该组织仍有数据（服务端译文）。');
+    expect(refusal).not.toHaveTextContent('该组织中仍有记录，暂时无法删除。');
+  });
+
+  it('MUST NOT CHANGE — any other failure still toasts and closes the dialog', async () => {
+    const other = new Error('Upstream exploded') as Error & { code?: string };
+    other.code = 'INTERNAL_ERROR';
+    deleteOrganization.mockRejectedValue(other);
+    renderSettings('zh', {});
+    fireEvent.click(await screen.findByTestId('settings-delete-btn'));
+    fireEvent.change(screen.getByTestId('delete-confirm-slug-input'), { target: { value: 'acme' } });
+    fireEvent.click(screen.getByTestId('delete-confirm-btn'));
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Upstream exploded'));
+    expect(screen.queryByTestId('delete-confirm-btn')).toBeNull();
+    expect(screen.queryByTestId('delete-refusal')).toBeNull();
   });
 });

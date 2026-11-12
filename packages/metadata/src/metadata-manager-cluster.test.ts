@@ -682,6 +682,47 @@ describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (
         expect(await readsOf(b.mgr, 'view', 'unlinked')).toEqual(answering('alpha view unlinked'));
     });
 
+    /**
+     * [#32560, ADR-0150 D3] A removal naming no package of an action name
+     * beside the environment's own item takes that item only — the one the
+     * bare read answers. The doors (and registries) hold A's item alone, the
+     * shared store the environment's; the origin's door and every peer's must keep A, so the
+     * removal carries that judgment to each node-local delete.
+     */
+    it('an action\'s removal naming none beside the environment\'s own item: every door keeps A\'s, every node then answers A (BASE: both doors deleted A)', async () => {
+        const type = 'action';
+        // A's action bound to an object, the environment's object-less: on one
+        // binding a package-less body would be A's customization (D4).
+        const env = { name: 'shared', label: 'env action shared' };
+        const alpha = { ...doorItem(type, 'shared', P), objectName: 'account' };
+        const { a, b, store } = await bootDoorCluster(type, [alpha], { sharedStore: true });
+        // The environment's own item as its store holds it beside a package's:
+        // a row of the shared store (a register would bind it to A's slot, D4).
+        await store.save(type, 'shared', env);
+        for (const node of [a, b]) expect(((await node.mgr.get(type, 'shared')) as any)?.label).toBe('env action shared');
+
+        await a.mgr.unregister(type, 'shared');
+        await flush();
+
+        expect(await store.load(type, 'shared')).toEqual({ data: null });
+        for (const [which, node] of [['A', a], ['B', b]] as const) {
+            expect((await node.door.loadSlots(type, 'shared')).map((slot) => slot.packageId), which).toEqual([P]);
+            expect(((await node.mgr.get(type, 'shared')) as any)?.label, which).toBe(`alpha ${type} shared`);
+        }
+    });
+
+    it.each(SLOTTED)('%s: a removal whose package-less judgment is not a boolean is dropped — B deletes nothing, not by name', async (type) => {
+        const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'only')], { sharedStore: false });
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type,
+            event: { type: 'deleted', metadataType: type, name: 'only', path: '', timestamp: new Date().toISOString() },
+            removal: { packagelessOnly: 'yes' },
+        });
+        await flush();
+        expect((await b.door.loadSlots(type, 'only')).map((slot) => slot.packageId)).toEqual([P]);
+    });
+
     it.each(SLOTTED)('%s: a removal whose package is not a string is dropped — B deletes nothing, not by name', async (type) => {
         const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'only')], { sharedStore: false });
         await bus.publish('metadata.changed', {
@@ -708,5 +749,103 @@ describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (
         expect(logError).toHaveBeenCalledTimes(1);
         expect(String(logError.mock.calls[0]![0])).toContain(`could NOT delete \`${type}/twice\` that a cluster peer removed`);
         expect((await b.door.loadSlots(type, 'twice')).map((slot) => slot.packageId).sort()).toEqual([P, Q]);
+    });
+});
+
+/**
+ * [ADR-0150 D4, #31698] One package's slot, on the origin and on each peer.
+ *
+ * A removal naming a package used to reach a peer as the removal of the whole
+ * name: the peer's foreign-write invalidation dropped EVERY registry slot of
+ * it, so another package's `registerInMemory` item (the security catalog's
+ * echo of a stored row, which no loader can restore) stopped answering there
+ * until restart. And the one in-memory removal the manager offered,
+ * `unregister`, deletes the stored row first, so a caller that only wanted
+ * its in-memory copy gone deleted a live row with it.
+ */
+describe('[#31698] a removal takes one package\'s slot, on the origin and on every peer', () => {
+    const P = 'com.acme.alpha';
+    const Q = 'com.acme.beta';
+    const TYPE = 'permission';
+    const item = (packageId: string) => ({ name: 'shared', label: packageId === P ? 'alpha' : 'beta', _packageId: packageId });
+
+    async function bootEchoCluster(opts: { sharedStore?: SharedStoreLoader } = {}) {
+        const bus = new TestPubSub();
+        const node = (nodeId: string) => {
+            const mgr = new MetadataManager({ formats: ['json'], loaders: opts.sharedStore ? [opts.sharedStore] : [] });
+            mgr.registerInMemory(TYPE, 'shared', item(P));
+            mgr.registerInMemory(TYPE, 'shared', item(Q));
+            mgr.attachClusterPubSub(bus, nodeId);
+            return mgr;
+        };
+        return { bus, a: node('node-A'), b: node('node-B') };
+    }
+    const labelAt = async (mgr: MetadataManager, packageId: string) => ((await mgr.get(TYPE, 'shared', packageId)) as any)?.label;
+
+    it('the stored type is slotted per package', () => {
+        expect(PACKAGE_SLOTTED_STORE_TYPES.has(TYPE)).toBe(true);
+    });
+
+    it('unregister(…, { packageId }) on A: B drops that package\'s slot and keeps the other package\'s in-memory item (BASE: B dropped both)', async () => {
+        const { a, b } = await bootEchoCluster();
+        await a.unregister(TYPE, 'shared', { packageId: P });
+        await flush();
+        for (const mgr of [a, b]) {
+            expect(await labelAt(mgr, P)).toBeUndefined();
+            expect(await labelAt(mgr, Q), 'no loader can restore an in-memory item, so it must never be dropped by another package\'s removal').toBe('beta');
+        }
+    });
+
+    it('unregisterInMemory deletes from no loader: the stored row of that slot stays, and the other slot keeps answering', async () => {
+        const store = new SharedStoreLoader();
+        await store.save(TYPE, 'shared', item(P));
+        const deletes = vi.spyOn(store, 'delete');
+        const { a, b } = await bootEchoCluster({ sharedStore: store });
+
+        a.unregisterInMemory(TYPE, 'shared', { packageId: P });
+        await flush();
+
+        expect(deletes, 'an in-memory removal never deletes a stored row').not.toHaveBeenCalled();
+        expect(store.storage.get(TYPE)?.get('shared')).toMatchObject({ _packageId: P });
+        for (const mgr of [a, b]) expect(await labelAt(mgr, Q)).toBe('beta');
+        // CONTROL — the item's removal deletes the row first.
+        await a.unregister(TYPE, 'shared', { packageId: Q });
+        expect(deletes).toHaveBeenCalledTimes(1);
+    });
+
+    it('unregisterInMemory is announced as a registry-only removal: B drops the same slot and deletes no door copy of its own', async () => {
+        const { bus, a, b } = await bootEchoCluster();
+        const door = new MemoryLoader();
+        await door.save(TYPE, 'shared', item(P));
+        b.registerLoader(door);
+        const published: unknown[] = [];
+        bus.subscribe('metadata.changed', (msg: PubSubMessage<unknown>) => { published.push(msg.payload); });
+        const watched: string[] = [];
+        b.subscribe(TYPE, (event) => { watched.push(`${event.type} ${event.name}`); });
+
+        a.unregisterInMemory(TYPE, 'shared', { packageId: P });
+        await flush();
+
+        expect(published).toMatchObject([{ type: TYPE, removal: { packageId: P, registryOnly: true } }]);
+        expect(watched).toEqual(['deleted shared']);
+        expect((await door.loadSlots(TYPE, 'shared')).map((slot) => slot.packageId), 'the peer\'s loader copy is not the origin\'s to remove').toEqual([P]);
+        expect(await labelAt(b, Q)).toBe('beta');
+        // `notify: false` announces nothing.
+        a.registerInMemory(TYPE, 'shared', item(P));
+        a.unregisterInMemory(TYPE, 'shared', { packageId: P, notify: false });
+        await flush();
+        expect(published).toHaveLength(1);
+    });
+
+    it('unregisterInMemory naming no package refuses a name two packages hold; `null` names the package-less slot only', async () => {
+        const mgr = new MetadataManager({ formats: ['json'], loaders: [] });
+        mgr.registerInMemory(TYPE, 'shared', item(P));
+        mgr.registerInMemory(TYPE, 'shared', item(Q));
+        expect(() => mgr.unregisterInMemory(TYPE, 'shared')).toThrow(/more than one|com\.acme/);
+        mgr.unregisterInMemory(TYPE, 'shared', { packageId: null });
+        expect([await labelAt(mgr, P), await labelAt(mgr, Q)]).toEqual(['alpha', 'beta']);
+        mgr.registerInMemory(TYPE, 'unbound', { name: 'unbound' });
+        mgr.unregisterInMemory(TYPE, 'unbound', { packageId: null });
+        expect(await mgr.get(TYPE, 'unbound')).toBeUndefined();
     });
 });
