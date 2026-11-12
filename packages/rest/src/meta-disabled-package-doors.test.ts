@@ -568,7 +568,7 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         expect([read.status, read.body?.code], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
         expect([...(read.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
             .toEqual([OTHER_PKG, THIRD_PKG].sort());
-        // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders.
+        // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders (#32622).
         const layers = await host.layers('dashboard', 'three_rows_dash');
         expect(layers.status, JSON.stringify(layers.body)).toBe(409);
         for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(layers.body)).toContain(pkg);

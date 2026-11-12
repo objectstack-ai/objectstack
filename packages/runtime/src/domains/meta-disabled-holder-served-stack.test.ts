@@ -285,7 +285,7 @@ describe.each([
             expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
             expect([...(read.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
                 .toEqual([ROW_E, ROW_F].sort());
-            // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders.
+            // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders (#32622).(#32622).
             const layers = await get(booted.kernel, '/meta/dashboard/three_rows_dash/layers');
             expect([layers.status, codeOf(layers.body)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
             for (const id of [ROW_E, ROW_F]) expect(JSON.stringify(layers.body)).toContain(id);
