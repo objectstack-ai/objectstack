@@ -101,6 +101,7 @@ interface BetterAuthErrorLike {
   code?: string;
   dependents?: unknown;
   userMessage?: unknown;
+  details?: unknown;
 }
 
 /**
@@ -118,6 +119,7 @@ type AuthClientError = Error & {
   code?: string;
   dependents?: AuthErrorDependent[];
   userMessage?: string;
+  details?: Record<string, unknown>;
 };
 
 /**
@@ -170,6 +172,17 @@ function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
  * renders that list itself, by object label, so it is carried on the thrown
  * error ({@link readDependents}). So is `userMessage`, the producer-marked
  * user-facing sentence of the error envelope, when the server sends one.
+ *
+ * ## And so is `details` (objectstack#32432)
+ *
+ * One code can name more than one cause. plugin-auth answers a password
+ * sign-in by an account its identity provider deactivated through SCIM with
+ * better-auth's own `403 BANNED_USER` and adds `details: { cause:
+ * 'scim_deactivated' }`; an administrator's ban answers the same code with no
+ * `details`. The server's instruction to clients is to branch on `code` and
+ * `details.cause`, never on the message, so the body's `details` object is
+ * carried on the thrown error as the server sent it. A `details` that is not a
+ * plain object is not carried.
  */
 function toAuthError(
   error: BetterAuthErrorLike,
@@ -182,7 +195,12 @@ function toAuthError(
   const dependents = readDependents(error.dependents);
   if (dependents) err.dependents = dependents;
   if (typeof error.userMessage === 'string' && error.userMessage.trim()) err.userMessage = error.userMessage;
+  if (isPlainObject(error.details)) err.details = error.details;
   return err;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** The error half of a better-auth `twoFactor.*` answer. */

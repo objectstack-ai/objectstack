@@ -353,6 +353,10 @@ const ar = {
     registryRef: {
       loadFailed: "تعذّر تحميل القائمة. لا يزال بإمكانك كتابة الاسم.",
       notFound: "{{name}} (غير موجود)",
+      holderPackage: "{{item}} · الحزمة {{package}}",
+      holderEnvironment: "{{item}} · معرّفة في هذه البيئة",
+      holderUnresolved: "{{name}} (توفّره عدة حزم، ولم تُحدَّد أي حزمة)",
+      holderNeedsPackage: "يحدّد هذا النموذج مجموعة الأذونات باسمها فقط. عندما توفّر عدة حزم مجموعة بالاسم نفسه، لا يمكن هنا اختيار سوى المجموعة المعرّفة في هذه البيئة.",
     },
     preferenceOption: {
       allTopics: "كل الموضوعات ({{value}})",
@@ -2548,6 +2552,7 @@ const ar = {
       dismiss: "إخفاء القائمة",
       showDone: "عرض العناصر المكتملة ({{done}})",
       hideDone: "إخفاء العناصر المكتملة",
+      optional: "اختياري",
       set: "تعيين",
       change: "تغيير",
       view: "عرض",
@@ -2997,6 +3002,7 @@ const ar = {
         invalidCredentials: "بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ أعد تعيينها لتسجيل الدخول على الفور.",
         invalidCredentialsNoMail: 'بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ اطلب من المسؤول إعادة تعيينها.',
         emailNotVerified: "يرجى التحقق من بريدك الإلكتروني قبل تسجيل الدخول.",
+        accountDeactivated: "عطّلت مؤسستك حسابك. تواصل مع المسؤول.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -4331,6 +4337,7 @@ const ar = {
       get_authoring_rules: "الاطلاع على قواعد التأليف",
       get_metadata_schema: "الاطلاع على تنسيق البيانات الوصفية",
       get_package: "مراجعة معلومات الحزمة",
+      get_record_history: "قراءة سجل تعديلات هذا السجل",
       list_metadata: "سرد البيانات الوصفية الموجودة",
       list_objects: "سرد الكائنات الموجودة",
       list_packages: "سرد الحزم الموجودة",

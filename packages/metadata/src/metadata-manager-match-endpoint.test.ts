@@ -1041,9 +1041,10 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     await loader.save(type, nameOf(type), doorItem(type, B));
     await loader.save(type, nameOf(type), { ...doorItem(type, A), label: 'alpha again' });
     expect(rows(type).map((row) => [row.package_id, row.version])).toEqual([[A, 3], [B, 2]]);
-    // A bundled type keeps each package's member (#31699 R3-B); every other type, the row saved last.
+    // Each package's row, the one saved last of its slot: a bundled type's member (#31699 R3-B),
+    // [#32521] every other type's too (BEFORE #32521: one per name, `alpha again`).
     expect((await loader.loadManyKeyed(type)).map((entry) => (entry.data as any).label).sort())
-      .toEqual(isBundledStoreType(type) ? ['alpha again', label(type, B)] : ['alpha again']);
+      .toEqual(['alpha again', label(type, B)]);
   });
 
   describe.each([
@@ -1086,8 +1087,11 @@ describe('per-package loader storage for every type stored per package (ADR-0150
   /**
    * The loaders' own unscoped reads — what `MetadataManager.load`,
    * `loadDiagnosed`, `loadMany` and `loadManyKeyed` read, and what the action
-   * router's third rung and objectql's action audit call — still answer one
-   * item per name, the one saved last, as when each loader kept one entry.
+   * router's third rung and objectql's action audit call. The by-name reads
+   * still answer one item per name, the one saved last, as when each loader
+   * kept one entry. [#32521] The plural reads keep one item per `(package,
+   * name)` over the stored rows, so the boot priming pass registers every
+   * holder, as over the door's store [#32517].
    */
   it.each(BUNDLED)('%s: the loaders\' unscoped reads keep each package\'s member; the by-name read still answers the one saved last (#31699 R3-B)', async (type) => {
     const ctx = await boot(type);
@@ -1113,15 +1117,20 @@ describe('per-package loader storage for every type stored per package (ADR-0150
     expect(((await manager.list(type))[0] as any)?.subject).toBe('en again');
   });
 
-  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the door\'s plural reads answer every package\'s item [#32517], the database\'s one row per name (unchanged)', async (type) => {
+  it.each(UNBUNDLED)('%s: the loaders\' by-name reads still answer the item saved last; the plural reads answer every package\'s item, over the door\'s store [#32517] and over the stored rows (#32521; BEFORE: the database\'s one row per name, the one saved last)', async (type) => {
     const ctx = await boot(type);
     for (const peer of [ctx.peer(['database']), ctx.peer(['door'])]) {
       expect(((await peer.load(type, nameOf(type))) as any)?.label).toBe(label(type, B));
       expect((((await peer.loadDiagnosed(type, nameOf(type))).data) as any)?.label).toBe(label(type, B));
     }
+    // [#32521] BASE: the database's plural reads answered the row saved last
+    // alone, `[label(type, B)]`.
     const database = ctx.peer(['database']);
-    expect(labelsOf(await database.loadMany(type))).toEqual([label(type, B)]);
-    expect((await database.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([[nameOf(type), label(type, B)]]);
+    expect(labelsOf(await database.loadMany(type))).toEqual([label(type, A), label(type, B)]);
+    expect((await database.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label])).toEqual([
+      [nameOf(type), label(type, A)],
+      [nameOf(type), label(type, B)],
+    ]);
     // [#32517] BASE: the door's plural reads folded the two packages' slots
     // into the one saved last, `[label(type, B)]`.
     const door = ctx.peer(['door']);

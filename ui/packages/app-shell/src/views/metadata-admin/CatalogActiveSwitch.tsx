@@ -111,6 +111,15 @@ export function DeactivateConfirmDialog({
           </AlertDialogTitle>
           <AlertDialogDescription data-testid="catalog-deactivate-impact">{impact}</AlertDialogDescription>
         </AlertDialogHeader>
+        {/* objectstack#32774 — under more than one holder of the name, the
+            confirm names the holder it switches off. */}
+        {pending?.holding && pending.holding.holders.length > 1 && (
+          <p className="text-xs text-muted-foreground" data-testid="catalog-deactivate-holder">
+            {pending.holding.packageId !== null
+              ? tFormat('perm.holder.pick.package', locale, { package: pending.holding.packageId })
+              : t('perm.holder.pick.environment', locale)}
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel data-testid="catalog-deactivate-cancel">{t('engine.cancel', locale)}</AlertDialogCancel>
           <AlertDialogAction
@@ -289,8 +298,7 @@ export function CatalogItemActiveSwitch({
       setSwitchError(null);
       try {
         const now = await writeCatalogActivation(type, name, !enabled, holdingPackage(writeHolding));
-        const holder = writeHolding && writeHolding.holders.length > 1 ? writeHolding.packageId : undefined;
-        setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, name, now, holder)));
+        setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, name, now, writeHolding)));
         if (countsCatalogHolders(type)) {
           toast.success(
             tFormat(now ? 'engine.catalog.active.switchedOn' : 'engine.catalog.active.switchedOff', locale, {
