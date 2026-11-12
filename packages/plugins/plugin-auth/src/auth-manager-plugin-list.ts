@@ -832,10 +832,10 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.scim) {
     await this.addOptionalPlugin(plugins, 'scim', async () => {
       const { scim } = await import('@better-auth/scim');
-      const { verifyScimBearerToken, recordScimRequestConnection, ScimCredentialLastUseStamper } = await import(
-        './scim-connection-service.js'
-      );
+      const { verifyScimBearerToken, recordScimRequestConnection, ScimCredentialLastUseStamper, scimRequestScope } =
+        await import('./scim-connection-service.js');
       const { createScimGroupProjection } = await import('./scim-group-projection.js');
+      const { createScimSsoAdoptionResolver } = await import('./scim-sso-adoption.js');
       const secret = this.resolveAuthSecret();
       // [#32120] One stamper for this manager's SCIM plugin, so its
       // per-credential minute claims are shared by every request it verifies.
@@ -890,7 +890,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
         // sessions. Routed to the platform's own ban write; the break-glass
         // last-administrator guard judges it at the engine. See
         // `reconcileScimUserLifecycle` for the contract and the measurement.
+        //
+        // [#32148] The other host half: a create whose email an account SSO
+        // JIT made already holds LINKS that account, under the three ruled
+        // conditions and never on the email alone; anything else creates and
+        // collides, 409 as before. The connection's organization is the one
+        // the request's verified credential names. See `scim-sso-adoption.ts`.
         identity: {
+          resolveUser: createScimSsoAdoptionResolver({
+            getEngine: () => this.getDataEngine() as never,
+            readConnection: () => scimRequestScope.getStore(),
+          }),
           reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
         },
         // [ADR-0134 D4, filled for permission sets] A pushed group grants the
