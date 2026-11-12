@@ -597,13 +597,6 @@ function storedExpressionSignatures(schema: { fields?: Record<string, unknown> }
  * and each one whose expression, stored type or scale changed. In `after`'s
  * declaration order.
  */
-export function changedStoredExpressionFields(
-  before: { fields?: Record<string, unknown> } | undefined,
-  after: { fields?: Record<string, unknown> } | undefined,
-): string[] {
-  return changedSince(storedExpressionSignatures(before), after);
-}
-
 function changedSince(before: ReadonlyMap<string, string>, after: { fields?: Record<string, unknown> } | undefined): string[] {
   return [...storedExpressionSignatures(after)].filter(([name, signature]) => before.get(name) !== signature).map(([name]) => name);
 }
@@ -619,7 +612,7 @@ export interface StoredExpressionCapture {
   /**
    * Fill what the change made live: every stored computed field the object
    * serves NOW that computes something new relative to the capture
-   * ({@link changedStoredExpressionFields}), over EVERY stored row, written.
+   * ({@link StoredExpressionCapture.changedFields}), over EVERY stored row, written.
    * `undefined` when the change made no such field live — nothing was read.
    */
   fillChanged(): Promise<StoredExpressionBackfillReport | undefined>;

@@ -630,9 +630,6 @@ export {
     storedExpressionBackfillComplete,
     announceStoredExpressionHoles,
     sampleStoredExpressionHoles,
-    // [#32527] The metadata doors' fill at the change.
-    captureStoredExpressions,
-    changedStoredExpressionFields,
 } from './stored-expression-backfill.js';
 export type {
     StoredExpressionBackfillReport,
@@ -643,6 +640,7 @@ export type {
     StoredExpressionBackfillLogger,
     StoredExpressionBackfillOptions,
     StoredExpressionHoleSample,
+    // [#32527] What `ObjectQL#captureStoredExpressions` hands a metadata door.
     StoredExpressionCapture,
 } from './stored-expression-backfill.js';
 // [ADR-0144, ruling 6492000994] The explicit code backfill behind

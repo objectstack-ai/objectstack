@@ -27,7 +27,6 @@ import {
   announceStoredExpressionHoles,
   backfillStoredExpressions,
   captureStoredExpressions,
-  changedStoredExpressionFields,
   formatStoredExpressionBackfillReport,
   sameStoredValue,
   storedExpressionBackfillComplete,
@@ -303,8 +302,15 @@ describe('backfillStoredExpressions — stored computed fields on rows stored be
       const capture = captureStoredExpressions(engine, quietLogger, 'contract');
       redeclare({ qty_double: { expression: { source: 'record.qty * 2', dialect: 'cel' }, type: 'number' } });
       expect(capture.changedFields()).toEqual([]);
-      expect(changedStoredExpressionFields(undefined, engine.getObject('contract') as any))
-        .toEqual(['review_sla_days_offset', 'qty_double']);
+    });
+
+    it('every stored computed field of an object the capture did not see yet is new', () => {
+      const capture = captureStoredExpressions(engine, quietLogger, 'fresh');
+      engine.registry.registerObject({
+        name: 'fresh',
+        fields: { qty: { type: 'number' }, twice: { type: 'number', expression: cel('record.qty * 2') }, shown: { type: 'formula', expression: cel('record.qty') } },
+      } as any);
+      expect(capture.changedFields()).toEqual(['twice']);
     });
   });
 
