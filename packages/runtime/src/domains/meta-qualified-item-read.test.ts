@@ -782,6 +782,24 @@ describe('#31699 — a webhook name two packages hold: the item read and the pub
         expect(labelOf(await read('/webhook/solo_hook'))).toBe('alpha webhook');
         expect((await read('/webhook/solo_hook/published')).status).toBe(404);
     });
+
+    // [#31699 PR 2 × #32183] Both reads judge the served holders (#32497,
+    // merged from main): a disabled co-holder holds no name for them.
+    // BASE (this branch's round-3 head 2200b8c9, before #32497, same fixture):
+    // both answered 409 naming both, the disabled holder included (#32694's
+    // premise, measured there).
+    it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM 409 naming both TO the enabled holder\'s] one enabled and one disabled holder (%s): the item read serves the enabled one, the published read answers as for it alone (404, nothing published); re-enabled, both 409', async (_order, order) => {
+        for (const id of order) ship('webhook', 'twin_hook', id);
+        registry.disablePackage(B);
+        const item = await read('/webhook/twin_hook');
+        expect([item.status, labelOf(item)], JSON.stringify(item.body)).toEqual([200, 'alpha webhook']);
+        const published = await read('/webhook/twin_hook/published');
+        expect([published.status, JSON.stringify(published.body).includes(B)], JSON.stringify(published.body)).toEqual([404, false]);
+        registry.enablePackage(B);
+        for (const path of ['/webhook/twin_hook', '/webhook/twin_hook/published']) {
+            expect((await read(path)).status, path).toBe(409);
+        }
+    });
 });
 
 /**

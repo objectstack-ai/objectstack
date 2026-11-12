@@ -354,6 +354,29 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
     ship('webhook', 'solo', A);
     expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'solo' }))?.item)).toBe('alpha webhook');
   });
+
+  // [#31699 PR 2 × #32183] The by-name read judges the served holders (#32497,
+  // merged from main), so a disabled co-holder holds no name for it, as the
+  // dispatcher already reads it. BASE (this branch's round-3 head 2200b8c9,
+  // before #32497): 409 naming both, the disabled holder included (#32694's
+  // premise, measured there).
+  it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM 409 naming both TO the enabled holder\'s] one enabled and one disabled holder (%s): a caller with no package reads the enabled one\'s; re-enabled, 409 naming both', async (_order, order) => {
+    for (const id of order) ship('webhook', 'twin_hook', id);
+    registry.disablePackage(B);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }))?.item)).toBe('alpha webhook');
+    expect(labelOf(await facade.get('webhook', 'twin_hook'))).toBe('alpha webhook');
+    registry.enablePackage(B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }), 'ambiguous-in-environment', [A, B]);
+  });
+
+  // BASE (2200b8c9, same fixture): the protocol read served nothing (404) already, while
+  // `MetadataFacade.get` answered the disabled package's body (#32497's row 1, now for the webhook).
+  it('[FROM the disabled body TO undefined, library] a lone disabled holder: the protocol read serves nothing, as before, and `MetadataFacade.get` answers undefined', async () => {
+    ship('webhook', 'gone_hook', B);
+    registry.disablePackage(B);
+    expect((await protocol.getMetaItem({ type: 'webhook', name: 'gone_hook' }))?.item ?? null).toBeNull();
+    expect(await facade.get('webhook', 'gone_hook')).toBeUndefined();
+  });
 });
 
 describe('the types E8 does not wire keep the legacy read', () => {
