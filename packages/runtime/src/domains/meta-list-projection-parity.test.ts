@@ -50,6 +50,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection: the dispatcher reaches it through a dynamic import.
+import '@objectstack/metadata';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
