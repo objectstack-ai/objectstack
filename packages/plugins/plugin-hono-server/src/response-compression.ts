@@ -166,12 +166,24 @@ function replay(
     });
 }
 
-/** A web transform over a Node zlib encoder. */
+/**
+ * A web transform over a Node zlib encoder.
+ *
+ * The encoder emits output asynchronously, so a chunk can arrive after the
+ * client has gone and the readable side was cancelled. Enqueueing it then
+ * throws inside the encoder's `data` event, an uncaught exception that would
+ * take the whole process down. Such a chunk has no reader: the encoder is
+ * destroyed instead.
+ */
 function encodingTransform(encoder: Transform): TransformStream<Uint8Array, Uint8Array> {
     return new TransformStream<Uint8Array, Uint8Array>({
         start(controller) {
             encoder.on('data', (chunk: Buffer) => {
-                controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+                try {
+                    controller.enqueue(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+                } catch {
+                    encoder.destroy();
+                }
             });
             encoder.on('error', (err) => controller.error(err));
         },

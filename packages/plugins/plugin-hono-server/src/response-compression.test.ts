@@ -229,6 +229,49 @@ describe('HonoHttpServer response compression', () => {
         expect(head.headers['vary']).toMatch(/accept-encoding/i);
     });
 
+    it('survives a client that leaves in the middle of an encoded answer', async () => {
+        // Text that compresses, but not to nothing: the encoder still has
+        // output pending when the client goes away.
+        let seed = 7;
+        const words = Array.from({ length: 1_000_000 }, () => {
+            seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+            return `w${seed % 50_000}`;
+        });
+        const big = Buffer.from(JSON.stringify(words));
+        const port = await boot((s) => s.getRawApp().get('/big', () => new Response(big, {
+            headers: { 'content-type': 'application/json' },
+        })));
+
+        const uncaught: unknown[] = [];
+        const onUncaught = (err: unknown) => { uncaught.push(err); };
+        process.on('uncaughtException', onUncaught);
+        try {
+            for (const coding of ['br', 'gzip']) {
+                await new Promise<void>((resolve, reject) => {
+                    const req = request({ host: '127.0.0.1', port, path: '/big', headers: { 'accept-encoding': coding } }, (res) => {
+                        expect(res.headers['content-encoding']).toBe(coding);
+                        res.once('data', () => {
+                            req.destroy();
+                            resolve();
+                        });
+                    });
+                    req.on('error', () => undefined);
+                    req.on('close', () => resolve());
+                    req.end();
+                    setTimeout(() => reject(new Error('no first byte')), 10_000);
+                });
+                await sleep(300);
+            }
+            // The server is still up, and still encoding.
+            const after = await get(port, '/big', { 'accept-encoding': 'gzip' });
+            expect(after.status).toBe(200);
+            expect(gunzipSync(after.body).equals(big)).toBe(true);
+        } finally {
+            process.off('uncaughtException', onUncaught);
+        }
+        expect(uncaught).toEqual([]);
+    }, 30_000);
+
     it('keeps every Set-Cookie line of an encoded answer', async () => {
         const port = await boot((s) => s.get('/api/v1/cookies', (_req, res) => {
             res.header('Set-Cookie', ['a=1; Path=/', 'b=2; Path=/']);
