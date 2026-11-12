@@ -2239,9 +2239,9 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
   it('action, each package binding the name to its own object: after the pass a bare read is refused 409 naming both, as without it (BEFORE: BETA\'s action)', async () => {
     await seed('action', ALPHA, 1, { objectName: 'account' });
     await seed('action', BETA, 2, { objectName: 'contact' });
-    expect((await answer(cold(), 'action', 'helper')).slice(0, 5)).toEqual(REFUSED);
+    expect(await answer(cold(), 'action', 'helper')).toEqual(REFUSED);
     const m = await bootPass();
-    expect((await answer(m, 'action', 'helper')).slice(0, 5)).toEqual(REFUSED);
+    expect(await answer(m, 'action', 'helper')).toEqual(REFUSED);
     expect(await answer(m, 'action', 'helper', ALPHA)).toBe(ALPHA);
     expect(labels(await m.list('action'))).toEqual([ALPHA, BETA]);
   });
