@@ -101,7 +101,8 @@ export type StoredDeclarationHolder =
 /** The holder of a declared name for a caller with no package: the one rule (module doc). */
 export function declaredHolderOf(registry: PackageScopedRegistry): (type: SharingDeclarationType, name: string) => StoredDeclarationHolder {
   return (type, name) => {
-    const answer = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
+    // [#32183] A binding never moves with a reversible disable: every holder.
+    const answer = resolvePackageScopedName(registry, { type, name, callerPackageId: null, includeDisabledPackages: true });
     switch (answer.status) {
       case 'resolved':
         return answer.holder.kind === 'package' ? { kind: 'package', packageId: answer.holder.packageId } : { kind: answer.holder.kind };

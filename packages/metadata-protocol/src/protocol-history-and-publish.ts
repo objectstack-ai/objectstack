@@ -50,6 +50,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
 import type { PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
 import { commitPlanKey } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import type { CommitPlanItem } from './protocol-bundle-members.js';
 import type { PreflightViolationCode } from './protocol-audit-entry.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
@@ -61,6 +62,7 @@ import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-q
 import { isBatchObjectType, judgeBatchObjectRegistrations, registerAdmittedBatchRows, type BatchObjectRow } from './batch-object-registration.js';
 import { engineCanRollBack } from '@objectstack/core';
 import type { SysMetadataRepository } from './sys-metadata-repository.js';
+import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
 
 /**
  * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
@@ -344,7 +346,7 @@ export class ProtocolHistoryAndPublishFacet {
     }
 
     /** [#28355] The body of {@link publishMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async publishMetaItemUnaudited(host: Pick<ProtocolHost, 'emitMetaItemPublished' | 'packagelessOverlayWriteRefusal' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPendingDenialAudit' | 'refuseOrganizationScopedWrite' | 'refuseUngrammaticalMetaItemName' | 'runPublishSideEffects'>, request: PublishMetaItemRequest): Promise<{
+    static async publishMetaItemUnaudited(host: Pick<ProtocolHost, 'emitMetaItemPublished' | 'engine' | 'packagelessOverlayWriteRefusal' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPendingDenialAudit' | 'refuseOrganizationScopedWrite' | 'refuseUngrammaticalMetaItemName' | 'runPublishSideEffects'>, request: PublishMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
@@ -563,6 +565,9 @@ export class ProtocolHistoryAndPublishFacet {
             // ruling, point 2, carried to this door).
             ...(advisories.length > 0 ? { advisories } : {}),
         };
+        // [#32527] The object's stored computed fields as served BEFORE the
+        // side effects make this promotion live: what the fill below diffs against.
+        const storedExpressions = captureStoredExpressionChange(host.engine, singularType, request.name);
         const effects = await host.runPublishSideEffects({
             singularType,
             name: request.name,
@@ -590,6 +595,14 @@ export class ProtocolHistoryAndPublishFacet {
             name: request.name,
             organizationId: null,
         });
+        // [#32527] Ruling 6816429574, letter A: a stored computed field this
+        // promotion made live with a new computation is filled over the
+        // object's existing rows, and reported per field on the same
+        // omitted-when-empty `advisories` (`protocol-stored-expression-fill.ts`).
+        // After the announce, so its subscribers serve the change while the rows
+        // are written; before the answer, which reports the counts.
+        const filled = await fillStoredExpressionChange(storedExpressions, { storageRefused: effects.storageRefused !== undefined });
+        if (filled.length > 0) response.advisories = [...(response.advisories ?? []), ...filled];
         return response;
     }
 
@@ -1435,6 +1448,8 @@ export class ProtocolHistoryAndPublishFacet {
             organizationId: null,
             // [#22877] The promoted body's member — the row the promotion wrote.
             ...mutationEventMemberOfBody(args.singularType, args.body),
+            // [#32451] …and the package that row is bound to.
+            ...mutationEventPackage(args.packageId),
         });
         return out;
     }
@@ -2436,6 +2451,16 @@ export class ProtocolHistoryAndPublishFacet {
         // publish order: a draft whose pair a later draft completes is then
         // registered after its sibling, not refused (and only logged) at its
         // own write-through ahead of it.
+        // [#32527] Each promoted object's stored computed fields as served
+        // BEFORE the registration below makes the batch live — once per object,
+        // the first draft naming it carrying the report: what the fill after
+        // the side effects diffs against.
+        const storedExpressions = new Map<string, { capture: StoredExpressionFillCapture; at: number }>();
+        promoted.forEach((p, at) => {
+            const capture = captureStoredExpressionChange(this.engine, p.singularType, p.d.name);
+            if (capture && !storedExpressions.has(capture.object)) storedExpressions.set(capture.object, { capture, at });
+        });
+        const storageRefusedObjects = new Set<string>();
         await registerAdmittedBatchRows(this, promotedObjects, admittedOrder);
         for (const p of promoted) {
             // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
@@ -2468,6 +2493,7 @@ export class ProtocolHistoryAndPublishFacet {
                 // omitted-when-empty: a clean sync adds no key.
                 if (eff.storageRefused) {
                     element.advisories = [...(element.advisories ?? []), eff.storageRefused];
+                    storageRefusedObjects.add(p.d.name);
                 }
                 if (eff.materializeApplied) {
                     materialize.any = true;
@@ -2508,6 +2534,17 @@ export class ProtocolHistoryAndPublishFacet {
                         + clientFacingFailureText(e, 'the reason is in the server log'),
                 });
             }
+        }
+
+        // [#32527] Ruling 6816429574, letter A: each promoted object's stored
+        // computed fields this batch made live with a new computation are filled
+        // over its existing rows, after every item's side effects (the object
+        // is served and its storage synced), and reported per field on the
+        // `published[]` element of the first draft that named the object — the
+        // element a refused storage sync of it rides (`protocol-stored-expression-fill.ts`).
+        for (const { capture, at } of storedExpressions.values()) {
+            const filled = await fillStoredExpressionChange(capture, { storageRefused: storageRefusedObjects.has(capture.object) });
+            if (filled.length > 0) published[at].advisories = [...(published[at].advisories ?? []), ...filled];
         }
 
         const seedApplied = seedBodies.length > 0 ? await this.applySeedBodies(seedBodies) : undefined;

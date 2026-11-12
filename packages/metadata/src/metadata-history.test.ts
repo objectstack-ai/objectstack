@@ -545,6 +545,25 @@ describe('history and rollback of a type stored per package (#32351)', () => {
     });
   }
 
+  it('[#32517] an environment rollback of a non-canonical locale files that locale\'s own registry key, never the canonical member\'s', async () => {
+    const type = 'email_template';
+    const fr = (label: string, packageId?: string) => ({ ...body(label, packageId), locale: 'fr-FR' });
+    await loader.save(type, 'x', body('A1', A));
+    await loader.save(type, 'x', body('B1', B));
+    await loader.save(type, 'x', body('A2', A));
+    // The environment's fr-FR, beside two packages: its own (package-less) row.
+    await loader.save(type, 'x', fr('env-fr1'));
+    await loader.save(type, 'x', fr('env-fr2'));
+    await loader.delete(type, 'x', { packageId: B });
+    await manager.rollback(type, 'x', 3, { packageId: A });
+    await manager.rollback(type, 'x', 4, { packageId: null });
+    const registry = (manager as unknown as { registry: Map<string, Map<string, unknown>> }).registry.get(type)!;
+    // The environment's slot keeps its fr-FR under the member's key; its canonical key holds nothing.
+    expect(registry.get('x\u0002fr-FR')).toEqual(fr('env-fr1'));
+    expect(registry.has('x')).toBe(false);
+    expect(await manager.get(type, 'x', A)).toEqual(body('A2', A));
+  });
+
   it('CONTROL: a type stored per name keeps one row per name, and its history, diff and rollback ignore packages', async () => {
     await loader.save('object', 'x', body('A1', A));
     await loader.save('object', 'x', body('B1', B));

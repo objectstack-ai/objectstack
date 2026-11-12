@@ -97,11 +97,13 @@ async function mountCatchAll(
     const make = answers[new URL(req.url).pathname];
     return make ? make() : unrouted404();
   });
+  // [#32637] The catch-all's two seams are the manager's vendor entry and its
+  // vendor-only ownership walk.
   (plugin as any).authManager = {
-    handleRequest,
+    handleVendorRequest: handleRequest,
     // The shipped matcher, over the fake table — only the endpoint-path
     // derivation is inlined here (AuthManager's own is private).
-    ownsRoute: async (req: Request) =>
+    ownsVendorRoute: async (req: Request) =>
       ownership.owns(req.method, new URL(req.url).pathname.slice(BASE.length)),
   };
 

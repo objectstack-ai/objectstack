@@ -91,9 +91,17 @@ import {
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
+  latestMemberOf,
+  latestMembersFirst,
+  memberSuffixOf,
+  pluralEntryKeys,
   readStoreEntry,
+  inheritStoreWriteOrder,
+  judgesLoaderSlots,
+  platformSlotsOf,
   recordStoreWrite,
   slotPackageOf,
+  slotOfKey,
   slotStoreOf,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
@@ -406,6 +414,12 @@ export interface ClusterMetadataChangedPayload {
 interface ClusterMetadataRemoval {
   /** The package whose item the origin removed; absent for a removal by name. */
   packageId?: string;
+  /**
+   * [ADR-0150 D3, #32560] The origin judged a removal naming no package of an
+   * action name to take the environment's own item only: a peer deletes the
+   * name's package-less slots from its in-memory copy, never a package's.
+   */
+  packagelessOnly?: true;
 }
 
 /**
@@ -417,7 +431,10 @@ interface ClusterMetadataRemoval {
 function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
   const removal: unknown = payload.removal;
   if (removal === null || typeof removal !== 'object') return undefined;
-  const { packageId } = removal as { packageId?: unknown };
+  const { packageId, packagelessOnly } = removal as { packageId?: unknown; packagelessOnly?: unknown };
+  // [#32560] Read wrongly, a package-less-only removal would delete by name
+  // and take the package's item: one that is not `true` is dropped too.
+  if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly } : undefined;
   if (packageId === undefined) return {};
   return typeof packageId === 'string' ? { packageId } : undefined;
 }
@@ -477,6 +494,89 @@ export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
   driver?: IDataDriver;
+  /**
+   * [#32154] Set by a host that will hand this manager its own logger later,
+   * through {@link MetadataManager.useHostLogger}. Until it does, the manager's
+   * `debug` / `info` lines are HELD and then replayed through the host's
+   * logger, so they follow the host's level (a boot at `warn` prints none of
+   * them, `OS_LOG_LEVEL=info` prints them all); `warn` and above print at
+   * once, as they always have. `MetadataPlugin` sets it and hands over the
+   * kernel's logger in `init()`. Without it, the manager logs through its own
+   * `info` logger exactly as before.
+   */
+  awaitHostLogger?: boolean;
+}
+
+/** [#32154] How many `debug` / `info` lines a manager holds while it waits for its host's logger. */
+const HELD_CHATTER_CAP = 200;
+
+/**
+ * [#32154] The manager's logger: ONE object for the manager's lifetime, so the
+ * loaders and the endpoint matcher it is handed to at construction follow the
+ * host's logger too once {@link HostFollowingLogger.adopt} switches the target.
+ *
+ * Why it exists: `MetadataPlugin` builds its manager in its own constructor,
+ * before any kernel exists, and `NodeMetadataManager` registers its
+ * filesystem loader in ITS constructor, so `Registered metadata loader: …`
+ * was written by a logger fixed at `info` before any host level could reach
+ * it, and printed into every quiet (`warn`) boot. The host's logger first
+ * reaches the manager in `MetadataPlugin.init()`.
+ *
+ * ⛔ `warn`, `error` and `fatal` are never held: a line that matters prints
+ * when it happens, even if no host ever arrives. Only chatter waits, bounded
+ * by {@link HELD_CHATTER_CAP}; what overflowed is counted on the replay.
+ */
+class HostFollowingLogger implements Logger {
+  private target: Logger;
+  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined = [];
+  private overflowed = 0;
+
+  constructor(initial: Logger) {
+    this.target = initial;
+  }
+
+  /** Send every later line to `host`, after replaying the held chatter through it. */
+  adopt(host: Logger): void {
+    this.target = host;
+    const held = this.held ?? [];
+    this.held = undefined;
+    for (const line of held) host[line.level](line.message, line.meta);
+    if (this.overflowed > 0) {
+      host.debug(`MetadataManager: ${this.overflowed} earlier debug/info line(s) were not kept while waiting for the host logger`);
+      this.overflowed = 0;
+    }
+  }
+
+  debug(message: string, meta?: Record<string, any>): void {
+    this.chatter('debug', message, meta);
+  }
+
+  info(message: string, meta?: Record<string, any>): void {
+    this.chatter('info', message, meta);
+  }
+
+  warn(message: string, meta?: Record<string, any>): void {
+    this.target.warn(message, meta);
+  }
+
+  error(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.target.error(message, error, meta);
+  }
+
+  fatal(message: string, error?: Error, meta?: Record<string, any>): void {
+    if (this.target.fatal) this.target.fatal(message, error, meta);
+    else this.target.error(message, error, meta);
+  }
+
+  private chatter(level: 'debug' | 'info', message: string, meta?: Record<string, any>): void {
+    if (this.held === undefined) {
+      this.target[level](message, meta);
+    } else if (this.held.length < HELD_CHATTER_CAP) {
+      this.held.push({ level, message, meta });
+    } else {
+      this.overflowed++;
+    }
+  }
 }
 
 /**
@@ -522,6 +622,8 @@ export class MetadataManager implements IMetadataService {
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
+  /** [#32154] Under `awaitHostLogger`, the object {@link logger} is built as; {@link useHostLogger} switches its target. */
+  private readonly hostFollowingLogger: HostFollowingLogger | undefined;
   protected watchCallbacks = new Map<string, Set<WatchCallback>>();
   protected config: MetadataManagerOptions;
 
@@ -747,7 +849,12 @@ export class MetadataManager implements IMetadataService {
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
-    this.logger = createLogger({ level: 'info', format: 'pretty' });
+    const ownLogger = createLogger({ level: 'info', format: 'pretty' });
+    // [#32154] Under `awaitHostLogger`, a logger that holds the chatter until
+    // the host hands over its own (see `HostFollowingLogger`,
+    // `useHostLogger`); otherwise its own `info` logger, exactly as before.
+    this.hostFollowingLogger = config.awaitHostLogger === true ? new HostFollowingLogger(ownLogger) : undefined;
+    this.logger = this.hostFollowingLogger ?? ownLogger;
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
     // covering overlapping but non-identical event sets — both are kept:
@@ -953,6 +1060,24 @@ export class MetadataManager implements IMetadataService {
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
 
+  /**
+   * [#32154] Log through the host's logger from now on, so every line of this
+   * manager (and of the loaders and matcher it handed its logger to) follows
+   * the host's level. The `debug` / `info` lines held since construction
+   * under {@link MetadataManagerOptions.awaitHostLogger} are replayed through
+   * it first, in order. `MetadataPlugin.init()` calls it with the kernel's
+   * logger.
+   *
+   * On a manager built WITHOUT that option, the manager's own later lines go
+   * to `logger`, but a loader or the endpoint matcher handed the earlier
+   * logger at construction keeps it: a host that wants those to follow too
+   * sets `awaitHostLogger`.
+   */
+  useHostLogger(logger: Logger): void {
+    if (this.hostFollowingLogger) this.hostFollowingLogger.adopt(logger);
+    else this.logger = logger;
+  }
+
   // ==========================================
   // IMetadataService — Core CRUD Operations
   // ==========================================
@@ -1153,6 +1278,15 @@ export class MetadataManager implements IMetadataService {
   async get(type: string, name: string, packageId?: string | null): Promise<unknown | undefined> {
     // [#7378 row 2] Read the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
+    // [ADR-0150 D3, #32560] A read naming no package of an action name a
+    // package holds in memory is judged over the registry AND the loaders
+    // (`judgesLoaderSlots`): another package's item stored only in a loader
+    // is a second holder, the environment's own item stored only in a loader
+    // answers first, and a package-less registry slot no loader stores is
+    // the platform's, refused beside the package.
+    if (judgesLoaderSlots(this.registry.get(type), type, name, packageId)) {
+      return (await this.loadSlottedDiagnosed(type, name, packageId)).data ?? undefined;
+    }
     // Check in-memory registry first
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return entry.data;
@@ -1203,7 +1337,12 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     // Check in-memory registry first — a hit here consulted no loader, so
     // there is nothing to be degraded about. [ADR-0150 D3] `packageId` as on
-    // `get`, read by the same rule.
+    // `get`, read by the same rule. [#32560] …and judged over the loaders
+    // too where `get` judges it so.
+    if (judgesLoaderSlots(this.registry.get(type), type, name, packageId)) {
+      const { data, degraded, errors } = await this.loadSlottedDiagnosed(type, name, packageId);
+      return { data: data ?? undefined, degraded, errors };
+    }
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return { data: entry.data, degraded: false, errors: [] };
 
@@ -1242,7 +1381,12 @@ export class MetadataManager implements IMetadataService {
     packageId?: string | null,
   ): Promise<{ data: unknown | null; degraded: boolean; errors: string[] }> {
     const { slots, errors } = await this.loaderSlotsNamed(type, name);
-    const entry = readStoreEntry(this.slotViewOf(type, name, slots), type, name, packageId);
+    const loaderStore = slotStoreOf(type, name, slots);
+    // [#32560] A package-less registry slot is the platform's when no loader
+    // stores it — judged only over loaders that all answered: with one down,
+    // the slot is read as the environment's, as before.
+    const platformKeys = errors.length === 0 ? platformSlotsOf(this.registry.get(type), type, name, loaderStore) : undefined;
+    const entry = readStoreEntry(this.slotViewOf(type, name, loaderStore), type, name, packageId, platformKeys);
     return entry.found
       ? { data: entry.data, degraded: false, errors }
       : { data: null, degraded: errors.length > 0, errors };
@@ -1289,14 +1433,20 @@ export class MetadataManager implements IMetadataService {
   private slotViewOf(
     type: string,
     name: string,
-    slots: Iterable<{ readonly packageId?: string; readonly data: unknown }>,
+    loaderStore: ReadonlyMap<string, unknown>,
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
-    for (const key of storeKeysNamed(registryStore, type, name)) view.set(key, registryStore!.get(key));
-    for (const [key, data] of slotStoreOf(type, name, slots)) {
+    // [#32517] Each slot's member written last first: a slot no key of which
+    // came from the registry answers its first member (`latestMemberOf`).
+    if (registryStore) {
+      for (const key of latestMembersFirst(registryStore, storeKeysNamed(registryStore, type, name))) view.set(key, registryStore.get(key));
+    }
+    for (const [key, data] of loaderStore) {
       if (!view.has(key)) view.set(key, data);
     }
+    // [#32560] "Written last" over the view is the registry's own order.
+    inheritStoreWriteOrder(view, registryStore);
     return view;
   }
 
@@ -1493,6 +1643,11 @@ export class MetadataManager implements IMetadataService {
    *    package-held name it is that holder's customization, never a second
    *    item).
    *
+   * [#32517] A bundled type's member is shadowed by the SAME member only (a
+   * slot's member, or the package-less slot's same member), so one package's
+   * second locale is listed beside its first, as the store keys them
+   * ({@link storeSlotKey}).
+   *
    * One loader's own slots do not shadow each other.
    */
   private async admitLoaderSlots(loader: MetadataLoader, type: string, items: Map<string, unknown>): Promise<void> {
@@ -1500,15 +1655,16 @@ export class MetadataManager implements IMetadataService {
     const heldIdentities = new Set<string>();
     const packageHeldIdentities = new Set<string>();
     for (const key of prior) {
-      heldIdentities.add(keyIdentityOf(key));
+      heldIdentities.add(keyIdentityOf(key) + memberSuffixOf(key));
       if (slotPackageOf(key) !== undefined) packageHeldIdentities.add(keyIdentityOf(key));
     }
     for (const entry of await this.loaderSlotEntries(loader, type)) {
       const key = storeSlotKey(type, entry.name, entry.packageId ?? indexedItemPackageId(entry.data), entry.data);
       const identity = keyIdentityOf(key);
+      const member = memberSuffixOf(key);
       const shadowed = items.has(key) || (slotPackageOf(key) === undefined
-        ? heldIdentities.has(identity)
-        : prior.has(identity) && !packageHeldIdentities.has(identity));
+        ? heldIdentities.has(identity + member)
+        : prior.has(identity + member) && !packageHeldIdentities.has(identity));
       if (!shadowed) items.set(key, entry.data);
     }
   }
@@ -1601,7 +1757,33 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return { items: Array.from(items.values()), degraded, errors };
+    return { items: this.listedInSlotOrder(type, items), degraded, errors };
+  }
+
+  /**
+   * [#32517] The order {@link list} answers `items` in. For a bundled type
+   * stored per `(package, name)`, each slot's member a by-name read answers
+   * first — the registry's member written last, else the first a loader
+   * admitted (`MemoryLoader.loadManySlots` hands a slot's member saved last
+   * first) — in the order the slots first appear, then every other member in
+   * store order. Those first items are, in that order, the one item per slot
+   * this list answered before a bundle's members had keys of their own, so a
+   * served read that lays its own layers over this list (`GET /meta`, the
+   * execution read) answers in the order it answered then. Every other type:
+   * store order.
+   */
+  private listedInSlotOrder(type: string, items: ReadonlyMap<string, unknown>): unknown[] {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !isBundledStoreType(type)) return Array.from(items.values());
+    const registryStore = this.registry.get(type);
+    const firsts = new Map<string, string>();
+    for (const key of items.keys()) {
+      const slot = slotOfKey(key);
+      if (firsts.has(slot)) continue;
+      const latest = registryStore ? latestMemberOf(registryStore, slot) : undefined;
+      firsts.set(slot, latest !== undefined && registryStore!.has(latest) && items.has(latest) ? latest : key);
+    }
+    const first = new Set(firsts.values());
+    return [...first, ...[...items.keys()].filter((key) => !first.has(key))].map((key) => items.get(key));
   }
 
   /**
@@ -1937,12 +2119,26 @@ export class MetadataManager implements IMetadataService {
     type: string,
     name: string,
     packageId?: string | null,
-  ): Promise<{ keys: string[]; packageId?: string }> {
-    const removal = storeRemovalKeys(this.registry.get(type), type, name, packageId);
+  ): Promise<{ keys: string[]; packageId?: string; packagelessOnly?: true }> {
+    const registryStore = this.registry.get(type);
+    const removal = storeRemovalKeys(registryStore, type, name, packageId);
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || removal.packageId !== undefined) return removal;
-    const { slots } = await this.loaderSlotsNamed(type, name);
-    storeRemovalKeys(this.slotViewOf(type, name, slots), type, name);
-    return removal;
+    const { slots, errors } = await this.loaderSlotsNamed(type, name);
+    const loaderStore = slotStoreOf(type, name, slots);
+    // [#32560] Judged as a read naming none judges it: a package-less
+    // registry slot no loader stores is the platform's (refused beside a
+    // package), and beside one package the removal takes the package-less
+    // slots the read answers — of the registry's, those the view's rule
+    // picks. That judgment is carried to every loader's delete and to every
+    // peer (`packagelessOnly`): each loader judges by its OWN slots, and one
+    // holding the package's item alone (the artifact door's store) would
+    // otherwise take it.
+    const platformKeys = errors.length === 0 ? platformSlotsOf(registryStore, type, name, loaderStore) : undefined;
+    const judged = storeRemovalKeys(this.slotViewOf(type, name, loaderStore), type, name, undefined, platformKeys);
+    return {
+      keys: judged.keys.filter((key) => registryStore?.has(key) === true),
+      ...(judged.packagelessOnly ? { packagelessOnly: true as const } : {}),
+    };
   }
 
   /**
@@ -1965,7 +2161,13 @@ export class MetadataManager implements IMetadataService {
   ): Promise<void> {
     // [#7378 row 2] Remove from the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
-    const { keys, packageId } = removal ?? (await this.removalOf(type, name, options?.packageId));
+    const judged: { keys: readonly string[]; packageId?: string; packagelessOnly?: true } =
+      removal ?? (await this.removalOf(type, name, options?.packageId));
+    const { keys, packageId } = judged;
+    // [#32560] How each loader's delete (and each peer's) is scoped.
+    const scope: ClusterMetadataRemoval = packageId !== undefined
+      ? { packageId }
+      : judged.packagelessOnly ? { packagelessOnly: true } : {};
     // ── 1. Storage first ────────────────────────────────────────────────
     // Delete from database-backed loaders that declare write capability, and
     // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
@@ -1982,7 +2184,7 @@ export class MetadataManager implements IMetadataService {
       // the protocols the gate does not cover.
       if (typeof loader.delete !== 'function') continue;
       try {
-        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
+        await this.deleteMetaItemFromLoader(loader, type, name, scope);
       } catch (error) {
         this.reportMetaItemDeleteFailure(loader.contract.name, type, name, error);
       }
@@ -2008,6 +2210,8 @@ export class MetadataManager implements IMetadataService {
     // Announce last, once the removal has landed everywhere (see register()).
     // [#32499] The cluster fan-out marks it a removal, with the package it
     // named, so each peer deletes its own in-memory copy by the same key.
+    // [#32560] Or with the package-less-only judgment, so a peer's door
+    // keeps the package's item the removal did not take.
     if (options?.notify !== false) {
       this.notifyWatchers(type, {
         type: 'deleted',
@@ -2016,7 +2220,7 @@ export class MetadataManager implements IMetadataService {
         path: '',
         data: undefined,
         timestamp: new Date().toISOString(),
-      }, packageId === undefined ? {} : { packageId });
+      }, scope);
     }
   }
 
@@ -2046,15 +2250,18 @@ export class MetadataManager implements IMetadataService {
     loader: MetadataLoader,
     type: string,
     name: string,
-    packageId?: string,
+    scope: ClusterMetadataRemoval,
   ): Promise<void> {
     const del = loader.delete;
     if (typeof del !== 'function') return;
     // [ADR-0150 D4, #32198] One package's item of a type stored per
-    // `(package, name)`: the loader deletes only that package's row. Every
-    // other delete keeps its by-name call, byte for byte.
-    if (packageId === undefined) await del.call(loader, type, name);
-    else await del.call(loader, type, name, { packageId });
+    // `(package, name)`: the loader deletes only that package's row.
+    // [ADR-0150 D3, #32560] A removal naming none judged to take the
+    // environment's own item only: the loader deletes the name's package-less
+    // slots only. Every other delete keeps its by-name call, byte for byte.
+    if (scope.packageId !== undefined) await del.call(loader, type, name, { packageId: scope.packageId });
+    else if (scope.packagelessOnly) await del.call(loader, type, name, { packagelessOnly: true });
+    else await del.call(loader, type, name);
   }
 
   /**
@@ -2333,8 +2540,10 @@ export class MetadataManager implements IMetadataService {
    * package's row and the `deleted` event names this package.
    */
   async unregisterPackage(packageName: string): Promise<void> {
-    // Collect all items to delete (type and name pairs)
-    const itemsToDelete: Array<{ type: string; name: string; key: string }> = [];
+    // Collect all items to delete (type and name pairs). [#32517] One entry
+    // per slot: a bundled type's members of one slot are removed together,
+    // with the one `deleted` announcement the slot made before.
+    const itemsToDelete = new Map<string, { type: string; name: string; keys: string[] }>();
 
     for (const [type, typeStore] of this.registry) {
       const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
@@ -2342,15 +2551,18 @@ export class MetadataManager implements IMetadataService {
         // [#32246] A by-package type: also every item in the package's slot,
         // a package-less customization of its item (D4) included.
         if (isPackageMember(data, packageName) || (slotted && slotPackageOf(key) === packageName)) {
-          itemsToDelete.push({ type, name: storedNameOf(key), key });
+          const slot = `${type}\u0000${slotOfKey(key)}`;
+          const entry = itemsToDelete.get(slot);
+          if (entry) entry.keys.push(key);
+          else itemsToDelete.set(slot, { type, name: storedNameOf(key), keys: [key] });
         }
       }
     }
 
     // Delete each item using unregister() to ensure deletion from both registry and loaders
-    for (const { type, name, key } of itemsToDelete) {
+    for (const { type, name, keys } of itemsToDelete.values()) {
       await this.unregisterAt(type, name, undefined, {
-        keys: [key],
+        keys,
         ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: packageName } : {}),
       });
     }
@@ -2809,9 +3021,14 @@ export class MetadataManager implements IMetadataService {
    * ⛔ Not caught: a throwing redactor fails the read rather than serving the
    * material it exists to withhold (the metadata protocol's
    * `redactMetadataItem` takes the same position).
+   *
+   * [#32183] `packageId`, when given, is read as {@link get} reads it: the
+   * package's own copy of a type stored per `(package, name)`. Both `/published`
+   * doors pass it for a name a disabled package also holds, so the store's own
+   * two-holder refusal never names a package the registry does not serve.
    */
-  async getPublished(type: string, name: string): Promise<unknown | undefined> {
-    const item = await this.get(type, name);
+  async getPublished(type: string, name: string, packageId?: string | null): Promise<unknown | undefined> {
+    const item = await this.get(type, name, packageId);
     if (!item) return undefined;
 
     const meta = item as any;
@@ -3437,10 +3654,13 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<T[]> {
-    const results: T[] = [];
     // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
     // per `(package, name, member)` (`bundleEntryKey`), never one per name.
-    const bundleEntries = new Set<string>();
+    // [#32517] An unbundled one keeps one per `(package, name)`
+    // (`pluralEntryKeys`): keyed by name alone, two packages' items of one
+    // name were folded into the first loader's one. Every other type: one per
+    // name, the first loader's, as before.
+    const gathered: Array<{ item: T; loader: MetadataLoader }> = [];
 
     for (const loader of this.loaders.values()) {
         try {
@@ -3466,23 +3686,7 @@ export class MetadataManager implements IMetadataService {
                 : PACKAGE_SLOTTED_STORE_TYPES.has(type)
                     ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
                     : await loader.loadMany<T>(type, options);
-            for (const item of items) {
-                const itemAny = item as any;
-                if (itemAny && typeof itemAny.name === 'string') {
-                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
-                    if (bundleKey !== undefined) {
-                        if (bundleEntries.has(bundleKey)) continue;
-                        bundleEntries.add(bundleKey);
-                        results.push(item);
-                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-                        continue;
-                    }
-                    const exists = results.some((r: any) => r && r.name === itemAny.name);
-                    if (exists) continue;
-                }
-                results.push(item);
-                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-            }
+            for (const item of items) gathered.push({ item, loader });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
             // [#5108] Same seam, same verdict as `list()` — see
@@ -3492,6 +3696,18 @@ export class MetadataManager implements IMetadataService {
             this.reportLoaderReadFailure(loader.contract.name, type, e);
         }
     }
+    const keys = pluralEntryKeys(type, gathered.map(({ item }) => ({ name: (item as { name?: unknown } | null)?.name, data: item })));
+    const kept = new Set<string>();
+    const results: T[] = [];
+    gathered.forEach(({ item, loader }, at) => {
+        const key = keys[at];
+        if (key !== undefined) {
+            if (kept.has(key)) return;
+            kept.add(key);
+        }
+        results.push(item);
+        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+    });
     return results;
   }
 
@@ -3549,6 +3765,9 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
+    // [#32517] An unbundled type stored per `(package, name)`: one entry per
+    // `(package, name)` over every loader (`pluralEntryKeys`), as `loadMany`.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type) && !isBundledStoreType(type)) return this.loadManyKeyedSlotted<T>(type, options);
     // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
     // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
     const items = new Map<string, MetadataKeyedItem<T>>();
@@ -3564,6 +3783,46 @@ export class MetadataManager implements IMetadataService {
     }
 
     return Array.from(items.values());
+  }
+
+  /**
+   * [#32517] {@link loadManyKeyed} for an unbundled type stored per
+   * `(package, name)`: every loader's keyed entries (each with the package
+   * its loader holds it for), then one entry per `(package, name)`
+   * ({@link pluralEntryKeys}): two packages' items of one name are both
+   * answered, and a one-holder name answers the first loader's entry, as
+   * before. Same failure posture as {@link loadManyKeyed}.
+   */
+  private async loadManyKeyedSlotted<T = any>(type: string, options?: MetadataLoadOptions): Promise<MetadataKeyedItem<T>[]> {
+    const gathered: MetadataKeyedItem<T>[] = [];
+    for (const loader of this.loaders.values()) {
+      try {
+        if (typeof loader.loadManyKeyed === 'function') {
+          for (const entry of await loader.loadManyKeyed<T>(type, options)) {
+            if (entry && typeof entry.name === 'string' && entry.name !== '') gathered.push(entry);
+          }
+        } else {
+          for (const name of await loader.list(type)) {
+            if (typeof name !== 'string' || name === '') continue;
+            const result = await loader.load(type, name, options);
+            if (result?.data != null) gathered.push({ name, data: result.data as T });
+          }
+        }
+        this.reportLoaderReadRecovered(loader.contract.name);
+      } catch (e) {
+        this.reportLoaderReadFailure(loader.contract.name, type, e);
+      }
+    }
+    const keys = pluralEntryKeys(type, gathered);
+    const kept = new Set<string>();
+    const out: MetadataKeyedItem<T>[] = [];
+    gathered.forEach((entry, at) => {
+      const key = keys[at]!;
+      if (kept.has(key)) return;
+      kept.add(key);
+      out.push({ name: entry.name, data: entry.data });
+    });
+    return out;
   }
 
   /**
@@ -3962,7 +4221,7 @@ export class MetadataManager implements IMetadataService {
         // in-memory delete that runs no `await` (`MemoryLoader`) has landed
         // before the invalidation below.
         const removal = receivedRemovalOf(p);
-        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal.packageId);
+        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal);
         try {
           this.invalidateForForeignWrite(p.type, p.event.name);
         } catch (err) {
@@ -4004,20 +4263,20 @@ export class MetadataManager implements IMetadataService {
    * loader whose delete is really asynchronous and so lands after the
    * receipt's own invalidation.
    */
-  private async removeNodeLocalCopies(type: string, name: string, packageId?: string): Promise<void> {
+  private async removeNodeLocalCopies(type: string, name: string, removal: ClusterMetadataRemoval): Promise<void> {
     let removed = false;
     for (const loader of this.loaders.values()) {
       if (!isNodeLocalRemovalTarget(loader)) continue;
       removed = true;
       try {
-        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
+        await this.deleteMetaItemFromLoader(loader, type, name, removal);
       } catch (error) {
         this.logger.error(
           `[MetadataManager] Loader \`${loader.contract.name}\` could NOT delete \`${type}/${name}\` that a cluster peer ` +
             `removed — this node keeps serving the item from that loader while the node that removed it answers nothing. ` +
             `Nothing looks broken on either node. Fix: re-issue the removal of \`${type}/${name}\` on this node.`,
           error instanceof Error ? error : undefined,
-          { loader: loader.contract.name, type, name, packageId, error },
+          { loader: loader.contract.name, type, name, packageId: removal.packageId, error },
         );
       }
     }

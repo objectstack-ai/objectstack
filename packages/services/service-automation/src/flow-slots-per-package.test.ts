@@ -931,3 +931,119 @@ describe('#31696 [R3] every record of a run follows its key when the name become
         expect(ran).toEqual(['p1']);
     });
 });
+
+/**
+ * [#32183, ADR-0150 D3; epic ruling R4-G] The engine reads every holder of a
+ * name two slots hold, a disabled package's included, so a disable moves no
+ * run's answer: the slot table's `heldByMany`, the shared name's refusal and
+ * the shared branch of `resolveFlowKey` answer as `main` does, where the
+ * registry's holder read did not yet leave a disabled package out. The
+ * served judgment of the run doors is #32670's.
+ *
+ * Two states, as a disable reaches the engine: a runtime disable (both slots
+ * stay armed: `disablePackage` unregisters nothing from the engine), and a
+ * boot disable (only the enabled holder's flows are armed, the registry holds
+ * both). Pinned as parity: for every non-empty disabled set, in both
+ * registration orders, the bare execute and a subflow call from a caller flow
+ * of each package answer what they answer with the same flows armed and
+ * nothing disabled. The CONTROL says what that answer is.
+ */
+describe('[#32183] a disable moves no run of a name two slots hold: the engine reads every holder (R4-G)', () => {
+    const OPS = 'com.acme.ops';
+    const BOTH = 'com.acme.both';
+    const NONE = 'com.acme.none';
+    const CALLERS = [P1, P2, OPS, BOTH, NONE];
+    const goOf = (packageId: string) => `go_${packageId.split('.').pop()}`;
+    const tagOf = (packageId: string) => packageId.split('.').pop()!;
+
+    /** A fresh registry and engine, every package installed. */
+    function reset(): void {
+        registry = new SchemaRegistry();
+        registry.logLevel = 'silent';
+        loaderSets = {};
+        ran = [];
+        engine = newEngine();
+        install(P1);
+        install(P2);
+        install(OPS, [P1]);
+        install(BOTH, [P1, P2]);
+        install(NONE);
+    }
+
+    /** `body` held by `packageId` in the registry and its loader set, and not armed in the engine. */
+    function heldOnly(packageId: string, body: { name: string }): void {
+        registry.registerItem('flow', { ...body, _packageId: packageId }, 'name' as never, packageId);
+        loaderSets[body.name] = [...new Set([...(loaderSets[body.name] ?? []), packageId])];
+    }
+
+    /**
+     * Both holders ship `f` and every package ships its caller flow, in
+     * `order`; a package of `unarmed` is held in the registry only (a boot
+     * disable arms none of its flows); then `disabled` is disabled.
+     */
+    function setUp(order: readonly string[], unarmed: readonly string[], disabled: readonly string[]): void {
+        reset();
+        for (const holder of order) (unarmed.includes(holder) ? heldOnly : ship)(holder, leaf('f', tagOf(holder)));
+        for (const id of CALLERS) (unarmed.includes(id) ? heldOnly : ship)(id, caller(goOf(id), 'f'));
+        for (const id of disabled) registry.disablePackage(id);
+    }
+
+    /** The bare execute's answer, and each armed caller flow's. */
+    async function answersOf(unarmed: readonly string[]): Promise<Record<string, unknown>> {
+        const out: Record<string, unknown> = {};
+        const run = async (name: string) => {
+            ran = [];
+            const result = await engine.execute(name);
+            return { success: result.success, error: result.error, ran: [...ran] };
+        };
+        out.bare = await run('f');
+        for (const id of CALLERS) if (!unarmed.includes(id)) out[goOf(id)] = await run(goOf(id));
+        return out;
+    }
+
+    const ORDERS = [[P1, P2], [P2, P1]];
+    const cases = (sets: readonly (readonly string[])[]) =>
+        ORDERS.flatMap((order) => sets.map((disabled) => [order.join(' then '), disabled.join(' and '), order, disabled] as const));
+
+    it.each(cases([[P1], [P2], [P1, P2]]))(
+        'runtime disable, registered %s, %s disabled: every run answers as with nothing disabled',
+        async (_o, _d, order, disabled) => {
+            setUp(order, [], []);
+            const before = await answersOf([]);
+            setUp(order, [], disabled);
+            expect(await answersOf([])).toEqual(before);
+        },
+    );
+
+    it.each(cases([[P1], [P2]]))(
+        'boot disable, registered %s, %s disabled (its flows not armed): every run answers as with the same flows armed and nothing disabled',
+        async (_o, _d, order, disabled) => {
+            setUp(order, disabled, []);
+            const before = await answersOf(disabled);
+            setUp(order, disabled, disabled);
+            expect(await answersOf(disabled)).toEqual(before);
+        },
+    );
+
+    it('CONTROL — both slots armed, nothing disabled: what `main` answers', async () => {
+        setUp([P1, P2], [], []);
+        const answers = await answersOf([]);
+        expect(answers.bare).toMatchObject({ success: false, ran: [] });
+        expect(String((answers.bare as { error?: string }).error)).toContain(P1);
+        expect(String((answers.bare as { error?: string }).error)).toContain(P2);
+        expect(answers[goOf(P1)]).toMatchObject({ success: true, ran: ['alpha'] });
+        expect(answers[goOf(P2)]).toMatchObject({ success: true, ran: ['beta'] });
+        expect(answers[goOf(OPS)]).toMatchObject({ success: true, ran: ['alpha'] });
+        expect(answers[goOf(BOTH)]).toMatchObject({ success: false, ran: [] });
+        expect(answers[goOf(NONE)]).toMatchObject({ success: false, ran: [] });
+    });
+
+    it('CONTROL — only beta\'s slot armed, both held, nothing disabled: what `main` answers', async () => {
+        setUp([P1, P2], [P1], []);
+        const answers = await answersOf([P1]);
+        expect(answers.bare).toMatchObject({ success: false, ran: [] });
+        expect(String((answers.bare as { error?: string }).error)).toContain(P1);
+        expect(answers[goOf(P2)]).toMatchObject({ success: true, ran: ['beta'] });
+        expect(answers[goOf(OPS)]).toMatchObject({ success: false, ran: [] });
+    });
+});

@@ -8819,12 +8819,27 @@ export class SchemaRegistry {
    * reads it. A package holding a member its dependency also holds is a
    * holder (a clash, refused by the resolver, never folded away).
    *
+   * [#32183, ADR-0150 D3] The SERVED holders: a package that is disabled
+   * ({@link isPackageDisabled}, the predicate {@link listItems} hides its
+   * items by) holds no name, so a by-name door judges the same holders the
+   * list shows. Disable is reversible: its items stay registered, and its
+   * holding counts again on enable. The caller's own holding stays, as for a
+   * bundle addition, so a caller inside a disabled package answers as before.
+   * The disabled holders leave the set the bundle-addition rule settled: a
+   * disable never promotes a dependent's addition to a holder of the name.
+   * `options.includeDisabledPackages` reads every holder, disabled or not —
+   * the read a DURABLE judgment takes (a backfill binding a stored row, the
+   * stored-reference report, the load audit), because a binding must not
+   * move with a reversible disable. The install gate reads its own set
+   * (`bareNamePackageHolders`) and is not this read.
+   *
    * @param callerPackageId - The package a bare read is made from. Its own
    *   holding stays in the set even when it is an addition, so its step 1
    *   (its own item, ADR-0150 D3) answers as before: the addition only stops
    *   counting toward OTHER callers' ambiguity (epic seat review 6729484996).
    */
-  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null): string[] {
+  packageScopedHoldersOf(type: string, name: string, callerPackageId?: string | null,
+    options?: { includeDisabledPackages?: boolean }): string[] {
     const collection = this.metadata.get(type);
     if (!collection) return [];
     const composite = this.compositeHoldersOf(collection, name);
@@ -8834,11 +8849,14 @@ export class SchemaRegistry {
       const bound = this.overlaySlotBinding(item, name, collection, compositeSet);
       if (typeof bound === 'string') holders.add(bound);
     }
+    const served = (ids: string[]): string[] => options?.includeDisabledPackages === true
+      ? ids
+      : ids.filter((id) => id === callerPackageId || !this.isPackageDisabled(id));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
-    if (!disc || holders.size < 2) return [...holders];
+    if (!disc || holders.size < 2) return served([...holders]);
     const membersOf = new Map<string, Set<string>>();
     for (const id of holders) membersOf.set(id, this.bundleMembersHeldBy(type, collection, name, id, compositeSet, disc));
-    return [...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf));
+    return served([...holders].filter((id) => id === callerPackageId || !this.isBundleAddition(id, membersOf)));
   }
 
   /**
@@ -10489,6 +10507,13 @@ export class SchemaRegistry {
    * is reachable from `callerPackageId`, or more than one is). The audits
    * below read it, so the boot, the install door and the served field share
    * one answer.
+   *
+   * [#32183] Judged over every holder, a disabled package's included: a
+   * field's vocabulary is a durable judgment, so a reversible disable of the
+   * package holding a list a live field names neither refuses the next boot
+   * (the disabled state is seeded before the load audit runs) nor empties the
+   * field's options. The by-name `picklist` read (`resolveItem`) is a door and
+   * judges the served holders.
    */
   picklistReferenceVerdict(
     name: string,
@@ -10496,7 +10521,9 @@ export class SchemaRegistry {
     pendingManifests?: readonly unknown[],
   ): PackageScopedResolution<PicklistItemLike> {
     const registry = pendingManifests && pendingManifests.length > 0 ? this.withPendingManifests(pendingManifests) : this;
-    return resolvePackageScopedName<PicklistItemLike>(registry, { type: 'picklist', name, callerPackageId });
+    return resolvePackageScopedName<PicklistItemLike>(registry, {
+      type: 'picklist', name, callerPackageId, includeDisabledPackages: true,
+    });
   }
 
   /**
@@ -10546,8 +10573,11 @@ export class SchemaRegistry {
         ...this.getAllPackages().filter((row) => !pending.has(artifactPackageId(row.manifest) ?? '')),
         ...pending.values(),
       ],
-      packageScopedHoldersOf: (type, name) => [
-        ...new Set([...this.packageScopedHoldersOf(type, name), ...pendingHolders(type, name)]),
+      // [#32183] The asked holder set (served, or every holder for a
+      // durable judgment such as {@link picklistReferenceVerdict}), with the
+      // artifact's own lists beside it.
+      packageScopedHoldersOf: (type, name, callerPackageId, options) => [
+        ...new Set([...this.packageScopedHoldersOf(type, name, callerPackageId, options), ...pendingHolders(type, name)]),
       ],
       getPackageScopedItem: <T>(type: string, name: string, packageId: string, member?: string): T | undefined =>
         pendingHolders(type, name).has(packageId)
@@ -10770,6 +10800,14 @@ export class SchemaRegistry {
    * arrival's doing and is left out. `ownRefusals: 'ambiguous'` (the per-item
    * seams) keeps only the arrival's own references and extensions the
    * resolver refuses as ambiguous.
+   *
+   * [#32183, ADR-0150 D3] Judged over EVERY holder, a disabled package's
+   * included, before and after the arrival, because the field verdict
+   * ({@link picklistReferenceVerdict}) reads every holder: the install audit
+   * and the served field agree for a disabled holder. Judged over the served
+   * holders, a field resolving to a disabled package's list would read as
+   * refused already and be skipped, and an arrival making it ambiguous would
+   * be admitted, the field silently losing its options.
    */
   judgePicklistArrival(
     manifests: readonly unknown[],
@@ -10787,9 +10825,17 @@ export class SchemaRegistry {
       const key = JSON.stringify([name, caller]);
       let entry = memo.get(key);
       if (!entry) {
+        // [#32183] Every holder, a disabled package's included, on both
+        // sides: the field verdict reads every holder
+        // ({@link picklistReferenceVerdict}), so the install audit and the
+        // served field agree for a disabled holder.
         memo.set(key, entry = {
-          before: resolvePackageScopedName<PicklistItemLike>(this, { type: 'picklist', name, callerPackageId: caller }),
-          after: resolvePackageScopedName<PicklistItemLike>(view, { type: 'picklist', name, callerPackageId: caller }),
+          before: resolvePackageScopedName<PicklistItemLike>(this, {
+            type: 'picklist', name, callerPackageId: caller, includeDisabledPackages: true,
+          }),
+          after: resolvePackageScopedName<PicklistItemLike>(view, {
+            type: 'picklist', name, callerPackageId: caller, includeDisabledPackages: true,
+          }),
         });
       }
       return entry;
