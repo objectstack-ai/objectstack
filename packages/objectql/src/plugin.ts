@@ -1788,9 +1788,9 @@ export class ObjectQLPlugin implements Plugin {
    * picklist re-judge refused the reload whole.
    */
   private refreshReloadedPackages(ctx: PluginContext, payload: unknown): 'refused' | undefined {
-    if (!this.ql) return;
+    if (!this.ql) return undefined;
     const metadata = (payload as { metadata?: unknown } | undefined)?.metadata as Record<string, any> | undefined;
-    if (!metadata || typeof metadata !== 'object') return;
+    if (!metadata || typeof metadata !== 'object') return undefined;
     // The shape `AppPlugin` hands the `manifest` service: the manifest's
     // fields with the collections spread over them.
     const artifact = metadata.manifest && typeof metadata.manifest === 'object'
@@ -1805,7 +1805,7 @@ export class ObjectQLPlugin implements Plugin {
       ctx.logger.warn('[ObjectQLPlugin] reload could not read the artifact\'s packages — registry entries keep their previous definitions', {
         error: e?.message,
       });
-      return;
+      return undefined;
     }
     const scope = {
       packageIds: entries
@@ -1849,6 +1849,7 @@ export class ObjectQLPlugin implements Plugin {
     if (refreshed.length > 0) {
       ctx.logger.info('[ObjectQLPlugin] reload refreshed the registry entries of its packages', { packageIds: refreshed });
     }
+    return undefined;
   }
 
   private ingestReloadedObjects(ctx: PluginContext, payload: unknown): void {
