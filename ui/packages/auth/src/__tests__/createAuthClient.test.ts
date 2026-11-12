@@ -662,3 +662,49 @@ describe('createAuthClient — enrollment rejections carry the status and the co
     expect(rejection.message).toBe('Two-factor verification failed (404)');
   });
 });
+
+// objectstack#32432 — a sign-in refusal keeps the body's `details`. plugin-auth
+// answers the password sign-in of an account its identity provider deactivated
+// through SCIM with better-auth's `403 BANNED_USER` plus `details: { cause:
+// 'scim_deactivated' }`; an administrator's ban answers the same code with no
+// `details`. The real better-auth client runs here; only `fetch` is a stub.
+describe('createAuthClient — a sign-in refusal carries the body details (objectstack#32432)', () => {
+  type Rejection = Error & { code?: string; details?: Record<string, unknown> };
+  const BAN_MESSAGE =
+    'You have been banned from this application. Please contact support if you believe this is an error.';
+  const refusalOf = async (body: Record<string, unknown>): Promise<Rejection> => {
+    const { mockFn } = createMockFetch({ '/sign-in/email': { status: 403, body } });
+    const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
+    return client.signIn({ email: 'dana@example.com', password: 'pass123' }).then(
+      () => {
+        throw new Error('expected the sign-in to be refused, but it resolved');
+      },
+      (err: unknown) => err as Rejection,
+    );
+  };
+
+  it('a SCIM deactivation: details.cause reaches the thrown error beside the unchanged code and message', async () => {
+    const rejection = await refusalOf({
+      code: 'BANNED_USER',
+      message: BAN_MESSAGE,
+      details: { cause: 'scim_deactivated' },
+    });
+    expect(rejection.code).toBe('BANNED_USER');
+    expect(rejection.details).toEqual({ cause: 'scim_deactivated' });
+    expect(rejection.message).toBe(BAN_MESSAGE);
+  });
+
+  it('CONTROL: an administrator\'s ban carries no details', async () => {
+    const rejection = await refusalOf({ code: 'BANNED_USER', message: BAN_MESSAGE });
+    expect(rejection.code).toBe('BANNED_USER');
+    expect(rejection).not.toHaveProperty('details');
+    expect(rejection.message).toBe(BAN_MESSAGE);
+  });
+
+  it('a details value that is not a plain object is not carried', async () => {
+    for (const details of ['scim_deactivated', ['scim_deactivated'], null]) {
+      const rejection = await refusalOf({ code: 'BANNED_USER', message: BAN_MESSAGE, details });
+      expect(rejection, JSON.stringify(details)).not.toHaveProperty('details');
+    }
+  });
+});

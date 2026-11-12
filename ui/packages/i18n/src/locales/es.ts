@@ -2798,6 +2798,7 @@ const es = {
         invalidCredentials: "Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Restablécela para iniciar sesión de inmediato.",
         invalidCredentialsNoMail: 'Correo o contraseña inválidos. Tras varios intentos fallidos, el inicio de sesión se pausa durante un tiempo. ¿Olvidaste tu contraseña? Pide a tu administrador que la restablezca.',
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",
+        accountDeactivated: "Tu organización ha desactivado tu cuenta. Ponte en contacto con tu administrador.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
