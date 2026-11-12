@@ -37,7 +37,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SysNotification } from '@objectstack/platform-objects';
+import { SysMember, SysNotification } from '@objectstack/platform-objects';
+import { RecipientResolver } from './recipient-resolver.js';
 import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service.js';
 import { createInboxChannel, INBOX_OBJECT, RECEIPT_OBJECT } from './inbox-channel.js';
 import { SqlNotificationOutbox, DELIVERY_OBJECT } from './sql-outbox.js';
@@ -135,5 +136,71 @@ describe('#23284 — a notification no producer attributed takes the owner ADR-0
         expect(await organizationsOf(ql, NOTIFICATION_EVENT_OBJECT)).toEqual(['org_b']);
         expect(await organizationsOf(ql, INBOX_OBJECT)).toEqual(['org_b']);
         expect(await organizationsOf(ql, RECEIPT_OBJECT)).toEqual(['org_b']);
+    });
+});
+
+describe('[#32445] org:members — an emit reaches the inbox of every member of its organization, and only those', () => {
+    // A user record the member object's title formula can read (`name`, `email`).
+    const SYS_USER_WITH_EMAIL = { ...SYS_USER, fields: { ...SYS_USER.fields, email: { type: 'text', label: 'Email' } } };
+    const ORG_A = ['u_owner', 'u_member', 'u_no_role', 'u_custom', 'u_admin'];
+
+    async function bootMembers(): Promise<ObjectQL> {
+        const ql = new ObjectQL();
+        ql.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }), true);
+        await ql.init();
+        for (const def of [SYS_ORGANIZATION, SYS_USER_WITH_EMAIL, SysMember, SysNotification, InboxMessage, NotificationReceipt, NotificationDelivery, NotificationPreference]) {
+            ql.registry.registerObject(def as any, '@objectstack/service-messaging');
+        }
+        await ql.syncSchemas();
+        ql.setTenancyPostureProvider(() => 'single');
+        for (const id of ['org_a', 'org_b']) await ql.insert('sys_organization', { id, name: id }, SYSTEM);
+        for (const id of [...ORG_A, 'u_elsewhere']) await ql.insert('sys_user', { id, name: id, email: `${id}@example.test` }, SYSTEM);
+        const member = (id: string, user: string, organization: string, role: string | null) =>
+            ql.insert('sys_member', { id, user_id: user, organization_id: organization, role }, SYSTEM);
+        await member('m1', 'u_owner', 'org_a', 'owner');
+        await member('m2', 'u_member', 'org_a', 'member');
+        await member('m3', 'u_no_role', 'org_a', null);
+        await member('m5', 'u_admin', 'org_a', 'admin');
+        await member('m6', 'u_elsewhere', 'org_b', 'member');
+        // A role outside the built-in four is refused on write today, so a row
+        // holding one is data at rest from an earlier release: seeded through
+        // the driver, never through the engine's write.
+        await ql.getDriverForObject('sys_member')!.create('sys_member', {
+            id: 'm4', user_id: 'u_custom', organization_id: 'org_a', role: 'sales_rep',
+        });
+        engine = ql;
+        return ql;
+    }
+
+    it('pages past one page (two members a page), delivers to all five members of org_a, and to no one in org_b', async () => {
+        const ql = await bootMembers();
+        const resolver = new RecipientResolver({ getData: () => ql as any, logger: silentLogger, membershipPageSize: 2 });
+        const messaging = new MessagingService({ logger: silentLogger, getData: () => ql as any, recipientResolver: resolver });
+        messaging.registerChannel(createInboxChannel({ getData: () => ql as any }));
+
+        const result = await messaging.emit({
+            topic: 'org.announcement',
+            audience: 'org:members',
+            organizationId: 'org_a',
+            channels: ['inbox'],
+            payload: { title: 'Maintenance window', body: 'Saturday 02:00-04:00.' },
+        });
+
+        expect(result.delivered).toBe(ORG_A.length);
+        const inbox = (await ql.find(INBOX_OBJECT, { fields: ['user_id', 'organization_id'] }, SYSTEM)) ?? [];
+        expect(inbox.map((r: Record<string, unknown>) => r.user_id).sort()).toEqual([...ORG_A].sort());
+        expect(new Set(inbox.map((r: Record<string, unknown>) => r.organization_id))).toEqual(new Set(['org_a']));
+    });
+
+    it('an emit that names no organization reaches nobody through org:members — never every organization', async () => {
+        const ql = await bootMembers();
+        const messaging = new MessagingService({ logger: silentLogger, getData: () => ql as any });
+        messaging.registerChannel(createInboxChannel({ getData: () => ql as any }));
+
+        // Two organizations under `single`: the event write itself is refused
+        // before any audience is read (ADR-0131 D9), so nothing is delivered.
+        await expect(messaging.emit({ topic: 'org.announcement', audience: 'org:members', channels: ['inbox'], payload: { title: 't', body: 'b' } }))
+            .rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED' });
+        expect((await ql.find(INBOX_OBJECT, { fields: ['user_id'] }, SYSTEM)) ?? []).toEqual([]);
     });
 });

@@ -318,9 +318,18 @@ function fieldsOf(reference: StoredPackageReference, packageColumnPresent = true
   return [...fields];
 }
 
-/** Ask the one rule, as the reference's backfill asks it. */
+/**
+ * Ask the one rule, as the reference's backfill asks it: over every holder, a
+ * disabled package's included (#32183), since a binding never moves with a
+ * reversible disable. Every D8 backfill this report covers asks that way: the
+ * flow rows (R7–R10) through the automation engine's `durableFlowHolder`, the
+ * connector row (R11) through its resolver with `includeDisabledPackages`,
+ * the rest through objectql's resolver or the registry's holder read with it.
+ * So a row resolved here is one the next boot binds, its package disabled or
+ * not.
+ */
 function ask(registry: StoredReferenceRegistry, type: ReferencedType, name: string, callerPackageId: string | null): PackageScopedResolution {
-  return resolvePackageScopedName(registry, { type, name, callerPackageId });
+  return resolvePackageScopedName(registry, { type, name, callerPackageId, includeDisabledPackages: true });
 }
 
 /** The report's reading of a refusal (module doc). */
@@ -442,7 +451,10 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
       const pairId = row.package_id;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || typeof pairId !== 'string' || !isCustomizationPackage(pairId)) continue;
-      const owners = pairMemberOwners(pairId, registry.packageScopedHoldersOf(type, name) ?? [], installed, storedBody(row.metadata));
+      // [#32183] Every holder, a disabled package's included: the report is a
+      // durable judgment, so its listing never moves with a reversible disable.
+      const every = registry.packageScopedHoldersOf(type, name, null, { includeDisabledPackages: true }) ?? [];
+      const owners = pairMemberOwners(pairId, every, installed, storedBody(row.metadata));
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,
@@ -474,7 +486,7 @@ async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry:
       const { id, type, name } = row;
       if (id === null || id === undefined || typeof type !== 'string' || !types.includes(type) || typeof name !== 'string') continue;
       if (row.state !== 'active' || (row.package_id !== null && row.package_id !== undefined && row.package_id !== '')) continue;
-      const owners = packageLessRowOwners(registry as never, type, name);
+      const owners = packageLessRowOwners(registry as never, type, name, { includeDisabledPackages: true });
       if (owners.length < 2) continue;
       findings.push({
         table: 'sys_metadata', id: String(id), type, name,
