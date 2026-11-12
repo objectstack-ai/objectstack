@@ -485,7 +485,8 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
   it('a second package holder is still refused by phase 1, so no reader can meet two', () => {
     sealedWithHolder(false);
     install(B);
-    expect(() => ship('flow', NAME, B)).toThrow();
+    // A type whose rule has not narrowed to the namespace (`flow` has, #31696).
+    expect(() => ship('webhook', NAME, B)).toThrow();
   });
 });
 

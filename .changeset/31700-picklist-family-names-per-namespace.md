@@ -53,7 +53,7 @@ The fix for every refusal is the address that names the holder: `?package=<id>`,
 
 The unresolved-picklist refusal (`describeUnresolvedPicklistReferences`) keeps "that no loaded package declares" when no line carries a refusal; a refused name now reads "A picklist name resolves to no one list: …", with a remedy for both kinds (declare the list, or make exactly one holder reachable).
 
-Every other covered type (flow, webhook, connector, tool) keeps one package holder per deployment; `email_template` narrowed in #31699.
+Every other covered type (webhook, connector, tool) keeps one package holder per deployment; `email_template` narrowed in #31699 and `flow` in #31696.
 
 `migrateDatabaseLoaderRowPackages` (`@objectstack/metadata/migrations`, `bind-database-loader-row-packages`) now also binds `picklist`, `mapping` and `dataset` rows to the package their body names: it binds every `PACKAGE_SLOTTED_STORE_TYPES` row.
 

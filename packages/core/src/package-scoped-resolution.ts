@@ -133,7 +133,9 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
  * `skill` first (#31701), then the object-less `action` (#31697), then
- * `email_template` (#31699), then the picklist family (#31700): `picklist`,
+ * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
+ * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
+ * name by package), then the picklist family (#31700): `picklist`,
  * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
  * type not listed here keeps one package holder per deployment.
  *
@@ -154,6 +156,7 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'skill',
   'action',
   'email_template',
+  'flow',
   // the picklist family (#31700)
   'picklist',
   'mapping',
