@@ -49,8 +49,37 @@ describe('finding user text · the locale ladder (request locale, then workspace
 
   it('falls to the workspace default when the request names no locale, one off the table, or one the entry lacks', () => {
     expect(userTextLocaleOf(entry, [undefined, 'zh-Hans'])).toBe('zh-Hans');
-    expect(userTextLocaleOf(entry, ['pt-PT', 'zh-Hans'])).toBe('zh-Hans');
+    expect(userTextLocaleOf(entry, ['vi-VN', 'zh-Hans'])).toBe('zh-Hans');
     expect(userTextLocaleOf(entry, ['ja', 'zh-CN'])).toBe('zh-Hans');
+    // `pt-PT` names `pt-BR` (through `pt`), which this entry has no sentence for.
+    expect(userTextLocaleOf(entry, ['pt-PT', 'zh-CN'])).toBe('zh-Hans');
+  });
+
+  it('reads a region or script code as its table language, one subtag shorter at a time, ahead of the default', () => {
+    /** An entry with sentences in more languages, as a producer's catalog has. */
+    const wide: UserTextEntry = {
+      en: () => 'en',
+      'zh-Hans': () => 'zh-Hans',
+      'zh-Hant': () => 'zh-Hant',
+      fr: () => 'fr',
+      es: () => 'es',
+      'pt-BR': () => 'pt-BR',
+    };
+    // A browser's region code reaches its own language, never the workspace default.
+    expect(userTextLocaleOf(wide, ['fr-FR', 'zh-CN'])).toBe('fr');
+    expect(userTextLocaleOf(wide, ['en-GB', 'zh-CN'])).toBe('en');
+    expect(userTextLocaleOf(wide, ['es-MX', 'zh-CN'])).toBe('es');
+    expect(userTextLocaleOf(wide, ['pt-PT', 'zh-CN'])).toBe('pt-BR');
+    expect(userTextLocaleOf(wide, ['EN-gb', 'zh-CN'])).toBe('en');
+    expect(userTextLocaleOf(wide, ['zh-Hant-US', 'zh-CN'])).toBe('zh-Hant');
+    // The workspace default is read the same way.
+    expect(userTextLocaleOf(wide, [undefined, 'fr-FR'])).toBe('fr');
+    expect(userTextLocaleOf(wide, ['vi-VN', 'fr-CA'])).toBe('fr');
+    // The first prefix the table names decides: a Traditional code whose
+    // language the entry lacks takes the next rung, never `zh` → Simplified.
+    expect(userTextLocaleOf(entry, ['zh-Hant-TW'])).toBe('en');
+    expect(userTextLocaleOf(entry, ['zh-TW'])).toBe('en');
+    expect(userTextLocaleOf(entry, ['zh-Hant-US', 'zh-CN'])).toBe('zh-Hans');
   });
 
   it('ends at en: an unknown locale, and a platform locale a rule has no sentence for, both render English', () => {
@@ -152,7 +181,19 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
         fields: { 'deal.restricted_note': { readable: true, editable: false } },
       })],
     },
-    params: { permissionSet: 'deal_manager', field: 'deal.restricted_note', object: 'deal', bypass: 'modify' },
+    params: { permissionSet: 'deal_manager', field: 'deal.restricted_note', object: 'deal', bypass: 'modify', inert: 'edit' },
+  },
+  {
+    label: 'field mask and lock under Modify All',
+    rule: SECURITY_SUPERUSER_FIELD_MASK_INERT,
+    stack: {
+      permissions: [PermissionSetSchema.parse({
+        name: 'deal_manager', label: 'Deal manager',
+        objects: { deal: { allowRead: true, allowEdit: true, modifyAllRecords: true } },
+        fields: { 'deal.margin': { readable: false, editable: false } },
+      })],
+    },
+    params: { permissionSet: 'deal_manager', field: 'deal.margin', object: 'deal', bypass: 'modify', inert: 'both' },
   },
   {
     label: 'field mask under View All',
@@ -164,7 +205,7 @@ const CASES: ReadonlyArray<{ label: string; rule: string; stack: Record<string, 
         fields: { 'sys_user.email': { readable: false, editable: false } },
       })],
     },
-    params: { permissionSet: 'directory_masked', field: 'sys_user.email', object: 'sys_user', bypass: 'view' },
+    params: { permissionSet: 'directory_masked', field: 'sys_user.email', object: 'sys_user', bypass: 'view', inert: 'read' },
   },
   {
     label: 'hidden master reference',
@@ -230,7 +271,7 @@ const findingOf = (c: (typeof CASES)[number]): SecurityFinding => {
 /** The params that are NAMES the sentence must show (not the variant selectors). */
 const namesOf = (params: Record<string, string>): string[] =>
   Object.entries(params)
-    .filter(([key, value]) => key !== 'bypass' && key !== 'remedy' && value !== '')
+    .filter(([key, value]) => key !== 'bypass' && key !== 'remedy' && key !== 'inert' && value !== '')
     .map(([, value]) => value);
 
 describe('security-posture user text · the catalog', () => {
@@ -295,6 +336,15 @@ describe('security-posture user text · rendered from the rule\'s real findings'
     expect(findingUserMessage(finding, [undefined, undefined])).toBe(findingUserMessage(finding, ['en']));
   });
 
+  it('a request in a region code of a catalog language answers in that language, not the workspace default', () => {
+    const finding = findingOf(CASES[0]!);
+    expect(findingUserMessage(finding, ['fr-FR', 'zh-CN'])).toBe(findingUserMessage(finding, ['fr']));
+    expect(findingUserMessage(finding, ['en-GB', 'zh-CN'])).toBe(findingUserMessage(finding, ['en']));
+    expect(findingUserMessage(finding, ['de-AT', 'zh-CN'])).toBe(findingUserMessage(finding, ['de']));
+    expect(findingUserMessage(finding, ['ko-KR', 'zh-CN'])).toBe(findingUserMessage(finding, ['ko']));
+    expect(findingUserMessage(finding, ['zh-Hant-HK', 'en'])).toBe(findingUserMessage(finding, ['zh-Hant']));
+  });
+
   it('the owner-policy sentence prescribes the opt-in only where it admits, as the rule\'s hint does', () => {
     const [optIn, keyOwner, addOwner] = CASES.filter((c) => c.rule === SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN)
       .map((c) => findingUserMessage(findingOf(c), ['en'])!);
@@ -305,11 +355,39 @@ describe('security-posture user text · rendered from the rule\'s real findings'
   });
 
   it('names the bypass the set actually holds', () => {
-    const [modify, view] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
+    const [modifyLock, modifyBoth, view] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
       .map((c) => findingUserMessage(findingOf(c), ['en'])!);
-    expect(modify).toContain('Modify All Records');
+    for (const modify of [modifyLock!, modifyBoth!]) expect(modify).toContain('Modify All Records');
     expect(view).toContain('View All Records');
     expect(view).not.toContain('Modify All Records');
+  });
+
+  it('calls ineffective only the half of the field restriction the bypass unbinds, as the rule\'s message does', () => {
+    const [modifyLock, modifyBoth, view] = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT)
+      .map((c) => findingUserMessage(findingOf(c), ['en'])!);
+    // View All beside a read mask and an edit lock: only the mask is inert.
+    // The lock still binds, so the sentence neither calls the restriction
+    // ineffective as a whole nor prescribes deleting it.
+    expect(view).toContain('hiding field "sys_user.email" has no effect');
+    expect(view).not.toContain('read-only');
+    expect(view).not.toContain('delete the field restriction');
+    expect(view).toContain('let the set read the field');
+    // Modify All beside an edit lock alone: the lock is inert.
+    expect(modifyLock).toContain('making field "deal.restricted_note" read-only has no effect');
+    expect(modifyLock).not.toContain('hiding');
+    expect(modifyLock).toContain('delete the field restriction');
+    // Modify All beside both: both halves are inert.
+    expect(modifyBoth).toContain('hiding field "deal.margin" and making it read-only have no effect');
+    expect(modifyBoth).toContain('delete the field restriction');
+  });
+
+  it('renders the three field-restriction sentences apart in every platform locale', () => {
+    // Same names and the same bypass, so only `inert` tells the three apart.
+    const findings = CASES.filter((c) => c.rule === SECURITY_SUPERUSER_FIELD_MASK_INERT).map(findingOf);
+    for (const tag of PLATFORM_LOCALE_TAGS) {
+      const [lock, both, view] = findings.map((f) => findingUserMessage({ ...f, userTextParams: { ...f.userTextParams!, permissionSet: 'p', field: 'f', object: 'o', bypass: 'modify' } }, [tag])!);
+      expect(new Set([lock, both, view]).size, tag).toBe(3);
+    }
   });
 });
 

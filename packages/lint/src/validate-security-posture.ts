@@ -1432,7 +1432,15 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         hint:
           `Remove ${bit} from ${via} and reach the rows with readScope/writeScope or a row-level policy, ` +
           `or delete the entry if the bypass is meant`,
-        userTextParams: { permissionSet: psName, field: flsKey, object: flsObject, bypass: modifyAll ? 'modify' : 'view' },
+        // `inert` names the half the user sentence may call ineffective: beside
+        // View All only the read mask is, and the edit lock still binds.
+        userTextParams: {
+          permissionSet: psName,
+          field: flsKey,
+          object: flsObject,
+          bypass: modifyAll ? 'modify' : 'view',
+          inert: inertBits.length > 1 ? 'both' : readMasked && viewAll ? 'read' : 'edit',
+        },
       });
     }
 

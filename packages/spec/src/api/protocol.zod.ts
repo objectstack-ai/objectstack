@@ -1009,9 +1009,11 @@ export const GetMetaItemLayeredResponseSchema = lazySchema(() => z.object({
  * request's locale, the rule id stays unchanged, and every client of the door
  * (the console, the CLI, MCP) receives the text already in that language
  * instead of each keeping a per-rule translation table. Same field name and same producer-marked meaning
- * as `ApiErrorSchema.userMessage` (`contract.zod.ts`), under the same locale
- * ladder: the locale the request names, else the workspace default, else
- * `en`. Where the sentences live is the producer's own business; the authoring
+ * as `ApiErrorSchema.userMessage` (`contract.zod.ts`), under the ladder its
+ * "Language" section declares for platform-composed text: the locale the
+ * request names, else the workspace default, else `en`, each code read
+ * against the platform locale table whole and then one subtag shorter at a
+ * time. Where the sentences live is the producer's own business; the authoring
  * rules in `@objectstack/lint` keep one catalog per rule file, covering the
  * platform locale table (`PLATFORM_LOCALES`, `@objectstack/spec/system`).
  */

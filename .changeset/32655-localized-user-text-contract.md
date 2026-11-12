@@ -8,7 +8,7 @@ feat(spec, lint): user-facing refusal and advisory text is declared to be in the
 Clause-②: yes
 Metadata-protocol: added
 
-The two error envelopes' `userMessage` (`ApiErrorSchema`, `EnhancedApiErrorSchema`) now state their language: the producer composes the text in the request's locale (the locale the request names, else the workspace default, else `en`, each read against the platform locale table), and consumers render it as received. The field's meaning is unchanged: producer-marked user-facing text, verbatim, present only when the producer opted in.
+The two error envelopes' `userMessage` (`ApiErrorSchema`, `EnhancedApiErrorSchema`) now state their language: the text is in the request's locale, composed by its producer, and consumers render it as received. Text the platform composes takes the locale the request names, else the workspace default, else `en`, each code read against the platform locale table whole and then one subtag shorter at a time (`fr-FR` reads as `fr`, `en-GB` as `en`). An app's own text, such as a hook's catalogued refusal, is served through the app's translations, else as declared. The field's meaning is unchanged: producer-marked user-facing text, verbatim, present only when the producer opted in.
 
 `RuntimeAuthoringIssueSchema`, the one finding shape of the save and publish doors' `advisories[]` and the 422's `issues[]`, gains an optional `userMessage` under the same rule: the finding's sentence for the person who saved the metadata, beside the unchanged `rule` id. `message` and `hint` stay the developer-facing English. A response without it parses exactly as before, and a client that parses the response now keeps the key instead of stripping it.
 

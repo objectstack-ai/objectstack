@@ -91,36 +91,61 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    *
    * The text is in the REQUEST's locale (ruling record 6819749037, option C:
    * text addressed to the end user comes back in the request's language,
-   * composed where it is produced). The ladder, read against the platform
-   * locale table (`PLATFORM_LOCALES` / `platformLocaleTagOf`,
+   * composed where it is produced). How a producer reaches that language
+   * depends on who wrote the text.
+   *
+   * PLATFORM-COMPOSED text, a sentence the platform authors per locale (an
+   * authoring rule's advisory, the finding twin of this field:
+   * `RuntimeAuthoringIssueSchema.userMessage` in `protocol.zod.ts`), follows
+   * one ladder over the platform locale table (`PLATFORM_LOCALES`,
    * `@objectstack/spec/system`):
    *
    *  1. the locale the request names — its `Accept-Language`, or `?locale` on
    *     the REST door;
-   *  2. else the workspace default — the `localization` settings' locale
-   *     (rungs 1 and 2 are the precedence `ExecutionContext.locale` already
-   *     resolves);
-   *  3. else `en`, the floor every producer carries.
+   *  2. else the workspace default — the `localization` settings' locale;
+   *  3. else `en`, which every platform-composed catalog carries.
    *
-   * A rung whose locale is not on the table, or that the producer has no text
-   * for, is passed over for the next one. The producer composes the text; a
-   * consumer renders it as received and keeps no per-code translation table of
-   * its own. "Verbatim" is unchanged by this: it binds the consumer, which
-   * never rewrites the text, not the producer's choice of language. The
-   * declared-refusal path already answers this way: a hook's catalogued
-   * refusal is served through `hooks.<hook>.refusals.<CODE>.message` in the
-   * caller's locale (`HookRefusalSchema`). The finding twin of this field is
-   * `RuntimeAuthoringIssueSchema.userMessage` (`protocol.zod.ts`), under the
-   * same ladder.
+   * Each rung's code is read through `platformLocaleTagOf`, the whole code
+   * first and then one subtag shorter at a time (`fr-FR` → `fr`, `en-GB` →
+   * `en`, `zh-Hant-US` → `zh-Hant`, `pt-PT` → `pt` → `pt-BR`). The first table
+   * language a prefix names is that rung's language, and no shorter prefix is
+   * tried after it, so a Traditional Chinese code never reads as `zh` and is
+   * never handed Simplified text. The platform's other table-keyed copy reads a
+   * caller's language the same way (`driverCatalogLocaleOf`,
+   * `storageTestCopyLocaleOf`). A rung that names no table language, or whose
+   * language the producer has no text for, is passed over for the next one.
+   *
+   * A producer needs rungs 1 and 2 as TWO values. `ExecutionContext.locale` is
+   * not them: it is their fold (the request's locale when the request names
+   * one, else the workspace default), so once a request names any locale the
+   * workspace default is gone from it, and a producer with no text in the
+   * request's language would skip rung 2 and land on `en`. The operation
+   * refusals composed by `renderOperationMessage` (`@objectstack/spec/system`)
+   * take one locale value today, so a request in a language that neither
+   * their built-in catalog nor a deployment translation holds reads `en`
+   * there, not the workspace default.
+   *
+   * APP-AUTHORED text, such as a hook's catalogued refusal (`HookRefusalSchema`),
+   * is not on this ladder: it is served through
+   * `hooks.<hook>.refusals.<CODE>.message` in the caller's locale, negotiated
+   * over whatever locales the app's translations hold, and otherwise as
+   * declared, in the app's own source language. No `en` floor is supplied for
+   * it.
+   *
+   * Either way the producer composes the text, and a consumer renders it as
+   * received and keeps no per-code translation table of its own. "Verbatim" is
+   * unchanged by this: it binds the consumer, which never rewrites the text,
+   * not the producer's choice of language.
    *
    * It never replaces `message` — the diagnostic channel keeps its own wording
    * for logs and developers.
    */
   userMessage: z.string().optional().describe(
-    'Producer-marked user-facing refusal text, verbatim, in the request\'s locale (else the workspace '
-    + 'default locale, else `en`). Present exactly when the producer opted in at throw time; consumers '
-    + 'render it to end users as received and keep their generic substitution for anything unmarked. '
-    + 'Status-agnostic; never replaces `message`.',
+    'Producer-marked user-facing refusal text, verbatim, in the request\'s locale: platform-composed text '
+    + 'falls back to the workspace default locale, then `en`; an app-authored refusal falls back to its '
+    + 'declared wording. Present exactly when the producer opted in at throw time; consumers render it to '
+    + 'end users as received and keep their generic substitution for anything unmarked. Status-agnostic; '
+    + 'never replaces `message`.',
   ),
   /**
    * The producer's declaration that the 5xx it named is a deliberate REFUSAL

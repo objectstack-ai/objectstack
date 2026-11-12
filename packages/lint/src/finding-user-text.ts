@@ -31,11 +31,17 @@
  *
  * {@link userTextLocaleOf}: the first candidate the caller hands in (the
  * request's locale, then the workspace default) that names a platform locale
- * the entry has a sentence for, read through `platformLocaleTagOf` so `zh-CN`
- * means `zh-Hans` and `en-US` means `en`; otherwise `en`, which every entry
- * carries (the type requires it). A locale off the table, and a locale the
- * entry has no sentence for, both take the next rung: that English floor is
- * the declared fallback, never a silent gap.
+ * the entry has a sentence for; otherwise `en`, which every entry carries (the
+ * type requires it). A candidate is read through `platformLocaleTagOf`, the
+ * whole code first and then one subtag shorter at a time
+ * ({@link platformLocaleNamedBy}), so `zh-CN` means `zh-Hans`, `fr-FR` means
+ * `fr` and `en-GB` means `en`. A code that names no table language, and a
+ * language the entry has no sentence for, both take the next rung: that
+ * English floor is the declared fallback, never a silent gap.
+ *
+ * The caller hands in the request's locale and the workspace default as two
+ * values. `ExecutionContext.locale` is the fold of the two, so it alone
+ * cannot serve the second rung once a request names a locale.
  *
  * ## What it is NOT
  *
@@ -79,17 +85,38 @@ export type UserTextCatalog = Readonly<Record<string, UserTextEntry>>;
 const USER_TEXT_FALLBACK_LOCALE: PlatformLocaleTag = 'en';
 
 /**
+ * The platform locale one candidate code names, or `undefined`: the whole code
+ * through `platformLocaleTagOf`, then each shorter prefix, one subtag at a time
+ * (RFC 4647 lookup: `fr-FR` → `fr`, `en-GB` → `en`, `zh-Hant-US` → `zh-Hant`,
+ * `pt-PT` → `pt` → `pt-BR`). The first prefix the table names decides, and no
+ * shorter one is tried after it, so a Traditional Chinese code never reads as
+ * `zh` and is never handed the Simplified sentence. The reading the platform's
+ * other table-keyed copy already uses (`driverCatalogLocaleOf` in
+ * `@objectstack/service-datasource`, `storageTestCopyLocaleOf` in
+ * `@objectstack/service-storage`).
+ */
+function platformLocaleNamedBy(code: string | null | undefined): PlatformLocaleTag | undefined {
+  if (typeof code !== 'string' || code.length === 0) return undefined;
+  const subtags = code.split('-');
+  for (let n = subtags.length; n > 0; n -= 1) {
+    const tag = platformLocaleTagOf(subtags.slice(0, n).join('-'));
+    if (tag !== undefined) return tag;
+  }
+  return undefined;
+}
+
+/**
  * The locale an entry answers in, for an ordered list of candidates (the
- * request's locale first, then the workspace default). Each candidate is read
- * against the platform locale table; the first that names a locale the entry
- * has a sentence for wins, and `en` answers when none does.
+ * request's locale first, then the workspace default). Each candidate names
+ * its platform locale through {@link platformLocaleNamedBy}; the first whose
+ * locale the entry has a sentence for wins, and `en` answers when none does.
  */
 export function userTextLocaleOf(
   entry: UserTextEntry,
   locales: readonly (string | null | undefined)[],
 ): PlatformLocaleTag {
   for (const candidate of locales) {
-    const tag = platformLocaleTagOf(candidate);
+    const tag = platformLocaleNamedBy(candidate);
     if (tag !== undefined && entry[tag] !== undefined) return tag;
   }
   return USER_TEXT_FALLBACK_LOCALE;

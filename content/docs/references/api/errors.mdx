@@ -43,7 +43,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| 'INVALID_FORMAT' \| 'VALUE_TOO_LONG' \| 'VALUE_TOO_SHORT' \| 'VALUE_OUT_OF_RANGE' \| … +42 more>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (else the workspace default locale, else `en`) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
@@ -160,7 +160,7 @@ const result = EnhancedApiErrorSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **code** | `Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>` | ✅ | Machine-readable error code |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (else the workspace default locale, else `en`) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `number` | optional | HTTP status code |
