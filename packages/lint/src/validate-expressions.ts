@@ -3390,7 +3390,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   }
 
   // ── Object validation-rule + formula predicates ────────────────────
-  for (const [objectPosition, obj] of objects.entries()) {
+  // [#32529] The object's position in `objects`, which is its position in
+  // `typedObjects` too (the served body the stored-expression member reads).
+  let objectPosition = -1;
+  for (const obj of objects) {
+    objectPosition += 1;
     const objectName = typeof obj.name === 'string' ? obj.name : undefined;
     // [#27643] The object's index in the authored list, for a validation-rule
     // finding's key path (`recordsOf` hands an array's own members back). A

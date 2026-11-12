@@ -4490,9 +4490,9 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // (a Map, whose one "key" is `Map.prototype.get`) and the member's own
       // finding (`{ rule, message, severity }`) — never metadata keys; the
       // field it judges is handed over whole from the tabled `f` receiver.
-      // The served objects the hop's field index is read from: its one "key"
-      // is `Array.prototype.find`, the match is the tabled `obj.name`.
-      'inputs', 'fieldDefs', 'finding', 'typedObjects',
+      // The served body the hop's field index is read from is indexed by
+      // position (`typedObjects[objectPosition]`), so it is no receiver here.
+      'inputs', 'fieldDefs', 'finding',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
