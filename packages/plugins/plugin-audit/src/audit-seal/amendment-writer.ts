@@ -17,7 +17,7 @@ import {
   type CheckpointSignedBody,
   type RedactionAmendmentBody,
 } from './signed-body.js';
-import { LocalCheckpointSigner, readAuditSealSecret, type SealStorageEngine } from './signer.js';
+import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
 
 /**
  * ADR-0154 D7 — the one redaction amendment writer. Every platform rewrite of
@@ -67,7 +67,7 @@ export interface AuditRedactionSeal {
    * amendments, secrets and hot rows are read through its drivers, and each
    * amendment is written through it.
    */
-  readonly engine: SealStorageEngine & Pick<AuditSealerEngine, 'registry'>;
+  readonly engine: AuditSealerEngine;
   /**
    * The crypto provider `os serve` seals with: it opens each checkpoint's
    * seed, and the default signer's key. Absent, a sealed row is refused.
@@ -292,7 +292,7 @@ export class RedactionAmender {
       }
       if (!signed) throw new Error(`the checkpoint signer answered a different key id on each of ${MAX_SIGN_ATTEMPTS} attempts`);
       this.keyId = expected;
-      await engine.insert(AUDIT_AMENDMENT_OBJECT, amendmentRow(signed.body, { id: randomUUID(), signature: signed.signature }), { context: { isSystem: true } });
+      await this.seal.engine.insert(AUDIT_AMENDMENT_OBJECT, amendmentRow(signed.body, { id: randomUUID(), signature: signed.signature }), { context: { isSystem: true } });
       try {
         await this.seal.sink?.deliver({ kind: 'amendment', body: signed.body as unknown as Record<string, unknown>, keyId: expected, signature: signed.signature });
       } catch (err) {
