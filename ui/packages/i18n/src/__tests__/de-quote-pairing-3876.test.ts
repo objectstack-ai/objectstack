@@ -429,7 +429,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `marketplace.install.targetNamespace.taken`, the refused install naming
     // the namespace another package owns („{{namespace}}“) — one interpolated
     // span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(116);
+    // 117 once objectstack-ai/objectstack#32478 added
+    // `empty.recordPagePlacesNoComponentDescription`, the record view naming a
+    // record page that places no component („{{name}}“) — one interpolated
+    // span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(117);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -534,8 +538,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 0 after objectstack-ai/objectstack#32087 added
     // `auth.login.errors.ssoStartFromLoginPage`, one more matched pair. 116 /
     // 116 / 0 after objectstack-ai/objectstack#32040 added
-    // `marketplace.install.targetNamespace.taken`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 116, close: 116, rdq: 0 });
+    // `marketplace.install.targetNamespace.taken`, one more matched pair. 117 /
+    // 117 / 0 after objectstack-ai/objectstack#32478 added
+    // `empty.recordPagePlacesNoComponentDescription`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 117, close: 117, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);
