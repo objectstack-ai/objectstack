@@ -139,6 +139,7 @@ vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
+import { RecentItemsProvider, useRecentItems } from '../../context/RecentItemsProvider';
 
 // jsdom ships neither of these; useIsMobile / useIsWideViewport and the Radix
 // popover's floating-ui measurement need them.
@@ -214,10 +215,17 @@ function withMetadata(
   return <MetadataCtx.Provider value={value}>{children}</MetadataCtx.Provider>;
 }
 
-function renderSurface(apps?: MetadataContextValue['apps']) {
-  return render(
+/** objectstack#32615 — the ids the REAL recent store holds, on every render. */
+function RecentStoreProbe() {
+  const { recentItems } = useRecentItems();
+  return <div data-testid="recent-store">{recentItems.map((i) => i.id).join(' ')}</div>;
+}
+
+function renderSurface(apps?: MetadataContextValue['apps'], recentStore = false) {
+  const tree = (
     <MemoryRouter initialEntries={[START_PATH]}>
       <LocationProbe />
+      {recentStore && <RecentStoreProbe />}
       {withMetadata(
         apps,
         <Routes>
@@ -227,8 +235,9 @@ function renderSurface(apps?: MetadataContextValue['apps']) {
           <Route path="/apps/cloud_control" element={<div data-testid="declared-landing" />} />
         </Routes>,
       )}
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  return render(recentStore ? <RecentItemsProvider>{tree}</RecentItemsProvider> : tree);
 }
 
 const trigger = () => screen.getByTestId('studio-pkg-chip');
@@ -243,9 +252,10 @@ const where = () => screen.getByTestId('location').textContent;
 async function openLifecycleSheet(
   initial = [row(PACKAGE_ID)],
   apps?: MetadataContextValue['apps'],
+  recentStore = false,
 ): Promise<HTMLElement> {
   fetchPackagesMock.mockResolvedValue(initial);
-  renderSurface(apps);
+  renderSurface(apps, recentStore);
   await waitFor(() => expect(trigger()).toHaveAttribute('data-pkg-list-state', 'loaded'));
   fireEvent.click(trigger());
   fireEvent.click(await screen.findByText('Package info & settings'));
@@ -356,5 +366,60 @@ describe('Studio package lifecycle — a failed refresh is not a deletion (#7821
     await waitFor(() => expect(snapshotFetches).toBeGreaterThan(before));
     expect(where()).toBe(START_PATH);
     expect(trigger()).toHaveAttribute('data-pkg-list-state', 'loaded');
+  });
+});
+
+describe('Studio package lifecycle — a deletion here drops the package from "Recently viewed" (objectstack#32615)', () => {
+  /** The key `RecentItemsProvider` hydrates from with no signed-in user. */
+  const STORAGE_KEY = 'objectui-recent-items';
+  const visit = (id: string) => ({
+    id: `package:${id}`,
+    type: 'package',
+    name: id,
+    href: `/studio/${encodeURIComponent(id)}`,
+    visitedAt: '2026-11-12T08:00:00.000Z',
+  });
+  const stored = () => screen.getByTestId('recent-store').textContent;
+
+  beforeEach(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([visit(PACKAGE_ID), visit(SIBLING_ID)]));
+  });
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it('REAL deletion: the deleted package leaves the store, the sibling stays', async () => {
+    const lifecycle = await openLifecycleSheet([row(PACKAGE_ID), row(SIBLING_ID)], undefined, true);
+    expect(stored()).toBe(`package:${PACKAGE_ID} package:${SIBLING_ID}`);
+
+    fetchPackagesMock.mockResolvedValue([row(SIBLING_ID)]);
+    fireEvent.click(lifecycle);
+
+    expect(await screen.findByTestId('studio-landing')).toBeInTheDocument();
+    expect(stored()).toBe(`package:${SIBLING_ID}`);
+    const persisted = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Array<{ id: string }>;
+    expect(persisted.map((e) => e.id)).toEqual([`package:${SIBLING_ID}`]);
+  });
+
+  it('CONTROL — a FAILED refresh is not a deletion: the store keeps the entry', async () => {
+    const lifecycle = await openLifecycleSheet([row(PACKAGE_ID), row(SIBLING_ID)], undefined, true);
+    const before = snapshotFetches;
+
+    fetchPackagesMock.mockRejectedValue(new Error('Service Unavailable'));
+    fireEvent.click(lifecycle);
+
+    await waitFor(() => expect(snapshotFetches).toBeGreaterThan(before));
+    expect(stored()).toBe(`package:${PACKAGE_ID} package:${SIBLING_ID}`);
+  });
+
+  it('CONTROL — the package still listed after the action: the store keeps the entry', async () => {
+    const lifecycle = await openLifecycleSheet([row(PACKAGE_ID), row(SIBLING_ID)], undefined, true);
+    const before = snapshotFetches;
+
+    fetchPackagesMock.mockResolvedValue([row(PACKAGE_ID), row(SIBLING_ID)]);
+    fireEvent.click(lifecycle);
+
+    await waitFor(() => expect(snapshotFetches).toBeGreaterThan(before));
+    expect(stored()).toBe(`package:${PACKAGE_ID} package:${SIBLING_ID}`);
   });
 });

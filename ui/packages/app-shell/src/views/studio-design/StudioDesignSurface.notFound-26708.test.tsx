@@ -20,6 +20,7 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import * as React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const PACKAGE_ID = 'app.r34d';
@@ -56,7 +57,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 
 vi.mock('../../components/SuggestedBindingsPanel', () => ({ SuggestedBindingsPanel: () => null }));
 vi.mock('../metadata-admin/AccessExplainPanel', () => ({ AccessExplainPanel: () => null }));
-vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => null }));
+// A body to find: the right slot keeps its copilot mounted whatever its mode.
+vi.mock('./StudioAiCopilot', () => ({ StudioChatDock: () => <div data-testid="studio-chat-dock" /> }));
 vi.mock('../../preview/DraftChangesPanel', () => ({ DraftChangesPanel: () => null }));
 
 import { StudioDesignSurface } from './StudioDesignSurface';
@@ -83,12 +85,12 @@ function servePackages(opts: { fail?: boolean } = {}) {
   return fetchMock;
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, surface: React.ReactElement = <StudioDesignSurface />) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/studio" element={<div data-testid="studio-landing" />} />
-        <Route path="/studio/:packageId/:tab" element={<StudioDesignSurface />} />
+        <Route path="/studio/:packageId/:tab" element={surface} />
       </Routes>
     </MemoryRouter>,
   );
@@ -200,5 +202,42 @@ describe('Studio: a pillar segment no pillar has renders a not-found state (obje
     );
     expect(current).toHaveAttribute('href', `/studio/${PACKAGE_ID}/interfaces`);
     expect(screen.queryByTestId('studio-pillar-not-found')).toBeNull();
+  });
+});
+
+describe('Studio: no copilot beside a package that is not there (objectstack#32615)', () => {
+  it('the built-in copilot slot is not mounted on the not-found state', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data`);
+    await screen.findByTestId('studio-package-not-found');
+    expect(screen.queryByTestId('studio-chat-dock')).toBeNull();
+    expect(screen.queryByTestId('studio-right-slot')).toBeNull();
+  });
+
+  it('CONTROL — a listed package keeps its copilot', async () => {
+    servePackages();
+    renderAt(`/studio/${PACKAGE_ID}/data`);
+    await waitFor(() =>
+      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
+        .toHaveAttribute('data-pkg-list-state', 'loaded'),
+    );
+    expect(screen.queryByTestId('studio-package-not-found')).toBeNull();
+    expect(screen.getByTestId('studio-chat-dock')).toBeInTheDocument();
+  });
+
+  it('an injected copilot (the cloud `aiSlot`) is not drawn on the not-found state; CONTROL — it is on a listed package', async () => {
+    servePackages();
+    renderAt(`/studio/${PHANTOM}/data`, <StudioDesignSurface aiSlot={<div data-testid="injected-copilot" />} />);
+    await screen.findByTestId('studio-package-not-found');
+    expect(screen.queryByTestId('injected-copilot')).toBeNull();
+    cleanup();
+
+    servePackages();
+    renderAt(`/studio/${PACKAGE_ID}/data`, <StudioDesignSurface aiSlot={<div data-testid="injected-copilot" />} />);
+    await waitFor(() =>
+      expect(within(screen.getByTestId('studio-shell-header')).getByTestId('studio-pkg-chip'))
+        .toHaveAttribute('data-pkg-list-state', 'loaded'),
+    );
+    expect(screen.getByTestId('injected-copilot')).toBeInTheDocument();
   });
 });

@@ -12,8 +12,9 @@
  *  - the label is the package's CURRENT name: a rename between the visit and
  *    the render shows the new one, and no entry is drawn as its raw id while a
  *    live package is behind it;
- *  - a package the list no longer has draws its machine name, as a missing
- *    object, page or report does (`useRecentItemLabel`);
+ *  - a package the list no longer has is not listed at all (objectstack#32615:
+ *    it used to draw its machine name and open an empty builder), while a
+ *    package the list names but the cards hide — a kernel package — still is;
  *  - nothing is listed before the list answers, or when there are no recent
  *    packages, and the existing cards stay.
  *
@@ -29,6 +30,8 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 
 const packages = vi.hoisted(() => ({
   list: [] as Array<Record<string, unknown>>,
+  /** Ids the list names that the cards hide (kernel packages): `fetchListedPackageIds` only. */
+  hidden: [] as string[],
   /** When set, `fetchPackages` waits for it, so the loading window can be observed. */
   gate: null as Promise<void> | null,
 }));
@@ -40,6 +43,11 @@ vi.mock('./packages-io', async (importOriginal) => {
     fetchPackages: vi.fn(async () => {
       if (packages.gate) await packages.gate;
       return packages.list;
+    }),
+    // The same answer's every id, the kernel packages the cards hide included.
+    fetchListedPackageIds: vi.fn(async () => {
+      if (packages.gate) await packages.gate;
+      return new Set([...packages.list.map((p) => String(p.id)), ...packages.hidden]);
     }),
   };
 });
@@ -71,6 +79,7 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   packages.list = [];
+  packages.hidden = [];
   packages.gate = null;
 });
 
@@ -127,17 +136,6 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     const [link] = recentLinks();
     expect(within(link).getByText('Acme Sales')).toBeInTheDocument();
     expect(within(link).queryByText('Acme CRM')).not.toBeInTheDocument();
-  });
-
-  it('a package the list no longer has draws its machine name, as a missing object does', async () => {
-    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
-    renderLanding([visit('com.acme.gone'), visit('com.acme.crm')]);
-
-    await screen.findByText('Recently viewed');
-    expect(recentLinks().map((a) => a.querySelector('.font-medium')?.textContent)).toEqual([
-      'com.acme.gone',
-      'Acme CRM',
-    ]);
   });
 
   it('lists only package entries, and at most one row of three', async () => {
@@ -201,5 +199,62 @@ describe('Studio landing → recent packages (objectui#11863)', () => {
     // Once in the recent row, once as its writable card.
     expect(screen.getAllByText('Acme CRM')).toHaveLength(2);
     expect(screen.getByText('My packages (writable)')).toBeInTheDocument();
+  });
+});
+
+describe('Studio landing → a deleted package leaves "Recently viewed" (objectstack#32615)', () => {
+  it('a package the list no longer has is not listed; CONTROL — a live one beside it is', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    renderLanding([visit('com.acme.gone'), visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    expect(recentLinks().map((a) => a.getAttribute('href'))).toEqual(['/studio/com.acme.crm']);
+    expect(screen.queryByText('com.acme.gone')).not.toBeInTheDocument();
+  });
+
+  it('the gone entry does not take a slot of the row: the next live packages fill it', async () => {
+    packages.list = ['a', 'b', 'c'].map((x) => ({
+      id: `com.acme.${x}`,
+      name: `Pkg ${x.toUpperCase()}`,
+      writable: true,
+      namespace: `acme${x}`,
+    }));
+    renderLanding([visit('com.acme.gone'), visit('com.acme.a'), visit('com.acme.b'), visit('com.acme.c')]);
+
+    await screen.findByText('Recently viewed');
+    expect(recentLinks().map((a) => a.querySelector('.font-medium')?.textContent)).toEqual([
+      'Pkg A',
+      'Pkg B',
+      'Pkg C',
+    ]);
+  });
+
+  it('only gone packages: no section at all', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    renderLanding([visit('com.acme.gone')]);
+
+    await screen.findByText('Acme CRM');
+    expect(screen.queryByTestId('studio-landing-recent')).not.toBeInTheDocument();
+  });
+
+  it('CONTROL — a kernel package the cards hide is installed, so its entry stays', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    packages.hidden = ['com.objectstack.platform'];
+    renderLanding([visit('com.objectstack.platform'), visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    expect(recentLinks().map((a) => a.getAttribute('href'))).toEqual([
+      '/studio/com.objectstack.platform',
+      '/studio/com.acme.crm',
+    ]);
+  });
+
+  it('the stored entry is kept: filtered on the render, never dropped from the store here', async () => {
+    packages.list = [{ id: 'com.acme.crm', name: 'Acme CRM', writable: true, namespace: 'acme' }];
+    renderLanding([visit('com.acme.gone'), visit('com.acme.crm')]);
+
+    await screen.findByText('Recently viewed');
+    const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') as Array<{ id: string }>;
+    expect(stored.map((e) => e.id)).toEqual(['package:com.acme.gone', 'package:com.acme.crm']);
   });
 });
