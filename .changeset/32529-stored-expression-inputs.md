@@ -7,7 +7,7 @@ fix(lint)!: a stored computed field whose `expression` reads another record is r
 
 Clause-②: no (narrowing)
 Metadata-protocol: narrowed
-Skills-docs: follow-up owed — skills/objectstack-data/rules/relationships.md (the line-item "Computed column" bullet teaches a stored `expression` and says nothing of an input read from another record, or of one that changes without a write: the clock, the acting user, a permission)
+Skills-docs: follow-up owed — skills/objectstack-data/rules/relationships.md (the line-item "Computed column" bullet), skills/objectstack-data/rules/field-types.md (the `formula` row) and skills/objectstack-ui/rules/dashboards.md (the total-over-a-formula bullet) teach a stored field carrying a formula's `expression` and say nothing of an input read from another record, which is now refused, or of one that changes without a write (the clock, the acting user, a permission), which is now warned
 
 <!-- adr-0087: registered stored-expression-cross-record-input-refused -->
 
