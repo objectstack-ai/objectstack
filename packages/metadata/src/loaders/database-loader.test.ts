@@ -2097,22 +2097,26 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
    * many times on the same manager, the loader's cache kept between runs or
    * dropped (`keepCache`).
    */
-  const bootPass = async (hostPackage?: string, inMemory: string[] = [], passes = 1, keepCache = false) => {
+  const bootPass = async (hostPackage?: string, inMemory: InMemory[] = [], passes = 1, keepCache = false) => {
     const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
     (m as any).loaders.clear();
     const loader = new DatabaseLoader({ driver });
     m.registerLoader(loader);
-    for (const packageId of inMemory) registerOwn(m, packageId);
+    for (const item of inMemory) registerOwn(m, item);
     for (let pass = 0; pass < passes; pass++) {
       if (pass > 0 && !keepCache) loader.invalidateAll();
       await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
     }
     return m;
   };
-  /** `packageId`'s own item of `helper`, registered in memory (code). */
-  const registerOwn = (m: MetadataManager, packageId: string) =>
-    m.registerInMemory('action', 'helper', { name: 'helper', label: `${packageId} code`, _packageId: packageId });
+  /** A package's own item of `helper` in memory: the package, or the package and the object it binds. */
+  type InMemory = string | readonly [packageId: string, objectName: string];
+  /** `item`'s package's own item of `helper`, registered in memory (code), bound to its object when it names one. */
+  const registerOwn = (m: MetadataManager, item: InMemory) => {
+    const [packageId, objectName] = typeof item === 'string' ? [item] : item;
+    return m.registerInMemory('action', 'helper', { name: 'helper', label: `${packageId} code`, _packageId: packageId, ...(objectName ? { objectName } : {}) });
+  };
   /** What a read answers: the item's label, or the refusal's code, status, reason and candidates, in the order the refusal names them. */
   const answerOf = async (read: () => Promise<unknown>) => {
     try {
@@ -2241,13 +2245,29 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   });
 
   /** One composition: the host's package, the stored rows, items in memory before the pass, and after it. */
-  type InMemoryCell = [hostPackage: string, rows: Row[], before: string[], after: string[]];
+  type InMemoryCell = [hostPackage: string | undefined, rows: Row[], before: InMemory[], after: InMemory[]];
   const bareAfterPass = async ([hostPackage, rows, before, after]: InMemoryCell, passes = 1, keepCache = false) => {
     driver = createMockDriver();
     await seedRows(rows);
     const m = await bootPass(hostPackage, before, passes, keepCache);
-    for (const packageId of after) registerOwn(m, packageId);
+    for (const item of after) registerOwn(m, item);
     return bareAnswers(m);
+  };
+  /**
+   * Each cell's bare reads after the pass ran twice on one manager, the
+   * loader's cache dropped and then kept between the runs, beside the
+   * refusal naming the cell's candidates, which each read should give.
+   */
+  const afterTwoPasses = async (cells: [InMemoryCell, string[]][]) => {
+    const seen: unknown[] = [];
+    const expected: unknown[] = [];
+    for (const keepCache of [false, true]) {
+      for (const [cell, candidates] of cells) {
+        seen.push(await bareAfterPass(cell, 2, keepCache));
+        expected.push([REFUSED(...candidates), REFUSED(...candidates)]);
+      }
+    }
+    return { seen, expected };
   };
 
   /**
@@ -2327,14 +2347,28 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
       [[HOST, [[ALPHA], [null]], [HOST], []], [HOST, ALPHA, 'environment']],
       [[HOST, [[null], [ALPHA]], [HOST], []], [HOST, ALPHA, 'environment']],
     ];
-    const seen: unknown[] = [];
-    const expected: unknown[] = [];
-    for (const keepCache of [false, true]) {
-      for (const [cell, candidates] of cells) {
-        seen.push(await bareAfterPass(cell, 2, keepCache));
-        expected.push([REFUSED(...candidates), REFUSED(...candidates)]);
-      }
-    }
+    const { seen, expected } = await afterTwoPasses(cells);
+    expect(seen).toEqual(expected);
+  });
+
+  /**
+   * [#32791, review S3, epic ruling of 22:50Z] The same two runs of the pass
+   * on one manager, over the shapes the epic read measured beside ruling
+   * B's: the packages swapped (a host declaring BETA), the rows and the
+   * host's package's item bound to objects (ALPHA's item and the package-less
+   * row on `account`, BETA's row on `contact`), and review B2's two cells on
+   * a host declaring no package. Each is refused as after one pass, and as
+   * on main. Without the carried mark the first two answered the package-less
+   * row; B2's two are held by the carried mark and by the stamp condition
+   * alike, so they answered the row only with both removed.
+   */
+  it('CONTROL action, the pass run twice on the same manager with the packages swapped, with the rows and the item in memory bound to objects, and in review B2\'s two cells on a host declaring no package: still refused (review S3)', async () => {
+    const { seen, expected } = await afterTwoPasses([
+      [[BETA, [[ALPHA], [null]], [BETA], []], [BETA, ALPHA, 'environment']],
+      [[ALPHA, [[BETA, 'contact'], [null, 'account']], [[ALPHA, 'account']], []], [ALPHA, BETA]],
+      [[undefined, [[BETA], [null]], [ALPHA], []], [ALPHA, BETA, 'environment']],
+      [[undefined, [[null]], [ALPHA], [BETA]], [ALPHA, BETA, 'environment']],
+    ]);
     expect(seen).toEqual(expected);
   });
 
