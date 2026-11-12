@@ -20,6 +20,7 @@
 import {
   compileCel,
   firstUndeclaredReference,
+  firstDateTextCall,
   firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
@@ -676,7 +677,7 @@ function dateTextIssue(
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
   if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
   const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
-  if (!verdict) return null;
+  if (!verdict) return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
   const reference = verdict.field
     ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
     : undefined;
@@ -702,7 +703,9 @@ function dateTextIssue(
         ),
     };
   }
-  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
+  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') {
+    return dateTextCallIssue(source, celFieldTypes, scope, flowArm);
+  }
   return {
     severity: 'error',
     issue: refusal(
@@ -713,6 +716,44 @@ function dateTextIssue(
         `field can't hold a duration: it reads \`{}\` at runtime. Use \`daysBetween(a, b)\` for the ` +
         `span in whole days, and ${shift}`,
     ),
+  };
+}
+
+/**
+ * #32595 — a call handed a `date`/`datetime` field that no overload accepts on
+ * the text the runtime holds for it, found by {@link firstDateTextCall}:
+ * `isoDate(record.start_time)`, `record.start_time.getFullYear()`. The
+ * Timestamp typing passes it and the evaluator faults on it on every row
+ * (`found no matching overload for 'isoDate(string)'`), so it takes the date
+ * verdicts' grade and outcome sentence (`flowArm`): `date-text-call`, or its
+ * `-fail-closed` / `-fail-open` / `-run-fails` / `-run-may-fail` arm. The
+ * prescription is the call with the field parsed by `date(…)`, which the check
+ * proved clean.
+ */
+function dateTextCallIssue(
+  source: string,
+  celFieldTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  flowArm: DateArm | null,
+): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
+  const found = firstDateTextCall(source, celFieldTypes, scope);
+  if (!found) return null;
+  const params = { call: found.call, reference: found.reference, rewrite: found.rewrite };
+  const ref = `\`${found.reference}\``;
+  const head =
+    `\`${found.call}\` — ${ref} is a date field, and the runtime holds a date field as its text ` +
+    `(\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which this call does not accept: `;
+  const use = `Parse the text into a timestamp first: \`${found.rewrite}\`.`;
+  return {
+    severity: 'error',
+    issue: flowArm
+      ? refusal(`date-text-call-${flowArm}`, params, source, `${head}${dateArmFault(flowArm, ref, 'text')} ${use}`)
+      : refusal(
+        'date-text-call',
+        params,
+        source,
+        `${head}this faults at runtime, so the field silently evaluates to null. ${use}`,
+      ),
   };
 }
 

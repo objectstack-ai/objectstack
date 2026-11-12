@@ -911,6 +911,20 @@ function celTypeName(t: FieldCelType): string {
   return t === 'timestamp' ? 'google.protobuf.Timestamp' : t;
 }
 
+/**
+ * What a typed env declares a `date`/`datetime` field (`timestamp`) as:
+ *  - `timestamp` — a `google.protobuf.Timestamp`: the type-soundness typing of
+ *    {@link firstTypeMismatch}, whose date-arithmetic verdict reads it;
+ *  - `date-text` — the text the runtime holds, as {@link DATE_TEXT_CEL_TYPE}
+ *    with the OPERATORS the evaluator answers on it
+ *    ({@link registerDateTextOverloads}): {@link firstDateTextVerdict};
+ *  - `text` — that text as a plain `string`, so every CALL resolves exactly as
+ *    the evaluator resolves it on a string, with the same operator answers
+ *    declared on `string` ({@link registerDateTextAnswersOnString}):
+ *    {@link firstDateTextCall}.
+ */
+type TemporalTyping = 'timestamp' | 'date-text' | 'text';
+
 /** CEL types produced by date subtraction / temporal fns — arith on these nulls. */
 const DATE_CEL_TYPES = new Set(['google.protobuf.Timestamp', 'google.protobuf.Duration']);
 /** Numeric CEL types — the RHS that turns date arithmetic into a runtime fault. */
@@ -950,6 +964,70 @@ function registerNullComparisons(env: Environment): void {
  */
 const UNSOUND_OVERLOAD_RE = /no such overload:\s*([\w.]+)\s*(<=|>=|<|>|\+|-|\*|\/|%)\s*([\w.]+)/;
 
+/** #3306 — an {@link UNSOUND_OVERLOAD_RE} fault that is date/duration ARITHMETIC against a number. */
+function isDateArith(m: RegExpExecArray): boolean {
+  return ARITH_OPS.has(m[2])
+    && ((DATE_CEL_TYPES.has(m[1]) && NUMERIC_CEL_TYPES.has(m[3]))
+      || (NUMERIC_CEL_TYPES.has(m[1]) && DATE_CEL_TYPES.has(m[3])));
+}
+
+/** The ordering operators — the comparisons a date field's text answers string-lex. */
+const ORDERING_OPS: ReadonlySet<string> = new Set(['<', '<=', '>', '>=']);
+
+/**
+ * The field a node reads, when it is a plain field reference at this scope:
+ * `record.<f>` / `previous.<f>` / `input.<f>`, and in a flattened condition the
+ * bare `<f>` too. `null` for anything else.
+ */
+function typedFieldRef(node: unknown, scope: 'record' | 'flattened'): { name: string; written: string } | null {
+  const path = scopePath(node);
+  if (!path) return null;
+  if (path.length === 1) return scope === 'flattened' ? { name: path[0], written: path[0] } : null;
+  if (path.length === 2 && (path[0] === 'record' || path[0] === 'previous' || path[0] === 'input')) {
+    return { name: path[1], written: `${path[0]}.${path[1]}` };
+  }
+  return null;
+}
+
+/**
+ * [#32595] Whether `source` orders a date field against a TEXT field
+ * (`record.x < record.start_time`). The evaluator compares the two texts
+ * string-lex, but no declared text names that pairing — ADR-0053 Phase 1 §3,
+ * {@link firstTypeMismatch}'s docblock and the {@link DATE_TEXT_CEL_TYPE}
+ * overload table name a date field ordered against another date field, a text
+ * literal or a Timestamp — so it keeps the type-mismatch verdict it had.
+ * Unparseable ⇒ `true`: keep what the check said.
+ */
+function ordersDateAgainstTextField(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+): boolean {
+  let ast: unknown;
+  try {
+    ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+  } catch {
+    return true;
+  }
+  const kindOf = (node: unknown): FieldCelType | null => {
+    const ref = typedFieldRef(node, scope);
+    return ref ? fieldCelTypes[ref.name] ?? null : null;
+  };
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found) return;
+    if (Array.isArray(v)) { for (const child of v) visit(child); return; }
+    if (!isCelNode(v)) return;
+    if (ORDERING_OPS.has(v.op) && Array.isArray(v.args) && v.args.length === 2) {
+      const [a, b] = v.args.map(kindOf);
+      if ((a === 'timestamp' && b === 'string') || (a === 'string' && b === 'timestamp')) { found = true; return; }
+    }
+    visit(v.args);
+  };
+  visit(ast);
+  return found;
+}
+
 /**
  * A typed environment for the soundness check. Each field carries a concrete
  * CEL type (`string`/`bool`) or `dyn`, so cel-js's checker faults an
@@ -967,7 +1045,7 @@ const UNSOUND_OVERLOAD_RE = /no such overload:\s*([\w.]+)\s*(<=|>=|<|>|\+|-|\*|\
 function buildTypedEnv(
   fieldCelTypes: Readonly<Record<string, FieldCelType>>,
   scope: 'record' | 'flattened',
-  temporalAsText = false,
+  temporal: TemporalTyping = 'timestamp',
   /**
    * [#29959] Flattened scope only: the field types to type `record.<field>` /
    * `previous.<field>` with. Absent, those roots stay `map` (dyn members). It
@@ -977,11 +1055,16 @@ function buildTypedEnv(
    */
   recordRootTypes?: Readonly<Record<string, FieldCelType>>,
 ): Environment {
-  // `temporalAsText` declares a `date`/`datetime` field as the text the runtime
-  // holds ({@link DATE_TEXT_CEL_TYPE}) instead of a Timestamp — see
-  // {@link firstDateTextVerdict}.
+  // `temporal` picks what a `date`/`datetime` field is declared as — see
+  // {@link TemporalTyping}.
   const typeName = (t: FieldCelType): string =>
-    temporalAsText && t === 'timestamp' ? DATE_TEXT_CEL_TYPE : celTypeName(t);
+    t !== 'timestamp' || temporal === 'timestamp' ? celTypeName(t)
+    : temporal === 'date-text' ? DATE_TEXT_CEL_TYPE
+    : 'string';
+  const registerTemporal = (env: Environment): void => {
+    if (temporal === 'date-text') registerDateTextOverloads(env);
+    else if (temporal === 'text') registerDateTextAnswersOnString(env);
+  };
   if (scope === 'flattened') {
     const env = new Environment({
       unlistedVariablesAreDyn: true,
@@ -990,7 +1073,7 @@ function buildTypedEnv(
     });
     registerStdLib(env, () => new Date(0));
     registerNullComparisons(env);
-    if (temporalAsText) registerDateTextOverloads(env);
+    registerTemporal(env);
     if (recordRootTypes) {
       // [#29959] A flow run binds the record it was handed as `record` too
       // (`seedRunVariables`), beside the flattened bare names, so
@@ -1020,7 +1103,7 @@ function buildTypedEnv(
   });
   registerStdLib(env, () => new Date(0));
   registerNullComparisons(env);
-  if (temporalAsText) registerDateTextOverloads(env);
+  registerTemporal(env);
   const fields: Record<string, string> = {};
   for (const [name, t] of Object.entries(fieldCelTypes)) fields[name] = typeName(t);
   try { env.registerType('OsRecordScope', { fields }); } catch { /* invalid field name — ignore */ }
@@ -1172,15 +1255,44 @@ export function firstTypeMismatch(
   const bareTypes = scope === 'flattened' && bareShadowed && bareShadowed.size > 0
     ? withoutNames(fieldCelTypes, bareShadowed)
     : fieldCelTypes;
+  /**
+   * [#32595] A text/boolean mismatch against a Timestamp or a Duration may be
+   * the Timestamp typing's alone: it declares a date field a Timestamp, and
+   * the runtime holds the field's text, so `"Due: " + record.d` and
+   * `record.d < "2026-01-01"` check as `string + Timestamp` /
+   * `Timestamp < string` here and evaluate to the concatenation and the
+   * string-lex comparison there — the shapes this function's docblock, the
+   * {@link DATE_TEXT_CEL_TYPE} overload table and ADR-0053 Phase 1 §3 declare
+   * the runtime answers. Re-checked with the field declared as that text
+   * ({@link registerDateTextOverloads}):
+   *  - a text/boolean mismatch there is the verdict — `record.x < today()`
+   *    still faults; one the date text takes part in (`bool + DateText`) keeps
+   *    the Timestamp spelling it has always been reported in;
+   *  - none ⇒ `null`, the mismatch was the typing's, and the date-text check
+   *    the caller runs next judges the rest — except an ORDERING of a date
+   *    field against a TEXT field (`record.x < record.start_time`), which no
+   *    declared text names: it keeps the verdict it had.
+   * `recordRoots` is the flattened record-root pass's typing (#29959).
+   */
+  const confirmAgainstDateText = (
+    m: RegExpExecArray,
+    recordRoots?: Readonly<Record<string, FieldCelType>>,
+  ): RegExpExecArray | null => {
+    if (!DATE_CEL_TYPES.has(m[1]) && !DATE_CEL_TYPES.has(m[3])) return m;
+    const r = unsoundOverload(buildTypedEnv(bareTypes, scope, 'date-text', recordRoots));
+    if (r && textOrBool(r)) return r[1] === DATE_TEXT_CEL_TYPE || r[3] === DATE_TEXT_CEL_TYPE ? m : r;
+    return ordersDateAgainstTextField(source, recordRoots ?? bareTypes, scope) ? m : null;
+  };
   try {
-    const m = unsoundOverload(buildTypedEnv(bareTypes, scope));
+    const timestampTyped = unsoundOverload(buildTypedEnv(bareTypes, scope));
+    const m = timestampTyped && !isDateArith(timestampTyped) && textOrBool(timestampTyped)
+      ? confirmAgainstDateText(timestampTyped)
+      : timestampTyped;
     if (m) {
       const operator = m[2];
       const operands = `${m[1]} ${operator} ${m[3]}`;
       // #3306 — date/duration ARITHMETIC against a number: always nulls, hard error.
-      if (ARITH_OPS.has(operator)
-        && ((DATE_CEL_TYPES.has(m[1]) && NUMERIC_CEL_TYPES.has(m[3]))
-          || (NUMERIC_CEL_TYPES.has(m[1]) && DATE_CEL_TYPES.has(m[3])))) {
+      if (isDateArith(m)) {
         return {
           operator, operands, celType: 'timestamp', category: 'date-arith',
           field: offendingField(source, bareTypes, 'timestamp', scope),
@@ -1200,7 +1312,8 @@ export function firstTypeMismatch(
     // the same verdict the bare name gets. The date verdicts stay the bare
     // name's alone, as before.
     if (scope !== 'flattened' || !/(?<![\w$.])(?:record|previous)\s*\./.test(source)) return null;
-    const r = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', false, fieldCelTypes));
+    const rootTyped = unsoundOverload(buildTypedEnv(bareTypes, 'flattened', 'timestamp', fieldCelTypes));
+    const r = rootTyped && textOrBool(rootTyped) ? confirmAgainstDateText(rootTyped, fieldCelTypes) : null;
     const celType = r ? textOrBool(r) : null;
     if (!r || !celType) return null;
     const read = offendingRecordRead(source, fieldCelTypes, celType);
@@ -1269,6 +1382,30 @@ function registerDateTextOverloads(env: Environment): void {
 }
 
 /**
+ * [#32595] The operator answers {@link registerDateTextOverloads} declares on
+ * a date field's text against a Timestamp, declared on plain `string` for the
+ * `text` typing ({@link TemporalTyping}), whose env types ONLY the date fields
+ * (every other field is `dyn`), so these reach a date field's text and the
+ * string-valued expressions computed from it, and no text field. The
+ * text-against-text answers (`+`, ordering, equality) are cel-js's own string
+ * overloads, and the shapes the evaluator faults on stay undeclared, as there.
+ * Without them the first operator the check meets on the field would mask the
+ * call {@link firstDateTextCall} is asking about.
+ */
+function registerDateTextAnswersOnString(env: Environment): void {
+  const TS = 'google.protobuf.Timestamp';
+  const declare = (signature: string): void => {
+    try { env.registerOperator(signature, () => null); } catch { /* already/invalid — ignore */ }
+  };
+  for (const op of ['<', '<=', '>', '>=', '==']) {
+    declare(`string ${op} ${TS}: bool`);
+    declare(`${TS} ${op} string: bool`);
+  }
+  declare(`${TS} - string: google.protobuf.Duration`);
+  declare(`string - ${TS}: google.protobuf.Duration`);
+}
+
+/**
  * A verdict of the date-text check ({@link firstDateTextVerdict}):
  *  - `fault` — arithmetic on a date field's text that the evaluator cannot
  *    answer, so the expression faults and the field reads null;
@@ -1307,7 +1444,7 @@ export function firstDateTextVerdict(
 ): DateTextVerdict | null {
   if (typeof source !== 'string' || !source.trim()) return null;
   try {
-    const env = buildTypedEnv(fieldCelTypes, scope, true);
+    const env = buildTypedEnv(fieldCelTypes, scope, 'date-text');
     const result = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).check?.() as
       | { valid?: boolean; type?: unknown; error?: { message?: string } }
       | undefined;
@@ -1319,6 +1456,120 @@ export function firstDateTextVerdict(
     const m = UNSOUND_OVERLOAD_RE.exec(result.error?.message ?? '');
     if (!m || !ARITH_OPS.has(m[2]) || (m[1] !== DATE_TEXT_CEL_TYPE && m[3] !== DATE_TEXT_CEL_TYPE)) return null;
     return { kind: 'fault', operator: m[2], operands: `${m[1]} ${m[2]} ${m[3]}`, field };
+  } catch {
+    // A parse/other fault is the syntax checker's job (celEngine.compile).
+    return null;
+  }
+}
+
+/**
+ * cel-js's code for a CALL no overload accepts — `isoDate(string)`,
+ * `string.getFullYear()` — raised by the checker and the evaluator alike
+ * (`found no matching overload for 'isoDate(string)'`). Read off the error's
+ * structured `code`, never its prose ({@link classifyCelFault}'s rule).
+ */
+const CEL_NO_MATCHING_OVERLOAD_CODE = 'no_matching_overload';
+
+/**
+ * A verdict of {@link firstDateTextCall}: the call as written, the date field
+ * it is handed as written, and the call rewritten with that field parsed by
+ * `date(…)` first.
+ */
+export interface DateTextCall {
+  readonly call: string;
+  readonly reference: string;
+  readonly rewrite: string;
+}
+
+/**
+ * #32595 — the first call in `source` that is handed a `date`/`datetime`
+ * field directly and that no overload accepts on the text the runtime holds
+ * for it, judged with every such field declared as a plain `string` (the
+ * `text` typing of {@link TemporalTyping}).
+ *
+ * The Timestamp typing hands `isoDate(record.start_time)` the
+ * `google.protobuf.Timestamp` `isoDate` asks for, so it checks clean, while
+ * every read door hands the field out as its text (ADR-0053 D-F1, the
+ * {@link DATE_TEXT_CEL_TYPE} docblock): the evaluator answers `found no
+ * matching overload for 'isoDate(string)'` on every row, null included, so a
+ * formula reads null and a fail-closed rule refuses every write. Declared as
+ * what it is, the call faults this check exactly where it faults the
+ * evaluator, and a call the evaluator answers on a string (`size(record.d)`,
+ * `record.d.startsWith('2026')`, `date(record.d)`) checks clean. `isoDate`
+ * refusing text "at build when the argument's type is known" is its published
+ * contract (`stdlib.ts`); this is where the build knows it.
+ *
+ * Each call that reads a date field directly — as an argument, or as a
+ * method's receiver — is checked on its own, so a fault elsewhere in the
+ * expression cannot mask it, and it is the verdict only when the same call
+ * with each such field wrapped in `date(…)` checks clean: the rewrite the
+ * message prescribes is proven, not guessed. Only the date fields are typed;
+ * every other field stays `dyn`. Returns `null` when the source does not
+ * parse or no call qualifies: anything else is another check's to report.
+ */
+export function firstDateTextCall(
+  source: string,
+  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened' = 'record',
+): DateTextCall | null {
+  if (typeof source !== 'string' || !source.trim()) return null;
+  const dateFields: Record<string, FieldCelType> = {};
+  let any = false;
+  for (const [name, t] of Object.entries(fieldCelTypes)) {
+    dateFields[name] = t === 'timestamp' ? 'timestamp' : 'dyn';
+    any ||= t === 'timestamp';
+  }
+  if (!any) return null;
+  try {
+    const env = buildTypedEnv(dateFields, scope, 'text');
+    const parsed = env.parse(rewriteNullableTernary(rewriteIndexedHas(source)));
+    // The whole expression checking clean is the common case: nothing to find.
+    if ((parsed.check?.() as { valid?: boolean } | undefined)?.valid !== false) return null;
+    /** The check of one printed sub-expression: `true` clean, else the fault's code. */
+    const checkOf = (node: unknown): true | string | undefined => {
+      const r = env.parse(serialize(node as Parameters<typeof serialize>[0])).check?.() as
+        | { valid?: boolean; error?: { code?: unknown } }
+        | undefined;
+      if (!r) return undefined;
+      return r.valid !== false ? true : typeof r.error?.code === 'string' ? r.error.code : undefined;
+    };
+    const dateRef = (node: unknown): string | null => {
+      const ref = typedFieldRef(node, scope);
+      return ref && dateFields[ref.name] === 'timestamp' ? ref.written : null;
+    };
+    let verdict: DateTextCall | null = null;
+    const visit = (v: unknown): void => {
+      if (verdict) return;
+      if (Array.isArray(v)) { for (const child of v) visit(child); return; }
+      if (!isCelNode(v)) return;
+      // `call`: [fn, [arg…]] · `rcall`: [fn, receiver, [arg…]]
+      const args = v.args;
+      const operands: unknown[] | null =
+        v.op === 'call' && Array.isArray(args) && Array.isArray(args[1]) ? [...(args[1] as unknown[])]
+        : v.op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
+          ? [args[1], ...(args[2] as unknown[])]
+          : null;
+      const reference = operands?.map(dateRef).find((r): r is string => r !== null);
+      if (reference && checkOf(v) === CEL_NO_MATCHING_OVERLOAD_CODE) {
+        // A fresh node around the same operands, each date field wrapped in `date(…)`.
+        const wrap = (node: unknown): unknown => (dateRef(node) ? wrapInDate(node as CelNode) : node);
+        const list = args as unknown[];
+        const copy: CelNode = v.op === 'rcall'
+          ? { op: 'rcall', args: [list[0], wrap(list[1]), (list[2] as unknown[]).map(wrap)] }
+          : { op: 'call', args: [list[0], (list[1] as unknown[]).map(wrap)] };
+        if (checkOf(copy) === true) {
+          verdict = {
+            call: serialize(v as Parameters<typeof serialize>[0]),
+            reference,
+            rewrite: serialize(copy as Parameters<typeof serialize>[0]),
+          };
+          return;
+        }
+      }
+      visit(args);
+    };
+    visit(parsed.ast);
+    return verdict;
   } catch {
     // A parse/other fault is the syntax checker's job (celEngine.compile).
     return null;
