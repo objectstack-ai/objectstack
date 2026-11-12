@@ -352,7 +352,7 @@ const hook = (label: string) => ({
 });
 
 const recordPage = (name: string, isDefault: boolean, label = name) =>
-    ({ name, label, type: 'record', object: 'acme_org', isDefault, regions: [] });
+    ({ name, label, type: 'record', object: 'acme_org', isDefault, regions: [{ name: 'main', components: [{ type: 'record:details' }] }] });
 
 const datasource = (extra: Record<string, unknown> = {}) =>
     ({ name: 'wh', label: 'Warehouse', driver: 'sqlite', config: { filename: 'wh.db' }, ...extra });

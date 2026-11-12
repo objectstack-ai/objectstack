@@ -523,6 +523,7 @@
     "checkPageMainRegionWidth": "src/ui/page.zod.ts#checkPageMainRegionWidth (function)",
     "checkPagePrintComposition": "src/ui/page.zod.ts#checkPagePrintComposition (function)",
     "checkPageRecordBindingPlacement": "src/ui/page.zod.ts#checkPageRecordBindingPlacement (function)",
+    "checkPageRecordPlacesComponent": "src/ui/page.zod.ts#checkPageRecordPlacesComponent (function)",
     "checkPageRegionPlacement": "src/ui/page.zod.ts#checkPageRegionPlacement (function)",
     "checkPageRequiresKind": "src/ui/page.zod.ts#checkPageRequiresKind (function)",
     "checkPageSourceCompleteness": "src/ui/page.zod.ts#checkPageSourceCompleteness (function)",
