@@ -198,23 +198,29 @@ async function listSkillPromptsServedBy(
 
 /**
  * [#32767] The MCP door of each platform tool family
- * (`PLATFORM_TOOL_FAMILY_PREFIXES` in `@objectstack/spec/system`). The MCP
- * server registers no `action_<name>` tool: an AI-exposed action reaches the
- * client through `run_action` (the skill schema's own JSDoc says so), so a
- * binding naming one is served exactly when `run_action` is.
+ * (`PLATFORM_TOOL_FAMILY_PREFIXES` in `@objectstack/spec/system`; a pin holds
+ * every spec prefix to a door here). The native MCP families register no
+ * `action_<name>` tool: an AI-exposed action reaches the client through
+ * `run_action` (the skill schema's own JSDoc says so), so a binding naming one
+ * is served when `run_action` is, as well as by a tool of that very name.
  */
-const TOOL_FAMILY_DOORS: ReadonlyArray<readonly [prefix: string, door: string]> = [['action_', 'run_action']];
+export const TOOL_FAMILY_DOORS: ReadonlyArray<readonly [prefix: string, door: string]> = [['action_', 'run_action']];
 
 /** Whether one entry of a skill's `tools` binding names a tool `served` serves. */
 function bindingEntryServed(entry: string, served: ReadonlySet<string>): boolean {
   const wildcard = entry.endsWith('*');
   const stem = wildcard ? entry.slice(0, -1) : entry;
+  // A plain name is served by the tool of that name; a trailing wildcard
+  // (`SkillSchema.tools`) by any tool it matches. A host server may list a
+  // family member by name, so the match is read before the family's door.
+  if (wildcard) {
+    for (const name of served) if (name.startsWith(stem)) return true;
+  } else if (served.has(entry)) {
+    return true;
+  }
   for (const [prefix, door] of TOOL_FAMILY_DOORS) {
     if (stem.startsWith(prefix)) return served.has(door);
   }
-  if (!wildcard) return served.has(entry);
-  // A trailing wildcard (`SkillSchema.tools`) is served by any tool it matches.
-  for (const name of served) if (name.startsWith(stem)) return true;
   return false;
 }
 
@@ -237,8 +243,9 @@ export function skillBindingServed(raw: unknown, served: ReadonlySet<string>): b
  * it connects, so the answer is the connection's whole tool list.
  *
  * `undefined` when this SDK's registry cannot be read: the served list is then
- * unknown and every skill is offered, as before this filter. The pins in
- * `skill-prompts.test.ts` go red on such an SDK in both directions.
+ * unknown and every skill is offered, as before this filter. On such an SDK
+ * the two data-only pins in `skill-prompts.test.ts` go red (their CONTROL pins
+ * stay green), so the regression cannot pass silently.
  */
 function servedToolNames(server: McpServer): ReadonlySet<string> | undefined {
   const tools = (server as unknown as { _registeredTools?: unknown })._registeredTools;

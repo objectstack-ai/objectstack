@@ -9,9 +9,10 @@ import {
   MCP_OAUTH_SCOPE_METADATA_WRITE,
 } from '@objectstack/spec/ai';
 import type { AIToolDefinition } from '@objectstack/spec/contracts';
+import { PLATFORM_TOOL_FAMILY_PREFIXES } from '@objectstack/spec/system';
 
 import { MCPServerRuntime } from './mcp-server-runtime.js';
-import { lookupSkillPrompt, projectSkillPrompt, skillBindingServed } from './skill-prompts.js';
+import { lookupSkillPrompt, projectSkillPrompt, skillBindingServed, TOOL_FAMILY_DOORS } from './skill-prompts.js';
 import type { McpDataBridge, McpActionBridge } from './mcp-http-tools.js';
 import type { McpSkillBridge } from './skill-prompts.js';
 import type { McpAuthoringInjection } from './types.js';
@@ -417,6 +418,17 @@ describe('a skill is offered only where the connection serves the tools it binds
     const binding = { tools: ['action_resolve_case', 'action_*'] };
     expect(skillBindingServed(binding, new Set(['run_action']))).toBe(true);
     expect(skillBindingServed(binding, new Set(['list_actions', 'query_records']))).toBe(false);
+  });
+
+  it('a family member a host server lists by name is served by that tool, without the family door', () => {
+    expect(skillBindingServed({ tools: ['action_resolve_case'] }, new Set(['action_resolve_case']))).toBe(true);
+    expect(skillBindingServed({ tools: ['action_*'] }, new Set(['action_resolve_case']))).toBe(true);
+    expect(skillBindingServed({ tools: ['action_resolve_case'] }, new Set(['action_close_case']))).toBe(false);
+  });
+
+  it('every platform tool family the spec declares has its MCP door here', () => {
+    const doors = new Set(TOOL_FAMILY_DOORS.map(([prefix]) => prefix));
+    for (const prefix of PLATFORM_TOOL_FAMILY_PREFIXES) expect(doors.has(prefix)).toBe(true);
   });
 
   it('a trailing wildcard is served by any tool it matches; a skill binding nothing is always served', () => {
