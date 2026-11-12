@@ -22,10 +22,16 @@
 
 import type { DataSource } from '@object-ui/types';
 
-/** One listed item of a registry: the name stored, the label shown beside it. */
+/**
+ * One listed item of a registry: the name stored, the label shown beside it,
+ * and the package the registry served it under (`_packageId`, verbatim), when
+ * the data source reports one (objectstack#32770). A registry serves one item
+ * per `(package, name)`, so two items of one name are two holders of it.
+ */
 export interface RegistryItemHeader {
   name: string;
   label?: string;
+  packageId?: string;
 }
 
 export type RegistryLister = Required<Pick<DataSource, 'listMetadataItems'>>;
