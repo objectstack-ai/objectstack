@@ -15,6 +15,7 @@ import {
 } from './smtp.js';
 import { formatInvalidSmtpPortNotice } from './smtp-port-contract.js';
 import { makeTransport } from './index.js';
+import { normalizeMessage } from '../email-service.js';
 
 const nm = vi.hoisted(() => ({
   createTransport: vi.fn(),
@@ -119,7 +120,9 @@ describe('SmtpTransport — TLS / auth option mapping', () => {
 
   it('describe() reports the connection without the password', () => {
     const d = new SmtpTransport({ host: 'smtp.x', user: 'u@x', password: 'sekrit' }).describe();
-    expect(d).toMatchObject({ host: 'smtp.x', port: 587, auth: { user: 'u@x' } });
+    expect(d).toMatchObject({
+      host: 'smtp.x', port: 587, auth: { user: 'u@x' }, disableFileAccess: true, disableUrlAccess: true,
+    });
     expect(JSON.stringify(d)).not.toContain('sekrit');
   });
 });
@@ -149,6 +152,8 @@ describe('SmtpTransport — send', () => {
       html: '<p>H</p>',
       headers: [{ key: 'X-Trace', value: '42' }],
       attachments: [{ filename: 'a.txt', content: 'body', contentType: 'text/plain', cid: 'cid1' }],
+      disableFileAccess: true,
+      disableUrlAccess: true,
     });
   });
 
@@ -533,5 +538,63 @@ describe('SmtpTransport — a host connect policy', () => {
 
     const without = makeTransport({ provider: 'smtp', options: { host: 'smtp.boot.x' } }) as SmtpTransport;
     expect(without.describe()).not.toHaveProperty('getSocket');
+  });
+});
+
+describe('SmtpTransport — the transport reads no file and fetches no URL on a message\'s behalf', () => {
+  const OPEN = { disableFileAccess: false, disableUrlAccess: false };
+
+  it('sets both content-access flags on the transport it builds, after transportOptions', async () => {
+    await new SmtpTransport({ host: 'smtp.x', transportOptions: { ...OPEN, pool: true } }).send(MSG);
+    expect(nm.createTransport).toHaveBeenCalledWith(expect.objectContaining({
+      pool: true,
+      disableFileAccess: true,
+      disableUrlAccess: true,
+    }));
+  });
+
+  it('sets both flags on every message it hands to sendMail', async () => {
+    const t = new SmtpTransport({ host: 'smtp.x', transportOptions: OPEN });
+    await t.send(MSG);
+    await t.send({ ...MSG, attachments: [{ filename: 'a.txt', content: 'a' }] });
+    expect(nm.sendMail).toHaveBeenCalledTimes(2);
+    for (const [mail] of nm.sendMail.mock.calls) {
+      expect(mail).toMatchObject({ disableFileAccess: true, disableUrlAccess: true });
+    }
+  });
+
+  it('describe() shows both flags on, whatever transportOptions says', () => {
+    expect(new SmtpTransport({ host: 'smtp.x' }).describe())
+      .toMatchObject({ disableFileAccess: true, disableUrlAccess: true });
+    expect(new SmtpTransport({ host: 'smtp.x', transportOptions: OPEN }).describe())
+      .toMatchObject({ disableFileAccess: true, disableUrlAccess: true });
+  });
+
+  it('CONTROL — message fields outside the contract never reach nodemailer', async () => {
+    const body = {
+      to: 'rcpt@example.test',
+      from: 'no-reply@example.test',
+      subject: 'S',
+      text: 'T',
+      raw: 'RAW',
+      alternatives: [{ contentType: 'text/x-other', content: 'ALT' }],
+      icalEvent: { content: 'ICAL' },
+      amp: '<p>AMP</p>',
+      watchHtml: '<p>WATCH</p>',
+      attachments: [{
+        filename: 'a.txt',
+        content: 'body',
+        path: 'attachment-fixture/never-read.txt',
+        href: 'http://127.0.0.1:9/never-fetched',
+        raw: 'RAW-PART',
+      }],
+    };
+    await new SmtpTransport({ host: 'smtp.x' }).send(normalizeMessage(body as never));
+
+    const [mail] = nm.sendMail.mock.calls[0];
+    expect(Object.keys(mail).sort()).toEqual(
+      ['attachments', 'disableFileAccess', 'disableUrlAccess', 'from', 'subject', 'text', 'to'],
+    );
+    expect(mail.attachments).toEqual([{ filename: 'a.txt', content: 'body' }]);
   });
 });

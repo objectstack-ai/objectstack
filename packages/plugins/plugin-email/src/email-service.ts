@@ -391,7 +391,9 @@ function attachmentKindOf(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
   if (ArrayBuffer.isView(value)) return 'a typed array';
+  if (value instanceof ArrayBuffer) return 'an ArrayBuffer';
   if (typeof (value as { pipe?: unknown }).pipe === 'function') return 'a stream';
+  if (typeof value === 'object' && !Array.isArray(value) && !isPlainObject(value)) return 'a class instance';
   return kindOf(value);
 }
 
@@ -417,7 +419,7 @@ function assertAttachments(value: unknown): void {
     const attachment: unknown = value[i];
     if (!isPlainObject(attachment)) {
       throw new Error(
-        `VALIDATION_FAILED: \`attachments[${i}]\` must be an object, not ${attachmentKindOf(attachment)}`,
+        `VALIDATION_FAILED: \`attachments[${i}]\` must be a plain object, not ${attachmentKindOf(attachment)}`,
       );
     }
     const content = attachment.content;
