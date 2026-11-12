@@ -2478,8 +2478,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         // [ADR-0150 D3, #31696] The holder table a flow
                         // endpoint's `target` resolves over, from the
                         // endpoint's own package: the request kernel's
-                        // ObjectQL registry.
-                        const registry = (await execDeps.getObjectQL(protocolContext, protocolContext.environmentId)
+                        // ObjectQL registry. One that cannot be read leaves
+                        // the bare name, which the engine refuses for a
+                        // shared name (fail closed).
+                        const registry = (await Promise.resolve()
+                            .then(() => execDeps.getObjectQL(protocolContext, protocolContext.environmentId))
                             .catch(() => null) as { registry?: EndpointExecutorDeps['registry'] } | null)?.registry;
 
                         const answer = await runAppEndpointStep({

@@ -171,8 +171,7 @@ function withSlots(automation: Record<string, any>, name = 'send_digest', holder
 describe('[ADR-0150 D4/D9, #31696] a flow name two namespaces\' packages hold: each address is served from its holder\'s own slot', () => {
     const slotted = () => {
         const d = dispatcherWith(TWO_HOLDERS);
-        withSlots(d.automation);
-        return d;
+        return { ...d, automation: withSlots(d.automation) };
     };
 
     it('read, run, legacy trigger, toggle and runs of `crm`\'s address reach CRM\'s flow; `hr`\'s reach HR\'s; the bare name is never read', async () => {
@@ -228,11 +227,11 @@ describe('[ADR-0150 D4/D9, #31696] a flow name two namespaces\' packages hold: e
 
     it('CONTROL — a namespace that holds neither is refused naming both, nothing read or run', async () => {
         const d = dispatcherWith({ ...TWO_HOLDERS, namespaces: { [CRM]: 'crm', [HR]: 'hr', 'com.ops.pkg': 'ops' } });
-        withSlots(d.automation);
+        const automation = withSlots(d.automation);
         const answer = await d.call('/ops/send_digest/trigger', 'POST');
         expect([answer.status, codeOf(answer)]).toEqual([409, 'RESOURCE_CONFLICT']);
         expect(candidatesOf(answer)).toEqual([{ kind: 'package', packageId: CRM }, { kind: 'package', packageId: HR }]);
-        expect(d.automation.executeSlot).not.toHaveBeenCalled();
+        expect(automation.executeSlot).not.toHaveBeenCalled();
     });
 });
 

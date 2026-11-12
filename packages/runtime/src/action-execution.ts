@@ -2684,13 +2684,14 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // before anything below reads or runs. Every step below (existence,
     // start admission, the row reads, the run) reads the one flow. An
     // action with no package keeps the bare name, which the engine refuses
-    // for a shared name, naming both.
-    const automation = flowServiceForCaller(
-        service,
-        (await deps.getObjectQL(requestContext, envId).catch(() => null) as { registry?: any } | null)?.registry,
-        action?.target,
-        callerPackageId,
-    );
+    // for a shared name, naming both; so does an action whose registry
+    // cannot be read (fail closed).
+    const registry = callerPackageId
+        ? (await Promise.resolve()
+            .then(() => deps.getObjectQL(requestContext, envId))
+            .catch(() => null) as { registry?: any } | null)?.registry
+        : undefined;
+    const automation = flowServiceForCaller(service, registry, action?.target, callerPackageId);
     // [#9446] Row 1 of the table, answered by the SAME optional `getFlow`
     // registry probe the trigger door uses — the engine's not-found exit
     // carries no classification, so this is the only way to read it that is not

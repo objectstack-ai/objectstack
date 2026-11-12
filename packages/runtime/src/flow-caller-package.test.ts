@@ -28,22 +28,28 @@ import { ApiEndpointSchema } from '@objectstack/spec/api';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { executeEndpointTarget, type EndpointExecutionContext } from './endpoint-executor.js';
 import { flowServiceForCaller, flowSlotView } from './flow-slot-view.js';
+import type { PackageScopedRegistry } from '@objectstack/objectql';
 
 const CRM = 'com.crm.pkg';
 const HR = 'com.hr.pkg';
 const OPS = 'com.ops.pkg';
 const FLOW = 'convert_lead';
 
+type Installed = NonNullable<ReturnType<PackageScopedRegistry['getPackage']>>;
+/** An installed package as the closure walk reads it: its manifest's id, namespace and dependencies. */
+const installed = (manifest: { id: string; namespace: string; dependencies?: Record<string, string> }) =>
+    ({ manifest, source: 'code' }) as unknown as Installed;
+
 /** The registry's holder table: `type:name` → the packages holding it. */
 function registryWith(packages: Record<string, string[]>, namespaces: Record<string, string> = { [CRM]: 'crm', [HR]: 'hr', [OPS]: 'ops' }) {
     const holdersOf = (type: string, name: string) => packages[`${type}:${name}`] ?? [];
     return {
         packageScopedHoldersOf: (type: string, name: string) => holdersOf(type, name),
-        getPackageScopedItem: (type: string, name: string, packageId: string) =>
-            (holdersOf(type, name).includes(packageId) ? { name, _packageId: packageId } : undefined),
+        getPackageScopedItem: <T,>(type: string, name: string, packageId: string): T | undefined =>
+            (holdersOf(type, name).includes(packageId) ? ({ name, _packageId: packageId } as T) : undefined),
         getEnvironmentScopedItem: () => undefined,
-        getPackage: (id: string) => (namespaces[id] ? { manifest: { id, namespace: namespaces[id] } } : undefined),
-        getAllPackages: () => Object.keys(namespaces).map((id) => ({ manifest: { id, namespace: namespaces[id] } })),
+        getPackage: (id: string): Installed | undefined => (namespaces[id] ? installed({ id, namespace: namespaces[id] }) : undefined),
+        getAllPackages: (): Installed[] => Object.keys(namespaces).map((id) => installed({ id, namespace: namespaces[id] })),
         getNamespaceOwners: (ns: string) => Object.keys(namespaces).filter((id) => namespaces[id] === ns),
     };
 }
@@ -60,10 +66,10 @@ function engineWith(holders: string[]) {
             if (shared) throw refusal();
             return { name, label: `${holders[0]} flow` };
         }),
-        execute: vi.fn(async () => ({ success: true, output: { ran: 'bare' } })),
+        execute: vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: { ran: 'bare' } })),
         flowSlotKey: vi.fn((pkg: string | null, name: string) => (name === FLOW ? keyOf(pkg) : undefined)),
         getFlowSlot: vi.fn((pkg: string | null, name: string) => (name === FLOW && keyOf(pkg) ? { name, label: `${pkg} flow` } : null)),
-        executeSlot: vi.fn(async (pkg: string | null) => ({ success: true, output: { ran: pkg } })),
+        executeSlot: vi.fn(async (pkg: string | null, _name: string, _context?: unknown) => ({ success: true, output: { ran: pkg } })),
         toggleFlowSlot: vi.fn(async () => {}),
     };
 }
@@ -87,7 +93,7 @@ describe('flowServiceForCaller — the target resolves from the caller package',
         const withDependency = {
             ...registry,
             getPackage: (id: string) => (id === OPS
-                ? { manifest: { id, namespace: 'ops', dependencies: { [CRM]: '^1.0.0' } } }
+                ? installed({ id, namespace: 'ops', dependencies: { [CRM]: '^1.0.0' } })
                 : registry.getPackage(id)),
         };
         await flowServiceForCaller(engine, withDependency, FLOW, OPS).execute(FLOW, {} as never);
