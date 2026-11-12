@@ -267,8 +267,10 @@ reading of that date, not part of the decision:
 ("in-memory drivers have no real transaction"), and that is not what the code
 shows today: `driver-memory` implements `beginTransaction` / `commit` /
 `rollback` by snapshotting the store and restoring the snapshot, declares no
-`transactionsUnsupported`, and the gate answers yes for it. Measured at the
-same commit: on ObjectQL over `InMemoryDriver`, a transaction that inserted two
+`transactionsUnsupported`, and the gate answers yes for it. The driver half is
+pinned by `memory-driver.test.ts` ("should rollback a transaction"); the engine
+half was measured at the same commit by a one-time probe, not kept as a test:
+on ObjectQL over `InMemoryDriver`, a transaction that inserted two
 rows and then threw left none of them, with `owned: true`; the same driver made
 to declare `transactionsUnsupported` left both. What it rolls back is the whole
 store, to its state at `begin` — a rollback, without the isolation a SQL
@@ -282,7 +284,8 @@ changed. Where it answers no:
 
 1. **Every draft is judged before any is written.** A first pass runs each
    draft's promotion in judge-only mode. A draft the publish-time gate refuses
-   — the class #32396 hit — refuses the batch with nothing written.
+   — the class #32396 hit — refuses the batch with no draft promoted. (The
+   refusal itself is still recorded in the audit trail.)
 2. **Then the drafts are promoted, each judged again** against the store as the
    earlier promotions left it, and the commit is recorded.
 3. **A failure the first pass could not see is undone by compensation** — a
@@ -296,8 +299,11 @@ changed. Where it answers no:
 4. **An undo that fails is named.** One item's failure does not stop the others
    from being undone. An item that could not be undone is reported in
    `failed[]` as live, without the `BATCH_ABORTED` code that means "not
-   published"; it is logged at `error` with the fix; and the refusal's
-   audit note names it.
+   published"; and it is logged at `error` with the fix. The refusal's audit
+   note names it too, but only when the refusal has an identifiable causal
+   item: that audit row is written per causal item, and a failure outside any
+   one promotion — the commit record failing after every promotion — has
+   none.
 
 ### That is best effort, not atomicity
 
@@ -308,7 +314,8 @@ rather than leaving it to be discovered:
   promotion live.** The list of what to undo is held by the publishing call
   itself; nothing durable records that an undo is owed, and nothing retries one.
 - **An undo is a write, and a write can fail.** The item then stays live — named
-  in the response, the log and the audit note, as above.
+  in the response and the log, and in the audit note only where the refusal
+  has a causal item, as above.
 - **There is no isolation.** Between a promotion and its undo the store holds
   the promoted row. The publishing runtime's registry does not serve it —
   registry refresh is a Phase-2 side effect, which a refused batch never
