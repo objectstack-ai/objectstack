@@ -770,6 +770,8 @@ os audit verify                                     # every chain, the deploymen
 os audit verify --org org_123 --org org_456          # only these organizations' chains
 os audit verify --from 2026-11-01 --to 2026-11-08    # only the rows of these windows
 os audit verify --json                               # the machine-readable report
+os audit verify --out ledger-proof.json              # also write the proof bundle
+os audit verify --bundle ledger-proof.json --trusted-key <fingerprint>   # check a bundle offline
 ```
 
 **Options:**
@@ -777,6 +779,10 @@ os audit verify --json                               # the machine-readable repo
   chain is checked, the deployment chain included.
 - `--from <iso>`, `--to <iso>` — judge only the rows of the windows this range overlaps
   (ISO-8601). Links and signatures are still checked over each whole chain.
+- `--out <file>` — also write the run's proof bundle (see below), an export of the ledger
+  that carries personal data. It is written whatever the verdict.
+- `--bundle <file>` — check a proof bundle offline instead of the live ledger (see below).
+- `--trusted-key <fingerprint>` — a signing key fingerprint `--bundle` trusts (repeatable).
 - `--database-url <url>`, `--json`
 
 Each row a checkpoint lists reads as one of:
@@ -810,6 +816,35 @@ Exit codes:
   not boot, a crypto provider that cannot open what is sealed, an archive datasource a
   sealed object declares that this run did not connect (every archived row would read
   `missing`), or a check that stopped partway.
+
+**The proof bundle.** `--out <file>` writes what an auditor needs to repeat the check
+without your database (format `objectstack.audit.proof-bundle.v1`): the public halves of
+the keys this run trusted, every checkpoint and amendment in scope, and each judged row's
+leaf input. A leaf input holds the row's clear columns and, for its value columns, only
+the salted commitments. The bundle holds no value, no salt and no seed.
+
+**A bundle carries personal data.** Its clear columns (`user_id`, `actor`, `ip_address`,
+`user_agent`, `tenant_id`) identify people. It is an export of the ledger: keep it and pass
+it on under the same access and retention rules as the ledger it came from, and narrow it
+with `--org`, `--from` and `--to` to what the auditor needs. The file is written with mode
+`0600`.
+
+`--bundle <file>` re-runs the verdicts on such a bundle. It boots nothing and needs no
+database and no data key. It checks that each leaf input hashes to its checkpoint's leaf
+hash and the leaf hashes to the signed root, that the links hold, that every signature
+verifies under a trusted key, and that each expiry is honoured under the retention value
+its own signature carries. It requires at least one `--trusted-key <fingerprint>`: a
+fingerprint `os audit verify` printed on the host, which you got out of band. A key the
+bundle carries is used only when it hashes to a fingerprint you gave. A bundle cannot vouch
+for its own keys.
+
+- A bundle keeps the scope of the run that wrote it, so `--bundle` takes no `--org`,
+  `--from` or `--to`. It also takes no `--out` and no `--database-url`.
+- `--trusted-key` applies to `--bundle` only.
+- Any other combination is a usage error (exit 2), as are a missing `--trusted-key` and a
+  file that is not a proof bundle.
+- A bundle proves what its checkpoints hold. Rows of a sealed window that no checkpoint
+  lists (`late` and unsealed) are carried as the writing run found them.
 
 ### Build & Validate
 

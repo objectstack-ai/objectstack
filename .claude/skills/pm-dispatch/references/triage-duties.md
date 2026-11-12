@@ -80,7 +80,7 @@
 - 三类外首触关闭只清门前存量,关 not planned(不等批准可否决重开);三类内无证据拒收。
 - 三类内再过时前提检查,三选一:晋级 / 关闭 not planned / hold;判级只在此轮,不在立单时。
 - ⛔ 带 `pm:dispatched`/assignee/open 或 merged PR 引用的卡不动;例外:关卡行、下三行、锚卡首触。
-- 在飞活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲门一次,首行键 `Owned-24h re-check:`。
+- 总监席活性复查:认领逾一天无自有产出(commit/PR/评论)⇒ 敲一次,首行键 `Owned-24h re-check:`。
 - 敲门后 `RECLAIM_AFTER_HOURS = 12` 小时无答复 ⇒ `label-write.mjs --release` 一笔中继释放,贴不动。
 - 释放:`Release:` 评论(出处三件)+ `Resume-from:` 行 + `pm:dispatched`→`pm:queue` + 清 assignee。
 - 人工地板(恒呈维护者):功能新增;ADR;协议/公开契约变化;破坏性或难回滚动作。
