@@ -2240,17 +2240,18 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
 /**
  * [#32521; epic #31527 red lines 2 and 3, epic seat rulings 2026-11-12] The
  * boot priming pass primes every holder of a name two packages hold: the
- * plural reads hand on one item per `(package, slot identity)` of such a name
- * of every type stored per `(package, name)`, so after the pass a bare read of
+ * plural reads hand on one item per `(package, name)` of such a name of every
+ * type stored per `(package, name)`, so after the pass a bare read of
  * it is refused `409 ambiguous-in-environment` naming both, the same as without
  * the pass, and an unfiltered `list` keeps both. A name one package holds —
  * with or without a package-less row beside it, on any host — hands on one
  * item and answers what it answered (the CONTROL pins).
  *
- * BEFORE (measured at efd4ea3a, #32458's head, same fixtures, all five
- * unbundled types alike): `DatabaseLoader.loadMany` / `loadManyKeyed` kept one
- * row per name (the highest version) and `MetadataManager.loadMany` one item
- * per `body.name`, so the pass registered BETA's row alone and a bare read
+ * BEFORE (measured at efd4ea3a, #32458's head, same fixtures, the five
+ * unbundled types of that head alike; re-measured at main 34890e0e, after
+ * #32517, for all nine — `flow`, `picklist`, `mapping` and `dataset` too):
+ * `DatabaseLoader.loadMany` / `loadManyKeyed` kept one row per name (the
+ * highest version), so the pass registered BETA's row alone and a bare read
  * answered BETA's body. `email_template` (bundled) already kept every row.
  */
 describe('[#32521] the boot priming pass primes every holder of a name', () => {
