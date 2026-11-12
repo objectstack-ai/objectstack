@@ -303,6 +303,18 @@ describe('the field-write label list is quoted and separated by the catalog, byt
       expect(refusal.userMessage).toBe(text);
     });
   }
+
+  it('a deployment `errors.` override of the list rules reaches the sentence', async () => {
+    const refuse = await boot({
+      sets: [memberSet],
+      row: OWNED_BY_U1,
+      translations: { en: { 'errors.field_label_quoted': '[{{label}}]', 'errors.field_label_list_separator': ' / ' } },
+    });
+    const refusal = await refuse(update({ salary: 1, grade: 'A' }, 'en'));
+    expect(refusal.userMessage).toBe(
+      'You do not have permission to edit [Grade] / [Salary]. Undo those changes and try again, or contact your administrator if you need access.',
+    );
+  });
 });
 
 describe('the userMessage reaches the REST data door body (mapDataError, POST / PATCH /data/:object)', () => {
