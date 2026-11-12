@@ -2,7 +2,8 @@
 
 /**
  * Messaging route ledger — the audited disposition of every HTTP route
- * `registerPreferenceOptionsRoutes` (`preference-options-routes.ts`) mounts.
+ * `registerPreferenceOptionsRoutes` (`preference-options-routes.ts`) and
+ * `registerInAppMessageRoutes` (`in-app-message-routes.ts`) mount.
  *
  * WHY THIS EXISTS. `MessagingServicePlugin` reaches for the `http-server`
  * service and registers straight on `IHttpServer`, so neither the dispatcher
@@ -14,9 +15,11 @@
  * (`/api/v1/notifications*`) are not here: the runtime dispatcher serves them,
  * and they are rows of its own ledger.
  *
- * NOT SDK SURFACE. `@objectstack/client` expresses no method for it: the
- * consumer is the console's notification preference and template forms, over
- * plain HTTP. That is a `server-only` disposition.
+ * NOT SDK SURFACE. `@objectstack/client` expresses no method for either: the
+ * consumers are the console's notification preference and template forms, and
+ * the Setup action "Send in-app message" (a same-origin `type: 'api'` action,
+ * which the action doors also forward for an agent), over plain HTTP. That is
+ * a `server-only` disposition.
  *
  * This module is package-internal (not exported from the index): it is the
  * guard's data, not public API. It stays import-free, so a guard in another
@@ -51,4 +54,6 @@ export interface MessagingRouteLedgerEntry {
 export const MESSAGING_ROUTE_LEDGER: readonly MessagingRouteLedgerEntry[] = [
     { route: 'GET /api/v1/messaging/preference-options', family: 'messaging', disposition: 'server-only',
         note: 'the topics and channels a notification preference or template can name, for the console\'s pick-or-type inputs; any signed-in member, read-only' },
+    { route: 'POST /api/v1/messaging/in-app-messages', family: 'messaging', disposition: 'server-only',
+        note: 'an organization administrator\'s in-app message to everyone in, or picked members of, their current organization; the target of the Setup action send_in_app_message on sys_notification' },
 ];

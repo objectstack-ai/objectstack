@@ -285,6 +285,13 @@ const MODULES = {
   // `sendServerFault`), so it builds none itself.
   'packages/services/service-messaging/src/preference-options-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // [#32445] The in-app message door (`POST /api/v1/messaging/in-app-messages`),
+  // mounted by `MessagingServicePlugin` beside the preference options door.
+  // Every body it answers is written by the shared pair (`sendOk` /
+  // `sendError` / `sendServerFault`), so it builds none itself. Declared in
+  // the same PR that created the module.
+  'packages/services/service-messaging/src/in-app-message-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // [#30209] The shareable-objects door (`GET /api/v1/sharing/shareable-objects`),
   // mounted by `SharingServicePlugin` straight on `IHttpServer`. Every body it
   // answers is written by the shared pair (`sendOk` / `sendError` /
