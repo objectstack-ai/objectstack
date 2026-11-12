@@ -29,6 +29,7 @@ import {
   SysCommentReaction,
   SysAuditCheckpoint,
   SysAuditSigningKey,
+  SysAuditAmendment,
 } from './objects/index.js';
 import { SysAuditLogDetailPage } from './sys-audit-log.page.js';
 // `sys_notification` was parked here "until that [ADR-0030] migration lands".
@@ -331,12 +332,10 @@ export class AuditPlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      // [ADR-0154] The checkpoints and the signing keys are registered ahead
-      // of the sealer and signer that write them (#31908 P1b-1), so their
-      // tables, translations and `get` / `list` doors exist when the sealer
-      // lands. `sys_audit_amendment` is registered with its first writer, the
-      // redaction amendments of P3; until then it is declared and unregistered.
-      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey],
+      // [ADR-0154] The checkpoints and the signing keys, which the sealer and
+      // signer write, and the amendments, which the redaction amendment writer
+      // writes before a migration rewrites a sealed row (D7).
+      objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey, SysAuditAmendment],
       // The ledger row's record page: its fields, and every ledger row about
       // the same record beside it, so a `config_change` row sits next to the
       // mirror's rows about the same settings row (`sys-audit-log.page.ts`).
@@ -852,7 +851,7 @@ export class AuditPlugin implements Plugin {
    * different problems, and the log now distinguishes them.
    */
   private async provisionSystemTables(engine: IDataEngine, ctx: PluginContext): Promise<void> {
-    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey];
+    const objects = [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey, SysAuditAmendment];
     // [#22984] FIRST: a deployment that declared its DDL managed out-of-band
     // gets none from here either. See "Why the flag skips this provisioning".
     if (bootSchemaSyncSkipped(engine)) {

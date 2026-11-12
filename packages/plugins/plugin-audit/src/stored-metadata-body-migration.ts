@@ -57,6 +57,14 @@
  * their copies ({@link planDecisionNotePatch}) — the one operator-run rewrite
  * this family already has, extended to a derived column of the same rows, never
  * a second rewrite path.
+ *
+ * ## A sealed row is amended first, or not rewritten (ADR-0154 D7)
+ *
+ * Given `seal`, a row of an object that declares `lifecycle.seal` goes through
+ * the one redaction amendment writer (`audit-seal/amendment-writer.ts`) before
+ * it is rewritten: amended first, or left as it is and counted `refused` when
+ * its amendment cannot be written. The dry run decides the same, and writes
+ * nothing.
  */
 
 import {
@@ -66,6 +74,7 @@ import {
   STORED_METADATA_TYPE_COLUMN,
 } from '@objectstack/spec/kernel';
 import type { IDataEngine } from '@objectstack/spec/contracts';
+import { RedactionAmender, type AuditRedactionSeal, type RedactionDecision } from './audit-seal/amendment-writer.js';
 
 /** The two audit-family tables this writer copies stored metadata bodies into. */
 export const STORED_METADATA_BODY_AUDIT_OBJECTS = ['sys_audit_log', 'sys_activity'] as const;
@@ -342,10 +351,15 @@ export interface MigrationLogger {
 /** What one migration run did (or would do in dry-run). */
 export interface StoredMetadataBodyMigrationReport {
   apply: boolean;
-  /** Per audit-family object: rows scanned and rows rewritten (or that would be). */
-  readonly byObject: Record<string, { scanned: number; rewritten: number }>;
+  /** Per audit-family object: rows scanned, rows rewritten (or that would be), and sealed rows refused. */
+  readonly byObject: Record<string, { scanned: number; rewritten: number; refused: number }>;
   /** Rows a planner changed, total across the two tables. */
   rewritten: number;
+  /**
+   * [ADR-0154 D7] Sealed rows left as they are because their redaction
+   * amendment cannot be written — not counted in `rewritten`.
+   */
+  refused: number;
   /** Rows read, total. */
   scanned: number;
   /** Rows an `update` threw on (apply mode) — re-run to finish them. */
@@ -370,16 +384,26 @@ function asArray(result: unknown): Record<string, unknown>[] {
 export async function migrateStoredMetadataBodyCopies(
   engine: StoredMetadataBodyMigrationEngine,
   logger: MigrationLogger,
-  options: { apply?: boolean } = {},
+  options: {
+    apply?: boolean;
+    /**
+     * [ADR-0154 D7] What amending a sealed row takes. Every shipped caller
+     * passes it; without it a row is rewritten with no amendment, and a sealed
+     * one then reads `modified` in `os audit verify`.
+     */
+    seal?: AuditRedactionSeal;
+  } = {},
 ): Promise<StoredMetadataBodyMigrationReport> {
   const apply = options.apply === true;
   const report: StoredMetadataBodyMigrationReport = {
     apply,
     byObject: {},
     rewritten: 0,
+    refused: 0,
     scanned: 0,
     failures: 0,
   };
+  const amender = options.seal ? new RedactionAmender(options.seal, 'os migrate audit-metadata-bodies', logger) : undefined;
 
   // Best-effort `record_id` → metadata `type` resolver: an update diff snapshot
   // may carry no `type` column, so the live `sys_metadata` row answers it when
@@ -411,7 +435,8 @@ export async function migrateStoredMetadataBodyCopies(
     { object: METADATA_DECISION_AUDIT_OBJECT, where: { code: { $eq: CONFLICT_NOTE_CODE } } },
   ];
   for (const { object, where } of tables) {
-    report.byObject[object] = { scanned: 0, rewritten: 0 };
+    report.byObject[object] = { scanned: 0, rewritten: 0, refused: 0 };
+    const sealed = amender?.isSealed(object) === true;
     let rows: Record<string, unknown>[];
     try {
       const result = await engine.find(object, { where }, { context: SYSTEM_CTX });
@@ -439,6 +464,14 @@ export async function migrateStoredMetadataBodyCopies(
           ? planAuditRowPatch(row, await resolveType(row.record_id))
           : planActivityRowPatch(row, await resolveType(row.record_id));
       if (!patch) continue;
+      // [ADR-0154 D7] A sealed row: its amendment is decided before anything else.
+      const decision: RedactionDecision = sealed ? await amender!.decide(object, row.id, patch) : { kind: 'none' };
+      if (decision.kind === 'refused') {
+        report.refused += 1;
+        report.byObject[object].refused += 1;
+        logger.warn(`[stored-metadata-body-migration] refused to rewrite ${object}/${String(row.id)}, a sealed row: ${decision.reason}. It is left as it is.`);
+        continue;
+      }
       report.rewritten += 1;
       report.byObject[object].rewritten += 1;
       if (!apply) continue;
@@ -446,6 +479,20 @@ export async function migrateStoredMetadataBodyCopies(
       if (typeof id !== 'string' || id === '') {
         report.failures += 1;
         logger.warn(`[stored-metadata-body-migration] ${object} row has no id — cannot rewrite`);
+        continue;
+      }
+      try {
+        await amender?.write(object, decision);
+      } catch (e) {
+        // The amendment is written before the row, or the row is not rewritten (D7).
+        report.rewritten -= 1;
+        report.byObject[object].rewritten -= 1;
+        report.refused += 1;
+        report.byObject[object].refused += 1;
+        logger.warn(
+          `[stored-metadata-body-migration] refused to rewrite ${object}/${id}, a sealed row: its amendment could not be written ` +
+            `(${(e as Error)?.message ?? String(e)}). It is left as it is.`,
+        );
         continue;
       }
       try {
@@ -465,6 +512,7 @@ export async function migrateStoredMetadataBodyCopies(
   logger.info?.(
     `[stored-metadata-body-migration] ${apply ? 'rewrote' : 'would rewrite'} ${report.rewritten} of ${report.scanned} ` +
       `audit/activity/decision row(s) carrying a stored metadata body or a stored content hash` +
+      (report.refused > 0 ? ` (${report.refused} sealed row(s) refused: no amendment could be written)` : '') +
       (report.failures > 0 ? ` (${report.failures} failed — re-run to finish)` : ''),
   );
   return report;
