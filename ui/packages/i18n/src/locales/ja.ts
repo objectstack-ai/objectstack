@@ -1425,6 +1425,7 @@ const ja = {
     saving: "保存中…",
     lockedByApproval: "承認のためロック中",
     lockedTooltip: "このレコードには承認待ちのリクエストがあります。編集はロックされています",
+    lockedByState: "現在の状態では編集できません",
     writeStrippedTitle: "保存しました（一部の項目は反映されていません）",
     writeWarningsTitle: "保存しました（警告があります）",
     writeStrippedReadonly: "次の項目は読み取り専用のため反映されませんでした: {{fields}}",

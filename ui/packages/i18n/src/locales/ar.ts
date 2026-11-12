@@ -1526,6 +1526,7 @@ const ar = {
     saving: "جارٍ الحفظ…",
     lockedByApproval: "مقفل للموافقة",
     lockedTooltip: "يحتوي هذا السجل على طلب موافقة معلق؛ التعديل مقفل",
+    lockedByState: "غير قابل للتعديل في حالته الحالية",
     writeStrippedTitle: "تم الحفظ، لكن بعض الحقول لم تُطبَّق",
     writeWarningsTitle: "تم الحفظ، مع تحذيرات",
     writeStrippedReadonly: "للقراءة فقط، لذلك لم تُطبَّق: {{fields}}",
