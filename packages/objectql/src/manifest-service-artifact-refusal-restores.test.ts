@@ -37,7 +37,7 @@
  * the marketplace install door hands them over.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin } from './plugin.js';
 import { ObjectQL } from './engine.js';
@@ -165,6 +165,44 @@ async function boot(): Promise<{ ql: ObjectQL; manifest: ManifestService }> {
   return { ql, manifest };
 }
 
+/**
+ * A kernel whose cold boot registers `atBoot` (a plugin's `start()`, before the
+ * registry is sealed), with the `metadata:reloaded` announce a reload arrives
+ * through and every warning the kernel logged.
+ */
+async function bootWith(atBoot: unknown[]) {
+  const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
+  kernels.push(kernel);
+  const warn = vi.spyOn((kernel as unknown as { logger: { warn: (...a: unknown[]) => void } }).logger, 'warn');
+  let trigger: ((name: string, payload: unknown) => Promise<void>) | undefined;
+  await kernel.use(new ObjectQLPlugin());
+  await kernel.use({
+    name: 'test.follow-door.boot-packages',
+    version: '1.0.0',
+    dependencies: ['com.objectstack.engine.objectql'],
+    init: async () => {},
+    start: async (ctx: { getService<T>(name: string): T; trigger: (name: string, payload: unknown) => Promise<void> }) => {
+      trigger = (name, payload) => ctx.trigger(name, payload);
+      const manifest = ctx.getService<ManifestService>('manifest');
+      await manifest.register({
+        id: HOLDER, name: 'holder', namespace: 'holder', version: '1.0.0', type: 'app',
+        objects: [object('holder_thing', { label: 'Holder thing' })],
+        apps: [{ name: 'holder_app', label: 'Holder', navigation: [] }],
+      });
+      for (const m of atBoot) await manifest.register(m);
+    },
+  } as never);
+  await kernel.bootstrap();
+  const ql = kernel.getService<ObjectQL>('objectql');
+  ql.registry.logLevel = 'silent';
+  return {
+    ql,
+    warn,
+    warnings: () => warn.mock.calls.map((c) => String(c[0])),
+    reload: (m: unknown) => trigger!('metadata:reloaded', { metadata: m }),
+  };
+}
+
 async function refusal(run: () => Promise<unknown>): Promise<any> {
   try {
     await run();
@@ -290,5 +328,297 @@ describe('CONTROLS', () => {
 
     expect(ql.registry.getObjectOwner('suite_residual_thing')?.packageId).toBe(SUITE);
     expect(ql.residualOwnerSource(SUITE)).toBe('marketplace');
+  });
+});
+
+// ── [ADR-0144 D2 and D6, amended] The record-currency follow door, at the end of the run ──
+//
+// A running install, upgrade or reload registers several object layers, and a
+// pair of them is whole only once all have registered: a package's
+// `objectExtensions` after its `objects`, a later member of the artifact, its
+// residual, a nested plugin. So the registry asks the follow door ONCE, at the
+// end of the outermost registration run, of every layer the run registered
+// (`SchemaRegistry.restoringOnRefusal`). Asked any earlier — at each
+// registration, or at the end of each body — the admitted cases below are
+// refused; never asked, the refused ones install.
+
+const LEDGER = 'com.probe.ledger';
+const CODE = { type: 'text', label: 'Currency', valueDomain: 'iso_4217_currency' };
+const FOLLOW_REFUSED = { name: 'RecordCurrencyFollowRefusedError', code: 'INVALID_METADATA', status: 422, httpStatus: 422 };
+
+/** The parent, holding an ISO 4217 code under `codeField` (none when omitted). */
+const invoice = (codeField?: string, fields: Record<string, unknown> = {}) => object('suite_invoice', {
+  fields: { title: { type: 'text', label: 'Title' }, ...(codeField ? { [codeField]: CODE } : {}), ...fields },
+});
+/** The child, whose amount follows `pointer` through its `invoice` (a plain number when omitted). */
+const line = (pointer?: string) => object('suite_line', {
+  fields: {
+    title: { type: 'text', label: 'Title' },
+    invoice: { type: 'master_detail', label: 'Invoice', reference: 'suite_invoice' },
+    amount: pointer
+      ? { type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField: pointer } }
+      : { type: 'number', label: 'Amount' },
+  },
+});
+/** A `record` roll-up of the child's amount, in the parent's currency. */
+const SUBTOTAL = {
+  subtotal: {
+    type: 'summary',
+    label: 'Subtotal',
+    currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' },
+    summaryOperations: { object: 'suite_line', field: 'amount', function: 'sum' },
+  },
+};
+/** A package installed before the artifact, owning the parent. */
+const ledger = (codeField?: string) => ({
+  id: LEDGER, name: 'ledger', namespace: 'ledger', version: '1.0.0', type: 'module', objects: [invoice(codeField)],
+});
+/** The first member with `objects` beside its own. */
+const coreWith = (version: string, objects: unknown[], extra: Record<string, unknown> = {}) =>
+  core(version, { objects: [object('suite_core_thing', { label: `core ${version}` }), ...objects], ...extra });
+const EXTENDS_CODE = { objectExtensions: [{ extend: 'suite_invoice', fields: { currency_code: CODE } }] };
+
+const fieldOf = (ql: ObjectQL, objectName: string, field: string): any =>
+  (ql.registry.getObject(objectName)?.fields as Record<string, unknown> | undefined)?.[field];
+const followedBy = (ql: ObjectQL) => fieldOf(ql, 'suite_line', 'amount')?.currencyConfig?.currencyField;
+
+describe('a running install is asked the record-currency follow door once, at the end of its run (ADR-0144 D2 and D6, amended)', () => {
+  it('a package whose own `objectExtensions` supplies the parent\'s code field installs', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+
+    // The body's object registers before its extension: asked at that
+    // registration, the child follows a code the parent does not hold yet.
+    await manifest.register(coreWith('1.0.0', [line('invoice.currency_code')], EXTENDS_CODE), { source: 'marketplace' });
+
+    expect(ql.registry.getObjectOwner('suite_line')?.packageId).toBe(CORE);
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('…and so does an artifact whose LATER member supplies it: no body is asked at its own end', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+
+    await manifest.register(
+      artifact([coreWith('1.0.0', [line('invoice.currency_code')]), addon('1.0.0', EXTENDS_CODE)]),
+      { source: 'marketplace' },
+    );
+
+    expect(trace(ql).packages).toEqual([`${CORE}@1.0.0`, `${ADDON}@1.0.0`]);
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('…and an upgrade whose RESIDUAL supplies it, while a body starts following it', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(artifact([coreWith('1.0.0', [line()]), addon()], { objects: [invoice()] }), { source: 'marketplace' });
+    expect(ql.registry.getObjectOwner('suite_invoice')?.packageId).toBe(SUITE);
+
+    // The residual registers after every body: at the end of the first body
+    // the child follows `currency_code` of the parent 1.0.0 left, which holds none.
+    await manifest.register(
+      artifact([coreWith('2.0.0', [line('invoice.currency_code')]), addon('2.0.0')], { objects: [invoice('currency_code')] }),
+      { source: 'marketplace' },
+    );
+
+    expect(trace(ql).packages).toEqual([`${CORE}@2.0.0`, `${ADDON}@2.0.0`]);
+    expect(followedBy(ql)).toBe('invoice.currency_code');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('an upgrade that renames the code field in one member and re-points the amount in another installs: the parent judged is the new one', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(
+      artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.currency_code')] })]),
+      { source: 'marketplace' },
+    );
+
+    // The parent registers first: asked there, the installed child still
+    // follows `currency_code`, which the incoming parent no longer holds.
+    await manifest.register(
+      artifact([coreWith('2.0.0', [invoice('billing_code')]), addon('2.0.0', { objects: [line('invoice.billing_code')] })]),
+      { source: 'marketplace' },
+    );
+
+    expect(trace(ql).packages).toEqual([`${CORE}@2.0.0`, `${ADDON}@2.0.0`]);
+    expect(followedBy(ql)).toBe('invoice.billing_code');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')).toBeUndefined();
+  });
+
+  /** Each place a bad pair can arrive from; the parent holds `currency_code`, and `title` holds no ISO 4217 code. */
+  const BAD_PAIRS: Array<{ label: string; build: () => unknown; object: string; field: string }> = [
+    {
+      label: 'in a body: its amount follows a parent field that holds no ISO 4217 code',
+      build: () => artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.title')] })]),
+      object: 'suite_line', field: 'amount',
+    },
+    {
+      label: 'in the residual: a top-level object no body declares',
+      build: () => artifact([coreWith('1.0.0', [invoice('currency_code')]), addon()], { objects: [line('invoice.title')] }),
+      object: 'suite_line', field: 'amount',
+    },
+    {
+      label: 'in a nested plugin\'s objects (one package, as the body door takes it)',
+      build: () => coreWith('1.0.0', [invoice('currency_code')], { plugins: [{ name: 'suite_inner', objects: [line('invoice.title')] }] }),
+      object: 'suite_line', field: 'amount',
+    },
+    {
+      label: 'across two members: a `record` roll-up over a child amount that follows nothing',
+      build: () => artifact([coreWith('1.0.0', [invoice('currency_code', SUBTOTAL)]), addon('1.0.0', { objects: [line()] })]),
+      object: 'suite_invoice', field: 'subtotal',
+    },
+  ];
+  for (const c of BAD_PAIRS) {
+    it(`a bad pair is refused 422 and leaves nothing of the artifact — ${c.label}`, async () => {
+      const { ql, manifest } = await boot();
+
+      const err = await refusal(() => manifest.register(c.build(), { source: 'marketplace' }));
+
+      expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: c.object, fieldName: c.field });
+      expect(trace(ql)).toEqual(NOTHING);
+      expect(ql.registry.getObject('suite_invoice')).toBeUndefined();
+      expect(ql.registry.getObject('suite_line')).toBeUndefined();
+      expect(ql.residualOwnerSource(SUITE)).toBeUndefined();
+    });
+  }
+
+  it('a bad pair with the parent another installed package owns is refused the same way, and that package reads as it did', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+
+    const err = await refusal(() => manifest.register(coreWith('1.0.0', [line('invoice.currency')]), { source: 'marketplace' }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency'");
+    expect(trace(ql)).toEqual({ ...NOTHING, objects: [`suite_invoice:${LEDGER}:suite_invoice`] });
+  });
+
+  it('a refused upgrade leaves the installed version of every member serving: the parent drops the code a later member still follows', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(
+      artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.currency_code')] })]),
+      { source: 'marketplace' },
+    );
+    const before = trace(ql);
+
+    const err = await refusal(() => manifest.register(
+      artifact([coreWith('2.0.0', [invoice()]), addon('2.0.0', { objects: [line('invoice.currency_code')] })]),
+      { source: 'marketplace' },
+    ));
+
+    expect(err).toMatchObject(FOLLOW_REFUSED);
+    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency_code'");
+    expect(trace(ql)).toEqual(before);
+    expect(trace(ql).packages).toEqual([`${CORE}@1.0.0`, `${ADDON}@1.0.0`]);
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('a package upgraded under a tenant\'s overlay that holds the followed code installs: the overlay is what is served', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    // The tenant's overlay of the packaged parent adds the code field, and a tenant's child follows it.
+    ql.registry.registerObject({ ...invoice('currency_code'), _provenance: 'org' } as never, 'sys_metadata', undefined, 'overlay');
+    ql.registry.registerObject(line('invoice.currency_code') as never, 'sys_metadata');
+
+    // The owner beneath the overlay is not what is served, so it is not asked.
+    await manifest.register({ ...ledger(), version: '2.0.0' });
+
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('2.0.0');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('CONTROL: the same upgrade with no overlay is refused: the owner is what is served', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger('currency_code'));
+    ql.registry.registerObject(line('invoice.currency_code') as never, 'sys_metadata');
+
+    const err = await refusal(() => manifest.register({ ...ledger(), version: '2.0.0' }));
+
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('a cold boot registers the same bad pair unasked, as before: the door is asked only once the boot has sealed the registry', async () => {
+    const { ql } = await bootWith([
+      artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.title')] })]),
+    ]);
+
+    expect(trace(ql).packages).toEqual([`${CORE}@1.0.0`, `${ADDON}@1.0.0`]);
+    expect(followedBy(ql)).toBe('invoice.title');
+  });
+});
+
+describe('a reload is one registration run, asked the follow door once at its end (ADR-0144 D2 and D6, amended)', () => {
+  const RELOAD_REFUSED = '[ObjectQLPlugin] reload refused — every package and object keeps its previous definition';
+  const PACKAGE_SKIPPED = '[ObjectQLPlugin] reload could not re-register a package — its registry entries keep their previous definitions';
+
+  it('a reload that adds the code field in a later member and makes an earlier member\'s child follow it reloads', async () => {
+    const v1 = artifact([coreWith('1.0.0', [line()]), addon('1.0.0', { objects: [invoice()] })]);
+    const { ql, reload, warnings } = await bootWith([v1]);
+    expect(followedBy(ql)).toBeUndefined();
+
+    // The child's package re-registers first: asked at the end of ITS
+    // `registerApp`, the child follows a code the served parent does not hold.
+    await reload(artifact([
+      coreWith('1.0.0', [line('invoice.currency_code')]),
+      addon('1.0.0', { objects: [invoice('currency_code')] }),
+    ]));
+
+    expect(followedBy(ql)).toBe('invoice.currency_code');
+    expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+    expect(warnings().filter((w) => w === RELOAD_REFUSED || w === PACKAGE_SKIPPED)).toEqual([]);
+  });
+
+  it('a body refused inside the reload is skipped whole while the other packages reload, as before', async () => {
+    const { ql, reload, warnings } = await bootWith([artifact([core(), addon()])]);
+
+    await reload(artifact([
+      core('1.0.0', { objects: [object('suite_core_thing', { label: 'core reloaded' })] }),
+      // Its own object re-registers, then one the holder owns is refused:
+      // the package's nested run puts back the first with the second.
+      { ...addon(), objects: [object('suite_addon_thing', { label: 'addon reloaded' }), object('holder_thing')] },
+    ]));
+
+    expect(trace(ql).objects).toEqual([`suite_addon_thing:${ADDON}:addon 1.0.0`, `suite_core_thing:${CORE}:core reloaded`]);
+    expect(ql.registry.getObjectOwner('holder_thing')?.packageId).toBe(HOLDER);
+    expect(warnings().filter((w) => w === PACKAGE_SKIPPED)).toHaveLength(1);
+    expect(warnings()).not.toContain(RELOAD_REFUSED);
+  });
+
+  it('a bad pair refuses the whole reload: every package keeps the definition it served, and the log names the pair', async () => {
+    const v1 = artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.currency_code')] })]);
+    const { ql, reload, warn } = await bootWith([v1]);
+    const before = trace(ql);
+
+    // The first member reloads cleanly; the second one's amount follows a field that holds no code.
+    await reload(artifact([
+      core('1.0.0', { objects: [object('suite_core_thing', { label: 'core reloaded' }), invoice('currency_code')] }),
+      addon('1.0.0', { objects: [line('invoice.title')] }),
+    ]));
+
+    expect(trace(ql)).toEqual(before);
+    expect(followedBy(ql)).toBe('invoice.currency_code');
+    const refused = warn.mock.calls.filter((c) => c[0] === RELOAD_REFUSED);
+    expect(refused).toHaveLength(1);
+    expect(refused[0][1]).toMatchObject({ packageIds: [CORE, ADDON] });
+    expect(String((refused[0][1] as { error?: unknown }).error)).toContain('suite_line');
+  });
+
+  it('…and so does a bad pair arriving in the reload\'s flat objects, which register in the same run', async () => {
+    const v1 = artifact([coreWith('1.0.0', [invoice('currency_code')]), addon('1.0.0', { objects: [line('invoice.currency_code')] })]);
+    const { ql, reload, warn } = await bootWith([v1]);
+    const before = trace(ql);
+
+    await reload({
+      ...artifact([
+        core('1.0.0', { objects: [object('suite_core_thing', { label: 'core reloaded' }), invoice('currency_code')] }),
+        addon('1.0.0', { objects: [line('invoice.currency_code')] }),
+      ]),
+      objects: [{ ...line('invoice.title'), _packageId: ADDON }],
+    });
+
+    expect(trace(ql)).toEqual(before);
+    expect(followedBy(ql)).toBe('invoice.currency_code');
+    expect(warn.mock.calls.filter((c) => c[0] === RELOAD_REFUSED)).toHaveLength(1);
   });
 });
