@@ -3716,7 +3716,19 @@ export class RestServer {
                     ...(member !== undefined ? { member } : {}),
                     ...(environmentId ? { environmentId } : {}),
                 };
-                const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
+                let envelope: { item?: unknown; packageId?: unknown } | undefined;
+                try {
+                    envelope = await p.getMetaItem(itemRequest) as typeof envelope;
+                } catch (error) {
+                    // [#32607] The plain read's refusal of a name several
+                    // packages hold only as stored rows is step 1c's to answer:
+                    // the package-less writes' own refusal (#28337).
+                    if (!packageId && typeof p.packagelessLayeredReadRefusal === 'function'
+                        && await p.packagelessLayeredReadRefusal({ type, name, ...(member !== undefined ? { member } : {}) }) !== undefined) {
+                        return false;
+                    }
+                    throw error;
+                }
                 return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
             },
             ...(typeof p.packagelessLayeredReadRefusal === 'function'

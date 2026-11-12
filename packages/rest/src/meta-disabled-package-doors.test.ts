@@ -637,6 +637,48 @@ describe('[#32607] RestServer: two enabled row holders and no shipper', () => {
         }
     }, 60_000);
 
+    // [#32607, A1] The layered chain's owner step reads the plain read first; its refusal of two row holders is
+    // left to step 1c (the writes' own refusal, #28337), and every other refusal of it is answered as before.
+    const WRITES_SENTENCE = 'Name the package this layered read is for';
+    const messageOf = (body: any): string => String(body?.error?.message ?? body?.message ?? body?.error ?? '');
+
+    it.each(ORDERS)('%s, A1 CONTROL: /layers of a name two packages ship in code keeps the plain read\'s refusal', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) {
+            host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+            host.registry.registerItem('dashboard', { name: 'two_code_dash', label: `${label(pkg)} code`, widgets: [] } as any, 'name', pkg);
+        }
+        const read = await host.plain('dashboard', 'two_code_dash');
+        const layers = await host.layers('dashboard', 'two_code_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, A1 CONTROL: /layers of two served row holders beside a disabled one keeps the plain read\'s refusal (#32354 Q2)', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of [...packages, PKG]) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of [PKG, ...packages]) await save(host, 'q2_rows_dash', pkg);
+        host.registry.disablePackage(PKG);
+        const read = await host.plain('dashboard', 'q2_rows_dash');
+        const layers = await host.layers('dashboard', 'q2_rows_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body), JSON.stringify(layers.body)).toBe(messageOf(read.body));
+        expect(messageOf(layers.body)).not.toContain(WRITES_SENTENCE);
+        expect(JSON.stringify(layers.body)).not.toContain(PKG);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, A1: /layers of two enabled row holders answers the package-less writes\' refusal, not the plain read\'s', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of packages) await save(host, 'a1_rows_dash', pkg);
+        const read = await host.plain('dashboard', 'a1_rows_dash');
+        const layers = await host.layers('dashboard', 'a1_rows_dash');
+        expect([read.status, layers.status], JSON.stringify([read.body, layers.body])).toEqual([409, 409]);
+        expect(messageOf(layers.body).startsWith(WRITES_SENTENCE), JSON.stringify(layers.body)).toBe(true);
+        for (const pkg of packages) expect(messageOf(layers.body)).toContain(pkg);
+    }, 60_000);
+
     it.each(ORDERS)('%s, CONTROL: one row holder is served on every bare door as before', async (_order, packages) => {
         const host = setup();
         for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
