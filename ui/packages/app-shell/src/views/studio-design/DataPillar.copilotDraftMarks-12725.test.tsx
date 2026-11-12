@@ -273,8 +273,10 @@ describe('Data pillar field properties — a copilot write while the field is op
     await act(async () => {
       landSave({});
     });
-    await waitFor(() => expect(draftReadsOf('showcase_task')).toBe(before + 1), { timeout: 8000 });
-    expect(await screen.findByText('Impact scope')).toBeInTheDocument();
+    // Only the pillar's load installs the drafted field; the save's own
+    // verdict re-read (the other draft read here) installs no buffer.
+    expect(await screen.findByText('Impact scope', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(draftReadsOf('showcase_task')).toBe(before + 2);
   });
 
   it('CONTROL: a pulse re-reads the open object only, never another one in the rail', async () => {
