@@ -887,6 +887,39 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE')).toBeUndefined();
   });
 
+  it('[#32408, #32183] a row of the App\'s pair is bound over every holder, so a disable never moves it: with one of two holders disabled X\'s exact read serves it while the registry binds it to no package, and with both disabled the bare read withholds it (BASE: the pair, an enabled holder of its own, so the bare read refused naming X and the pair, then served the row)', async () => {
+    tpl('en-US', X);
+    tpl('en-US', Y);
+    const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+    rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+    registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+    registry.disablePackage(Y);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome', null, { includeDisabledPackages: true })).toEqual([X, Y]);
+    // CONTROL (residual, #32561): the exact read counts the served holders, the registry's binding every holder.
+    expect(labelOf(await read(X, 'de-DE'))).toBe('pair de-DE');
+    expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE')).toBeUndefined();
+    registry.disablePackage(X);
+    const bare = await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'de-DE' } as never) as { item?: unknown };
+    expect(bare?.item).toBeUndefined();
+  });
+
+  it('[#32408, #32183] a row of the App\'s pair bound to its one holder is that holder\'s: with the holder disabled, the bare read and the address of an addition to it withhold the row (BASE: both served it, the pair an enabled holder of its own)', async () => {
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(memberOf(Z) as object), dependencies: { [APP]: '^1.0.0', [X]: '^1.0.0' } } as never, 'code');
+    tpl('en-US', X);
+    tpl('fr-FR', Z);
+    const pairDe = { name: 'welcome', label: 'pair de-DE', locale: 'de-DE', subject: 'pair de-DE', bodyHtml: '<p>p</p>' };
+    rows.push({ id: 'row_de', type: 'email_template', name: 'welcome', state: 'active', package_id: PAIR, bundle_member: 'de-DE', metadata: JSON.stringify(pairDe) });
+    registry.registerItem('email_template', { ...pairDe, _packageId: PAIR, _provenance: 'org' }, 'name' as never);
+    registry.disablePackage(X);
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', X, 'de-DE')?.label).toBe('pair de-DE');
+    const bare = await protocol.getMetaItem({ type: 'email_template', name: 'welcome', member: 'de-DE' } as never) as { item?: unknown };
+    expect(bare?.item).toBeUndefined();
+    const atZ = await read(Z, 'de-DE') as { item?: unknown; packageId?: string };
+    expect([atZ?.item, atZ?.packageId]).toEqual([undefined, X]);
+  });
+
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
     tpl('en-US', X);
     pairRow();
