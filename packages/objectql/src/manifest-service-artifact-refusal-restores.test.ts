@@ -35,6 +35,16 @@
  *
  * The artifacts arrive after `start()`, through the `manifest` service, the way
  * the marketplace install door hands them over.
+ *
+ * ## The record-currency follow door (ADR-0144 D2 and D6, amended)
+ *
+ * The same run ends by asking the follow door once, of every object layer it
+ * registered. The last two `describe`s pin it for an install, an upgrade and
+ * a reload: a pair another member, the residual or the package's own
+ * extension completes is admitted; a bad pair in a body, the residual or a
+ * nested plugin is refused 422 and leaves nothing; a cold boot is not asked;
+ * a reload is one run, refused whole on a bad pair, while a body refused
+ * inside it is still skipped on its own.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -536,6 +546,26 @@ describe('a running install is asked the record-currency follow door once, at th
     expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
     expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
     expect(fieldOf(ql, 'suite_invoice', 'currency_code')?.valueDomain).toBe('iso_4217_currency');
+  });
+
+  it('an upgrade whose new child follows a code field the tenant\'s overlay does not hold is refused: the pair is judged against the served parent, as a single save judges it', async () => {
+    const { ql, manifest } = await boot();
+    await manifest.register(ledger());
+    // The tenant customized the packaged parent before the package gave it a code field.
+    ql.registry.registerObject({ ...invoice(), label: 'Customer invoice', _provenance: 'org' } as never, 'sys_metadata', undefined, 'overlay');
+
+    const err = await refusal(() => manifest.register({
+      ...ledger('currency_code'), version: '2.0.0',
+      objects: [invoice('currency_code'), line('invoice.currency_code')],
+    }));
+
+    // The served parent is the overlay's body, which holds no `currency_code`:
+    // every write of the amount would be refused for want of a code.
+    expect(err).toMatchObject({ ...FOLLOW_REFUSED, objectName: 'suite_line', fieldName: 'amount' });
+    expect(String(err?.message)).toContain("'suite_invoice' declares no field 'currency_code'");
+    expect(ql.registry.getPackage(LEDGER)?.manifest?.version).toBe('1.0.0');
+    expect(ql.registry.getObject('suite_line')).toBeUndefined();
+    expect((ql.registry.getObject('suite_invoice') as any)?.label).toBe('Customer invoice');
   });
 
   it('a cold boot registers the same bad pair unasked, as before: the door is asked only once the boot has sealed the registry', async () => {
