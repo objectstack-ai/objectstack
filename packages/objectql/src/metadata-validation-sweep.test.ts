@@ -188,7 +188,7 @@ const FIXTURES: Record<string, Fixture> = {
             name: 'sweep_page',
             label: 'Sweep Page',
             type: 'record',
-            regions: [{ name: 'main', components: [] }],
+            regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
         },
         invalid: { label: 'No Name' },
         invalidatedField: 'name',

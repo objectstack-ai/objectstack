@@ -65,7 +65,7 @@ async function boot() {
 
 describe('install door — a namespace never spells an address-grammar literal', () => {
   it('the refused set is the grammar\'s letter-led literals', () => {
-    expect([...NAMESPACE_REFUSED_LITERALS]).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'trigger']);
+    expect([...NAMESPACE_REFUSED_LITERALS]).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'runs', 'trigger']);
   });
 
   it.each(NAMESPACE_REFUSED_LITERALS.map((literal) => [literal]))(
@@ -88,6 +88,16 @@ describe('install door — a namespace never spells an address-grammar literal',
     const { register } = await boot();
     const err = await register(body(ALPHA, 'trigger'));
     expect(err?.message).toContain('/automation/trigger');
+  });
+
+  // `runs` is spelled by no route under `/automation/hooks`: the run doors of
+  // a flow named `hooks` serve it there, so the qualified hook of a package
+  // namespaced `runs` would be read as one of them.
+  it('`runs` is named at the inbound hook\'s namespace position, the one door that reads it as a literal', async () => {
+    const { register } = await boot();
+    const err = await register(body(ALPHA, 'runs'));
+    expect([err?.code, err?.status, err?.name], err?.message).toEqual(['NAMESPACE_CONFLICT', 422, 'NamespaceAddressLiteralError']);
+    expect(err?.message).toContain('(/automation/hooks/runs)');
   });
 });
 
@@ -124,29 +134,33 @@ describe('a package already installed under such a namespace keeps booting', () 
     return kernel;
   }
 
-  it('the boot registers it: it installs, owns its namespace and is warned once, naming `?package=`', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const kernel = await bootHolding(body(ALPHA, 'hooks'));
-      const ql = kernel.getService<ObjectQL>('objectql');
-      expect(ql.registry.bareNameHoldersAreSealed).toBe(true);
-      expect(ql.registry.getPackage(ALPHA)).toBeDefined();
-      expect(ql.registry.getNamespaceOwner('hooks')).toBe(ALPHA);
-      const warned = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`));
-      expect(warned).toHaveLength(1);
-      expect(warned[0]).toContain(`?package=${ALPHA}`);
-      expect(warned[0]).toContain("Namespace 'hooks' spells a literal segment");
+  // Every literal, by the one boot path: no literal has a rule of its own.
+  it.each(NAMESPACE_REFUSED_LITERALS.map((literal) => [literal]))(
+    'the boot registers it under `%s`: it installs, owns its namespace and is warned once, naming `?package=`',
+    async (literal) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const kernel = await bootHolding(body(ALPHA, literal));
+        const ql = kernel.getService<ObjectQL>('objectql');
+        expect(ql.registry.bareNameHoldersAreSealed).toBe(true);
+        expect(ql.registry.getPackage(ALPHA)).toBeDefined();
+        expect(ql.registry.getNamespaceOwner(literal)).toBe(ALPHA);
+        const warned = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`));
+        expect(warned).toHaveLength(1);
+        expect(warned[0]).toContain(`?package=${ALPHA}`);
+        expect(warned[0]).toContain(`Namespace '${literal}' spells a literal segment`);
 
-      // A reload after the seal — the same id registered again — is no new
-      // install: it installs, and the warning is not repeated.
-      const svc = kernel.getService('manifest') as { register(m: unknown): void | Promise<void> };
-      await expect(Promise.resolve(svc.register({ packages: [{ manifest: { ...body(ALPHA, 'hooks'), version: '1.0.1' } }] }))).resolves.not.toThrow();
-      expect(ql.registry.getPackage(ALPHA)?.manifest?.version).toBe('1.0.1');
-      expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`))).toHaveLength(1);
-    } finally {
-      warn.mockRestore();
-    }
-  });
+        // A reload after the seal — the same id registered again — is no new
+        // install: it installs, and the warning is not repeated.
+        const svc = kernel.getService('manifest') as { register(m: unknown): void | Promise<void> };
+        await expect(Promise.resolve(svc.register({ packages: [{ manifest: { ...body(ALPHA, literal), version: '1.0.1' } }] }))).resolves.not.toThrow();
+        expect(ql.registry.getPackage(ALPHA)?.manifest?.version).toBe('1.0.1');
+        expect(warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes(`Package '${ALPHA}' is installed under a namespace`))).toHaveLength(1);
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
 
   it('an upgrade after the boot that MOVES its namespace to a literal is a new occupation: refused 422', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
