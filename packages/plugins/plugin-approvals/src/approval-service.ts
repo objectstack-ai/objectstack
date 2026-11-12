@@ -5349,6 +5349,9 @@ export class ApprovalService implements IApprovalService {
       await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
+    // A decision attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, org, context);
+
     // The run behind this request must still be resumable before ANY of it is
     // written down (#4420). Last of the refusals, first before the writes: a
     // decision recorded against a dead run is a zombie nothing later can undo,
@@ -5538,6 +5541,61 @@ export class ApprovalService implements IApprovalService {
    */
   private static resumeStatusOf(err: unknown): string | undefined {
     return (err as { resumeStatus?: string } | undefined)?.resumeStatus;
+  }
+
+  /**
+   * A decision or a comment attaches only files its caller uploaded.
+   *
+   * Every id in `attachments` must name a `sys_file` of the request's
+   * organization whose uploader is the caller (`owner_id === userId`) — the
+   * download door's own first rule ("the uploader may always download"), so
+   * no file is attached that its caller could not already open. Anything else
+   * is refused before any write, with one answer for every refused id: a file
+   * the caller did not upload, an id that names no file the request's
+   * organization reaches, a value that is not a list of ids, and a read of the
+   * file store that fails. Nothing tells those apart.
+   *
+   * Not judged: a system caller (its inputs are server-minted, as the
+   * file-reference rule treats every system write), and a kernel with no file
+   * store (`sys_file` not registered, so no file is served from it).
+   */
+  private async assertAttachmentsUploadedByCaller(
+    attachments: unknown,
+    organizationId: string | null,
+    context: ExecutionContext,
+  ): Promise<void> {
+    if (attachments === undefined || attachments === null) return;
+    if (Array.isArray(attachments) && attachments.length === 0) return;
+    if (context?.isSystem) return;
+    if (!this.engine.getSchema?.('sys_file')) return;
+
+    const refuse = (): never => {
+      throw new Error(
+        'VALIDATION_FAILED: attachments can only be files you uploaded yourself. '
+        + 'Upload the file, then attach it again.',
+      );
+    };
+    const userId = actingUserId(context);
+    if (!userId) refuse();
+    const ids = Array.isArray(attachments) ? attachments : [attachments];
+    if (!ids.every((id): id is string => typeof id === 'string' && id.length > 0)) refuse();
+    const wanted = [...new Set(ids as string[])];
+
+    let rows: any[] = [];
+    try {
+      rows = (await this.engine.find('sys_file', {
+        where: { id: { $in: wanted } },
+        fields: ['id', 'owner_id'],
+        limit: wanted.length,
+        context: organizationId ? { ...SYSTEM_CTX, tenantId: organizationId } : SYSTEM_CTX,
+      })) ?? [];
+    } catch {
+      refuse();
+    }
+    const uploadedByCaller = new Set(
+      rows.filter((r) => r?.owner_id != null && String(r.owner_id) === userId).map((r) => String(r.id)),
+    );
+    if (!wanted.every((id) => uploadedByCaller.has(id))) refuse();
   }
 
   /**
@@ -7347,6 +7405,8 @@ export class ApprovalService implements IApprovalService {
     if (!context.isSystem && !isSubmitter && slot === undefined) {
       throw new Error(`FORBIDDEN: actor '${actorId}' is not on this request`);
     }
+    // A comment attaches only files its caller uploaded, refused before any write.
+    await this.assertAttachmentsUploadedByCaller(input.attachments, raw.organization_id ?? null, context);
 
     const now = this.clock.now().toISOString();
     await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
