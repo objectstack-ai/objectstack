@@ -192,20 +192,34 @@ describe('one package holder per picklist, mapping and dataset name, on a booted
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
   });
 
-  it('install-local of a co-owner of `alpha`\'s namespace declaring the held picklist, mapping or dataset name is 422 PLUGIN_REGISTER_FAILED naming the holder and the rename; nothing is installed', async () => {
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held picklist name is 422 PLUGIN_REGISTER_FAILED naming the holder and the rename; nothing is installed', async () => {
+    const before = await packageIds();
+    const { status, body } = await installLocal(inline('alphalist', { picklists: [picklist('alphalist')] }, 'alpha'));
+    expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+    const message = String(body?.error?.message ?? '');
+    expect(message).toContain('Bare-name conflict');
+    expect(message).toContain(`the picklist "${PICKLIST}", already held by package "com.qa.bare.alpha"`);
+    expect(message).toContain(`"alpha_${PICKLIST}"`);
+    expect(message, 'another namespace\'s holder is no rival').not.toContain('com.qa.bare.beta');
+    expect(await packageIds(), 'the package list is unchanged').toEqual(before);
+  });
+
+  it('install-local of a co-owner of `alpha`\'s namespace declaring the held mapping or dataset name is refused naming `alpha` alone; nothing is installed', async () => {
+    // The co-owner depends on alpha, so the override write gate (ADR-0146 D2)
+    // answers before the one-holder door: a dependent never replaces a base
+    // item. The one-holder door's own co-owner refusal is pinned in-process
+    // (registry-bare-name-one-holder.test.ts, "the narrowing").
     for (const [p, collections, type, name] of [
-      ['alphalist', { picklists: [picklist('alphalist')] }, 'picklist', PICKLIST],
       ['alphamap', { mappings: [mapping('alphamap', MAPPING, 'alpha_item')] }, 'mapping', MAPPING],
       ['alphaset', { datasets: [dataset('alphaset', DATASET, 'alpha_item')] }, 'dataset', DATASET],
     ] as const) {
       const before = await packageIds();
       const { status, body } = await installLocal(inline(p, collections as never, 'alpha'));
-      expect([status, codeOf(body)], `${type} ${JSON.stringify(body)}`).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+      expect([status, codeOf(body)], `${type} ${JSON.stringify(body)}`).toEqual([403, 'NOT_OVERRIDABLE']);
       const message = String(body?.error?.message ?? '');
-      expect(message).toContain('Bare-name conflict');
-      expect(message).toContain(`the ${type} "${name}", already held by package "com.qa.bare.alpha"`);
-      expect(message).toContain(`"alpha_${name}"`);
-      expect(message, 'another namespace\'s holder is no rival').not.toContain('com.qa.bare.beta');
+      expect(message).toContain(`'${type}/${name}'`);
+      expect(message).toContain('com.qa.bare.alpha');
+      expect(message).not.toContain('com.qa.bare.beta');
       expect(await packageIds(), 'the package list is unchanged').toEqual(before);
     }
   });
