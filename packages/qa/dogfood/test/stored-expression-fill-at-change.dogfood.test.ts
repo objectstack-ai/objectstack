@@ -140,8 +140,10 @@ describe('dogfood: a formula turned into a stored number on a populated object i
     expect(draft.status, JSON.stringify(draft.json)).toBe(200);
     // A draft is not live: nothing is filled yet.
     expect(filledNotice(draft.json)).toEqual([]);
+    // …and no total reads as complete: the live field is still the formula, and a sum over it is refused.
     const beforePublish = await askTotal(object);
-    console.log('PROBE draft-time total', beforePublish.status, JSON.stringify(beforePublish.json).slice(0, 600));
+    expect(beforePublish.status, JSON.stringify(beforePublish.json)).toBe(400);
+    expect(beforePublish.json?.code, JSON.stringify(beforePublish.json)).toBe('DATASET_INVALID');
 
     const published = await call('POST', `/meta/object/${object}/publish`, {});
 

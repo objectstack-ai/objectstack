@@ -518,6 +518,8 @@ describe('[#32527] the save and publish doors fill a stored computed field the c
       title: { name: 'title', label: 'Title', type: 'text' },
       start_day: { name: 'start_day', label: 'Start', type: 'number' },
       end_day: { name: 'end_day', label: 'End', type: 'number' },
+      // The stamp the fill keeps, and the one its write is conditional on.
+      updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' },
       days: { name: 'days', label: 'Days', ...days },
       ...extra,
     },
