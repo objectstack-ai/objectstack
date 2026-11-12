@@ -238,10 +238,10 @@ async function readableIn(
 
 /**
  * The envelope `uid` would read the record with: their own grants, in the
- * claimed organization only while a current membership backs the claim under
- * a walled posture — the session arm of `resolveAuthzContext`, which drops an
- * unbacked claim and re-resolves with no active organization (Layer 0 then
- * fails closed).
+ * claimed organization only while a current membership backs the claim —
+ * under every posture since ADR-0093 D8.1 was amended — the session arm of
+ * `resolveAuthzContext`, which drops an unbacked claim and re-resolves with no
+ * active organization (Layer 0 then fails closed).
  */
 async function contextForMentionedUser(
   engine: MentionRecipientGateEngine,

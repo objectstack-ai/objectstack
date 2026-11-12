@@ -27,6 +27,9 @@ import {
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
+// [#31696] One holder's flow of a shared name, served from its own slot; a
+// start's admission walks callees from the calling flow's package.
+import { flowSlotView, flowWalkReads, runSlotView } from '../flow-slot-view.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -231,6 +234,14 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [ADR-0093 D8.1, as amended] The caller's membership set, already
+    // resolved for this request — forwarded, never re-derived, and forwarded
+    // EMPTY too: an empty set is the answer "no current membership", which the
+    // organization wall reads under every posture. So the run's data operations
+    // are judged by the membership rule as this request is.
+    // `SeededRunContext.accessible_org_ids` (`@objectstack/service-automation`)
+    // names its readers.
+    if (Array.isArray(ec?.accessible_org_ids)) automationContext.accessible_org_ids = [...ec.accessible_org_ids];
     // [#28099] The caller's posture rung, already resolved beside the grants
     // above — forwarded, never re-derived or raised, absent when the request
     // carries none. The run carries those grants, so its setup does not
@@ -2909,6 +2920,8 @@ async function respondToFlowTrigger(
     flowName: string,
     body: any,
     context: HttpProtocolContext,
+    /** [#31696] The holder table the start admission's callees resolve over. */
+    registry?: AutomationAddressRegistry,
 ): Promise<HttpDispatcherResult> {
     if (await flowIsUnknown(automationService, flowName)) {
         return {
@@ -2945,6 +2958,8 @@ async function respondToFlowTrigger(
             flowStartRecordKeys(automationContext),
             context?.executionContext,
             (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
+            // [#31696] Callees read from the calling flow's package, as the run reads them.
+            flowWalkReads(automationService, async () => registry),
         );
     } catch (err) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
@@ -3606,7 +3621,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
-    const automationService = await deps.getService(context, CoreServiceName.enum.automation);
+    let automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
     // automation capability. This domain is the sharpest case for the rule: a
@@ -3620,19 +3635,44 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
 
     // [ADR-0150 D5, epic child G1] THE ADDRESS, judged: an addressed path is
-    // served only when its qualifier names the one holder the bare name
-    // resolves to — then it is exactly its bare path below — and is refused
-    // otherwise (`404` when nothing there holds the name, else `409` naming
-    // every candidate). A bare by-name run or read whose name the resolver
-    // refuses (two packages hold it) is answered `409` naming every candidate,
-    // the same answer (D5). The definition writes (`PUT` / `DELETE /:name`,
-    // the clone) are left to their own `409` and its remedy
-    // (`flowWriteRefusal`), unchanged.
+    // served when its qualifier names the one holder the bare name resolves
+    // to — then it is exactly its bare path below — and is refused otherwise
+    // (`404` when nothing there holds the name, else `409` naming every
+    // candidate). A bare by-name run or read whose name the resolver refuses
+    // (two packages hold it) is answered `409` naming every candidate, the
+    // same answer (D5). The definition writes (`PUT` / `DELETE /:name`, the
+    // clone) are left to their own `409` and its remedy (`flowWriteRefusal`),
+    // unchanged.
+    //
+    // [ADR-0150 D4/D9, #31696] A flow name two packages hold, addressed by the
+    // namespace of one of them: the by-name runs and reads (the doors the bare
+    // `409` covers) are served from that holder's own slot, every step of the
+    // door reading the one flow (`../flow-slot-view.ts`). The definition
+    // writes keep the `409`, as does an engine with no slot entries.
+    //
+    // [ADR-0150 D4, #31696] A BARE run door (`/:name/runs/:runId/…`: the run
+    // read, resume, cancel, restore-suspension and the screen read) on such a
+    // name acts on the run's own slot: a run id names exactly one run, and
+    // the run carries its slot key, so it is no guess at a name. A run of
+    // another flow, or one whose key no one holder's slot is filed under,
+    // keeps the `409`.
     {
-        const refusal = address.qualifier && address.item
+        const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
             : bareByNameRefusal(addressRegistry, parts, m);
-        if (refusal) return { handled: true, response: automationAddressRefusalResponse(deps, refusal) };
+        if (admission?.status === 'slot') {
+            const slotted = bareByNameItem(parts, m)?.type === 'flow' && address.item
+                ? flowSlotView(automationService, admission.packageId, address.item.name)
+                : undefined;
+            if (!slotted) return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
+            automationService = slotted;
+        } else if (admission) {
+            const byRun = !address.qualifier && admission.status === 409 && parts[1] === 'runs' && parts[2]
+                ? await runSlotView(automationService, parts[0], parts[2], admission.refusal.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])))
+                : undefined;
+            if (!byRun) return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
+            automationService = byRun;
+        }
     }
 
     // Legacy: POST /automation/trigger/:name — the shape
@@ -3674,7 +3714,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
-            return respondToFlowTrigger(deps, automationService, triggerName, body, context);
+            return respondToFlowTrigger(deps, automationService, triggerName, body, context, addressRegistry);
         }
     }
 
@@ -3888,7 +3928,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                return respondToFlowTrigger(deps, automationService, name, body, context);
+                return respondToFlowTrigger(deps, automationService, name, body, context, addressRegistry);
             }
         }
 

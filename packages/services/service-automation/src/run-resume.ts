@@ -19,7 +19,7 @@ import { withFlowRunSlot } from './flow-slots.js';
 import type { FlowParsed, FlowRunSummary } from '@objectstack/spec/automation';
 import type { AutomationContext, AutomationResult, ResumeSignal } from '@objectstack/spec/contracts';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runAccessibleOrgIds, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { refuseNode } from './guard-refusal.js';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
@@ -168,6 +168,13 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
     // `current_user.email` dropped out: the run was refused on rows the
     // same user's request reads and writes. A context that already carries
     // an email keeps it verbatim, as the request path keeps a session's.
+    //
+    // [ADR-0093 D8.1, as amended] So is the user's membership set
+    // (`accessible_org_ids`), what the organization wall reads under every
+    // posture: a person's data access requires a current membership in the
+    // organization. The launch door hands the request's; every other trigger
+    // takes the resolver's here, so the wall judges the run as it judges the
+    // same user's request.
     await this.seedRunGrants(flow.name, runContext, 'triggering');
 
     // The organization's default currency, for a text slot's
@@ -213,6 +220,10 @@ export async function seedRunGrants(
 ): Promise<void> {
     const needsGrants = !Array.isArray(runContext.permissions);
     const needsPeers = runOrgUserIds(runContext) === undefined;
+    // [ADR-0093 D8.1, as amended] The membership set, by the peer list's rule:
+    // a context that carries one keeps it (the launch door hands the
+    // request's), and one that does not takes the resolver's.
+    const needsMembership = runAccessibleOrgIds(runContext) === undefined;
     const needsEmail = !runContext.email;
     // A rung a door forwarded without grants (#28099) is never kept beside
     // grants it was not derived from: the resolution below re-seeds the rung
@@ -226,7 +237,7 @@ export async function seedRunGrants(
     if (
         runContext.runAs !== 'system' &&
         runContext.userId &&
-        (needsGrants || needsPeers || needsEmail) &&
+        (needsGrants || needsPeers || needsMembership || needsEmail) &&
         this.userGrantsResolver
     ) {
         try {
@@ -252,6 +263,9 @@ export async function seedRunGrants(
                 }
                 if (needsPeers && Array.isArray(grants.org_user_ids)) {
                     (runContext as SeededRunContext).org_user_ids = grants.org_user_ids;
+                }
+                if (needsMembership && Array.isArray(grants.accessible_org_ids)) {
+                    (runContext as SeededRunContext).accessible_org_ids = grants.accessible_org_ids;
                 }
                 if (needsEmail && grants.email) runContext.email = grants.email;
             }
@@ -279,17 +293,26 @@ export async function seedRunGrants(
                 ...(needsPeers ? ['current_user.org_user_ids'] : []),
                 ...(needsEmail ? ['current_user.email'] : []),
             ].join(' or ');
-            // Without grants the lost list may be empty (the context carried
-            // its peers and email); with grants carried it never is, since
-            // one of the two is what sent the run here.
+            // The lost list may be empty: without grants when the context
+            // carried its peers and email, and with grants carried when the
+            // membership set alone is what sent the run here.
             const consequence = needsGrants
                 ? `its data ops fall back to baseline member permissions (not elevated)` +
                   (lost ? `, and every row policy reading ${lost} drops out` : '')
-                : `its data ops keep the trigger's positions and permission sets, but every row ` +
-                  `policy reading ${lost} drops out (narrower, not elevated)`;
+                : `its data ops keep the trigger's positions and permission sets` +
+                  (lost ? `, but every row policy reading ${lost} drops out (narrower, not elevated)` : '');
+            // [ADR-0093 D8.1, as amended] A membership run setup could not
+            // read is not a current membership: the run takes an empty set, so
+            // the organization wall judges its data operations as it judges a
+            // person who holds none, under every posture. Narrower, never wider.
+            if (needsMembership) (runContext as SeededRunContext).accessible_org_ids = [];
+            const membership = needsMembership
+                ? `; it holds no current membership the run could read, so the organization wall refuses ` +
+                  `its organization-scoped data ops`
+                : '';
             this.logger.warn(
                 `[runAs] flow '${flowName}' could not resolve grants for ${whose} user ` +
-                `'${runContext.userId}' — ${consequence}. The resolver's failure is in this record's meta.`,
+                `'${runContext.userId}' — ${consequence}${membership}. The resolver's failure is in this record's meta.`,
                 describeThrownForLog(err),
             );
         }
@@ -360,6 +383,9 @@ async function deciderSegmentContext(
     delete switched.permissions;
     delete switched.permissionSetAddresses;
     delete switched.org_user_ids;
+    // [ADR-0093 D8.1, as amended] The trigger user's memberships are theirs:
+    // the decider's are resolved below, beside the decider's grants.
+    delete switched.accessible_org_ids;
     // The trigger user's rung is theirs: kept under the decider's id, a
     // platform administrator's submission would hand a member's decision
     // segment the deployment-level rows. Seeded for the decider below.
