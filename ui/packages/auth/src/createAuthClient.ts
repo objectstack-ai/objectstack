@@ -122,9 +122,9 @@ type AuthClientError = Error & {
 
 /**
  * The `dependents` list in the shape the server declares, or `undefined` when
- * the body carries none: an entry without a non-empty `object` is dropped, and
- * a `count` that is not a non-negative integer is left out, as the server's own
- * wire reader does.
+ * the body carries none: an entry without a non-empty `object` is dropped, as
+ * plugin-auth's `wireDependents` drops it on the server side of the same list,
+ * and a `count` that is not a non-negative integer is left out.
  */
 function readDependents(raw: unknown): AuthErrorDependent[] | undefined {
   if (!Array.isArray(raw)) return undefined;
