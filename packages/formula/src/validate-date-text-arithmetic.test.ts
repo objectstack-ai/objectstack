@@ -175,10 +175,16 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
   const LEAVE: ExprSchemaHint = {
     scope: 'record',
     objectName: 'c982_leave_request',
-    fields: ['title', 'start_time', 'start_day', 'end_day'],
-    fieldTypes: { title: 'text', start_time: 'datetime', start_day: 'date', end_day: 'date' },
+    fields: ['title', 'other', 'flag', 'amount', 'start_time', 'start_day', 'end_day'],
+    fieldTypes: {
+      title: 'text', other: 'text', flag: 'boolean', amount: 'number',
+      start_time: 'datetime', start_day: 'date', end_day: 'date',
+    },
   };
-  const ROW_2026 = { title: 'Leave', start_time: '2026-11-16T01:00:00.000Z', start_day: '2026-11-16', end_day: '2026-11-20' };
+  const ROW_2026 = {
+    title: 'Leave', other: 'x', flag: true, amount: 3,
+    start_time: '2026-11-16T01:00:00.000Z', start_day: '2026-11-16', end_day: '2026-11-20',
+  };
   const ROW_2025 = { ...ROW_2026, start_time: '2025-11-16T01:00:00.000Z', start_day: '2025-11-16' };
   type Outcome = ExprSchemaHint['faultOutcome'];
   /** Every code the gate answers, errors and warnings alike. */
@@ -225,9 +231,19 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     ['value', 'string(record.start_time)', undefined, [], '2026-11-16T01:00:00.000Z'],
     ['value', 'daysBetween(record.start_day, record.end_day)', undefined, [], 4],
     ['value', 'isoDate(today())', undefined, [], evaluated('isoDate(today())')],
-    // Kept as they were: a real fault, and an ordering against a TEXT field no declared text names.
+    // Kept as they were: a real fault, and a date field ordered against a text
+    // counterpart that is not a literal, which no declared text names — a text
+    // field read directly or through a ternary, or text computed by `+`,
+    // `upper`, `string` or `isoDate` (the evaluator compares them string-lex).
     ['predicate', 'record.title < today()', 'fail-closed', ['type-mismatch-fail-closed'], 'fault'],
     ['predicate', 'record.title < record.start_time', 'fail-closed', ['type-mismatch-fail-closed'], false],
+    ['predicate', 'record.start_day < (record.flag ? record.title : record.other)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', '(record.flag ? record.start_day : record.end_day) < record.title', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', "record.start_day < record.title + 'x'", 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', 'record.start_day < upper(record.title)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', 'record.start_day < string(record.amount)', 'fail-closed', ['type-mismatch-fail-closed'], true],
+    ['predicate', 'record.start_day < isoDate(today())', 'fail-closed', ['type-mismatch-fail-closed'],
+      ROW_2026.start_day < new Date().toISOString().slice(0, 10)],
   ];
 
   for (const [role, source, outcome, codes, reads] of ROWS) {
@@ -243,6 +259,36 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     // A validation condition that is true refuses the write.
     expect(evaluated(rule, ROW_2026)).toBe(false);
     expect(evaluated(rule, ROW_2025)).toBe(true);
+  });
+
+  it('a guarded call is refused too: it faults on every row whose value reaches the call', () => {
+    const guarded = "record.start_time != null && isoDate(record.start_time) == '2026-11-16'";
+    expect(gate('predicate', guarded, 'fail-closed')).toEqual(['date-text-call-fail-closed']);
+    // A row the guard stops never reaches the call; a row with a value does, and faults.
+    expect(evaluated(guarded, { ...ROW_2026, start_time: null })).toBe(false);
+    expect(evaluated(guarded)).toBe('fault');
+    // The prescribed rewrite keeps the guard and reads the day.
+    const rewritten = "record.start_time != null && isoDate(date(record.start_time)) == '2026-11-16'";
+    expect(gate('predicate', rewritten, 'fail-closed')).toEqual([]);
+    expect(evaluated(rewritten, { ...ROW_2026, start_time: null })).toBe(false);
+    expect(evaluated(rewritten)).toBe(true);
+  });
+
+  it('the prescribed rewrite reads the same value where a date-time arrives as a JS Date', () => {
+    // A server-side writer handing a `Date`, or a driver that reads a date-time
+    // back as one (MongoDB stores it as a BSON Date): the refused call
+    // evaluates there, and the rewrite reads the same value as on the text.
+    const asDate = { ...ROW_2026, start_time: new Date(ROW_2026.start_time) };
+    expect(evaluated('isoDate(record.start_time)', asDate)).toBe('2026-11-16');
+    for (const [rewrite, reads] of [
+      ['isoDate(date(record.start_time))', '2026-11-16'],
+      ['isoDatetime(date(record.start_time))', '2026-11-16T01:00:00.000Z'],
+      ['date(record.start_time).getFullYear()', 2026],
+      ['date(record.start_time).getHours()', 1],
+    ] as const) {
+      expect(evaluated(rewrite, asDate)).toBe(reads);
+      expect(evaluated(rewrite)).toBe(reads);
+    }
   });
 
   it('names the call and the field, and prescribes the rewrite the check proved clean', () => {

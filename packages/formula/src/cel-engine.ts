@@ -989,38 +989,61 @@ function typedFieldRef(node: unknown, scope: 'record' | 'flattened'): { name: st
   return null;
 }
 
+/** The operators {@link registerDateTextOverloads} declares on a date field's text that yield `bool`. */
+const DATE_TEXT_COMPARISON_OPS: ReadonlySet<string> = new Set([...ORDERING_OPS, '==', '!=']);
+
 /**
- * [#32595] Whether `source` orders a date field against a TEXT field
- * (`record.x < record.start_time`). The evaluator compares the two texts
- * string-lex, but no declared text names that pairing — ADR-0053 Phase 1 §3,
- * {@link firstTypeMismatch}'s docblock and the {@link DATE_TEXT_CEL_TYPE}
- * overload table name a date field ordered against another date field, a text
- * literal or a Timestamp — so it keeps the type-mismatch verdict it had.
+ * [#32595] Whether `source` compares a date field's text against a counterpart
+ * no declared text names. The {@link DATE_TEXT_CEL_TYPE} overload table, the
+ * #28944 changelog ("Date comparisons (`<`, `==`, against a literal, against
+ * `today()`)") and ADR-0053 Phase 1 §3 name a date field ordered or equated
+ * against another date field, a text LITERAL, a Timestamp or `null`. Any
+ * other text-valued counterpart — a text field, read directly or through a
+ * ternary, a concatenation, `upper(…)`, `string(…)`, `isoDate(today())` — is
+ * named by none of them, so the comparison keeps the type-mismatch verdict
+ * the Timestamp typing gave it. Each operand's type is read off `env` (the
+ * date-text typing the caller confirmed against) by checking that operand on
+ * its own; an operand that does not check on its own (it reads a
+ * comprehension variable) proves nothing and keeps the verdict too. A `dyn`
+ * counterpart is not judged here: the Timestamp typing never faulted on it.
  * Unparseable ⇒ `true`: keep what the check said.
  */
-function ordersDateAgainstTextField(
-  source: string,
-  fieldCelTypes: Readonly<Record<string, FieldCelType>>,
-  scope: 'record' | 'flattened',
-): boolean {
+function comparesDateTextAgainstUndeclared(source: string, env: Environment): boolean {
   let ast: unknown;
   try {
-    ast = (recordScopeEnv ??= buildScopedEnv([])).parse(source).ast;
+    ast = env.parse(rewriteNullableTernary(rewriteIndexedHas(source))).ast;
   } catch {
     return true;
   }
-  const kindOf = (node: unknown): FieldCelType | null => {
-    const ref = typedFieldRef(node, scope);
-    return ref ? fieldCelTypes[ref.name] ?? null : null;
+  /** The CEL type `node` checks to on its own, or `undefined` when it does not check. */
+  const typeOf = (node: unknown): string | undefined => {
+    try {
+      const r = env.parse(serialize(node as Parameters<typeof serialize>[0])).check?.() as
+        | { valid?: boolean; type?: unknown }
+        | undefined;
+      return r && r.valid !== false && typeof r.type === 'string' ? r.type : undefined;
+    } catch {
+      return undefined;
+    }
   };
+  const isTextLiteral = (node: unknown): boolean =>
+    isCelNode(node) && node.op === 'value' && typeof node.args === 'string';
+  /** The counterparts the declared texts name for a date field's text. */
+  const declared = (node: unknown, type: string | undefined): boolean =>
+    type === DATE_TEXT_CEL_TYPE || type === 'google.protobuf.Timestamp' || type === 'dyn'
+    || isTextLiteral(node) || isNullLiteral(node);
   let found = false;
   const visit = (v: unknown): void => {
     if (found) return;
     if (Array.isArray(v)) { for (const child of v) visit(child); return; }
     if (!isCelNode(v)) return;
-    if (ORDERING_OPS.has(v.op) && Array.isArray(v.args) && v.args.length === 2) {
-      const [a, b] = v.args.map(kindOf);
-      if ((a === 'timestamp' && b === 'string') || (a === 'string' && b === 'timestamp')) { found = true; return; }
+    if (DATE_TEXT_COMPARISON_OPS.has(v.op) && Array.isArray(v.args) && v.args.length === 2) {
+      const [a, b] = v.args as unknown[];
+      const [ta, tb] = [typeOf(a), typeOf(b)];
+      if ((ta === DATE_TEXT_CEL_TYPE && !declared(b, tb)) || (tb === DATE_TEXT_CEL_TYPE && !declared(a, ta))) {
+        found = true;
+        return;
+      }
     }
     visit(v.args);
   };
@@ -1279,9 +1302,10 @@ export function firstTypeMismatch(
     recordRoots?: Readonly<Record<string, FieldCelType>>,
   ): RegExpExecArray | null => {
     if (!DATE_CEL_TYPES.has(m[1]) && !DATE_CEL_TYPES.has(m[3])) return m;
-    const r = unsoundOverload(buildTypedEnv(bareTypes, scope, 'date-text', recordRoots));
+    const dateTextEnv = buildTypedEnv(bareTypes, scope, 'date-text', recordRoots);
+    const r = unsoundOverload(dateTextEnv);
     if (r && textOrBool(r)) return r[1] === DATE_TEXT_CEL_TYPE || r[3] === DATE_TEXT_CEL_TYPE ? m : r;
-    return ordersDateAgainstTextField(source, recordRoots ?? bareTypes, scope) ? m : null;
+    return comparesDateTextAgainstUndeclared(source, dateTextEnv) ? m : null;
   };
   try {
     const timestampTyped = unsoundOverload(buildTypedEnv(bareTypes, scope));
@@ -1489,10 +1513,13 @@ export interface DateTextCall {
  *
  * The Timestamp typing hands `isoDate(record.start_time)` the
  * `google.protobuf.Timestamp` `isoDate` asks for, so it checks clean, while
- * every read door hands the field out as its text (ADR-0053 D-F1, the
- * {@link DATE_TEXT_CEL_TYPE} docblock): the evaluator answers `found no
- * matching overload for 'isoDate(string)'` on every row, null included, so a
- * formula reads null and a fail-closed rule refuses every write. Declared as
+ * the SQL driver's read doors (ADR-0053 D-F1, the {@link DATE_TEXT_CEL_TYPE}
+ * docblock) and every JSON write hand the field to the evaluator as its text:
+ * there it answers `found no matching overload for 'isoDate(string)'` on every
+ * row whose value reaches the call, null included, so a formula reads null
+ * and a fail-closed rule refuses the write. (A date-time that arrives as a JS
+ * `Date` — a server-side writer, a MongoDB read — evaluates; the `date(…)`
+ * rewrite the verdict prescribes reads the same value on both.) Declared as
  * what it is, the call faults this check exactly where it faults the
  * evaluator, and a call the evaluator answers on a string (`size(record.d)`,
  * `record.d.startsWith('2026')`, `date(record.d)`) checks clean. `isoDate`
