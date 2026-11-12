@@ -2293,6 +2293,7 @@ const ko = {
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
       hideDone: "완료된 항목 접기",
+      optional: "선택 사항",
       set: "설정",
       change: "변경",
       view: "보기",
