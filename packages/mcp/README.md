@@ -7,7 +7,7 @@ MCP Runtime Server Plugin for ObjectStack — exposes your app's data objects, b
 - **Model Context Protocol (MCP)**: expose an ObjectStack app to any MCP client
 - **Object tools**: list / describe / query / aggregate / read / create / update / delete, generated from your metadata
 - **Action tools**: invoke the business actions an author opted into the AI surface
-- **Resources**: object schemas, records and metadata types as MCP resources
+- **Resources** (stdio transport only): object schemas, records and metadata types as MCP resources; over HTTP the same reads are the `list_objects`, `describe_object` and `get_record` tools
 - **Prompts**: authored skills and registered agents project as MCP prompts
 - **Two transports**: a long-lived stdio server, and a per-request Streamable HTTP endpoint at `/api/v1/mcp`
 - **Security**: every call runs under a real principal — permissions, row-level and field-level security apply, and OAuth scopes narrow the tool families
@@ -179,7 +179,8 @@ registered means the `tools` capability is not advertised.
 
 ## Resources
 
-Registered by the resource bridge, from your metadata:
+Resources are served on the **stdio transport only**. Registered by the resource
+bridge on the long-lived stdio server, from your metadata:
 
 ```
 objectstack://objects                                    # List all data objects
@@ -196,6 +197,20 @@ The listing and schema resources read the same objects `list_objects` and
 `GET /api/v1/meta/object` serves, so a package's objects appear on every kernel
 shape and a disabled package's objects do not. A host with no `protocol`
 service reads the metadata service instead.
+
+The Streamable HTTP endpoint at `/api/v1/mcp` serves **no** resources: it does
+not advertise the `resources` capability, and `resources/list`,
+`resources/templates/list` and `resources/read` answer `-32601 Method not found`.
+Over HTTP, read the same data with the tools, which run under the same caller's
+principal (permissions, row-level and field-level security, OAuth scopes):
+
+| Resource (stdio) | Tool (HTTP and stdio) |
+|---|---|
+| `objectstack://objects` | `list_objects` |
+| `objectstack://objects/{objectName}` | `describe_object` |
+| `objectstack://objects/{objectName}/records/{recordId}` | `get_record` |
+
+`objectstack://metadata/types` has no HTTP counterpart.
 
 ## Prompts
 
@@ -482,7 +497,8 @@ the handler and declares the capability together — so there is no way to
 advertise a primitive this server cannot serve (ADR-0076 D12).
 
 In practice: `tools` appears once a tool is registered, `resources` once a
-resource is, `prompts` once the skill/agent bridge runs. `logging` is the one
+resource is (on the stdio server only: the HTTP endpoint registers no resource,
+so it never advertises `resources`), `prompts` once the skill/agent bridge runs. `logging` is the one
 hand-declared entry, and it is honest — declaring it is itself what wires the
 `logging/setLevel` handler.
 
