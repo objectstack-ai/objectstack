@@ -19,22 +19,39 @@
  *      (`stack.capabilities`) — the explicit, package-provenanced declaration
  *      (ADR-0066 D1), served at runtime by the registry (ADR-0131 D3),
  *   3. every capability a permission set in this stack GRANTS via
- *      `systemPermissions` (granting a capability also declares it).
+ *      `systemPermissions` (granting a capability also declares it),
+ *   4. sources 2 and 3 read off every package of the artifact being built
+ *      (`stack.packages[].manifest`, ADR-0130 D4) — see below.
+ *
+ * ## Why a sibling package's grant counts (#32575)
+ *
+ * The runtime does not scope a capability to the package that requires it: a
+ * caller holds the `systemPermissions` of every permission set it holds,
+ * folded into one list whichever package declared the set, and a
+ * `requiredPermissions` gate asks only whether that list names the capability.
+ * So a grant in the app package of an artifact satisfies a gate in its
+ * marketing package. The per-package author-time pass hands this rule ONE
+ * package's collections plus the artifact's `packages[]` as resolution context
+ * (`packageBodyAsStack` in the CLI); reading providers off that context changes
+ * what the rule can RESOLVE, never what it JUDGES — the references walked below
+ * are still this stack's own, and a capability no package of the artifact
+ * provides still warns.
  *
  * A `sys_capability` seed row is NOT a source: no runtime reader consults one
  * (ADR-0131 D3 — the catalog is the registry, and the row object is retired),
  * so counting it would silence this warning for a capability the runtime never
  * declares.
  *
- * WARNING, not error: a single package's lint cannot see capabilities declared
- * by OTHER installed packages, and the reference fails closed at runtime anyway,
- * so a dangling reference is "almost certainly a typo" — surface it, don't break
- * the build. Assignment (`systemPermissions`) is NOT flagged: it is the
- * declaration side, and a package legitimately introduces new capabilities there.
+ * WARNING, not error: the lint cannot see capabilities declared by packages
+ * installed from OTHER artifacts, and the reference fails closed at runtime
+ * anyway, so a dangling reference is "almost certainly a typo" — surface it,
+ * don't break the build. Assignment (`systemPermissions`) is NOT flagged: it is
+ * the declaration side, and a package legitimately introduces new capabilities
+ * there.
  */
 
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
-import { recordsOf } from './object-graph.js';
+import { packagesOf, recordsOf } from './object-graph.js';
 
 export const CAPABILITY_REFERENCE_UNKNOWN = 'capability-reference-unknown';
 
@@ -90,12 +107,21 @@ export function validateCapabilityReferences(stack: AnyRec): CapabilityRefFindin
 
   // ── Build the author-time "known capability" set ──
   const known = new Set<string>(PLATFORM_CAPABILITY_NAMES);
-  // [ADR-0066 D1] Capabilities the stack explicitly DECLARES via defineCapability.
-  for (const cap of recordsOf(stack.capabilities)) {
-    if (typeof cap.name === 'string' && cap.name.length > 0) known.add(cap.name);
-  }
-  for (const ps of recordsOf(stack.permissions)) {
-    for (const cap of asCapArray(ps.systemPermissions)) known.add(cap);
+  const addProvidersOf = (source: AnyRec) => {
+    // [ADR-0066 D1] Capabilities explicitly DECLARED via defineCapability.
+    for (const cap of recordsOf(source.capabilities)) {
+      if (typeof cap.name === 'string' && cap.name.length > 0) known.add(cap.name);
+    }
+    for (const ps of recordsOf(source.permissions)) {
+      for (const cap of asCapArray(ps.systemPermissions)) known.add(cap);
+    }
+  };
+  addProvidersOf(stack);
+  // [#32575] Every package of the artifact provides too — the runtime folds
+  // the grants of every held set whichever package declared it (module note).
+  for (const entry of packagesOf(stack)) {
+    const body = entry.manifest;
+    if (body && typeof body === 'object' && !Array.isArray(body)) addProvidersOf(body as AnyRec);
   }
 
   // [#22161] One remedy line; that a capability another installed package
