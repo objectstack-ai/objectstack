@@ -873,7 +873,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // as before the hydration ({@link declinedCopyReplaced}).
     if (exactAddress) {
         item = exactQualifierItem(host, request, exactAddress,
-            declinedCopyReplaced(host, request, exactAddress, item, member), member);
+            declinedCopyReplaced(host, request, exactAddress, item, wantedMember), member);
     }
 
     if (item === undefined && serviceDegraded?.degraded) {

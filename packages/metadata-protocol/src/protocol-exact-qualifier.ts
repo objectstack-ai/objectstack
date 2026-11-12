@@ -371,21 +371,6 @@ export function exactQualifierItem(
         // A provenance sentinel or a package this registry does not hold is not another package's item.
         return item;
     }
-    return admittedHolderItem(registry, request, address, member);
-}
-
-/**
- * The registry's own item of the holder an exact address admitted: the one
- * holder's item; two bases the package is a pair of, both holding the name,
- * refused naming both; `undefined` when only a stored row bound to the
- * package carries the name.
- */
-function admittedHolderItem(
-    registry: ExactQualifierRegistry,
-    request: { type: string; name: string },
-    address: ExactQualifierAddress,
-    member: string | undefined,
-): unknown {
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
@@ -430,20 +415,31 @@ export function isPackageLessRow(row: unknown): boolean {
  * place of a package-less registry or service copy of a row it declines
  * ({@link declinesPackageLessRowAt}): the copy a hydration put in the
  * registry's bare slot (stamped `''` or `sys_metadata`, tenant-marked) is the
- * declined row, so the admitted holder's own item is served, as before the
- * hydration. `item` is returned unchanged when it is not such a copy.
+ * declined row, so the admitted holder's own shipped item is served, as
+ * before the hydration. Read from the artifact set (`lookupArtifactItem`),
+ * never the registry's package-scoped read, which answers the bare slot over
+ * a lone holder's composite (the ADR-0005 overlay). Two bases the package is
+ * a pair of, both holding the name, are refused naming both. `item` is
+ * returned unchanged when it is not such a copy.
  */
 export function declinedCopyReplaced(
-    host: Pick<ProtocolHost, 'engine' | 'isStoredEntryOfDeclinedName'>,
+    host: Pick<ProtocolHost, 'isStoredEntryOfDeclinedName' | 'lookupArtifactItem'>,
     request: { type: string; name: string },
     address: ExactQualifierAddress,
     item: unknown,
-    member: string | undefined,
+    wantedMember: string | undefined,
 ): unknown {
     if (item === undefined || item === null || typeof item !== 'object') return item;
+    const served = (item as { _packageId?: unknown })._packageId;
+    // Package-less only: `''` and the provenance sentinel `sys_metadata` are no package, as in {@link exactQualifierItem}.
+    if (typeof served === 'string' && served !== '' && served !== 'sys_metadata') return item;
     if (!isPackageScopedType(request.type) || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
-    const registry = exactQualifierRegistry(host);
-    return registry ? admittedHolderItem(registry, request, address, member) : item;
+    if (address.registryHolders.length > 1) {
+        throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
+            address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
+    }
+    const [holder] = address.registryHolders;
+    return holder === undefined ? undefined : host.lookupArtifactItem(request.type, request.name, holder, wantedMember);
 }
 
 /**
