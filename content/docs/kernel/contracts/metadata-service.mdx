@@ -155,7 +155,10 @@ consumer ever sees a synthesised `name`. One exception: for a type stored per
 `permission`), a row the database loader binds to its package by the
 `package_id` column alone reaches `loadMany` stamped with that package
 (`_packageId`), so registering it back fills that package's slot; `loadManyKeyed`
-returns the stored body as stored, without the stamp.
+returns the stored body as stored, without the stamp. For `email_template` every
+such row is stamped. For the other five, a row is stamped only when its body
+carries the row's own `name` and no other body `loadMany` answers carries that
+`name`; any other body, a nameless one included, is handed on unstamped.
 
 That difference is the point. A stored body with no top-level `name` is legal
 and deliberate — an aggregated `defineView` container has none **by design**,

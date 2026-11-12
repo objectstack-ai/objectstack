@@ -4097,8 +4097,12 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
  * it for ({@link withEntryPackage}) when the body names none itself. The
  * package is read off the loader's keyed entries, and only from a loader that
  * holds items per package (`loadManySlots`): a body is stamped when its `name`
- * is the key of exactly one keyed entry, and that entry carries a package.
- * Every body is kept, in `loadMany`'s order — a body the keyed read cannot
+ * is the key of exactly one keyed entry, that entry carries a package and its
+ * own body carries the entry's key as its `name`, and no other body `loadMany`
+ * answered carries that `name`. A body whose `name` is another row's key is
+ * never stamped with that row's package — a row's key and its body's `name`
+ * are two identities (#14205), and a save does not make them agree. Every body
+ * is kept, in `loadMany`'s order — a body the keyed read cannot
  * name (a nested or extension-less file, a row whose `name` column is empty)
  * is answered as before, unstamped. A loader that holds nothing per package is
  * not read twice.
@@ -4110,13 +4114,21 @@ async function withLoaderEntryPackages<T>(
   options?: MetadataLoadOptions,
 ): Promise<T[]> {
   if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
+  const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
   const packageOf = new Map<string, string | null>();
   for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-    packageOf.set(entry.name, packageOf.has(entry.name) ? null : entry.packageId ?? null);
+    const own = nameOf(entry.data) === entry.name ? entry.packageId ?? null : null;
+    packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+  }
+  const bodiesNamed = new Map<string, number>();
+  for (const item of items) {
+    const name = nameOf(item);
+    if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
   }
   return items.map((item) => {
-    const name = (item as { name?: unknown } | null)?.name;
-    const packageId = typeof name === 'string' ? packageOf.get(name) : undefined;
-    return packageId ? withEntryPackage({ name: name as string, data: item, packageId }) : item;
+    const name = nameOf(item);
+    if (typeof name !== 'string' || bodiesNamed.get(name) !== 1) return item;
+    const packageId = packageOf.get(name);
+    return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
   });
 }

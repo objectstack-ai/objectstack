@@ -2100,6 +2100,43 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
     expect(UNBUNDLED).not.toContain('email_template');
   });
 
+  it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
+    for (const type of UNBUNDLED) {
+      for (const strayPackage of [BETA, null]) {
+        driver = createMockDriver();
+        // Row keyed `b` whose body says `name: 'a'` — storable through `save`, which does not refuse a
+        // name that disagrees with its key — beside row `a` bound to ALPHA by the column alone.
+        await driver.create('sys_metadata', {
+          id: `${type}_stray`, type, name: 'b', state: 'active', version: 1, checksum: `${type}_stray`,
+          source: 'database', package_id: strayPackage, metadata: JSON.stringify({ name: 'a', label: 'stray' }),
+        });
+        await driver.create('sys_metadata', {
+          id: `${type}_alpha`, type, name: 'a', state: 'active', version: 2, checksum: `${type}_alpha`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'a', label: ALPHA }),
+        });
+        // Main's answer for the name: the body `loadMany` keeps first, unstamped.
+        expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        const m = await bootPass();
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
+      }
+      // Row `a` bound to ALPHA whose own body says `name: 'z'`, beside a row whose `name` column is
+      // empty and whose body says `name: 'a'`: neither body is ALPHA's row's by its name.
+      driver = createMockDriver();
+      await driver.create('sys_metadata', {
+        id: `${type}_alpha`, type, name: 'a', state: 'active', version: 1, checksum: `${type}_alpha`,
+        source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'z', label: ALPHA }),
+      });
+      await driver.create('sys_metadata', {
+        id: `${type}_unkeyed`, type, name: null, state: 'active', version: 2, checksum: `${type}_unkeyed`,
+        source: 'database', package_id: null, metadata: JSON.stringify({ name: 'a', label: 'unkeyed' }),
+      });
+      const items = (await manager().loadMany(type)) as Array<{ label: string; _packageId?: string }>;
+      expect(items.map((item) => [item._packageId ?? null, item.label]))
+        .toEqual(expect.arrayContaining([[null, ALPHA], [null, 'unkeyed']]));
+      expect(items).toHaveLength(2);
+    }
+  });
+
   for (const type of UNBUNDLED) {
     it(`${type}: two holders — loadMany stamps the row's package, and registering it back leaves every row unchanged (BEFORE: unstamped, a package-less row inserted)`, async () => {
       await seed(type, ALPHA, 1);
