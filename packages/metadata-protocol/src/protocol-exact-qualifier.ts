@@ -786,7 +786,14 @@ export function admitEnvironmentQualifier(
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
     }
-    const holders = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    // [#32183, epic ruling R4-B2] The served holders, or every holder when no
+    // package serves the name: a name only disabled packages hold is refused
+    // naming them, as before, never read as a caller with no package (that
+    // read can reach a disabled holder's customization pair row).
+    const served = registry.packageScopedHoldersOf(request.type, request.name) ?? [];
+    const holders = served.length > 0
+        ? served
+        : registry.packageScopedHoldersOf(request.type, request.name, null, { includeDisabledPackages: true }) ?? [];
     if (holders.length === 0) {
         refuseUnjudgeableByNameRead(host, request, { kind: 'environment' });
         return;
