@@ -889,6 +889,11 @@ export function objectWriteFlowSubjects(
     return liveFlows.filter((entry) => !(isRec(entry) && typeof entry.name === 'string' && redrafted.has(entry.name)));
 }
 
+/** [#32666] `pending` without the entries named `name` — the written item's own draft. */
+function withoutWrittenItem(pending: readonly unknown[] | undefined, name: string): readonly unknown[] | undefined {
+    return pending?.filter((entry) => !(isRec(entry) && entry.name === name));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // #20312 — an html page's source is compiled at save against the deployment's
 // SDUI component manifest (ADR-0080 §5).
@@ -1342,6 +1347,16 @@ export function evaluateRuntimeAuthoringGate(args: {
     const objects = mergePendingDeclarations(args.objects ?? [], args.pending?.objects);
     // [#32666] The flows an object write judges as subjects; none on any other type.
     const objectWriteFlows = objectWriteFlowSubjects(args.type, args.flows, args.pending?.flows);
+    // [#32666] …and, on that write, the object universe the RULES judge with
+    // the written object's own draft left out of the fold: the item IS that
+    // draft, so folding it in made the gate's stored universe the candidate
+    // itself, and every finding the write adds on another entry — a carried
+    // flow's — cancelled against its own copy. Left out, the written object's
+    // stored self is its LIVE body (none for a new object), the universe the
+    // single-item door judges against. Every other object stays folded.
+    const ruleObjects = objectWriteFlows !== undefined
+        ? mergePendingDeclarations(args.objects ?? [], withoutWrittenItem(args.pending?.objects, args.name))
+        : objects;
 
     const result = runRuntimeAuthoringRules({
         type: args.type,
@@ -1354,7 +1369,7 @@ export function evaluateRuntimeAuthoringGate(args: {
         // had been threaded, `datasets` had not, and the difference was
         // invisible until an error-severity rule landed on the un-threaded one.
         context: {
-            objects,
+            objects: ruleObjects,
             permissions: mergePendingDeclarations(args.permissions ?? [], args.pending?.permissions),
             books: mergePendingDeclarations(args.books ?? [], args.pending?.books),
             datasets: mergePendingDeclarations(args.datasets ?? [], args.pending?.datasets),
