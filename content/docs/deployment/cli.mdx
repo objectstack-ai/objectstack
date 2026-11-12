@@ -1186,6 +1186,33 @@ duration.
 Both are safe to apply — the convergence preserves every stored instant and is
 idempotent — but only the second takes time proportional to your data.
 
+#### Runtime-owned indexes apply builds
+
+`os migrate apply` also builds one index of its own once that DDL is done: the
+permission-set grant's package-less guard, which keeps one grant per user,
+permission set and organization among the grants that name no package.
+`os migrate plan` lists it in a section after the held-back work and before the
+drift, the order `apply` performs them in:
+
+```text
+  Runtime-owned indexes (built when you apply, after the work above)
+    + sys_user_permission_set.uniq_sys_user_permission_set_packageless [unique (user_id, permission_set, organization_id) WHERE permission_set_package IS NULL]
+```
+
+The plan lists it only where `apply` would build it. An index that already
+stands is not listed, because `apply` sends it no DDL. Nor is it listed when the
+plan has nothing else to apply, because `apply` then changes nothing at all; a
+serving boot that runs schema sync builds it instead. Grants that would collide
+under the index make the line read as refused, with how many: `apply` leaves
+those rows as they are, applies the rest, and `os migrate duplicates` lists them.
+Under `--json` the section is the `schemaSyncIndexes` array, whose entries carry
+`table`, `index`, `keyParts`, `rowScope` and a `status` of `build`, `blocked` or
+`unreadable`.
+
+The other runtime-owned indexes are built by the serving boot, not by `apply`,
+so the plan does not list them; `os migrate duplicates` reports the rows that
+would block them.
+
 #### Occupancy check (SQLite)
 
 A running `os dev` / `os serve` holding the same SQLite file open is the usual
