@@ -18,4 +18,5 @@ One package holding the name — on one object, on several, or object-less — i
 
 **BREAKING** (first-party count: 0 — no first-party caller removes an action by bare name, and none removes a bound action by package through `unregister`):
 
-1. FROM a package-less `unregister('action', name)` of a name two packages bind (one object or two) that removed both TO the same call naming the package to remove: `unregister('action', name, { packageId })`.
+1. FROM a package-less `unregister('action', name)` of a name two packages hold — both bound to one object, each bound to its own object, or one bound and one object-less — that removed both TO the same call naming the package to remove: `unregister('action', name, { packageId })`.
+2. FROM a package-less `MemoryLoader.delete('action', name)` of such a name, which deleted every slot, TO the same `409` refusal; name the package (`delete('action', name, { packageId })`) to remove one package's action.

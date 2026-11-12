@@ -31,10 +31,11 @@
  *  - **enumerate**: every slot of a name answers to that name
  *    ({@link storedNameOf}, {@link storeKeysNamed}).
  *  - **remove** ({@link storeRemovalKeys}): a removal naming a package drops
- *    that package's slot only — ⛔ never another package's item; a removal
- *    naming none drops every slot of the name while at most one package holds
- *    it, and is refused naming every holder when two or more do (D3), so it
- *    never takes both and never picks one.
+ *    every slot that package holds of the name (an action's object-bound ones
+ *    included) — ⛔ never another package's item; a removal naming none drops
+ *    every slot of the name while at most one package holds any of them, and
+ *    is refused naming every holder when two or more do (D3), so it never
+ *    takes both and never picks one.
  *
  * [#32246] The loaders under the registry hold these types by the same rules:
  * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
@@ -65,8 +66,11 @@
  * name bound to two objects are two names that never meet (objectql's
  * `actionOwnerScopedRegistry`). So an action BOUND to an object is slotted by
  * its object and name ({@link slotIdentityOf}); an object-less action by its
- * name alone, exactly as `api`. The D3 refusal fires only among slots of one
- * identity: two packages on the object-less name, or on one object and name.
+ * name alone, exactly as `api`. A write's and a by-identity read's D3 refusal
+ * fires only among slots of one identity: two packages on the object-less
+ * name, or on one object and name. A removal counts packages over every
+ * identity of the name instead ({@link storeRemovalKeys}), as `DatabaseLoader`'s
+ * one row per `(package, name)` does.
  * A by-name read that cannot see the object, of a name bound to more than one
  * owner, answers the item written last under the name — what the bare-name
  * map answered — when one package holds every one of them; it refuses when
@@ -389,9 +393,11 @@ function isPackageCaller(packageId: string | null | undefined): packageId is str
  *    and one object-less — is two holders, as the by-name read counts them
  *    ({@link readStoreEntry}) and as `DatabaseLoader`'s row key `(package,
  *    name)` counts them, so the manager's judgment and the loader's own
- *    refusal agree; the refusal names each package with the object it binds
- *    the name to. One package binding the name to several objects is one
- *    holder.
+ *    refusal agree. Over a store of items (the registry, the door's
+ *    `MemoryLoader`, the manager's view of every loader) the refusal also
+ *    names the object each package binds the name to; over `DatabaseLoader`'s
+ *    row store, whose values are rows, it names the packages only. One
+ *    package binding the name to several objects is one holder.
  *
  * A type outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per name:
  * the name's key, whatever package is named, and no package to delete by.

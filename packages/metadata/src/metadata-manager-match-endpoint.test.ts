@@ -1422,6 +1422,28 @@ describe('[#32352] an action\'s removal: the manager\'s holder count agrees with
     expect(ctx.loggedErrors).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['bound to ONE object', 'shared_item', 'shared_item'],
+    ['bound to two different objects', 'alpha_item', 'beta_item'],
+    ['one bound, one object-less', 'alpha_item', undefined],
+  ] as const)('the artifact door\'s `MemoryLoader`, asked directly: `delete(\'action\', name)` naming no package, of a name two packages\' actions %s hold, is the same 409 naming both, and keeps every slot (BASE: it deleted every slot); naming a package takes every slot of that package only', async (_shape, alphaObject, betaObject) => {
+    const door = new MemoryLoader();
+    await door.save('action', NAME, item(A, alphaObject));
+    await door.save('action', NAME, item(B, betaObject));
+    const holders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId);
+    const err = await door.delete('action', NAME).then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+    expect(err, 'the door refuses').toBeInstanceOf(PackageScopedNameRefusedError);
+    expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: A },
+      { kind: 'package', packageId: B },
+    ]);
+    expect(err!.message.toLowerCase()).toContain(`package "${A}" binds it to object "${alphaObject}"`);
+    expect(await holders(), 'nothing deleted').toEqual([A, B]);
+    await door.delete('action', NAME, { packageId: A });
+    expect(await holders()).toEqual([B]);
+  });
+
   it('CONTROL — one package\'s bound action: a removal naming none takes its slot, door entry and row, as before', async () => {
     const ctx = await boot([[A, 'alpha_item']]);
     await ctx.manager.unregister('action', NAME);
