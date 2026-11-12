@@ -296,7 +296,7 @@ export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.
 // and the address shape `resolveMetaItemAddress` answers. Both transports read them.
 // [ADR-0150 D3, #32310] …and where a caller-arm read (`?callerPackage=`) is read.
 export {
-    META_ITEM_SUBRESOURCE_SEGMENTS, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
+    META_ITEM_SUBRESOURCE_SEGMENTS, judgesPackageLessRows, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
 } from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 

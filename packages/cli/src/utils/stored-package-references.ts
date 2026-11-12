@@ -56,7 +56,9 @@
  * refused, and listed here, until it is deleted.
  *
  * Beside them it lists each package-less `sys_metadata` row of such a type
- * (any type whose readers consult `(package, name)`, not only a bundled one)
+ * (any type whose readers consult `(package, name)`, not only a bundled one,
+ * and any type whose one-holder rule has narrowed to the namespace, such as
+ * `action`: `judgesPackageLessRows`, #32407)
  * whose name two or more packages hold: the row is the customization of one
  * holder and cannot say which (ADR-0150 D4), so each holder's exact read
  * refuses it and the list scoped to a holder leaves it out
@@ -95,11 +97,12 @@
  */
 
 import type { PackageScopedHolder, PackageScopedResolution } from '@objectstack/core';
-import { PACKAGE_SCOPED_READ_TYPES, resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
+import { PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { resolvePackageScopedName, type PackageScopedRegistry } from '@objectstack/objectql';
 import { keysetWalk } from '@objectstack/types';
 import { isCustomizationPackage, validateNamespaceNotAddressLiteral } from '@objectstack/spec/kernel';
 import { ITEM_KEY_DISCRIMINATORS, installedManifestsOf } from '@objectstack/metadata-core';
-import { packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
+import { judgesPackageLessRows, packageLessRowOwners, pairMemberOwners } from '@objectstack/metadata-protocol';
 
 /** The D3 types a stored reference names. */
 type ReferencedType = 'permission' | 'sharing_rule' | 'queue' | 'assignment_rule' | 'flow' | 'connector' | 'email_template';
@@ -451,7 +454,7 @@ async function ambiguousPairMemberRows(engine: StoredReferenceEngine, registry: 
 
 /** The package-less rows two or more holders of the name could own (module doc). Reads only; ordered by id. */
 async function ambiguousPackageLessRows(engine: StoredReferenceEngine, registry: StoredReferenceRegistry): Promise<PackageLessRowFinding[]> {
-  const types: string[] = PACKAGE_SCOPED_READ_TYPES.filter((type) => registry.readsByPackage?.(type) === true);
+  const types: string[] = PACKAGE_SCOPED_TYPES.filter((type) => judgesPackageLessRows(registry, type));
   if (types.length === 0) return [];
   const findings: PackageLessRowFinding[] = [];
   const walk = keysetWalk<Row>(
