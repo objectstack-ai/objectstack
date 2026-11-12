@@ -852,10 +852,10 @@ describe('email delivery is optional: shown, marked so, and never what keeps the
     setRequiredRows();
     AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
     renderChecklist(ADMIN);
-    await screen.findByTestId('first-run-checklist-row-invite');
+    // The invite row is done, so folded: its read is awaited through the count.
+    await waitFor(() => expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('4 of 5 done'));
     expect(drawnRowIds()).toEqual(['organization_name', 'mail']);
     expect(row('mail').getAttribute('data-done')).toBe('false');
-    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('4 of 5 done');
   });
 
   it('a mail setup that delivers still reads done; it folds with the done rows and moves no required count', async () => {
