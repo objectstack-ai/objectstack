@@ -8,7 +8,7 @@ export const CrmApp = App.create({
   name: 'crm_enterprise',
   label: 'Enterprise CRM',
   icon: 'briefcase',
-  // defaultAgent: 'build',                // only `ask` (the default: omit) or `build` binds — objectstack-ai
+  // defaultAgent: 'build',                // only `ask` (the default: omit) or `build` binds (ADR-0063 §2) — objectstack-ai
   branding: {
     primaryColor: '#4169E1',
     logo: '/assets/crm-logo.png',
