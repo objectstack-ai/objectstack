@@ -186,8 +186,7 @@ describe('the console root lands on the default app with one /meta/app read and 
     expect(window.location.pathname).toBe('/apps/crm');
     expect(appListReads()).toHaveLength(1);
     expect(preferenceReads()).toHaveLength(1);
-    // Nothing else the shell asks goes out twice either (the adapter's
-    // discovery, the signed-in user's locale row).
+    // And no other URL of the boot goes out twice.
     expect(duplicateUrls()).toEqual([]);
   });
 
