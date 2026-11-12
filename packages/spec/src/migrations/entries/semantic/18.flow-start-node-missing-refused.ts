@@ -10,8 +10,9 @@ export const entry: SemanticMigration = {
   id: 'flow-start-node-missing-refused',
   surface:
     'automation.Flow.nodes on a flow saved live or published through the metadata doors '
-    + '(PUT /api/v1/meta/flow/NAME live save, the per-item publish, POST /api/v1/packages/PKG/publish-drafts; '
-    + 'Studio, REST and MCP authors) and on a flow os validate / os build / os lint judge: a flow whose top-level '
+    + '(PUT /api/v1/meta/flow/NAME live save, the per-item publish, POST /api/v1/packages/PKG/publish-drafts, '
+    + 'and the restore doors POST /api/v1/meta/flow/NAME/rollback and POST /api/v1/packages/PKG/commits/COMMIT/revert; '
+    + 'Studio, REST and MCP authors) and on a flow os validate / os build / os lint / os verify judge: a flow whose top-level '
     + 'nodes hold no node of type start, an empty list included. A start node inside a loop, parallel or '
     + 'try_catch region body does not count',
   replacement:
@@ -23,18 +24,20 @@ export const entry: SemanticMigration = {
     + 'parsed, built, was stored live by the metadata save door (200) and published, and could never run: every '
     + 'trigger and every explicit run was refused with FLOW_NO_START_NODE, and the automation engine now refuses '
     + 'to register it. The authoring rule flow-start-node-missing (severity error) now refuses it in os validate, '
-    + 'os build and os lint, and a live save and a publish answer 422 INVALID_METADATA with the rule in issues[], '
-    + 'at `flow \'NAME\' · nodes`, naming the node types found. A draft save (mode=draft) still stores, with the '
-    + 'finding in its _diagnostics, so a designer can keep saving mid-edit. A flow with two start nodes is not '
+    + 'os build, os lint and os verify, and a live save, a publish and a restore answer 422 INVALID_METADATA with the rule in issues[], '
+    + 'at `flow \'NAME\' · nodes`, naming the node types found. A draft save (mode=draft) runs no rule and still '
+    + 'stores, so a designer can keep saving mid-edit; the finding is on the draft read\'s _diagnostics. A flow with two start nodes is not '
     + 'this rule: it runs from the first, and flow-node-unreachable names the extra one. '
-    + 'Rows stored before this release: a start-less flow row in sys_metadata stays stored and readable. The '
+    + 'Rows stored before this release: a start-less flow row in sys_metadata stays stored and readable, and a '
+    + 'start-less flow in an artifact built earlier still loads. The '
     + 'boot completes and the flow is not armed: the engine refuses to register it with a warn naming the flow '
     + '(`[Automation] failed to register flow`, or `[Automation] cold-boot flow bind: failed to register flow`), '
     + 'and the metadata read serves the stored row unchanged beside `registration: refused` and the engine\'s '
     + 'words naming the missing start node. A live re-save of that row is refused until a start node is added, '
     + 'because the gate charges a write with the written flow\'s own findings whatever the stored row held; a '
-    + 'draft stored earlier is judged at its publish and blocks its package\'s publish until fixed; deleting the '
-    + 'flow, or saving it as a draft, still works. OS_ALLOW_UNLINTED_METADATA_WRITES=1 turns the save and publish '
+    + 'draft stored earlier is judged at its publish and blocks its package\'s publish until fixed; a history '
+    + 'version stored before the release that holds no start node can no longer be restored (the same 422); '
+    + 'deleting the flow, or saving it as a draft, still works. OS_ALLOW_UNLINTED_METADATA_WRITES=1 turns the save and publish '
     + 'refusal into a logged warning for a migration window; the engine still refuses to register the flow. '
     + 'There is no mechanical rewrite: the start node carries the trigger, which only the author knows.',
   acceptanceCriteria:
