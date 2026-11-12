@@ -133,8 +133,10 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
  * `skill` first (#31701), then the object-less `action` (#31697), then
- * `email_template` (#31699). A type not listed here keeps one package holder
- * per deployment.
+ * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
+ * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
+ * name by package). A type not listed here keeps one package holder per
+ * deployment.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -146,6 +148,7 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'skill',
   'action',
   'email_template',
+  'flow',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */

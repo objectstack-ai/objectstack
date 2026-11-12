@@ -8,7 +8,7 @@ Clause-②: no (narrowing) — `AutomationEngine.registerFlow` refuses a definit
 Metadata-protocol: narrowed
 Skills-docs: none — every flow `skills/objectstack-automation` teaches already opens with a start node, and the refusal text carries the cure.
 
-<!-- adr-0087: not-required (no-migration-prescription) no key, value or spelling is retired and no stored row can be rewritten mechanically: a start node carries the flow's trigger, which only its author knows, so the refusal text names the cure and `os migrate meta --stored` lists each such row -->
+<!-- adr-0087: registered flow-start-node-missing-refused -->
 
 **BREAKING** accept-set narrowing at every door that registers a flow: the automation write doors (`POST /api/v1/automation`, `PUT /api/v1/automation/NAME`), the boot pull, the `kernel:ready` bind and the metadata-change sync.
 

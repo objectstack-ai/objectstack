@@ -149,12 +149,87 @@ describe('[#31697] the in-memory action store keeps one slot per (package, name)
 
   it('CONTROL — a type outside the slotted set is unchanged: the later write replaces the earlier', async () => {
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-    manager.registerInMemory('flow', 'digest', { name: 'digest', _packageId: ALPHA });
+    // A webhook: `flow` joined the slotted set (#31696).
+    manager.registerInMemory('webhook', 'digest', { name: 'digest', _packageId: ALPHA });
     const later = { name: 'digest', _packageId: BETA };
-    manager.registerInMemory('flow', 'digest', later);
-    expect(await manager.get('flow', 'digest')).toBe(later);
-    expect(await manager.get('flow', 'digest', ALPHA)).toBe(later);
-    expect(await manager.list('flow')).toEqual([later]);
+    manager.registerInMemory('webhook', 'digest', later);
+    expect(await manager.get('webhook', 'digest')).toBe(later);
+    expect(await manager.get('webhook', 'digest', ALPHA)).toBe(later);
+    expect(await manager.list('webhook')).toEqual([later]);
+  });
+});
+
+/**
+ * [#32365, ADR-0150 D3] The bare read of an action name with a package-less
+ * item beside package holders: the environment's own item answers first
+ * beside ONE package, whatever object each binds the name to; beside two it
+ * is named in the refusal, which names every candidate.
+ *
+ * BASE (main 89d815c5): beside one package, the slot written last answered
+ * (the package's action when it was written after the environment's); beside
+ * two, the refusal named the two packages only.
+ */
+describe('[#32365] the bare action read weighs the environment\'s own item', () => {
+  const at = (packageId: string | undefined, label: string, objectName?: string) => ({
+    name: 'digest', label, type: 'script', target: `${label}_impl`,
+    ...(objectName ? { objectName } : {}), ...(packageId ? { _packageId: packageId } : {}),
+  });
+  const refusalOf = (manager: MetadataManager) =>
+    manager.get('action', 'digest').then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+
+  it('the environment\'s item on one object beside one package\'s on another answers the bare read, in either write order', async () => {
+    for (const order of [['env', 'alpha'], ['alpha', 'env']]) {
+      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      for (const which of order) {
+        manager.registerInMemory('action', 'digest', which === 'env' ? at(undefined, 'env', 'contact') : at(ALPHA, 'alpha', 'account'));
+      }
+      expect(((await manager.get('action', 'digest')) as any)?.label, `written ${order.join(' then ')}`).toBe('env');
+      expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label, 'a read naming A answers A\'s own slot first').toBe('alpha');
+    }
+  });
+
+  it('beside two packages on two objects, the refusal names both packages AND the environment', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'contact'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'lead'));
+    const err = await refusalOf(manager);
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'environment' },
+    ]);
+    expect(err!.message).toContain('The environment\'s own item binds it to object "lead"');
+  });
+
+  it('beside two packages on the one same key (object-less), the refusal names the environment too', async () => {
+    const manager = twoHolders();
+    manager.registerInMemory('action', 'digest', at(undefined, 'env'));
+    const err = await refusalOf(manager);
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'environment' },
+    ]);
+    expect(((await manager.get('action', 'digest', BETA)) as any)?.label).toBe('beta');
+  });
+
+  it('[contract review F1] beside two packages on ONE object, with the environment\'s item on another object: the refusal names the environment too', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'account'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'lead'));
+    const err = await refusalOf(manager);
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'environment' },
+    ]);
+    expect(err!.message).toContain('The environment\'s own item binds it to object "lead"');
+  });
+
+  it('CONTROL — a package-less item on the one package\'s own key is that package\'s customization (D4): the bare read answers it, as before', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'custom', 'account'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('custom');
   });
 });
 
