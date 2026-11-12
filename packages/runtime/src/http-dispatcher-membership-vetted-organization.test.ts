@@ -117,8 +117,15 @@ describe('the environment-membership gate reads the vetted organization of a ses
         expect(membershipReads()).toEqual([OUTSIDER]);
     });
 
-    it('CONTROL: on a host whose posture keeps every claim, the resolution keeps the platform organization', async () => {
+    it('[ADR-0093 D8.1, as amended] with no tenancy posture too, a platform-organization claim no membership backs is not kept, so the session is judged', async () => {
         const { dispatcher, membershipReads } = tenantHost({ user: STAFF, activeOrganizationId: PLATFORM_ORG, memberOf: [], posture: null });
+        const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
+        expect(membershipRefusal(result), JSON.stringify(result.response?.body)).toEqual({ userId: STAFF });
+        expect(membershipReads()).toEqual([STAFF]);
+    });
+
+    it('CONTROL: with no tenancy posture, a member of the platform organization passes', async () => {
+        const { dispatcher, membershipReads } = tenantHost({ user: STAFF, activeOrganizationId: PLATFORM_ORG, memberOf: [PLATFORM_ORG], posture: null });
         const result = await dispatcher.dispatch('POST', '/mcp', MCP_CALL, {}, mcp());
         expect(membershipRefusal(result)).toBeUndefined();
         expect(membershipReads()).toEqual([]);

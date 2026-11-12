@@ -130,17 +130,24 @@ describe.skipIf(!MYSQL_URL)('grant package-less index on a LIVE MySQL / MariaDB'
         expect(log.error).not.toHaveBeenCalled();
     });
 
-    it('admits nothing the old key refused, with a non-null and a null organization (epic condition 1)', async () => {
+    // [#32164, red-line review E2] The last row: what the store alone
+    // admits that the old key refused, a packaged grant beside a package-less
+    // one; the engine's write seam refuses it above the store
+    // (`plugin-security`'s `stored-permission-set-package-stamp.ts`).
+    it('among package-less grants admits nothing the old key refused, with a non-null and a null organization (epic condition 1); the store alone admits a packaged grant beside a package-less one', async () => {
         expect(await ensureUserPermissionSetPackagelessIndex(exec, quietLogger(), { client: 'mysql2' })).toEqual({ status: 'created' });
-        const rows: Array<[string, string | null]> = [
-            ['n1', 'org_1'],
-            ['n2', 'org_1'],
-            ['z1', null],
-            ['z2', null],
+        const rows: Array<[string, string | null, string | null]> = [
+            ['n1', null, 'org_1'],
+            ['n2', null, 'org_1'],
+            ['z1', null, null],
+            ['z2', null, null],
+            // The fixture builds the guard alone, not the declared key, so only
+            // the packaged row beside n1 is read here.
+            ['m1', 'com.acme.crm', 'org_1'],
         ];
         const answers: Array<{ id: string; old: boolean; now: boolean }> = [];
-        for (const [id, org] of rows) {
-            answers.push({ id, old: await insertInto(OLD_KEY_TABLE, id, null, org), now: await insert(id, null, org) });
+        for (const [id, pkg, org] of rows) {
+            answers.push({ id, old: await insertInto(OLD_KEY_TABLE, id, pkg, org), now: await insert(id, pkg, org) });
         }
         expect(answers).toEqual([
             { id: 'n1', old: true, now: true },
@@ -149,6 +156,7 @@ describe.skipIf(!MYSQL_URL)('grant package-less index on a LIVE MySQL / MariaDB'
             // key admitted a second platform-wide grant, and so does this index.
             { id: 'z1', old: true, now: true },
             { id: 'z2', old: true, now: true },
+            { id: 'm1', old: false, now: true },
         ]);
     });
 

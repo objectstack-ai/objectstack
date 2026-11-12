@@ -614,6 +614,7 @@ export const ERROR_CODE_LEDGER = {
     'ACCOUNT_LOCKED',
     'ASYNC_NOT_SUPPORTED',
     'AUTH_CONFIG_ERROR',
+    'BANNED_USER',                // 403 on a sign-in by a banned account: better-auth's admin-plugin code, passed through for an administrator's ban and stamped by plugin-auth (`banned-user-refusal-cause.ts`) on `/sign-in/email` with `details.cause: 'scim_deactivated'` when the identity provider deactivated the account through SCIM; a client tells the two apart by that field, never by the message
     'CREATE_FAILED',
     'CREDENTIALS_NAME_DIFFERENT_ACCOUNTS', // 401, before every gate and the endpoint: the request's session cookie and its bearer token name two different signed-in accounts, so it is refused and nothing runs for either; an auth request is judged and executed as one account (one credential, one account, or a credential naming no live account is unaffected)
     'DOMAIN_VERIFICATION_DISABLED', // domain verification is off on this deployment

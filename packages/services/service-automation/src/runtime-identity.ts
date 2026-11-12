@@ -108,6 +108,18 @@ export interface RunIdentityContext {
    * `runAs:'user'` run whose setup seeded it ({@link runPrincipalKind}).
    */
   principalKind?: 'agent';
+  /**
+   * [ADR-0093 D8.1, as amended] Every organization the acting user holds a
+   * current membership in, the kernel `ExecutionContext.accessible_org_ids`:
+   * what the organization wall reads, under every posture — a person's data
+   * access requires a current membership in the organization. Present on a
+   * `runAs:'user'` run whose context carries it (the launch door hands the
+   * request's; run setup resolves it otherwise, {@link runAccessibleOrgIds});
+   * the wall then judges the run as it judges the same user's request. Never
+   * set on a `runAs:'system'` run, whose `isSystem` short-circuit precedes the
+   * wall.
+   */
+  accessible_org_ids?: string[];
   /** Acting user's tenant/org id. */
   tenantId?: string;
   /**
@@ -215,6 +227,18 @@ export interface RunDataContext extends RunIdentityContext {
 export interface SeededRunContext extends AutomationContext {
   org_user_ids?: string[];
   /**
+   * [ADR-0093 D8.1, as amended] The acting user's membership set, as the
+   * same resolver reports it (`resolveUserAuthzGrants`' `accessible_org_ids`,
+   * which `resolveAuthzContext` copies onto a request's context). A context
+   * that already carries one keeps it — the launch door hands the request's,
+   * and a `subflow` / `map` child inherits its parent's — and run setup
+   * resolves it for one that does not, taking an empty set when that
+   * resolution fails (a membership it cannot read is not a current one). It
+   * is the acting user's fact, so the decision switch removes it with the rest
+   * and resolves the decider's.
+   */
+  accessible_org_ids?: string[];
+  /**
    * [ADR-0150 D3] The acting user's permission-set addresses, as the same
    * resolver reports them (`resolveUserAuthzGrants`' own field). Seeded with
    * the positions and permission sets, and removed with them by the decision
@@ -276,6 +300,17 @@ export function runTriggerUserId(context: AutomationContext | undefined): string
 export function runOrgUserIds(context: AutomationContext | undefined): string[] | undefined {
   const peers = (context as SeededRunContext | undefined)?.org_user_ids;
   return Array.isArray(peers) ? peers : undefined;
+}
+
+/**
+ * [ADR-0093 D8.1, as amended] The membership set the run context carries
+ * ({@link SeededRunContext.accessible_org_ids}), or `undefined` when it carries
+ * none. An empty set is carried as such: it is the answer "no current
+ * membership", which the organization wall reads.
+ */
+export function runAccessibleOrgIds(context: AutomationContext | undefined): string[] | undefined {
+  const orgIds = (context as SeededRunContext | undefined)?.accessible_org_ids;
+  return Array.isArray(orgIds) ? orgIds : undefined;
 }
 
 /**
@@ -342,7 +377,7 @@ export function runPrincipalKind(context: AutomationContext | undefined): 'agent
  *    empty: the actor label + `flowRunId` are its provenance, and ADR-0118 D1
  *    forbids inventing a sentinel or pseudo-user in its place.
  *  - `runAs:'user'` (default) → the triggering user's identity
- *    (`{ userId, positions, permissions, org_user_ids?, email?, posture?, tenantId? }`), so the
+ *    (`{ userId, positions, permissions, org_user_ids?, accessible_org_ids?, email?, posture?, tenantId? }`), so the
  *    security middleware enforces that user's row-level security. The run can
  *    never exceed the triggering user's grants. Empty `positions` falls back to
  *    the platform's baseline permission set, exactly like a fresh member's own
@@ -355,7 +390,9 @@ export function runPrincipalKind(context: AutomationContext | undefined): 'agent
  *    same user's request; without it, that policy drops out. `posture` is the
  *    rung run setup seeded ({@link runPosture}): with it, a reader keyed on the
  *    rung answers as for the same user's request; without it, as for a
- *    principal below the rung.
+ *    principal below the rung. `accessible_org_ids` is the user's membership
+ *    set ({@link runAccessibleOrgIds}): the organization wall judges the run
+ *    by it, as it judges the same user's request (ADR-0093 D8.1, as amended).
  *  - neither (an effective `runAs:'user'` run with no trigger user) → **throws**
  *    {@link UnscopedRunDataAccessError} (#3760). This used to return a
  *    provenance-only envelope and let the run proceed UNSCOPED — the #1888
@@ -482,6 +519,11 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
   if (addresses) out.permissionSetAddresses = addresses;
   const orgUserIds = runOrgUserIds(context);
   if (orgUserIds) out.org_user_ids = orgUserIds;
+  // [ADR-0093 D8.1, as amended] The acting user's membership set, so the
+  // organization wall judges this run's data operations as it judges the
+  // same user's request.
+  const accessibleOrgIds = runAccessibleOrgIds(context);
+  if (accessibleOrgIds) out.accessible_org_ids = accessibleOrgIds;
   if (context.email) out.email = context.email;
   const posture = runPosture(context);
   if (posture) out.posture = posture;
