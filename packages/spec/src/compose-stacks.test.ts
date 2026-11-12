@@ -626,3 +626,115 @@ describe('Action order sorting', () => {
     expect(combined.objects![0].actions!.map((a) => a.name)).toEqual(['approve', 'app_action']);
   });
 });
+
+/**
+ * [ADR-0150 D4 · #32477] A NESTED artifact — one `composeStacks` built under
+ * `manifest: 'preserve'`, composed again — keeps its objects in its package
+ * bodies and carries no flattened copy, so the object door reads those bodies:
+ * an object name a body declares and another input declares too is refused
+ * under EVERY `objectConflict` strategy (seat ruling on #32477, option A).
+ *
+ * Measured on #32475's head 8be0f346 before this read existed (A = p1 + p2
+ * under 'preserve', p1 declaring `alpha_shared`; q, a co-owner of namespace
+ * alpha, declaring `alpha_shared` too):
+ *
+ * ```
+ * flat p1 + q, 'error'           : REFUSED STACK_COMPOSE_OBJECT_CONFLICT 422 (unchanged)
+ * A + q, any strategy, 'preserve': ACCEPTED — the boot refuses DUPLICATE_ARTIFACT_OBJECT_NAME 422
+ * A + q, any strategy, default   : ACCEPTED — the boot serves p1's object; q's fields and actions are gone
+ * install p1, p2, q one by one   : q REFUSED DUPLICATE_ARTIFACT_OBJECT_NAME 422
+ * ```
+ */
+describe('composeStacks - a nested artifact\'s package bodies are read for object name conflicts', () => {
+  const CONFLICT = 'STACK_COMPOSE_OBJECT_CONFLICT';
+  const X = 'alpha_shared';
+  const obj = (name: string, from: string, approve = false) => ({
+    name,
+    label: `${name} from ${from}`,
+    fields: { [`only_${from}`]: { type: 'text' as const, label: from } },
+    ...(approve ? { actions: [{ name: 'approve', label: `approve ${from}`, type: 'script' as const, body: { language: 'js', source: `return '${from}';`, capabilities: [] } }] } : {}),
+  });
+  const pkg = (id: string, namespace: string, objects: ReturnType<typeof obj>[], extra: Record<string, unknown> = {}) =>
+    defineStack({
+      manifest: { id: `com.example.${id}`, name: id, version: '1.0.0', type: 'module' as const, namespace, ...extra },
+      objects,
+    } as never);
+  const p1 = (approve = false) => pkg('p1', 'alpha', [obj(X, 'p1', approve), obj('alpha_p1_item', 'p1')]);
+  const p2 = () => pkg('p2', 'beta', [obj('beta_p2_item', 'p2')]);
+  const q = (approve = false) =>
+    pkg('q', 'alpha', [obj(X, 'q', approve)], { dependencies: { 'com.example.p1': '^1.0.0' } });
+  /** A: p1 (declares `alpha_shared`) and p2, composed under 'preserve' — stripped, bodies only. */
+  const nested = (approve = false) => composeStacks([p1(approve), p2()], { manifest: 'preserve' });
+  const thrown = (fn: () => unknown): { code?: string; status?: number; issues?: unknown; message: string } | undefined => {
+    try {
+      fn();
+      return undefined;
+    } catch (e) {
+      return e as { code?: string; status?: number; issues?: unknown; message: string };
+    }
+  };
+  const BODY_SITE = "at packages[0].objects['alpha_shared'] (package 'com.example.p1', namespace 'alpha')";
+  const issueFor = (order: 'nested-first' | 'flat-first') =>
+    order === 'nested-first'
+      ? `object '${X}' is defined in multiple stacks: 'com.example.p2' (stack #0) ${BODY_SITE} and 'com.example.q' (stack #1) at stack.objects[0].`
+      : `object '${X}' is defined in multiple stacks: 'com.example.q' (stack #0) at stack.objects[0] and 'com.example.p2' (stack #1) ${BODY_SITE}.`;
+
+  it('the nested input carries its objects only in its bodies (the shape the read exists for)', () => {
+    const a = nested();
+    expect(a.objects).toBeUndefined();
+    expect((a.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual(['com.example.p1', 'com.example.p2']);
+  });
+
+  for (const objectConflict of ['error', 'override', 'merge'] as const) {
+    for (const manifest of ['preserve', undefined] as const) {
+      it(`refuses the nested + flat pair under '${objectConflict}', manifest ${manifest ?? 'default'}, in either order`, () => {
+        const opts: ComposeStacksOptions = { objectConflict, ...(manifest ? { manifest } : {}) };
+        const nestedFirst = thrown(() => composeStacks([nested(), q()], opts));
+        expect([nestedFirst?.code, nestedFirst?.status]).toEqual([CONFLICT, 422]);
+        expect(nestedFirst?.issues).toEqual([issueFor('nested-first')]);
+        const flatFirst = thrown(() => composeStacks([q(), nested()], opts));
+        expect([flatFirst?.code, flatFirst?.status]).toEqual([CONFLICT, 422]);
+        expect(flatFirst?.issues).toEqual([issueFor('flat-first')]);
+      });
+    }
+  }
+
+  it('refuses the pair at the object door when both sides embed `approve` on the object, before the action check', () => {
+    for (const manifest of ['preserve', undefined] as const) {
+      const err = thrown(() => composeStacks([nested(true), q(true)], manifest ? { manifest } : {}));
+      expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+      expect(err?.issues).toEqual([issueFor('nested-first')]);
+    }
+  });
+
+  it('refuses two nested artifacts whose bodies declare one object name', () => {
+    const p3 = pkg('p3', 'gamma', [obj('gamma_p3_item', 'p3')]);
+    const other = composeStacks([q(), p3], { manifest: 'preserve' });
+    const err = thrown(() => composeStacks([nested(), other], { manifest: 'preserve' }));
+    expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+    expect(err?.issues).toEqual([
+      `object '${X}' is defined in multiple stacks: 'com.example.p2' (stack #0) ${BODY_SITE} and ` +
+        `'com.example.p3' (stack #1) at packages[0].objects['alpha_shared'] (package 'com.example.q', namespace 'alpha').`,
+    ]);
+  });
+
+  it('CONTROL — the flat pair is judged as before: refused under error with its own issue, reconciled under override', () => {
+    const err = thrown(() => composeStacks([p1(), q()]));
+    expect([err?.code, err?.status]).toEqual([CONFLICT, 422]);
+    expect(err?.issues).toEqual([`object '${X}' is defined in multiple stacks.`]);
+    const out = composeStacks([p1(), q()], { objectConflict: 'override' });
+    expect(out.objects?.find((o) => o.name === X)?.label).toBe(`${X} from q`);
+  });
+
+  it('CONTROL — a nested artifact beside a package declaring a different object still composes, output unchanged', () => {
+    const r = pkg('r', 'gamma', [obj('gamma_r_item', 'r')]);
+    const preserved = composeStacks([nested(), r], { manifest: 'preserve' });
+    expect((preserved.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual([
+      'com.example.p1',
+      'com.example.p2',
+      'com.example.r',
+    ]);
+    const flattened = composeStacks([nested(), r]);
+    expect((flattened.objects ?? []).map((o) => o.name)).toEqual(['gamma_r_item']);
+  });
+});
