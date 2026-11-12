@@ -18,6 +18,7 @@ import {
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
@@ -27,6 +28,7 @@ import {
 import { SORT_FIELD_UNKNOWN } from './validate-sortable-fields.js';
 import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 import { explainRule } from './rule-explanations.js';
+import { AGGREGATE_FIELD_TYPE_COMPATIBILITY, FieldType, VIRTUAL_FIELD_AGGREGATE_REMEDY, isMultiValueField } from '@objectstack/spec/data';
 
 // [#22161] Each finding of the two ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every direct call below
@@ -1182,7 +1184,10 @@ describe('[#25786] a grouping level ordered by another field', () => {
     const [finding, ...rest] = findingsFor(ordered('score'));
     expect(rest).toEqual([]);
     expect(finding.rule).toBe(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
-    expect(finding.hint).toMatch(/^The field is computed on read and stores no value/);
+    expect(finding.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    // A group order asks `min` / `max`: the stored answer is a field of the formula's RETURN type
+    // (a `date` field for a date formula), never `number` for every formula.
+    expect(finding.hint).toContain('a field of its return type');
   });
 
   it('a dotted `orderBy` is refused at the data door\'s ingress, whatever its head', () => {
@@ -1493,6 +1498,168 @@ describe('[#26719] a list-view chart bound to a dataset over another object', ()
     const text = entry!.paragraphs.join('\n');
     for (const fact of ['base `object`', '`include`', 'to-one relationships', 'a draft save', '`chart-dataset-unknown`', 'dashboard']) {
       expect(text, fact).toContain(fact);
+    }
+  });
+});
+
+/**
+ * [#32449] `columns[].summary` reaches `engine.aggregate` through the grouped
+ * header query and the footer's whole-set query, both lowered off
+ * `COLUMN_SUMMARY_AGGREGATION`, so a summary whose function the aggregate door
+ * refuses over the aggregated field's declaration is refused at authoring —
+ * by the door's own verdict, one pin per refused family and one accepted
+ * control per family.
+ */
+describe('[#32449] a column summary whose function the aggregate door refuses', () => {
+  const SUMMARY_OBJECTS = [
+    {
+      ...OBJECTS[0],
+      fields: [
+        ...OBJECTS[0].fields,
+        { name: 'labels', type: 'tags', label: 'Labels' },
+        { name: 'watchers', type: 'lookup', reference: 'duly_person', multiple: true, label: 'Watchers' },
+        { name: 'rate', type: 'percent', label: 'Rate' },
+        { name: 'closed_at', type: 'datetime', label: 'Closed' },
+      ],
+    },
+    OBJECTS[1],
+  ];
+  const withColumns = (...columns: unknown[]) =>
+    validateListViewFieldRefs(stackWith(mutate({ columns: ['title', ...columns] }), SUMMARY_OBJECTS));
+  const refused = (fs: ListViewFieldRefFinding[]) => fs.filter((f) => f.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+
+  it.each([
+    ['sum / avg over a non-numeric field', { field: 'title', summary: 'sum' }, '"sum" over "title" (`text`)'],
+    ['sum / avg over a non-numeric field (object form, another field)', { field: 'estimate', summary: { type: 'avg', field: 'due_at' } }, '"avg" over "due_at" (`date`)'],
+    ['min / max over a string-class field', { field: 'status', summary: 'min' }, '"min" over "status" (`select`)'],
+    ['min / max over a reference', { field: 'owner', summary: 'max' }, '"max" over "owner" (`lookup`)'],
+    ['count_unique over a JSON-stored field', { field: 'payload', summary: 'count_unique' }, '"count_unique" over "payload" (`json`)'],
+    ['count_unique over a multi-option field', { field: 'labels', summary: 'count_unique' }, '"count_unique" over "labels" (`tags`)'],
+    ['count_unique over a multi-value declaration', { field: 'watchers', summary: 'count_unique' }, '"count_unique" over "watchers" (`lookup` with `multiple: true`)'],
+  ])('refuses %s — `error`, at the column\'s `summary`', (_family, column, words) => {
+    const findings = withColumns(column);
+    expect(findings.map((f) => [f.rule, f.path, f.severity])).toEqual([
+      [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, 'views[0].list.columns[1].summary', 'error'],
+    ]);
+    expect(findings[0].message).toContain(`summary ${words} is refused by the aggregate door`);
+    expect(findings[0].message).toContain('400 INVALID_FIELD');
+  });
+
+  it('accepts what the door accepts: booleans for sum / avg (ruled), a date for min / max, scalars for count_unique', () => {
+    expect(refused(withColumns(
+      { field: 'is_locked', summary: 'sum' },
+      { field: 'is_all_day', summary: 'avg' },
+      { field: 'due_at', summary: 'min' },
+      { field: 'closed_at', summary: { type: 'max' } },
+      { field: 'estimate', summary: 'sum' },
+      { field: 'rate', summary: 'avg' },
+      { field: 'title', summary: 'count_unique' },
+      { field: 'status', summary: 'count_unique' },
+    ))).toEqual([]);
+  });
+
+  it('`sum` over a `percent` is refused — a rate does not add — and `formula` carries the store-it remedy', () => {
+    const [onRate] = refused(withColumns({ field: 'rate', summary: 'sum' }));
+    expect(onRate.hint).toBe('Point "sum" at a numeric field that adds (not a percent), or aggregate "rate" with one its `percent` type accepts: count, count_unique, avg, min, max.');
+    const [onFormula] = refused(withColumns({ field: 'score', summary: 'avg' }));
+    expect(onFormula.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+  });
+
+  it('names the summaries the declaration accepts, read off the door\'s verdict', () => {
+    const [onText] = refused(withColumns({ field: 'title', summary: 'max' }));
+    expect(onText.hint).toBe('Point "max" at a numeric, date/time or boolean field, or aggregate "title" with one its `text` type accepts: count, count_unique.');
+    const [onMulti] = refused(withColumns({ field: 'watchers', summary: 'count_unique' }));
+    expect(onMulti.hint).toBe('Point "count_unique" at a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
+    // [#32449] The fix line names ColumnSummary members only — never the function `count_distinct`, which the
+    // schema refuses there. That holds for the spec's one virtual-field sentence (`VIRTUAL_FIELD_AGGREGATE_REMEDY`)
+    // too, printed verbatim on every surface: it names no count by an aggregate spelling, so every hint is held.
+    const own = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(own.length).toBeGreaterThan(5);
+    expect(own.some((f) => f.hint === VIRTUAL_FIELD_AGGREGATE_REMEDY), 'the virtual-field hint is among them').toBe(true);
+    for (const f of own) expect(f.hint, f.hint).not.toContain('count_distinct');
+    // `os explain` holds that sentence verbatim, for the summary and for the group order that prints it too.
+    for (const rule of [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, LIST_VIEW_GROUP_ORDER_UNORDERABLE]) {
+      expect(explainRule(rule)?.paragraphs.join('\n'), rule).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    }
+  });
+
+  it('judges nothing that compares no value: none, count and the four derived members, over any field', () => {
+    for (const summary of ['none', 'count', 'count_filled', 'count_empty', 'percent_filled', 'percent_empty']) {
+      expect(refused(withColumns({ field: 'payload', summary }, { field: 'title', summary: { type: summary } })), summary).toEqual([]);
+    }
+  });
+
+  it('skips what it cannot judge: an unknown field (the existence rule\'s), a dotted path, no declared type, a type outside `FieldType`', () => {
+    expect(withColumns({ field: 'title', summary: { type: 'sum', field: 'nope_field' } }).map((f) => [f.rule, f.path])).toEqual([
+      [LIST_VIEW_FIELD_UNKNOWN, 'views[0].list.columns[1].summary.field'],
+    ]);
+    expect(refused(withColumns({ field: 'title', summary: { type: 'sum', field: 'owner.name' } }))).toEqual([]);
+    expect(refused(withColumns({ field: 'id', summary: 'sum' }))).toEqual([]);
+    const objects = [{ ...SUMMARY_OBJECTS[0], fields: [...SUMMARY_OBJECTS[0].fields, { name: 'rank_raw', type: 'integer', label: 'Rank' }] }, OBJECTS[1]];
+    expect(refused(validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'rank_raw', summary: 'sum' }] }), objects)))).toEqual([]);
+  });
+
+  it('agrees with the table and `isMultiValueField` on every summary member over every declared `FieldType`', () => {
+    const MEMBER_FN: Record<string, string> = { sum: 'sum', avg: 'avg', min: 'min', max: 'max', count_unique: 'count_distinct' };
+    for (const [member, fn] of Object.entries(MEMBER_FN)) {
+      for (const type of FieldType.options) {
+        for (const multiple of [false, true]) {
+          const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'probe', type, label: 'Probe', ...(multiple ? { multiple } : {}) }] }];
+          const findings = refused(validateListViewFieldRefsUnrecorded(stackWith({ data: { provider: 'object', object: 'duly_task' }, columns: [{ field: 'probe', summary: member }] }, objects)));
+          const accepted = (AGGREGATE_FIELD_TYPE_COMPATIBILITY as Record<string, readonly string[]>)[fn].includes(type)
+            && !(fn === 'count_distinct' && isMultiValueField({ type, multiple }));
+          expect(findings.length, `${member} over ${type}${multiple ? ' (multiple)' : ''}`).toBe(accepted ? 0 : 1);
+        }
+      }
+    }
+  });
+
+  it('walks every list-view rung: an object\'s built-in list view too', () => {
+    const stack = {
+      name: 'probe',
+      objects: [{ ...SUMMARY_OBJECTS[0], listViews: { all: { columns: [{ field: 'title', summary: 'avg' }] } } }, OBJECTS[1]],
+    };
+    expect(refused(validateListViewFieldRefs(stack)).map((f) => f.path)).toEqual(['objects[0].listViews.all.columns[0].summary']);
+  });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`a refused summary fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, {
+        normalized: stackWith(mutate({ columns: [{ field: 'title', summary: 'sum' }] }), SUMMARY_OBJECTS),
+      }));
+      expect(errors.map((f) => f.rule)).toContain(LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    });
+  }
+
+  it('reaches the runtime save door through the reference-integrity suite (a view write and an object write)', () => {
+    const stack = stackWith(mutate({ columns: [{ field: 'status', summary: 'max' }] }), SUMMARY_OBJECTS);
+    for (const runtimeWriteType of ['view', 'object'] as const) {
+      const findings = validateReferenceIntegrity(stack, { runtimeWriteType });
+      expect(findings.map((f) => f.rule), runtimeWriteType).toContain(LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    }
+  });
+
+  it('the longest declaration spelling (`multiple: true`) leaves room for ordinary names within 200 characters', () => {
+    const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'opportunity_watchers_list', type: 'lookup', reference: 'duly_person', multiple: true, label: 'W' }] }, OBJECTS[1]];
+    const [f] = refused(validateListViewFieldRefs(stackWith({ data: { provider: 'object', object: 'duly_task' }, columns: [{ field: 'opportunity_watchers_list', summary: 'count_unique' }] }, objects)));
+    expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+    expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+  });
+
+  it('`os explain` carries the reasoning, and every verdict fired is one line of at most 200 characters', () => {
+    const entry = explainRule(LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(entry, 'no `os explain` entry').toBeDefined();
+    const text = entry!.paragraphs.join('\n');
+    for (const fact of ['`COLUMN_SUMMARY_AGGREGATION`', '`count_unique` to `count_distinct`', '`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'collation', '`multiple: true`', 'STORED', 'fit one page', 'whatever the row count']) {
+      expect(text, fact).toContain(fact);
+    }
+    const mine = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
+    expect(mine.length).toBeGreaterThan(5);
+    for (const f of mine) {
+      for (const line of [f.message, f.hint]) {
+        expect(line).not.toContain('\n');
+        expect(line.length, line).toBeLessThanOrEqual(200);
+      }
     }
   });
 });

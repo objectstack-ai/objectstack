@@ -117,7 +117,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source: {
         label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
+        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
           env_native: "Local Account"
@@ -3724,6 +3724,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       version: {
         label: "Version"
+      },
+      package_id: {
+        label: "Package ID"
       },
       operation_type: {
         label: "Operation Type",

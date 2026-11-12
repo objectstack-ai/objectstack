@@ -138,7 +138,7 @@ describe('ObjectQLPlugin.syncRegisteredSchemas() — per-object and summary leve
     engine.registerDriver(driver as any);
     for (const obj of objects) engine.registerObject(obj);
     (plugin as any).ql = engine;
-    await (plugin as any).syncRegisteredSchemas({ logger: rec.logger });
+    await (plugin as any).syncRegisteredSchemas({ logger: rec.logger, trigger: async () => {} });
     return rec;
   }
 

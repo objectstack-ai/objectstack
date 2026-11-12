@@ -46,9 +46,11 @@
  *     (the row's `alone`): its token carries `actions: write`, and that grant
  *     serves one request and nothing beside it. `workflow` is judged against
  *     the closed allowlist and `ref` against the one ref, as enums — an
- *     off-list file, a path, a glob or another ref is refused by name — and
- *     `inputs` against the file's closed entry (the row's `closedInputs`,
- *     `WORKFLOW_DISPATCH_INPUTS` in `ops.mjs`): exactly that object, every key
+ *     off-list file, a path, a glob or another ref is refused by name — then
+ *     against the stroke's OWN repository (the row's `closedInputs`,
+ *     `WORKFLOW_DISPATCH_BY_REPO` in `ops.mjs`): a file another repository
+ *     lists is refused by name; and `inputs` against that repository's entry
+ *     for the file: exactly that object, every key
  *     and value, or no `inputs` key where the entry is `null`. A missing
  *     input, another value (`refresh_version_pr: false` on `release.yml`, the
  *     publish-repair lane) or any other input (`force`) is refused by name;
@@ -133,7 +135,10 @@
  * line, `permission_repository_advisories=write` for a stroke carrying one of
  * them and empty for every other — and `permission_repository_advisories=read`
  * for an `advisory_read` or `advisory_list` stroke, the two rows whose `grant`
- * is lower than `PERMISSIONS` holds. The
+ * is lower than `PERMISSIONS` holds. One more line marks an `advisory_note`
+ * stroke, `advisory_note=yes`, and is empty for every other: the execute step
+ * reads it to carry the relay's note key for that stroke alone (`ops.mjs`,
+ * "The one row that APPENDS to an advisory"). The
  * workflow reads those outputs and never the payload, and `--self-test` pins
  * the list to ONE name for every other op, two for a transfer, the grant to
  * those two rows alone, and the workflow lines that read both.
@@ -270,6 +275,26 @@ import {
   advisoryListProjection,
   advisorySealAad,
   advisoryReadAad,
+  ADVISORY_DESCRIPTION_MAX_CHARS,
+  ADVISORY_NOTE_KEY_ENV,
+  ADVISORY_NOTE_KEY_SECRET,
+  ADVISORY_NOTE_MAX_SEALED_CHARS,
+  ADVISORY_NOTE_MIN_SEALED_CHARS,
+  ADVISORY_NOTE_OPEN_FAILED,
+  ADVISORY_NOTE_OUTPUT,
+  ADVISORY_NOTE_RELAY_PUBLIC_KEY,
+  ADVISORY_NOTE_SEPARATOR,
+  ADVISORY_NOTE_STATES,
+  MAX_ADVISORY_NOTE_BYTES,
+  advisoryNoteDescription,
+  advisoryNoteDigest,
+  advisoryNoteFenceFailures,
+  advisoryNoteKeyFailure,
+  advisoryNoteLandedText,
+  advisoryNoteReadBack,
+  advisoryNoteSealedFailure,
+  openAdvisoryNote,
+  sealAdvisoryNote,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -296,12 +321,15 @@ import {
   TARGET_REPO_SHAPE,
   TRANSFER_TARGETS,
   WORKFLOW_DISPATCH_ALLOWLIST,
+  WORKFLOW_DISPATCH_BY_REPO,
+  CLOUD_WORKFLOW_DISPATCH_INPUTS,
   WORKFLOW_DISPATCH_INPUTS,
   WORKFLOW_DISPATCH_PATH_SHAPE,
   WORKFLOW_DISPATCH_REF,
   GOVERNED_REVIEW_OPS,
   answerPlaceholder,
   dispatchInputsOnTheWire,
+  workflowDispatchEntry,
   failedJobNames,
   governedReviewRequests,
   rerunFailedFenceFailures,
@@ -409,6 +437,12 @@ export function validateField(name, value, spec, where) {
     if (why) return `${at} must be one X25519 public key, base64 SPKI DER of exactly ${ADVISORY_READ_PUBLIC_KEY_CHARS} characters — got ${describeQuietly(value)} that ${why}; it is refused here, before any request, and never echoed`;
     return null;
   }
+  if (spec.kind === 'sealed') {
+    // ⛔ Never echoed, and never opened: the validator holds no key — a note's plaintext is not in the payload to judge.
+    const why = advisoryNoteSealedFailure(value);
+    if (why) return `${at} must be one note sealed to the relay's key, base64url of ${ADVISORY_NOTE_MIN_SEALED_CHARS} to ${ADVISORY_NOTE_MAX_SEALED_CHARS} characters — got ${describeQuietly(value)} that ${why}; it is refused here, before any request, and never echoed`;
+    return null;
+  }
   if (spec.kind === 'versions') {
     // ⛔ Never echoed (`FIELDS`' `quiet`): before the publish a package and its versions are the unpublished advisory's.
     if (!Array.isArray(value)) return `${at} must be an array of version entries, got ${describeQuietly(value)}`;
@@ -423,19 +457,25 @@ export function validateField(name, value, spec, where) {
     return null;
   }
   if (spec.kind === 'inputs') {
-    if (!isPlainObject(value)) return `${at} must be a JSON object of input name → boolean, got ${Array.isArray(value) ? 'an array' : quote(value)}`;
+    if (!isPlainObject(value)) return `${at} must be a JSON object of input name → boolean or string, got ${Array.isArray(value) ? 'an array' : quote(value)}`;
     const names = Object.keys(value);
     if (names.length === 0) return `${at} must name at least one input — a workflow started with none carries no inputs key`;
+    // A scalar of the two kinds a closed entry spells; WHICH kind an input takes is its entry's (`closedInputsErrors`).
     for (const name of names) {
-      if (typeof value[name] !== 'boolean') return `${at}.${name} must be a JSON boolean, got ${quote(value[name])}`;
+      if (typeof value[name] !== 'boolean' && typeof value[name] !== 'string') return `${at}.${name} must be a JSON boolean or string, got ${quote(value[name])}`;
     }
     return null;
   }
   return `${at}: unknown field kind ${quote(spec.kind)} — a bug in ops.mjs, not in the payload`;
 }
 
-/** One action against the op table. Returns the errors for it (possibly none). */
-export function validateAction(action, index) {
+/**
+ * One action against the op table, on the stroke's repository `repo` (the
+ * rows that judge a value against a per-repository table — `closedInputs` —
+ * read it; a repository with no entry there lists nothing). Returns the errors
+ * for it (possibly none).
+ */
+export function validateAction(action, index, repo) {
   const where = `actions[${index}]`;
   const errors = [];
   if (!isPlainObject(action)) return [`${where} must be an object, got ${Array.isArray(action) ? 'an array' : typeof action}`];
@@ -463,8 +503,16 @@ export function validateAction(action, index) {
       refusedKeys.add(key);
     }
   }
-  if (spec.closedInputs && !refusedKeys.has('inputs') && typeof action.workflow === 'string' && Object.hasOwn(spec.closedInputs, action.workflow)) {
-    errors.push(...closedInputsErrors(action, spec.closedInputs[action.workflow], where));
+  // The file against the stroke's OWN repository, then its inputs against that repository's entry — judged only on a
+  // `workflow` the field enum admitted, so an off-list name is refused once, by the enum.
+  if (spec.closedInputs && 'workflow' in action && !refusedKeys.has('workflow') && typeof action.workflow === 'string') {
+    const table = typeof repo === 'string' && Object.hasOwn(spec.closedInputs, repo) ? spec.closedInputs[repo] : null;
+    if (table === null || !Object.hasOwn(table, action.workflow)) {
+      const there = table === null ? 'it starts no workflow there' : `there it starts ${Object.keys(table).map((f) => quote(f)).join(', ')}`;
+      errors.push(`${where}.workflow ${quote(action.workflow)} is not a workflow the relay starts on ${quote(repo ?? null)} — ${there}; each file is dispatchable only on the repository whose entry lists it`);
+    } else if (!refusedKeys.has('inputs')) {
+      errors.push(...closedInputsErrors(action, table[action.workflow], where));
+    }
   }
   // Two keys the row needs DIFFERENT (`distinct`, ops.mjs): judged only on values the field kinds admitted.
   if (spec.distinct) {
@@ -499,6 +547,7 @@ export function closedInputsErrors(action, declared, where) {
   }
   for (const [name, value] of Object.entries(declared)) {
     if (!Object.hasOwn(sent, name)) errors.push(`${where}.inputs.${name} is required when workflow is ${quote(workflow)}: ${exactly}`);
+    else if (typeof sent[name] !== typeof value) errors.push(`${where}.inputs.${name} must be a JSON ${typeof value}, got ${quote(sent[name])}`);
     else if (sent[name] !== value) errors.push(`${where}.inputs.${name} must be ${quote(value)} when workflow is ${quote(workflow)}, got ${quote(sent[name])} — the relay sends ${exactly}`);
   }
   return errors;
@@ -510,7 +559,7 @@ export function closedInputsErrors(action, declared, where) {
  * such a stroke carries that op alone, names ONE second repository, never
  * `repo` itself, and each card once. The ones whose token carries a grant no
  * other row spends (`alone`, `workflow_dispatch`'s and `run_rerun_failed`'s,
- * the two that spend `actions: write`, and the seven advisory rows', which
+ * the two that spend `actions: write`, and the eight advisory rows', which
  * spend `repository-advisories`): such a stroke carries exactly that one
  * action. Runs only over actions that passed
  * `validateAction`. Pure.
@@ -556,7 +605,7 @@ export function strokeErrors(repo, actions) {
  * envelope, for a door that plans one before it knows its transport.
  */
 export function validateStroke(repo, actions) {
-  const errors = actions.flatMap((a, i) => validateAction(a, i));
+  const errors = actions.flatMap((a, i) => validateAction(a, i, repo));
   return errors.length ? errors : strokeErrors(repo, actions);
 }
 
@@ -713,13 +762,17 @@ export function readPayloadSource(opts, { env = process.env, read = (p) => readF
  * The `$GITHUB_OUTPUT` lines the workflow's later steps read. Values are
  * single-line by construction of the validator. One `permission_<name>=` line
  * per stroke-scoped grant: its level when this stroke spends it, EMPTY
- * otherwise — the mint action skips an empty `permission-*` input.
+ * otherwise — the mint action skips an empty `permission-*` input. Then
+ * `advisory_note=yes` for a note's stroke and `advisory_note=` for every other:
+ * the one output the execute step's env reads, to carry the relay's note key.
  */
 export function githubOutputLines(payload) {
   const repositories = tokenRepositoriesOf(payload).map((r) => r.split('/')[1]).join(',');
   const grants = tokenPermissionsOf(payload);
   const scoped = STROKE_SCOPED_PERMISSIONS.map((name) => `permission_${name.replace(/-/g, '_')}=${grants[name] ?? ''}`);
-  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped].join('\n') + '\n';
+  // The note's stroke alone is marked, so the workflow hands the relay's note key to that execute step and no other (header).
+  const note = `${ADVISORY_NOTE_OUTPUT}=${payload.actions.some((a) => a.op === 'advisory_note') ? 'yes' : ''}`;
+  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped, note].join('\n') + '\n';
 }
 
 const USAGE = [
@@ -1060,6 +1113,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the token scope: ONE repository for every op but transfer, source + target for a transfer stroke, and the workflow mints from that list': 8,
   'the workflow_dispatch row: a closed allowlist of files matched whole, each with its closed inputs, ref main alone, a stroke of exactly that one action, actions write minted for that stroke alone, and the dispatch call and the failed-jobs re-run the ONLY actions paths any row reaches': 18,
   "the release.yml entry: refresh_version_pr true and nothing beside it — force, false, absent, a string or any other input refused by name; the wire spells the table's value as a string; every entry's inputs declared on disk; and the file's own guards, evaluated, start the bookkeeping lane alone": 22,
+  "the workflow table keyed by repository: cloud's deploy-staging.yml dispatchable on cloud alone with apps affected alone, on main alone; a file judged against the stroke's own repository, so a name one repository lists is refused on every other and a repository with no entry starts nothing; the token minted for that ONE repository; and this repository's entries unchanged": 18,
   "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 36,
   "the pr_enqueue_front row: pull and expected_head_sha, a full sha, and nothing that widens them; ONE enqueuePullRequest mutation with jump true and the expected head, the pull's node id read first; a stroke of exactly that one action; merge-queues write minted for that stroke and EMPTY for every other, through the workflow's own input; contents and workflows its literal alsoSpends; the fences on the pull and its queue named and left to the executor": 10,
   "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
@@ -1067,11 +1121,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 77,
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
   "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 21,
+  "advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text": 22,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
-// 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 19;
+// 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
+// table's repository key; 20 → 21 with advisory_note's.
+const SELF_TEST_BATTERY_FLOOR = 21;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1126,6 +1182,10 @@ export async function selfTest() {
     return { publicKey: k.publicKey, privateKey: k.privateKey, spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
   };
   const READER = keyPair();
+  /** A synthetic relay note key pair — ⛔ never the committed one, which only the maintainer makes — and one note sealed to it. */
+  const RELAY = keyPair();
+  const NOTE_TEXT = 'NOTE MARKER: a synthetic analysis line, never to be logged';
+  const NOTE_SEALED = sealAdvisoryNote({ section: NOTE_TEXT, digestKey: Buffer.alloc(32, 7), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA }) });
   /** One `$GITHUB_OUTPUT` line of a judged payload, by its name — the scoped grants are two lines, so none is read by position. */
   const outputLine = (payload, name) => githubOutputLines(payload).split('\n').find((l) => l.startsWith(`${name}=`)) ?? null;
 
@@ -1230,6 +1290,7 @@ export async function selfTest() {
       advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -1378,7 +1439,7 @@ export async function selfTest() {
     for (const f of ['missing.json', 'notjson.json', 'event-no-payload.json', 'event-list.json']) unfit.push((await drive(['--from-event'], { [EVENT_PATH_ENV]: f })).code);
     t('--from-event on an unreadable event file, one that is not JSON, one with no client_payload and one whose client_payload is not an object: each exit 3', unfit, [EXIT_PREREQUISITE, EXIT_PREREQUISITE, EXIT_PREREQUISITE, EXIT_PREREQUISITE]);
     const env = await drive(['--from-event', '--github-output'], { [EVENT_PATH_ENV]: 'event.json', GITHUB_OUTPUT: '/out.txt' });
-    t('--from-event --github-output judges the event file\'s client_payload and writes repositories, request_id, action_count, session and an EMPTY permission_actions, permission_repository_advisories and permission_merge_queues to $GITHUB_OUTPUT for a comment', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\npermission_actions=\npermission_repository_advisories=\npermission_merge_queues=\n']);
+    t('--from-event --github-output judges the event file\'s client_payload and writes repositories, request_id, action_count, session and an EMPTY permission_actions, permission_repository_advisories, permission_merge_queues and advisory_note to $GITHUB_OUTPUT for a comment', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\npermission_actions=\npermission_repository_advisories=\npermission_merge_queues=\nadvisory_note=\n']);
     t('--github-output without GITHUB_OUTPUT is exit 3', (await drive(['--from-event', '--github-output'], { [EVENT_PATH_ENV]: 'event.json' })).code, EXIT_PREREQUISITE);
     t('⛔ --from-env, the old route through a step\'s logged env, is gone: an unknown flag, usage, nothing judged', [(await drive(['--from-env'], { FLEET_WRITE_PAYLOAD: good })).code, KNOWN_FLAGS.includes('--from-env')], [EXIT_REFUSED, false]);
     t('--json prints the normalised payload as one line after the OK line', JSON.parse((await drive(['--file', 'good.json', '--json'])).out.split('\n')[1]).request_id, 'fw-20260922T090000Z-abc123');
@@ -1423,6 +1484,7 @@ export async function selfTest() {
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1446,14 +1508,14 @@ export async function selfTest() {
     const start = (extra = {}) => ({ op: 'workflow_dispatch', workflow: FILE, ref: WORKFLOW_DISPATCH_REF, ...extra });
     const one = (action) => fixturePayload({ actions: [action] });
     const spec = OPS.workflow_dispatch;
-    t('the row: workflow and ref required, inputs the one optional key and judged against the closed table, spending actions, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.closedInputs === WORKFLOW_DISPATCH_INPUTS, spec.permission, spec.alone, spec.secondRepo ?? null], [['workflow', 'ref'], ['inputs'], true, 'actions', true, null]);
-    t('the allowlist is exactly the keys of WORKFLOW_DISPATCH_INPUTS — the shard-timings refresh and the release workflow — and the ref is exactly main', [[...WORKFLOW_DISPATCH_ALLOWLIST], Object.keys(WORKFLOW_DISPATCH_INPUTS), WORKFLOW_DISPATCH_REF, FIELDS.workflow.values, FIELDS.ref.values], [['shard-timings-refresh.yml', 'release.yml'], ['shard-timings-refresh.yml', 'release.yml'], 'main', ['shard-timings-refresh.yml', 'release.yml'], ['main']]);
+    t('the row: workflow and ref required, inputs the one optional key and judged against the per-repository closed table, spending actions, travelling alone, reaching no second repository', [spec.required, spec.optional, spec.closedInputs === WORKFLOW_DISPATCH_BY_REPO, spec.permission, spec.alone, spec.secondRepo ?? null], [['workflow', 'ref'], ['inputs'], true, 'actions', true, null]);
+    t('this repository\'s entry is exactly the shard-timings refresh and the release workflow, the allowlist (the field enum) every file any repository lists, and the ref is exactly main', [Object.keys(WORKFLOW_DISPATCH_INPUTS), [...WORKFLOW_DISPATCH_ALLOWLIST], WORKFLOW_DISPATCH_REF, FIELDS.workflow.values, FIELDS.ref.values], [['shard-timings-refresh.yml', 'release.yml'], ['shard-timings-refresh.yml', 'release.yml', 'deploy-staging.yml'], 'main', ['shard-timings-refresh.yml', 'release.yml', 'deploy-staging.yml'], ['main']]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
-    const onDisk = WORKFLOW_DISPATCH_ALLOWLIST.map((f) => {
+    const onDisk = Object.keys(WORKFLOW_DISPATCH_INPUTS).map((f) => {
       const p = resolve(repoRoot, '.github/workflows', f);
       return [f, existsSync(p) && /^\s*workflow_dispatch:/m.test(readFileSync(p, 'utf8')), /^[A-Za-z0-9._-]+\.ya?ml$/.test(f)];
     });
-    t('every allowlisted entry is a bare file name of a workflow on disk under .github/workflows/ that declares a workflow_dispatch trigger', onDisk, WORKFLOW_DISPATCH_ALLOWLIST.map((f) => [f, true, true]));
+    t('every entry this repository lists is a bare file name of a workflow on disk under .github/workflows/ that declares a workflow_dispatch trigger', onDisk, Object.keys(WORKFLOW_DISPATCH_INPUTS).map((f) => [f, true, true]));
     const req = spec.requests(start(), REPO);
     t('its one request is POST /repos/{repo}/actions/workflows/{file}/dispatches with the body { ref: main } and NO inputs for a file whose entry is null', [WORKFLOW_DISPATCH_INPUTS[FILE], req.length, req[0].verb, req[0].path, req[0].body, 'inputs' in req[0].body], [null, 1, 'POST', `/repos/${REPO}/actions/workflows/${FILE}/dispatches`, { ref: 'main' }, false]);
     t('…a path the dispatch shape names, and the only actions path the whole table reaches', [WORKFLOW_DISPATCH_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.some((re) => re.test(req[0].path))], [true, false]);
@@ -1465,7 +1527,7 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: pr_enqueue_front, workflow_dispatch, run_rerun_failed and the seven advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list'], ['transfer']]);
+    t('the only rows that travel alone or widen the token: pr_enqueue_front, workflow_dispatch, run_rerun_failed and the eight advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'], ['transfer']]);
     t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
@@ -1521,12 +1583,12 @@ export async function selfTest() {
     const releaseText = readFileSync(resolve(repoRoot, '.github/workflows/release.yml'), 'utf8');
     const declared = declaredDispatchInputs(releaseText);
     t('the reader reads release.yml\'s dispatch inputs off disk — force, refresh_version_pr and snapshot_next, all boolean, all defaulting to false — so force and snapshot_next are declared there and left out here on purpose', declared, { force: { type: 'boolean', default: 'false' }, refresh_version_pr: { type: 'boolean', default: 'false' }, snapshot_next: { type: 'boolean', default: 'false' } });
-    t('every input an entry names is declared by its file with the type its value has, and a null entry\'s file declares none', WORKFLOW_DISPATCH_ALLOWLIST.map((file) => {
+    t('every input an entry of this repository names is declared by its file with the type its value has, and a null entry\'s file declares none', Object.keys(WORKFLOW_DISPATCH_INPUTS).map((file) => {
       const onDisk = declaredDispatchInputs(readFileSync(resolve(repoRoot, '.github/workflows', file), 'utf8'));
       const entry = WORKFLOW_DISPATCH_INPUTS[file];
       if (entry === null) return [file, onDisk !== null && Object.keys(onDisk).length === 0];
       return [file, onDisk !== null && Object.entries(entry).every(([name, value]) => onDisk[name]?.type === typeof value)];
-    }), WORKFLOW_DISPATCH_ALLOWLIST.map((file) => [file, true]));
+    }), Object.keys(WORKFLOW_DISPATCH_INPUTS).map((file) => [file, true]));
     // The lane claim, measured: release.yml's own job guards evaluated for the relay's dispatch. The reader is pinned to
     // read all ten jobs and to tell the lanes apart (the two schedules, push and the repair dispatch are its controls),
     // and a guard mutated in memory must change the answer — so the pin can fail, and a job added there is judged by its
@@ -1552,6 +1614,42 @@ export async function selfTest() {
     const unguarded = releaseText.replace("(github.event_name == 'workflow_dispatch' && !inputs.refresh_version_pr && !inputs.snapshot_next)", "(github.event_name == 'workflow_dispatch' && inputs.refresh_version_pr && !inputs.snapshot_next)");
     const added = `${releaseText.replace(/\n+$/u, '')}\n\n  extra-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n`;
     t('⛔ the pin can fail: a release-integrity guard that lost its negation, or an eleventh job with no guard, is started by the relay\'s dispatch', [unguarded !== releaseText && started(unguarded, 'workflow_dispatch', REFRESH).runs.includes('release-integrity'), started(added, 'workflow_dispatch', REFRESH).runs.includes('extra-lane')], [true, true]);
+  }
+
+  // ── the workflow table keyed by repository ───────────────────────────────
+  battery("the workflow table keyed by repository: cloud's deploy-staging.yml dispatchable on cloud alone with apps affected alone, on main alone; a file judged against the stroke's own repository, so a name one repository lists is refused on every other and a repository with no entry starts nothing; the token minted for that ONE repository; and this repository's entries unchanged");
+  {
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const CLOUD = `${TARGET_OWNER}/cloud`;
+    const UI = `${TARGET_OWNER}/objectui`;
+    const STAGING = 'deploy-staging.yml';
+    const AFFECTED = { apps: 'affected' };
+    const on = (repo, action) => fixturePayload({ repo, actions: [action] });
+    const deploy = (extra = {}) => ({ op: 'workflow_dispatch', workflow: STAGING, ref: WORKFLOW_DISPATCH_REF, inputs: { ...AFFECTED }, ...extra });
+    const reasons = (payload) => validatePayload(payload).errors;
+    t('the table: exactly this repository and cloud, each in the fleet\'s governed roster; cloud lists deploy-staging.yml alone, with apps affected alone', [Object.keys(WORKFLOW_DISPATCH_BY_REPO), Object.keys(WORKFLOW_DISPATCH_BY_REPO).every((r) => TRANSFER_TARGETS.includes(r)), WORKFLOW_DISPATCH_BY_REPO[REPO] === WORKFLOW_DISPATCH_INPUTS, JSON.parse(JSON.stringify(CLOUD_WORKFLOW_DISPATCH_INPUTS)), WORKFLOW_DISPATCH_BY_REPO[CLOUD] === CLOUD_WORKFLOW_DISPATCH_INPUTS], [[REPO, CLOUD], true, true, { [STAGING]: AFFECTED }, true]);
+    const repoRoot = resolve(SELF_PATH, '../../../..');
+    const names = Object.values(WORKFLOW_DISPATCH_BY_REPO).flatMap((table) => Object.keys(table));
+    t('no file name is listed by two repositories, and this repository has no deploy-staging.yml of its own — the name collides with nothing here', [names.length === new Set(names).size, existsSync(resolve(repoRoot, '.github/workflows', STAGING))], [true, false]);
+    t('workflowDispatchEntry: listed with its inputs only on the repository that lists it — unlisted on another, on a repository with no entry, and for a name no one lists', [workflowDispatchEntry(CLOUD, STAGING), workflowDispatchEntry(REPO, STAGING), workflowDispatchEntry(UI, STAGING), workflowDispatchEntry(CLOUD, 'release.yml'), workflowDispatchEntry(REPO, 'release.yml').listed], [{ listed: true, inputs: AFFECTED }, { listed: false, inputs: null }, { listed: false, inputs: null }, { listed: false, inputs: null }, true]);
+    const v = validatePayload(on(CLOUD, deploy()));
+    t('⭐ the cloud staging deploy is accepted on cloud, on main, with apps affected, and its normalised action carries exactly that', [v.ok, v.payload?.repo, v.payload?.actions[0]], [true, CLOUD, { op: 'workflow_dispatch', workflow: STAGING, ref: 'main', inputs: AFFECTED }], v.errors.join(' | '));
+    const req = OPS.workflow_dispatch.requests(deploy(), CLOUD);
+    t('its one request is the dispatch call on CLOUD\'s deploy-staging.yml with { ref: main, inputs: { apps: "affected" } }, a path the dispatch shape names and no refused family reaches', [req.length, req[0].verb, req[0].path, req[0].body, WORKFLOW_DISPATCH_PATH_SHAPE.test(req[0].path), REFUSED_PATH_FAMILIES.some((re) => re.test(req[0].path))], [1, 'POST', `/repos/${CLOUD}/actions/workflows/${STAGING}/dispatches`, { ref: 'main', inputs: { apps: 'affected' } }, true, false]);
+    t('⛔ the wire is built from the TABLE: an unjudged action naming apps all still sends apps affected alone', OPS.workflow_dispatch.requests(deploy({ inputs: { apps: 'all', force: true } }), CLOUD)[0].body, { ref: 'main', inputs: { apps: 'affected' } });
+    t('its stroke mints actions write for ONE repository — cloud, the payload\'s own, no second repository', v.payload ? [tokenRepositoriesOf(v.payload), tokenPermissionsOf(v.payload).actions, outputLine(v.payload, 'repositories'), outputLine(v.payload, 'permission_actions')] : 'refused', [[CLOUD], 'write', 'repositories=cloud', 'permission_actions=write']);
+    t('⛔ a non-default apps — all, a named app list, the empty string — is refused by name, naming the one value', ['all', 'web,api', ''].map((apps) => reasons(on(CLOUD, deploy({ inputs: { apps } })))), ['all', 'web,api', ''].map((apps) => [`actions[0].inputs.apps must be "affected" when workflow is "deploy-staging.yml", got ${JSON.stringify(apps)} — the relay sends exactly {"apps":"affected"}`]));
+    t('⛔ absent inputs, another input beside apps, and apps as a JSON boolean are each refused by name', [reasons(on(CLOUD, { op: 'workflow_dispatch', workflow: STAGING, ref: 'main' })), reasons(on(CLOUD, deploy({ inputs: { apps: 'affected', environment: 'production' } }))), reasons(on(CLOUD, deploy({ inputs: { apps: true } })))], [['actions[0].inputs is required when workflow is "deploy-staging.yml": exactly {"apps":"affected"} — the one lane the relay may start there'], ['actions[0].inputs.environment is not an input the relay sends to deploy-staging.yml — it sends exactly {"apps":"affected"}'], ['actions[0].inputs.apps must be a JSON string, got true']]);
+    t('⛔ a ref other than main is refused on cloud too, naming main', ['develop', 'staging', 'refs/heads/main'].every((ref) => refuses(on(CLOUD, deploy({ ref })), 'actions[0].ref must be one of "main"')));
+    t('⛔ a file outside the allowlist is refused on cloud by the enum, naming the list', [refuses(on(CLOUD, deploy({ workflow: 'deploy-cloud-prod.yml' })), 'actions[0].workflow must be one of'), refuses(on(CLOUD, deploy({ workflow: '.github/workflows/deploy-staging.yml' })), 'actions[0].workflow must be one of')], [true, true]);
+    t('⛔ the wrong repository: deploy-staging.yml on THIS repository is refused by name, naming what this repository starts', reasons(on(REPO, deploy())), ['actions[0].workflow "deploy-staging.yml" is not a workflow the relay starts on "objectstack-ai/objectstack" — there it starts "shard-timings-refresh.yml", "release.yml"; each file is dispatchable only on the repository whose entry lists it']);
+    t('⛔ …and on a repository with no entry it is refused, naming that it starts nothing there', reasons(on(UI, deploy())), ['actions[0].workflow "deploy-staging.yml" is not a workflow the relay starts on "objectstack-ai/objectui" — it starts no workflow there; each file is dispatchable only on the repository whose entry lists it']);
+    t('⛔ the hole the key closes: release.yml\'s refresh and the shard-timings refresh — each accepted on this repository — are refused on cloud and on objectui', [[CLOUD, UI].every((r) => refuses(on(r, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: true } }), 'is not a workflow the relay starts on')), [CLOUD, UI].every((r) => refuses(on(r, { op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main' }), 'is not a workflow the relay starts on'))], [true, true]);
+    t('…each refused ONCE — the inputs of a file the repository does not list are not judged beside it', reasons(on(CLOUD, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: false } })).length, 1);
+    t('⛔ the cloud deploy beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ repo: CLOUD, actions: [deploy(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
+    const keep = [{ op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main' }, { op: 'workflow_dispatch', workflow: 'release.yml', ref: 'main', inputs: { refresh_version_pr: true } }];
+    t('this repository\'s two entries are unchanged: each accepted on this repository, its one request the body it sent before the key', keep.map((a) => [validatePayload(on(REPO, a)).ok, OPS.workflow_dispatch.requests(a, REPO)[0].body]), [[true, { ref: 'main' }], [true, { ref: 'main', inputs: { refresh_version_pr: 'true' } }]]);
+    t('…and their refusals word as before: the string "true" on release.yml names the JSON boolean, once', reasons(on(REPO, { ...keep[1], inputs: { refresh_version_pr: 'true' } })), ['actions[0].inputs.refresh_version_pr must be a JSON boolean, got "true"']);
   }
 
   // ── the run_rerun_failed row ──────────────────────────────────────────────
@@ -1593,6 +1691,7 @@ export async function selfTest() {
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
     t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
@@ -1790,7 +1889,7 @@ export async function selfTest() {
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
     // The seven rows spending repository-advisories: the five that write, then the two that read (their own batteries below).
-    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list'];
+    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'];
     const report = (extra = {}) => ({ op: 'advisory_report', summary: 'A short summary.', description: 'What, where, how to reproduce.', ...extra });
     const draft = (extra = {}) => ({ op: 'advisory_create', summary: 'A short summary.', description: 'What, where, how to reproduce.', packages: ['@objectstack/rest'], ...extra });
     const add = (extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'], ...extra });
@@ -1803,7 +1902,7 @@ export async function selfTest() {
     /** A second release line of the same package — a package may take one entry per line it was fixed on. */
     const LINE_17 = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' });
     // The rows and their requests.
-    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions or advisory_state, the read ghsa_id with public_key, and the listing public_key alone; all seven spend repository-advisories alone — the five that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null]]);
+    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions or advisory_state, the read ghsa_id with public_key, the listing public_key alone, and the note ghsa_id with sealed_note; all eight spend repository-advisories alone — the six that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null]]);
     t('the fields: summary and description byte-capped strings — 1024 and the body cap; severity GitHub\'s four, quiet; cwe_ids a quiet capped list of CWE ids; ghsa_id its own kind; collaborators a quiet login list capped like assignees; advisory_state a quiet enum of draft, closed and published — by the maintainer\'s ruling no state is refused by name any more', [FIELDS.summary, FIELDS.description.max === FIELDS.body.max, [...FIELDS.severity.values], FIELDS.severity.quiet, [FIELDS.cwe_ids.kind, FIELDS.cwe_ids.max, FIELDS.cwe_ids.shape === CWE_ID_SHAPE, FIELDS.cwe_ids.quiet], FIELDS.ghsa_id, [FIELDS.collaborators.max === FIELDS.assignees.max, FIELDS.collaborators.itemMax === FIELDS.assignees.itemMax, FIELDS.collaborators.shape === LOGIN_SHAPE, FIELDS.collaborators.quiet], [[...FIELDS.advisory_state.values], FIELDS.advisory_state.quiet, Object.keys(FIELDS.advisory_state.named)]], [{ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }, true, ['critical', 'high', 'medium', 'low'], true, ['list', 10, true, true], { kind: 'ghsa' }, [true, true, true, true], [['draft', 'closed', 'published'], true, []]]);
     const filed = OPS.advisory_report.requests(report(), REPO);
     const filedFull = OPS.advisory_report.requests(report({ severity: 'high', cwe_ids: ['CWE-79', 'CWE-352'] }), REPO);
@@ -1918,7 +2017,7 @@ export async function selfTest() {
       return v.ok ? [outputLine(v.payload, 'permission_repository_advisories'), tokenPermissionsOf(v.payload)['repository-advisories'] ?? null] : `refused: ${v.errors.join(' | ')}`;
     };
     t('⛔ fence grant, refused side: every other op — each alone in its stroke, the actions strokes among them, and the stroke of all that share one token — writes an EMPTY permission_repository_advisories and mints no such grant', [others.filter((op) => JSON.stringify(advisoryLine([{ op, ...minimalOf[op] }])) !== JSON.stringify(['permission_repository_advisories=', null])), advisoryLine(others.filter((op) => !OPS[op].secondRepo && !OPS[op].alone).map((op) => ({ op, ...minimalOf[op] })))], [[], ['permission_repository_advisories=', null]]);
-    t('repository-advisories is spent by the seven rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
+    t('repository-advisories is spent by the eight rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-repository-advisories:\s*\$\{\{\s*steps\.validate\.outputs\.permission_repository_advisories\s*\}\}\s*$/gm)].length;
@@ -1928,7 +2027,7 @@ export async function selfTest() {
     const refusedTails = ['/', '?state=draft', '?per_page=100', '?state=published&per_page=100', '?state=withdrawn&per_page=100', '?state=draft&per_page=30', '?state=draft&per_page=100&page=2', '?per_page=100&state=draft', '?state=draft&per_page=100&sort=updated', '?state=draft&per_page=100&direction=asc', '?state=draft&per_page=100&before=abc', '?state=draft&per_page=100&after=', '?state=draft&per_page=100&after=a+b', '?state=draft&per_page=100&after=a/b', '?state=draft&per_page=100&after=a&after=b', `?state=draft&per_page=100&after=${'a'.repeat(ADVISORY_LIST_CURSOR_MAX_CHARS + 1)}`, '?state=draft&per_page=100&state=published', '?state=Draft&per_page=100', '?state=draft&per_page=100#x', '/x', `/${GHSA}/cve`, `/${GHSA}/forks`, `/${GHSA}/`, `/${GHSA.toUpperCase()}`, '/GHSA-abcd-2345', `/${GHSA}x`, '/reports/', '/reportsx', `/reports/${GHSA}`, '/reports/x/cve', 'x'];
     t('⛔ every other security-advisories path is caught by a refused family: the collection with a trailing slash or any query but the listing page\'s own — another state, another page size, a page number, the parameters reordered, sort, direction, before, an empty, raw, repeated or over-long cursor, a second state, a fragment — anything after it but one advisory or the reports endpoint, the CVE request, the temporary fork, anything after the reports endpoint, and any id that is not exactly one advisory\'s', refusedTails.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))), []);
     t('…while the paths a row reaches are caught by none: the bare collection, the reports endpoint, one advisory\'s, and the listing\'s page for each listed state, first and with a cursor', ['', '/reports', `/${GHSA}`].filter((tail) => REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))).concat(ADVISORY_LIST_STATES.flatMap((st) => [advisoryListPagePath(REPO, st), advisoryListPagePath(REPO, st, 'Y3Vyc29y+djI6/A==')]).filter((path) => REFUSED_PATH_FAMILIES.some((re) => re.test(path)))), []);
-    const fillWith = { ...draft({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...setv(), ...move('closed'), public_key: READER.spki };
+    const fillWith = { ...draft({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...setv(), ...move('closed'), public_key: READER.spki, sealed_note: NOTE_SEALED };
     const every = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) {
@@ -1937,7 +2036,7 @@ export async function selfTest() {
       }
       return OPS[op].requests(a, REPO).map((r) => ({ op, ...r }));
     });
-    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the three PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`]);
+    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the four PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`, `advisory_note PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
     // ⛔ published: reachable by no row — not as a value, not through any body.
     const everyValue = OP_NAMES.flatMap((op) =>
       [...OPS[op].required, ...OPS[op].optional]
@@ -2222,6 +2321,101 @@ export async function selfTest() {
     t('⛔ every sentence a listing prints names no id, no state word, no severity, no digit but its own caps and statuses, and no marker — the landed row says it landed and nothing more', [sentences.filter((x) => /GHSA|\b(?:triage|draft|closed|published|critical|high|medium|low)\b|ADVISORY LIST MARKER/.test(x)), ADVISORY_LIST_LANDED, sentences.flatMap((x) => x.match(/\d+/g) ?? []).filter((d) => !['3', '29939', '10', '200', '404', '403'].includes(d))], [[], "sealed the listing to the seat's one-time key, padded to the run's full notice size so its length says nothing — only that seat's process opens it", []]);
   }
 
+  // ── advisory_note: the one row that appends to an advisory, sealed inbound ─────────────
+  battery("advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text");
+  {
+    const { createHash, createHmac } = await import('node:crypto');
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const MARKER = 'NOTE MARKER';
+    const note = (extra = {}) => ({ op: 'advisory_note', ghsa_id: GHSA, sealed_note: NOTE_SEALED, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const aad = (over = {}) => advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA, ...over });
+    const opens = (sealed, { key = RELAY.privateKey, ...over } = {}) => {
+      try {
+        return openAdvisoryNote({ sealed, privateKey: key, aad: aad(over) }).section;
+      } catch (e) {
+        return e.message === ADVISORY_NOTE_OPEN_FAILED ? 'refused' : `threw: ${e.message}`;
+      }
+    };
+    // The row and the field.
+    t('the row: ghsa_id and sealed_note, nothing optional; repository-advisories at write (no grant of its own), alone, no gate of its own (the stroke\'s target-write), no second repository, nothing else spent; sealed_note is its own kind', [OPS.advisory_note.required, OPS.advisory_note.optional, OPS.advisory_note.permission, OPS.advisory_note.grant ?? null, OPS.advisory_note.alone, OPS.advisory_note.senderGate ?? null, OPS.advisory_note.secondRepo ?? null, OPS.advisory_note.alsoSpends ?? null, FIELDS.sealed_note], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, true, null, null, null, { kind: 'sealed' }]);
+    const req = OPS.advisory_note.requests(note(), REPO);
+    t('its ONE request is a PATCH of that one advisory carrying the id and the ciphertext to the executor — and NO body: the description is the executor\'s, spelled after its reads', [req.length, req[0].verb, req[0].path, req[0].advisoryNote, 'body' in req[0]], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, { ghsaId: GHSA, sealedNote: NOTE_SEALED }, false]);
+    // The caps.
+    const maxSeal = sealAdvisoryNote({ section: 'x'.repeat(MAX_ADVISORY_NOTE_BYTES), digestKey: Buffer.alloc(32, 1), publicKey: RELAY.spki, aad: aad() });
+    const maxPayload = validatePayload(one(note({ sealed_note: maxSeal })));
+    t("the caps: a section of at most 30,000 bytes, sealed to 126..40,124 characters — the largest note's seal is exactly the cap, accepted, and its whole payload stays under the platform's 64 KiB", [MAX_ADVISORY_NOTE_BYTES, ADVISORY_NOTE_MIN_SEALED_CHARS, ADVISORY_NOTE_MAX_SEALED_CHARS, maxSeal.length, maxPayload.ok, Buffer.byteLength(JSON.stringify(maxPayload.payload ?? {}), 'utf8') < CLIENT_PAYLOAD_MAX_BYTES], [30_000, 126, 40_124, ADVISORY_NOTE_MAX_SEALED_CHARS, true, true]);
+    const accepted = validatePayload(one(note()));
+    t('⭐ accepted: the id and a seal — the normalised payload carries the ciphertext unchanged and nothing else of the note', [accepted.ok, accepted.payload?.actions?.[0], NOTE_SEALED.includes('NOTE'), JSON.stringify(accepted.payload).includes(NOTE_TEXT)], [true, note(), false, false]);
+    // ⛔ Refused before the dispatch, never echoed.
+    const flipped = `${NOTE_SEALED.slice(0, -1)}${NOTE_SEALED.endsWith('A') ? 'B' : 'A'}`;
+    const offVersion = Buffer.from(NOTE_SEALED, 'base64url');
+    offVersion[0] = 2;
+    const refusedShapes = [
+      [`${MARKER} ${'the plaintext note, put in the wrong key '.repeat(4)}`, 'is not base64url'],
+      ['AAAA', 'is not 126 to 40124 characters long'],
+      [`${NOTE_SEALED}${'A'.repeat(ADVISORY_NOTE_MAX_SEALED_CHARS)}`, 'is not 126 to 40124 characters long'],
+      [`${NOTE_SEALED.slice(0, -2)}==`, 'is not base64url'],
+      [offVersion.toString('base64url'), 'does not open with the seal version'],
+      [7, 'is not a string'],
+    ];
+    const refusals = refusedShapes.map(([value, why]) => {
+      const v = validatePayload(one(note({ sealed_note: value })));
+      return [v.ok, v.errors.some((e) => e.includes('actions[0].sealed_note must be one note sealed to the relay') && e.includes(why)), v.errors.some((e) => e.includes(MARKER) || (typeof value === 'string' && value.length > 8 && e.includes(value)))];
+    });
+    t('⛔ refused before any request, the value NEVER echoed: plaintext put in the key, too short, too long, padded, another version, a number — each naming what it failed to be', refusals, refusedShapes.map(() => [false, true, false]));
+    t('…a tampered seal of the right shape passes HERE — the validator holds no key and opens nothing — and is the executor\'s to refuse at the open', [advisoryNoteSealedFailure(flipped) === null || advisoryNoteSealedFailure(flipped) === 'is not canonical base64url', opens(flipped)], [true, 'refused']);
+    t('⛔ the actions file\'s own keys never reach the payload: note_file, a plaintext note or a public key beside the seal are refused as keys the row does not take', ['note_file', 'note', 'body', 'public_key'].map((k) => validatePayload(one(note({ [k]: k === 'public_key' ? READER.spki : 'x' }))).errors.some((e) => e.includes(`actions[0].${k} is not a key \`advisory_note\` takes`))), [true, true, true, true]);
+    t('⛔ alone: a note beside a comment, and two notes, are each refused — one note per stroke', [refuses(fixturePayload({ actions: [note(), { op: 'comment', issue: 1, body: 'x' }] }), 'a stroke carries exactly ONE `advisory_note` and nothing else'), refuses(fixturePayload({ actions: [note(), note()] }), 'a stroke carries exactly ONE `advisory_note` and nothing else')], [true, true]);
+    // The grant and the mark.
+    const p = accepted.payload;
+    t('⭐ the grant and the mark: its stroke mints the five literal grants plus repository-advisories WRITE for ONE repository, and the GitHub output marks it advisory_note=yes — and EMPTY for a comment, a read and a state move', [tokenPermissionsOf(p), tokenRepositoriesOf(p), outputLine(p, 'permission_repository_advisories'), outputLine(p, ADVISORY_NOTE_OUTPUT), [one({ op: 'comment', issue: 1, body: 'b' }), one({ op: 'advisory_read', ghsa_id: GHSA, public_key: READER.spki }), one({ op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' })].map((x) => outputLine(validatePayload(x).payload, ADVISORY_NOTE_OUTPUT))], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'repository-advisories': 'write' }, [REPO], 'permission_repository_advisories=write', 'advisory_note=yes', ['advisory_note=', 'advisory_note=', 'advisory_note=']]);
+    // The workflow: the key for the note's stroke alone, in the execute step alone, and nothing uploaded.
+    const workflowText = readFileSync(resolve(SELF_PATH, '../../../..', '.github/workflows/fleet-write.yml'), 'utf8');
+    const live = workflowText.split('\n').filter((l) => !/^\s*#/.test(l));
+    const naming = live.filter((l) => l.includes(ADVISORY_NOTE_KEY_SECRET) || l.includes(ADVISORY_NOTE_KEY_ENV));
+    const steps = workflowText.split(/\n\s+- name: /).slice(1);
+    const holders = steps.filter((st) => st.includes(ADVISORY_NOTE_KEY_SECRET)).map((st) => st.split('\n')[0]);
+    t("⭐ the workflow: ONE live line names the relay's note key — the execute step's env, the secret behind the validator's advisory_note=yes and an EMPTY value for every other stroke — in that step alone, which runs the executor", [naming.map((l) => l.trim()), holders, steps.find((st) => st.includes(ADVISORY_NOTE_KEY_SECRET))?.includes('run: node scripts/pm/fleet-write/execute.mjs')], [[`${ADVISORY_NOTE_KEY_ENV}: \${{ steps.validate.outputs.${ADVISORY_NOTE_OUTPUT} == 'yes' && secrets.${ADVISORY_NOTE_KEY_SECRET} || '' }}`], ['Execute the actions as the fleet (sender gate first, stop at the first failure)'], true]);
+    t('⛔ …and the run keeps nothing a reader could fetch later: no artifact upload and no cache step, and still no client_payload in any step env', [/upload-artifact|actions\/cache/.test(live.join('\n')), payloadInStepEnv(workflowText)], [false, []]);
+    // The seal.
+    const opened = openAdvisoryNote({ sealed: NOTE_SEALED, privateKey: RELAY.privateKey, aad: aad() });
+    t('⭐ the seal opens with the relay\'s key to the section BYTE FOR BYTE and the seat\'s digest key — and the ciphertext alone carries no byte of the note, as characters or decoded, while the opened text does (the positive control)', [opened.section === NOTE_TEXT, opened.digestKey.equals(Buffer.alloc(32, 7)), NOTE_SEALED.includes('MARKER'), Buffer.from(NOTE_SEALED, 'base64url').includes(Buffer.from('NOTE MARKER')), opened.section.includes('NOTE MARKER')], [true, true, false, false, true]);
+    t('⛔ it opens for ITS request, action, advisory and key alone: another key, request, action or id is refused, and so is the read\'s own open under the same key and data — the two directions never cross', [opens(NOTE_SEALED, { key: READER.privateKey }), opens(NOTE_SEALED, { requestId: 'fw-test-2' }), opens(NOTE_SEALED, { action: 2 }), opens(NOTE_SEALED, { ghsaId: 'GHSA-wxyz-2345-abcd' }), (() => {
+      try {
+        openAdvisoryRead({ sealed: NOTE_SEALED, privateKey: RELAY.privateKey, aad: aad() });
+        return 'opened';
+      } catch {
+        return 'refused';
+      }
+    })(), opens(sealAdvisoryRead({ plaintext: `${'k'.repeat(32)}${NOTE_TEXT}`, publicKey: RELAY.spki, aad: aad() }))], ['refused', 'refused', 'refused', 'refused', 'refused', 'refused']);
+    t("the associated data: the note's own label, the request, the action, the op and the id — and the read's and the listing's unchanged beside it", [aad().toString('utf8'), advisorySealAad({ requestId: 'r', action: 1, op: 'advisory_read', ghsaId: GHSA }).equals(advisoryReadAad({ requestId: 'r', action: 1, ghsaId: GHSA }))], [`fleet-write:advisory_note:v1 request=fw-test-1 action=1 op=advisory_note ghsa_id=${GHSA}`, true]);
+    // The key.
+    const RELAY_TEXT = RELAY.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+    const keyWhys = [advisoryNoteKeyFailure(RELAY_TEXT, null), advisoryNoteKeyFailure(RELAY_TEXT, RELAY.spki), advisoryNoteKeyFailure(RELAY_TEXT, READER.spki), advisoryNoteKeyFailure('', RELAY.spki), advisoryNoteKeyFailure(`${MARKER} not a key`, RELAY.spki), advisoryNoteKeyFailure(RELAY_TEXT, 'x')];
+    t("the key: a pair made as one passes; a null committed half, the other seat's half, no secret, prose and a committed half that is no key are each named — and no reason carries either key", [keyWhys.map((w) => w === null), keyWhys[0]?.includes('is not committed'), keyWhys[2]?.includes("public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY"), keyWhys.some((w) => w && (w.includes(RELAY_TEXT) || w.includes(MARKER) || w.includes(RELAY.spki)))], [[false, true, false, false, false, false], true, true, false]);
+    t("⛔ the committed half is the maintainer's one X25519 public key in its one spelling — never null or anything else — and it is the judge's default: a synthetic secret is refused as another pair's, never as a missing half", [typeof ADVISORY_NOTE_RELAY_PUBLIC_KEY === 'string' && advisoryReadKeyFailure(ADVISORY_NOTE_RELAY_PUBLIC_KEY) === null, advisoryNoteKeyFailure(RELAY_TEXT)?.includes('public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY')], [true, true]);
+    // The fences.
+    const answer = (json, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', description: `${MARKER} the finder's text`, ...json } });
+    const fence = (a) => advisoryNoteFenceFailures({ ghsaId: GHSA, answer: a, from: ADVISORY_NOTE_STATES }).map((f) => f.fence);
+    t('the fences: triage, draft and closed pass, a null description too; published and withdrawn fail the state fence, another advisory the advisory fence, a 404 every fence after the read, a description that is not text its own', [['triage', 'draft', 'closed'].map((state) => fence(answer({ state }))), fence(answer({ description: null })), fence(answer({ state: 'published' })), fence(answer({ state: 'withdrawn' })), fence(answer({ ghsa_id: 'GHSA-wxyz-2345-abcd' })), fence({ status: 404, json: { message: 'Not Found' } }), fence(answer({ description: { x: 1 } }))], [[[], [], []], [], ['state'], ['state'], ['advisory'], ['read', 'advisory', 'state', 'description'], ['description']]);
+    t("…the state fence names what a note never touches, and the other rows' sentence is unchanged", [advisoryFenceText(advisoryNoteFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }), from: ADVISORY_NOTE_STATES })), advisoryFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }) })[0]?.wants], ['fence `state`: the advisory reads state published, and the relay writes only to an unpublished advisory — state triage or draft or closed; never published or withdrawn', 'an unpublished advisory — state triage or draft; never published, closed or withdrawn']);
+    // The description and the read-back.
+    const SECTION = `domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ\n2026-11-12T04:00:00Z\n\n${MARKER} the analysis`;
+    const EXISTING = `${MARKER} the finder's text\n`;
+    const sent = advisoryNoteDescription(EXISTING, SECTION);
+    t('APPEND ONLY: the description sent is the text read, byte for byte, then the separator and the section — or the section alone on an empty one', [sent.startsWith(EXISTING), sent === `${EXISTING}${ADVISORY_NOTE_SEPARATOR}${SECTION}`, advisoryNoteDescription('', SECTION) === SECTION, ADVISORY_NOTE_SEPARATOR, ADVISORY_DESCRIPTION_MAX_CHARS], [true, true, true, '\n\n---\n\n', 65_535]);
+    const back = (description, status = 200, extra = {}) => advisoryNoteReadBack({ ghsaId: GHSA, expected: sent, section: SECTION, answer: { status, json: { ghsa_id: GHSA, state: 'draft', description, ...extra } } });
+    const backs = [back(sent), back(`${EXISTING}x${ADVISORY_NOTE_SEPARATOR}${SECTION}`), back(`${sent} `), back(EXISTING), back(sent, 422), back(sent, 200, { ghsa_id: 'GHSA-wxyz-2345-abcd' })];
+    t('the read-back: exactly the description sent lands; other text before the section is a raced write; a byte after it or no section is not stored as sent; a refusal or another advisory is no read-back — and no reason carries a byte of either text', [backs.map((b) => b.ok), backs[1].why.includes('another write raced this one'), backs[2].why.includes('does not end with the section'), backs.some((b) => b.why.includes(MARKER))], [[true, false, false, false, false, false], true, true, false]);
+    // The digest and the row.
+    const KEY = Buffer.alloc(32, 9);
+    const digest = advisoryNoteDigest({ digestKey: KEY, section: SECTION });
+    t("the keyed digest: HMAC-SHA256 of the section under the seat's digest key, 64 hex — never the bare SHA-256 a reader could test a guess against, and another key's differs", [digest === createHmac('sha256', KEY).update(SECTION, 'utf8').digest('hex'), /^[0-9a-f]{64}$/.test(digest), digest === createHash('sha256').update(SECTION, 'utf8').digest('hex'), digest === advisoryNoteDigest({ digestKey: Buffer.alloc(32, 8), section: SECTION })], [true, true, false, false]);
+    const landed = advisoryNoteLandedText({ ghsaId: GHSA, state: 'draft', existingBytes: 30, sectionBytes: 90, storedBytes: 127, digest });
+    t('⛔ the landed row: the id, the state, three byte counts and the keyed digest — no byte of the note or the description', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · appended a 90-byte note to a 30-byte description — 127 bytes stored, read back byte for byte · keyed digest ${digest}`, false]);
+  }
+
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -2254,14 +2448,16 @@ export async function selfTest() {
     `✓ fleet-write/validate self-test: ${cases.length} cases pass across ${declared.length} batteries — a closed envelope, one organization, ` +
       'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
       'a token list of ONE repository for every op but transfer, whose second is one governed target, and actions write reaching one dispatch call on one allowlisted file ' +
-      "with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards — or one failed-jobs re-run of a run named by its id alone, " +
+      "on the one repository that lists it, with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards, or cloud's staging deploy with apps affected alone — or one failed-jobs re-run of a run named by its id alone, " +
       'each minted for its stroke alone, every other actions path still refused, and an issue-hierarchy link named by two different issue numbers, ' +
       'fenced on its two cards and landed only when the parent\'s list reads the child back, the payload read from the event file and never a step\'s env, ' +
       'and five advisory rows — a report, a draft, an advisory\'s collaborators, its versions and its state, each alone in its stroke — nothing echoed from a refusal, versions entries closed and judged by value, published reached by advisory_state alone, ' +
       'repository-advisories write minted for that one stroke, the bare collection reached by the draft\'s POST alone, and no other advisory path; ' +
       'and one that reads — advisory_read, alone in its stroke, its token at repository-advisories READ, the seat\'s one-time key judged before any request ' +
       'and never echoed, its answer sealed to that key and opening for that read alone; and one that lists — advisory_list, public_key alone, ' +
-      'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way.',
+      'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way; ' +
+      'and one that appends — advisory_note, its note sealed to the relay\'s own key, judged by shape and never opened or echoed here, ' +
+      'the key reaching the execute step for that stroke alone.',
   );
   selfTestReachedVerdict = true;
   return 0;

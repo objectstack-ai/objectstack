@@ -76,7 +76,7 @@ import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
-import { DatabaseLoader } from './loaders/database-loader.js';
+import { DatabaseLoader, type MetadataHistoryAddress } from './loaders/database-loader.js';
 import { isAmbiguousMetadataStemError } from './loaders/ambiguous-metadata-stem.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
@@ -87,6 +87,9 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isPackageCaller,
+  bundleEntryKey,
+  isBundledStoreType,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
@@ -98,6 +101,7 @@ import {
   storeRemovalKeys,
   storeSlotKey,
   storeWriteKey,
+  environmentStoreKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -111,6 +115,22 @@ import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
  * Watch callback function (legacy)
  */
 export type WatchCallback = (event: MetadataWatchEvent) => void | Promise<void>;
+
+/**
+ * [#31699 R5-A; epic ruling 6801410166] {@link MetadataManager.register}'s
+ * options: the spec's {@link MetadataWriteOptions}, plus `skipSourceLoader`.
+ * With it, an item {@link MetadataManager.loadMany} read from a loader is not
+ * persisted back into that same loader; every other loader's write is
+ * unchanged. The boot priming pass sets it, so a boot never writes back a row
+ * it read from the store it read it from. [R7-A] That loader still binds the
+ * empty `package_id` column of the legacy row the item was read from, the
+ * column only (`MetadataLoader.bindReadRowPackage`). Class-level, as
+ * {@link MetadataUnregisterOptions} is.
+ */
+export interface MetadataRegisterOptions extends MetadataWriteOptions {
+  /** Skip the write-through to the loader `loadMany` read this very item from. */
+  skipSourceLoader?: boolean;
+}
 
 /**
  * [ADR-0150 D3/D4, #32198] {@link MetadataManager.unregister}'s options: the
@@ -158,15 +178,32 @@ function isPackageMember(item: unknown, packageId: string): boolean {
 }
 
 /**
- * [#5276, #32246] Whether {@link MetadataManager.unregister}'s storage half
- * deletes from `loader`: a `datasource:` loader that declares write
- * capability, for every type; and for a type stored per `(package, name)`,
- * also a `memory:` loader that can delete (the artifact door's store). ⛔ Not
- * the `memory:` loaders for any other type: their residue is a separate card.
+ * [#5276, #32246, #32353] Whether {@link MetadataManager.unregister}'s storage
+ * half deletes from `loader`: a `datasource:` loader that declares write
+ * capability, and a `memory:` loader that can delete (the artifact door's
+ * store), for every type. A `memory:` loader's copy of a removed item would
+ * otherwise keep answering every read once the registry's entry is gone, and
+ * a customization removed over a door item would bring the door's body back:
+ * a removal removes the item, and the artifact's next load (a reload or a
+ * restart) is what restores a door item. For a type stored per
+ * `(package, name)` the loader deletes by that key, for every other type by
+ * name.
  */
-function isRemovalTarget(loader: MetadataLoader, type: string): boolean {
+function isRemovalTarget(loader: MetadataLoader): boolean {
   if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
-  return loader.contract.protocol === 'memory:' && PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.delete === 'function';
+  return isNodeLocalRemovalTarget(loader);
+}
+
+/**
+ * [#32499] The node-local half of {@link isRemovalTarget}: the `memory:`
+ * loader that can delete (the artifact door's store), which every node of a
+ * cluster holds on its own. A cluster peer applies a removal it hears of
+ * here and nowhere else ({@link MetadataManager.attachClusterPubSub}): the
+ * shared `datasource:` store is the origin's to delete from, and a second
+ * delete by the peer could take out a row re-written in between.
+ */
+function isNodeLocalRemovalTarget(loader: MetadataLoader): boolean {
+  return loader.contract.protocol === 'memory:' && typeof loader.delete === 'function';
 }
 
 /**
@@ -261,12 +298,14 @@ export function buildWritableLoaderMissingMethodsMessage(
  * same shape one direction over — and leaving it open meant one declaration was
  * binding at one end of an item's life and decorative at the other.
  *
- * Scope is deliberately exactly the combination `register()`/`unregister()` act
- * on. Other protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to
- * by the manager at runtime — both loops filter on `datasource:` too — so they
- * have neither a write nor a deletion of their own to lose and are not gated. A
- * `datasource:` loader with `capabilities.write: false` is likewise untouched by
- * both paths.
+ * Scope is deliberately exactly the combination `register()` writes to. Other
+ * protocols (`file:`, `memory:`, `http:`, `s3:`) are never saved to by the
+ * manager at runtime — `register()`'s loop filters on `datasource:` — so they
+ * have no write of their own to lose and are not gated. `unregister()` also
+ * deletes from a `memory:` loader that implements `delete()`, for every type
+ * ({@link isRemovalTarget}, #32246, #32353); one without `delete()` is
+ * skipped, which loses nothing the manager wrote. A `datasource:` loader with
+ * `capabilities.write: false` is untouched by both paths.
  */
 function assertWritableLoaderContract(loader: MetadataLoader): void {
   const { name, protocol, capabilities } = loader.contract;
@@ -337,6 +376,11 @@ function generateEventUuid(): string {
  * `metadata:changed` payload that this shape was said to align with; it never
  * did, and that schema was retired (ADR-0087 entry
  * `metadata-changed-event-payload-retired`).
+ *
+ * [#32499] `removal` is the one addition, and it is an address too: it marks
+ * the `deleted` event of {@link MetadataManager.unregister} and carries the
+ * package that removal named, so a peer deletes its own in-memory copy of the
+ * item by the same key the origin deleted its copy by.
  */
 export interface ClusterMetadataChangedPayload {
   /** Origin nodeId — used for loopback suppression. */
@@ -345,6 +389,37 @@ export interface ClusterMetadataChangedPayload {
   type: string;
   /** The legacy watch event replayed verbatim on peer nodes. */
   event: MetadataWatchEvent;
+  /**
+   * [#32499] Present only on the `deleted` event `unregister()` announces: the
+   * origin removed `(type, event.name)` — one package's item of a type stored
+   * per `(package, name)` when `packageId` is set — and deleted its in-memory
+   * loaders' copy (the artifact door's store). A peer deletes its own
+   * in-memory copy by the same key, so the item stops answering on every
+   * node. Absent on every other event (a create or an update, a file or
+   * repository event, an origin that predates this field): there the peer
+   * keeps its in-memory copy, which no loader could restore once dropped.
+   */
+  removal?: ClusterMetadataRemoval;
+}
+
+/** [#32499] What {@link ClusterMetadataChangedPayload.removal} carries. */
+interface ClusterMetadataRemoval {
+  /** The package whose item the origin removed; absent for a removal by name. */
+  packageId?: string;
+}
+
+/**
+ * [#32499] The removal a received payload carries, or `undefined` when it
+ * carries none or carries one this node cannot read (a `packageId` that is
+ * not a string): a removal read wrongly would delete by name, wider than the
+ * origin did, so a malformed one is dropped, as a malformed payload is.
+ */
+function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
+  const removal: unknown = payload.removal;
+  if (removal === null || typeof removal !== 'object') return undefined;
+  const { packageId } = removal as { packageId?: unknown };
+  if (packageId === undefined) return {};
+  return typeof packageId === 'string' ? { packageId } : undefined;
 }
 
 /**
@@ -402,6 +477,89 @@ export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
   driver?: IDataDriver;
+  /**
+   * [#32154] Set by a host that will hand this manager its own logger later,
+   * through {@link MetadataManager.useHostLogger}. Until it does, the manager's
+   * `debug` / `info` lines are HELD and then replayed through the host's
+   * logger, so they follow the host's level (a boot at `warn` prints none of
+   * them, `OS_LOG_LEVEL=info` prints them all); `warn` and above print at
+   * once, as they always have. `MetadataPlugin` sets it and hands over the
+   * kernel's logger in `init()`. Without it, the manager logs through its own
+   * `info` logger exactly as before.
+   */
+  awaitHostLogger?: boolean;
+}
+
+/** [#32154] How many `debug` / `info` lines a manager holds while it waits for its host's logger. */
+const HELD_CHATTER_CAP = 200;
+
+/**
+ * [#32154] The manager's logger: ONE object for the manager's lifetime, so the
+ * loaders and the endpoint matcher it is handed to at construction follow the
+ * host's logger too once {@link HostFollowingLogger.adopt} switches the target.
+ *
+ * Why it exists: `MetadataPlugin` builds its manager in its own constructor,
+ * before any kernel exists, and `NodeMetadataManager` registers its
+ * filesystem loader in ITS constructor, so `Registered metadata loader: …`
+ * was written by a logger fixed at `info` before any host level could reach
+ * it, and printed into every quiet (`warn`) boot. The host's logger first
+ * reaches the manager in `MetadataPlugin.init()`.
+ *
+ * ⛔ `warn`, `error` and `fatal` are never held: a line that matters prints
+ * when it happens, even if no host ever arrives. Only chatter waits, bounded
+ * by {@link HELD_CHATTER_CAP}; what overflowed is counted on the replay.
+ */
+class HostFollowingLogger implements Logger {
+  private target: Logger;
+  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined = [];
+  private overflowed = 0;
+
+  constructor(initial: Logger) {
+    this.target = initial;
+  }
+
+  /** Send every later line to `host`, after replaying the held chatter through it. */
+  adopt(host: Logger): void {
+    this.target = host;
+    const held = this.held ?? [];
+    this.held = undefined;
+    for (const line of held) host[line.level](line.message, line.meta);
+    if (this.overflowed > 0) {
+      host.debug(`MetadataManager: ${this.overflowed} earlier debug/info line(s) were not kept while waiting for the host logger`);
+      this.overflowed = 0;
+    }
+  }
+
+  debug(message: string, meta?: Record<string, any>): void {
+    this.chatter('debug', message, meta);
+  }
+
+  info(message: string, meta?: Record<string, any>): void {
+    this.chatter('info', message, meta);
+  }
+
+  warn(message: string, meta?: Record<string, any>): void {
+    this.target.warn(message, meta);
+  }
+
+  error(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.target.error(message, error, meta);
+  }
+
+  fatal(message: string, error?: Error, meta?: Record<string, any>): void {
+    if (this.target.fatal) this.target.fatal(message, error, meta);
+    else this.target.error(message, error, meta);
+  }
+
+  private chatter(level: 'debug' | 'info', message: string, meta?: Record<string, any>): void {
+    if (this.held === undefined) {
+      this.target[level](message, meta);
+    } else if (this.held.length < HELD_CHATTER_CAP) {
+      this.held.push({ level, message, meta });
+    } else {
+      this.overflowed++;
+    }
+  }
 }
 
 /**
@@ -442,9 +600,13 @@ function redactServedDocument(
  */
 export class MetadataManager implements IMetadataService {
   private loaders: Map<string, MetadataLoader> = new Map();
+  /** [#31699 R5-A] The loader {@link loadMany} read each item object from ({@link MetadataRegisterOptions}). */
+  private readonly loadedFrom = new WeakMap<object, MetadataLoader>();
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
+  /** [#32154] Under `awaitHostLogger`, the object {@link logger} is built as; {@link useHostLogger} switches its target. */
+  private readonly hostFollowingLogger: HostFollowingLogger | undefined;
   protected watchCallbacks = new Map<string, Set<WatchCallback>>();
   protected config: MetadataManagerOptions;
 
@@ -636,7 +798,8 @@ export class MetadataManager implements IMetadataService {
   //     can invalidate their caches.
   //   • A subscribed remote event first invalidates THIS node's caches
   //     (registry entry + listCache, via `invalidateForForeignWrite` —
-  //     #5109) and is then replayed into the local watch hub, so existing
+  //     #5109; a peer's removal also deletes THIS node's in-memory copy,
+  //     #32499) and is then replayed into the local watch hub, so existing
   //     consumers (ObjectQLPlugin, Studio HMR, …) see uniform behavior
   //     regardless of which node initiated the change — including when
   //     they answer the event by re-reading through `list()`.
@@ -669,7 +832,12 @@ export class MetadataManager implements IMetadataService {
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
-    this.logger = createLogger({ level: 'info', format: 'pretty' });
+    const ownLogger = createLogger({ level: 'info', format: 'pretty' });
+    // [#32154] Under `awaitHostLogger`, a logger that holds the chatter until
+    // the host hands over its own (see `HostFollowingLogger`,
+    // `useHostLogger`); otherwise its own `info` logger, exactly as before.
+    this.hostFollowingLogger = config.awaitHostLogger === true ? new HostFollowingLogger(ownLogger) : undefined;
+    this.logger = this.hostFollowingLogger ?? ownLogger;
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
     // covering overlapping but non-identical event sets — both are kept:
@@ -875,6 +1043,24 @@ export class MetadataManager implements IMetadataService {
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
 
+  /**
+   * [#32154] Log through the host's logger from now on, so every line of this
+   * manager (and of the loaders and matcher it handed its logger to) follows
+   * the host's level. The `debug` / `info` lines held since construction
+   * under {@link MetadataManagerOptions.awaitHostLogger} are replayed through
+   * it first, in order. `MetadataPlugin.init()` calls it with the kernel's
+   * logger.
+   *
+   * On a manager built WITHOUT that option, the manager's own later lines go
+   * to `logger`, but a loader or the endpoint matcher handed the earlier
+   * logger at construction keeps it: a host that wants those to follow too
+   * sets `awaitHostLogger`.
+   */
+  useHostLogger(logger: Logger): void {
+    if (this.hostFollowingLogger) this.hostFollowingLogger.adopt(logger);
+    else this.logger = logger;
+  }
+
   // ==========================================
   // IMetadataService — Core CRUD Operations
   // ==========================================
@@ -896,7 +1082,7 @@ export class MetadataManager implements IMetadataService {
     type: string,
     name: string,
     data: unknown,
-    options?: MetadataWriteOptions,
+    options?: MetadataRegisterOptions,
   ): Promise<void> {
     // [#7378] The ruled register contract, before anything is touched: refuse
     // a data.name that disagrees with the name argument and refuse a
@@ -941,6 +1127,12 @@ export class MetadataManager implements IMetadataService {
       // and because `save?` stays optional on the interface for the protocols
       // the gate does not cover. Mirrors the same guard in `unregister()`.
       if (typeof loader.save !== 'function') continue;
+      // [#31699 R5-A] Never back into the loader this item was read from; [R7-A] only the
+      // column-only bind of the legacy row it was read from reaches that loader.
+      if (options?.skipSourceLoader && data !== null && typeof data === 'object' && this.loadedFrom.get(data) === loader) {
+        await loader.bindReadRowPackage?.(type, name, data);
+        continue;
+      }
       await loader.save(type, name, data);
     }
 
@@ -1003,9 +1195,9 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` the item's package slot), dropping any key the write
    * replaces. Whether an item was replaced — the `added` / `changed` split.
    */
-  private writeRegistryEntry(type: string, name: string, data: unknown): boolean {
+  private writeRegistryEntry(type: string, name: string, data: unknown, slot?: string): boolean {
     let typeStore = this.registry.get(type);
-    const { key, replaces } = storeWriteKey(typeStore, type, name, data);
+    const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
@@ -1708,12 +1900,23 @@ export class MetadataManager implements IMetadataService {
    *    slot and the precedence above decides between them, as the bare-name
    *    map did;
    *  - an item that carries none, under a name no package holds, is the
-   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *    environment's own (D1 bucket 4) and fills the environment's slot;
+   *  - [#31700] an item that carries none, under a name TWO or more packages
+   *    hold here (packages of different namespaces, since the API narrowed to
+   *    one holder per namespace), is a customization of no one holder: none is
+   *    picked, so it fills the environment's slot. The store's write rule
+   *    puts the same row there ({@link storeWriteKey}: a package-less write of
+   *    a name two packages hold lands in the bare slot), so the index and the
+   *    store agree on what that row is.
    *
-   * While phase 1 keeps one package holder per `api` name, every slot holds
-   * what the bare-name map held, so the index answers what it answered. No
-   * name is resolved here: a request carries no caller package, and the
-   * matcher keys its routes by METHOD + path (bucket 1).
+   * Each holder keeps its own slot, so two namespaces' same-named APIs are
+   * both indexed. They cannot claim one route between them: the publish gate
+   * requires each path under `/api/v1/apps/<namespace>/`, so their paths
+   * differ by namespace. Only the environment's row can share a holder's
+   * METHOD + path, and the matcher's duplicate-claim rule decides that,
+   * announced at `error`. No name is resolved here: a request carries no
+   * caller package, and the matcher keys its routes by METHOD + path
+   * (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
     // [#32246] Every item a loader stores, each with the package the loader
@@ -1828,9 +2031,12 @@ export class MetadataManager implements IMetadataService {
    * the `409` naming every holder, where the storage loop would have caught
    * each loader's own refusal as a failed delete and announced a removal that
    * never happened. Every loader's holders of the name are within this view,
-   * so a loader the removal deletes from does not refuse once it has passed —
-   * ⛔ except an object-bound action's slots, which the holder count does not
-   * read (the registry's own rule; a separate card).
+   * so a loader the removal deletes from does not refuse once it has passed.
+   * [#32352] That includes an action's object-bound slots: holders are counted
+   * by package over every slot of the name, as `DatabaseLoader`'s row key
+   * `(package, name)` counts them, so a name two packages hold on one object
+   * or on two is refused here rather than by the loader's `delete` after the
+   * registry had already dropped it and announced `deleted`.
    *
    * @throws {PackageScopedNameRefusedError} no package named, two or more
    *   packages holding the name in the registry or the loaders.
@@ -1869,13 +2075,12 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     const { keys, packageId } = removal ?? (await this.removalOf(type, name, options?.packageId));
     // ── 1. Storage first ────────────────────────────────────────────────
-    // Delete only from database-backed loaders that declare write capability.
-    // [ADR-0150 D4, #32246] For a type stored per `(package, name)`, also from
-    // the in-memory loaders (the artifact door's store): its copy of the
-    // removed item would otherwise keep answering every read once the
-    // registry's slots are gone.
+    // Delete from database-backed loaders that declare write capability, and
+    // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
+    // door's store), for every type: their copy of the removed item would
+    // otherwise keep answering every read once the registry's entry is gone.
     for (const loader of this.loaders.values()) {
-      if (!isRemovalTarget(loader, type)) continue;
+      if (!isRemovalTarget(loader)) continue;
       // [#5276] Defensive only — unreachable for a registered loader. This exact
       // combination (`datasource:` + `capabilities.write`, no `delete`) is
       // rejected by `registerLoader()`, the sole writer of `this.loaders`, so
@@ -1909,6 +2114,8 @@ export class MetadataManager implements IMetadataService {
     });
 
     // Announce last, once the removal has landed everywhere (see register()).
+    // [#32499] The cluster fan-out marks it a removal, with the package it
+    // named, so each peer deletes its own in-memory copy by the same key.
     if (options?.notify !== false) {
       this.notifyWatchers(type, {
         type: 'deleted',
@@ -1917,7 +2124,7 @@ export class MetadataManager implements IMetadataService {
         path: '',
         data: undefined,
         timestamp: new Date().toISOString(),
-      });
+      }, packageId === undefined ? {} : { packageId });
     }
   }
 
@@ -3320,6 +3527,17 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32488] The name of the loader {@link loadMany} read `item` — that very
+   * object — from; `undefined` for an object it did not hand out. The boot
+   * priming pass asks it so that, of two loaders' items stored under one
+   * identity once the host's package is stamped, the earlier loader's item
+   * keeps the entry (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.name;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
@@ -3328,17 +3546,50 @@ export class MetadataManager implements IMetadataService {
     options?: MetadataLoadOptions
   ): Promise<T[]> {
     const results: T[] = [];
+    // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
+    // per `(package, name, member)` (`bundleEntryKey`), never one per name.
+    const bundleEntries = new Set<string>();
 
     for (const loader of this.loaders.values()) {
         try {
-            const items = await loader.loadMany<T>(type, options);
+            // [#31699 R4-B; epic ruling 6799056319] A bundled type stored per
+            // `(package, name)` reads the loader's keyed entries where it has
+            // them: a row bound to its package by the `package_id` column alone
+            // (as the metadata protocol writes it) carries no stamp in its body,
+            // so only the entry's `packageId` keeps two packages' same member
+            // apart. Such a body is handed on stamped with that package
+            // (`_packageId`, the column's package and only the column's, as the
+            // protocol's own read binds a row), so a caller that registers it
+            // back — the boot priming pass — fills that package's slot and its
+            // member's row, never a package-less one.
+            // [#32458] An unbundled type stored per `(package, name)` (`api`,
+            // `agent`, `skill`, `action`, `permission`) keeps every body the
+            // loader's `loadMany` answers, a body its keyed read cannot name
+            // included, and stamps each one the loader holds for a package the
+            // same way ({@link withLoaderEntryPackages}): handed on unstamped,
+            // such a row filled the name's package-less slot, and with two
+            // holders its save inserted a package-less row.
+            const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && isBundledStoreType(type) && typeof loader.loadManyKeyed === 'function'
+                ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
+                : PACKAGE_SLOTTED_STORE_TYPES.has(type)
+                    ? await withLoaderEntryPackages(loader, type, await loader.loadMany<T>(type, options), options)
+                    : await loader.loadMany<T>(type, options);
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
+                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
+                    if (bundleKey !== undefined) {
+                        if (bundleEntries.has(bundleKey)) continue;
+                        bundleEntries.add(bundleKey);
+                        results.push(item);
+                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+                        continue;
+                    }
                     const exists = results.some((r: any) => r && r.name === itemAny.name);
                     if (exists) continue;
                 }
                 results.push(item);
+                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
             }
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
@@ -3406,7 +3657,9 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    const items = new Map<string, T>();
+    // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
+    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
+    const items = new Map<string, MetadataKeyedItem<T>>();
 
     for (const loader of this.loaders.values()) {
       try {
@@ -3418,7 +3671,7 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
-    return Array.from(items, ([name, data]) => ({ name, data }));
+    return Array.from(items.values());
   }
 
   /**
@@ -3438,15 +3691,16 @@ export class MetadataManager implements IMetadataService {
   private async admitKeyedLoaderItems<T = any>(
     loader: MetadataLoader,
     type: string,
-    items: Map<string, T>,
+    items: Map<string, MetadataKeyedItem<T>>,
     options?: MetadataLoadOptions
   ): Promise<void> {
     if (typeof loader.loadManyKeyed === 'function') {
       const keyed = await loader.loadManyKeyed<T>(type, options);
       for (const entry of keyed) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        if (items.has(entry.name)) continue;
-        items.set(entry.name, entry.data);
+        const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
+        if (items.has(key)) continue;
+        items.set(key, { name: entry.name, data: entry.data });
       }
       return;
     }
@@ -3455,7 +3709,9 @@ export class MetadataManager implements IMetadataService {
       if (typeof name !== 'string' || name === '' || items.has(name)) continue;
       const result = await loader.load(type, name, options);
       if (result?.data == null) continue;
-      items.set(name, result.data as T);
+      const key = bundleEntryKey(type, name, result.data) ?? name;
+      if (items.has(key)) continue;
+      items.set(key, { name, data: result.data as T });
     }
   }
 
@@ -3708,7 +3964,11 @@ export class MetadataManager implements IMetadataService {
     this.notifyWatchers(type, legacyEvent);
   }
 
-  protected notifyWatchers(type: string, event: MetadataWatchEvent) {
+  /**
+   * Wake this node's watchers, then fan the event out to cluster peers.
+   * `removal` is {@link unregister}'s alone ({@link ClusterMetadataChangedPayload.removal}).
+   */
+  protected notifyWatchers(type: string, event: MetadataWatchEvent, removal?: ClusterMetadataRemoval) {
     this.notifyWatchersLocal(type, event);
 
     // Cluster fan-out (`content/docs/kernel/cluster.mdx` §6.2, lane 1).
@@ -3718,6 +3978,7 @@ export class MetadataManager implements IMetadataService {
         originNode: this.clusterNodeId,
         type,
         event,
+        ...(removal ? { removal } : {}),
       };
       const key = `${type}:${(event as { name?: string }).name ?? ''}`;
       void this.clusterPubSub
@@ -3801,6 +4062,15 @@ export class MetadataManager implements IMetadataService {
         //     to defer for, while deferring it would leave a window between
         //     receipt and the next tick in which reads still answer stale.
         //     Any `await` in a request handler is enough to lose that race.
+        //
+        // [#32499] A removal deletes this node's in-memory copy first, as
+        // `unregister()` deletes from storage before it drops the registry:
+        // otherwise the dropped entry hands every read to that copy, and this
+        // node keeps serving what the origin removed. Started here, so an
+        // in-memory delete that runs no `await` (`MemoryLoader`) has landed
+        // before the invalidation below.
+        const removal = receivedRemovalOf(p);
+        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal.packageId);
         try {
           this.invalidateForForeignWrite(p.type, p.event.name);
         } catch (err) {
@@ -3829,6 +4099,37 @@ export class MetadataManager implements IMetadataService {
       channel: MetadataManager.CLUSTER_CHANNEL,
     });
     return () => this.detachClusterPubSub();
+  }
+
+  /**
+   * [#32499] The peer half of {@link unregister}'s storage step: delete a
+   * removal a cluster peer announced from this node's in-memory loaders
+   * ({@link isNodeLocalRemovalTarget}), by the key the origin deleted by
+   * ({@link deleteMetaItemFromLoader}). The shared `datasource:` store is
+   * left alone: the origin already deleted from it.
+   *
+   * The list cache is dropped again once every delete has settled, for a
+   * loader whose delete is really asynchronous and so lands after the
+   * receipt's own invalidation.
+   */
+  private async removeNodeLocalCopies(type: string, name: string, packageId?: string): Promise<void> {
+    let removed = false;
+    for (const loader of this.loaders.values()) {
+      if (!isNodeLocalRemovalTarget(loader)) continue;
+      removed = true;
+      try {
+        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
+      } catch (error) {
+        this.logger.error(
+          `[MetadataManager] Loader \`${loader.contract.name}\` could NOT delete \`${type}/${name}\` that a cluster peer ` +
+            `removed — this node keeps serving the item from that loader while the node that removed it answers nothing. ` +
+            `Nothing looks broken on either node. Fix: re-issue the removal of \`${type}/${name}\` on this node.`,
+          error instanceof Error ? error : undefined,
+          { loader: loader.contract.name, type, name, packageId, error },
+        );
+      }
+    }
+    if (removed) this.invalidateListCache(type);
   }
 
   /**
@@ -3890,11 +4191,17 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get version history for a metadata item.
    * Returns a timeline of all changes made to the item.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` reads that package's versions only (`null`: the
+   * environment's, recorded under no package); naming none, a
+   * name more than one row slot holds is refused 409 naming every holder
+   * (`PackageScopedNameRefusedError`), and one holder answers as before.
    */
   async getHistory(
     type: string,
     name: string,
-    options?: MetadataHistoryQueryOptions
+    options?: MetadataHistoryQueryOptions & MetadataHistoryAddress
   ): Promise<MetadataHistoryQueryResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -3908,12 +4215,20 @@ export class MetadataManager implements IMetadataService {
       limit: options?.limit,
       offset: options?.offset,
       includeMetadata: options?.includeMetadata,
+      packageId: options?.packageId,
     });
   }
 
   /**
    * Rollback a metadata item to a specific version.
    * Restores the metadata definition from the history snapshot.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` names whose row is restored, and the version must be
+   * that package's ("not found" otherwise). Naming none, the name's one row is
+   * restored; several are refused 409 naming every holder, and so is a version
+   * of a package that holds no row of the name (`not-held-by-qualifier`) —
+   * ⛔ never written into another package's row.
    */
   async rollback(
     type: string,
@@ -3922,7 +4237,7 @@ export class MetadataManager implements IMetadataService {
     options?: {
       changeNote?: string;
       recordedBy?: string;
-    }
+    } & MetadataHistoryAddress
   ): Promise<unknown> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -3930,10 +4245,15 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the target version snapshot directly from the history table
-    const targetVersion = await dbLoader.getHistoryRecord(type, name, version);
+    const address = historyAddressOf(options);
+    const targetVersion = await dbLoader.getHistoryRecord(type, name, version, address);
 
     if (!targetVersion) {
-      throw new Error(`Version ${version} not found in history for ${type}/${name}`);
+      // [#32351 F1] An addressed read leaves out a version attributed to no
+      // package; on a name several row slots hold it is refused naming every
+      // holder, not answered "not found".
+      if (address !== undefined) await dbLoader.refuseUnattributedVersion(type, name, version);
+      throw new Error(`Version ${version} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!targetVersion.metadata) {
@@ -3949,11 +4269,24 @@ export class MetadataManager implements IMetadataService {
       restoredMetadata,
       version,
       options?.changeNote,
-      options?.recordedBy
+      options?.recordedBy,
+      address,
     );
 
-    // Update in-memory registry with the restored metadata
-    this.writeRegistryEntry(type, name, restoredMetadata);
+    // Update in-memory registry with the restored metadata. [#32351] A
+    // package's restored version that names no package itself (a package-less
+    // customization of that package's row) is filed under that package's slot,
+    // as the row it was written to is. [S4] One restored by the environment
+    // address is filed under the bare slot, as its row is, even when one
+    // package holds the name (the write rule would file it under that package's).
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (slotted && isPackageCaller(address?.packageId)) {
+      this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
+    } else if (slotted && address !== undefined) {
+      this.writeRegistryEntry(type, name, restoredMetadata, environmentStoreKey(type, name, restoredMetadata));
+    } else {
+      this.writeRegistryEntry(type, name, restoredMetadata);
+    }
 
     return restoredMetadata;
   }
@@ -3961,12 +4294,18 @@ export class MetadataManager implements IMetadataService {
   /**
    * Compare two versions of a metadata item.
    * Returns a diff showing what changed between versions.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` compares two of that package's versions ("not found"
+   * for another's); naming none, a name more than one row slot holds is
+   * refused 409 naming every holder.
    */
   async diff(
     type: string,
     name: string,
     version1: number,
-    version2: number
+    version2: number,
+    options?: MetadataHistoryAddress
   ): Promise<MetadataDiffResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -3974,15 +4313,16 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the two version snapshots directly from the history table
-    const v1 = await dbLoader.getHistoryRecord(type, name, version1);
-    const v2 = await dbLoader.getHistoryRecord(type, name, version2);
+    const address = historyAddressOf(options);
+    const v1 = await dbLoader.getHistoryRecord(type, name, version1, address);
+    const v2 = await dbLoader.getHistoryRecord(type, name, version2, address);
 
     if (!v1) {
-      throw new Error(`Version ${version1} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version1} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v2) {
-      throw new Error(`Version ${version2} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version2} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v1.metadata || !v2.metadata) {
@@ -4008,3 +4348,72 @@ export class MetadataManager implements IMetadataService {
   }
 }
 
+/**
+ * [#32351] The package address a history door forwards to the database
+ * loader: only `packageId`, so the loader's answer never depends on what else
+ * the caller's options carry; `undefined` when none is named.
+ */
+function historyAddressOf(options?: MetadataHistoryAddress): MetadataHistoryAddress | undefined {
+  return options?.packageId === undefined ? undefined : { packageId: options.packageId };
+}
+
+/** [#32351] The "not found" message's address, for a by-package type read by address; empty otherwise. */
+function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): string {
+  if (address?.packageId === undefined || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return '';
+  return isPackageCaller(address.packageId) ? ` (package ${address.packageId})` : ' (environment)';
+}
+
+/**
+ * [#31699 R4-B] A keyed entry's body, stamped with the entry's package when the
+ * body names none itself; the body unchanged otherwise. [#32458] The same stamp
+ * for an unbundled type stored per `(package, name)`, through
+ * {@link withLoaderEntryPackages}.
+ */
+function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
+  const data = entry.data as unknown;
+  if (entry.packageId === undefined || indexedItemPackageId(data) !== undefined) return entry.data;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return entry.data;
+  return { ...(data as Record<string, unknown>), _packageId: entry.packageId } as T;
+}
+
+/**
+ * [#32458] `items`, the bodies `loader.loadMany` answered for an unbundled type
+ * stored per `(package, name)`, each stamped with the package the loader holds
+ * it for ({@link withEntryPackage}) when the body names none itself. The
+ * package is read off the loader's keyed entries, and only from a loader that
+ * holds items per package (`loadManySlots`): a body is stamped when its `name`
+ * is the key of exactly one keyed entry, that entry carries a package and its
+ * own body carries the entry's key as its `name`, and no other body `loadMany`
+ * answered carries that `name`. A body whose `name` is another row's key is
+ * never stamped with that row's package — a row's key and its body's `name`
+ * are two identities (#14205), and a save does not make them agree. Every body
+ * is kept, in `loadMany`'s order — a body the keyed read cannot
+ * name (a nested or extension-less file, a row whose `name` column is empty)
+ * is answered as before, unstamped. A loader that holds nothing per package is
+ * not read twice.
+ */
+async function withLoaderEntryPackages<T>(
+  loader: MetadataLoader,
+  type: string,
+  items: T[],
+  options?: MetadataLoadOptions,
+): Promise<T[]> {
+  if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
+  const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
+  const packageOf = new Map<string, string | null>();
+  for (const entry of await loader.loadManyKeyed<T>(type, options)) {
+    const own = nameOf(entry.data) === entry.name ? entry.packageId ?? null : null;
+    packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+  }
+  const bodiesNamed = new Map<string, number>();
+  for (const item of items) {
+    const name = nameOf(item);
+    if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
+  }
+  return items.map((item) => {
+    const name = nameOf(item);
+    if (typeof name !== 'string' || bodiesNamed.get(name) !== 1) return item;
+    const packageId = packageOf.get(name);
+    return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
+  });
+}

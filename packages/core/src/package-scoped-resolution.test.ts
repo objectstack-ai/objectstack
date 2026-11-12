@@ -19,6 +19,7 @@ import {
   NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
   PackageScopedNameRefusedError,
+  describePackageScopedHolder,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
   isNamespaceScopedBareNameType,
   isPackageScopedType,
@@ -26,6 +27,7 @@ import {
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
+  type PackageScopedHolder,
   type PackageScopedResolvableType,
 } from './package-scoped-resolution.js';
 
@@ -132,7 +134,10 @@ describe('ADR-0150 D3 exceptions over a supplied holder set', () => {
 
   it('an overridable baseline yields to another holder of the step, and answers when it is the only one', () => {
     expect(resolve([[EMAIL, 'builtin']], [EMAIL], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', via: 'baseline' });
-    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // The step-2 yield, on a name the platform does not request with no package.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'welcome')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // [#31699] A platform-requested name (`auth.*`) resolves environment-wide whatever the caller: the override still wins.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
     expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [], undefined, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
   });
 
@@ -232,11 +237,21 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES.length).toBeGreaterThan(0);
     for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
       expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
-      expect(isPackageScopedType(type), type).toBe(true);
+      // [#31700] The engine's function registry is the one member that is no
+      // metadata type: it keeps its holders per package itself (D4's last row).
+      expect(isPackageScopedType(type), type).toBe(type !== ENGINE_FUNCTION_TYPE);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
-    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    // [#31696] The flow has narrowed (it is in the set above); a webhook has not.
+    expect(isNamespaceScopedBareNameType('flow')).toBe(true);
+    expect(isNamespaceScopedBareNameType('webhook')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
+  });
+
+  it('[#31700] the picklist family has narrowed: picklist, mapping, dataset, api and the engine function', () => {
+    for (const type of ['picklist', 'mapping', 'dataset', 'api', ENGINE_FUNCTION_TYPE]) {
+      expect(isNamespaceScopedBareNameType(type), type).toBe(true);
+    }
   });
 });
 
@@ -257,5 +272,13 @@ describe('[#32244, review 6781770671 N1] packageScopedActionOwnersSentence', () 
     expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['account']]]))).toBe(
       `Package "${A}" binds it to object "account"; package "${B}" binds it to object "account".`,
     );
+  });
+});
+
+describe('[#32412] a stack\'s residual as a holder (ADR-0130 D4): named as the top level outside every package body', () => {
+  it('describes the residual by its owner id, never as a package', () => {
+    const holder: PackageScopedHolder = { kind: 'residual', ownerId: 'com.example.top' };
+    expect(describePackageScopedHolder(holder)).toBe('the top level of stack "com.example.top" outside every package body (its residual)');
+    expect(describePackageScopedHolder(holder)).not.toContain('package "com.example.top"');
   });
 });

@@ -132,8 +132,19 @@ export function isBareNameOneHolderType(type: unknown): type is BareNameOneHolde
  * `bare-name-one-holder.ts` module doc, "The narrowing"). Each type joins in
  * its own trailing change, once its by-name readers, its AI faces and its
  * stored references all carry the package: the AI family's `agent` and
- * `skill` first (#31701), then the object-less `action` (#31697). A type not
- * listed here keeps one package holder per deployment.
+ * `skill` first (#31701), then the object-less `action` (#31697), then
+ * `email_template` (#31699), then `flow` (#31696: the engine holds a flow per
+ * `(package, name)`, and its doors, flow actions and flow endpoints resolve a
+ * name by package), then the picklist family (#31700): `picklist`,
+ * `mapping` and `dataset`, the `api` and the engine's `function` registry. A
+ * type not listed here keeps one package holder per deployment.
+ *
+ * Every member but {@link ENGINE_FUNCTION_TYPE} is a metadata type ADR-0150
+ * addresses by package ({@link PACKAGE_SCOPED_TYPES}). The function registry
+ * is the engine's: it keeps every holder per package itself (ADR-0150 D4's
+ * last row) and has no by-name metadata read, so the stores and the reads
+ * keyed on this list (`@objectstack/metadata`'s slotted store, the metadata
+ * protocol's fail-closed read) never meet it.
  *
  * Here, not in objectql, so a reader objectql depends on can read it too: the
  * metadata protocol refuses a bare read of a narrowed type that an engine
@@ -144,6 +155,14 @@ export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] 
   'agent',
   'skill',
   'action',
+  'email_template',
+  'flow',
+  // the picklist family (#31700)
+  'picklist',
+  'mapping',
+  'dataset',
+  'api',
+  'function',
 ]);
 
 /** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
@@ -267,13 +286,34 @@ export function isPackageScopedResolvableType(type: unknown): type is PackageSco
 /**
  * Names the PLATFORM requests by spelling, per type (ADR-0150 D3 Exceptions):
  * they resolve environment-wide whatever the caller's package, and keep one
- * holder. The same list as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
- * keyed by registry type instead of stack collection: the public form doors'
- * submit context requests the permission set `guest_portal` by name
- * (`packages/rest/src/form-routes.ts`).
+ * holder.
+ *
+ *  - `permission` — the public form doors' submit context requests the
+ *    permission set `guest_portal` by name (`packages/rest/src/form-routes.ts`);
+ *    the same entry as `@objectstack/cli`'s `PLATFORM_REQUESTED_BARE_NAMES`,
+ *    keyed by registry type instead of stack collection.
+ *  - `email_template` — the auth mails the platform sends by name with no
+ *    package (plugin-auth through `IEmailService.sendTemplate`): the
+ *    `auth.*` templates the email service code-declares as its overridable
+ *    baseline (`BUILTIN_AUTH_TEMPLATES`, plugin-email). An app overrides one by
+ *    declaring its name (ADR-0131 D10), and a deployment keeps one overriding
+ *    package per name even once the type's one-holder rule narrows to the
+ *    namespace (ADR-0150 D9, #31699): two would leave every password reset
+ *    refused as ambiguous. The CLI's prefix rule judges no email template, so
+ *    its list carries none.
  */
 export const PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE: Readonly<Partial<Record<PackageScopedType, readonly string[]>>> = Object.freeze({
   permission: Object.freeze(['guest_portal']),
+  email_template: Object.freeze([
+    'auth.password_reset',
+    'auth.verify_email',
+    'auth.magic_link',
+    'auth.invitation',
+    'auth.account_invitation',
+    'auth.two_factor_otp',
+    'auth.email_change_notice',
+    'auth.existing_account_sign_up',
+  ]),
 });
 
 /** Is `(type, name)` one the platform requests by spelling? */
@@ -306,16 +346,25 @@ export const RUNTIME_COMPATIBILITY_PACKAGE_ID = '__runtime__';
  * — or the platform: code a plugin or the host registers under no package (an
  * owner-less engine function), reachable from every caller like `sys` (D2;
  * epic seat ruling on #31733, 6729484996).
+ *
+ * [#32412] Or a stack's residual (ADR-0130 D4): the top level of the artifact
+ * whose id is `ownerId`, outside every package body (`UnclaimedTopLevel`,
+ * `ObjectQL#recordResidualOwner`). It is not a package — no package row
+ * answers `ownerId` unless a body carries it, and then the residual is still
+ * not that body — so it is never a `package` holder. The rule here never
+ * answers it; the app-artifact job binder's residual-twin refusal names it.
  */
 export type PackageScopedHolder =
   | Extract<BareNameHolder, { kind: 'package' }>
   | { readonly kind: 'environment' }
-  | { readonly kind: 'platform' };
+  | { readonly kind: 'platform' }
+  | { readonly kind: 'residual'; readonly ownerId: string };
 
 /** How a refusal names a holder. */
 export function describePackageScopedHolder(holder: PackageScopedHolder): string {
   if (holder.kind === 'environment') return 'the environment (an item authored in this environment, bound to no package)';
   if (holder.kind === 'platform') return 'the platform (registered by a plugin or the host, owned by no package)';
+  if (holder.kind === 'residual') return `the top level of stack "${holder.ownerId}" outside every package body (its residual)`;
   return describeBareNameHolder(holder);
 }
 
@@ -362,7 +411,8 @@ export type PackageScopedResolution<T = unknown> =
   | {
       readonly status: 'resolved';
       readonly item: T;
-      readonly holder: PackageScopedHolder;
+      /** [#32412] Never a residual: the rule answers no such holder (it is only ever a refusal's candidate). */
+      readonly holder: Exclude<PackageScopedHolder, { kind: 'residual' }>;
       readonly via: PackageScopedResolutionStep;
     }
   | { readonly status: 'not-found' }
@@ -476,7 +526,7 @@ function isBaseline(type: PackageScopedResolvableType, packageId: string): boole
   return isBareNameOneHolderType(type) && isOverridableBaseline(type, packageId);
 }
 
-const packageHolder = (packageId: string): PackageScopedHolder => ({ kind: 'package', packageId });
+const packageHolder = (packageId: string): Extract<PackageScopedHolder, { kind: 'package' }> => ({ kind: 'package', packageId });
 
 function typeLabel(type: PackageScopedResolvableType): string {
   switch (type) {

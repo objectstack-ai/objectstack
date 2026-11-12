@@ -418,6 +418,10 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
     calls: 1,
     sentinelPin: 'packages/cli/src/commands/db/clean.operator-text-21418.test.ts',
   },
+  'packages/cli/src/utils/schema-sync-indexes.ts': {
+    calls: 2,
+    sentinelPin: 'packages/cli/src/utils/schema-sync-indexes.operator-text-21418.test.ts',
+  },
   'packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.ts': {
     calls: 1,
     sentinelPin: 'packages/metadata-protocol/src/migrations/activation-ledger-packageless-index.test.ts',
@@ -441,6 +445,10 @@ const OPERATOR_TEXT_CALLERS: Readonly<Record<string, { readonly calls: number; r
   'packages/metadata-protocol/src/migrations/seed-tenancy-backfill.ts': {
     calls: 5,
     sentinelPin: 'packages/metadata-protocol/src/migrations/raw-exec-operator-detail-16657.test.ts',
+  },
+  'packages/metadata-protocol/src/migrations/user-permission-set-packageless-index.ts': {
+    calls: 3,
+    sentinelPin: 'packages/metadata-protocol/src/migrations/user-permission-set-packageless-index.test.ts',
   },
   'packages/metadata/src/migrations/drop-projection-tables.ts': {
     calls: 1,

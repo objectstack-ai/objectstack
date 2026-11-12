@@ -158,6 +158,20 @@ describe('#30892 — a record\'s files for a resolved caller: read one, attach o
     } as never);
     await engine.syncSchemas();
     await installDefaultOrganization(engine);
+    // The callers are current members of the organization their links are
+    // minted in: a person's data access requires one, under every posture
+    // (ADR-0093 D8.1, as amended). Data at rest, seeded through the driver.
+    engine.registry.registerObject(
+      {
+        name: 'sys_member', label: 'Member', managedBy: 'better-auth',
+        fields: { user_id: { type: 'text', label: 'User' }, organization_id: { type: 'text', label: 'Organization' }, role: { type: 'text', label: 'Role' } },
+      },
+      '@objectstack/service-storage',
+    );
+    await engine.syncSchemas();
+    for (const { userId } of [OWNER, REVIEWER, OUTSIDER]) {
+      await engine.getDriverForObject('sys_member')!.create('sys_member', { id: `mem_${userId}`, user_id: userId, organization_id: ORG, role: 'member' });
+    }
 
     // Row-level security, as the fixture stands it in: a caller reads its own
     // claims; the reviewer reads every claim.

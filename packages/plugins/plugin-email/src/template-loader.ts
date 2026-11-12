@@ -34,14 +34,29 @@
  * An email template is addressed by `(package, name)`. Before a bundle is
  * read, the name is resolved by the ONE package-scoped resolver
  * (`resolvePackageScopedName`, `@objectstack/objectql`) over the ObjectQL
- * registry, as a caller with no package: `SendTemplateInput` names no
- * package, so every send is context-free — the environment's own item, else
- * the unique package holder (the built-ins rank below it, ADR-0150 D3 (b)),
- * else a refusal naming every candidate, which fails the send
- * ({@link EmailTemplateAmbiguousError}). ⛔ Never a first-listed pick. While
- * phase 1's one-holder refusal stands (`email_template` is one of its types)
- * no two packages hold a name, so every name resolves as before, and the
- * layered list below answers the bundle exactly as it did.
+ * registry, from the package the send is made from
+ * (`SendTemplateInput.callerPackageId`; a flow's `notify` node passes the
+ * package whose own flow body is armed): that package's own template, else
+ * the one holder in its declared dependency closure, else a refusal naming
+ * every candidate. A send that names no package keeps the bare-name meaning:
+ * the environment's own item, else the unique package holder (the built-ins
+ * rank below it, ADR-0150 D3 (b)), else a refusal naming every holder. A
+ * refusal fails the send ({@link EmailTemplateAmbiguousError}). ⛔ Never a
+ * first-listed pick.
+ *
+ * Since the type's one-holder rule narrowed to the namespace (ADR-0150 D9,
+ * #31699), two packages of two namespaces may each ship a name. When the name
+ * resolves to one of two or more package holders, the bundle read is the
+ * resolved holder's own address (the list scoped to it: its members, its
+ * pair's added members, its environment overlay), never the environment-wide
+ * list, which lists every holder's members side by side. A name with one
+ * package holder reads the environment-wide list exactly as before: there it
+ * already IS that holder's bundle (a dependent's added member is no holder,
+ * and the list leaves it out). A dependent's added member meets its base: a
+ * send from the dependent resolves the name from its closure, as a send from
+ * any other package of it would. The `auth.*` mails the platform sends keep
+ * one overriding package per deployment (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`,
+ * `@objectstack/core`) and resolve environment-wide whatever the caller.
  */
 
 import {
@@ -52,7 +67,14 @@ import {
 } from '@objectstack/objectql';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { EmailTemplateDefinitionSchema, type EmailTemplateDefinitionParsed } from '@objectstack/spec/system';
-import { DEFAULT_TEMPLATE_LOCALE, TEMPLATE_BUNDLE_LOCALES, type EmailTemplateRow, type TemplateLoader, type TemplateBundleLocales } from './email-service.js';
+import {
+  DEFAULT_TEMPLATE_LOCALE,
+  TEMPLATE_BUNDLE_LOCALES,
+  type EmailTemplateRow,
+  type TemplateLoader,
+  type TemplateBundleLocales,
+  type TemplateLoadOptions,
+} from './email-service.js';
 
 /**
  * The package the built-in auth templates are code-declared under: the email
@@ -76,7 +98,7 @@ export interface EmailTemplateRegistrySources {
    * slot — read on its execution face, the one an in-process engine that
    * runs the definitions it reads is meant to use.
    */
-  protocol?: { getMetaItemsForExecution(request: { type: string }): Promise<{ items?: unknown[] }> };
+  protocol?: { getMetaItemsForExecution(request: { type: string; packageId?: string }): Promise<{ items?: unknown[] }> };
   /**
    * The ObjectQL `SchemaRegistry`. Its items are read ONLY when no `protocol`
    * is registered: such a host has no metadata door, so no environment item
@@ -119,6 +141,42 @@ function packageScopedRegistryOf(registry: EmailTemplateRegistrySources['registr
     && typeof registry.getAllPackages === 'function'
     ? (registry as PackageScopedRegistry)
     : undefined;
+}
+
+/**
+ * [ADR-0150 D3/D9, #31699] The package whose own address the bundle of `name`
+ * is read at, for a send made from `callerPackageId`; `undefined` to read the
+ * environment-wide list, as before. Throws the refusal when the name does not
+ * resolve for the caller.
+ *
+ * Only a name two or more packages hold (the built-ins aside, which rank
+ * below any of them) is read at one address: with one holder the
+ * environment-wide list is already its bundle. A caller whose own holding is a
+ * bundle ADDITION (a locale a dependent adds to another package's template,
+ * which holds no name for anyone else) meets its base: the name is resolved
+ * again from its closure over the holders every other reader sees.
+ */
+function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPackageId: string | null): string | undefined {
+  const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
+  if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
+  if (resolved.status !== 'resolved' || resolved.holder.kind !== 'package') return undefined;
+  const holders = (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name) ?? [])
+    .filter((id) => id !== BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
+  if (holders.length < 2) return undefined;
+  const holder = resolved.holder.packageId;
+  if (holders.includes(holder)) return holder;
+  // The caller holds an addition only: resolve from its closure over the
+  // holders every other reader sees (its own addition left out).
+  const shared: PackageScopedRegistry = {
+    getPackage: (id) => scoped.getPackage(id),
+    getAllPackages: () => scoped.getAllPackages(),
+    getPackageScopedItem: (type, n, packageId, member) => scoped.getPackageScopedItem(type, n, packageId, member),
+    getEnvironmentScopedItem: (type, n, member) => scoped.getEnvironmentScopedItem(type, n, member),
+    packageScopedHoldersOf: (type, n) => scoped.packageScopedHoldersOf(type, n),
+  } as PackageScopedRegistry;
+  const base = resolvePackageScopedName(shared, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
+  if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);
+  return base.status === 'resolved' && base.holder.kind === 'package' ? base.holder.packageId : undefined;
 }
 
 /** An item's locale as the bundle key reads it: the schema default when it declares none. */
@@ -191,22 +249,26 @@ export function createRegistryEmailTemplateLoader(
 ): TemplateLoader {
   const resolveSources = typeof sources === 'function' ? sources : () => sources;
 
-  const readBundle = async (name: string): Promise<Record<string, unknown>[]> => {
+  const readBundle = async (name: string, options?: TemplateLoadOptions): Promise<Record<string, unknown>[]> => {
     const { protocol, registry } = resolveSources() ?? {};
-    // [ADR-0150 D3] The name first: a send names no package, so it resolves
-    // as a caller with no package. A refusal fails the send, naming every
-    // candidate; any other answer leaves the bundle to the read below.
+    // [ADR-0150 D3] The name first, from the package the send is made from (a
+    // caller with no package when it names none). A refusal fails the send,
+    // naming every candidate; a name two packages hold is read at the
+    // resolved holder's own address; any other answer leaves the bundle to the
+    // environment-wide read below, as before.
     const scoped = packageScopedRegistryOf(registry);
-    if (scoped) {
-      const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name });
-      if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
-    }
+    const address = scoped ? bundleAddressOf(scoped, name, options?.callerPackageId ?? null) : undefined;
     let items: unknown[];
     if (typeof protocol?.getMetaItemsForExecution === 'function') {
-      const listed = await protocol.getMetaItemsForExecution({ type: EMAIL_TEMPLATE_TYPE });
+      const listed = await protocol.getMetaItemsForExecution(
+        address === undefined ? { type: EMAIL_TEMPLATE_TYPE } : { type: EMAIL_TEMPLATE_TYPE, packageId: address },
+      );
       items = (listed?.items ?? []).map(stripReadDecorations);
     } else if (typeof registry?.listItems === 'function') {
       items = registry.listItems(EMAIL_TEMPLATE_TYPE) ?? [];
+      if (address !== undefined) {
+        items = items.filter((item) => (item as { _packageId?: unknown } | null)?._packageId === address);
+      }
     } else {
       items = [];
     }
@@ -239,13 +301,13 @@ export function createRegistryEmailTemplateLoader(
   // `resolveLocaleAmong` (the table language's first mapped tag, variant
   // expansion's first variant) answers the lowest tag, whatever order the
   // list carries.
-  const bundleLocales: TemplateBundleLocales = async (name) =>
-    [...new Set((await readBundle(name)).map(itemLocale))].sort();
+  const bundleLocales: TemplateBundleLocales = async (name, options) =>
+    [...new Set((await readBundle(name, options)).map(itemLocale))].sort();
 
   const loader: TemplateLoader & { [TEMPLATE_BUNDLE_LOCALES]: TemplateBundleLocales } = {
     [TEMPLATE_BUNDLE_LOCALES]: bundleLocales,
-    async load(name, locale) {
-      const bundle = await readBundle(name);
+    async load(name, locale, options) {
+      const bundle = await readBundle(name, options);
       if (locale) return render(pick(bundle, locale));
       const preferred = pick(bundle, DEFAULT_TEMPLATE_LOCALE);
       if (preferred) return render(preferred);

@@ -79,8 +79,7 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -321,7 +320,7 @@ import {
     judgeExtensionFieldSuffix,
 } from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
-import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+import { applySeedBodiesOnHost, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
@@ -614,6 +613,7 @@ import { ProtocolWriteGatesFacet } from './protocol-write-gates.js';
 import { ProtocolWriteGatesTables } from './protocol-write-gates-tables.js';
 // [#29985 codemod] Registry hydration, view expansion, write-through, object storage: the members below delegate to its facet, `ProtocolRegistryHydrationFacet`.
 import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js';
+import type { HealPackageBinding } from './protocol-heal-binding.js';
 // [#29985 codemod] Save refusals, saveMetaItem, saveConflict, migrateStoredMetadata: the members below delegate to its facet, `ProtocolSaveFacet`.
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
@@ -8365,6 +8365,8 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         /** The DELETE's own scope — `null` for an env-wide row. [#6780] */
         organizationId: string | null,
+        /** [#32366] The package the removed row was bound to; `null` for none; `HEAL_BINDING_UNKNOWN` when the caller does not know it. */
+        packageId: HealPackageBinding,
         /**
          * [#22877] The bundle member whose row was removed, as the door's
          * selector named it; omitted, the canonical member. For a type whose
@@ -8376,7 +8378,7 @@ export class ObjectStackProtocolImplementation implements
         member?: string,
     ): Promise<void> {
         // [#29985 codemod] The body moved to `protocol-registry-hydration.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, member);
+        return ProtocolRegistryHydrationFacet.restoreArtifactRegistryView(protocolHost(this), type, name, organizationId, packageId, member);
     }
 
     /** Docblock and body: {@link ProtocolRegistryHydrationFacet.ensureObjectStorage} in `protocol-registry-hydration.ts` [#29985 codemod]. */
@@ -9673,6 +9675,8 @@ export class ObjectStackProtocolImplementation implements
         member?: string;
         /** The registry question this promotion asks (`registry-question.ts`). */
         registryQuestion: RegistryQuestion;
+        /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
+        judgeOnly?: boolean;
     }): Promise<{
         singularType: string;
         /**
@@ -9687,7 +9691,12 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
+        promotedDraft?: { body: unknown; hash: string };
+        /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
+        judged?: { body: unknown; packageId: string | null };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
@@ -9726,16 +9735,8 @@ export class ObjectStackProtocolImplementation implements
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
         landed?: SeedAppliedLandedParsed[];
     }> {
-        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof applySeedBodies> = {
-            get engine() { return readEngine(); },
-            getMetaItem: (...a) => this.getMetaItem(...a),
-            // [#25779] The `field-files` service, so a published seed's files
-            // are stored as the boot seed's are.
-            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
-        };
-        return applySeedBodies.call(host, bodies);
+        // [#30020 codemod] The body moved to `protocol-publish-batch.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return applySeedBodiesOnHost.call(protocolHost(this), bodies);
     }
 
     /**
@@ -9957,8 +9958,13 @@ export class ObjectStackProtocolImplementation implements
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
      * lock guards and refreshes the runtime registry), so this needs NO
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
-     * the in-memory registry and 503s when that service is absent). Per-item
-     * failures are collected and do NOT abort the rest.
+     * the in-memory registry and 503s when that service is absent).
+     *
+     * All-or-nothing (ADR-0067 D2): a refusal of any draft refuses the whole
+     * batch, and nothing it promoted stays live. [#32396] That holds on a
+     * runtime that cannot roll a transaction back too — there the whole batch
+     * is judged before any draft is promoted, and a failure only the writes
+     * meet undoes the promotions already made — see the body's Phase 0.
      *
      * [#9406] The wire face of this return is DECLARED:
      * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the

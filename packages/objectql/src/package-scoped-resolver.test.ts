@@ -276,7 +276,14 @@ describe('red line 2 — every refusal names every candidate', () => {
 
 describe('ADR-0150 D3 exceptions', () => {
   it('a platform-requested name resolves environment-wide whatever the caller, and keeps one holder', () => {
-    expect(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE).toEqual({ permission: ['guest_portal'] });
+    expect(PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE).toEqual({
+      permission: ['guest_portal'],
+      // [#31699] The auth mails the platform sends with no package.
+      email_template: [
+        'auth.password_reset', 'auth.verify_email', 'auth.magic_link', 'auth.invitation',
+        'auth.account_invitation', 'auth.two_factor_otp', 'auth.email_change_notice', 'auth.existing_account_sign_up',
+      ],
+    });
     install(A);
     install(P); // declares nothing: A is outside its closure
     ship('permission', 'guest_portal', A);
@@ -307,7 +314,8 @@ describe('ADR-0150 D3 exceptions', () => {
     expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'baseline' });
     ship('email_template', 'auth.password_reset', A);
     expect(resolve('email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { packageId: A } });
-    expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'closure', holder: { packageId: A } });
+    // A name the platform requests (#31699) resolves environment-wide for a package caller too.
+    expect(resolve('email_template', 'auth.password_reset', P)).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { packageId: A } });
   });
 
   it('a bundled type answers the asked member of the resolved package, or not-found', () => {
@@ -395,6 +403,36 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
     expect(resolve('flow', 'send_email')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
   });
 
+  it('[#31699] a pair row that declares another holder as its base is skipped on the base\'s address, which falls to its own item', () => {
+    install(A);
+    install(B);
+    ship('email_template', 'welcome', A);
+    ship('email_template', 'welcome', B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const pairRow = (type: string, nameOf: string, tag: string, declared?: string) => registry.registerItem(type, {
+      ...body(type, nameOf, tag), _packageId: `${A}.custom`, _provenance: 'org',
+      ...(declared ? { overrides: { package: declared } } : {}),
+    }, 'name' as never);
+    pairRow('email_template', 'welcome', 'bound-to-beta', B);
+    pairRow('page', 'home', 'bound-to-beta', B);
+    expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', A)?.label).toBe('alpha template');
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('alpha page');
+    // CONTROL: the other holder's own item is unchanged.
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', B)?.label).toBe('beta page');
+  });
+
+  it('[#31699] CONTROL — a pair row that declares its own base, or none, is still the base\'s', () => {
+    install(A);
+    install(B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    registry.registerItem('page', { ...body('page', 'home', 'pair-own'), _packageId: `${A}.custom`, _provenance: 'org', overrides: { package: A } }, 'name' as never);
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('pair-own page');
+    registry.registerItem('page', { ...body('page', 'home', 'pair-plain'), _packageId: `${A}.custom`, _provenance: 'org' }, 'name' as never);
+    expect(registry.getPackageScopedItem<{ label: string }>('page', 'home', A)?.label).toBe('pair-plain page');
+  });
+
   it("a bundle's overlay members bind per member", () => {
     install(A);
     ship('email_template', 'welcome', A);
@@ -447,7 +485,8 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
   it('a second package holder is still refused by phase 1, so no reader can meet two', () => {
     sealedWithHolder(false);
     install(B);
-    expect(() => ship('flow', NAME, B)).toThrow();
+    // A type whose rule has not narrowed to the namespace (`flow` has, #31696).
+    expect(() => ship('webhook', NAME, B)).toThrow();
   });
 });
 
@@ -578,10 +617,11 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     engine.registry.logLevel = 'silent';
   });
 
-  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare map still keeps the last', () => {
+  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare read refuses the name (#31700)', () => {
     engine.registerFunction('score', fn('alpha'), `app:${A}`);
     engine.registerFunction('score', fn('beta'), { packageId: B, effect: 'writes' });
-    expect((engine.resolveFunction('score') as unknown as { tag: string }).tag).toBe('beta');
+    // [#31700, epic seat ruling R2-C] The bare map keeps the last, and the bare read picks neither holder.
+    expect(() => engine.resolveFunction('score')).toThrow(/The function "score" is held by 2 packages/);
     const holders = engine.functionHoldersOf('score');
     expect(holders.packageHolders).toEqual([A, B]);
     expect((holders.packageItem(A)?.handler as unknown as { tag: string }).tag).toBe('alpha');

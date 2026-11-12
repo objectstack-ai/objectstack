@@ -250,6 +250,7 @@ import {
 // [#30918] The coarse last-use stamp a verified MCP call writes on its consent.
 import { McpClientLastUseStamper, mcpClientLastUseStoreFor, issuedAtOf } from './mcp-client-last-use.js';
 import { runAfterResponse } from './run-after-response.js';
+import { markDirectoryProvisionedUsers } from './scim-identity-source.js';
 // [objectstack-ai/cloud#3606, ruling A] `/oauth2/revoke` for an MCP access
 // token: the answer `handleRequest` gives after the provider's, through
 // `answerOAuthTokenRevocation` below.
@@ -757,6 +758,21 @@ export function readInvitationPlacementIntent(
 
   if (!businessUnitId || positions.length === 0) return null;
   return { businessUnitId, positions };
+}
+
+/**
+ * [#32637] The plugin's own auth route table, as `AuthManager.handleRequest`
+ * answers through it: every route `AuthPlugin`'s mount serves, registered by
+ * the one function that fills the self-hosted mount (`auth-plugin.ts`).
+ */
+export interface AuthRouteSurface {
+  /**
+   * Answer one request under `basePath`, with what the transport knows about
+   * it. An exception is a rejection, never a fabricated answer.
+   */
+  fetch(request: Request, transport?: { remoteAddress?: string }): Promise<Response>;
+  /** Does the table itself serve `method` on `pathname` (a `HEAD` as its `GET`)? */
+  owns(method: string, pathname: string): boolean;
 }
 
 export interface AuthManagerOptions extends Partial<AuthConfig> {
@@ -4045,12 +4061,20 @@ export class AuthManager {
   }
 
   /**
-   * Handle an authentication request
-   * Forwards the request directly to better-auth's universal handler
+   * Handle an authentication request: the plugin's WHOLE auth surface.
    *
-   * better-auth catches internal errors (database / adapter / ORM) and
-   * returns a 500 Response instead of throwing.  We therefore inspect the
-   * response status and log server errors so they are not silently swallowed.
+   * [#32637] A request under `basePath` is answered by the route table
+   * `AuthPlugin` bound to this manager ({@link bindRouteSurface}) — the same
+   * registration that fills the self-hosted mount, so the routes the platform
+   * mounts itself (`/config`, the `/admin/*` doors, …), their mount-layer
+   * checks, and better-auth behind them through that table's catch-all. A host
+   * that forwards its auth path here serves exactly what the self-hosted mount
+   * serves and nothing else. With no bound table (a manager constructed on its
+   * own), or for a path outside `basePath`, the request goes straight to
+   * better-auth ({@link handleVendorRequest}), as it always did.
+   *
+   * An exception on the table reaches the caller as a rejection: the host
+   * turns it into its own public error body.
    *
    * @param request - Web standard Request object
    * @param transport - What the transport knows about the request that a Fetch
@@ -4058,10 +4082,50 @@ export class AuthManager {
    *   (`IHttpRequest.remoteAddress`). Omitted, the request's client address is
    *   established from trusted forwarded headers alone, and is undetermined
    *   when `trustProxy` is not declared. Either way the vendored library is
-   *   handed that address and no other (`client-address-vendor.ts`).
+   *   handed that address and no other (`client-address-vendor.ts`), and the
+   *   table's mount-layer checks judge by that same address.
    * @returns Web standard Response object
    */
   handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
+    const surface = this.routeSurface;
+    if (surface && this.betterAuthEndpointPath(request) !== undefined) return surface.fetch(request, transport);
+    return this.handleVendorRequest(request, transport);
+  }
+
+  /**
+   * [#32637] Bind the plugin's own route table: from now on
+   * {@link handleRequest} answers through it and {@link ownsRoute} counts its
+   * routes. `AuthPlugin` binds it in `init()`, right after constructing this
+   * manager, so the table is complete before the first request.
+   *
+   * @internal The plugin's wiring, not an extension point.
+   */
+  bindRouteSurface(surface: AuthRouteSurface | undefined): void {
+    this.routeSurface = surface;
+  }
+
+  /** [#32637] The table {@link bindRouteSurface} bound, if any. */
+  private routeSurface?: AuthRouteSurface;
+
+  /**
+   * better-auth's universal handler ALONE — the vendor entry.
+   *
+   * Every in-process re-dispatch into the vendor goes here, never through
+   * {@link handleRequest}: a bridge mounted on the route table that re-dispatched
+   * through `handleRequest` would be answered by that table again — the
+   * table's catch-all would call itself, and a gate-then-delegate mount on the
+   * vendor's own path (`/admin/remove-user`) would call its own route — and
+   * the mount-layer checks would run a second time on one request.
+   *
+   * better-auth catches internal errors (database / adapter / ORM) and
+   * returns a 500 Response instead of throwing.  We therefore inspect the
+   * response status and log server errors so they are not silently swallowed.
+   *
+   * @param request - Web standard Request object
+   * @param transport - As {@link handleRequest}'s.
+   * @returns Web standard Response object
+   */
+  handleVendorRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
     const host: Pick<RequestRoutingHost, 'config' | 'betterAuthEndpointPath' | 'getOrCreateAuth' | 'resolveClientAddress' | 'runSubjectErasureAtomically' | 'answerOAuthTokenRevocation' | 'runSsoCallback' | 'resolveAuthSecret'> = {
       config: this.config,
@@ -4152,7 +4216,8 @@ export class AuthManager {
           return (await auth.$context) as ThirdPartyLoginContext;
         },
         startUrl: new URL(`${this.getBasePath()}/sign-in/sso`, callback.request.url).href,
-        dispatch: (request) => this.handleRequest(request, transport),
+        // The vendor's own start, so never back through the route table.
+        dispatch: (request) => this.handleVendorRequest(request, transport),
         logger: this.config.logger,
       },
       callbackScope,
@@ -4309,6 +4374,31 @@ export class AuthManager {
   }
 
   /**
+   * Does this auth service ROUTE this request — is it one {@link handleRequest}
+   * answers with an answer of its own, whatever that answer is?
+   *
+   * [#32637] True for a route the bound route table serves itself, judged by
+   * method AND path (`POST /admin/sso/register` is the table's, a `GET` on that
+   * path is not), so a host that yields a `404` it is told nobody owns keeps an
+   * objectstack route's own `404` (a withdraw naming no consent) as the answer.
+   * Otherwise, whether better-auth's own router serves it
+   * ({@link ownsVendorRoute}).
+   */
+  ownsRoute(request: Request): Promise<boolean> {
+    const surface = this.routeSurface;
+    if (surface) {
+      let pathname: string | undefined;
+      try {
+        pathname = new URL(request.url).pathname;
+      } catch {
+        pathname = undefined;
+      }
+      if (pathname !== undefined && surface.owns(request.method, pathname)) return Promise.resolve(true);
+    }
+    return this.ownsVendorRoute(request);
+  }
+
+  /**
    * [#15417] Does better-auth ROUTE this request — i.e. is the path one its own
    * router owns, whatever it then answers?
    *
@@ -4328,7 +4418,7 @@ export class AuthManager {
    * request it cannot decide, so a failure to enumerate can never take the
    * #4088 surface down with it.
    */
-  ownsRoute(request: Request): Promise<boolean> {
+  ownsVendorRoute(request: Request): Promise<boolean> {
     // [#25224 cut 10] The body moved to `auth-manager-request-routing.ts` (see `RequestRoutingHost`).
     const readRouteOwnership = () => this.routeOwnership;
     const writeRouteOwnership = (v: AuthManager['routeOwnership']) => { this.routeOwnership = v; };
@@ -4521,10 +4611,20 @@ export class AuthManager {
    * never applied it on the SCIM path either — the vendor wrote the column
    * straight through the adapter.
    *
-   * Every read and write goes through `context.database` — the adapter the
+   * Every ban read and write goes through `context.database` — the adapter the
    * vendor bound to its transaction — never through an `internalAdapter`
    * resolved outside it, so the ban commits or rolls back with the SCIM
    * mutation it belongs to.
+   *
+   * [ADR-0135 D4] This callback also writes the directory-managed mark
+   * (`sys_user.source = 'idp_provisioned'`, `scim-identity-source.ts`) on every
+   * call — fail-closed and first on an active state, best-effort and after the
+   * deprovision write on an inactive one (the body says why): the vendor
+   * invokes it for every SCIM create, re-link and reprovision, and it is the
+   * one host seam all of them share. `source` is not
+   * a vendor field, so the adapter would drop it; the mark is written through
+   * the data engine instead, which joins the same transaction as its ambient
+   * one. A user holding a local password keeps `env_native` (D4's rule).
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,
@@ -4545,6 +4645,28 @@ export class AuthManager {
         `[auth] SCIM identity reconciliation: better-auth user '${state.userId}' has no sys_user row`,
       );
     }
+    // [ADR-0135 D4] The directory-managed mark, on the one seam every SCIM
+    // create, re-link and reprovision passes through (`scim-identity-source.ts`
+    // says why it is this callback). The engine joins the vendor's transaction,
+    // so the mark commits with the SCIM write or not at all.
+    //
+    // Its failure posture depends on the state, and the ORDER is the contract:
+    //  - active: the mark is written FIRST and fails closed — a mark that
+    //    cannot be written fails the SCIM request, the vendor rolls the create
+    //    back, and the IdP retries; no SCIM user is created unmarked.
+    //  - inactive (a deactivation, a DELETE, a create with `active: false`):
+    //    the deprovision write goes FIRST and the mark after it is best-effort,
+    //    so a refused mark can never leave a deprovisioned account enabled. A
+    //    refusal is logged and swallowed; the boot backfill and the next active
+    //    write re-run the mark. (A failure that aborts the driver transaction
+    //    itself fails the deprovision write too — that is the database, not
+    //    the mark.)
+    const engine = this.getDataEngine();
+    if (!engine) {
+      throw new Error(
+        `[auth] SCIM identity reconciliation: no data engine to write the identity-source mark for user '${state.userId}'`,
+      );
+    }
     const writer = {
       updateUser: (id: string, data: Record<string, unknown>) =>
         db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
@@ -4561,18 +4683,45 @@ export class AuthManager {
         if (user.banExpires !== null && user.banExpires !== undefined) {
           await writer.updateUser(state.userId, { banExpires: null, updatedAt: new Date() });
         }
-        return;
+      } else {
+        await applyUserBan(writer, state.userId, {
+          banReason: SCIM_DEACTIVATION_BAN_REASON,
+          banExpires: null,
+        });
       }
-      await applyUserBan(writer, state.userId, {
-        banReason: SCIM_DEACTIVATION_BAN_REASON,
-        banExpires: null,
-      });
+      try {
+        await markDirectoryProvisionedUsers(engine as never, [state.userId]);
+      } catch (e) {
+        this.logScimMarkDegradation(state.userId, e);
+      }
       return;
     }
+    await markDirectoryProvisionedUsers(engine as never, [state.userId]);
     if (!banned) return;
     // An administrator's ban is not the IdP's to lift.
     if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
     await applyUserUnban(writer, state.userId);
+  }
+
+  /**
+   * [ADR-0135 D4] The one notice for a directory-managed mark that could not
+   * be written on a SCIM deprovision, where the deprovision write has already
+   * landed and the mark is best-effort (`reconcileScimUserLifecycle`). Logged at
+   * `error`: the account is disabled, so nothing looks wrong, but the row keeps
+   * its previous `source` until the mark lands.
+   */
+  private logScimMarkDegradation(userId: string, error: unknown): void {
+    const message =
+      `[auth] the SCIM identity-source mark was NOT written for user '${userId}' on a deprovision — the account `
+      + 'was disabled and the SCIM request succeeds, so nothing looks wrong, but the user keeps their previous '
+      + '`source`, and a directory-provisioned user still reading `env_native` is offered the password / '
+      + 'identity-edit actions that hide for a managed identity (ADR-0135 D4). Remedy: make the sys_user update '
+      + 'land (write permission on `source`, driver connectivity); the boot backfill and the next active SCIM '
+      + 'write for this user re-run the mark.';
+    const sink = this.config.logger as { error?: (msg: string, meta?: unknown) => void } | undefined;
+    const meta = { object: 'sys_user', field: 'source', error: error instanceof Error ? error.message : String(error) };
+    if (typeof sink?.error === 'function') sink.error(message, meta);
+    else console.error(message, meta);
   }
 
   /**

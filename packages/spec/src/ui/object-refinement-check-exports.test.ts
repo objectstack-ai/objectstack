@@ -66,6 +66,7 @@ import {
   checkPageRegionPlacement,
   checkPageRecordBindingPlacement,
   checkPageMainRegionWidth,
+  checkPageRecordPlacesComponent,
 } from './page.zod';
 import {
   GlobalFilterSchema,
@@ -281,16 +282,18 @@ const pagePrintFixtures: Fixture[] = [
 
 // [#23610] `isDefault: true` off a record page bound to an object, and a
 // region the page's template does not place. No fixture here carries `print`,
-// `source`, `requires`, a `details` + `tabs` pair or a component `data`, so the
-// siblings stay silent and each row exercises ONE check alone. `kind` and
-// `template` are left out on the default rows on purpose: a direct call sees
-// neither while the parse sees the applied `full` / `default` defaults.
+// `source`, `requires`, a `details` + `tabs` pair or a component `data`, and
+// every `full` record page places a component (`PLACED`), so the siblings stay
+// silent and each row exercises ONE check alone. `kind` and `template` are
+// left out on the default rows on purpose: a direct call sees neither while
+// the parse sees the applied `full` / `default` defaults.
+const PLACED = [{ name: 'main', components: [{ type: 'record:details' }] }];
 const pageDefaultPlacementFixtures: Fixture[] = [
   { label: '`isDefault: true` on a `home` page', value: { ...PAGE_BASE, isDefault: true }, refusesAt: ['isDefault'] },
   { label: '`isDefault: true` on a `list` page', value: { ...PAGE_BASE, type: 'list', isDefault: true }, refusesAt: ['isDefault'] },
-  { label: '`isDefault: true` on a record page bound to no object', value: { ...PAGE_BASE, type: 'record', isDefault: true }, refusesAt: ['isDefault'] },
-  { label: '`isDefault: true` on a page with no `type` (the `record` default) and no object', value: { name: 'untyped_page', label: 'Untyped', isDefault: true }, refusesAt: ['isDefault'] },
-  { label: '`isDefault: true` on a record page bound to an object', value: { ...PAGE_BASE, type: 'record', object: 'account', isDefault: true }, refusesAt: [] },
+  { label: '`isDefault: true` on a record page bound to no object', value: { ...PAGE_BASE, type: 'record', isDefault: true, regions: PLACED }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a page with no `type` (the `record` default) and no object', value: { name: 'untyped_page', label: 'Untyped', isDefault: true, regions: PLACED }, refusesAt: ['isDefault'] },
+  { label: '`isDefault: true` on a record page bound to an object', value: { ...PAGE_BASE, type: 'record', object: 'account', isDefault: true, regions: PLACED }, refusesAt: [] },
   { label: '`isDefault: false` on a `home` page', value: { ...PAGE_BASE, isDefault: false }, refusesAt: [] },
   { label: 'a `home` page with no `isDefault`', value: { ...PAGE_BASE }, refusesAt: [] },
 ];
@@ -329,9 +332,26 @@ const pageRecordBindingPlacementFixtures: Fixture[] = [
   { label: 'a `record` binding on an `app` page', value: { ...PAGE_BASE, type: 'app', record: ORG_ROW }, refusesAt: [] },
   { label: 'an `app` page with no `record` binding', value: { ...PAGE_BASE, type: 'app' }, refusesAt: [] },
   { label: 'a `record` binding on a `home` page', value: { ...PAGE_BASE, record: ORG_ROW }, refusesAt: ['record'] },
-  { label: 'a `record` binding on a record page — its row is the record it opens', value: { ...PAGE_BASE, type: 'record', object: 'account', record: ORG_ROW }, refusesAt: ['record'] },
-  { label: 'a `record` binding on a page with no `type` (the `record` default)', value: { name: 'untyped_page', label: 'Untyped', record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a record page — its row is the record it opens', value: { ...PAGE_BASE, type: 'record', object: 'account', record: ORG_ROW, regions: PLACED }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a page with no `type` (the `record` default)', value: { name: 'untyped_page', label: 'Untyped', record: ORG_ROW, regions: PLACED }, refusesAt: ['record'] },
   { label: 'a `record` binding on a `list` page', value: { ...PAGE_BASE, type: 'list', record: ORG_ROW }, refusesAt: ['record'] },
+];
+
+// A `full` record page draws only the components its regions place, so one
+// that places none is refused at `regions`. The `kind: 'html'` row carries a
+// `source`, so the source-completeness sibling stays silent; no row names a
+// region its template does not place.
+const pageRecordPlacesComponentFixtures: Fixture[] = [
+  { label: 'a record page with no `regions`', value: { ...PAGE_BASE, type: 'record', object: 'account' }, refusesAt: ['regions'] },
+  { label: 'a page with no `type` (the `record` default) and no `regions`', value: { name: 'untyped_page', label: 'Untyped' }, refusesAt: ['regions'] },
+  { label: 'a record page whose regions hold no component', value: { ...PAGE_BASE, type: 'record', regions: [region('header'), region('main')] }, refusesAt: ['regions'] },
+  { label: 'a record page placing one component', value: { ...PAGE_BASE, type: 'record', regions: PLACED }, refusesAt: [] },
+  { label: 'a `slotted` record page with no regions — it draws the synthesized default', value: { ...PAGE_BASE, type: 'record', kind: 'slotted' }, refusesAt: [] },
+  { label: 'an `html` record page with no regions — it draws its `source`', value: { ...PAGE_BASE, type: 'record', kind: 'html', source: 'Card' }, refusesAt: [] },
+  { label: 'a `home` page with no regions — it draws its label as the heading', value: { ...PAGE_BASE }, refusesAt: [] },
+  { label: 'an `app` page whose regions hold no component', value: { ...PAGE_BASE, type: 'app', regions: [region('main')] }, refusesAt: [] },
+  { label: 'a record page bound to an object, carrying an `interfaceConfig.source` — the record view does not read it', value: { ...PAGE_BASE, type: 'record', object: 'account', interfaceConfig: { source: 'account' } }, refusesAt: ['regions'] },
+  { label: 'a page with no `type` and no `object` carrying an `interfaceConfig.source` — the page route draws it as an interface list', value: { name: 'open_cases', label: 'Open cases', interfaceConfig: { source: 'case' } }, refusesAt: [] },
 ];
 
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
@@ -552,6 +572,7 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
       { name: 'checkPageRecordBindingPlacement', check: checkPageRecordBindingPlacement, fixtures: pageRecordBindingPlacementFixtures },
       { name: 'checkPageMainRegionWidth', check: checkPageMainRegionWidth, fixtures: pageMainRegionWidthFixtures },
+      { name: 'checkPageRecordPlacesComponent', check: checkPageRecordPlacesComponent, fixtures: pageRecordPlacesComponentFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -706,9 +727,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all eight exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth', 'checkPageRecordPlacesComponent']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -757,6 +778,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageRegionPlacement', checkPageRegionPlacement],
     ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
     ['checkPageMainRegionWidth', checkPageMainRegionWidth],
+    ['checkPageRecordPlacesComponent', checkPageRecordPlacesComponent],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);

@@ -145,7 +145,7 @@ import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
 import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import type { ListDatasetsOutput, QueryDatasetOutput } from '@objectstack/spec/ai';
-import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
+import { describeServedObject, metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
@@ -522,7 +522,10 @@ const OBJECT_SCHEMA_MASK_TELEMETRY = {
  * D1 invariant, on this plane as on `/meta`.
  *
  * The D4 exemptions, the D6 tiers and the D8 switch are the shared posture's,
- * decided there and nowhere here. An unrestricted principal is handed each
+ * decided there and nowhere here — and so [ruling record 6787890900] is
+ * whether the object exists for this principal at all: one they may not read
+ * is left out of `listObjects` and read as `undefined` by `getObject`, exactly
+ * as a name the view does not hold. An unrestricted principal is handed each
  * definition by reference, exactly as before. A posture that throws, or a
  * projection that empties an object, refuses the read
  * ({@link fieldVisibilityRefusal}); in a listing, one such object refuses the
@@ -536,7 +539,7 @@ const OBJECT_SCHEMA_MASK_TELEMETRY = {
  * keep reading `view` whole: they serve none of it.
  */
 export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps): McpObjectView {
-  const servedToPrincipal = async (): Promise<(def: ObjectDef) => Promise<ObjectDef>> => {
+  const servedToPrincipal = async (): Promise<(def: ObjectDef) => Promise<ObjectDef | undefined>> => {
     const context = await deps.resolvePrincipal();
     const security = deps.security?.();
     const enabled = isObjectSchemaMaskingEnabled();
@@ -556,6 +559,9 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
         throw error;
       }
       const masked = applyObjectSchemaMask(def, await relateObjectSchemaMaskPosture(posture, def));
+      // [ruling record 6787890900] An object the principal may not read does
+      // not exist for them: `undefined`, the answer for a name the view lacks.
+      if (masked.hidden) return undefined;
       if (masked.emptied) throw fieldVisibilityRefusal(objectName);
       return masked.document;
     };
@@ -564,7 +570,10 @@ export function callerObjectView(view: McpObjectView, deps: CallerObjectViewDeps
     async listObjects() {
       const serve = await servedToPrincipal();
       const served: ObjectDef[] = [];
-      for (const def of ((await view.listObjects()) ?? []) as ObjectDef[]) served.push(await serve(def));
+      for (const def of ((await view.listObjects()) ?? []) as ObjectDef[]) {
+        const one = await serve(def);
+        if (one !== undefined) served.push(one);
+      }
       return served;
     },
     async getObject(name) {
@@ -1139,22 +1148,12 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
     async describeObject(name: string): Promise<unknown | null> {
       const def = (await servedView.getObject(name)) as ObjectDef | undefined;
       if (!def) return null;
-      const fields = def.fields ?? {};
       // The field list is an ARRAY here, not the stored map: `validate_expression`
       // reads `Array.isArray(def.fields)` off this very value, and the HTTP
       // bridge projects the same shape. A map would type-check and silently
       // leave that tool with zero fields in scope.
-      return {
-        name: def.name,
-        label: def.label ?? def.name,
-        fields: Object.entries(fields).map(([key, f]) => ({
-          name: key,
-          type: f?.type,
-          label: f?.label ?? key,
-          required: f?.required ?? false,
-        })),
-        enableFeatures: def.enable ?? {},
-      };
+      // [#32435] …each field and rule carrying what a write needs.
+      return describeServedObject(def);
     },
 
     // [#28715] From the object `describeObject` reads: the protocol's served

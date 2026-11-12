@@ -1945,6 +1945,9 @@ importers:
       fast-xml-parser:
         specifier: 5.10.1
         version: 5.10.1
+      hono:
+        specifier: ^4.13.5
+        version: 4.13.12
       jose:
         specifier: ^6.2.12
         version: 6.2.12
@@ -1979,9 +1982,6 @@ importers:
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
-      hono:
-        specifier: ^4.13.5
-        version: 4.13.12
       ioredis-mock:
         specifier: ^8.13.1
         version: 8.13.1(@types/ioredis-mock@8.2.7(ioredis@6.0.0))(ioredis@6.0.0)

@@ -23,29 +23,33 @@
  * resolve the name, so with two holders every caller is served the same one —
  * measured on a booted showcase with two packages sharing one bare name:
  *
- *  - `picklist` — a field's `picklist: NAME` resolves the FIRST-registered
- *    package's list for every object, so the second package's object is served
- *    the other package's options and refuses its own values;
- *  - `mapping` — an import's `mappingName` resolves the first-registered
- *    package's mapping, and the other package's import answers
+ *  - `picklist` — a field's `picklist: NAME` resolved the FIRST-registered
+ *    package's list for every object, so the second package's object was
+ *    served the other package's options and refused its own values;
+ *  - `mapping` — an import's `mappingName` resolved the first-registered
+ *    package's mapping, and the other package's import answered
  *    `MAPPING_TARGET_MISMATCH`;
- *  - `dataset` — a dashboard's `datasetName` query runs the first-registered
+ *  - `dataset` — a dashboard's `datasetName` query ran the first-registered
  *    package's dataset;
- *  - `api` — the endpoint matcher keeps ONE api per name, the last-registered,
- *    so the other package's declared path answers `404`;
+ *  - `api` — the endpoint matcher kept ONE api per name, the last-registered,
+ *    so the other package's declared path answered `404` (the picklist
+ *    family, these four and `function`, since narrowed to the namespace:
+ *    "The narrowing");
  *  - `action`, object-less only — `/actions/global/NAME` ran the
  *    last-registered package's handler while `/meta/action/NAME` served the
  *    first-registered package's declaration, so the button a client drew and
  *    the code that ran came from two packages (since narrowed to the
  *    namespace: "The narrowing");
- *  - `function` — the engine's function registry keeps one function per name,
- *    the last-registered, and a flow `script` node's `function` and an
- *    action's `target` resolve it with no package;
+ *  - `function` — the engine's function registry kept one function per name,
+ *    the last-registered, and a flow `script` node's `function` resolved it
+ *    with no package (an action's `target` names a handler key, never a
+ *    registered function);
  *  - `flow` — the automation engine keys its flow map by the bare name and
  *    arms ONE flow per name, the lexicographically-first package's, whichever
  *    registered first (it warns, naming both); `/meta/flow/NAME` serves the
  *    FIRST-registered package's declaration, so the body the designer opens
- *    and the body that runs can come from two packages;
+ *    and the body that runs can come from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `webhook` — the dispatcher's declared-webhook reader keeps the
  *    FIRST-registered package's declaration per name and never subscribes
  *    the other, and `/meta/webhook/NAME` serves the same one;
@@ -53,9 +57,10 @@
  *    connector picker reads) serves the FIRST-registered package's
  *    declaration; a provider-bound instance is the engine's one connector
  *    per name, and a second one at boot already refuses the boot (ADR-0097);
- *  - `email_template` — a send's `template: NAME` resolves the
+ *  - `email_template` — a send's `template: NAME` resolved the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
- *    serves the same one;
+ *    served the same one (both since narrowed to the namespace: "The
+ *    narrowing");
  *  - `agent` — `/meta/agent/NAME` served the FIRST-registered package's
  *    agent, the one by-name read of an agent the open framework serves (the
  *    agent runtime that resolves an agent by name is the cloud's);
@@ -147,7 +152,51 @@
  * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
  * `run_action` with `namespace`) reaches each. The same 409 answers two
  * packages' same-named action bound to ONE object (epic ruling record
- * 6729825528, letter A), which this rule never covered.
+ * 6729825528, letter A), which this rule never covered. `flow` followed
+ * (#31696): the automation engine holds and arms one flow per
+ * `(package, name)` slot and refuses a bare name two packages hold, naming
+ * both; `/meta/flow/NAME` reads through `readPackageScopedItem`; the
+ * namespace-qualified `/automation/NS/NAME` doors serve each holder's own
+ * slot; and a flow action or a flow endpoint runs the flow its own package
+ * names (D3).
+ *
+ * `email_template` followed (#31699): `/meta/email_template/NAME` reads
+ * through `readPackageScopedItem` member by member, and a send resolves the
+ * name from the package it is made from (a flow's `notify` node passes the
+ * flow's armed package; a send that names none resolves caller-less, and a
+ * refusal names every holder). A name two packages hold is read at the
+ * resolved holder's own address, so the bundle is that holder's alone
+ * (plugin-email's template loader).
+ *
+ * The picklist family followed (#31700): `picklist`, `mapping`, `dataset`,
+ * `api` and the engine's `function`. Each by-name reader resolves by
+ * `(package, name)`: a field's `picklist:` from the package that wrote the
+ * reference (E6) and the bare `/meta/picklist/NAME` (#32070); an import's
+ * `mappingName` and a connector pull (#32071); the dataset query door, the
+ * dataset AI tools and a chart's `?callerPackage=` (#32072, #32310); the
+ * `api` store and its qualified read (#32069), whose endpoint matcher keys
+ * routes by METHOD + path, a path the publish gate puts under the declaring
+ * namespace (`/api/v1/apps/NS/…`, ADR-0121 D1), so two namespaces' same-named
+ * APIs never claim one route; a flow `script` node's function, from the
+ * calling flow's package (#32073). A bare read of a name two packages hold
+ * answers `409 RESOURCE_CONFLICT` naming both — the engine's own bare function
+ * read (`resolveFunction` / `resolveFunctionEntry`) included (epic seat ruling
+ * R2-C, 6812862622) — and the metadata service's
+ * in-memory store keeps a slot per `(package, name)` for the three metadata
+ * types besides `api` (`PACKAGE_SLOTTED_STORE_TYPES`). An owner-less function
+ * a plugin or the host registers is the platform's holder: never judged at
+ * the bind, and refused beside a package holder at the read (ADR-0150 D2,
+ * epic seat ruling 6729484996).
+ *
+ * Two holdings still meet under a narrowed type, whatever the namespaces:
+ *
+ *  - a name the platform requests by its bare spelling
+ *    (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`) — the
+ *    `auth.*` mails the platform sends name no package, so a deployment keeps
+ *    one overriding package per name;
+ *  - a bundle ADDITION ({@link isBundleAdditionPair}) — a dependent package's
+ *    member its base does not ship, under the base's name, is no second
+ *    address: it names its base's template, and is refused as before.
  *
  * ## What it deliberately does not judge
  *
@@ -160,6 +209,9 @@
  *    ("The narrowing").
  *  - `picklistExtensions` — an extension adds values to another package's list
  *    by design; its own refusal (a repeated value) is the picklist module's.
+ *    Its target resolves caller-less (epic ruling X on #31678), so once two
+ *    namespaces hold the name, an extension of it adds to neither list and
+ *    is refused naming both (the registry's picklist audit), never a pick.
  *  - An action bound to an object, and a hook's `handler` (above).
  *  - A direct `ObjectQL.registerFunction` call: the imperative registration a
  *    host's own code makes, outside any package's bind.
@@ -180,6 +232,8 @@ import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
+  isPackageScopedType,
+  isPlatformRequestedBareName,
   OVERRIDABLE_BASELINE_PACKAGES,
   isBareNameOneHolderType,
   isOverridableBaseline,
@@ -190,6 +244,7 @@ import {
   type BareNameOneHolderType,
   type BareNameRegistryType,
 } from '@objectstack/core';
+import { ITEM_KEY_DISCRIMINATORS, readDiscriminatorValue } from '@objectstack/metadata-core';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 
 // [epic #31527 child R2] The holder vocabulary — the covered types, the
@@ -333,6 +388,14 @@ export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unkn
  * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
  * a bare name by `(package, name)` or refuses it naming both. A package with
  * no namespace has no address of its own, so it still meets every holder.
+ *
+ * A name the PLATFORM requests by its bare spelling, with no package
+ * (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`; ADR-0150 D3
+ * Exceptions) keeps one holder per deployment whatever the namespaces: its
+ * requester can name no package, so two holders would leave it refused as
+ * ambiguous on every request (`email_template`'s `auth.*` mails, #31699).
+ * `name` omitted judges by the type alone.
+ *
  * The namespace comparison is `namespacedHoldersMeet` (`@objectstack/spec`),
  * the copy `composeStacks` reads for the same pair in one artifact.
  */
@@ -340,8 +403,10 @@ export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
   incomingNamespace: string | undefined,
   holderNamespace: string | undefined,
+  name?: string,
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
+  if (name !== undefined && isPackageScopedType(type) && isPlatformRequestedBareName(type, name)) return true;
   // The namespace half is spec's one copy, which `composeStacks` reads too.
   return namespacedHoldersMeet(incomingNamespace, holderNamespace);
 }
@@ -428,6 +493,64 @@ export function declaredBareNames(manifest: ObjectStackManifest | unknown): Decl
   const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
   if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
   return out;
+}
+
+/**
+ * [ADR-0150 D9, #31699] The members of the bundle `(type, name)` a manifest
+ * declares — each item's discriminator value (an email template's `locale`,
+ * its canonical value when it states none), read from the same sources as
+ * {@link declaredBareNames}. Empty for a type that is no bundle.
+ */
+export function declaredBundleMembers(
+  manifest: ObjectStackManifest | unknown,
+  type: BareNameRegistryType,
+  name: string,
+): Set<string> {
+  const members = new Set<string>();
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (!disc) return members;
+  const read = (source: unknown) => {
+    if (!source || typeof source !== 'object') return;
+    const items = (source as Record<string, unknown>)[COLLECTION_KEY[type]];
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (itemName(item) === name) members.add(readDiscriminatorValue(item, disc.field) || disc.canonical);
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return members;
+}
+
+/**
+ * One package's holding of a bundled name, as {@link isBundleAdditionPair}
+ * reads it: the members it holds, and its declared dependency closure.
+ */
+export interface BundleHolding {
+  readonly packageId: string;
+  readonly members: ReadonlySet<string>;
+  readonly reach: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0150 D9, #31699] Is one of two package holdings of a bundled name an
+ * ADDITION to the other's bundle — the adding package declares (transitively)
+ * the other, the other does not declare it back, and the two hold no member in
+ * common (a dependent's `fr-FR` beside its base's `en-US`, #28802)? The test
+ * the registry's package-scoped holder read drops a dependent's addition by.
+ *
+ * An addition is no second address: it names its base's template, so it
+ * meets the base under the one-holder rule whatever the two namespaces
+ * declare, and stays refused once the type narrows to the namespace, as it was
+ * refused before.
+ */
+export function isBundleAdditionPair(a: BundleHolding, b: BundleHolding): boolean {
+  const adds = (adding: BundleHolding, base: BundleHolding): boolean =>
+    adding.reach.has(base.packageId)
+    && !base.reach.has(adding.packageId)
+    && ![...adding.members].some((member) => base.members.has(member));
+  return adds(a, b) || adds(b, a);
 }
 
 /** How a refusal names a covered type. */

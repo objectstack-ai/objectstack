@@ -90,6 +90,9 @@ import {
   BARE_NAME_ONE_HOLDER_TYPES,
   bareNameHoldersMeet,
   declaredBareNames,
+  declaredBundleMembers,
+  isBundleAdditionPair,
+  type BundleHolding,
   declaredBuiltInBoundActions,
   describeBareNameHolder,
   handlerOwnerPackageId,
@@ -146,14 +149,21 @@ import {
 // pure, so the registry and the engine plugin's load-time audit read one
 // spelling of each. See the module header.
 import {
+  collectManifestPicklistExtensions,
   collectManifestPicklistNames,
+  collectManifestPicklistReferences,
   collectPicklistReferences,
+  describePicklistReferencesBrokenByInstall,
+  describeUnresolvedPicklistReferences,
   duplicatePicklistValueError,
   findDuplicatePicklistValue,
   mergePicklistOptions,
   resolvePicklistFieldsOnto,
   type PicklistContribution,
   type PicklistOptionLike,
+  type DisagreeingPicklistReference,
+  type PicklistArrivalAct,
+  type PicklistArrivalVerdict,
   type UnresolvedPicklistExtension,
   type UnresolvedPicklistReference,
 } from './picklist-resolution.js';
@@ -4991,13 +5001,19 @@ export class SchemaRegistry {
    * security catalog reads its own. A package holder counts only when it
    * meets the incoming package under {@link bareNameHoldersMeet}: for a type
    * narrowed to the namespace, a holder of another namespace does not
-   * (`incomingNamespace`, the namespace the incoming package declares).
+   * (`incomingNamespace`, the namespace the incoming package declares) —
+   * unless one holding is an addition to the other's bundle
+   * ({@link bareNameBundleAdditionMeets}; `incomingHolding`, read only then).
    */
   private bareNameHoldersOtherThan(
     type: BareNameOneHolderType,
     name: string,
     incomingPackageId: string,
-    opts: { builtIns: boolean; incomingNamespace: string | undefined },
+    opts: {
+      builtIns: boolean;
+      incomingNamespace: string | undefined;
+      incomingHolding?: () => BundleHolding | undefined;
+    },
   ): BareNameHolder[] {
     if (!this.bareNameHoldersSealed) return [];
     const packages = this.bareNamePackageHolders(type, name);
@@ -5005,11 +5021,66 @@ export class SchemaRegistry {
     const found = new Map<string, BareNameHolder>();
     if (opts.builtIns && BUILT_IN_BARE_NAMES[type].has(name)) found.set(bareNameHolderKey({ kind: 'built-in' }), { kind: 'built-in' });
     for (const packageId of packages) {
-      if (!bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId))) continue;
+      if (
+        !bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId), name)
+        && !this.bareNameBundleAdditionMeets(type, name, opts.incomingHolding, packageId)
+      ) continue;
       const holder: BareNameHolder = { kind: 'package', packageId };
       found.set(bareNameHolderKey(holder), holder);
     }
     return [...found.values()];
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] `packageId`'s holding of the bundled `(type, name)`
+   * as the registry holds it — the members its composite group and its bound
+   * overlays hold ({@link bundleMembersHeldBy}) and its declared dependency
+   * closure — or `undefined` for a type that is no bundle.
+   */
+  private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string): BundleHolding | undefined {
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || !isBareNameRegistryType(type)) return undefined;
+    const collection = this.metadata.get(type) ?? new Map<string, any>();
+    const members = this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc);
+    return { packageId, members, reach: new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []) };
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] Do two package holders of a bundled name meet
+   * because one holding is an ADDITION to the other's bundle
+   * ({@link isBundleAdditionPair}) — whatever their namespaces, so a type
+   * narrowed to the namespace keeps refusing a dependent's added member as
+   * it did? `false` for a type that is no bundle, or when the incoming
+   * holding cannot be read.
+   */
+  private bareNameBundleAdditionMeets(
+    type: BareNameOneHolderType,
+    name: string,
+    incomingHolding: (() => BundleHolding | undefined) | undefined,
+    holderPackageId: string,
+  ): boolean {
+    if (!ITEM_KEY_DISCRIMINATORS[type] || !incomingHolding) return false;
+    const incoming = incomingHolding();
+    const holder = this.registeredBundleHolding(type, name, holderPackageId);
+    return incoming !== undefined && holder !== undefined && isBundleAdditionPair(incoming, holder);
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] The holding of the bundled `(type, name)` a manifest
+   * brings to the package door: the members it declares
+   * ({@link declaredBundleMembers}), and the closure its declared dependencies
+   * reach — each one and its own declared closure, read from the registry, as
+   * the walk would read the package once installed.
+   */
+  private declaredBundleHolding(manifest: ObjectStackManifest, packageId: string, type: BareNameOneHolderType, name: string): BundleHolding | undefined {
+    if (!ITEM_KEY_DISCRIMINATORS[type] || !isBareNameRegistryType(type)) return undefined;
+    const reach = new Set<string>();
+    for (const dep of declaredDependencyIds(manifest)) {
+      reach.add(dep);
+      for (const transitive of packageDependencyClosure(dep, this)?.dependencies ?? []) reach.add(transitive);
+    }
+    reach.delete(packageId);
+    return { packageId, members: declaredBundleMembers(manifest, type, name), reach };
   }
 
   /**
@@ -5033,7 +5104,11 @@ export class SchemaRegistry {
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true, incomingNamespace })) {
+      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, {
+        builtIns: true,
+        incomingNamespace,
+        incomingHolding: () => this.declaredBundleHolding(manifest, selfId, type, name),
+      })) {
         conflicts.push({
           type,
           name,
@@ -5176,7 +5251,9 @@ export class SchemaRegistry {
           const namespace = this.bareNameHolderNamespace(packageId);
           const first = packages
             .slice(0, index)
-            .find((earlier) => bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier)));
+            .find((earlier) =>
+              bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier), name)
+              || this.bareNameBundleAdditionMeets(type, name, () => this.registeredBundleHolding(type, name, packageId), earlier));
           if (first === undefined) return;
           conflicts.push({
             type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: first },
@@ -5423,6 +5500,26 @@ export class SchemaRegistry {
     const door = this.judgeRegistrationDoors(schema, packageId, ownership);
     if ('refusal' in door) throw door.refusal;
     schema = door.schema;
+
+    // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] After the
+    // boot sealed the picklist vocabulary, a packaged body registered on its
+    // own (outside an install judged as a whole: a plugin or the metadata
+    // service registering through the registry directly, a reloaded object)
+    // meets the one re-judge before its layer is stored: a field it writes
+    // must not leave another package's field of the same name writing to a
+    // different list ({@link refusePicklistItemArrival}). ⛔ Never an overlay
+    // or a tenant-authored body: it fills no package's slot and writes no
+    // package's reference, resolving as the environment's (`picklistReferrerOf`;
+    // swept for seat ruling R3-A).
+    if (packageId && (ownership === 'own' || ownership === 'extend') && !isTenantAuthored(schema)) {
+      this.refusePicklistItemArrival(
+        packageId,
+        ownership === 'own'
+          ? { objects: [schema] }
+          : { objectExtensions: [{ extend: schema.name, fields: (schema as { fields?: unknown }).fields }] },
+        `object '${schema.name}' of package '${packageId}'`,
+      );
+    }
 
     // [#25744] A code package's object keeps its own actions as their
     // `ActionSchema` parse — `requiresFeature` / `requiresMembershipReach`
@@ -8063,6 +8160,14 @@ export class SchemaRegistry {
       const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, {
         builtIns: false,
         incomingNamespace: this.bareNameHolderNamespace(packageId),
+        // [#31699] The incoming holding: what the package already holds of the
+        // bundle, and the member this registration adds.
+        incomingHolding: () => {
+          const held = this.registeredBundleHolding(type, baseName, packageId);
+          const disc = ITEM_KEY_DISCRIMINATORS[type];
+          if (!held || !disc) return held;
+          return { ...held, members: new Set([...held.members, discriminatorValue(item, disc.field) || disc.canonical]) };
+        },
       });
       if (holders.length > 0) {
         const rename = this.bareNameRenameFor(packageId, baseName);
@@ -8070,6 +8175,25 @@ export class SchemaRegistry {
           holders.map((existingHolder) => ({ type, name: baseName, incomingPackageId: packageId, existingHolder, rename })),
         );
       }
+    }
+
+    // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] A picklist a
+    // package registers on its own after the boot sealed the vocabulary — a
+    // plugin or the metadata service registering through the registry
+    // directly — meets the one re-judge an install meets, before anything
+    // below stores it: a list of a name another namespace's package holds must
+    // not leave an installed extension or reference with no one list
+    // ({@link refusePicklistItemArrival}). Any registration under a package
+    // fills that package's slot, a tenant-authored body included (contract
+    // review 6815437823 must-fix 1): the holder's own overlay adds no holder
+    // and passes. ⛔ Never a registration with no package: the environment
+    // catalog.
+    if (type === 'picklist' && packageId) {
+      this.refusePicklistItemArrival(
+        packageId,
+        { picklists: [{ ...(item as object), name: baseName }] },
+        `picklist '${baseName}' of package '${packageId}'`,
+      );
     }
 
     // One default record page per object per deployment — the item seam
@@ -8756,6 +8880,11 @@ export class SchemaRegistry {
    * one package's item never shadows another package's same-named item, which
    * is the one difference from {@link getItem}'s bare-slot-first answer.
    *
+   * A paired `<base>.custom` row that declares another holder as the base it
+   * customizes (`overrides.package`, ADR-0146 D2; the App's pair shared by
+   * every package of the App) is that holder's, never the App's: the App's
+   * address skips it and falls to the App's own item (#31699, epic ruling).
+   *
    * @param member - As on {@link getItem}: one bundle member, for a type whose
    *   identity is a pair; omitted, the canonical member first.
    */
@@ -8764,7 +8893,8 @@ export class SchemaRegistry {
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId
+        && !pairRowDeclaresAnotherHolder(item, packageId, holders));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { local } = collectBundle(collection, name, disc, packageId);
@@ -10297,6 +10427,15 @@ export class SchemaRegistry {
     packageId?: string,
   ): void {
     const target = extension.extend;
+    // [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] After the
+    // seal, an extension registered on its own (outside an install judged as
+    // a whole) meets the one re-judge first: its target, judged caller-less,
+    // must be one list ({@link refusePicklistItemArrival}).
+    this.refusePicklistItemArrival(
+      packageId,
+      { picklistExtensions: [extension] },
+      `a \`picklistExtensions\` entry of package '${packageId}' extending picklist '${target}'`,
+    );
     const packageKey = packageId ?? '';
     const own = this.picklistExtensionContributions.get(target)?.get(packageKey);
     const merged = new Map<string, PicklistOptionLike>(own?.options);
@@ -10371,14 +10510,25 @@ export class SchemaRegistry {
    * referrer's declared closure, else refused naming every holder — exactly as
    * the served field will be once the artifact registers (epic seat review on
    * #31731). ⛔ No closure is computed here; R computes it from this view.
+   *
+   * [#31700, ruling R2-A] `replaces: false` (a per-item seam,
+   * {@link judgePicklistArrival}): the manifest adds lists to a package and
+   * stands for no version of it, so `getPackage` keeps answering the
+   * installed record. A manifest with no package id registers its lists as
+   * the environment's (`registerItem` with no package), so the view holds
+   * them there.
    */
-  private withPendingManifests(manifests: readonly unknown[]): PackageScopedRegistry {
+  private withPendingManifests(manifests: readonly unknown[], options: { replaces?: boolean } = {}): PackageScopedRegistry {
     const pending = new Map<string, InstalledPackage>();
     const pendingLists = new Map<string, Set<string>>();
+    const pendingEnvironmentLists = new Set<string>();
     for (const manifest of manifests) {
       const id = artifactPackageId(manifest);
-      if (id === undefined) continue;
-      pending.set(id, { manifest } as unknown as InstalledPackage);
+      if (id === undefined) {
+        for (const name of collectManifestPicklistNames(manifest)) pendingEnvironmentLists.add(name);
+        continue;
+      }
+      if (options.replaces !== false) pending.set(id, { manifest } as unknown as InstalledPackage);
       for (const name of collectManifestPicklistNames(manifest)) {
         let holders = pendingLists.get(name);
         if (!holders) pendingLists.set(name, holders = new Set());
@@ -10403,7 +10553,10 @@ export class SchemaRegistry {
         pendingHolders(type, name).has(packageId)
           ? ({ name, _packageId: packageId } as unknown as T)
           : this.getPackageScopedItem<T>(type, name, packageId, member),
-      getEnvironmentScopedItem: (type, name, member) => this.getEnvironmentScopedItem(type, name, member),
+      getEnvironmentScopedItem: <T>(type: string, name: string, member?: string): T | undefined =>
+        type === 'picklist' && pendingEnvironmentLists.has(name)
+          ? ({ name } as unknown as T)
+          : this.getEnvironmentScopedItem<T>(type, name, member),
     };
     return view;
   }
@@ -10467,6 +10620,308 @@ export class SchemaRegistry {
    */
   findOutsideClosurePicklistReferences(): UnresolvedPicklistReference[] {
     return this.auditPicklistReferences().outsideClosure;
+  }
+
+  /**
+   * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+   * (6812862622)] Set once, by {@link sealPicklistVocabulary}, when the boot
+   * has judged every packaged picklist reference and extension. From then on
+   * every picklist arrival meets {@link judgePicklistArrival} before anything
+   * of it registers.
+   */
+  private picklistVocabularySealed = false;
+
+  /**
+   * How many {@link registeringPicklistArrival} runs are open: an arrival
+   * judged as a whole registers inside one, and the per-item seams (and a
+   * nested {@link admitPicklistArrival}) do not judge its parts again.
+   */
+  private picklistArrivalDepth = 0;
+
+  /**
+   * [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] The boot's seal of
+   * the picklist vocabulary, called by the engine plugin at `kernel:ready` once
+   * the load-time audit has run. From this call on, every way a picklist
+   * holder, a `picklistExtensions` entry or a field's picklist reference
+   * arrives — a late install or upgrade (the `manifest` service), a hot
+   * reload, a direct `registerApp`, and the item seams
+   * ({@link registerItem} for a `picklist`, {@link registerPicklistExtension},
+   * {@link registerObject}) — meets {@link judgePicklistArrival} first.
+   */
+  sealPicklistVocabulary(): void {
+    this.picklistVocabularySealed = true;
+  }
+
+  /** Has the boot sealed the picklist vocabulary (every arrival is now judged)? */
+  get picklistVocabularyIsSealed(): boolean {
+    return this.picklistVocabularySealed;
+  }
+
+  /**
+   * [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] Refuse, once the
+   * vocabulary is sealed and outside a run already judged as a whole, an
+   * arrival of `manifests` that {@link judgePicklistArrival} finds wanting.
+   * Nothing registers before it; the caller registers after it, inside
+   * {@link registeringPicklistArrival}.
+   *
+   * @throws the `INVALID_METADATA` refusal naming every reference, extension
+   *   and field, and each holder.
+   */
+  refusePicklistArrival(manifests: readonly unknown[], options: { act?: PicklistArrivalAct } = {}): void {
+    if (!this.picklistVocabularySealed || this.picklistArrivalDepth > 0) return;
+    const refusal = this.picklistArrivalRefusal(manifests, { replaces: true, ownRefusals: 'all', act: options.act ?? 'install' });
+    if (refusal) throw refusal;
+  }
+
+  /**
+   * Run `register` as the registration of an arrival judged as a whole
+   * ({@link refusePicklistArrival}): the per-item seams it reaches do not
+   * judge its parts one by one, which would read a half-registered artifact.
+   */
+  registeringPicklistArrival<T>(register: () => T): T {
+    this.picklistArrivalDepth += 1;
+    try {
+      return register();
+    } finally {
+      this.picklistArrivalDepth -= 1;
+    }
+  }
+
+  /** {@link refusePicklistArrival}, then `register` inside {@link registeringPicklistArrival}. */
+  admitPicklistArrival<T>(manifests: readonly unknown[], register: () => T, options: { act?: PicklistArrivalAct } = {}): T {
+    this.refusePicklistArrival(manifests, options);
+    return this.registeringPicklistArrival(register);
+  }
+
+  /**
+   * [ADR-0150 D3, #31700; epic seat ruling R2-A, 6812862622] The per-item
+   * seams' half: one picklist, extension or object body registered under
+   * `packageId` on its own, after the seal and outside an arrival judged as a
+   * whole. Judged as an ADDITION to what the package holds
+   * (`replaces: false`): its installed items stay, and its identity and
+   * dependencies are the installed record's. Its own reference or extension
+   * is refused only when the resolver refuses it as ambiguous — the class two
+   * namespaces' holders open; a name nothing holds, or holds only outside the
+   * package's closure, keeps the seam's answer (served no options, named by
+   * the boot audit). What it does to everyone else's references is judged in
+   * full. ⛔ Never a registration with no package: the environment catalog
+   * (`sys_metadata`), whose stored row is not refused here. A tenant-authored
+   * list under a package is judged as any list of it (seat ruling R3-A); a
+   * tenant-authored object layer is not asked, as it writes no package's
+   * reference ({@link registerObject}).
+   */
+  private refusePicklistItemArrival(packageId: string | undefined, part: Record<string, unknown>, subject: string): void {
+    if (!this.picklistVocabularySealed || this.picklistArrivalDepth > 0 || !packageId) return;
+    const refusal = this.picklistArrivalRefusal([{ id: packageId, ...part }], {
+      replaces: false,
+      ownRefusals: 'ambiguous',
+      act: 'register',
+      subject,
+    });
+    if (refusal) throw refusal;
+  }
+
+  /** The refusal {@link judgePicklistArrival}'s verdict amounts to, or `undefined`. */
+  private picklistArrivalRefusal(
+    manifests: readonly unknown[],
+    options: { replaces: boolean; ownRefusals: 'all' | 'ambiguous'; act: PicklistArrivalAct; subject?: string },
+  ): Error | undefined {
+    const verdict = this.judgePicklistArrival(manifests, options);
+    return describeUnresolvedPicklistReferences(verdict.unresolved, verdict.orphans)
+      ?? describePicklistReferencesBrokenByInstall(
+        manifests.map((m) => artifactPackageId(m)).filter((id): id is string => id !== undefined),
+        verdict.references,
+        verdict.extensions,
+        verdict.disagreeing,
+        { act: options.act, subject: options.subject },
+      );
+  }
+
+  /**
+   * [ADR-0150 D3, #31700; epic seat rulings A (6811306558) and R2-A
+   * (6812862622)] The ONE re-judge of a picklist arrival: `manifests` (an
+   * artifact, a reload, one body, or one item a seam registers) judged with
+   * everything already registered, over one registry view holding them
+   * (`withPendingManifests`), before any of it registers. Five answers:
+   *
+   *  - `unresolved`: a field reference the arrival brings that R does not
+   *    resolve from the package writing it, nothing holding the name included;
+   *  - `orphans`: a `picklistExtensions` entry the arrival brings whose target
+   *    resolves to no one list, judged caller-less as the boot judges it
+   *    (`findOrphanPicklistExtensions`): a list of the same name the arriving
+   *    package itself declares is no shortcut once another namespace holds
+   *    the name;
+   *  - `references` / `extensions`: an installed reference or extension that
+   *    resolves now and would not once the arrival registers;
+   *  - `disagreeing`: a field whose reference to one list name every packaged
+   *    layer that writes it (the owner, each `objectExtensions` redeclare, the
+   *    arrival's among them) reaches the same list from now — or that no
+   *    installed layer writes yet — and whose writers would reach different
+   *    lists: served no options and refusing every value
+   *    ({@link findDisagreeingPicklistReferences}).
+   *
+   * Judged as the boot audit judges: packaged layers only, never an overlay or
+   * a tenant-authored body, each reference from the package that writes it.
+   * `replaces` (an install, an upgrade, a reload): an arriving package's
+   * installed layers and extensions are what the arrival replaces, so its
+   * references are judged as the arrival's; otherwise (a per-item seam) they
+   * stay, and the arriving item is added to them. A reference or extension
+   * refused already, or a field whose writers disagree already, is not this
+   * arrival's doing and is left out. `ownRefusals: 'ambiguous'` (the per-item
+   * seams) keeps only the arrival's own references and extensions the
+   * resolver refuses as ambiguous.
+   */
+  judgePicklistArrival(
+    manifests: readonly unknown[],
+    options: { replaces?: boolean; ownRefusals?: 'all' | 'ambiguous' } = {},
+  ): PicklistArrivalVerdict {
+    const verdict: PicklistArrivalVerdict = { unresolved: [], orphans: [], references: [], extensions: [], disagreeing: [] };
+    if (manifests.length === 0) return verdict;
+    const replaces = options.replaces !== false;
+    const replaced = new Set(
+      replaces ? manifests.map((m) => artifactPackageId(m)).filter((id): id is string => id !== undefined) : [],
+    );
+    const view = this.withPendingManifests(manifests, { replaces });
+    const memo = new Map<string, { before: PackageScopedResolution<PicklistItemLike>; after: PackageScopedResolution<PicklistItemLike> }>();
+    const judged = (name: string, caller: string | null) => {
+      const key = JSON.stringify([name, caller]);
+      let entry = memo.get(key);
+      if (!entry) {
+        memo.set(key, entry = {
+          before: resolvePackageScopedName<PicklistItemLike>(this, { type: 'picklist', name, callerPackageId: caller }),
+          after: resolvePackageScopedName<PicklistItemLike>(view, { type: 'picklist', name, callerPackageId: caller }),
+        });
+      }
+      return entry;
+    };
+    const refusedOwn = (after: PackageScopedResolution<PicklistItemLike>): boolean => {
+      if (after.status === 'resolved') return false;
+      if (options.ownRefusals !== 'ambiguous') return true;
+      return after.status === 'refused'
+        && (after.reason === 'ambiguous-in-closure' || after.reason === 'ambiguous-in-environment');
+    };
+    const carrying = <R extends object>(entry: R, after: PackageScopedResolution<PicklistItemLike>): R & { refusal?: string } =>
+      after.status === 'refused' ? { ...entry, refusal: after.message } : entry;
+
+    // The arrival's own references and extensions.
+    const arrivingRefs: UnresolvedPicklistReference[] = [];
+    const arrivingExtensions = new Set<string>();
+    for (const manifest of manifests) {
+      const packageId = artifactPackageId(manifest);
+      for (const ref of collectManifestPicklistReferences(manifest, packageId)) {
+        arrivingRefs.push(ref);
+        const { after } = judged(ref.picklist, ref.packageId ?? null);
+        if (refusedOwn(after)) verdict.unresolved.push(carrying(ref, after));
+      }
+      for (const ext of collectManifestPicklistExtensions(manifest, packageId)) {
+        arrivingExtensions.add(JSON.stringify([ext.picklist, ext.packageId ?? '']));
+        const { after } = judged(ext.picklist, null);
+        if (refusedOwn(after)) verdict.orphans.push(carrying(ext, after));
+      }
+    }
+
+    // What it does to the references and extensions already installed, and
+    // every field's writers, grouped by (object, field, list name).
+    type Group = { object: string; field: string; picklist: string; before: (string | null)[]; after: (string | null)[] };
+    const groups = new Map<string, Group>();
+    for (const [fqn, contributors] of this.objectContributors) {
+      const referrerOf = picklistReferrerOf(contributors);
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        const replacedLayer = contributor.packageId !== undefined && replaced.has(contributor.packageId);
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          if (!replacedLayer) {
+            const { before, after } = judged(ref.picklist, ref.packageId ?? null);
+            if (before.status === 'resolved' && after.status !== 'resolved') verdict.references.push(carrying(ref, after));
+          }
+          const key = JSON.stringify([fqn, ref.field, ref.picklist]);
+          if (groups.has(key)) continue;
+          const writers = referrerOf(ref.field, ref.picklist);
+          groups.set(key, {
+            object: fqn,
+            field: ref.field,
+            picklist: ref.picklist,
+            before: [...writers],
+            after: writers.filter((w) => w === null || !replaced.has(w)),
+          });
+        }
+      }
+    }
+    for (const [target, byPackage] of this.picklistExtensionContributions) {
+      for (const entry of byPackage.values()) {
+        if (entry.packageId !== undefined && replaced.has(entry.packageId)) continue;
+        if (arrivingExtensions.has(JSON.stringify([target, entry.packageId ?? '']))) continue;
+        const { before, after } = judged(target, null);
+        if (before.status === 'resolved' && after.status !== 'resolved') {
+          verdict.extensions.push(carrying({ picklist: target, packageId: entry.packageId }, after));
+        }
+      }
+    }
+    for (const ref of arrivingRefs) {
+      const key = JSON.stringify([ref.object, ref.field, ref.picklist]);
+      let group = groups.get(key);
+      if (!group) groups.set(key, group = { object: ref.object, field: ref.field, picklist: ref.picklist, before: [], after: [] });
+      const writer = ref.packageId ?? null;
+      if (!group.after.includes(writer)) group.after.push(writer);
+    }
+    for (const group of groups.values()) {
+      if (group.after.length < 2) continue;
+      const before = group.before.map((w) => judged(group.picklist, w).before);
+      if (!before.every((r) => r.status === 'resolved')) continue;
+      const beforeHolders = before.map((r) => (r as { holder: PackageScopedHolder }).holder);
+      if (!beforeHolders.every((h) => sameHolder(h, beforeHolders[0]))) continue;
+      const reached: { packageId: string | undefined; holder: PackageScopedHolder }[] = [];
+      for (const writer of group.after) {
+        const after = judged(group.picklist, writer).after;
+        if (after.status !== 'resolved') break;
+        reached.push({ packageId: writer ?? undefined, holder: after.holder });
+      }
+      if (reached.length < group.after.length) continue;
+      if (reached.every((r) => sameHolder(r.holder, reached[0].holder))) continue;
+      verdict.disagreeing.push({ object: group.object, field: group.field, picklist: group.picklist, referrers: reached });
+    }
+    return verdict;
+  }
+
+  /**
+   * [ADR-0150 D3, child E6; #31700] The fields whose picklist reference
+   * several packaged layers write (the object's owner and an extension of
+   * it), each RESOLVING the name from its own package, but to DIFFERENT
+   * lists. {@link resolveFieldPicklistOptions} serves such a field no options
+   * — no referrer is preferred over another — and the record validator
+   * refuses its values; neither half of the audit above names it, since
+   * every referrer's own resolution succeeds. Reachable once two namespaces
+   * may each hold the name: the owner's package reaches its list, the
+   * extension's package reaches its own. The boot names each one (a warning,
+   * every referrer and the holder it reaches) and carries on, as it does for
+   * an outside-closure reference (ruling N2 on the E6 card).
+   */
+  findDisagreeingPicklistReferences(): DisagreeingPicklistReference[] {
+    const disagreeing: DisagreeingPicklistReference[] = [];
+    for (const [fqn, contributors] of this.objectContributors) {
+      const referrerOf = picklistReferrerOf(contributors);
+      const seen = new Set<string>();
+      for (const contributor of contributors) {
+        if (contributor.ownership === 'overlay' || isTenantAuthored(contributor.definition)) continue;
+        for (const ref of collectPicklistReferences(fqn, contributor.definition, contributor.packageId)) {
+          const key = `${ref.field}\u0000${ref.picklist}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const referrers = referrerOf(ref.field, ref.picklist);
+          if (referrers.length < 2) continue;
+          const reached: { packageId: string | undefined; holder: PackageScopedHolder }[] = [];
+          for (const referrer of referrers) {
+            const verdict = this.picklistReferenceVerdict(ref.picklist, referrer);
+            if (verdict.status !== 'resolved') break;
+            reached.push({ packageId: referrer ?? undefined, holder: verdict.holder });
+          }
+          if (reached.length < referrers.length) continue;
+          if (reached.every((r) => sameHolder(r.holder, reached[0].holder))) continue;
+          disagreeing.push({ object: fqn, field: ref.field, picklist: ref.picklist, referrers: reached });
+        }
+      }
+    }
+    return disagreeing;
   }
 
   /** The field half of the audit, split by the resolver's verdict (above). */
@@ -10663,4 +11118,19 @@ export class SchemaRegistry {
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }
+}
+
+/**
+ * [#31699, epic ruling on the App pair's plain slot] Whether `item`, a row of a
+ * paired `<base>.custom` package that binds to `packageId` (its base), declares
+ * another holder of the name as the base it customizes (`overrides.package`,
+ * ADR-0146 D2): that holder's member, never `packageId`'s.
+ */
+function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders: ReadonlySet<string>): boolean {
+  const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
+  const declaration = (item as { overrides?: unknown }).overrides;
+  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
+  const declared = (declaration as { package?: unknown }).package;
+  return typeof declared === 'string' && declared !== '' && declared !== packageId && holders.has(declared);
 }

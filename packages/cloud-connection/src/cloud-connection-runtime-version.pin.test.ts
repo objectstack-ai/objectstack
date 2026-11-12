@@ -39,6 +39,8 @@ const CLOUD = 'http://cloud.test';
 const ADMIN = 'u_admin';
 const ORG = 'o1';
 const GRANTS: Record<string, any[]> = {
+    // A current membership in the organization the session acts in (ADR-0093 D8.1, as amended).
+    sys_member: [{ id: 'mem_1', user_id: ADMIN, organization_id: ORG, role: 'member' }],
     sys_user_permission_set: [{ id: 'ups_1', user_id: ADMIN, permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: ORG }],
     sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
 };

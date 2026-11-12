@@ -69,6 +69,7 @@ import {
 } from './protocol-view-normalization.js';
 import { isShippedViewItem, stripDerivedProvenance } from './protocol-package-bindings.js';
 import { mutationEventMemberOfBody } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import {
     destructiveChangeRemedy,
@@ -82,6 +83,7 @@ import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
+import { BatchRowHealError, canJudgeBatchObjects, isBatchObjectType, readActiveBatchRow, settleBatchObjectRows, undoBatchRowWrite, undoOutcomeForLog, type WrittenBatchRow } from './batch-object-registration.js';
 
 export class ProtocolSaveFacet {
     /**
@@ -2165,6 +2167,9 @@ export class ProtocolSaveFacet {
                 organizationId: null,
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
+                // [#32451] …and its package: the binding `put` wrote under (a
+                // draft naming none inherits the active rows' package).
+                ...mutationEventPackage(mode === 'draft' && request.packageId == null ? inheritedDraftPackageId : request.packageId),
             });
             const receiptPackageId = typeof request.packageId === 'string' && request.packageId !== ''
                 ? request.packageId
@@ -2248,7 +2253,7 @@ export class ProtocolSaveFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#migrateStoredMetadata`; the method's docblock there is its contract. */
-    static async migrateStoredMetadata(host: Pick<ProtocolHost, 'convertStoredItemDetailed' | 'engine' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'registeredTranslationBundle' | 'resolveFlowCanonicalizer' | 'saveMetaItem' | 'storedRowKnownDatasources'>, request: {
+    static async migrateStoredMetadata(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'classifyObjectContribution' | 'convertStoredItemDetailed' | 'engine' | 'ensureObjectStorage' | 'findEnvironmentRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'registeredTranslationBundle' | 'resolveFlowCanonicalizer' | 'restoreArtifactRegistryView' | 'saveMetaItem' | 'storedRowKnownDatasources'>, request: {
             /** Write. Omitted / false = preview: reports what it would do, writes nothing. */
             apply?: boolean;
             /** Restrict to these metadata types (singular or plural spelling). */
@@ -2315,6 +2320,10 @@ export class ProtocolSaveFacet {
         // Two scoped queries rather than one unfiltered scan: `state` is an
         // equality column and these are the only two states that are SERVED
         // metadata. Archived bodies are never even read.
+        // [#32369] The object rows this pass rewrote and published, judged as
+        // one unit once the pass is done (see the settle below the loop).
+        const rewrittenObjects: Array<WrittenBatchRow & { entry: StoredMigrationRow }> = [];
+        const judging = canJudgeBatchObjects(host);
         const rows: any[] = [];
         for (const state of ['active', 'draft'] as const) {
             // [#21908, ADR-0096 D5] The explicit system opt-in: the migration
@@ -2632,7 +2641,32 @@ export class ProtocolSaveFacet {
                     // #4556 default). The pass's name is on `source` above.
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
-                record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' });
+                const entry: StoredMigrationRow = { ...base, notices: flattened, todos: flattenedTodos, outcome: 'rewritten' };
+                // [#32369] Read back BEFORE the row is recorded rewritten: a read
+                // that fails records the row failed alone (the `catch` below).
+                if (judging && state === 'active' && organizationId === null && isBatchObjectType(singular)) {
+                    const stored = await readActiveBatchRow(host, { type: singular, name: base.name, packageId });
+                    const address = {
+                        type: singular, name: base.name, packageId,
+                        // The row this pass read and rewrote: an undo restores it.
+                        prevVersion: typeof row.version === 'number' ? row.version : null,
+                    };
+                    rewrittenObjects.push({
+                        type: singular, name: base.name, body: stored?.body ?? item, packageId, entry,
+                        undo: async () => {
+                            // ⛔ Never a delete: the row was stored before this pass.
+                            if (address.prevVersion === null) {
+                                throw new Error(`the row's stored version is unknown, so its rewrite cannot be restored`);
+                            }
+                            await undoBatchRowWrite(host, address, {
+                                ...(request.actor ? { actor: request.actor } : {}),
+                                source: 'migrate-stored',
+                                message: `undo the rewrite of ${singular}/${base.name}: the registry refuses it (ADR-0144 D2 and D6)`,
+                            });
+                        },
+                    });
+                }
+                record(entry);
             } catch (e: any) {
                 // [#8333 · P13] `rows[].reason` is REPORT DATA — it rides on the
                 // migration report, not on a thrown message — so no HTTP
@@ -2666,6 +2700,36 @@ export class ProtocolSaveFacet {
                     `[protocol.migrateStoredMetadata] rewrite failed for ${base.type}/${base.name}: ${e?.message ?? e}`,
                 );
             }
+        }
+
+        // [#32369, ADR-0144 D2 and D6] The rewritten objects as ONE unit, after
+        // the pass's own registrations: a rewrite the registry refuses — at its
+        // registration (D6's roll-up door, only logged at the write-through) or
+        // once the pass is whole (the follow door, which no registration asks)
+        // — is restored to the row this pass read and reported `failed` with
+        // the registry's own refusal, never `rewritten`. Judged after the loop,
+        // so a row whose pair a later row of the pass completes is rewritten
+        // (#29673). A restored row is what the store held before the pass; a
+        // registry that refused that row too still logs it at the restore.
+        for (const out of await settleBatchObjectRows(host, rewrittenObjects)) {
+            const { entry } = out.row;
+            entry.outcome = 'failed';
+            entry.reason = clientFacingFailureText(out.refusal, 'the registry refused the rewrite')
+                + (out.undoError === undefined
+                    ? ' The rewrite was taken back: the row is stored as it was before this pass.'
+                    : out.undoError instanceof BatchRowHealError
+                        ? ' The rewrite was taken back: the row is stored as it was before this pass, but the registry '
+                            + `could not be put back to it (${clientFacingFailureText(out.undoError.healError, 'heal failed')}) `
+                            + 'and may serve the refused rewrite until the server restarts.'
+                        : ` The rewrite could NOT be taken back (${clientFacingFailureText(out.undoError, 'undo failed')}): `
+                            + 'the row is stored rewritten although the registry refuses it; correct it by hand.');
+            report.rewritten--;
+            report.failed++;
+            console.warn(
+                `[protocol.migrateStoredMetadata] the rewrite of ${entry.type}/${entry.name} was refused by the registry and `
+                + `${undoOutcomeForLog(out.undoError)}: `
+                + `${out.refusal.message}`,
+            );
         }
 
         return report;

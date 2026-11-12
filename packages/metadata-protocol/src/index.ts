@@ -82,6 +82,31 @@ export type {
     EnsureActivationLedgerPackagelessIndexStatus,
 } from './migrations/activation-ledger-packageless-index.js';
 
+// [ADR-0150 D4, #32164] `sys_user_permission_set`'s one grant per (user_id,
+// permission_set, organization_id) among the grants that name no package — a
+// runtime index ADDED beside the grant's declared key, which ADR-0150 D4 widens
+// with the NULL-distinct `permission_set_package`.
+export {
+    ensureUserPermissionSetPackagelessIndex,
+    createUserPermissionSetGuardAtSchemaSync,
+    buildUserPermissionSetPackagelessIndexSql,
+    // [#32460] The build's own catalog read ("does the guard stand?"), for
+    // `os migrate plan`: it lists the guard `os migrate apply` would build,
+    // and nothing where this statement finds the guard standing.
+    buildUserPermissionSetPackagelessIndexPresenceSql,
+    buildUserPermissionSetPackagelessDuplicateProbeSql,
+    resolveUserPermissionSetIndexSeam,
+    buildUserPermissionSetOldKeySql,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS,
+    USER_PERMISSION_SET_OLD_KEY_INDEX_NAME,
+} from './migrations/user-permission-set-packageless-index.js';
+export type {
+    EnsureUserPermissionSetPackagelessIndexResult,
+    EnsureUserPermissionSetPackagelessIndexStatus,
+    UserPermissionSetGuardPassOutcome,
+} from './migrations/user-permission-set-packageless-index.js';
+
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
 // object whose `user_id` key part is NULL on every tenant- and global-scope row
@@ -275,7 +300,7 @@ export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.
 // and the address shape `resolveMetaItemAddress` answers. Both transports read them.
 // [ADR-0150 D3, #32310] …and where a caller-arm read (`?callerPackage=`) is read.
 export {
-    META_ITEM_SUBRESOURCE_SEGMENTS, type CallerPackageAddress, type MetaItemAddress,
+    META_ITEM_SUBRESOURCE_SEGMENTS, judgesPackageLessRows, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
 } from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
@@ -340,11 +365,12 @@ export {
   seedLoadPartialWrites,
   type SeedLoadPartialWrites,
 } from './seed-loader.js';
-export { runBuildProbes } from './build-probes.js';
+export { publishedItemReader, runBuildProbes } from './build-probes.js';
 export type {
   RuntimeBuildIssue,
   BuildProbeReport,
   RunBuildProbesOptions,
   ProbeEngine,
   ProbeAnalytics,
+  ProbeItemProtocol,
 } from './build-probes.js';

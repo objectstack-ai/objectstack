@@ -30,7 +30,7 @@ describe('page-template-full-width-to-default (ADR-0087 D2)', () => {
   const ID = 'page-template-full-width-to-default';
   const FULL_WIDTH = {
     name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width',
-    regions: [{ name: 'main', components: [] as unknown[] }],
+    regions: [{ name: 'main', components: [{ type: 'record:details' }] as unknown[] }],
   };
 
   it('is registered for protocol 18 and retired from the authoring load path', () => {

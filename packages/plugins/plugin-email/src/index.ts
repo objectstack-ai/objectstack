@@ -39,6 +39,7 @@ export {
 export type {
   EmailServiceOptions,
   TemplateLoader,
+  TemplateLoadOptions,
   EmailTemplateRow,
   EmailPersistence,
   EmailQueueDelivery,

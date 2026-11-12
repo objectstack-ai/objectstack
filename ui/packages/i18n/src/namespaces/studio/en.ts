@@ -362,6 +362,7 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.section.basic': 'Basic',
   'designer.field.section.advanced': 'Advanced',
   'designer.field.section.options': '{type} options',
+  'designer.field.section.computed': 'Computed value',
   'designer.field.apiName': 'API name',
   'designer.field.label': 'Label',
   // objectui#11782 — under the Label input: the label a translation shows instead.
@@ -461,6 +462,14 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.relatedList.filterHelp': 'Only child records matching these conditions are listed, on top of the match on the parent record; the tab count matches the list.',
   'designer.field.relatedList.filterAdvanced': 'This filter uses nested or OR conditions the builder cannot show; it is kept exactly as stored.',
   'designer.field.formula': 'Formula (CEL)',
+  'designer.field.formula.storedHint':
+    'Computed on read, a formula stores no value, so it cannot be summed or averaged. To total it, change Type to its return type (Number, Date, …): the expression is kept, and the value is computed and stored on every write.',
+  // A stored field's `expression` (objectstack#32576): computed and stored on every write.
+  'designer.field.storedExpression': 'Computed from (CEL)',
+  'designer.field.storedExpression.hint':
+    'Leave empty for a value people enter. With an expression, the value is computed from the record and stored on every write, so it can be summed, averaged and sorted.',
+  'designer.field.storedExpression.computed':
+    'Computed and read-only: no form, grid or import sets this value, and it is computed and stored on every write. Records saved before the expression was set stay empty until each is saved again. The expression is evaluated at the write, so now(), today() and the current user keep the value they had then.',
   // Roll-up summary (summaryOperations)
   'designer.field.summary.object': 'Child object',
   'designer.field.summary.function': 'Aggregation',
@@ -4451,6 +4460,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.appNav.empty': 'Empty — click “Add nav item” to start',
   'engine.appNav.emptyReadonly': 'No top-level nav items yet',
   'engine.appNav.item': 'Item {n}',
+  'engine.appNav.incomplete': 'Incomplete',
+  'engine.appNav.incompleteHint':
+    'No target chosen yet. This browser keeps the item here, and the saved navigation leaves it out until a target is chosen.',
   'engine.appNav.itemOne': 'item',
   'engine.appNav.itemOther': 'items',
   // The translation preview, the designer table's last family: held out of S6
