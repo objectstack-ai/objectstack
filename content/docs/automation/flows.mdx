@@ -372,6 +372,26 @@ and no key on the node chooses another. A selector that expands over
 organization membership reads that organization's members only; another
 organization's flows notify its own.
 
+**A `notify` node's `channels` must name channels the deployment registers.**
+A channel is code: the messaging service registers `inbox`, and `email`, `sms`
+and `push` (each sends once its transport service is configured), and a plugin
+can register more. The `/automation` write doors (`POST /`, `PUT /:name` and the
+copy door `POST /:name/clone`) refuse a flow whose `notify` node, at any depth,
+names any other channel: `400 VALIDATION_FAILED`, naming the node and the channel
+at `nodes.N.config.channels`, with a did-you-mean, and listing the channels the
+deployment registers. Nothing is registered or stored. A channel whose transport
+is not configured yet is listed and accepted, because it starts sending once
+the transport is configured, with no flow edit. With no messaging service
+installed, a `notify` node delivers nothing whatever it names, and its channels
+are not judged. The check is the save's: a flow a package ships, and a flow
+stored through the metadata door, register as before, and a delivery on a
+channel nothing registers fails at run time with `channel 'NAME' not
+registered` and a step warning. **Positions and queues are not checked when a
+flow is saved.** An approval node's `position` or `queue` names runtime data
+an administrator adds and removes, so a name nobody holds yet saves, and it is
+resolved when the run reaches the node
+([who an entry that resolves to nobody leaves on the slate](/docs/automation/approvals)).
+
 **A `notify` node mails a person who is not a user through an email field.**
 An applicant who came in through a public form has no account, so no user id
 reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
