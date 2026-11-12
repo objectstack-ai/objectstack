@@ -51,8 +51,10 @@ export const UNENTITLED_USER = 'u_plain';
  * The organization the grant belongs to, and the one both sessions are active
  * in. A stored grant applies only in its own organization — a row with no
  * organization applies nowhere — so the grant names one and the resolution runs
- * in it. Under the default `single` posture the session's claim is kept
- * without a membership row, so no `sys_member` row is needed for it.
+ * in it. Both users hold a current membership in it: under every tenancy
+ * posture a person's data access requires one, judged on each request
+ * (ADR-0093 D8.1, as amended), so the engine double answers a `sys_member` row
+ * for each.
  */
 export const ENTITLED_ORGANIZATION = 'o1';
 
@@ -100,11 +102,17 @@ export function createSessionAuthService() {
   };
 }
 
+/** Each user's membership in {@link ENTITLED_ORGANIZATION}. */
+const MEMBERSHIPS = [ENTITLED_USER, UNENTITLED_USER].map((user_id) => ({
+  id: `mem_${user_id}`, user_id, organization_id: ENTITLED_ORGANIZATION, role: 'member',
+}));
+
 /**
  * The RBAC tables `resolveAuthzContext` reads, as a minimal engine double.
  *
- * Only the two objects carrying the grant answer rows; every other read — the
- * memberships, positions and identity tables the resolver also consults —
+ * The two objects carrying the grant answer rows, and so does `sys_member`:
+ * each user holds a current membership in {@link ENTITLED_ORGANIZATION}. Every
+ * other read — the positions and identity tables the resolver also consults —
  * returns empty, which is what a `single`-posture deployment with one
  * organization and no custom roles really looks like. The rows carry no `active` flag and no validity window on
  * purpose: absent means active/unbounded by the resolver's own predicates
@@ -114,6 +122,12 @@ export function createSessionAuthService() {
 export function createGrantsEngine() {
   const engine = {
     find: async (object: string, opts: any) => {
+      if (object === 'sys_member') {
+        const where = opts?.where ?? {};
+        return MEMBERSHIPS.filter((m) =>
+          (where.user_id === undefined || where.user_id === m.user_id) &&
+          (where.organization_id === undefined || where.organization_id === m.organization_id));
+      }
       if (object === 'sys_user_permission_set') {
         return opts?.where?.user_id === ENTITLED_USER
           ? [{

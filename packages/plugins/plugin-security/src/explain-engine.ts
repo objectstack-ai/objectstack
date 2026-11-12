@@ -997,10 +997,11 @@ export async function resolveDelegatorContext(
  * field, the explanation a denial, the narrowing diagnostic nothing.
  *
  * It is {@link vetOrganizationClaim} asked once, with the prologue's inputs:
- * the live organization (`context.tenantId`), the delegator's OWN memberships
- * (`accessible_org_ids`, never inherited), and the posture. Under `single`
- * the claim stands, and a context with no active organization is not this
- * rule's (ADR-0123 D2). ⛔ Not a second spelling of the membership rule: a
+ * the live organization (`context.tenantId`) and the delegator's OWN
+ * memberships (`accessible_org_ids`, never inherited). [ADR-0093 D8.1, as
+ * amended] The rule holds under every posture, `single` included — the posture
+ * is still passed and no longer decides it. A context with no active
+ * organization is not this rule's (ADR-0123 D2). ⛔ Not a second spelling of the membership rule: a
  * reader that needs it calls this, and this calls the one function that
  * spells it.
  */
