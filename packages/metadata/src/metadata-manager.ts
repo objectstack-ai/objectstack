@@ -101,6 +101,7 @@ import {
   storeRemovalKeys,
   storeSlotKey,
   storeWriteKey,
+  environmentStoreKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -1037,9 +1038,9 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` the item's package slot), dropping any key the write
    * replaces. Whether an item was replaced — the `added` / `changed` split.
    */
-  private writeRegistryEntry(type: string, name: string, data: unknown): boolean {
+  private writeRegistryEntry(type: string, name: string, data: unknown, slot?: string): boolean {
     let typeStore = this.registry.get(type);
-    const { key, replaces } = storeWriteKey(typeStore, type, name, data);
+    const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
@@ -4033,14 +4034,17 @@ export class MetadataManager implements IMetadataService {
     // Update in-memory registry with the restored metadata. [#32351] A
     // package's restored version that names no package itself (a package-less
     // customization of that package's row) is filed under that package's slot,
-    // as the row it was written to is.
-    this.writeRegistryEntry(
-      type,
-      name,
-      isPackageCaller(address?.packageId) && PACKAGE_SLOTTED_STORE_TYPES.has(type)
-        ? withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId })
-        : restoredMetadata,
-    );
+    // as the row it was written to is. [S4] One restored by the environment
+    // address is filed under the bare slot, as its row is, even when one
+    // package holds the name (the write rule would file it under that package's).
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (slotted && isPackageCaller(address?.packageId)) {
+      this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
+    } else if (slotted && address !== undefined) {
+      this.writeRegistryEntry(type, name, restoredMetadata, environmentStoreKey(type, name, restoredMetadata));
+    } else {
+      this.writeRegistryEntry(type, name, restoredMetadata);
+    }
 
     return restoredMetadata;
   }

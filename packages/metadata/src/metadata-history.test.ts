@@ -410,6 +410,24 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         });
       });
 
+      it('an environment rollback beside one package files the bare registry slot, not the package\'s (S4)', async () => {
+        await twoHolders();
+        await loader.save(type, 'x', body('env1'));
+        await loader.save(type, 'x', body('env2'));
+        await loader.delete(type, 'x', { packageId: B });
+        // A's row plus the package-less row; the registry holds A's slot (A's rollback filed it).
+        await manager.rollback(type, 'x', 1, { packageId: A });
+        expect(await manager.get(type, 'x', A)).toEqual(body('A1', A));
+        await manager.rollback(type, 'x', 4, { packageId: null });
+        expect(await manager.get(type, 'x', A)).toEqual(body('A1', A));
+        // The restored body sits in the bare (environment) registry slot, as its row does.
+        const registry = (manager as unknown as { registry: Map<string, Map<string, unknown>> }).registry;
+        expect(registry.get(type)?.get('x')).toEqual(body('env1'));
+        expect((await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)])).toEqual(
+          expect.arrayContaining([[A, 'A1'], [null, 'env1']]),
+        );
+      });
+
       it('a rollback naming a package when no row of the name is left answers "not found", not a refusal naming nobody', async () => {
         await twoHolders();
         await loader.delete(type, 'x', { packageId: A });

@@ -141,6 +141,16 @@ function slotIdentityOf(type: string, name: string, data: unknown): string {
   return owner === undefined ? name : `${owner}${OWNER_SEPARATOR}${name}`;
 }
 
+/**
+ * [#32351 S4] The store key of the environment's (package-less) item of
+ * `(type, name, data)`: the bare slot, whoever else holds the name. A write
+ * addressed to the environment goes here, where {@link storeWriteKey} would
+ * file a package-less body under the name's one package slot.
+ */
+export function environmentStoreKey(type: string, name: string, data: unknown): string {
+  return slotIdentityOf(type, name, data);
+}
+
 /** The identity a store key addresses: the key without its package. */
 export function keyIdentityOf(key: string): string {
   const at = key.indexOf(SLOT_SEPARATOR);
