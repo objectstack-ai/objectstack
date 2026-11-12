@@ -439,7 +439,7 @@ export class ProtocolRegistryHydrationFacet {
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension'>, type: string,
+    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'declinesStoredRow' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'restoreArtifactRegistryView'>, type: string,
             data: unknown,
             options: HydrationOptions,): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
@@ -495,11 +495,13 @@ export class ProtocolRegistryHydrationFacet {
         const rowName = String((data as any).name);
         const scoped = isPackageScopedType(canonicalType);
         // A copy of it registered before the package arrived (the write-through
-        // of a save the seal did not refuse yet) is lifted, so the registry
-        // answers the package's item whichever came first.
+        // of a save the seal did not refuse yet) is healed by the one heal walk
+        // (#23198), so the registry answers the package's item whichever came
+        // first. The walk re-hydrates the stored rows, and this row then meets
+        // the package's item, not a tenant-authored one, so it stops there.
         if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) {
-            if (isTenantAuthored(registry.getItem?.(type, rowName)) && typeof registry.removeRuntimeShadow === 'function') {
-                registry.removeRuntimeShadow(type, rowName, bundleMemberOf(type, data));
+            if (isTenantAuthored(registry.getItem?.(type, rowName))) {
+                await host.restoreArtifactRegistryView(type, rowName, null, bundleMemberOf(type, data));
             }
             return false;
         }
