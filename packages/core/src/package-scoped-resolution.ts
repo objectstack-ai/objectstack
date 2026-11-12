@@ -371,7 +371,8 @@ export type PackageScopedResolution<T = unknown> =
   | {
       readonly status: 'resolved';
       readonly item: T;
-      readonly holder: PackageScopedHolder;
+      /** [#32412] Never a residual: the rule answers no such holder (it is only ever a refusal's candidate). */
+      readonly holder: Exclude<PackageScopedHolder, { kind: 'residual' }>;
       readonly via: PackageScopedResolutionStep;
     }
   | { readonly status: 'not-found' }
@@ -485,7 +486,7 @@ function isBaseline(type: PackageScopedResolvableType, packageId: string): boole
   return isBareNameOneHolderType(type) && isOverridableBaseline(type, packageId);
 }
 
-const packageHolder = (packageId: string): PackageScopedHolder => ({ kind: 'package', packageId });
+const packageHolder = (packageId: string): Extract<PackageScopedHolder, { kind: 'package' }> => ({ kind: 'package', packageId });
 
 function typeLabel(type: PackageScopedResolvableType): string {
   switch (type) {
