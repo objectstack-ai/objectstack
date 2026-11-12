@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { Table as TableIcon } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 
@@ -17,26 +17,28 @@ import { useObjectTranslation } from '@object-ui/i18n';
  * the object exists and its package is disabled (`OBJECT_PACKAGE_DISABLED`),
  * so the description says that instead. The console route draws it for that
  * answer (`AppContent`); this module's `ObjectView` draws it for an absence.
+ * Drawn through the shared `NotFoundState`, with a way back to Home.
  * Not part of the package entry.
  */
 export function ObjectNotFoundState({ objectName, packageDisabled = false }: { objectName: string | undefined; packageDisabled?: boolean }) {
     const { t } = useObjectTranslation();
+    const testId = packageDisabled ? 'object-package-disabled' : 'object-not-found';
     return (
-        <div className="h-full p-4 flex items-center justify-center">
-          <Empty data-testid={packageDisabled ? 'object-package-disabled' : 'object-not-found'}>
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <TableIcon className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <EmptyTitle>{t('console.objectView.objectNotFound')}</EmptyTitle>
-            <EmptyDescription>
+        <NotFoundState
+          testId={testId}
+          icon={TableIcon}
+          title={t('console.objectView.objectNotFound')}
+          description={
+            <>
               {packageDisabled
                 ? t('console.objectView.objectPackageDisabled', { objectName })
                 : t('console.objectView.objectNotFoundDescription', { objectName })}
               {' '}
               {t('console.objectView.objectNotFoundHint')}
-            </EmptyDescription>
-          </Empty>
-        </div>
+            </>
+          }
+          actions={<BackToHomeButton testId={`${testId}-home`} />}
+        />
     );
 }
 

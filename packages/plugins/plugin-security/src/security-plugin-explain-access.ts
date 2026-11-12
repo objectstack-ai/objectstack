@@ -216,10 +216,11 @@ export async function explainAccessForCaller(
       : undefined;
     // [#20580] ...but only while the explained user could be resolved in it.
     // Explaining them in the caller's organization is a CLAIM on it made for
-    // them, and enforcement vets a claim before it resolves anything:
-    // under a walled posture a member removed from that organization, whose
-    // session still names it, has the claim dropped and resolves with NO
-    // active organization — so none of that organization's grants apply.
+    // them, and enforcement vets a claim before it resolves anything: a
+    // member removed from that organization, whose session still names it,
+    // has the claim dropped and resolves with NO active organization — so none
+    // of that organization's grants apply. Under every posture since ADR-0093
+    // D8.1 was amended; the posture argument is no longer read.
     // `vetOrganizationClaim` is that check (the session arm of
     // `resolveAuthzContext`), asked of the same membership set; the explainer
     // spells no membership rule of its own.

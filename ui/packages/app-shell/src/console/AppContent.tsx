@@ -9,7 +9,7 @@
  */
 
 import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
@@ -50,6 +50,7 @@ import { ConsoleLayout } from '../layout/ConsoleLayout.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 import { ObjectView } from '../views/ObjectView.js';
 // objectui#13052 — on its own line: the line above is the eager-walk control
@@ -71,6 +72,7 @@ import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, 
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
+import { NO_RECORD_DRAWERS_OPENING, RecordDrawerOpeningProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -807,6 +809,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isDialogOpen = !!recordFormParam;
+  // objectstack#32685 — the form opens over the record drawer the URL names,
+  // after it, as it does from a click: on a reload the drawer is drawn a
+  // moment after the form would be, and the layer opened last is on top. The
+  // form waits until the route's element is shown (not its skeleton, not a
+  // suspended boundary) and every drawer that element mounts is drawn.
+  const [recordDrawersOpening, setRecordDrawersOpening] = useState<RecordDrawersOpening>(NO_RECORD_DRAWERS_OPENING);
+  const [routeSlotShown, setRouteSlotShown] = useState(false);
   // objectui#12291 — a seeded create's values, carried by the history entry
   // that opened the overlay (`handleEdit` below). The object the router keeps
   // for that entry, so its identity holds until the entry changes.
@@ -955,6 +964,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     ? allObjects.find((o: any) => o.name === formObjectParam)
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
+  const recordFormShown = useRecordFormOpensOverDrawers(
+    isDialogOpen && !!formObjectDef && routeReadsSettled && routeSlotShown,
+    recordDrawersOpening,
+  );
 
   // objectstack#27138 — the record the overlay edits may be held by a pending
   // approval that locks it. The record's field projection leaves that lock out
@@ -1237,12 +1250,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // The way home itself is shared with the app-missing screen below
   // (objectui#13122): that screen returns above `ConsoleLayout` too, so a Retry
   // alone left a stale bookmark or an uninstalled app's link a full-screen dead
-  // end. One button, one copy key, one navigation for every screen that owes it.
-  const renderBackHomeButton = (testId: string) => (
-    <Button onClick={() => navigate(homePath)} data-testid={testId}>
-      {t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}
-    </Button>
-  );
+  // end. One button, one copy key, one navigation for every screen that owes it:
+  // `<BackToHomeButton>`, the way home of the shared `NotFoundState` as well.
 
   // One screen for both branches that draw a `denied` verdict below.
   const renderAppAccessDenied = () => (
@@ -1257,7 +1266,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               'This app exists, but your account is not authorized to open it. Ask an administrator to grant you access.',
           })}
         </EmptyDescription>
-        <div className="mt-4">{renderBackHomeButton('app-access-denied-home')}</div>
+        <div className="mt-4"><BackToHomeButton testId="app-access-denied-home" variant="default" to={homePath} /></div>
       </Empty>
     </div>
   );
@@ -1324,18 +1333,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               }),
             };
     return (
-      <div className="h-screen flex items-center justify-center">
-        <Empty data-testid={verdictScreen.testId}>
-          <EmptyTitle>{verdictScreen.title}</EmptyTitle>
-          <EmptyDescription>{verdictScreen.description}</EmptyDescription>
-          <div className="mt-4 flex items-center justify-center gap-2">
+      <NotFoundState
+        testId={verdictScreen.testId}
+        className="h-screen p-0"
+        title={verdictScreen.title}
+        description={verdictScreen.description}
+        actions={
+          <>
             <Button onClick={() => setMissingRecheckRun(null)} data-testid={`${verdictScreen.testId}-retry`}>
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
-            {renderBackHomeButton(`${verdictScreen.testId}-home`)}
-          </div>
-        </Empty>
-      </div>
+            <BackToHomeButton testId={`${verdictScreen.testId}-home`} variant="default" to={homePath} />
+          </>
+        }
+      />
     );
   }
 
@@ -1519,6 +1530,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentUserId={user?.id ?? null}
         currentOrgId={activeOrganization?.id ?? null}
       >
+      <RecordDrawerOpeningProvider value={setRecordDrawersOpening}>
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}
@@ -1653,6 +1665,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="*" element={<RouteNotFound />} />
               </Routes>
                 )}
+                {/* objectstack#32685 — after the route's element in the same
+                    boundary: shown in the commit that shows the route, never
+                    while it is suspended. */}
+                <RouteSlotShown onShownChange={setRouteSlotShown} />
               </RouteFader>
             </Suspense>
           </ErrorBoundary>
@@ -1710,7 +1726,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 title: editingRecord
                   ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
-                open: isDialogOpen,
+                open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
                 // objectui#6514 — the same declared-key gate `RecordFormPage`
                 // runs, through the same helper. This read `f.visible`, a key
@@ -1757,6 +1773,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             />
           )}
       </ConsoleLayout>
+      </RecordDrawerOpeningProvider>
       </FilterScopeProvider>
     </ExpressionProvider>
   );
@@ -2104,26 +2121,30 @@ function ShorthandRecordRedirect() {
  * Visible "not found" fallback rendered for any unmatched URL inside the
  * console app shell. Previously these URLs produced a fully blank content
  * area with no indication that anything had gone wrong — users would think
- * the app had crashed. An explicit Empty state with a "back to app home"
- * action turns an opaque failure into a recoverable one.
+ * the app had crashed. The shared `NotFoundState` with two ways out, back in
+ * the history and to Home, turns an opaque failure into a recoverable one.
  */
 function RouteNotFound() {
   const navigate = useNavigate();
+  const homePath = useHomePath();
   const { t } = useObjectTranslation();
   return (
-    <div className="flex h-full w-full items-center justify-center p-8">
-      <Empty>
-        <EmptyTitle>{t('console.notFound.title', { defaultValue: 'Page not found' })}</EmptyTitle>
-        <EmptyDescription>
-          {t('console.notFound.description', { defaultValue: 'The URL you followed does not match any view in this app.' })}
-        </EmptyDescription>
-        <div className="mt-4">
-          <Button variant="outline" onClick={() => navigate(-1)}>
+    <NotFoundState
+      testId="route-not-found"
+      className="p-8"
+      title={t('console.notFound.title', { defaultValue: 'Page not found' })}
+      description={t('console.notFound.description', {
+        defaultValue: 'The URL you followed does not match any view in this app.',
+      })}
+      actions={
+        <>
+          <Button variant="outline" onClick={() => navigate(-1)} data-testid="route-not-found-back">
             {t('console.notFound.back', { defaultValue: 'Go back' })}
           </Button>
-        </div>
-      </Empty>
-    </div>
+          <BackToHomeButton testId="route-not-found-home" to={homePath} />
+        </>
+      }
+    />
   );
 }
 
@@ -2178,6 +2199,18 @@ function RouteObjectReadFailed({ answer, onRetry }: { answer: AnsweredLoadFailur
 function searchParamsHasRecordForm(search: string): boolean {
   const sp = new URLSearchParams(search);
   return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
+}
+
+/**
+ * objectstack#32685 — reports whether the route slot's element is shown: from
+ * the commit that shows it until it is hidden (unmounted, or suspended).
+ */
+function RouteSlotShown({ onShownChange }: { onShownChange: (shown: boolean) => void }) {
+  useLayoutEffect(() => {
+    onShownChange(true);
+    return () => onShownChange(false);
+  }, [onShownChange]);
+  return null;
 }
 
 /**

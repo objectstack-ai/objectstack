@@ -42,7 +42,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set_package: {
         label: "權限集所屬應用",
-        help: "該權限集來自哪個應用。由平台填寫；權限集是在這裡建立的，或有多個應用提供同名權限集時為空。"
+        help: "該權限集來自哪個應用。有多個應用提供同名權限集時，授權用它指明是哪個應用的；否則由平台填寫。權限集是在這裡建立的，或有多個應用提供同名權限集而授權未指明時為空。"
       },
       granted_by: {
         label: "授予者",

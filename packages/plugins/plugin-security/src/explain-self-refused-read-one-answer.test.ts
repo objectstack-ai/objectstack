@@ -150,6 +150,9 @@ beforeAll(async () => {
   await residue('sys_user_permission_set', {
     id: 'ups_srr_create_only', user_id: CREATE_ONLY_USER, permission_set: CREATE_ONLY_SET.name, organization_id: ORG,
   });
+  // ...a grant that applies while a current membership backs the organization
+  // (ADR-0093 D8.1, as amended: under every posture).
+  await e.insert('sys_member', { id: 'mem_srr_create_only', user_id: CREATE_ONLY_USER, organization_id: ORG, role: 'member' }, SYS);
   for (const o of [BOARD, GATED]) await e.insert(o, { id: STORED, name: 'stored', owner_id: 'usr_srr_owner' }, SYS);
 
   const sets = [MEMBER_DEFAULT, CREATE_ONLY_SET, GATED_WRITER_SET, READER_SET, USERS_ONLY_SET];

@@ -405,6 +405,13 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the backfill keeps the stamp of the row it writes, and sends none on a federated object',
   },
+  // [#32527] The write keeps the stamp its caller hands it, and is conditional on it; the caller
+  // (`backfillStoredExpressions`, the row above) asks the federated predicate and hands a federated
+  // object's row no stamp, so the write then names no `updated_at` and issues no predicate on it.
+  'stored-expression-backfill.ts#writeUnlessMovedSince :: updated_at': {
+    disposition: 'writer',
+    why: 'keeps the stamp the backfill read on the row it writes, conditional on it; handed none on a federated object, it names no updated_at',
+  },
   'engine-migration-state.ts#recordObservedDeviation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'engine-migration-state.ts#retractCreationAttestation :: updated_at': { disposition: 'not-a-read', why: PLATFORM_ROW },
   'plugin.ts#reconcileFederatedBindings :: isFederatedObject()': { disposition: 'not-a-read', why: SYNC_ROUTE },

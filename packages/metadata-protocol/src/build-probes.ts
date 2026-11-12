@@ -208,6 +208,80 @@ async function hasRows(
  * reported, never thrown — verification must not break the publish it
  * verifies.
  */
+/**
+ * [ADR-0150 D3, #31700] The slice of the metadata protocol
+ * {@link publishedItemReader} reads through: the by-name item read, and the
+ * caller arm's resolution (`resolveCallerPackageAddress`, #32310), when the
+ * protocol offers it.
+ */
+export interface ProbeItemProtocol {
+    getMetaItem(request: { type: string; name: string; packageId?: string }): Promise<unknown>;
+    resolveCallerPackageAddress?(request: { type: string; name: string; callerPackageId: string }):
+        | { readonly kind: 'package'; readonly packageId: string }
+        | { readonly kind: 'environment' };
+}
+
+/**
+ * [ADR-0150 D3, #31700] The probes' item read for a publish of package
+ * `publishingPackageId`: a published artifact by name, and a dataset a widget
+ * names RESOLVED FROM the publishing package, the dashboard's own, by the
+ * caller arm the dataset doors offer (`?callerPackage=`), then read at the
+ * holder's exact address. A dataset name is held once per namespace, so two
+ * namespaces may each hold it: each package's publish probes its own
+ * dataset, never a read of the bare name, which two holders refuse. A name
+ * the publishing package cannot resolve is the caller's refusal
+ * (`ambiguous-in-closure`, `outside-closure`), which the widget plane
+ * reports as not probed. With no publishing package, or a protocol without
+ * the caller arm, the dataset is read by name, as before.
+ */
+export function publishedItemReader(
+    protocol: ProbeItemProtocol,
+    publishingPackageId: string | undefined,
+): RunBuildProbesOptions['getItem'] {
+    return async (type, name) => {
+        let packageId: string | undefined;
+        if (type === 'dataset' && publishingPackageId && typeof protocol.resolveCallerPackageAddress === 'function') {
+            const address = protocol.resolveCallerPackageAddress({ type, name, callerPackageId: publishingPackageId });
+            if (address.kind === 'package') packageId = address.packageId;
+        }
+        const wrapper = (await protocol.getMetaItem({ type, name, ...(packageId !== undefined ? { packageId } : {}) })) as
+            | { item?: unknown }
+            | undefined;
+        return wrapper?.item ?? wrapper ?? undefined;
+    };
+}
+
+/**
+ * [#32072, #31700] Why a widget's dataset was not probed, and the fix: the
+ * refusal's own reading. A caller with a package (the publishing package,
+ * {@link publishedItemReader}) is refused for its closure, so the fix is that
+ * package's; a read with no package is refused for the environment.
+ */
+function datasetNotProbed(refused: PackageScopedRefusal, dsName: string): { why: string; fix: string } {
+    const holders = refused.candidates.map((h) => (h.kind === 'package' ? h.packageId : describePackageScopedHolder(h)));
+    const caller = refused.callerPackageId;
+    if (caller !== null && refused.reason === 'outside-closure') {
+        return {
+            why: `dataset "${dsName}" is held only outside the declared dependencies of package "${caller}" `
+                + `(${holders.join(', ')}), so the dashboard's read of it is refused`,
+            fix: `Declare package "${caller}"'s dependency on the package whose dataset "${dsName}" the widget means, `
+                + `or hold the dataset in "${caller}" itself, then republish.`,
+        };
+    }
+    if (caller !== null) {
+        return {
+            why: `dataset "${dsName}" has ${holders.length} holders package "${caller}" reaches `
+                + `(${holders.join(', ')}), so the dashboard's read of it is refused`,
+            fix: `Make "${dsName}" mean one dataset from package "${caller}": hold it in "${caller}" itself, `
+                + 'or depend on only one of the packages that hold it, then republish.',
+        };
+    }
+    return {
+        why: `dataset "${dsName}" has ${holders.length} holders (${holders.join(', ')}), so a read of it by name is refused`,
+        fix: `Keep one dataset named "${dsName}": rename or remove the others, then republish.`,
+    };
+}
+
 export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<BuildProbeReport> {
     const issues: RuntimeBuildIssue[] = [];
     const checked = { seeds: 0, views: 0, widgets: 0, objects: 0 };
@@ -402,21 +476,21 @@ export async function runBuildProbes(opts: RunBuildProbesOptions): Promise<Build
             const dsName = w.dataset as string;
             const dataset = asRec(await readItem('dataset', dsName));
             if (!dataset) {
-                // [#32072] A name several packages hold: the read refused it, so
-                // nothing is probed, and the receipt says so (silence would read
-                // as "probed and passed"). The operator's remedy is one holder.
+                // [#32072] A name the read refused: nothing is probed, and the
+                // receipt says so (silence would read as "probed and passed").
+                // [#31700] Read from the publishing package, the refusal is
+                // that package's, and so is the remedy.
                 const refused = refusals.get(`dataset ${dsName}`);
                 if (refused) {
-                    const holders = refused.candidates.map((h) =>
-                        h.kind === 'package' ? h.packageId : describePackageScopedHolder(h));
+                    const { why, fix } = datasetNotProbed(refused, dsName);
                     issues.push({
                         layer: 'runtime',
                         severity: 'warning',
                         artifact: { type: 'dashboard', name: p.name },
                         ref: { type: 'dataset', name: dsName, member: widgetId },
                         code: 'widget_not_probed',
-                        message: `Dashboard "${p.name}" widget "${widgetId}" not probed: dataset "${dsName}" has ${holders.length} holders (${holders.join(', ')}), so a read of it by name is refused.`,
-                        fix: `Keep one dataset named "${dsName}": rename or remove the others, then republish.`,
+                        message: `Dashboard "${p.name}" widget "${widgetId}" not probed: ${why}.`,
+                        fix,
                     });
                 }
                 continue; // dangling dataset is an L1 (graph) finding, not a runtime one

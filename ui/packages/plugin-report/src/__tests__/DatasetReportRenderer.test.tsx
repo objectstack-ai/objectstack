@@ -1300,12 +1300,12 @@ describe('DatasetReportRenderer — measure drill scopes (#30615)', () => {
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
- * objectstack#32077 (ADR-0150 D5) — every dataset selection of a report names
- * the report's own served package (`_packageId`) as `?package=`, the joined
- * blocks' included. A report authored in the environment sends none, and the
- * server's refusal for a name two packages hold is shown as it came.
+ * ADR-0150 D3 — every dataset selection of a report names the report's own
+ * served package (`_packageId`) as the reader's package (`callerPackage`), the
+ * joined blocks' included. A report authored in the environment sends none,
+ * and a refusal is shown as it came, never retried bare.
  * ──────────────────────────────────────────────────────────────────────────── */
-describe('DatasetReportRenderer — the report\'s package on its dataset queries (objectstack#32077)', () => {
+describe('DatasetReportRenderer — the report\'s package as the reader\'s package on its dataset queries (ADR-0150 D3)', () => {
   afterEach(() => cleanup());
 
   type Report = Parameters<typeof DatasetReportRenderer>[0]['report'];
@@ -1313,11 +1313,11 @@ describe('DatasetReportRenderer — the report\'s package on its dataset queries
     ({ ...report, ...(packageId !== undefined ? { _packageId: packageId } : {}) }) as Report;
   const summary = { name: 'hours', type: 'summary', dataset: 'sales', rows: ['region'], values: ['revenue'] };
 
-  /** Two packages each ship a `sales` dataset; the adapter answers per qualifier, as the server's exact read does. */
+  /** Two packages each ship a `sales` dataset; the adapter answers per caller, as the server's D3 read does. */
   const twoHolderSource = () => ({
-    queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { packageId?: string }) => {
-      if (options?.packageId === 'com.acme.alpha') return { rows: [{ region: 'Alpha region', revenue: 1 }] };
-      if (options?.packageId === 'com.acme.beta') return { rows: [{ region: 'Beta region', revenue: 2 }] };
+    queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string }) => {
+      if (options?.callerPackage === 'com.acme.alpha') return { rows: [{ region: 'Alpha region', revenue: 1 }] };
+      if (options?.callerPackage === 'com.acme.beta') return { rows: [{ region: 'Beta region', revenue: 2 }] };
       throw new Error(
         'Dataset query failed: 409 Conflict — dataset "sales" is held by 2 packages in this environment and the caller '
         + 'names no package: package "com.acme.alpha", package "com.acme.beta". Nothing picks one of them: address it by its package.',
@@ -1325,7 +1325,7 @@ describe('DatasetReportRenderer — the report\'s package on its dataset queries
     }),
   });
 
-  it('two packages hold one dataset name: each report queries its own, under its own package', async () => {
+  it('two packages hold one dataset name: each report queries its own, as its own reader', async () => {
     const src = twoHolderSource();
     const { unmount } = render(<DatasetReportRenderer report={served(summary, 'com.acme.alpha')} dataSource={src} />);
     expect(await screen.findByText('Alpha region')).toBeInTheDocument();
@@ -1333,9 +1333,48 @@ describe('DatasetReportRenderer — the report\'s package on its dataset queries
     render(<DatasetReportRenderer report={served(summary, 'com.acme.beta')} dataSource={src} />);
     expect(await screen.findByText('Beta region')).toBeInTheDocument();
     expect(src.queryDataset.mock.calls.map((c) => [c[0], c[2]])).toEqual([
-      ['sales', { packageId: 'com.acme.alpha' }],
-      ['sales', { packageId: 'com.acme.beta' }],
+      ['sales', { callerPackage: 'com.acme.alpha' }],
+      ['sales', { callerPackage: 'com.acme.beta' }],
     ]);
+  });
+
+  it('a report in P whose dataset only P\'s dependency holds renders that dataset: the server resolves it for P', async () => {
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string; packageId?: string }) => {
+        if (options?.callerPackage === 'com.acme.app' && options.packageId === undefined) return { rows: [{ region: 'Lib region', revenue: 3 }] };
+        if (options?.packageId !== undefined) throw new Error(`Dataset query failed: 409 Conflict — not held by package "${options.packageId}".`);
+        return { rows: [{ region: 'Bare region', revenue: 9 }] };
+      }),
+    };
+    render(<DatasetReportRenderer report={served(summary, 'com.acme.app')} dataSource={src} />);
+    expect(await screen.findByText('Lib region')).toBeInTheDocument();
+    expect(screen.queryByText('Bare region')).not.toBeInTheDocument();
+    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ callerPackage: 'com.acme.app' }]);
+  });
+
+  it('a 409 for the report\'s reader is shown, naming the candidates, and never retried bare', async () => {
+    const src = {
+      queryDataset: vi.fn(async (_dataset: string, _selection: unknown, options?: { callerPackage?: string }) => {
+        if (options?.callerPackage === undefined) return { rows: [{ region: 'Bare region', revenue: 9 }] };
+        throw new Error('Dataset query failed: 409 Conflict — dataset "sales" is held by 2 packages in the closure of '
+          + `package "${options.callerPackage}": package "com.acme.lib1", package "com.acme.lib2".`);
+      }),
+    };
+    render(<DatasetReportRenderer report={served(summary, 'com.acme.app')} dataSource={src} />);
+    const alert = await screen.findByText(/in the closure of package "com\.acme\.app"/);
+    expect(alert.textContent).toContain('com.acme.lib1');
+    expect(alert.textContent).toContain('com.acme.lib2');
+    expect(screen.queryByText('Bare region')).not.toBeInTheDocument();
+    expect(src.queryDataset).toHaveBeenCalledTimes(1);
+  });
+
+  it('the package is part of each selection\'s signature: the same report under another package queries again', async () => {
+    const src = twoHolderSource();
+    const { rerender } = render(<DatasetReportRenderer report={served(summary, 'com.acme.alpha')} dataSource={src} />);
+    expect(await screen.findByText('Alpha region')).toBeInTheDocument();
+    rerender(<DatasetReportRenderer report={served(summary, 'com.acme.beta')} dataSource={src} />);
+    expect(await screen.findByText('Beta region')).toBeInTheDocument();
+    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ callerPackage: 'com.acme.alpha' }, { callerPackage: 'com.acme.beta' }]);
   });
 
   it('a joined report names its package on every block', async () => {
@@ -1353,10 +1392,10 @@ describe('DatasetReportRenderer — the report\'s package on its dataset queries
       />,
     );
     await waitFor(() => expect(screen.getAllByText('Beta region')).toHaveLength(2));
-    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ packageId: 'com.acme.beta' }, { packageId: 'com.acme.beta' }]);
+    expect(src.queryDataset.mock.calls.map((c) => c[2])).toEqual([{ callerPackage: 'com.acme.beta' }, { callerPackage: 'com.acme.beta' }]);
   });
 
-  it('a report with no package, where two packages hold the name, sends none and shows the conflict naming both', async () => {
+  it('CONTROL: a report with no package, where two packages hold the name, sends none and shows the conflict naming both', async () => {
     const src = twoHolderSource();
     render(<DatasetReportRenderer report={served(summary)} dataSource={src} />);
     const alert = await screen.findByText(/held by 2 packages/);
