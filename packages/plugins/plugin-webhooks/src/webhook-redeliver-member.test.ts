@@ -53,10 +53,21 @@ const ORG_B = 'org_b';
 const silentLogger = { info() {}, warn() {}, error() {}, debug() {} } as any;
 
 /** The slice of ObjectQL the plugin's boot and the veto's lookup touch. */
+/**
+ * [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+ * access requires a current membership in the organization, judged on each
+ * request: the session's organization claim is kept only while one backs it.
+ * The signed-in caller holds one in the organization its session names.
+ */
+const MEMBERSHIPS: ReadonlyArray<Record<string, string>> = [{ id: 'mem_u_1', user_id: 'u_1', organization_id: ORG_A, role: 'member' }];
+
 function fakeEngine(subscriptions: Map<string, Record<string, unknown>>) {
     return {
         registry: { listItems: () => [], getObject: () => undefined },
-        async find() { return []; },
+        async find(object: string, query?: any) {
+            if (object !== 'sys_member') return [];
+            return MEMBERSHIPS.filter((row) => Object.entries(query?.where ?? {}).every(([k, v]) => row[k] === v));
+        },
         async findOne(object: string, opts?: any) {
             assertEngineFindOnePredicate(object, opts);
             return subscriptions.get(opts?.where?.id) ?? null;

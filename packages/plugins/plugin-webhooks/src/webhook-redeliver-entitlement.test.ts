@@ -79,6 +79,12 @@ interface FixtureOptions {
     readonly memberships?: readonly Membership[];
 }
 
+/** Both signed-in callers' membership in `org_a`, unless a case names its own rows. */
+const DEFAULT_MEMBERSHIPS: readonly Membership[] = [
+    { user_id: ADMIN, organization_id: ORG_A },
+    { user_id: MEMBER, organization_id: ORG_A },
+];
+
 /** Equality on every key of a `where`, the only shape the grant resolver issues here. */
 const matches = (row: Membership, where: Record<string, unknown> | undefined) =>
     Object.entries(where ?? {}).every(([key, value]) => (row as unknown as Record<string, unknown>)[key] === value);
@@ -102,7 +108,10 @@ class FixturePlugin implements Plugin {
             [LIVE, { id: LIVE, name: LIVE_NAME, active: true }],
             [INACTIVE, { id: INACTIVE, name: INACTIVE_NAME, active: false }],
         ]);
-        const memberships = this.options.memberships ?? [];
+        // [ADR-0093 D8.1, as amended] A person's data access requires a
+        // current membership in the organization, under every posture: by
+        // default both signed-in callers hold one in `org_a`.
+        const memberships = this.options.memberships ?? DEFAULT_MEMBERSHIPS;
         ctx.registerService('manifest', { register: () => {}, list: () => [] });
         ctx.registerService('objectql', {
             registry: { listItems: () => [], getObject: () => undefined },
@@ -414,7 +423,7 @@ describe('the door\'s tenancy resolver, on a real ObjectKernel registry', () => 
         }
         return kernel;
     };
-    const judge = async (kernel: ObjectKernel) => {
+    const judge = async (kernel: ObjectKernel, memberships: readonly Membership[] = [{ user_id: ADMIN, organization_id: ORG_A }]) => {
         const security = webhookAdministrationSecurity((id) => id === ADMIN);
         const logged: string[] = [];
         const ctx = {
@@ -423,7 +432,11 @@ describe('the door\'s tenancy resolver, on a real ObjectKernel registry', () => 
         } as unknown as PluginContext;
         const verdict = await judgeRedeliverEntitlement({
             headers: new Headers(),
-            ql: { async find() { return []; } },
+            ql: {
+                async find(object: string, query?: any) {
+                    return object === 'sys_member' ? memberships.filter((row) => matches(row, query?.where)) : [];
+                },
+            },
             authService: undefined,
             tenancy: redeliverTenancyResolver(ctx),
             security,
@@ -434,14 +447,19 @@ describe('the door\'s tenancy resolver, on a real ObjectKernel registry', () => 
         return { verdict, asked: security.asked, logged };
     };
 
-    it('never registered: no posture, so the claim stands and the caller is admitted in it', async () => {
+    it('never registered: no posture, so a claim a current membership backs stands and the caller is admitted in it', async () => {
         const { verdict, asked } = await judge(kernelWith('unregistered'));
         expect(verdict).toEqual({ admitted: true, tenantId: ORG_A });
         expect(asked.map((q) => q.tenantId)).toEqual([ORG_A]);
     });
 
+    it('[ADR-0093 D8.1] never registered: the membership rule reads no posture, so an unbacked claim is dropped and refused 403', async () => {
+        const { verdict } = await judge(kernelWith('unregistered'), []);
+        expect(verdict).toMatchObject({ admitted: false, refusal: { status: 403, code: 'PERMISSION_DENIED' } });
+    });
+
     it('registered with a walled posture: the unbacked claim is dropped and refused 403', async () => {
-        const { verdict } = await judge(kernelWith('isolated'));
+        const { verdict } = await judge(kernelWith('isolated'), []);
         expect(verdict).toMatchObject({ admitted: false, refusal: { status: 403, code: 'PERMISSION_DENIED' } });
     });
 
