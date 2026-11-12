@@ -52,8 +52,9 @@
  *
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
  * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent`,
- * `skill` (#31701), `action` (#31697, below) and `email_template` (#31699).
- * Two packages of two namespaces may each install such a name, so a store keyed by bare name would keep whichever registered last:
+ * `skill` (#31701), `action` (#31697, below), `email_template` (#31699) and
+ * `flow` (#31696). Two packages of two namespaces may each install such a
+ * name, so a store keyed by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
  * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
@@ -103,9 +104,10 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * then every namespace-scoped type (#32151, #31697; see "Which types" above):
  * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
  * ADR-0150 child B), which joins in the same change that adds it to
- * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162).
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then `flow`
+ * (#31696), which joins in the same change that adds it to that set.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
