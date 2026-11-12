@@ -2145,6 +2145,29 @@ const FLOW_START_NODE_MISSING_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION: RuleExplanation = {
+  rule: 'flow-after-save-inline-retry',
+  covers: 'why an after-save flow may not retry an inline callout',
+  paragraphs: [
+    'A flow whose start node runs it after a record change (`record-after-create`, `-update`, `-delete`, ' +
+      '`-insert` or `-write`) runs inside the save: the record-change trigger waits for the run before the ' +
+      'save answers. An `http` or `connector_action` node calls an outside system inline, so when that system ' +
+      'is down and the node is retried, the user\'s save waits through every attempt and every backoff delay ' +
+      '(a three-retry ladder held one save for 8.8 seconds). The automation engine refuses to register such a ' +
+      'flow, so the stored row reads `registration: refused`.',
+    'Two things retry a node inline: a `try_catch` whose `retry.maxRetries` is 1 or more re-runs its `try` ' +
+      'region, at any depth, and `errorHandling.strategy: \'retry\'` re-runs the whole flow. The `catch` ' +
+      'region of a `try_catch` is not retried by that node.',
+    'The cure for `http` is `durable: true`: the request is queued on the messaging HTTP outbox, which ' +
+      'retries it in the background with its own backoff and dead-letter, and the save no longer waits. ' +
+      'A `connector_action` has no background path, so remove the retry around it, or make the call through ' +
+      'an `http` node with `durable: true`.',
+    'Not judged: a before-trigger flow, a scheduled, API or manual flow, and an inline call nothing retries. ' +
+      'A `subflow` node\'s callee is another flow and is judged on its own trigger, not this one\'s.',
+    FLOW_GATE_REACH,
+  ],
+};
+
 const FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION: RuleExplanation = {
   rule: 'flow-time-relative-descriptor-invalid',
   covers: 'why a refused timeRelative descriptor never binds',
@@ -6017,6 +6040,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
   [FLOW_START_NODE_MISSING_EXPLANATION.rule]: FLOW_START_NODE_MISSING_EXPLANATION,
+  [FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION.rule]: FLOW_AFTER_SAVE_INLINE_RETRY_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,

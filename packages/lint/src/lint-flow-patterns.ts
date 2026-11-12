@@ -255,6 +255,13 @@ export const FLOW_NODE_UNREACHABLE = 'flow-node-unreachable';
  */
 export const FLOW_START_NODE_MISSING = 'flow-start-node-missing';
 /**
+ * An outbound call retried inline in a flow that runs after a record change
+ * (ruling 6810500711, letter D). `error`: the automation engine refuses to
+ * register the flow (`validateAfterSaveInlineRetry` in `service-automation`'s
+ * `flow-registration-checks.ts`). See {@link scanAfterSaveInlineRetry}.
+ */
+export const FLOW_AFTER_SAVE_INLINE_RETRY = 'flow-after-save-inline-retry';
+/**
  * #15429 — a `decision` `config.mode` the spec refuses: a value outside
  * `'exclusive' | 'inclusive'`, or a legal `mode` beside a non-empty
  * `conditions` list (ruling A on #20168). `error`: `registerFlow` refuses the
@@ -2015,6 +2022,83 @@ function scanStartNodeMissing(flowName: string, rawNodes: unknown, nodes: AnyRec
   });
 }
 
+/**
+ * The start-node `triggerType` tokens that run a flow after a record change:
+ * the record-change trigger's grammar, after-phase only. The trigger's hook
+ * handler awaits the run, so the save that fired it answers when the run does.
+ */
+const AFTER_RECORD_CHANGE_TRIGGER = /^record-after-(create|insert|update|delete|write)$/;
+
+/**
+ * The builtin node types that call an outside system inline, each with the
+ * fix its finding names. The engine's registration check holds the same two:
+ * `http` (inline unless `config.durable: true`) and `connector_action` (no
+ * background path).
+ */
+const INLINE_CALLOUT_FIX: ReadonlyMap<string, string> = new Map([
+  ['http', 'Set `durable: true` on the node: the request is then queued on the messaging HTTP outbox, which retries it in the background, and the save no longer waits for it.'],
+  ['connector_action', 'A connector action has no background delivery path, so remove the retry around it, or send the call through an `http` node with `durable: true`.'],
+]);
+
+/**
+ * {@link FLOW_AFTER_SAVE_INLINE_RETRY}: one `error` finding per inline outbound
+ * call that is retried in a flow running after a record change.
+ *
+ * The save waits for an after-trigger run, so a failing call that is retried
+ * holds the user's save for every attempt and every backoff delay. Two things
+ * retry a node inline: a `try_catch` whose `retry.maxRetries` is at least 1
+ * (its `try` region, at any depth) and the flow's `errorHandling.strategy:
+ * 'retry'` (the whole run). A before-trigger, schedule, API or manual flow is
+ * not judged, nor is an inline call nothing retries.
+ */
+function scanAfterSaveInlineRetry(flowName: string, flow: AnyRec, nodes: AnyRec[], findings: FlowLintFinding[]): void {
+  const start = nodes.find((n) => n.type === START_NODE_TYPE);
+  const triggerType = (start?.config as AnyRec | undefined)?.triggerType;
+  if (typeof triggerType !== 'string' || !AFTER_RECORD_CHANGE_TRIGGER.test(triggerType)) return;
+  const eh = (flow.errorHandling ?? undefined) as AnyRec | undefined;
+  const flowRetries = eh?.strategy === 'retry' && typeof eh.maxRetries === 'number' ? eh.maxRetries : 0;
+
+  const visit = (list: AnyRec[], retriedBy: string | undefined, depth: number): void => {
+    for (const node of list) {
+      const type = typeof node.type === 'string' ? node.type : '';
+      const cfg = (node.config ?? undefined) as AnyRec | undefined;
+      const fix = INLINE_CALLOUT_FIX.get(type);
+      if (fix && retriedBy && !(type === 'http' && cfg?.durable === true)) {
+        findings.push({
+          where: `flow '${flowName}' · node '${String(node.id)}'`,
+          message:
+            `node '${String(node.id)}' (\`${type}\`) calls an outside system inline and is retried by ${retriedBy}. ` +
+            `The flow runs after a record change (\`${triggerType}\`) and the save waits for the run, so a failing ` +
+            `call holds the user's save for every attempt and every backoff delay; the automation engine refuses ` +
+            `to register the flow.`,
+          hint: fix,
+          rule: FLOW_AFTER_SAVE_INLINE_RETRY,
+          severity: 'error',
+        });
+      }
+      if (depth >= MAX_REGION_DEPTH) continue;
+      for (const key of ownRegionKeys(type)) {
+        const value = cfg?.[key];
+        const regions = Array.isArray(value) ? value : [value];
+        const tryRetry = type === 'try_catch' && key === 'try' ? (cfg?.retry as AnyRec | undefined)?.maxRetries : undefined;
+        const by = retriedBy
+          ?? (typeof tryRetry === 'number' && tryRetry >= 1
+            ? `\`try_catch\` '${String(node.id)}' (\`retry.maxRetries: ${tryRetry}\`)`
+            : undefined);
+        for (const region of regions) {
+          if (!region || typeof region !== 'object') continue;
+          visit(recordsOf((region as AnyRec).nodes), by, depth + 1);
+        }
+      }
+    }
+  };
+  visit(
+    nodes,
+    flowRetries >= 1 ? `the flow's \`errorHandling\` (\`strategy: 'retry'\`, \`maxRetries: ${flowRetries}\`)` : undefined,
+    0,
+  );
+}
+
 export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
   const findings: FlowLintFinding[] = [];
   for (const flow of recordsOf(stack.flows)) {
@@ -2126,6 +2210,8 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
     //      its start node, and a region body is already single-entry
     //      (ADR-0031), so nothing one level down can be unreached.
     scanStartNodeMissing(flowName, flow.nodes, nodes, findings);
+    // (a6) An outbound call retried inline on the save path of an after-trigger flow.
+    scanAfterSaveInlineRetry(flowName, flow, nodes, findings);
     scanUnreachableNodes(flowName, nodes, edges, findings);
 
     // (b)–(e) #5383 — every graph in the flow, not just the top-level one: its

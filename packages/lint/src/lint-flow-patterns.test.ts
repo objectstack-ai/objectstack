@@ -35,6 +35,7 @@ import {
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
   FLOW_START_NODE_MISSING,
+  FLOW_AFTER_SAVE_INLINE_RETRY,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
@@ -3924,5 +3925,77 @@ describe('lintFlowPatterns — a flow with no start node (flow-start-node-missin
 
   it('has an os explain entry', () => {
     expect(explainRule(FLOW_START_NODE_MISSING)).toBeDefined();
+  });
+});
+
+describe('lintFlowPatterns — a retried inline outbound call in an after-save flow (flow-after-save-inline-retry)', () => {
+  const http = (config: Record<string, unknown> = {}) => ({
+    id: 'push', type: 'http', config: { url: 'https://api.example.com/v1/tasks', method: 'POST', ...config },
+  });
+  const connector = { id: 'post_slack', type: 'connector_action', connectorConfig: { connectorId: 'slack', actionId: 'post' } };
+  const flag = { id: 'flag', type: 'assignment', config: { failed: true } };
+  const guarded = (inner: unknown, maxRetries = 3, catchNodes: unknown[] = [flag]) => ({
+    id: 'guarded_push', type: 'try_catch',
+    config: { retry: { maxRetries, backoffMs: 1000 }, try: { nodes: [inner], edges: [] }, catch: { nodes: catchNodes, edges: [] } },
+  });
+  const flowOf = (startConfig: Record<string, unknown> | undefined, step: { id: string }, extra: Record<string, unknown> = {}) => ({
+    flows: [{
+      name: 'sync', type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', ...(startConfig ? { config: startConfig } : {}) }, step, { id: 'end', type: 'end' }],
+      edges: [{ id: 'e1', source: 'start', target: step.id }, { id: 'e2', source: step.id, target: 'end' }],
+      ...extra,
+    }],
+  });
+  const afterUpdate = { objectName: 'task', triggerType: 'record-after-update' };
+  const found = (stack: unknown) =>
+    lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_AFTER_SAVE_INLINE_RETRY);
+
+  it.each(['record-after-create', 'record-after-update', 'record-after-delete', 'record-after-write'])(
+    '%s: an inline http node inside a retrying try_catch is an error naming the node, the retry and durable: true',
+    (triggerType) => {
+      const hits = found(flowOf({ objectName: 'task', triggerType }, guarded(http())));
+      expect(hits).toHaveLength(1);
+      expect(hits[0]).toMatchObject({ rule: FLOW_AFTER_SAVE_INLINE_RETRY, severity: 'error', where: "flow 'sync' · node 'push'" });
+      expect(hits[0].message).toContain("retried by `try_catch` 'guarded_push' (`retry.maxRetries: 3`)");
+      expect(hits[0].hint).toMatch(/^Set `durable: true` on the node/);
+    },
+  );
+
+  it('the flow-level retry reaches a top-level inline http node; a retried connector_action gets its own fix', () => {
+    expect(found(flowOf(afterUpdate, http(), { errorHandling: { strategy: 'retry', maxRetries: 2 } }))[0].message)
+      .toContain("retried by the flow's `errorHandling` (`strategy: 'retry'`, `maxRetries: 2`)");
+    expect(found(flowOf(afterUpdate, guarded(connector)))[0].hint).toMatch(/^A connector action has no background delivery path/);
+  });
+
+  it('a node nested deeper in the retried try region is flagged', () => {
+    const loop = { id: 'each', type: 'loop', config: { collection: [1], body: { nodes: [http()], edges: [] } } };
+    expect(found(flowOf(afterUpdate, guarded(loop))).map((f) => f.where)).toEqual(["flow 'sync' · node 'push'"]);
+  });
+
+  describe('does NOT flag (controls)', () => {
+    it('the same node with durable: true', () => {
+      expect(found(flowOf(afterUpdate, guarded(http({ durable: true }))))).toEqual([]);
+    });
+    it('an inline call nothing retries: no retry, maxRetries 0, or in the catch region', () => {
+      expect(found(flowOf(afterUpdate, http()))).toEqual([]);
+      expect(found(flowOf(afterUpdate, guarded(http(), 0)))).toEqual([]);
+      expect(found(flowOf(afterUpdate, guarded(flag, 3, [http()])))).toEqual([]);
+    });
+    it('a before-trigger, a scheduled and a manual flow', () => {
+      expect(found(flowOf({ objectName: 'task', triggerType: 'record-before-update' }, guarded(http())))).toEqual([]);
+      expect(found(flowOf({ schedule: { type: 'cron', expression: '0 8 * * *' } }, guarded(http())))).toEqual([]);
+      expect(found(flowOf(undefined, guarded(http())))).toEqual([]);
+    });
+  });
+
+  it('is in the gating flow rule, so its error reaches os lint/build and the save and publish doors', () => {
+    const rule = AUTHORING_RULES.find((r) => r.name === 'lintFlowPatterns');
+    expect(rule!.runtimeTypes).toContain('flow');
+    const served = rule!.run(flowOf(afterUpdate, guarded(http())) as never, {});
+    expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_AFTER_SAVE_INLINE_RETRY, severity: 'error' }));
+  });
+
+  it('has an os explain entry', () => {
+    expect(explainRule(FLOW_AFTER_SAVE_INLINE_RETRY)).toBeDefined();
   });
 });
