@@ -2053,21 +2053,23 @@ describe('[#31699 R5-A] the priming pass never writes back a row it read from th
  * package, the boot priming pass stamps a package-less stored row with the
  * host's package before it registers it (`applyProtection`), so the registry
  * holds that row in the host's slot. A read naming no package of an action
- * name a package holds in memory is judged over the registry and the loaders
- * (#32560's `judgesLoaderSlots`), and the loaders still store the row
- * package-less: one row was counted twice, as the host's package and as the
- * environment, and the refusal named a holder that does not exist. The judged
- * view now files that row as the store files a write that carries no package
- * (`packagelessWriteKeyOf`): the name's one holder's customization, else the
- * environment's own item.
+ * name is judged over the registry and the loaders (#32560's
+ * `judgesLoaderSlots`), and the loaders still store the row package-less: one
+ * row was counted twice, as the host's package and as the environment, and
+ * the refusal named a holder that does not exist. The judged view now files
+ * that row as the store files a write that carries no package
+ * (`packagelessWriteKeyOf`: the name's one holder's customization, else the
+ * environment's own item), with the write order of the slot it came from.
+ * Only a row stamped with its slot's package is filed so, and not one whose
+ * registration replaced an item registered in memory (that item's package
+ * holds the name: epic ruling B).
  *
- * BEFORE (main `ee230a25`, these fixtures): the three action cases below were
- * refused naming `com.host.app` — `[alpha, host, environment]`, `[alpha,
- * beta, host, environment]` and `[alpha, host]`. Before #32560 (`070e8796`)
- * the same reads answered the row the pass registered: the package-less row
- * in the first and third case, and in the second too (a pick between two
- * packages that #32560's judgement now refuses). The CONTROLs answer on main
- * as here, for every by-package type.
+ * BEFORE (`main` with #32676): each case below not marked CONTROL was refused
+ * naming `com.host.app`. The CONTROLs answer on that `main` as here; the two
+ * marked with a review finding were red on this branch at an earlier head.
+ * The boot state only: after a write that carries no package the host is
+ * named again (#32812), and a removal naming no package still names it
+ * (#32813).
  */
 describe('[#32791] a stored package-less row the boot pass files under the host\'s package is one holder of an action name, not two', () => {
   const ALPHA = 'com.alpha.app';
@@ -2136,15 +2138,26 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
     expect(await answer(m, 'action', HOST), 'a read naming the host, as before').toBe('env');
   });
 
-  it('action, two packages\' rows and a package-less row saved last, on a host declaring another package: the bare read is refused naming the two packages and the environment, never the host (BEFORE: the host named too)', async () => {
-    await seed('action', ALPHA, 1);
-    await seed('action', BETA, 2);
-    await seed('action', null, 3);
-    // Which slots the pass fills for a name two packages hold is the pass's own
-    // rule (a pass that primes every holder leaves this row in the bare slot);
-    // the read's holders are what this case pins.
-    const m = await bootPass(HOST);
-    expect(await bareAnswers(m)).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+  /**
+   * Which slots the pass fills for a name two packages hold is the pass's own
+   * rule (#32676's pass primes every holder and leaves the package-less row
+   * package-less); the read's holders are what this case pins.
+   */
+  it('CONTROL action, two packages\' rows (or a package\'s and the host\'s own) and a package-less row saved last: the bare read is refused naming both and the environment, never a host that holds nothing', async () => {
+    const cells: Array<[string, readonly Row[], unknown]> = [
+      [HOST, [[ALPHA], [BETA], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'account'], [null, 'account']], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [ALPHA, [[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
+      [HOST, [[ALPHA], [HOST], [null]], REFUSED(ALPHA, HOST, 'environment')],
+    ];
+    const seen: unknown[] = [];
+    for (const [hostPackage, rows] of cells) {
+      driver = createMockDriver();
+      await seedRows(rows);
+      seen.push(await bareAnswers(await bootPass(hostPackage)));
+    }
+    expect(seen).toEqual(cells.map(([, , expected]) => [expected, expected]));
   });
 
   it('action, a package\'s row bound to an object and an object-less package-less row saved last, on a host declaring another package: the bare read answers the environment\'s own item (BEFORE: 409 naming the package and the host)', async () => {
@@ -2179,30 +2192,19 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
   });
 
   /**
-   * [#32791] Every other stored composition whose bare read moves on a host
-   * declaring another package: the package-less row counted once, as the
-   * store files it (D4). BEFORE (main): each refused naming the host too.
+   * [#32791] A package-less row bound to an object, beside one package's row
+   * on a host declaring another package: counted once, as the store files it
+   * — the holder's customization of the object it binds, or the
+   * environment's own item where the package binds the name otherwise.
    */
-  it('action, the other stored compositions on a host declaring another package: the bare read counts the package-less row once, and getDiagnosed agrees', async () => {
-    const cells: Array<[readonly Row[], unknown]> = [
-      [[[ALPHA, 'account'], [null, 'account']], 'env'],
-      [[[ALPHA], [null, 'account']], 'env'],
-      [[[ALPHA, 'account'], [BETA, 'account'], [null, 'account']], REFUSED(ALPHA, BETA, 'environment')],
-      [[[ALPHA, 'account'], [BETA, 'contact'], [null]], REFUSED(ALPHA, BETA, 'environment')],
-      [[[ALPHA], [HOST], [null]], REFUSED(ALPHA, HOST, 'environment')],
-    ];
+  it('action, a package-less row bound to an object beside one package\'s row, on a host declaring another package: the bare read answers the package-less row, and getDiagnosed agrees', async () => {
     const seen: unknown[] = [];
-    for (const [rows] of cells) {
+    for (const rows of [[[ALPHA, 'account'], [null, 'account']], [[ALPHA], [null, 'account']]] as const) {
       driver = createMockDriver();
       await seedRows(rows);
       seen.push(await bareAnswers(await bootPass(HOST)));
     }
-    expect(seen).toEqual(cells.map(([, expected]) => [expected, expected]));
-  });
-
-  it('action, two packages binding the name to two objects and an object-less package-less row, on a host declaring one of them: the bare read is refused naming the two packages and the environment (BEFORE: the two packages only)', async () => {
-    await seedRows([[ALPHA, 'account'], [BETA, 'contact'], [null]]);
-    expect(await bareAnswers(await bootPass(ALPHA))).toEqual([REFUSED(ALPHA, BETA, 'environment'), REFUSED(ALPHA, BETA, 'environment')]);
+    expect(seen).toEqual([['env', 'env'], ['env', 'env']]);
   });
 
   /**
@@ -2213,7 +2215,7 @@ describe('[#32791] a stored package-less row the boot pass files under the host\
    * row. BEFORE (this branch at `003d6480`): the package-less row, a pick
    * between two packages; main answers as here.
    */
-  it('action, a package\'s item in memory before the pass, a package-less row and a second package\'s item, on a host declaring no package: the bare read is refused naming both packages and the environment', async () => {
+  it('CONTROL action, a package\'s item in memory before the pass, a package-less row and a second package\'s item, on a host declaring no package: the bare read is refused naming both packages and the environment', async () => {
     await seedRows([[BETA], [null]]);
     const stored = await bootPass(undefined, [ALPHA]);
     expect(await answer(stored, 'action', ALPHA), 'the row is ALPHA\'s customization').toBe('env');
