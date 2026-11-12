@@ -468,7 +468,8 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // their gates always wrote; the third where the layered
                     // view is chosen, below. ⛔ A rule is added there, never
                     // here.
-                    const queryRefusal = metaReadGate.metaItemQueryRefusal('item', req.query);
+                    // [ADR-0150 D3, #32310] …and the caller arm's rule 4 reads the type.
+                    const queryRefusal = metaReadGate.metaItemQueryRefusal('item', req.query, { type: req.params?.type });
                     if (queryRefusal && queryRefusal.rule !== 'layered-member') {
                         res.status(queryRefusal.status).json({
                             error: { code: queryRefusal.code, message: queryRefusal.message },
@@ -478,6 +479,19 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     const memberSelector = metaMemberSelector(req.query);
                     const environmentId = isScoped ? req.params?.environmentId : undefined;
                     const p = await this.resolveProtocol(environmentId, req);
+                    // [ADR-0150 D3, #32310] The caller arm (`?callerPackage=P`):
+                    // the name resolves FROM P by D3 — P's own item, else the
+                    // unique holder in P's declared closure plus `sys`, else
+                    // `409` naming the candidates — and this read then reads
+                    // the resolved holder at its exact qualifier, `?package=`,
+                    // so everything below (the overlay, the drafts, the lock,
+                    // the read gate) answers as that address answers. Resolved
+                    // ONCE, here, and the request carries the address from now
+                    // on: no branch below reads the caller arm.
+                    const callerQuery = metaReadGate.metaCallerPackageQuery(
+                        p, { type: req.params.type, name: req.params.name, ...memberSelector }, req.query,
+                    );
+                    if (callerQuery) req = Object.assign(Object.create(Object.getPrototypeOf(req ?? {})), req, { query: callerQuery });
 
                     // [#3984 / commit 83a3b1f2e] Normalize the `:type` segment ONCE,
                     // here at the top, and let every gate below read THIS
@@ -596,6 +610,19 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         );
                         for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
                         await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
+                        return;
+                    }
+
+                    // [ruling record 6787890900] An object the caller may not
+                    // read is answered as a name with nothing behind it
+                    // ({@link sendMetaItemAbsent}, the one absence emitter),
+                    // before any fetch: no validator — `If-None-Match` or
+                    // `If-Modified-Since` — is ever judged for it, so no `304`
+                    // can say it exists. After the refusals above, which answer
+                    // every name alike; the layered branch's chain answers it
+                    // absent itself.
+                    if (maskPosture.kind === 'hidden') {
+                        sendMetaItemAbsent(res);
                         return;
                     }
 
@@ -1185,7 +1212,11 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                         sendMetaItemAbsent(res);
                         return;
                     }
-                    handleRouteError(res, error);
+                    // [#32201, ADR-0150 D5] The package-scoped refusal (the bare
+                    // name two packages hold, `?package=` of a package that
+                    // holds none of it) carries its holders as
+                    // `details.candidates`; anything else answers as before.
+                    handleRouteError(res, error, undefined, { packageScopedCandidates: true });
                 }
             },
             metadata: {

@@ -365,6 +365,13 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A `notify` node names no organization.** The notification and its inbox rows
+belong to [the organization the run acts as](#the-acting-organization) — for a
+run that carries none, that of the record it links to, else the trigger record —
+and no key on the node chooses another. A selector that expands over
+organization membership reads that organization's members only; another
+organization's flows notify its own.
+
 **A `notify` node mails a person who is not a user through an email field.**
 An applicant who came in through a public form has no account, so no user id
 reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
@@ -2622,12 +2629,12 @@ door's own admission check, made before anything is dispatched:
 
 | Status | `error.code` | What happened | What to do |
 |:---|:---|:---|:---|
-| `404` | — | No flow by that name in this deployment | Check the name; nothing was dispatched |
+| `404` | — | No flow by that name is held in this deployment. A flow stored with no `start` node is never armed (see the `FLOW_NO_START_NODE` row), so it answers here too | Check the name; nothing was dispatched |
 | `403` | `PERMISSION_DENIED` | The caller is not the system principal, and the flow is declared `runAs: 'system'` with a self-triggered `type` (`autolaunched`, `record_change`, `schedule`). The same answer at every door that starts a flow by name: this route, a `type: 'flow'` action (REST and MCP `run_action`) and a declared `type: 'flow'` endpoint | Let it run on its own trigger, or call it from a parent flow's `subflow` node. If members are meant to start it, declare it `type: 'screen'` (or `'api'` for a signed inbound hook) |
 | `403` | `PERMISSION_DENIED` | The flow declares `requiredPermissions` and the caller, not the system principal, does not hold every capability it names. Checked after the row above, at the same doors; the message names the declared and the missing capabilities | Grant the capability through a permission set's `systemPermissions`, or start the flow as someone who holds it |
 | `404` | `RECORD_NOT_FOUND` | The start names a record (`recordId`, or the object's id alias such as `crmLeadId`) that the caller, not the system principal, cannot read in its own scope, or that does not exist: the two get one answer, the one the action door gives. Checked after the two rows above, at the same doors. A record key that is not one id, or a record named with no `objectName` for a flow declared `runAs: 'system'`, is refused `400` `VALIDATION_FAILED` naming the key. Where the flow's own definition reads a start input as the id of a record of a fixed object (a `get_record`, `update_record` or `delete_record` node with a literal `objectName` whose `filter.id` or `filter.id.$eq` is the input, or whose `filter.id.$in` is; a `screen` node with a literal `objectName` whose `recordId` is the input; a `subflow` or `map` node that hands the input to a callee input the callee reads so), that input is also loaded in the caller's own scope from THAT object, whatever object the start names, or none, and whatever the flow runs as: a value the caller cannot read there gets this `404`, and a value that is not one id (or a list of ids, where the definition reads a list) is refused `400` `VALIDATION_FAILED` naming the input. An input the flow declares a record id (`objectName` on the variable, [above](#a-start-input-that-is-a-record-id)) is loaded from the declared object the same way, whether or not the definition reads it | Start the flow on a record the caller can read, and name the record's object (`objectName`) beside `recordId`. Hand an input the flow reads as a record id the id of a record the caller can read in the object the flow reads it from, in the shape the flow reads (one id, or a list of ids) |
 | `409` | `FLOW_DISABLED` | The flow exists but is switched off | Enable it — the identical request then succeeds |
-| `422` | `FLOW_NO_START_NODE` | The stored definition has no `start` node | Fix the flow; retrying cannot help |
+| `422` | `FLOW_NO_START_NODE` | A defensive exit of the engine that no door reaches today. A flow with no `start` node is refused at registration (`POST` / `PUT /api/v1/automation` answer `400` `VALIDATION_FAILED`), and a stored one is not armed, so its trigger answers `404` above, not `422` | Add a `start` node to the flow; its metadata read shows `registration: refused` until then |
 | `422` | `FLOW_INPUT_SCHEMA_INVALID` | A node's `config` violates the `inputSchema` its own definition declares | Fix the flow; the refusal is non-retryable — even under `errorHandling.strategy: 'retry'` the engine refuses once and never enters the retry loop |
 | `400` | `FLOW_FAILED` | The flow **ran** and was rejected | Read `error.details.summary` for the failing node |
 

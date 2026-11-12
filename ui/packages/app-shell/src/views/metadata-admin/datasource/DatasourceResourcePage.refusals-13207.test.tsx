@@ -20,6 +20,13 @@
  *    dialog; the empty-datasource copy is absent and no toast double-reports.
  *  - (d) CONTROL: Sync succeeding with zero tables shows the empty copy.
  *  - (e) Sync refused after the dialog was closed reports through a toast.
+ *
+ * objectstack#32305 (the second describe): a refusal's line is the envelope's
+ * `message`; the rationale and the remedy are its `details.hint`. The page
+ * shows the hint under the line wherever the server sends one, keeping its
+ * line breaks, and nothing extra when it sends none. Envelopes below are the
+ * shape `datasourceAdminRefusal` / `withRefusalDetails` (service-datasource
+ * `datasource-refusal.ts`) answer on `main`.
  */
 
 import * as React from 'react';
@@ -61,8 +68,8 @@ const reply = (status: number, payload: unknown): Reply => ({
   text: async () => JSON.stringify(payload),
 });
 const ok = (data: unknown) => reply(200, { success: true, data });
-const refuse = (status: number, message: string) =>
-  reply(status, { success: false, error: { code: 'DATASOURCE_ADMIN_ERROR', message } });
+const refuse = (status: number, message: string, details?: Record<string, unknown>) =>
+  reply(status, { success: false, error: { code: 'DATASOURCE_ADMIN_ERROR', message, ...(details ? { details } : {}) } });
 
 // `external`: only a federation source offers Sync (objectui#13318).
 const ROW = { name: 'warehouse', driver: 'postgres', schemaMode: 'external', origin: 'runtime', active: true, status: 'unvalidated' };
@@ -133,5 +140,95 @@ describe('DatasourceResourcePage — refusals read as refusals (objectui#13207)'
     release(refuse(400, message));
     await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
     expect(vi.mocked(toast.error).mock.calls[0][0]).toContain(message);
+  });
+});
+
+// ── objectstack#32305: the hint under the line ─────────────────────────────
+
+const SQLITE = { id: 'sqlite', label: 'SQLite', configSchema: { properties: {} } };
+const CREATE_URL = '/api/v1/datasources';
+const DRAFT_TEST_URL = '/api/v1/datasources/test';
+
+/** A multi-finding config refusal, as `listedRefusal('invalid_config', …)` builds it. */
+const CONFIG_LINE = "Invalid configuration for driver 'sqlite': 2 issue(s) found.";
+const CONFIG_FINDINGS = ['config.filename: Required', 'config.readonly: Expected boolean, received string'];
+const CONFIG_REFUSAL = { reason: 'invalid_config', hint: CONFIG_FINDINGS.join('\n') };
+
+/** A Sync-door refusal, as `withRefusalDetails(err, 'not_federation_source', hint)` builds it. */
+const SYNC_LINE = "Datasource 'warehouse' is not a federation source.";
+const SYNC_HINT = "Sync reads a datasource whose schemaMode is external or validate-only.\nSet its Schema mode to External, then Sync again.";
+
+/** Opens the editor on a new datasource named `warehouse`. */
+async function openNewDatasource() {
+  fireEvent.click(await screen.findByRole('button', { name: /New datasource/ }));
+  const name = (await screen.findByText('Name *', { selector: 'label' })).parentElement?.querySelector('input');
+  expect(name, 'the Name box').toBeTruthy();
+  fireEvent.change(name as HTMLInputElement, { target: { value: 'warehouse' } });
+}
+
+function withDrivers(route: (url: string, init?: RequestInit) => Reply | undefined) {
+  return (url: string, init?: RequestInit) => (url === '/api/v1/datasources/drivers' ? ok({ drivers: [SQLITE] }) : route(url, init));
+}
+
+describe('DatasourceResourcePage — a refusal shows its details.hint under its line (objectstack#32305)', () => {
+  it('a refused Save toasts the line, with the multi-finding hint as the description, one finding per line', async () => {
+    renderPage(withDrivers((url, init) => (url === CREATE_URL && init?.method === 'POST' ? refuse(400, CONFIG_LINE, CONFIG_REFUSAL) : undefined)));
+    await openNewDatasource();
+    fireEvent.click(screen.getByRole('button', { name: /Create datasource/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    const [line, options] = vi.mocked(toast.error).mock.calls[0] as [string, { description?: unknown; descriptionClassName?: string }];
+    expect(line).toContain(CONFIG_LINE);
+    expect(line).not.toContain(CONFIG_FINDINGS[0]);
+    expect(String(options?.description).split('\n')).toEqual(CONFIG_FINDINGS);
+    expect(options?.descriptionClassName).toContain('whitespace-pre-line');
+  });
+
+  it('CONTROL: a refused Save with no hint toasts the line alone', async () => {
+    const message = "Datasource 'warehouse' already exists.";
+    renderPage(withDrivers((url, init) => (url === CREATE_URL && init?.method === 'POST' ? refuse(400, message, { reason: 'already_exists' }) : undefined)));
+    await openNewDatasource();
+    fireEvent.click(screen.getByRole('button', { name: /Create datasource/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.error).mock.calls[0]).toHaveLength(1);
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain(message);
+  });
+
+  it('a refused draft Test draws the hint under the editor\'s inline line, one finding per line', async () => {
+    renderPage(withDrivers((url) => (url === DRAFT_TEST_URL ? refuse(400, CONFIG_LINE, CONFIG_REFUSAL) : undefined)));
+    await openNewDatasource();
+    fireEvent.click(screen.getByRole('button', { name: /Test connection/ }));
+    const hint = await screen.findByTestId('datasource-refusal-hint');
+    expect(hint.textContent).toBe(CONFIG_FINDINGS.join('\n'));
+    expect(hint.className).toContain('whitespace-pre-line');
+    expect(screen.getByText(CONFIG_LINE)).toBeTruthy();
+  });
+
+  it('a refused remote-tables read draws the hint under the line in the Sync dialog, keeping its line breaks', async () => {
+    renderPage((url) => (url === TABLES_URL ? refuse(400, SYNC_LINE, { reason: 'not_federation_source', hint: SYNC_HINT }) : undefined));
+    fireEvent.click(await screen.findByRole('button', { name: /Sync objects/ }));
+    const alert = await within(await screen.findByRole('dialog')).findByRole('alert');
+    const hint = within(alert).getByTestId('datasource-refusal-hint');
+    expect(hint.textContent).toBe(SYNC_HINT);
+    expect(hint.className).toContain('whitespace-pre-line');
+    expect(alert.textContent).toBe(SYNC_LINE + SYNC_HINT);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a refused remote-tables read with no hint draws the line alone', async () => {
+    renderPage((url) => (url === TABLES_URL ? refuse(400, SYNC_LINE, { reason: 'not_federation_source' }) : undefined));
+    fireEvent.click(await screen.findByRole('button', { name: /Sync objects/ }));
+    const alert = await within(await screen.findByRole('dialog')).findByRole('alert');
+    expect(alert.textContent).toBe(SYNC_LINE);
+    expect(within(alert).queryByTestId('datasource-refusal-hint')).toBeNull();
+  });
+
+  it('a refused row Test toasts the line with the hint as the description', async () => {
+    const line = "Datasource 'warehouse' is defined in code.";
+    const hint = 'Change it in the code that declares it.';
+    renderPage((url) => (url === TEST_URL ? refuse(400, line, { reason: 'code_defined', hint }) : undefined));
+    fireEvent.click(await screen.findByRole('button', { name: /Test/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain(line);
+    expect(vi.mocked(toast.error).mock.calls[0][1]).toMatchObject({ description: hint });
   });
 });

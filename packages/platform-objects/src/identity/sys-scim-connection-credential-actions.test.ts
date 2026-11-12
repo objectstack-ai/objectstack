@@ -107,3 +107,32 @@ describe('sys_scim_connection_credential: AI exposure (ADR-0011 identity-actions
     expect(revoke.ai?.description?.length ?? 0).toBeGreaterThan(0);
   });
 });
+
+describe('[#32120] the token hint and the last use: readable, read-only, and never the secret', () => {
+  const fields = SysScimConnectionCredential.fields as Record<string, { readonly?: boolean; internal?: boolean; maxLength?: number; type?: string }>;
+
+  it('both columns are declared read-only to every writer; the hint holds at most four characters', () => {
+    expect(fields.token_hint).toMatchObject({ type: 'text', readonly: true, maxLength: 4 });
+    expect(fields.last_used_at).toMatchObject({ type: 'datetime', readonly: true });
+    // Readable: neither is internal (the digest is, and stays so).
+    expect(fields.token_hint.internal).not.toBe(true);
+    expect(fields.last_used_at.internal).not.toBe(true);
+    expect(fields.token_digest.internal).toBe(true);
+    // The data API stays list-only, so no generic write reaches either column.
+    expect(SysScimConnectionCredential.enable?.apiMethods).toEqual(['list']);
+  });
+
+  it('the `all` view shows the hint and the last use, and never the digest', () => {
+    const columns = (SysScimConnectionCredential.listViews?.all as { columns?: unknown[] } | undefined)?.columns ?? [];
+    const names = columns.map((c) => (typeof c === 'string' ? c : (c as { field?: string }).field));
+    expect(names).toContain('token_hint');
+    expect(names).toContain('last_used_at');
+    expect(names).not.toContain('token_digest');
+  });
+
+  it('the mint result dialog shows the hint beside the token, as plain text', () => {
+    const dialog = action('mint_scim_credential').resultDialog?.fields ?? [];
+    expect(dialog.map((f) => f.path)).toEqual(['token', 'tokenHint', 'connectionId', 'expiresAt']);
+    expect(dialog.find((f) => f.path === 'tokenHint')?.format).toBe('text');
+  });
+});

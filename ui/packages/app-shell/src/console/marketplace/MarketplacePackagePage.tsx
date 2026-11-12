@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
+  Input,
   Checkbox,
   Select,
   SelectContent,
@@ -72,6 +73,7 @@ import {
   getServedPackageBody,
   declaredInstallModesOf,
   installPackage,
+  getInstallNamespace,
   installLocal,
   uninstallLocal,
   listLocalInstalls,
@@ -114,6 +116,7 @@ import { SuggestedBindingsPanel, type SuggestedBindingsStrings } from '../../com
 import { ConnectorCredentialsStep } from './ConnectorCredentialsStep.js';
 import type { SuggestedBinding } from '../../services/suggestedBindingsApi.js';
 import { errorCodeIs } from '@object-ui/types';
+import { readTargetNamespaceRefusal } from './targetNamespaceRefusal.js';
 import { MarketplaceNamespaceGate } from './MarketplaceNamespaceGate.js';
 import { effectiveSolutionType, readListingTaxonomy } from './marketplaceTaxonomy.js';
 import { DetailLanguagesGroup } from './MarketplaceLanguages.js';
@@ -273,6 +276,13 @@ function MarketplacePackagePageBody() {
   // requested permissions before the install button is enabled.
   const [acknowledged, setAcknowledged] = useState(false);
   const [installing, setInstalling] = useState(false);
+  // objectstack#32040 — the hosted unmanaged install's target namespace: the
+  // control plane's default as read for one package (`null` while the read is
+  // in flight), the value the operator edits, and the refusal drawn beside it.
+  const [namespaceDefault, setNamespaceDefault] = useState<{ packageId: string; value: string | null } | null>(null);
+  const [targetNamespace, setTargetNamespace] = useState('');
+  const [namespaceError, setNamespaceError] = useState<string | null>(null);
+  const namespaceInputRef = useRef<HTMLInputElement | null>(null);
   const [installResult, setInstallResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [deploy, setDeploy] = useState<DeployState | null>(null);
   // Tracks whether the package has been installed into the current
@@ -415,6 +425,32 @@ function MarketplacePackagePageBody() {
   const hostedInstallMode: LocalInstallMode | undefined = hostedModeDoor && declaredModes?.some((m) => m !== 'managed')
     ? requestedInstallMode
     : undefined;
+
+  // objectstack#32040 — an unmanaged hosted install (never an update) names
+  // the namespace its copy takes: the field is drawn, pre-filled with the
+  // control plane's default. A managed install draws no field and sends none.
+  const namespaceFieldShown = installOpen && !dialogUpdate && hostedInstallMode === 'unmanaged';
+  const namespaceLoading = namespaceFieldShown && namespaceDefault?.packageId !== packageId;
+  useEffect(() => {
+    if (!namespaceFieldShown || !packageId) return;
+    let cancelled = false;
+    setNamespaceDefault(null);
+    setTargetNamespace('');
+    setNamespaceError(null);
+    void getInstallNamespace(packageId).then((value) => {
+      if (cancelled) return;
+      // No default (unconfigured, unreachable, refused): the field stays empty
+      // and a typed name still installs.
+      setNamespaceDefault({ packageId, value });
+      setTargetNamespace(value ?? '');
+    });
+    return () => { cancelled = true; };
+  }, [namespaceFieldShown, packageId]);
+  // A refused namespace returns focus to its field once the install settles
+  // (the field is disabled while it runs), so the operator types another.
+  useEffect(() => {
+    if (namespaceError && !installing) namespaceInputRef.current?.focus();
+  }, [namespaceError, installing]);
 
   // Seed cloud-install state so the primary CTA renders as "Installed" on
   // first paint instead of inviting another install.
@@ -630,8 +666,10 @@ function MarketplacePackagePageBody() {
     // ADR-0131 D6 — an install, never an update of the managed copy this
     // environment holds, sends the mode the package page resolved.
     const installMode = dialogUpdate ? undefined : hostedInstallMode;
+    const askedNamespace = installMode === 'unmanaged' ? targetNamespace.trim() : '';
     setInstalling(true);
     setInstallResult(null);
+    setNamespaceError(null);
     try {
       // objectui#12146 — an update never asks for sample data: the update
       // dialog draws no "Include sample data" control, so it sends what an
@@ -642,6 +680,7 @@ function MarketplacePackagePageBody() {
         environmentId: selectedEnv,
         seedSampleData: dialogUpdate ? false : seedSampleData,
         ...(installMode ? { installMode } : {}),
+        ...(askedNamespace ? { targetNamespace: askedNamespace } : {}),
       });
       const name = data?.package ? localizePackage(data.package as any, language).displayName : packageId;
       // An unmanaged copy (ADR-0131 D6) is the environment's own base, not a
@@ -707,7 +746,17 @@ function MarketplacePackagePageBody() {
         });
       }
     } catch (e: any) {
-      setInstallResult({ ok: false, message: installRefusalText(e) });
+      // A refusal of the typed namespace is drawn beside the field, and the
+      // dialog stays open for another name. A second copy of the same package
+      // (`details.targetPackageId`) is not one: no namespace clears it.
+      const nsRefusal = askedNamespace ? readTargetNamespaceRefusal(e) : null;
+      if (nsRefusal) {
+        setNamespaceError(nsRefusal.kind === 'taken'
+          ? t('marketplace.install.targetNamespace.taken', { namespace: nsRefusal.namespace })
+          : nsRefusal.message);
+      } else {
+        setInstallResult({ ok: false, message: installRefusalText(e) });
+      }
     } finally {
       setInstalling(false);
     }
@@ -1959,6 +2008,38 @@ function MarketplacePackagePageBody() {
             </div>
           )}
 
+          {namespaceFieldShown && !envsError && (
+            <div className="space-y-1.5" data-testid="install-target-namespace" data-state={namespaceLoading ? 'loading' : (namespaceError ? 'refused' : 'ready')}>
+              <Label htmlFor="install-target-namespace-input">{t('marketplace.install.targetNamespace.label')}</Label>
+              {namespaceLoading ? (
+                <Skeleton className="h-9 w-full" data-testid="install-target-namespace-loading" />
+              ) : (
+                <Input
+                  id="install-target-namespace-input"
+                  ref={namespaceInputRef}
+                  value={targetNamespace}
+                  onChange={(e) => { setTargetNamespace(e.target.value); setNamespaceError(null); }}
+                  placeholder={t('marketplace.install.targetNamespace.placeholder')}
+                  disabled={installing || installResult?.ok === true}
+                  aria-invalid={namespaceError ? true : undefined}
+                  aria-describedby={namespaceError ? 'install-target-namespace-error' : 'install-target-namespace-hint'}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="font-mono"
+                />
+              )}
+              {namespaceError ? (
+                <p id="install-target-namespace-error" role="alert" className="text-sm text-destructive">{namespaceError}</p>
+              ) : (
+                <p id="install-target-namespace-hint" className="text-xs text-muted-foreground">
+                  {namespaceDefault !== null && namespaceDefault.packageId === packageId && namespaceDefault.value === null
+                    ? t('marketplace.install.targetNamespace.noDefault')
+                    : t('marketplace.install.targetNamespace.hint')}
+                </p>
+              )}
+            </div>
+          )}
+
           {containsCode && !envsError && (
             <div className="space-y-3">
               <PluginDisclosure version={pkg.latest_version} />
@@ -2010,7 +2091,7 @@ function MarketplacePackagePageBody() {
             {!envsError && (
               <Button
                 onClick={doInstall}
-                disabled={!selectedEnv || installing || installResult?.ok === true || deploy !== null || (containsCode && !acknowledged)}
+                disabled={!selectedEnv || installing || installResult?.ok === true || deploy !== null || (containsCode && !acknowledged) || namespaceLoading}
               >
                 {dialogUpdate
                   ? (installing ? t('marketplace.action.updating') : t('marketplace.action.updateTo', { defaultValue: 'Update' }))

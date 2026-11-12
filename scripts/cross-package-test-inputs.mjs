@@ -1612,6 +1612,15 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/**/*.ts',
       'scripts/cross-package-test-inputs.mjs',
     ],
+    heldBy: {
+      // src/metadata-registry-question-producers.test.ts (ADR-0144 D2 and D6,
+      // amended) walks `packages/` with `readdirSync` for every request-carrying
+      // `saveMetaItem(` / `promoteDraftForPublish(` call in a package's `.ts`
+      // sources and holds the count per file to metadata-protocol's
+      // `REGISTRY_QUESTION_PRODUCERS`; the walk names no path this scan can
+      // put on the roster, so the glob is held by witness.
+      'packages/**/*.ts': ['packages/runtime/src/metadata-registry-question-producers.test.ts'],
+    },
   },
   '@objectstack/driver-sql': {
     // src/live-dialect-matrix.isolation.test.ts imports `stripComments` from

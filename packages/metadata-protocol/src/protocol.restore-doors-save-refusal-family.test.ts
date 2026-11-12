@@ -37,6 +37,8 @@
  * imported, so each pin can fail on its own.
  */
 
+// Pays the lint root's first load at collection, never inside a clocked case.
+import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // [#5619] The producer's OWN write-verb dispatch decisions, imported from
 // `@objectstack/metadata-core` and NOT from `@objectstack/objectql`: objectql
@@ -47,6 +49,7 @@ import {
     assertEngineFindOnePredicate,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -183,6 +186,7 @@ function makeStubEngine() {
         async syncObjectSchema() { return true; },
         async dropObjectSchema() { return true; },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             registerItem: (type: string, item: any) => {
                 if (!registered.has(type)) registered.set(type, new Map());
                 registered.get(type)!.set(item?.name, item);
@@ -348,7 +352,7 @@ const hook = (label: string) => ({
 });
 
 const recordPage = (name: string, isDefault: boolean, label = name) =>
-    ({ name, label, type: 'record', object: 'acme_org', isDefault, regions: [] });
+    ({ name, label, type: 'record', object: 'acme_org', isDefault, regions: [{ name: 'main', components: [{ type: 'record:details' }] }] });
 
 const datasource = (extra: Record<string, unknown> = {}) =>
     ({ name: 'wh', label: 'Warehouse', driver: 'sqlite', config: { filename: 'wh.db' }, ...extra });

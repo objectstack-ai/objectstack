@@ -22,6 +22,11 @@ import { MemoryRouter } from 'react-router-dom';
 import { AuthProvider } from '@object-ui/auth';
 import type { AuthClient } from '@object-ui/auth';
 import { LoginPage } from '../LoginPage';
+import { serveDeploymentWithOwner } from '../../../__tests__/helpers/ownerProbeDouble';
+
+// objectstack#32021 — the page asks whether this deployment has an owner; this one has.
+serveDeploymentWithOwner();
+
 
 afterEach(cleanup);
 
@@ -79,7 +84,8 @@ describe('LoginPage — OAuth callback error banner', () => {
  * through plugin-auth's real SAML ACS pipeline (the one
  * `sso-saml-refusal-landing.test.ts` drives), with the audience gate's code
  * carrying its administrator-facing message; `state_not_found` is the OIDC
- * callback's answer to a request with no `state`.
+ * callback's answer to a request with no `state`; `unsolicited_response` is
+ * the SAML ACS's refusal of an IdP-initiated response (objectstack#32132).
  */
 describe('LoginPage — a refused single sign-on names its own cause (objectstack#32087)', () => {
   const SELF_REGISTRATION_CLOSED_MESSAGE =
@@ -109,6 +115,11 @@ describe('LoginPage — a refused single sign-on names its own cause (objectstac
       description: 'SAML response binding could not be validated',
       sentence:
         "Your organization's sign-in service sent a response this system could not accept. Ask your administrator to check the single sign-on setup.",
+    },
+    {
+      code: 'unsolicited_response',
+      sentence:
+        "Sign-in has to start from this system's login page. Enter your work email here and choose Sign in with SSO.",
     },
     {
       code: 'state_not_found',

@@ -29,6 +29,17 @@ export {
   collectInternalWriteResponseFields,
 } from './write-response-internal-fields.js';
 export { createMetadataProtocolPlugin, assembleMetadataProtocol, shouldRunPlatformMigrations } from './plugin.js';
+// [ADR-0144 D2 and D6, amended] Which metadata doors ask the registry the
+// question that reads its other objects, in one place: exported so the
+// runtime's repo-tier census can pin every producer against it.
+export {
+    AGAINST_REGISTRY_SAVE_FACES,
+    PROMOTION_REGISTRY_QUESTION,
+    REGISTRY_QUESTION_PRODUCERS,
+    saveRegistryQuestion,
+    type RegistryQuestion,
+    type RegistryQuestionProducer,
+} from './registry-question.js';
 export type { MetadataProtocolPluginOptions, AssembleMetadataProtocolOptions } from './plugin.js';
 // [#20312] The service key a host registers its SDUI component manifest under, read by the save door per publish.
 export { SDUI_MANIFEST_SERVICE } from './runtime-authoring-gate.js';
@@ -70,6 +81,27 @@ export type {
     EnsureActivationLedgerPackagelessIndexResult,
     EnsureActivationLedgerPackagelessIndexStatus,
 } from './migrations/activation-ledger-packageless-index.js';
+
+// [ADR-0150 D4, #32164] `sys_user_permission_set`'s one grant per (user_id,
+// permission_set, organization_id) among the grants that name no package — a
+// runtime index ADDED beside the grant's declared key, which ADR-0150 D4 widens
+// with the NULL-distinct `permission_set_package`.
+export {
+    ensureUserPermissionSetPackagelessIndex,
+    createUserPermissionSetGuardAtSchemaSync,
+    buildUserPermissionSetPackagelessIndexSql,
+    buildUserPermissionSetPackagelessDuplicateProbeSql,
+    resolveUserPermissionSetIndexSeam,
+    buildUserPermissionSetOldKeySql,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS,
+    USER_PERMISSION_SET_OLD_KEY_INDEX_NAME,
+} from './migrations/user-permission-set-packageless-index.js';
+export type {
+    EnsureUserPermissionSetPackagelessIndexResult,
+    EnsureUserPermissionSetPackagelessIndexStatus,
+    UserPermissionSetGuardPassOutcome,
+} from './migrations/user-permission-set-packageless-index.js';
 
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
@@ -262,7 +294,10 @@ export { refuseNamespaceObjectNameClashes } from './protocol-save-door-refusals.
 // [ADR-0150 D5, epic #31527 child G1] The qualified by-name path's reading:
 // the sub-resource literals that keep their route (`/meta/:type/:name/history`),
 // and the address shape `resolveMetaItemAddress` answers. Both transports read them.
-export { META_ITEM_SUBRESOURCE_SEGMENTS, type MetaItemAddress } from './protocol-exact-qualifier.js';
+// [ADR-0150 D3, #32310] …and where a caller-arm read (`?callerPackage=`) is read.
+export {
+    META_ITEM_SUBRESOURCE_SEGMENTS, packageLessRowOwners, pairMemberOwners, type CallerPackageAddress, type MetaItemAddress,
+} from './protocol-exact-qualifier.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
 // [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base

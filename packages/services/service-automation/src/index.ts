@@ -107,6 +107,12 @@ export { resolveFlowPrecedence, describeFlowContender, renderFlowContender } fro
 export type { FlowNameRefusalReader } from './flow-precedence.js';
 export type { FlowPrecedenceWinner } from './flow-precedence.js';
 
+// [#31696, ADR-0150 D4] The engine holds flows by `(package, name)`: the slot
+// `AutomationEngine.getFlowSlots` answers, and the key a slot of a name two
+// packages hold is filed under (`PACKAGE/NAME`).
+export { qualifiedFlowKey } from './flow-slots.js';
+export type { FlowSlot } from './flow-slots.js';
+
 // Per-run summary (#4354): the fold that turns a run's step log into
 // "selected N, acted M, skipped K by <gate>". Exported so a host building its
 // own observability surface (or a test asserting a sweep actually wrote
@@ -146,6 +152,28 @@ export type { SuspendedRunStoreEngine, ObjectStoreSuspendedRunStoreOptions } fro
 // The sys_automation_run object backing the durable store — registered by
 // AutomationServicePlugin and exported for hosts wiring a custom store.
 export { SysAutomationRun } from './sys-automation-run.object.js';
+
+// [ADR-0153 D7] A pull's run record and read position — registered by
+// AutomationServicePlugin beside sys_automation_run; the ledger is the one
+// writer (`ConnectorPullDeps.runs`).
+export { SysSyncRun } from './sys-sync-run.object.js';
+export {
+    ObjectStoreSyncRunLedger,
+    SYNC_RUN_OBJECT,
+    SYNC_RUN_INTERRUPTED,
+    closeInterruptedSyncRuns,
+} from './sync-run-ledger.js';
+export type {
+    SyncRunCounts,
+    SyncRunDescription,
+    SyncRunEnd,
+    SyncRunLedger,
+    SyncRunLedgerEngine,
+    SyncRunOrigin,
+    SyncRunPosition,
+    SyncRunScope,
+    SyncRunStatus,
+} from './sync-run-ledger.js';
 
 // Trigger dispatch idempotency (#10220). The persisted claim ledger behind
 // `AutomationEngine.claim(key)` — the in-memory store is for tests / explicit

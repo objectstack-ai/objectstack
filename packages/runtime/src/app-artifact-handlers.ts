@@ -13,7 +13,10 @@
  *   - hook bodies (and bundle functions) through `ql.bindHooks(...)`,
  *   - action bodies through `ql.registerAction(object, name, handler, owner)`,
  *
- * both under ONE owner, `app:<appId>` ({@link appArtifactHandlerOwner}).
+ * both under the owner `app:<appId>` ({@link appArtifactHandlerOwner}); a
+ * multi-package artifact's actions go under each declaring package's
+ * `app:<package id>` instead (see "Each package's actions under its own
+ * package" below).
  *
  * ## Why this is a function and not a block inside `AppPlugin.start`
  *
@@ -41,7 +44,26 @@
  * hook the new version dropped stop running. The explicit hook teardown matters
  * because `bindHooksToEngine` only unregisters when it is handed a NON-empty
  * list — a reinstall whose new version declares no hooks would otherwise keep
- * the old ones firing.
+ * the old ones firing. For a multi-package artifact the action teardown
+ * covers every owner the artifact's previous bind on that engine registered
+ * under, and every owner the new bind registers under, so a package body the
+ * new bundle no longer carries stops running too: when every action sat under
+ * `app:<appId>`, the teardown of that one owner removed it.
+ *
+ * ## Each package's actions under its own package (ADR-0150 D4)
+ *
+ * A multi-package artifact (`packages[]`, `composeStacks(…, { manifest:
+ * 'preserve' })`) carries each package's actions in that package's body, and
+ * each body's action handlers are registered under THAT package
+ * (`app:<package id>`, {@link actionBindingGroups}), as an install of each
+ * package registers them, so a package-qualified call
+ * (`/actions/NS/global/NAME`, `executeAction`'s `packageId`) reaches its own,
+ * and two packages of two namespaces may each hold one object-less action of
+ * a name. It binds what the reconciled artifact carries, nothing a
+ * composition replaced; a key two bodies carry (outside that object-less
+ * pair) stays one handler under the artifact's owner, and so does an action
+ * the top level carries and no body declares. Hooks and functions stay under
+ * the artifact's owner.
  *
  * Functions are not torn down: they are code (ADR-0088 — never a metadata row),
  * so a JSON artifact cannot carry one, and `registerFunction` replaces by name.
@@ -131,6 +153,13 @@
  */
 
 import type { PluginContext, SystemWriteOrganizationDecision } from '@objectstack/core';
+import {
+    PackageScopedNameRefusedError,
+    artifactPackageId,
+    describePackageScopedHolder,
+    resolveArtifactPackageOrder,
+    type PackageScopedRefusal,
+} from '@objectstack/core';
 import type {
     ConnectorSourcePullResult,
     IAutomationService,
@@ -170,14 +199,17 @@ import {
     collectBundleJobs,
 } from './app-plugin.js';
 import { resolveArtifactCollections } from './artifact-collections.js';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import { toBoundaryJobSchedule } from './job-schedule.js';
 import type { JobHandlerContext } from './job-handler-context.js';
 import { resolveMetrics } from './observability/observability-service-plugin.js';
 
 /**
- * The engine owner key every handler bound for `appId` is registered under —
- * the `package` of each `listRegisteredActions()` row and the `packageId` of
- * each hook. ObjectQLPlugin's runtime-authored re-sync reads the same owner as
+ * The engine owner key the handlers bound for the package `appId` are
+ * registered under — the `package` of each `listRegisteredActions()` row and
+ * the `packageId` of each hook. For an artifact it names the artifact's id;
+ * for a multi-package artifact's action it names the declaring package's id
+ * ({@link actionBindingGroups}). ObjectQLPlugin's runtime-authored re-sync reads the same owner as
  * "an installed code package's handler" (`isArtifactShippedAction`).
  */
 export function appArtifactHandlerOwner(appId: string): string {
@@ -208,7 +240,12 @@ export interface AppArtifactHandlerBindingOptions {
 
 /** What one {@link bindAppArtifactHandlers} call bound. */
 export interface AppArtifactHandlerBinding {
-    /** The owner key the handlers were registered under. */
+    /**
+     * The artifact's owner key: the hooks, the functions, and every action
+     * of a bundle with no `packages[]` were registered under it. A
+     * multi-package bundle's actions go under each declaring package's owner
+     * instead ({@link actionBindingGroups}).
+     */
     owner: string;
     /** Hook definitions handed to `bindHooks` (0 when none were declared or binding failed). */
     hooks: number;
@@ -242,9 +279,25 @@ export function bindAppArtifactHandlers(
     const owner = appArtifactHandlerOwner(appId);
     const out: AppArtifactHandlerBinding = { owner, hooks: 0, functions: 0, actions: 0, withheldHooks: [] };
 
+    // [ADR-0150 D4] Each package body's actions under its own package. Read
+    // before the teardown, which removes every owner the groups name.
+    let actionGroups: ActionBindingGroup[] = [];
+    try {
+        actionGroups = actionBindingGroups(bundle, owner);
+    } catch (err: any) {
+        logger.error(`${tag} Failed to read the declared actions`, err as Error, { appId });
+    }
+
     // ── Tear down the owner's previous set ──────────────────────────────
     try {
-        if (typeof ql.removeActionsByPackage === 'function') ql.removeActionsByPackage(owner);
+        if (typeof ql.removeActionsByPackage === 'function') {
+            // Every owner this artifact bound last time, and every owner it
+            // binds now: a package body the new bundle no longer carries stops
+            // running, as it did when every action sat under `owner`.
+            const owners = new Set([owner, ...previousActionOwners(ql, owner), ...actionGroups.map((g) => g.owner)]);
+            for (const each of owners) ql.removeActionsByPackage(each);
+        }
+        recordActionOwners(ql, owner, actionGroups.map((g) => g.owner));
         if (typeof ql.unregisterHooksByPackage === 'function') ql.unregisterHooksByPackage(owner);
     } catch (err: any) {
         logger.error(`${tag} Failed to tear down the previous handler set`, err as Error, { appId, owner });
@@ -319,10 +372,10 @@ export function bindAppArtifactHandlers(
     // them. Actions without one are left to imperative
     // `engine.registerAction(...)` registration in user code.
     try {
-        const actions = collectBundleActions(bundle);
-        if (actions.length > 0 && typeof ql.registerAction === 'function') {
+        const total = actionGroups.reduce((sum, group) => sum + group.actions.length, 0);
+        if (total > 0 && typeof ql.registerAction === 'function') {
             const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId });
-            for (const action of actions) {
+            for (const { owner: actionOwner, actions } of actionGroups) for (const action of actions) {
                 const handler = actionBodyRunner(action);
                 if (!handler) continue;
                 // Object-less actions register under the canonical `'global'`
@@ -334,7 +387,7 @@ export function bindAppArtifactHandlers(
                         ? action.object
                         : GLOBAL_ACTION_OBJECT_KEY;
                 try {
-                    ql.registerAction(objectKey, action.name, handler, owner);
+                    ql.registerAction(objectKey, action.name, handler, actionOwner);
                     out.actions++;
                 } catch (err: any) {
                     logger.warn(`${tag} Failed to register action body`, {
@@ -354,6 +407,116 @@ export function bindAppArtifactHandlers(
     }
 
     return out;
+}
+
+/**
+ * The owners each artifact's last bind registered actions under, per engine
+ * (keyed by the artifact's `owner`), so a re-bind tears down a package body
+ * the new bundle dropped ({@link bindAppArtifactHandlers}).
+ */
+const boundActionOwners = new WeakMap<object, Map<string, readonly string[]>>();
+
+function previousActionOwners(ql: object, owner: string): readonly string[] {
+    return boundActionOwners.get(ql)?.get(owner) ?? [];
+}
+
+function recordActionOwners(ql: object, owner: string, owners: readonly string[]): void {
+    let byArtifact = boundActionOwners.get(ql);
+    if (!byArtifact) boundActionOwners.set(ql, (byArtifact = new Map()));
+    byArtifact.set(owner, [...new Set(owners)]);
+}
+
+/** One owner's share of an artifact's declared actions ({@link actionBindingGroups}). */
+interface ActionBindingGroup {
+    readonly owner: string;
+    readonly actions: ReturnType<typeof collectBundleActions>;
+}
+
+/**
+ * [ADR-0150 D4] An artifact's declared actions, grouped by the owner each is
+ * registered under. A bundle with no `packages[]` is one group, under the
+ * artifact's `owner`, exactly as before.
+ *
+ * A bundle carrying `packages[]` binds what the RECONCILED artifact carries
+ * (`collectBundleActions(bundle)`, which reads `resolveArtifactCollections`:
+ * the composed top level first, where the composition reconciled one object
+ * two packages declare under `objectConflict: 'merge'` / `'override'`) and
+ * nothing else, so a declaration the composition replaced is bound at no
+ * address. Each declaration is then owned by the body that carries its key
+ * (`OBJECT:NAME`, the object-less key under `'global'`), read in the boot's
+ * package order (`resolveArtifactPackageOrder`):
+ *
+ *   - one body carries the key: under that body's package
+ *     (`app:<package id>`), so a package-qualified call reaches it;
+ *   - no body carries it (a top-level residual: an input with no manifest):
+ *     under the artifact's `owner`;
+ *   - two or more bodies carry it: the reconciled declarations, under the
+ *     artifact's `owner`, as the binder bound every key before it read
+ *     bodies: one coordinate, where a later registration replaces an earlier
+ *     one, so a call that names no package keeps the answer it had. The one exception is the pair `composeStacks` admits
+ *     under `manifest: 'preserve'` (#32245): an object-less key whose bodies
+ *     are distinct packages no two of which meet under the install gate's
+ *     namespace rule (`namespacedHoldersMeet`). Each of those bodies binds
+ *     its OWN declaration under its own package, as two installs bind them,
+ *     and a call that names no package is refused naming both.
+ *
+ * The bodies are read to choose each declaration's owner and, for that
+ * pair, to bind each body's own declaration. The reconciled set may carry
+ * one or both of the pair's declarations (package bodies do not claim
+ * against each other in `resolveArtifactCollections`, only the top level
+ * does), so the pair's key is split once (`split`), whichever it carries.
+ */
+function actionBindingGroups(bundle: unknown, owner: string): ActionBindingGroup[] {
+    const reconciled = collectBundleActions(bundle);
+    const declared = (bundle as { packages?: unknown } | null | undefined)?.packages;
+    if (!Array.isArray(declared) || declared.length === 0) return [{ owner, actions: reconciled }];
+
+    type Action = ReturnType<typeof collectBundleActions>[number];
+    interface Holder { readonly packageId: string; readonly namespace: string | undefined; readonly actions: Action[] }
+    const keyOf = (action: { name: string; object?: string }) =>
+        `${typeof action.object === 'string' && action.object.length > 0 ? action.object : GLOBAL_ACTION_OBJECT_KEY}:${action.name}`;
+
+    const holdersByKey = new Map<string, Holder[]>();
+    for (const body of resolveArtifactPackageOrder(bundle) as unknown[]) {
+        const packageId = artifactPackageId(body);
+        if (typeof packageId !== 'string' || packageId === '') continue;
+        const ns = (body as { namespace?: unknown } | null | undefined)?.namespace;
+        const namespace = typeof ns === 'string' && ns !== '' ? ns : undefined;
+        for (const action of collectBundleActions(body)) {
+            const key = keyOf(action);
+            const holders = holdersByKey.get(key) ?? [];
+            let holder = holders.find((h) => h.packageId === packageId);
+            if (!holder) {
+                holder = { packageId, namespace, actions: [] };
+                holders.push(holder);
+                holdersByKey.set(key, holders);
+            }
+            holder.actions.push(action);
+        }
+    }
+
+    const heldApart = (key: string, holders: readonly Holder[]) =>
+        key.startsWith(`${GLOBAL_ACTION_OBJECT_KEY}:`)
+        && holders.every((a, i) => holders.every((b, j) => i === j || !namespacedHoldersMeet(a.namespace, b.namespace)));
+
+    const byOwner = new Map<string, Action[]>();
+    const add = (to: string, ...actions: Action[]) => {
+        const list = byOwner.get(to) ?? [];
+        list.push(...actions);
+        byOwner.set(to, list);
+    };
+    const split = new Set<string>();
+    for (const action of reconciled) {
+        const key = keyOf(action);
+        const holders = holdersByKey.get(key) ?? [];
+        if (holders.length === 1) add(appArtifactHandlerOwner(holders[0].packageId), action);
+        else if (holders.length > 1 && heldApart(key, holders)) {
+            if (split.has(key)) continue;
+            split.add(key);
+            for (const holder of holders) add(appArtifactHandlerOwner(holder.packageId), ...holder.actions);
+        } else add(owner, action);
+    }
+    return [...byOwner].map(([groupOwner, actions]) => ({ owner: groupOwner, actions }));
 }
 
 // ─── The job half (#21489) ─────────────────────────────────────────────
@@ -471,12 +634,12 @@ function collectBundleMappings(bundle: unknown): Array<Record<string, unknown>> 
  *
  * It binds when the job declares no code beside it (the declaration refuses
  * `pull` + `body` / `handler`), `pull` parses against `JobSchema.pull`, and the
- * artifact declares the named mapping WITH a `connectorSource` — the reference
- * `defineStack` (and so `os validate`) checks against the stack's mappings. A
- * pull that does not bind is not scheduled: a run of it could only ever be
- * refused by the automation service (`mapping_not_found` /
- * `no_connector_source`), so the reason is said once, at bind, rather than on
- * every tick.
+ * artifact declares the named mapping WITH a source — a `connectorSource`, or
+ * [ADR-0153 D1] a `datasourceSource` — the reference `defineStack` (and so
+ * `os validate`) checks against the stack's mappings. A pull that does not
+ * bind is not scheduled: a run of it could only ever be refused by the
+ * automation service (`mapping_not_found` / `no_connector_source`), so the
+ * reason is said once, at bind, rather than on every tick.
  *
  * `refusal` is the sentence the author acts on, prefixed with the key it names.
  */
@@ -503,17 +666,159 @@ export function judgeJobPull(
         return {
             binds: false,
             refusal: `pull.mapping: this artifact declares no mapping '${mapping}' — declare it (its targetObject, fieldMapping `
-                + 'and a connectorSource naming the rest or openapi connector it pulls from) beside the job, or correct the name',
+                + 'and a connectorSource naming the rest or openapi connector it pulls from, or a datasourceSource naming the '
+                + 'federated object it copies) beside the job, or correct the name',
         };
     }
-    if (declared.connectorSource === undefined) {
+    // [ADR-0153 D1] Either source binds: the automation service's pull reads a
+    // connector action or, for a `datasourceSource`, the federated object in windows.
+    if (declared.connectorSource === undefined && declared.datasourceSource === undefined) {
         return {
             binds: false,
-            refusal: `pull.mapping: mapping '${mapping}' declares no connectorSource, so there is nothing to pull — add `
-                + 'connectorSource: { connector, action } naming the rest or openapi connector it reads from',
+            refusal: `pull.mapping: mapping '${mapping}' declares no source, so there is nothing to pull — add `
+                + 'connectorSource: { connector, action } naming the rest or openapi connector it reads from, or '
+                + 'datasourceSource: { object, watermark: { field, start } } naming the federated object it copies',
         };
     }
     return { binds: true, mapping };
+}
+
+/**
+ * [ADR-0150 D3, #32071] The package that declares each job of `bundle` — what
+ * a `pull` job hands the automation service as `callerPackageId`, so the pull
+ * reads its mapping from that package (its own, else the one holder in its
+ * declared closure plus `sys`, else a refusal).
+ *
+ * The binder's jobs are the artifact's resolved `jobs`, flattened across
+ * `packages[]` (ADR-0130 D4), and carry no package; the job service keys them
+ * all under the top-level `appId`. That id is not the declaring package of a
+ * body's job — each body's items register under the body's own id — so the
+ * body is found the way `AppPlugin` finds a datasource's owner: walking
+ * `resolveArtifactPackageOrder`. A body's job object answers that body (by
+ * identity, else, for a top-level copy of it, by name in body order).
+ *
+ * A top-level job no body declares is the residual: the job service runs it
+ * under `appId`, but that id is no package (`ObjectQL#recordResidualOwner`:
+ * "the residual is not a package") unless a body carries it, so such a job
+ * answers `undefined` and its pull names no package — the no-package read,
+ * as before. An artifact without `packages[]` declares every job from `appId`.
+ *
+ * A job name more than one body declares, met by name (a JSON-loaded
+ * artifact binds the flattened top-level copies, so this is the usual path),
+ * answers a REFUSAL naming every declaring body (ADR-0150 D3,
+ * `ambiguous-in-environment`), never the first body in package order: the
+ * binder fails that job's run with it before any call or write.
+ *
+ * [#32355] So does a job name a body declares and the residual carries too:
+ * the residual's job is met by that name as well, and it is not the body's.
+ * The residual carries a body's job name when the artifact holds MORE jobs of
+ * that name than its bodies declare — the flattened top level copies each
+ * body job once, so every job of the name beyond those copies is a top-level
+ * job of its own (`composeStacks(…, { manifest: 'preserve' })` with an input
+ * that has no `manifest`). By count, never by comparing a copy's content with
+ * its body's: a conversion replays a body under its own version window, so a
+ * genuine copy need not stay equal to the body it was copied from. Such a name
+ * answers the one holder when the body and the residual's owner are one
+ * package, and otherwise a refusal naming the declaring bodies and the
+ * residual. A job a body's own array holds still answers that body by
+ * identity, as above.
+ */
+export function jobDeclaringPackages(
+    bundle: unknown,
+    appId: string,
+): (job: unknown) => string | undefined | PackageScopedRefusal {
+    if (bundle === null || typeof bundle !== 'object' || (bundle as { packages?: unknown }).packages === undefined) {
+        return () => appId;
+    }
+    const byIdentity = new Map<unknown, string>();
+    const byName = new Map<string, string[]>();
+    // [#32355] How many jobs of each name the bodies declare, copies counted once each.
+    const declaredCount = new Map<string, number>();
+    // The residual's owner is a package only when a body carries its id.
+    let residual: string | undefined;
+    for (const body of resolveArtifactPackageOrder(bundle)) {
+        const id = artifactPackageId(body);
+        if (id === appId) residual = appId;
+        const jobs = (body as { jobs?: unknown } | null | undefined)?.jobs;
+        if (!id || !Array.isArray(jobs)) continue;
+        for (const job of jobs) {
+            if (!job || typeof job !== 'object') continue;
+            byIdentity.set(job, id);
+            const name = (job as { name?: unknown }).name;
+            if (typeof name !== 'string') continue;
+            const declarers = byName.get(name) ?? [];
+            if (!declarers.includes(id)) declarers.push(id);
+            byName.set(name, declarers);
+            declaredCount.set(name, (declaredCount.get(name) ?? 0) + 1);
+        }
+    }
+    // [#32355] The body job names the residual carries too: the binder's jobs
+    // hold more of the name than the bodies declare.
+    const boundCount = new Map<string, number>();
+    for (const job of collectBundleJobs(bundle)) {
+        const name = (job as { name?: unknown } | null | undefined)?.name;
+        if (typeof name === 'string' && byName.has(name)) boundCount.set(name, (boundCount.get(name) ?? 0) + 1);
+    }
+    const residualCarries = new Set([...boundCount].filter(([name, n]) => n > (declaredCount.get(name) ?? 0)).map(([name]) => name));
+    return (job) => {
+        const held = byIdentity.get(job);
+        if (held !== undefined) return held;
+        const name = (job as { name?: unknown } | null | undefined)?.name;
+        const declarers = typeof name === 'string' ? byName.get(name) : undefined;
+        if (declarers === undefined) return residual;
+        if (residualCarries.has(name as string)) {
+            // One holder only when the residual's owner IS the one declaring body.
+            if (declarers.length === 1 && declarers[0] === residual) return residual;
+            return jobNameRefusal(name as string, declarers, { packageId: residual });
+        }
+        return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
+    };
+}
+
+/**
+ * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
+ * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too — as
+ * its owning package when a body carries the artifact's id (then also a candidate), else as the
+ * top level that names no package, which no holder kind spells, so the message alone names it.
+ */
+function jobNameRefusal(
+    name: string,
+    packageIds: readonly string[],
+    residual?: { readonly packageId: string | undefined },
+): PackageScopedRefusal {
+    const bodies = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
+    if (residual === undefined) {
+        return {
+            status: 'refused',
+            reason: 'ambiguous-in-environment',
+            type: 'job',
+            name,
+            callerPackageId: null,
+            candidates: bodies,
+            message: `The job "${name}" is declared by ${packageIds.length} package bodies of this artifact: `
+                + `${bodies.map(describePackageScopedHolder).join('; ')}. Nothing picks one of them, so its pull reads `
+                + 'as none of them: rename the job in all but one package so each name has one declaring package.',
+        };
+    }
+    const owner = residual.packageId;
+    const candidates = owner === undefined || packageIds.includes(owner)
+        ? bodies
+        : [...bodies, { kind: 'package' as const, packageId: owner }];
+    const residualHolder = owner === undefined
+        ? 'which names no package'
+        : `which runs as ${describePackageScopedHolder({ kind: 'package', packageId: owner })}, the body that carries the artifact's id`;
+    return {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'job',
+        name,
+        callerPackageId: null,
+        candidates,
+        message: `The job "${name}" is declared by ${bodies.map(describePackageScopedHolder).join('; ')} and by this `
+            + `artifact's top level outside every package body (its residual, ${residualHolder}). Nothing picks one of them, `
+            + 'so its pull reads as none of them: rename the top-level job, or the package body\'s, so each name has one '
+            + 'declaring holder.',
+    };
 }
 
 /**
@@ -604,9 +909,11 @@ export function pullRunOutcomeOf(result: ConnectorSourcePullResult): JobRunOutco
     const summary = result?.summary;
     const errors = Number(summary?.errors ?? 0);
     if (errors > 0) {
+        // [ADR-0153 D1] A datasource pull names the federated object it read.
+        const from = result.source === 'datasource' ? ` (from '${result.object}')` : '';
         return {
             outcome: 'degraded',
-            reason: `mapping '${result.mapping}': ${errors} of ${result.pulled} pulled record(s) were refused by the import runner `
+            reason: `mapping '${result.mapping}'${from}: ${errors} of ${result.pulled} pulled record(s) were refused by the import runner `
                 + `(${Number(summary?.created ?? 0)} created, ${Number(summary?.updated ?? 0)} updated, ${Number(summary?.skipped ?? 0)} skipped)`,
         };
     }
@@ -759,7 +1066,10 @@ export interface AppArtifactJobScheduling {
  *   - a `pull` → the mapping pull, when {@link judgeJobPull} binds it and the
  *     `automation` service serves `pullConnectorSource`; each run calls that
  *     contract method through the service registry under the job's execution
- *     context, and maps the result with {@link pullRunOutcomeOf}. A pull that
+ *     context and as the package that declares the job
+ *     ({@link jobDeclaringPackages}, its `callerPackageId`; a residual
+ *     top-level job names none), and maps the
+ *     result with {@link pullRunOutcomeOf}. A pull that
  *     does not bind schedules nothing (warn) — install-local refuses that
  *     shape up front ({@link collectJobsWithoutBody}), so on that door this
  *     fires only on the rehydrate of an entry an earlier build installed;
@@ -918,6 +1228,9 @@ export async function scheduleAppArtifactJobs(
     // writes need one (`group`): legal, and refused at their first
     // tenant-scoped write — said once below, with the remedy.
     const armedWithoutOrganization: string[] = [];
+    // [ADR-0150 D3, #32071] Which package declares each job: a pull reads its
+    // mapping from it.
+    const declaringPackageOf = jobDeclaringPackages(bundle, appId);
 
     for (const job of jobs) {
         const jobName: string = job?.name;
@@ -954,8 +1267,9 @@ export async function scheduleAppArtifactJobs(
         let form: 'body' | 'handler' | 'pull';
         if (job.pull !== undefined) {
             // The declarative run form. Judged against the artifact first: a
-            // pull whose mapping is missing (or has no `connectorSource`)
-            // could only ever be refused, so it is not scheduled.
+            // pull whose mapping is missing, or has no source (`connectorSource`
+            // or `datasourceSource`), could only ever be refused, so it is not
+            // scheduled.
             const judged = judgeJobPull(job, bundle);
             if (!judged.binds) {
                 logger.warn(`${tag} job pull does not bind — the job is NOT scheduled: ${judged.refusal}`, {
@@ -966,6 +1280,9 @@ export async function scheduleAppArtifactJobs(
                 continue;
             }
             const mapping = judged.mapping;
+            const declarer = declaringPackageOf(job);
+            const callerPackageId = typeof declarer === 'string' ? declarer : undefined;
+            const declarerRefusal = typeof declarer === 'object' ? declarer : undefined;
             let automation: IAutomationService | undefined;
             try { automation = ctx.getService<IAutomationService>('automation'); } catch { /* not installed */ }
             if (typeof automation?.pullConnectorSource !== 'function') {
@@ -980,7 +1297,7 @@ export async function scheduleAppArtifactJobs(
             }
             // Resolved again on every run, through the registry — never the
             // instance read above, so a re-registered service is the one called.
-            run = async () => {
+            run = async (jobCtx) => {
                 let service: IAutomationService | undefined;
                 try { service = ctx.getService<IAutomationService>('automation'); } catch { /* reported below */ }
                 if (typeof service?.pullConnectorSource !== 'function') {
@@ -989,6 +1306,10 @@ export async function scheduleAppArtifactJobs(
                         + '`pullConnectorSource` — nothing was pulled',
                     );
                 }
+                // [#32071] A job name two bodies declare is attributed to neither:
+                // refused before any call or write, naming every declaring body.
+                // [#32355] So is one a body declares and the residual carries.
+                if (declarerRefusal !== undefined) throw new PackageScopedNameRefusedError(declarerRefusal);
                 // [#31823] Resolved once per run, before the pull reads or writes:
                 // a job with no organization pulls as the one its writes are
                 // stamped with, where the engine derives one.
@@ -997,7 +1318,17 @@ export async function scheduleAppArtifactJobs(
                     + 'stamped with could not be resolved — the pull runs with none, and its match lookup reads by the key alone',
                     { appId, job: jobName, mapping, error: err instanceof Error ? err.message : String(err) },
                 ));
-                const result = await service.pullConnectorSource({ mapping, context: jobExecutionContext(runAs) });
+                const result = await service.pullConnectorSource({
+                    mapping,
+                    context: jobExecutionContext(runAs),
+                    // A residual job names no package (above): the no-package read.
+                    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
+                    // [ADR-0153 D7] The job run that drove the pull, for its run
+                    // record: the run id and the trigger the job service handed
+                    // this handler, each only as the contract spells it.
+                    ...(typeof jobCtx?.runId === 'string' && jobCtx.runId !== '' ? { jobRunId: jobCtx.runId } : {}),
+                    ...(jobCtx?.trigger === 'schedule' || jobCtx?.trigger === 'manual' ? { trigger: jobCtx.trigger } : {}),
+                });
                 return pullRunOutcomeOf(result);
             };
             form = 'pull';

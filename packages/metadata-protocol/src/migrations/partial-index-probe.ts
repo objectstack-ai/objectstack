@@ -106,6 +106,39 @@ export function resolveIndexSeamForTable(
     engine: unknown,
     table: string,
 ): { exec: IndexExec; client?: string } | undefined {
+    const driver: any = resolveSqlDriverForTable(engine, table);
+    if (!driver) return undefined;
+    const exec = resolveDriverExec(driver);
+    // `resolveSqlDriverForTable` answers only a driver for which this
+    // resolution succeeds, so `exec` is present here; the guard is for the
+    // type, not for a reachable state.
+    if (!exec) return undefined;
+    return { exec, client: resolveDriverClientName(driver) };
+}
+
+/**
+ * [#32164] Does the driver behind `table` hold its schema DDL back right now?
+ *
+ * `true` only while a one-shot CLI boot has armed deferred DDL on it
+ * (`setDeferredDdl`, read back as the driver's `schemaDdlDeferred`): `os migrate
+ * plan`, every other dry-run mode, and `os migrate apply` before its
+ * confirmation. A schema-sync pass on such a boot records its DDL instead of
+ * performing it, so an index a migration would build beside that DDL is a
+ * write the operator never confirmed. The same reading `ObjectQLPlugin` takes
+ * to leave the boot's schema-migration lock to that command. `false` for a
+ * host with no raw-SQL driver, which builds nothing anyway.
+ */
+export function isSchemaDdlHeldBackForTable(engine: unknown, table: string): boolean {
+    const driver = resolveSqlDriverForTable(engine, table);
+    try {
+        return (driver as { schemaDdlDeferred?: unknown } | undefined)?.schemaDdlDeferred === true;
+    } catch {
+        return false;
+    }
+}
+
+/** The raw-SQL-capable driver behind `table`, the walk {@link resolveIndexSeamForTable} documents. */
+function resolveSqlDriverForTable(engine: unknown, table: string): unknown {
     const engineAny = engine as any;
     const attempt = (fn: () => unknown): any => {
         try {
@@ -128,12 +161,7 @@ export function resolveIndexSeamForTable(
             }
         }
     }
-    if (!canRunSql(driver)) return undefined;
-    const exec = resolveDriverExec(driver);
-    // `canRunSql` above is defined AS this resolution succeeding, so `exec` is
-    // present here; the guard is for the type, not for a reachable state.
-    if (!exec) return undefined;
-    return { exec, client: resolveDriverClientName(driver) };
+    return canRunSql(driver) ? driver : undefined;
 }
 
 /**

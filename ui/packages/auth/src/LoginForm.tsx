@@ -429,19 +429,28 @@ export function LoginForm({
     const identifier = email.trim();
     try {
       if (formMode === 'phone-otp') {
-        await signInWithPhoneOtp(phone.trim(), otpCode.trim());
-      } else if (phonePasswordEnabled && looksLikePhoneIdentifier(identifier)) {
+        const { twoFactorRequired } = await signInWithPhoneOtp(phone.trim(), otpCode.trim());
+        if (twoFactorRequired) {
+          // Code accepted; the account has an enrolled second factor. The
+          // provider holds the challenge and this form draws the same code
+          // step the password paths reach. The SMS code is spent, and the
+          // host hears `onSuccess` only once the second factor is verified.
+          setOtpCode('');
+          return;
+        }
+      } else {
         // Unified identifier: a phone-shaped entry routes to phone+password.
         // Normalize identically to the backend (strip formatting, no country
         // code) or the phoneNumber lookup fails.
-        await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password);
-      } else {
-        const { twoFactorRequired } = await signIn(identifier, password);
+        const { twoFactorRequired } = phonePasswordEnabled && looksLikePhoneIdentifier(identifier)
+          ? await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password)
+          : await signIn(identifier, password);
         if (twoFactorRequired) {
           // Password accepted; the account has two-factor sign-in on. The
           // provider now holds the challenge and this form draws the code
-          // step (objectstack#29105). Nothing is signed in yet, so the host
-          // hears `onSuccess` only once the code is verified.
+          // step, whichever identifier signed in (objectstack#29105,
+          // objectstack#32107). Nothing is signed in yet, so the host hears
+          // `onSuccess` only once the code is verified.
           setPassword('');
           setPasswordVisible(false);
           return;

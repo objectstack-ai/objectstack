@@ -20,6 +20,8 @@ import {
 } from './sso-client-secret.js';
 import {
   applyIdpInitiatedToOidcConfigOnRead,
+  applyUserInfoOptOutOnRead,
+  restoreUserInfoEndpointOnWrite,
   stripIdpInitiatedFromOidcConfigOnWrite,
 } from './sso-sign-in-options.js';
 import {
@@ -937,6 +939,7 @@ export function createObjectQLAdapterFactory(
         // The provider's IdP-initiated toggle lives on its own column, never
         // in the blob (`sso-sign-in-options.ts`).
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, row);
+        restoreUserInfoEndpointOnWrite(objectName, row);
         // [#7725] `sys_member` declares `{organization_id, user_id}` unique, and
         // the platform auto-binds every user at sign-up (ADR-0093 D1/D2), so
         // better-auth's accept-invitation `createMember` collides on a pair that
@@ -1010,6 +1013,7 @@ export function createObjectQLAdapterFactory(
         await injectClientSecretOnRead(secretEngine, objectName, result);
         // The vendor reads `oidcConfig.allowIdpInitiated`; the column answers it.
         applyIdpInitiatedToOidcConfigOnRead(objectName, result);
+        applyUserInfoOptOutOnRead(objectName, result);
         // [#18728] Ruling C's producer half: `sys_organization.metadata` is a
         // text column holding JSON, and better-auth decodes it on its two
         // write echoes only. Decode it here so all four READ routes
@@ -1060,6 +1064,7 @@ export function createObjectQLAdapterFactory(
         for (const r of results) {
           await injectClientSecretOnRead(secretEngine, objectName, r);
           applyIdpInitiatedToOidcConfigOnRead(objectName, r);
+          applyUserInfoOptOutOnRead(objectName, r);
         }
 
         return results.map((r) => {
@@ -1098,6 +1103,7 @@ export function createObjectQLAdapterFactory(
         // first config edit, leaving a column that only LOOKS protected.
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
+        restoreUserInfoEndpointOnWrite(objectName, patch);
         // [#17440] Write door #2 again, for a different column. Account
         // identity is `(provider_id, account_id)` since better-auth 1.7.3, and
         // no column records which IdP vouched for a row — so re-pointing a
@@ -1126,6 +1132,7 @@ export function createObjectQLAdapterFactory(
         // is required". Same two read halves as `findOne`, same order.
         await injectClientSecretOnRead(secretEngine, objectName, result);
         applyIdpInitiatedToOidcConfigOnRead(objectName, result);
+        applyUserInfoOptOutOnRead(objectName, result);
         const norm = normaliseLegacyDates(model, result);
         return (bridged ? remapKeys(norm, snakeToCamel) : norm) as T;
       },
@@ -1145,6 +1152,7 @@ export function createObjectQLAdapterFactory(
         // be the one path that writes the secret back in cleartext.
         liftClientSecretForWrite(objectName, patch);
         stripIdpInitiatedFromOidcConfigOnWrite(objectName, patch);
+        restoreUserInfoEndpointOnWrite(objectName, patch);
         for (const record of records) {
           // [#17440] Same rule on the bulk door — a re-point smuggled through
           // `updateMany` is the same re-point.
@@ -1260,10 +1268,52 @@ export function createObjectQLAdapterFactory(
   // Capture the WRAPPED adapter (transforms applied) so `config.transaction`
   // above can hand it to transaction callbacks — see the #3653 note there.
   return (options: Parameters<typeof factory>[0]) => {
-    const adapter = factory(options);
+    const adapter = readEverySsoProviderRowWhenUnbounded(factory(options));
     wrappedAdapter = adapter;
     return adapter;
   };
+}
+
+/**
+ * The SSO provider table is read WHOLE when its caller asks for no limit.
+ *
+ * better-auth's `createAdapterFactory` turns a `findMany` with no `limit` into
+ * `options.advanced.database.defaultFindManyLimit ?? 100` before this adapter
+ * runs — so the adapter's own `limit || 100` below never sees an unbounded
+ * read on this path. `@better-auth/sso` (1.7.12) issues three such reads of
+ * `ssoProvider` and treats each answer as the whole table:
+ *
+ *  - `/sign-in/sso` by email, step 2: `findMany({ model: "ssoProvider" })`
+ *    then `.find(domainMatches)` — a provider matched only here (a subdomain
+ *    of its domain, a non-first entry of its list) at row 101 or later never
+ *    routes, and the address is answered `404 No provider found`;
+ *  - `/sso/providers`: every row, then filtered by owner — a caller's own
+ *    provider past row 100 is missing from the list;
+ *  - `/sso/register`'s quota: a user's providers, counted against
+ *    `providersLimit`.
+ *
+ * So exactly that model, and only when the caller passed no `limit`, is read
+ * as `count(where)` then `findMany` with that count as an explicit limit:
+ * the same factory pipeline (model/field mapping, output transforms, this
+ * adapter's read seams), no `sortBy` added — the order a `.find` picks its
+ * first match from is the one it always was — and no other model's bound
+ * moves. A row written between the two reads is missed exactly as a row
+ * written after a single read would be.
+ */
+function readEverySsoProviderRowWhenUnbounded<A extends {
+  findMany: (args: any) => Promise<any>;
+  count: (args: any) => Promise<number>;
+}>(adapter: A): A {
+  const ssoProviderObject = resolveProtocolName('ssoProvider');
+  const boundedFindMany = adapter.findMany.bind(adapter);
+  adapter.findMany = (async (args: { model: string; where?: unknown; limit?: number }) => {
+    if (args.limit !== undefined || resolveProtocolName(args.model) !== ssoProviderObject) {
+      return boundedFindMany(args);
+    }
+    const rows = await adapter.count({ model: args.model, where: args.where });
+    return boundedFindMany({ ...args, limit: Math.max(rows, 1) });
+  }) as A['findMany'];
+  return adapter;
 }
 
 // ---------------------------------------------------------------------------

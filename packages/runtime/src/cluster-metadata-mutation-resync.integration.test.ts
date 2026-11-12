@@ -174,3 +174,57 @@ describe('[#31722] lane 2 on cluster.resync — two kernels, one database', () =
         expect(b.engine.registry.getObject('gadget')).toBeUndefined();
     });
 });
+
+/**
+ * [#32145] A peer that learns of an object through a DELIVERED lane-2 hint
+ * prepares it the way the authoring replica's save did: the driver's own
+ * per-object registries (the autonumber counter, the organization column it
+ * stamps and scopes on) are built by the object's schema sync, which the save
+ * door runs on the writer and nothing ran on a peer — the table already
+ * exists in the shared database, the peer's driver just never synced it.
+ *
+ * Directions declared before running: without the peer-side preparation the
+ * two ⭐ cases are red (B issues no number; B stamps no organization); the
+ * CONTROL — the same writes on the authoring replica — is green either way.
+ */
+const ticket = {
+    name: 'ticket',
+    label: 'Ticket',
+    sharingModel: 'private',
+    fields: {
+        title: { type: 'text', label: 'Title' },
+        ticket_number: { type: 'autonumber', label: 'Number', format: 'TK-{0000}' },
+    },
+};
+
+/** A tenant member's write: the engine threads `tenantId` to the driver's native stamp. */
+const memberCtx = { context: { userId: 'usr_1', tenantId: 'org_1', roles: [], permissions: [] } } as never;
+
+describe('[#32145] a delivered lane-2 hint prepares the object on the peer — two kernels, one database', () => {
+    it('⭐ B numbers the autonumber of an object authored on A', async () => {
+        const { a, b } = await twoReplicas();
+        const saved = await a.protocol.saveMetaItem({ type: 'object', name: 'ticket', item: ticket, mode: 'publish' });
+        expect(saved.success).toBe(true);
+        await vi.waitFor(() => expect(b.engine.registry.getObject('ticket')).toBeDefined());
+
+        const row = await b.engine.insert('ticket', { title: 'on b', organization_id: 'org_1' }, { context: { isSystem: true } } as never);
+        expect((row as { ticket_number?: unknown }).ticket_number).toBe('TK-0001');
+    });
+
+    it('⭐ B stamps the organization of a member write to an object authored on A', async () => {
+        const { a, b } = await twoReplicas();
+        await a.protocol.saveMetaItem({ type: 'object', name: 'ticket', item: ticket, mode: 'publish' });
+        await vi.waitFor(() => expect(b.engine.registry.getObject('ticket')).toBeDefined());
+
+        const row = await b.engine.insert('ticket', { title: 'on b' }, memberCtx);
+        expect((row as { organization_id?: unknown }).organization_id).toBe('org_1');
+    });
+
+    it('CONTROL — the authoring replica numbers and stamps the same writes', async () => {
+        const { a } = await twoReplicas();
+        await a.protocol.saveMetaItem({ type: 'object', name: 'ticket', item: ticket, mode: 'publish' });
+
+        const row = await a.engine.insert('ticket', { title: 'on a' }, memberCtx);
+        expect(row).toMatchObject({ ticket_number: 'TK-0001', organization_id: 'org_1' });
+    });
+});

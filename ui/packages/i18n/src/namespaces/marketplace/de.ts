@@ -145,6 +145,13 @@ const de = {
         unmanagedHint: "Einmalig als eigene Metadaten in dieses Laufzeitsystem kopiert: Jedes Element ist hier bearbeitbar, und die Kopie erhält kein Upgrade.",
         required: "Wählen Sie einen Installationsmodus, um dieses Paket zu installieren.",
       },
+      targetNamespace: {
+        label: "Ziel-Namespace",
+        placeholder: "z. B. crm_copy",
+        hint: "Der Namespace, unter dem die Metadaten dieser Kopie geschrieben werden. Ändern Sie ihn, um unter einem anderen Namen zu installieren.",
+        noDefault: "Es konnte kein Standard-Namespace gelesen werden. Geben Sie den Namespace ein, den diese Kopie erhalten soll.",
+        taken: "Der Namespace „{{namespace}}“ gehört einem anderen Paket. Wählen Sie einen anderen Namen und installieren Sie erneut.",
+      },
       unmanagedSuccess: "v{{version}} von „{{name}}“ als eigene Metadaten in dieses Laufzeitsystem kopiert, in die Basis {{base}}. Die Kopie ist bearbeitbar und erhält kein Upgrade.",
       unmanagedStrippedLocks: "Das Paket hat diese Elemente gesperrt. Die Kopie ist bearbeitbar, daher wurden ihre Sperren nicht kopiert:",
       unmanagedIgnored: "Dieses Laufzeitsystem unterstützt keine nicht verwalteten Installationen, daher wurde „{{name}}“ verwaltet installiert (als Code registriert) statt kopiert. Aktualisieren Sie das Laufzeitsystem, deinstallieren Sie dann das Paket und installieren Sie es erneut als nicht verwaltete Kopie.",

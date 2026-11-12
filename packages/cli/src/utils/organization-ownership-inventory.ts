@@ -366,6 +366,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'column-drop',
     citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the settings global rung's tenant-less holder (C6, record 6051723395)`,
   },
+  ...['sys_audit_amendment', 'sys_audit_checkpoint', 'sys_audit_signing_key'].map(
+    (object): InventoryEntry => ({
+      object,
+      census: PMAIN,
+      fate: 'column-drop',
+      citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the audit ledger's checkpoints, amendments and signing keys (ADR-0154)`,
+    }),
+  ),
   {
     object: 'sys_metadata',
     census: P1,
@@ -813,6 +821,16 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: PMAIN,
     fate: 'attribution',
     citation: `${CENSUS_MAIN} (in reach, added since the first census); ${D10_SINGLE}`,
+    anchors: [],
+  },
+  // ADR-0153 D7 — a pull's run record is written with the organization of the
+  // job that drove it; a NULL row is a pull in no organization, which no
+  // parent names.
+  {
+    object: 'sys_sync_run',
+    census: PMAIN,
+    fate: 'attribution',
+    citation: `${CENSUS_MAIN} (in reach, added since the first census; one row per pull, in the job's organization); ${D10_SINGLE}`,
     anchors: [],
   },
   // Inbound mail (`@objectstack/service-mailbox`): every row is written by the

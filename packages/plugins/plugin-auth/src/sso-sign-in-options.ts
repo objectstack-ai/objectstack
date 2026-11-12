@@ -59,17 +59,41 @@ export const SSO_ALLOW_IDP_INITIATED_FIELD = 'allow_idp_initiated';
 /** `sys_sso_provider` column for the JIT-provisioning toggle. */
 export const SSO_ALLOW_JIT_FIELD = 'allow_jit';
 
+/** `sys_sso_provider` column for the OIDC userinfo opt-out (claims from the ID token only). */
+export const SSO_SKIP_USER_INFO_FIELD = 'skip_user_info';
+
 /** The member `@better-auth/sso` reads off a parsed OIDC config. */
 const OIDC_IDP_INITIATED_KEY = 'allowIdpInitiated';
 
+/** The OIDC config member whose presence makes the vendor read claims from userinfo instead of the ID token. */
+const OIDC_USER_INFO_ENDPOINT_KEY = 'userInfoEndpoint';
+
 /**
- * The vendor `additionalFields` declaration. Both default OFF; both accepted
- * from the register and update-provider bodies (`input: true`) and returned by
- * the vendor's provider reads.
+ * Where a userinfo-opted-out provider's stored `userInfoEndpoint` rides while
+ * the vendor holds the config: out of the vendor's sight, and back in the
+ * stored blob on the next write (see {@link applyUserInfoOptOutOnRead}).
+ */
+const OIDC_PARKED_USER_INFO_ENDPOINT_KEY = 'osParkedUserInfoEndpoint';
+
+/**
+ * The vendor `additionalFields` declaration. Every one defaults OFF; every one
+ * is accepted from the register and update-provider bodies (`input: true`) and
+ * returned by the vendor's provider reads.
+ *
+ * `skipUserInfo` is the OIDC userinfo opt-out: the provider's claims come from
+ * the verified ID token only. `@better-auth/sso` reads every claim (the email,
+ * the name, `mapping.extraFields`) from the userinfo response ALONE whenever
+ * the provider has a `userInfoEndpoint`, and offers no seam before it refuses
+ * a sign-in for a missing email (`missing_user_info`). Microsoft Entra ID's
+ * userinfo (on Microsoft Graph) carries neither `preferred_username` nor
+ * `upn`, so a user without a mailbox could not sign in whatever the email
+ * mapping named; with `skipUserInfo` the mapping reads the ID token, which
+ * carries both.
  */
 export const SSO_PROVIDER_SIGN_IN_FIELDS = {
   allowIdpInitiated: { type: 'boolean', required: false, defaultValue: false, input: true },
   allowJit: { type: 'boolean', required: false, defaultValue: false, input: true },
+  skipUserInfo: { type: 'boolean', required: false, defaultValue: false, input: true },
 } as const;
 
 /** One provider's sign-in options, as the store answers them. */
@@ -87,7 +111,7 @@ const ALL_OFF: SsoProviderSignInOptions = { allowIdpInitiated: false, allowJit: 
  * `auth-manager-password-session-policy.ts` reads `two_factor_enabled` in).
  * Anything else, missing included, is OFF.
  */
-function storedOn(value: unknown): boolean {
+export function ssoToggleStoredOn(value: unknown): boolean {
   return value === true || value === 1;
 }
 
@@ -111,8 +135,8 @@ export async function readSsoProviderSignInOptions(
     const row = Array.isArray(rows) ? (rows[0] as Record<string, unknown> | undefined) : undefined;
     if (!row || row.provider_id !== providerId) return ALL_OFF;
     return {
-      allowIdpInitiated: storedOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
-      allowJit: storedOn(row[SSO_ALLOW_JIT_FIELD]),
+      allowIdpInitiated: ssoToggleStoredOn(row[SSO_ALLOW_IDP_INITIATED_FIELD]),
+      allowJit: ssoToggleStoredOn(row[SSO_ALLOW_JIT_FIELD]),
     };
   } catch {
     return ALL_OFF;
@@ -171,7 +195,7 @@ export function applyIdpInitiatedToOidcConfigOnRead(objectName: string, row: unk
   const record = row as Record<string, unknown>;
   const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
   if (!parsed) return;
-  parsed.config[OIDC_IDP_INITIATED_KEY] = storedOn(record[SSO_ALLOW_IDP_INITIATED_FIELD]);
+  parsed.config[OIDC_IDP_INITIATED_KEY] = ssoToggleStoredOn(record[SSO_ALLOW_IDP_INITIATED_FIELD]);
   record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
 }
 
@@ -186,6 +210,51 @@ export function stripIdpInitiatedFromOidcConfigOnWrite(objectName: string, row: 
   const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
   if (!parsed || !(OIDC_IDP_INITIATED_KEY in parsed.config)) return;
   delete parsed.config[OIDC_IDP_INITIATED_KEY];
+  record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
+}
+
+// ── OIDC: the userinfo opt-out, carried in the blob the vendor reads ────────
+
+/**
+ * READ half of the userinfo opt-out: for a provider row whose
+ * `skip_user_info` column reads ON, the blob handed to the vendor carries no
+ * `userInfoEndpoint`, so its callback reads every claim from the verified ID
+ * token (its own `else if (verifiedIdToken)` arm). The stored endpoint is not
+ * dropped: it rides in the blob under a parked member the vendor does not
+ * read, so a vendor write of this config (update-provider merges the config it
+ * read) hands it back, and {@link restoreUserInfoEndpointOnWrite} puts it
+ * back in place before the row is stored. Column OFF (the default), or a row
+ * with no usable OIDC blob: left alone.
+ */
+export function applyUserInfoOptOutOnRead(objectName: string, row: unknown): void {
+  if (objectName !== SSO_PROVIDER_OBJECT || !row || typeof row !== 'object') return;
+  const record = row as Record<string, unknown>;
+  if (!ssoToggleStoredOn(record[SSO_SKIP_USER_INFO_FIELD])) return;
+  const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
+  if (!parsed) return;
+  const endpoint = parsed.config[OIDC_USER_INFO_ENDPOINT_KEY];
+  if (endpoint === undefined) return;
+  delete parsed.config[OIDC_USER_INFO_ENDPOINT_KEY];
+  parsed.config[OIDC_PARKED_USER_INFO_ENDPOINT_KEY] = endpoint;
+  record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
+}
+
+/**
+ * WRITE half: a parked `userInfoEndpoint` goes back in place in an OIDC blob
+ * being written, unless the write names a `userInfoEndpoint` of its own (an
+ * update that sets one explicitly wins). The parked member is never stored.
+ */
+export function restoreUserInfoEndpointOnWrite(objectName: string, row: unknown): void {
+  if (objectName !== SSO_PROVIDER_OBJECT || !row || typeof row !== 'object') return;
+  const record = row as Record<string, unknown>;
+  if (!(SSO_OIDC_CONFIG_FIELD in record)) return;
+  const parsed = parseBlob(record[SSO_OIDC_CONFIG_FIELD]);
+  if (!parsed || !(OIDC_PARKED_USER_INFO_ENDPOINT_KEY in parsed.config)) return;
+  const parked = parsed.config[OIDC_PARKED_USER_INFO_ENDPOINT_KEY];
+  delete parsed.config[OIDC_PARKED_USER_INFO_ENDPOINT_KEY];
+  if (parsed.config[OIDC_USER_INFO_ENDPOINT_KEY] === undefined && parked !== undefined) {
+    parsed.config[OIDC_USER_INFO_ENDPOINT_KEY] = parked;
+  }
   record[SSO_OIDC_CONFIG_FIELD] = serialize(parsed);
 }
 

@@ -378,6 +378,32 @@ function expectationsFor(targetUserId: string): Record<string, RouteExpectation>
       body: { providerId: 'refusal-probe-groups-claim', groupsClaim: 'groups' },
       note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
     },
+    // #32085 — the SSO Providers edit door and the delete preview: the same
+    // gate first, ahead of any body or query read. Neither delegates before
+    // reading the stored provider, so the admin lands on the unknown probe.
+    'POST /api/v1/auth/admin/sso/update-provider': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-edit', clientSecret: 'probe-secret' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
+    },
+    'GET /api/v1/auth/admin/sso/delete-impact': {
+      bucket: 'objectstack-gate',
+      query: '?providerId=refusal-probe-edit',
+      note: 'a read: the gate runs before the query is read; the admin lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
+    },
+    // #32086 — the SSO Providers form's attribute mapping, show and set: the
+    // same gate first, ahead of any body read, and the same unknown probe
+    // provider for the admin.
+    'POST /api/v1/auth/admin/sso/get-attribute-mapping': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-attribute-mapping' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider',
+    },
+    'POST /api/v1/auth/admin/sso/set-attribute-mapping': {
+      bucket: 'objectstack-gate',
+      body: { providerId: 'refusal-probe-attribute-mapping', name: 'displayName' },
+      note: 'admin passes the gate and lands on 404 RESOURCE_NOT_FOUND for the unknown provider; nothing is written',
+    },
 
     // ── #9652: ban / unban moved from the vendor to an ObjectStack mount ────
     //

@@ -32,10 +32,12 @@ import {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
+import { AUTHORING_COMMANDS, runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 
 // [#22161] Each finding of the rule ids this file's rule shortened is one
 // verdict sentence; the reasoning it used to carry is the id's `os explain`
@@ -1859,6 +1861,128 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
 });
 
 /**
+ * ── Rule: security-update-policy-no-check (ADR-0058 D4, info) ───────────────
+ *
+ * When no applicable policy for a write declares `check`, each applicable
+ * policy's `using` stands in as its check, OR-combined, with the platform's
+ * ownership floor (`created_by == current_user.id`) where the pre-image gate
+ * kept it. A USING-only `update` / `all` policy keyed on any other caller
+ * column therefore also admits the rows the floor admits. Info tier: the
+ * composition is the published one, so the finding never fails a run.
+ */
+describe('validateSecurityPosture · a caller-keyed update policy with no check is noted at info tier', () => {
+  const noted = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack)
+      .filter((f) => f.rule === SECURITY_UPDATE_POLICY_NO_CHECK)
+      .map((f) => [f.severity, f.where, f.path]);
+  const set = (...rowLevelSecurity: Array<Record<string, unknown>>) => ({
+    permissions: [PermissionSetSchema.parse({
+      name: 'sales_rep',
+      objects: { deal: { allowRead: true, allowCreate: true, allowEdit: true } },
+      rowLevelSecurity,
+    })],
+  });
+  const AT = 'permissions[0].rowLevelSecurity[0].check';
+
+  it('a USING-only update policy keyed on owner_id is noted, at info', () => {
+    expect(noted(set({ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id' })))
+      .toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('a USING-only all policy keyed on owner_id is noted, at info', () => {
+    expect(noted(set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' })))
+      .toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('any caller column other than created_by is noted: an assignee, record.FIELD, either operand order, the SQL spelling', () => {
+    for (const using of [
+      'assignee == current_user.id',
+      'record.owner_id == current_user.id',
+      'current_user.id == owner_id',
+      'owner_id = current_user.id',
+      "created_by == current_user.id || (stage == 'open' && owner_id == current_user.id)",
+    ]) {
+      expect(noted(set({ name: 'p', object: 'deal', operation: 'update', using })), using)
+        .toEqual([['info', 'permission set "sales_rep"', AT]]);
+    }
+  });
+
+  it('control: a policy that declares check is not noted', () => {
+    expect(noted(set({
+      name: 'own_deals', object: 'deal', operation: 'all',
+      using: 'owner_id == current_user.id', check: 'owner_id == current_user.id',
+    }))).toEqual([]);
+  });
+
+  it('control: a blank check declares nothing, as the runtime reads it', () => {
+    expect(noted({
+      permissions: [{
+        name: 'sales_rep',
+        rowLevelSecurity: [{ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', check: '  ' }],
+      }],
+    })).toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('control: a USING keyed on created_by only is not noted', () => {
+    expect(noted(set({ name: 'mine', object: 'deal', operation: 'update', using: 'created_by == current_user.id' }))).toEqual([]);
+    expect(noted(set({ name: 'mine', object: '*', operation: 'all', using: 'record.created_by == current_user.id' }))).toEqual([]);
+  });
+
+  it('control: a USING that does not key the caller is not noted', () => {
+    expect(noted(set({ name: 'open_deals', object: 'deal', operation: 'update', using: "stage == 'prospecting'" }))).toEqual([]);
+    expect(noted(set({ name: 'team', object: 'deal', operation: 'update', using: 'owner_id in current_user.org_user_ids' }))).toEqual([]);
+  });
+
+  it('control: a select-only policy, and the other single verbs, are not noted', () => {
+    for (const operation of ['select', 'insert', 'delete']) {
+      expect(noted(set({ name: 'p', object: 'deal', operation, using: 'owner_id == current_user.id' })), operation).toEqual([]);
+    }
+  });
+
+  it('control: a disabled policy is not noted', () => {
+    expect(noted(set({ name: 'p', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', enabled: false }))).toEqual([]);
+  });
+
+  it('is info tier on every command the registry serves, so neither os lint --strict nor os validate --strict fails on it', () => {
+    // `--strict` counts errors and warnings only, on both doors: `os lint`
+    // grades an `info` as a suggestion (cli `lint-strict-warnings.e2e.test.ts`),
+    // and `os validate` leaves every registry finding of `severity: 'info'` out
+    // of its strict count (cli `validate-json-strict-exit.e2e.test.ts`; ruling
+    // of record 6787890900). So the tier is the pin: through the registry the
+    // finding reaches every command, `validate` and `lint` named below, as
+    // `info`, never in the gating set and never as a warning.
+    const stack = {
+      objects: [{ name: 'deal', label: 'Deal', sharingModel: 'public_read', fields: { title: { type: 'text', label: 'Title' } } }],
+      ...set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' }),
+    };
+    for (const command of AUTHORING_COMMANDS) {
+      const findings = runAuthoringRules(command, { normalized: stack, parsed: stack });
+      const ours = findings.filter((f) => f.rule === SECURITY_UPDATE_POLICY_NO_CHECK);
+      expect(ours.map((f) => f.severity), command).toEqual(['info']);
+      const { errors, advisories } = splitBySeverity(ours);
+      expect(errors, command).toEqual([]);
+      expect(advisories.filter((f) => f.severity === 'warning'), command).toEqual([]);
+    }
+    expect(AUTHORING_COMMANDS).toEqual(expect.arrayContaining(['validate', 'lint']));
+  });
+
+  it('states the composition rule and its side effect, and the id is explained', () => {
+    const [f] = validateSecurityPosture(set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' }))
+      .filter((x) => x.rule === SECURITY_UPDATE_POLICY_NO_CHECK);
+    expect(f.message).toContain('all policy "own_deals" (owner_id == current_user.id) declares no check.');
+    expect(f.message).toContain(
+      'A row-level policy with no `check` also admits new rows the ownership floor admits; declare `check` to bound what an update may write.',
+    );
+    expect(f.hint).toContain('takes the USING-only siblings and the floor out of the check');
+    expect(f.hint).toContain('a creator who is not the owner loses update unless a `check` admits them');
+    for (const text of [f.message, f.hint]) expect(text, text).not.toContain('\n');
+    const explanation = explainRule(SECURITY_UPDATE_POLICY_NO_CHECK);
+    expect(explanation).toBeDefined();
+    expect(explanation!.paragraphs.join('\n')).toContain('only the declared checks decide');
+  });
+});
+
+/**
  * ── Rule: security-controlled-by-parent-master-reference-hidden (ADR-0055 §3) ──
  *
  * A write of a controlled_by_parent detail needs edit access to the master its
@@ -2150,13 +2274,12 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => Object.keys(PermissionSetSchema.shape),
   },
   // [#25760] One row-level policy, read by the controlled-by-parent owner arm
-  // for the keys that decide whether it is that arm's subject. `using` and
-  // `check` are read through a computed key (`policy[predicate]`), which the
-  // scan cannot see; the corpus fixture below carries both spellings, so a
-  // retired `check` would still fail the key-legality guard.
+  // for the keys that decide whether it is that arm's subject. That arm reads
+  // `using` and `check` through a computed key (`policy[predicate]`); the
+  // update-check arm (ADR-0058 D4) reads both by name, so they are listed.
   {
     receiver: 'policy',
-    expected: ['enabled', 'name', 'object', 'operation'],
+    expected: ['check', 'enabled', 'name', 'object', 'operation', 'using'],
     declaredBy: 'PermissionSetSchema.rowLevelSecurity[]',
     keys: () => shapeKeysOf(PermissionSetSchema.shape.rowLevelSecurity),
   },
@@ -2476,6 +2599,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 };
 
@@ -2511,6 +2635,18 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
         name: 'ps', label: 'PS',
         objects: { deal: { allowRead: true, viewAllRecords: true } },
         fields: { 'deal.amount': { readable: false, editable: false } },
+      }],
+    },
+  },
+  {
+    // A USING-only `update` policy keyed on the caller's `owner_id`, no `check`:
+    // every key the arm reads (`rowLevelSecurity[].{name,operation,using,check,enabled}`)
+    // is one an author can legally write.
+    label: 'update-policy-no-check',
+    stack: {
+      permissions: [{
+        name: 'ps', label: 'PS', objects: {},
+        rowLevelSecurity: [{ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', enabled: true }],
       }],
     },
   },
@@ -2661,8 +2797,9 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
     // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
-    // 21: a set's readable: false on a controlled_by_parent detail's master reference.
-    expect(pushedRuleIds()).toHaveLength(21);
+    // 21: a caller-keyed update policy that declares no check (ADR-0058 D4, info).
+    // 22: a set's readable: false on a controlled_by_parent detail's master reference.
+    expect(pushedRuleIds()).toHaveLength(22);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

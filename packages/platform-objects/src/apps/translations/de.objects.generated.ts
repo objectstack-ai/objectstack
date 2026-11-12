@@ -2106,6 +2106,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Just-in-Time-Bereitstellung zulassen",
         help: "Bei der Zielgruppenrichtlinie „Nur auf Einladung“ ein Konto für eine Person anlegen, die sich ohne Konto oder Einladung über diesen Anbieter anmeldet. Standardmäßig deaktiviert: Eine solche Person wird abgewiesen. Andere Richtlinien stellen wie bisher bereit. Ändern Sie dies mit „Anmeldeoptionen bearbeiten“."
       },
+      skip_user_info: {
+        label: "Claims nur aus dem ID-Token lesen",
+        help: "Nur OIDC. Liest E-Mail-Adresse, Name und Gruppen aus dem verifizierten ID-Token des Identitätsanbieters und ruft dessen Userinfo-Endpunkt nicht auf. Für Microsoft Entra ID einschalten: Dessen Userinfo-Antwort enthält keine Gruppen und kein preferred_username. Standardmäßig aus: Ein Anbieter mit Userinfo-Endpunkt liest seine Claims aus dieser Antwort. Änderung über „Anmeldeoptionen bearbeiten“."
+      },
       user_id: {
         label: "Registriert von",
         help: "Benutzer, der diesen Anbieter registriert hat"
@@ -2156,7 +2160,15 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "Discovery-URL",
-            helpText: "Optional. URL des OIDC-Discovery-Dokuments. Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten."
+            helpText: "Optional. URL des OIDC-Discovery-Dokuments (https). Leer lassen, um `<issuer>/.well-known/openid-configuration` abzuleiten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo-URL",
+            helpText: "Optional. URL des OIDC-Userinfo-Endpunkts (https); ersetzt den im Discovery-Dokument genannten. Ein hier angegebener Endpunkt gilt für diesen Anbieter als vertrauenswürdig: Geben Sie ihn an, wenn die Registrierung abgelehnt wird, weil das Discovery-Dokument einen Userinfo-Host nennt, dem der Server nicht vertraut."
+          },
+          skipUserInfo: {
+            label: "Claims nur aus dem ID-Token lesen",
+            helpText: "Optional. Die Claims des Benutzers nur aus dem verifizierten ID-Token lesen und den Userinfo-Endpunkt nie aufrufen. Microsoft Entra ID: Aktivieren Sie dies, um „preferred_username“ zuzuordnen, das der Userinfo-Endpunkt nicht liefert."
           },
           scopes: {
             label: "Bereiche",
@@ -2165,7 +2177,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Zuordnung: E-Mail-Claim",
-            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“.",
+            helpText: "Optional. Claim, der der E-Mail-Adresse zugeordnet wird. Standard ist „email“. Microsoft Entra ID (Aussteller auf login.microsoftonline.com): Benutzer ohne Postfach haben keinen „email“-Claim; ordnen Sie daher „preferred_username“ (oder „upn“) zu und aktivieren Sie „Claims nur aus dem ID-Token lesen“.",
             placeholder: "email"
           },
           mapName: {
@@ -2208,6 +2220,26 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Optional. Angefordertes SAML-NameID-Format. Standard ist das im IdP konfigurierte Format.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Zuordnung: E-Mail-Attribut",
+            helpText: "Optional. Assertion-Attribut, das der E-Mail-Adresse des Benutzers zugeordnet wird. Standard ist „email“, danach die NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Zuordnung: Vornamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem Vornamen des Benutzers zugeordnet wird. Standard ist „givenName“. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Zuordnung: Nachnamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem Nachnamen des Benutzers zugeordnet wird. Standard ist „surname“. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Zuordnung: Anzeigenamenattribut",
+            helpText: "Optional. Assertion-Attribut, das dem vollständigen Namen des Benutzers zugeordnet wird; es wird verwendet, wenn Vor- und Nachnamenattribute fehlen. Standard ist „displayName“, danach die NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Zuordnung: Gruppenattribut",
             helpText: "Optional. Assertion-Attribut, das die Gruppen des Benutzers enthält. Jede Anmeldung vergibt die diesen Gruppen zugeordneten Berechtigungssätze. Leer lassen, um keine Gruppen zuzuordnen.",
@@ -2234,12 +2266,78 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "SSO-Anbieter löschen",
-        description: "Diesen SSO-Anbieter löschen? Benutzer seiner Domäne können sich dann nicht mehr darüber anmelden.",
-        successMessage: "SSO-Anbieter gelöscht"
+        description: "Diesen SSO-Anbieter löschen? Jeder damit verknüpfte Benutzer wird getrennt, auch Benutzer ohne andere verknüpfte Anmeldemethode (kein Passwort, kein anderer Anbieter). Seine IdP-Gruppenzuordnungen und die damit vergebenen Berechtigungssätze werden mit entfernt. Dies kann nicht rückgängig gemacht werden.",
+        resultDialog: {
+          title: "SSO-Anbieter gelöscht",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Entfernt"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "Was dieses Löschen entfernt",
+            linkedUsers: "Getrennte Benutzer",
+            usersWithoutOtherSignIn: "Benutzer ohne andere verknüpfte Anmeldemethode"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Anmeldeoptionen bearbeiten",
         successMessage: "Anmeldeoptionen gespeichert"
+      },
+      edit_saml_provider: {
+        label: "SAML-Einstellungen bearbeiten",
+        params: {
+          issuer: {
+            label: "Entity-ID des IdP",
+            helpText: "Die SAML-EntityID des IdP. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          entryPoint: {
+            label: "SSO-URL des IdP",
+            helpText: "Der Single-Sign-On-Endpunkt des IdP. Leer lassen, um den gespeicherten Wert zu behalten. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          cert: {
+            label: "Neues Signaturzertifikat des IdP",
+            helpText: "Das neue X.509-Signaturzertifikat des IdP (PEM). Leer lassen, um das gespeicherte Zertifikat zu behalten."
+          },
+          keepCurrentCert: {
+            label: "Dem aktuellen Zertifikat weiter vertrauen",
+            helpText: "Während der IdP umstellt, werden Assertions akzeptiert, die mit einem der beiden Zertifikate signiert sind. Erneut ohne diese Option bearbeiten, um das alte zu entfernen."
+          }
+        },
+        resultDialog: {
+          title: "SAML-Einstellungen gespeichert",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Geändert"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "OIDC-Einstellungen bearbeiten",
+        params: {
+          clientId: {
+            label: "Client-ID",
+            helpText: "Vom IdP ausgestellte OAuth-Client-ID. Leer lassen, um den gespeicherten Wert zu behalten. Nur änderbar, solange kein Benutzer mit dem Anbieter verknüpft ist."
+          },
+          clientSecret: {
+            label: "Neues Client-Geheimnis",
+            helpText: "Leer lassen, um das gespeicherte Geheimnis zu behalten. Das gespeicherte Geheimnis wird nie angezeigt."
+          },
+          scopes: {
+            label: "Bereiche",
+            helpText: "Durch Leerzeichen oder Kommas getrennte OAuth-Bereiche; sie ersetzen die gespeicherte Liste. Leer lassen, um sie zu behalten.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC-Einstellungen gespeichert",
+          acknowledge: "Fertig",
+          fields: {
+            message: "Geändert"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Gruppen-Claim anzeigen",
@@ -2267,6 +2365,57 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Fertig",
           fields: {
             groupsClaim: "Gruppen-Claim"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Attributzuordnung anzeigen",
+        resultDialog: {
+          title: "Attributzuordnung",
+          description: "Die IdP-Attribute (SAML) oder Claims (OIDC), aus denen dieser Anbieter bei jeder Anmeldung die E-Mail-Adresse und den Namen des Benutzers liest. Leer bedeutet den Standard: E-Mail aus „email“ (SAML: danach die NameID); Name aus „givenName“ + „surname“, danach „displayName“ (OIDC: „name“). Vor- und Nachname gelten nur für SAML. Ändern Sie sie mit „Attributzuordnung bearbeiten“.",
+          acknowledge: "Fertig",
+          fields: {
+            protocol: "Protokoll",
+            email: "E-Mail",
+            firstName: "Vorname",
+            lastName: "Nachname",
+            name: "Anzeigename"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Attributzuordnung bearbeiten",
+        params: {
+          email: {
+            label: "E-Mail-Attribut",
+            helpText: "Das IdP-Attribut oder der Claim, das bzw. der der E-Mail-Adresse des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten; leeren, um zum Standard („email“) zurückzukehren. Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Vornamenattribut (SAML)",
+            helpText: "Nur SAML. Das Assertion-Attribut, das dem Vornamen des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Nachnamenattribut (SAML)",
+            helpText: "Nur SAML. Das Assertion-Attribut, das dem Nachnamen des Benutzers zugeordnet wird. Unverändert lassen, um den aktuellen Wert zu behalten. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Anzeigenamenattribut",
+            helpText: "Das IdP-Attribut oder der Claim, das bzw. der dem vollständigen Namen des Benutzers zugeordnet wird (SAML: verwendet, wenn Vor- und Nachname fehlen). Unverändert lassen, um den aktuellen Wert zu behalten. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Attributzuordnung gespeichert",
+          description: "Die Attribute oder Claims, aus denen dieser Anbieter ab jetzt bei jeder Anmeldung die E-Mail-Adresse und den Namen des Benutzers liest. Leer bedeutet, dass der Standard gilt.",
+          acknowledge: "Fertig",
+          fields: {
+            email: "E-Mail",
+            firstName: "Vorname",
+            lastName: "Nachname",
+            name: "Anzeigename"
           }
         }
       }
@@ -2361,6 +2510,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Token-Digest",
         help: "HMAC-SHA-256 (base64url) des Bearer-Tokens, verschlüsselt mit dem Authentifizierungsgeheimnis der Bereitstellung – nur in eine Richtung; der Klartext wird beim Ausstellen einmal angezeigt und nie gespeichert."
       },
+      token_hint: {
+        label: "Token-Hinweis",
+        help: "Die letzten vier Zeichen des Bearer-Tokens, bei der Ausstellung erfasst, damit sich die Anmeldedaten einer Verbindung unterscheiden lassen; nie das Token oder sein Digest. Leer bei Anmeldedaten, die ausgestellt wurden, bevor Hinweise erfasst wurden."
+      },
       active: {
         label: "Aktiv",
         help: "Widerrufsschalter – inaktive Anmeldedaten werden bei der Prüfung abgelehnt"
@@ -2368,6 +2521,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Läuft ab am",
         help: "Optionaler fester Ablauf für eine gestaffelte Rotation der Anmeldedaten; abgelaufene Anmeldedaten werden abgelehnt"
+      },
+      last_used_at: {
+        label: "Zuletzt verwendet am",
+        help: "Wann die Anmeldedaten zuletzt eine SCIM-Anfrage authentifiziert haben, höchstens einmal pro Minute erfasst; leer, wenn keine Verwendung erfasst wurde"
       },
       user_id: {
         label: "Ausgestellt von",
@@ -2417,6 +2574,7 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Ich habe das Token gespeichert",
           fields: {
             token: "Token",
+            tokenHint: "Token-Hinweis",
             connectionId: "Verbindungs-ID",
             expiresAt: "Läuft ab am"
           }
@@ -2774,6 +2932,23 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Organisation",
         help: "Die Organisation, in der die Berechtigung erteilt wird: die Organisation, der die SCIM-Verbindung oder der SSO-Anbieter gehört."
       },
+      match_status: {
+        label: "Übereinstimmungsstatus",
+        help: "Ob die Gruppe, die die Zuordnung nennt, eine Gruppe ist, die ihre SCIM-Verbindung derzeit überträgt. Ohne Übereinstimmung wird nichts gewährt. Nicht zutreffend für einen SSO-Anbieter, der keine Gruppenliste speichert.",
+        options: {
+          matched: "Stimmt überein",
+          unmatched: "Stimmt mit keiner aktuellen Gruppe überein",
+          not_applicable: "Nicht zutreffend"
+        }
+      },
+      matched_group_id: {
+        label: "ID der übereinstimmenden Gruppe",
+        help: "Die ID der SCIM-Gruppe, mit der die Zuordnung derzeit übereinstimmt. Leer, wenn sie mit keiner übereinstimmt."
+      },
+      match_changed_at: {
+        label: "Übereinstimmung geändert am",
+        help: "Wann sich der Übereinstimmungsstatus oder die übereinstimmende Gruppe zuletzt geändert hat."
+      },
       created_at: {
         label: "Erstellt am"
       },
@@ -2783,7 +2958,64 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Alle"
+        label: "Alle",
+        emptyState: {
+          title: "Noch keine Gruppenzuordnungen",
+          message: "Mit „SSO-Gruppe zuordnen“ (eine Gruppe, die ein SSO-Anbieter bei der Anmeldung sendet) oder „SCIM-Gruppe zuordnen“ (eine Gruppe, die eine SCIM-Verbindung bereitstellt) den Mitgliedern einer Gruppe des Identitätsanbieters einen Berechtigungssatz gewähren."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "SSO-Gruppe zuordnen",
+        description: "Jedem Mitglied einer Gruppe, die ein SSO-Anbieter bei der Anmeldung sendet, einen Berechtigungssatz gewähren. Gilt ab der nächsten Anmeldung des Mitglieds über den Anbieter.",
+        successMessage: "Gruppenzuordnung gespeichert. Sie gilt ab der nächsten Anmeldung jedes Mitglieds über den Anbieter.",
+        params: {
+          providerId: {
+            label: "SSO-Anbieter-ID",
+            helpText: "Die Anbieter-ID des SSO-Anbieters, dessen Anmeldung die Gruppe mitsendet, z. B. „okta“. Der Anbieter braucht einen Gruppen-Claim (Gruppen-Claim bearbeiten am SSO-Anbieter)."
+          },
+          groupExternalId: {
+            label: "Externe Gruppen-ID",
+            helpText: "Der Gruppenwert genau so, wie der Gruppen-Claim ihn sendet, wenn er eine ID ist, z. B. eine Gruppenobjekt-ID aus Entra ID. Dieses Feld oder den Gruppen-Anzeigenamen setzen, nicht beide."
+          },
+          groupDisplayName: {
+            label: "Gruppen-Anzeigename",
+            helpText: "Der Gruppenwert genau so, wie der Gruppen-Claim ihn sendet, wenn er ein Name ist, z. B. „Sales“. Dieses Feld oder die externe Gruppen-ID setzen, nicht beide."
+          },
+          permissionSet: {
+            label: "Berechtigungssatz",
+            helpText: "Der Berechtigungssatz, den ein Mitglied der Gruppe in der Organisation des Anbieters erhält. Administratorsätze werden abgelehnt."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "SCIM-Gruppe zuordnen",
+        description: "Jedem Mitglied einer Gruppe, die eine SCIM-Verbindung bereitstellt, einen Berechtigungssatz gewähren. Die aktuellen Mitglieder der Gruppe erhalten ihn sofort.",
+        successMessage: "Gruppenzuordnung gespeichert",
+        params: {
+          connectionId: {
+            label: "SCIM-Verbindungs-ID",
+            helpText: "Die SCIM-Verbindung, über die die Gruppe bereitgestellt wird, z. B. „okta-prod“: die Verbindungs-ID ihrer Anmeldedaten."
+          },
+          groupExternalId: {
+            label: "Externe Gruppen-ID",
+            helpText: "Die externalId der Gruppe, wie der Identitätsanbieter sie sendet. Dieses Feld oder den Gruppen-Anzeigenamen setzen, nicht beide."
+          },
+          groupDisplayName: {
+            label: "Gruppen-Anzeigename",
+            helpText: "Der displayName der Gruppe, exakt abgeglichen. Dieses Feld oder die externe Gruppen-ID setzen, nicht beide."
+          },
+          permissionSet: {
+            label: "Berechtigungssatz",
+            helpText: "Der Berechtigungssatz, den ein Mitglied der Gruppe in der Organisation der Verbindung erhält. Administratorsätze werden abgelehnt."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Zuordnung löschen",
+        confirmText: "Diese Gruppenzuordnung löschen? Die Mitglieder der Gruppe erhalten ihren Berechtigungssatz nicht mehr. Bei einer SCIM-Verbindung werden die Mitglieder der Gruppe sofort neu projiziert und verlieren die Zuweisungen dieser Zuordnung. Bei einem SSO-Anbieter werden die Zuweisungen, die seine Anmeldungen für diesen Satz vorgenommen haben, sofort entfernt, sofern keine andere Zuordnung des Anbieters denselben Satz nennt. Zum Wiederherstellen die Gruppe erneut zuordnen.",
+        successMessage: "Gruppenzuordnung gelöscht"
       }
     }
   },
@@ -3585,6 +3817,55 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Notiz"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

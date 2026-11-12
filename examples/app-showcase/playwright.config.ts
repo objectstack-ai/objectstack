@@ -36,7 +36,10 @@ declare const process: { env: Record<string, string | undefined> };
  *
  * `OS_TRUSTED_APP_SCHEMES` on the `webServer`: the one app scheme
  * `e2e/mobile-signin-handoff.spec.ts` hands a token to, set the way a deployment
- * sets it. No other spec reaches the hand-off.
+ * sets it. No other spec reaches the hand-off. A server `reuseExistingServer`
+ * attached to locally did not boot with it, so that spec skips there, naming the
+ * variable, when the server's own answer says it registered no such scheme; on CI
+ * nothing is reused and it never skips.
  */
 const BASE_URL = new URL(process.env.SMOKE_API_URL || 'http://localhost:3000');
 const PORT = BASE_URL.port || '3000';

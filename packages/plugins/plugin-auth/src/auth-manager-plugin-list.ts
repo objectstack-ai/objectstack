@@ -62,6 +62,7 @@ import type { AuthPluginConfig } from '@objectstack/spec/system';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
 import { resolveUserAuthzGrants } from '@objectstack/core';
 import { applyPlatformAdminImpersonation } from './admin-impersonate-endpoint.js';
+import { requireSecondFactorAtCodeAndLinkDoors } from './second-factor-code-and-link-doors.js';
 import { buildOrganizationPlugin, type OrganizationPluginHost } from './auth-manager-organization-plugin.js';
 import {
   OAUTH_ORGANIZATION_CLAIM,
@@ -277,12 +278,17 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
 
   if (enabled.twoFactor) {
     const { twoFactor } = await import('better-auth/plugins/two-factor');
-    plugins.push(twoFactor({
+    // An account with an enrolled second factor is signed in by no one-time
+    // code or sign-in link alone: the code and link doors ask for the second
+    // factor, as password sign-in does. Throws (fails the build) when the
+    // vendor plugin no longer exposes the password door's challenge to reuse.
+    // See `second-factor-code-and-link-doors.ts`.
+    plugins.push(requireSecondFactorAtCodeAndLinkDoors(twoFactor({
       schema: buildTwoFactorPluginSchema(),
       // ADR-0069 D2 (#3690) — the operator's lockout policy governs BOTH
       // stages of sign-in, not just the password one.
       accountLockout: this.resolveTwoFactorAccountLockout(),
-    }));
+    })));
   }
 
   // Breached-password rejection (ADR-0069 D1). Native, stateless: a
@@ -826,11 +832,30 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
   if (enabled.scim) {
     await this.addOptionalPlugin(plugins, 'scim', async () => {
       const { scim } = await import('@better-auth/scim');
-      const { verifyScimBearerToken, recordScimRequestConnection } = await import(
+      const { verifyScimBearerToken, recordScimRequestConnection, ScimCredentialLastUseStamper } = await import(
         './scim-connection-service.js'
       );
       const { createScimGroupProjection } = await import('./scim-group-projection.js');
       const secret = this.resolveAuthSecret();
+      // [#32120] One stamper for this manager's SCIM plugin, so its
+      // per-credential minute claims are shared by every request it verifies.
+      // A failed stamp never fails the request; each distinct failure is said
+      // once at `error`, naming the credential row and never the bearer.
+      const lastUse = new ScimCredentialLastUseStamper({
+        onNewFailure: (error, credentialId) => {
+          // The host logger carries `error` though the config type names only
+          // `info`/`warn`; with none, the console's error stream, never lower.
+          const sink = this.config.logger as { error?: (msg: string) => void } | undefined;
+          (typeof sink?.error === 'function' ? sink.error.bind(sink) : console.error)(
+            `[AuthPlugin] SCIM credential use NOT recorded: the sys_scim_connection_credential.last_used_at stamp `
+              + `failed for credential ${credentialId}. The SCIM request was served, and later ones will be too, but `
+              + 'the credential\'s Last Used At stays older than its real last use, so an identity provider still on '
+              + 'it can read as idle to an administrator deciding which credential to revoke. Fix: restore write '
+              + 'access to sys_scim_connection_credential for the system context. Said once per distinct failure. '
+              + `Cause: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        },
+      });
       return scim({
         connections: [],
         authentication: {
@@ -854,7 +879,7 @@ export async function buildPluginList(this: PluginListHost): Promise<any[]> {
             // (`ScimRequestScope.connectionId` says why that reaches the
             // writes where an `enterWith` did not).
             return recordScimRequestConnection(
-              await verifyScimBearerToken(engine as never, secret, input.token),
+              await verifyScimBearerToken(engine as never, secret, input.token, lastUse),
             );
           },
         },

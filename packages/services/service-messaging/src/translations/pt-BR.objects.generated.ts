@@ -28,15 +28,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificação",
-        help: "Chave estrangeira → sys_notification (o evento L2 que esta linha materializa)"
+        help: "A notificação que esta mensagem entrega. Marcar a mensagem como lida registra a leitura nesta notificação."
       },
       delivery_id: {
         label: "Entrega",
-        help: "Chave estrangeira → sys_notification_delivery (linha da caixa de saída); null até a P1"
+        help: "O registro de entrega desta mensagem. Não é preenchido em mensagens no aplicativo."
       },
       actor_id: {
-        label: "Autor da ação",
-        help: "Usuário que causou o evento (quem mencionou, quem atribuiu) — mesma semântica de sys_notification.actor_id. Permite que um cliente oculte os próprios recibos com uma comparação puramente local. Null em uma linha de resumo por construção: um grupo agrupado não tem um único autor."
+        label: "Acionado por",
+        help: "A pessoa cuja ação gerou esta notificação, por exemplo quem mencionou ou atribuiu o destinatário. Vazio quando a mensagem agrupa várias notificações."
       },
       topic: {
         label: "Tópico"
@@ -60,6 +60,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Criado em"
+      },
+      keyed_text: {
+        label: "Chaves de texto",
+        help: "As chaves de catálogo e os parâmetros a partir dos quais o título e o corpo foram renderizados na entrega. Uma leitura renderiza novamente o título e o corpo a partir delas no idioma do leitor; null quando a notificação não trazia chaves, e o título e o corpo armazenados são então servidos como foram gravados."
       }
     },
     _views: {
@@ -82,11 +86,11 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificação",
-        help: "Chave estrangeira → sys_notification (evento L2)"
+        help: "A notificação cujo estado este recibo registra."
       },
       delivery_id: {
         label: "Entrega",
-        help: "Chave estrangeira → sys_notification_delivery (linha da caixa de saída); null até a P1"
+        help: "O registro de entrega ao qual este recibo pertence. Atualmente não é preenchido."
       },
       user_id: {
         label: "Usuário destinatário"
@@ -127,7 +131,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Evento de notificação",
-        help: "Chave estrangeira → sys_notification (evento L2)"
+        help: "A notificação que esta entrega envia."
       },
       recipient_id: {
         label: "Destinatário",

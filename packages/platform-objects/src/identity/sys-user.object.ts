@@ -1375,9 +1375,12 @@ export const SysUser = ObjectSchema.create({
     // Identity provenance (ADR-0135 D4). `idp_provisioned` users were
     // JIT-created on first federated login (a `sys_account` exists for an
     // external/OIDC provider — e.g. the cloud-as-IdP `objectstack-cloud`
-    // provider, or a customer's own IdP); `env_native` users registered
-    // locally (email/password) or are app end-users. Stamped automatically by
-    // the AuthManager `account.create.after` hook — never edited by hand.
+    // provider, or a customer's own IdP) or provisioned by a SCIM directory;
+    // `env_native` users registered locally (email/password), hold a local
+    // password, or are app end-users. Stamped automatically — by the
+    // AuthManager `account.create.after` hook, by the SCIM identity reconcile
+    // callback (`plugin-auth` `scim-identity-source.ts`, with a once-at-boot
+    // backfill for SCIM users provisioned earlier) — never edited by hand.
     // Drives the managed-vs-native user-mgmt UI gating (the password /
     // identity-edit actions hide for managed users, who hold no local
     // credential) and is the marker SCIM lifecycle keys off. Owned by objectql
@@ -1395,7 +1398,7 @@ export const SysUser = ObjectSchema.create({
         { label: 'IdP-Provisioned', value: 'idp_provisioned' },
         { label: 'Local Account', value: 'env_native' },
       ],
-      description: 'How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.',
+      description: 'How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.',
     }),
 
     id: Field.text({

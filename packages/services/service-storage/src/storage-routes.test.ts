@@ -171,6 +171,26 @@ describe('Storage REST Routes', () => {
       },
     );
 
+    // The key's extension is read from `filename`: a name that is not a string
+    // is refused at the door, as the declaration refuses it, before any row.
+    it.each<[string, unknown]>([
+      ['a number', 123],
+      ['an array', ['a.png']],
+      ['an object', { name: 'a.png' }],
+    ])('REFUSED 400 INVALID_REQUEST: filename as %s, with no sys_file row written', async (_label, filename) => {
+      const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+      const createFile = vi.spyOn(store, 'createFile');
+      const body = { filename, mimeType: 'image/png', size: 1 };
+      const res = createMockRes();
+      await handler(createMockReq({ body }), res);
+
+      expect(res._status, JSON.stringify(res._json)).toBe(400);
+      expect(res._json.success).toBe(false);
+      expect(res._json.error.code).toBe('INVALID_REQUEST');
+      expect(GetPresignedUrlRequestSchema.safeParse(body).success, 'the declaration refuses it').toBe(false);
+      expect(createFile, 'no pending sys_file row').not.toHaveBeenCalled();
+    });
+
     it.each([0, 1024])('CONTROL: size %d is accepted and stored on the pending row as sent', async (size) => {
       const handler = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
       const body = { filename: 'a.png', mimeType: 'image/png', size };
@@ -1100,5 +1120,69 @@ describe('Storage REST Routes', () => {
       );
       expect(res._status).toBe(401);
     });
+  });
+});
+
+// The upload doors lay the key out from the platform's own parts: a file
+// name carrying separators must not become nested directories inside the
+// storage root. The client's name is kept as the record's `name`.
+describe('Upload doors: a file name carrying separators keys flat inside the storage root', () => {
+  let rootDir: string;
+  let adapter: LocalStorageAdapter;
+  let store: StorageMetadataStore;
+  let httpServer: ReturnType<typeof createMockHttpServer>;
+
+  beforeEach(async () => {
+    rootDir = join(tmpdir(), `os-route-key-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    await fs.mkdir(rootDir, { recursive: true });
+    adapter = new LocalStorageAdapter({ rootDir, signingSecret: 'test-secret' });
+    store = new StorageMetadataStore(null);
+    httpServer = createMockHttpServer();
+    registerStorageRoutes(httpServer as any, adapter, store, { basePath: '/api/v1/storage' });
+  });
+
+  afterEach(async () => {
+    if (rootDir) await fs.rm(rootDir, { recursive: true, force: true });
+  });
+
+  const NAMES: Array<[string, string, string]> = [
+    ['a traversal name', '../../etc/passwd', ''],
+    ['a nested POSIX path', 'a/b/c.png', '.png'],
+    ['a nested Windows path', 'a\\b\\c.png', '.png'],
+  ];
+
+  it.each(NAMES)('presigned: %s (%j) stores one file directly under the scope', async (_label, filename, ext) => {
+    const presign = httpServer._getHandler('POST', '/api/v1/storage/upload/presigned')!;
+    const res = createMockRes();
+    await presign(createMockReq({ body: { filename, mimeType: 'text/plain', size: 5, scope: 'user' } }), res);
+    expect(res._status, JSON.stringify(res._json)).toBe(200);
+    const { fileId, uploadUrl } = res._json.data;
+
+    const row = await store.getFile(fileId);
+    expect(row!.key).toBe(`user/${fileId}${ext}`);
+    expect(row!.name, 'the client name is kept as metadata').toBe(filename);
+
+    const put = httpServer._getHandler('PUT', '/api/v1/storage/_local/raw/:token')!;
+    const putRes = createMockRes();
+    await put(createMockReq({
+      params: { token: uploadUrl.split('/_local/raw/')[1] },
+      rawBody: async () => Buffer.from('bytes'),
+    } as any), putRes);
+    expect(putRes._status, JSON.stringify(putRes._json)).toBe(200);
+
+    const entries = await fs.readdir(join(rootDir, 'user'), { withFileTypes: true });
+    expect(entries.map((e) => [e.name, e.isFile()])).toEqual([[`${fileId}${ext}`, true]]);
+  });
+
+  it.each(NAMES)('chunked: %s (%j) keys directly under the scope', async (_label, filename, ext) => {
+    const init = httpServer._getHandler('POST', '/api/v1/storage/upload/chunked')!;
+    const res = createMockRes();
+    await init(createMockReq({
+      body: { filename, mimeType: 'application/octet-stream', totalSize: 100, chunkSize: 5242880 },
+    }), res);
+    expect(res._status, JSON.stringify(res._json)).toBe(200);
+    const row = await store.getFile(res._json.data.fileId);
+    expect(row!.key).toBe(`user/${res._json.data.fileId}${ext}`);
+    expect(row!.name).toBe(filename);
   });
 });

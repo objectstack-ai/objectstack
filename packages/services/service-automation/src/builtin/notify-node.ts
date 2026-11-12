@@ -60,7 +60,71 @@ export interface MessagingServiceSurface {
          * only answer such a stack could honestly give.
          */
         enqueued?: number;
+        /**
+         * One outcome per `(channel x recipient)` pair this emit attempted,
+         * failed ones carrying the channel's own reason (an unregistered
+         * channel answers `channel 'NAME' not registered`). Read only to name
+         * the channels of a failed delivery on the step's warning
+         * ({@link deliveryFailureWarning}).
+         *
+         * Optional for the same reason as `enqueued`: a messaging
+         * implementation that does not report it still has its `failed` count
+         * read, and the warning then says that no channel was named.
+         */
+        deliveries?: ReadonlyArray<{ channel: string; recipient: string; ok: boolean; error?: string }>;
     }>;
+}
+
+/**
+ * The step warning for a `notify` whose emit reported failed deliveries, or
+ * `undefined` when none failed.
+ *
+ * Without it, a node whose only channel was refused (`push`, with no push
+ * channel registered) recorded a clean `success` step: the run history an
+ * admin reads was green, and the one place that said why nobody was notified
+ * was a server log line. The step is still a SUCCESS, deliberately. A failing
+ * result aborts the run, or routes it down a `fault` edge, so turning a refused
+ * channel into a failure would change what every flow with such a channel
+ * DOES. The advisory step warning (`NodeExecutionResult.warnings`) is the
+ * engine's channel for a legal outcome that must not read as a clean success,
+ * and the Runs surface shows it on the step.
+ *
+ * Partial delivery is warned on too (one channel refused while another
+ * delivered or was enqueued): the step did reach somebody, but not on every
+ * channel its author named, and the warning names which.
+ *
+ * The reason text is each failed delivery's own, passed through verbatim; the
+ * node never branches on it.
+ */
+function deliveryFailureWarning(
+    results: ReadonlyArray<Awaited<ReturnType<MessagingServiceSurface['emit']>>>,
+): string | undefined {
+    const failed = results.reduce((sum, result) => sum + (Number(result.failed) || 0), 0);
+    if (failed <= 0) return undefined;
+    const reached = results.reduce(
+        (sum, result) => sum + (Number(result.delivered) || 0) + (Number(result.enqueued) || 0),
+        0,
+    );
+    // One entry per (channel, reason), in first-seen order, with its count.
+    const groups = new Map<string, { channel: string; error: string | undefined; count: number }>();
+    for (const result of results) {
+        for (const delivery of result.deliveries ?? []) {
+            if (delivery.ok) continue;
+            const key = JSON.stringify([delivery.channel, delivery.error ?? null]);
+            const group = groups.get(key);
+            if (group) group.count += 1;
+            else groups.set(key, { channel: delivery.channel, error: delivery.error, count: 1 });
+        }
+    }
+    const named = [...groups.values()].map(({ channel, error, count }) =>
+        `channel '${channel}' (${count} ${count === 1 ? 'delivery' : 'deliveries'})${error ? `: ${error}` : ''}`,
+    );
+    const which = named.length > 0
+        ? named.join('; ')
+        : 'the messaging service named no channel for them';
+    return reached === 0
+        ? `notify delivered nothing: every delivery it attempted failed (${failed}). ${which}.`
+        : `notify: ${failed} of ${failed + reached} deliveries failed. ${which}.`;
 }
 
 /**
@@ -731,6 +795,32 @@ function resolveStringSlot(
  * no flow edit. This is the seam that fixes the "notify drops on the floor"
  * gap (#1292) once messaging is present.
  */
+/**
+ * [ADR-0150 D3, #31699] A node's literal `payload` without the key the
+ * delivery reads as the template's caller package: only the engine names it
+ * (`AutomationEngine.flowCallerPackage`), so an authored key can never resolve
+ * the template from another package.
+ */
+function withoutTemplateCallerPackage(payload: unknown): Record<string, unknown> {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return {};
+    const { templateCallerPackageId: _dropped, ...rest } = payload as Record<string, unknown>;
+    return rest;
+}
+
+/**
+ * [ADR-0150 D3, #31699 contract review F-A] Whether a node's literal `payload`
+ * carries a template reference the delivery channels take the template path
+ * on (`payload.template`, a non-blank string, read exactly as the email and
+ * inbox channels read it). Such a reference is resolved from the flow's armed
+ * package like `template:` is, so this spelling never resolves the name
+ * environment-wide from a packaged flow.
+ */
+function literalPayloadTemplate(payload: unknown): boolean {
+    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    const template = (payload as { template?: unknown }).template;
+    return typeof template === 'string' && template.trim() !== '';
+}
+
 export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext): void {
     const getMessaging = (): MessagingServiceSurface | undefined => {
         try {
@@ -990,6 +1080,16 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
             // is evaluated in the run's scope, a literal handed on as written —
             // the resolver every value-slot map shares.
             const template = toStr(cfg.template);
+            // [ADR-0150 D3, #31699] The package the template name resolves
+            // from at delivery: the package whose own body of this flow is
+            // armed, never a stamp on the definition. An environment-authored
+            // flow (or an environment override of a packaged one) names none,
+            // and the delivery resolves the name as a caller with no package.
+            // A template reference written in the literal `payload` (which the
+            // channels read just the same) names it too.
+            const templateCallerPackageId = template || literalPayloadTemplate(cfg.payload)
+                ? engine.flowCallerPackage(context)
+                : null;
             const templateData = cfg.templateData
                 ? resolveValueSlotMap(engine, cfg.templateData, variables, 'templateData', context)
                 : undefined;
@@ -1154,11 +1254,18 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                     // On the template path no inline title/body keys are set:
                     // channels without template support fall back to the topic,
                     // which is the honest degraded rendering, not ''.
+                    // [#31699] The template's caller package is the engine's
+                    // answer alone: a key of that name in the literal
+                    // `payload` is dropped, never forwarded as one.
                     payload: {
-                        ...(payload ?? {}),
+                        ...withoutTemplateCallerPackage(payload),
                         ...(template
-                            ? { template, ...(templateData !== undefined ? { templateData } : {}) }
-                            : { title, body }),
+                            ? {
+                                template,
+                                ...(templateData !== undefined ? { templateData } : {}),
+                                ...(templateCallerPackageId ? { templateCallerPackageId } : {}),
+                            }
+                            : { title, body, ...(templateCallerPackageId ? { templateCallerPackageId } : {}) }),
                         url: actionUrl,
                     },
                     severity,
@@ -1190,8 +1297,13 @@ export function registerNotifyNode(engine: AutomationEngine, ctx: PluginContext)
                 const delivered = results.reduce((sum, result) => sum + (Number(result.delivered) || 0), 0);
                 const enqueued = results.reduce((sum, result) => sum + (Number(result.enqueued) || 0), 0);
                 const failed = results.reduce((sum, result) => sum + (Number(result.failed) || 0), 0);
+                // A refused or failed delivery is named on the step itself, so
+                // the run history says why nobody was notified; the step stays a
+                // success (see `deliveryFailureWarning`).
+                const warning = deliveryFailureWarning(results);
                 return {
                     success: true,
+                    ...(warning ? { warnings: [warning] } : {}),
                     output: {
                         notificationId: results[0]?.notificationId,
                         delivered,

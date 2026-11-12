@@ -14,6 +14,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { multiReplicaInstallLocalRefusalMessage } from '@objectstack/cloud-connection';
 import PackageInstall from '../src/commands/package/install.js';
 
 /** Stub the runtime's install POST with a refusal envelope. */
@@ -76,5 +77,31 @@ describe('os package install — a refusal is printed with its code', () => {
     const { out } = await runInstall();
 
     expect(out).toContain('Install failed (500): boom');
+  });
+});
+
+/**
+ * #32176 — under declared replicas install-local refuses `409
+ * MULTI_REPLICA_PACKAGE_CHANGE_REFUSED`, and the message names the recipe an
+ * operator follows. This command is the path a deploy script takes to that door,
+ * so it must hand the operator the recipe the door wrote, verbatim: no case for
+ * the code, no paraphrase that could drift from it. The text is read from the
+ * one place it is spelled (`@objectstack/cloud-connection`), where the door's
+ * own suite pins that following it works.
+ */
+describe('os package install — the multi-replica refusal prints the door\'s recipe verbatim', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('prints the status, the code and the door\'s whole message, and exits 1', async () => {
+    const message = multiReplicaInstallLocalRefusalMessage('Installing');
+    stubRefusal(409, { code: 'MULTI_REPLICA_PACKAGE_CHANGE_REFUSED', message });
+
+    const { out, exit } = await runInstall();
+
+    expect(out).toContain(`Install failed (409 MULTI_REPLICA_PACKAGE_CHANGE_REFUSED): ${message}`);
+    expect(exit).toBe(1);
   });
 });

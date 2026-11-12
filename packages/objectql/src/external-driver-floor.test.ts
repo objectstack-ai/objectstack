@@ -223,8 +223,38 @@ describe('[#27277] reads: the engine applies the query', () => {
       expect(err.code).toBe('EXTERNAL_ROW_CAP_EXCEEDED');
       expect(err.status).toBe(422);
       expect(err.message).toContain('Narrow the filter');
-      expect(err.message).toContain('DataSync');
+      // [ADR-0153] The remedy is sync-in; the retired DataSync is never named.
+      expect(err.message).toContain('sync-in');
+      expect(err.message).not.toContain('DataSync');
     }
+  });
+
+  it('[ADR-0153 D2] the refusal carries what the driver returned, on the error object only', async () => {
+    const rows = Array.from({ length: EXTERNAL_ROW_CAP + 5 }, (_, i) => ({ id: `r${i}`, kind: 'leaf', weight: i }));
+    const { engine } = makeEngine({ rows });
+    const err = await engine.find('tree_node', { where: { kind: 'leaf' } }).then(() => undefined, (e) => e);
+    expect(err).toBeInstanceOf(ExternalRowCapExceededError);
+    // The floor asks for cap + 1 and the driver stopped there: that many came back.
+    expect(err.returnedRowCount).toBe(EXTERNAL_ROW_CAP + 1);
+    const weights = err.returnedValuesOf('weight');
+    expect(weights).toHaveLength(EXTERNAL_ROW_CAP + 1);
+    expect(weights.slice(0, 3)).toEqual([0, 1, 2]);
+    expect(err.returnedValuesOf('no_such_field').every((v: unknown) => v === undefined)).toBe(true);
+    // Never on the wire: not in details, not an own key, not in any serialization.
+    expect(err.details).toEqual({ datasource: 'tree', object: 'tree_node', cap: EXTERNAL_ROW_CAP });
+    expect(Object.keys(err)).not.toContain('returned');
+    const serialized = JSON.stringify({ ...err, message: err.message });
+    expect(serialized).not.toContain('r0');
+    expect(serialized).not.toContain('weight');
+    // A copy: mutating the answer does not reach the rows.
+    weights[0] = 'mutated';
+    expect(err.returnedValuesOf('weight')[0]).toBe(0);
+  });
+
+  it('[ADR-0153 D2] a refusal built without rows reports none returned', () => {
+    const err = new ExternalRowCapExceededError('tree', 'tree_node', 10);
+    expect(err.returnedRowCount).toBe(0);
+    expect(err.returnedValuesOf('weight')).toEqual([]);
   });
 
   it('a read the remote fails is ERR_DATASOURCE_UNAVAILABLE / 503, the cause logged and never in the message', async () => {
@@ -689,4 +719,87 @@ describe('[#27727] listDatasourceDefs answers the stored driver id, the key the 
     engine.registerDatasourceDef({ name: 'bare', schemaMode: 'external' });
     expect(engine.listDatasourceDefs()).toEqual([{ name: 'bare', schemaMode: 'external' }]);
   });
+});
+
+describe('[#32252] a combinator operand that is not a filter node is refused in where\'s words, before the driver is asked', () => {
+  // Before, measured through `engine.find` / `findOne` / `count` on this
+  // harness: every row below ANSWERED after the driver was read. The floor's
+  // walker read a condition array's index positions as columns (no row), a
+  // `null` element as no constraint (every row), a string `$not` operand as
+  // nothing to negate (no row), and a non-list `$and` as a one-element list.
+  // driver-sql, driver-memory and driver-mongodb refuse each in `where`
+  // INVALID_FILTER / 400; the floor now runs the same shape gate
+  // (`assertFilterNodeShapes`) in `assertDriverWhereEvaluableInMemory`, ahead
+  // of the remote read.
+  //
+  // name · where · the first sentence of the refusal
+  const NODE_REFUSED: ReadonlyArray<readonly [string, () => unknown, string]> = [
+    ['a condition array as a $and element', () => ({ $and: [[{ kind: 'leaf' }]] }),
+      'Filter node at where.$and[0] is a array ([{"kind":"leaf"}]), not a filter condition object.'],
+    ['null as a $or element', () => ({ $or: [null] }),
+      'Filter node at where.$or[0] is a null (null), not a filter condition object.'],
+    ['a string as the $not operand', () => ({ $not: 'leaf' }),
+      'Filter node at where.$not is a string ("leaf"), not a filter condition object.'],
+    ['a $and operand that is not a list', () => ({ $and: { kind: 'leaf' } }),
+      'Filter combinator "$and" at where.$and requires an array of filter conditions, but received a object ({"kind":"leaf"}).'],
+    ['a condition array two combinators deep', () => ({ $or: [{ kind: 'branch' }, { $and: [[{ kind: 'leaf' }]] }] }),
+      'Filter node at where.$or[1].$and[0] is a array ([{"kind":"leaf"}]), not a filter condition object.'],
+  ];
+
+  const refusalOf = async (read: () => Promise<unknown>) => {
+    const err = await read().then(() => undefined, (e) => e);
+    expect(err, 'expected a refusal, but the read answered').toBeInstanceOf(Error);
+    return err as Error & { code?: string; status?: number };
+  };
+
+  for (const [name, where, head] of NODE_REFUSED) {
+    it(`${name}: INVALID_FILTER / 400 on find, findOne and count, and the driver is never read`, async () => {
+      const { engine, remote } = makeEngine();
+      for (const read of [
+        () => engine.find('tree_node', { where: where() as never }),
+        () => engine.findOne('tree_node', { where: where() as never }),
+        () => engine.count('tree_node', { where: where() as never }),
+      ]) {
+        const err = await refusalOf(read);
+        expect(err.code, err.message).toBe('INVALID_FILTER');
+        expect(err.status).toBe(400);
+        expect(err.message.startsWith(`${head} `), err.message).toBe(true);
+      }
+      expect(remote.sent).toEqual([]);
+    });
+  }
+
+  // An in-process `where` root that is a class instance is admitted by the
+  // engine (`isWhereFilterObject`: its tag is `[object Object]`) and read by
+  // the floor's walker by its own keys, so it is walked like a literal root.
+  class FilterBox {
+    constructor(props: Record<string, unknown>) { Object.assign(this, props); }
+  }
+
+  it('a class-instance root carrying a condition-array element is refused like a literal one', async () => {
+    const { engine, remote } = makeEngine();
+    const err = await refusalOf(() => engine.find('tree_node', { where: new FilterBox({ $and: [[{ kind: 'leaf' }]] }) as never }));
+    expect(err.code).toBe('INVALID_FILTER');
+    expect(err.status).toBe(400);
+    expect(err.message.startsWith('Filter node at where.$and[0] is a array ([{"kind":"leaf"}]), not a filter condition object. '), err.message).toBe(true);
+    expect(remote.sent).toEqual([]);
+  });
+
+  // CONTROL — the object forms answer exactly as before.
+  const OBJECT_FORM: ReadonlyArray<readonly [string, () => unknown, string[]]> = [
+    ['$and of nodes', () => ({ $and: [{ kind: 'leaf' }, { weight: { $gt: 2 } }] }), ['n1']],
+    ['$or of nodes', () => ({ $or: [{ kind: 'branch' }, { label: 'Echo' }] }), ['n1', 'n2', 'n5']],
+    ['$not of a node', () => ({ $not: { kind: 'leaf' } }), ['n2', 'n5']],
+    ['a null-prototype $and element', () => ({ $and: [Object.assign(Object.create(null), { kind: 'branch' })] }), ['n2', 'n5']],
+    ['the empty $and (TRUE)', () => ({ $and: [] }), ['n1', 'n2', 'n3', 'n4', 'n5', 'n6']],
+    ['a class-instance root carrying a valid filter', () => new FilterBox({ $or: [{ kind: 'branch' }, { label: 'Echo' }] }), ['n1', 'n2', 'n5']],
+  ];
+
+  for (const [name, where, expected] of OBJECT_FORM) {
+    it(`${name} answers [${expected.join(', ')}], as before`, async () => {
+      const { engine } = makeEngine();
+      expect(ids(await engine.find('tree_node', { where: where() as never })).sort()).toEqual(expected);
+      expect(await engine.count('tree_node', { where: where() as never })).toBe(expected.length);
+    });
+  }
 });

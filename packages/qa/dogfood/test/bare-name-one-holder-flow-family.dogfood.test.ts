@@ -14,17 +14,29 @@
 //   - the cold boot of a deployment that already holds the clash — two
 //     `AppPlugin` packages, `alpha` and `beta`, shipping one flow, one webhook,
 //     one connector and one email template under the same names — boots, and
-//     logs ONE bare-name warning line naming all four, both packages and the
-//     rename for every name; the automation engine arms NEITHER of the two
-//     flows and logs the refusal naming both, and the declared webhook's
+//     logs ONE bare-name warning line naming the flow, the webhook and the
+//     connector, both packages and the rename for every name (the email
+//     template's rule narrowed to the namespace, ADR-0150 D9 #31699: two
+//     namespaces' templates are no clash, and a send of the name is refused
+//     naming both); the automation engine arms EACH flow in its own
+//     slot and refuses the bare name naming both, and the declared webhook's
 //     by-name read refuses the held name naming both packages (ADR-0150 D3,
 //     #31677 Q1 ruled A: a clash held from before phase 1 is refused like any
 //     other two-holder name, not first-picked);
 //   - `POST /marketplace/install-local` of a third package declaring the held
 //     flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the
-//     rename, installs nothing, and the engine still arms neither flow;
+//     rename, installs nothing, and the engine still serves the two slots;
 //   - the same door refusing a package that declares the held webhook name and
-//     the showcase's own flow and email template names, naming the showcase;
+//     the showcase's own flow name, naming the showcase — and no longer the
+//     showcase's email template name, which another namespace may now ship;
+//   - the email template's narrowing at the door (#31699): a third namespace's
+//     package shipping the held template name installs, a co-owner of `alpha`'s
+//     namespace is refused naming `alpha` only (at this door a co-owner depends
+//     on `alpha`, so the ADR-0146 D2 override write gate refuses it first, 403
+//     NOT_OVERRIDABLE; the bare-name rule's own co-owner refusal, for an
+//     artifact co-owner, is pinned in objectql), and a second namespace's
+//     override of the platform-requested `auth.password_reset` is refused naming
+//     the first overriding app;
 //   - CONTROL: a package declaring fresh names installs — and so does one
 //     overriding the platform's built-in `auth.password_reset` template, whose
 //     holder package is the overridable baseline: the send then renders the
@@ -142,10 +154,12 @@ describe('one package holder per flow, webhook, connector and email template nam
     return { status: res.status, body: (await res.json()) as any };
   };
 
-  /** The flow the automation engine serves for `name` — its bare-name flow map. */
-  const armedFlowLabel = async (name: string): Promise<string | undefined> => {
-    const automation = (stack.kernel as any).getService('automation');
-    return (await automation.getFlow(name))?.label;
+  /** [ADR-0150 D4, #31696] Each holder's flow is armed in its own slot; the bare name is refused (409), naming both. */
+  const slotFlowLabel = (pkg: string): string | undefined => (stack.kernel as any).getService('automation').getFlowSlot(pkg, FLOW)?.label;
+  const expectEachSlotArmedAndBareRefused = async (): Promise<void> => {
+    expect([slotFlowLabel('com.qa.bare.alpha'), slotFlowLabel('com.qa.bare.beta')]).toEqual(['alpha flow', 'beta flow']);
+    const err = await (stack.kernel as any).getService('automation').getFlow(FLOW).then(() => undefined, (e: unknown) => e);
+    expect([err?.code, err?.status, /com\.qa\.bare\.alpha.*com\.qa\.bare\.beta/.test(String(err?.message))]).toEqual(['RESOURCE_CONFLICT', 409, true]);
   };
 
   /**
@@ -207,7 +221,7 @@ describe('one package holder per flow, webhook, connector and email template nam
     if (storageDir) rmSync(storageDir, { recursive: true, force: true });
   });
 
-  it('the cold boot of a deployment holding the clash boots, and warns once naming all four names, both packages and the rename for every name', async () => {
+  it('the cold boot of a deployment holding the clash boots, and warns once naming the three unnarrowed names, both packages and the rename for every name', async () => {
     const warnings = bootLines.filter((l) => l.includes('Bare-name conflict at boot'));
     expect(warnings, 'one warning line').toHaveLength(1);
     const line = warnings[0]!;
@@ -215,8 +229,9 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(line).toContain(`the flow "${FLOW}"`);
     expect(line).toContain(`the webhook "${HOOK}"`);
     expect(line).toContain(`the connector "${CONN}"`);
-    expect(line).toContain(`the email template "${TPL}"`);
-    for (const name of [FLOW, HOOK, CONN, TPL]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
+    // [ADR-0150 D9, #31699] Two namespaces' email templates are no clash.
+    expect(line).not.toContain(`the email template "${TPL}"`);
+    for (const name of [FLOW, HOOK, CONN]) expect(line, `the rename of ${name}`).toContain(`"beta_${name}"`);
     expect(line).toContain('package "com.qa.bare.alpha"');
     expect(line).toContain('package "com.qa.bare.beta"');
     // The platform's built-in templates are the overridable baseline: never named by the warning.
@@ -225,18 +240,16 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(line).not.toContain(BUILT_IN_TPL);
     expect(line).not.toContain(baseline!);
     expect(await packageIds(), 'both packages booted').toEqual(expect.arrayContaining(['com.qa.bare.alpha', 'com.qa.bare.beta']));
-    // [ADR-0150 D3, #31677 Q1] The automation engine arms neither flow: the arming is refused, naming both.
-    expect(bootLines.some((l) =>
-      l.includes('failed to register flow') && l.includes(`"${FLOW}"`) && l.includes('held by 2 packages')
-      && l.includes('com.qa.bare.alpha') && l.includes('com.qa.bare.beta'))).toBe(true);
-    expect(await armedFlowLabel(FLOW)).toBeUndefined();
+    // [ADR-0150 D4, #31696] The engine arms each flow (it had refused the arming).
+    expect(bootLines.some((l) => l.includes('failed to register flow') && l.includes(`"${FLOW}"`))).toBe(false);
+    await expectEachSlotArmedAndBareRefused();
     // ADR-0150 D3 (#31677, Q1 ruled A): the webhook the clash held before phase 1
     // is no longer served by first registration — the by-name read refuses it,
     // naming both packages.
     await expectHeldWebhookRefused();
   });
 
-  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, and neither flow is armed', async () => {
+  it('install-local of a third package declaring a held flow name is 422 PLUGIN_REGISTER_FAILED naming both holders and the rename; nothing is installed, and each holder\'s slot is still served', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('gamma', { flows: [flow('gamma')] }));
     expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
@@ -246,10 +259,11 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(message).toContain('com.qa.bare.beta');
     expect(message).toContain(`"gamma_${FLOW}"`);
     expect(await packageIds(), 'the package list is unchanged').toEqual(before);
-    expect(await armedFlowLabel(FLOW)).toBeUndefined();
+    expect(slotFlowLabel('com.qa.bare.gamma')).toBeUndefined();
+    await expectEachSlotArmedAndBareRefused();
   });
 
-  it('install-local of a package declaring the held webhook name and the showcase\'s own flow and email template names is refused, naming the showcase', async () => {
+  it('install-local of a package declaring the held webhook name and the showcase\'s own flow and email template names is refused for the flow and the webhook, naming the showcase', async () => {
     const before = await packageIds();
     const { status, body } = await installLocal(inline('delta', {
       flows: [flow('delta', SHOWCASE_FLOW)],
@@ -259,7 +273,8 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
     const message = String(body?.error?.message ?? '');
     expect(message).toContain(`the flow "${SHOWCASE_FLOW}"`);
-    expect(message).toContain(`the email template "${SHOWCASE_TEMPLATE}"`);
+    // [#31699] Another namespace may ship the showcase's template name.
+    expect(message).not.toContain(`the email template "${SHOWCASE_TEMPLATE}"`);
     expect(message).toContain(SHOWCASE_PKG);
     expect(message).toContain(`the webhook "${HOOK}"`);
     expect(message).toContain('com.qa.bare.alpha');
@@ -286,5 +301,71 @@ describe('one package holder per flow, webhook, connector and email template nam
     expect(rendered?.subject).toBe('epsilon subject');
     // The built-in bundle is still registered beside the override: overridden, not displaced.
     expect(builtInTemplatePackage()).toBe(baseline);
+  });
+  describe('the email template\'s rule narrowed to the namespace (ADR-0150 D9, child B #31699)', () => {
+    /** An inline install-local manifest of a co-owner of `alpha`'s namespace: it declares `alpha` and depends on alpha. */
+    const coOwner = (id: string, collections: Record<string, unknown[]>) => ({
+      manifest: {
+        id, namespace: 'alpha', name: id.split('.').pop(), version: '1.0.0', type: 'app', scope: 'project',
+        engines: { protocol: `^${PROTOCOL_MAJOR}` },
+        dependencies: { 'com.qa.bare.alpha': '^1.0.0' },
+        objects: [item(`alpha_${id.split('.').pop()}`)],
+        ...collections,
+      },
+    });
+    const sendRefusal = async (name: string) => {
+      const email = (stack.kernel as any).getService('email');
+      try {
+        await email.renderTemplate({ template: name, data: {} });
+        return undefined;
+      } catch (err) {
+        return err as { code?: string; status?: number; message?: string; candidates?: Array<{ packageId?: string }> };
+      }
+    };
+
+    it('a send of the template two namespaces ship is refused with 409, naming both — never the first registered', async () => {
+      const refusal = await sendRefusal(TPL);
+      expect(refusal, 'the send refuses').toBeDefined();
+      expect([refusal!.code, refusal!.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+      expect((refusal!.candidates ?? []).map((c) => c.packageId).sort()).toEqual(['com.qa.bare.alpha', 'com.qa.bare.beta']);
+    });
+
+    it('a send made from each holder\'s package renders that package\'s own template (ADR-0150 D3, #31699 F1)', async () => {
+      const email = (stack.kernel as any).getService('email');
+      const from = (callerPackageId: string) => email.renderTemplate({ template: TPL, data: {}, callerPackageId });
+      expect((await from('com.qa.bare.alpha'))?.subject).toBe('alpha subject');
+      expect((await from('com.qa.bare.beta'))?.subject).toBe('beta subject');
+    });
+
+    it('install-local of a third namespace\'s package shipping the held template name installs', async () => {
+      const { status, body } = await installLocal(inline('zeta', { emailTemplates: [template('zeta')] }));
+      expect(status, JSON.stringify(body)).toBeLessThan(300);
+      expect(await packageIds()).toContain('com.qa.bare.zeta');
+    });
+
+    it('install-local of a co-owner of alpha\'s namespace shipping the held name is refused, naming alpha only; nothing is installed', async () => {
+      // A co-owner reaches this door by depending on alpha (ADR-0141 D5), so
+      // the ADR-0146 D2 override write gate refuses its same-named item before
+      // the bare-name rule is asked: 403 NOT_OVERRIDABLE, never an install.
+      const before = await packageIds();
+      const { status, body } = await installLocal(coOwner('com.qa.bare.alphamod', { emailTemplates: [template('alphamod')] }));
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([403, 'NOT_OVERRIDABLE']);
+      const message = String(body?.error?.message ?? '');
+      expect(message).toContain(`email_template/${TPL}`);
+      expect(message).toContain(`'com.qa.bare.alpha' ships`);
+      expect(message).not.toContain('com.qa.bare.beta');
+      expect(message).not.toContain('com.qa.bare.zeta');
+      expect(await packageIds()).toEqual(before);
+    });
+
+    it('install-local of a second namespace\'s override of the platform-requested auth.password_reset is refused, naming the first overriding app', async () => {
+      const before = await packageIds();
+      const { status, body } = await installLocal(inline('eta', { emailTemplates: [template('eta', BUILT_IN_TPL)] }));
+      expect([status, codeOf(body)], JSON.stringify(body)).toEqual([422, 'PLUGIN_REGISTER_FAILED']);
+      const message = String(body?.error?.message ?? '');
+      expect(message).toContain(`the email template "${BUILT_IN_TPL}"`);
+      expect(message).toContain('com.qa.bare.epsilon');
+      expect(await packageIds()).toEqual(before);
+    });
   });
 });

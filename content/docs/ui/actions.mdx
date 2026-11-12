@@ -615,7 +615,7 @@ The endpoint dispatches on the **declared `type`**, exactly like the MCP
 | `type` | Over REST |
 |:---|:---|
 | `script` | Runs the registered handler / inline body. |
-| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name — **and answers the same way**: a run that ran and was rejected is **400** `FLOW_FAILED`, while a dispatch that never happened is separated out (**404** unknown flow / **409** `FLOW_DISABLED` / **422** `FLOW_NO_START_NODE` / **422** `FLOW_INPUT_SCHEMA_INVALID`). A target declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`) is refused **403** `PERMISSION_DENIED` to every caller but the system principal, exactly as at the trigger door, and nothing runs; holding the action's `requiredPermissions` does not open it. A target that declares its own `requiredPermissions` is refused **403** `PERMISSION_DENIED` to a caller who does not hold every capability it names, even when the action declares none. See [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) for the full table — it is one table, read by both doors. |
+| `flow` | Runs `target` on the automation engine, with your identity forwarded (a `runAs: 'user'` flow enforces RLS as you). Dispatches the same flow as `POST /api/v1/automation/:target/trigger`, without having to know the flow name — **and answers the same way**: a run that ran and was rejected is **400** `FLOW_FAILED`, while a dispatch that never happened is separated out (**404** unknown flow, a stored flow with no `start` node included, as it is never armed / **409** `FLOW_DISABLED` / **422** `FLOW_INPUT_SCHEMA_INVALID`). A target declared `runAs: 'system'` whose type is self-triggered (`autolaunched`, `record_change`, `schedule`) is refused **403** `PERMISSION_DENIED` to every caller but the system principal, exactly as at the trigger door, and nothing runs; holding the action's `requiredPermissions` does not open it. A target that declares its own `requiredPermissions` is refused **403** `PERMISSION_DENIED` to a caller who does not hold every capability it names, even when the action declares none. See [Run a flow via API](/docs/automation/flows#run-a-flow-via-api) for the full table — it is one table, read by both doors. |
 | `api` | **Same-origin `target`** (a path starting with `/`): the door runs its gates — the sign-in floor, `requiredPermissions`, the packaged-action switch, the param contract, the subject-row load — and then **forwards the request in-process** to `target` with your own credentials, assembling the body exactly as the Console does (`recordIdParam` / `recordIdField` from the subject row, `bodyShape`, `bodyExtra` merged last, `organizationId` for an `/api/v1/auth/` target, `method`). The target endpoint still authorizes you itself; its status and body come back as the answer (its `data` unwrapped), and a credential rotation it emits (`Set-Cookie`, `set-auth-token`) is relayed. A `${ctx.selection.*}` or `{{page.<var>}}` token exists only in the browser and is refused **400** by name. **Off-origin `target`** (another host): **400** — the browser calls it directly, and such an action cannot be switched off in the activation ledger (the write door refuses, **409**, with the reason). |
 | `url` / `modal` / `form` | **400** — client-side navigation; there is nothing for the server to run. |
 
@@ -711,7 +711,7 @@ Pick the **posture** by who drives your door:
 | `posture` | Rules | Use it for |
 |:---|:---|:---|
 | `'rest'` (default) | Exactly the REST door's. | A door a person drives, or your own server code. |
-| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
+| `'ai'` | The REST door's, plus the three the MCP `run_action` tool adds: a `sys_*` action needs its own `ai.exposed`, every action needs `ai.exposed: true`, and an action with `ai.requiresConfirmation` is refused **428** `ACTION_CONFIRMATION_REQUIRED` until the call carries `confirm: true`. A script action with no handler binding is also refused. A client-side or off-origin `api` action is refused **400** as under `'rest'`, with `run_action`'s sentence (`cannot be invoked via MCP`) instead of the REST prescription, so the agent is not handed the action's `target`. | **A host's in-product AI tool** — an agent picks the action, so it takes the AI door's rules. |
 
 `posture` is `'rest'`, `'ai'` or absent (`'rest'`); any other value is
 refused **400** `VALIDATION_FAILED` before anything runs, so a misspelt
@@ -720,8 +720,35 @@ posture cannot quietly drop the AI rules.
 `credentialHeaders` are the caller's own credential headers, read the way the
 REST door reads its request's: a same-origin `type: 'api'` action forwards
 with them, and its target authorizes the caller itself. Omit them and such an
-action forwards with none. `environmentId` names the environment the action
-runs in; without it the kernel's default environment is used.
+action forwards with none.
+
+Pass the kernel your HTTP door is served from. On a multi-kernel host that is
+the kernel that registers the `kernel-resolver` service. `environmentId` reaches
+that resolver the way the environment of
+`POST /api/v1/environments/:id/actions/...` does, and the resolver places the
+call: it runs on the environment's own kernel, and on the host kernel only where
+the resolver places it there. A resolver that fails refuses the call with its
+own status; the call never runs on the host kernel in its place. Without
+`environmentId` the resolver gets no environment to read and places the call
+from what else it reads (your `credentialHeaders`; a host door has no
+hostname), or not at all. A call the resolver places in no environment runs in
+the kernel's default environment, as the REST door's does. On a host with no
+`kernel-resolver`, nothing places the call: it runs in the environment
+`environmentId` names (or the default environment when you omit it), exactly as
+before.
+
+Placement is all `dispatchAction` shares with the REST door's request
+handling. Three steps that door runs after placement are **not** run here, so
+they stay your door's job:
+
+- **The caller's identity in that environment.** The REST door resolves its
+  caller against the kernel the request was placed on. `executionContext` is
+  used as you pass it, so pass the caller as the named environment knows
+  them (their permission sets and positions there).
+- **The authentication-policy gate** (ADR-0069): a session with an expired
+  password or a pending MFA step is blocked at the REST door.
+- **Environment membership**: the REST door refuses a signed-in user who is
+  not a member of the environment, **403** `PROJECT_MEMBERSHIP_REQUIRED`.
 
 `namespace` addresses an installed package's action the way the
 `/api/v1/actions/:namespace/:object/:action` path does (`_env` names the

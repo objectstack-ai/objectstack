@@ -53,6 +53,7 @@ import {
   isHashShadowColumn,
   parseHashShadowKeyParts,
   type ExpectedIndex,
+  type LegacyUniqueReplacement,
   type PhysicalIndex,
 } from './schema-drift.js';
 import { MYSQL_CELL, declareDialectCell } from './live-dialect-matrix.testkit.js';
@@ -410,6 +411,185 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       const after = await catalog('os13015_stale');
       const fixed = after.cols.find((c: any) => c.COLUMN_NAME === shadow);
       expect(String(fixed.GENERATION_EXPRESSION).toLowerCase()).toContain('coalesce');
+    }, 60_000);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// The orphan arm: an UNRESOLVED carrier is kept, never offered as a drop
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `isHashShadowCarrier`'s promise — a carrier "is never a thing this differ may
+ * propose destroying on a guess" — held on the redefinition arm (above: an
+ * unresolved carrier under a DECLARED name reports nothing) and, since the
+ * widening arm learnt it, under a superseded narrower key's name. It did not
+ * hold on the orphan arm: an unresolved carrier under any OTHER generated name
+ * was offered as `drop_index`, categorized `destructive`. Its key could not be
+ * read, so what that drop would remove is unknown.
+ *
+ * The orphan arm now gives the widening arm's answer: kept, nothing offered.
+ * Every "nothing" below sits beside a colocated control in the same call — the
+ * drifted ordinary unique, and a RESOLVED orphan carrier that is still offered
+ * as the drop it really is — so an empty answer for the subject cannot be read
+ * as a differ that stopped reporting orphans, or shadows, altogether.
+ */
+describe('the orphan arm keeps an unresolved carrier and offers no drop', () => {
+  /** A carrier under a generated name no declaration and no widening entry names. */
+  const ORPHAN_NAME = 'uniq_os13015_probe_retired';
+  const orphanCarrier = (shadowKey?: PhysicalIndex['shadowKey']): PhysicalIndex => ({
+    name: ORPHAN_NAME,
+    columns: [hashShadowColumnFor(ORPHAN_NAME)],
+    unique: true,
+    ...(shadowKey ? { shadowKey } : {}),
+  });
+  /** The CONTROL carrier: retired too, but its key was read. */
+  const RESOLVED_NAME = 'uniq_os13015_probe_gone';
+  const resolvedOrphanCarrier: PhysicalIndex = {
+    name: RESOLVED_NAME,
+    columns: [hashShadowColumnFor(RESOLVED_NAME)],
+    unique: true,
+    shadowKey: [
+      { column: 'organization_id', nullSafe: false },
+      { column: 'gone', nullSafe: false },
+    ],
+  };
+  const forName = (entries: ReturnType<typeof diff>, name: string) =>
+    entries.filter((e) => (e.op as any).indexName === name || (e.op as any).dropIndexNames?.includes(name));
+
+  it('is a carrier the orphan arm would otherwise reach: a generated name, plain and unique', () => {
+    expect(isHashShadowCarrier(orphanCarrier())).toBe(true);
+    expect(orphanCarrier().shadowKey).toBeUndefined();
+  });
+
+  it('an unresolved carrier no declaration names: nothing offered, while the resolved one is still a destructive drop', () => {
+    const entries = diff([declaredControl], [orphanCarrier(), resolvedOrphanCarrier, physicalControl]);
+    // The subject: no drop_index, no entry of any kind.
+    expect(forName(entries, ORPHAN_NAME)).toEqual([]);
+    // CONTROL 1 — the resolved orphan carrier is still the orphan arm's.
+    const gone = forName(entries, RESOLVED_NAME);
+    expect(gone.map((e) => [e.kind, e.op.type, e.category])).toEqual([['unmapped_index', 'drop_index', 'destructive']]);
+    expect(gone[0]!.actual).toBe('UNIQUE (organization_id, gone)');
+    // CONTROL 2 — the ordinary drifted unique.
+    expect(forName(entries, CONTROL_NAME).map((e) => e.op.type)).toEqual(['recreate_index']);
+    expect(entries.length).toBe(2);
+  });
+
+  it('outside the widening arm: an unresolved carrier under a tenant-arm legacy name is kept, not dropped', () => {
+    // The field-level tenant retirement (no `widenedBy`) excludes every carrier
+    // from its `present` set and claims none, so the carrier fell through to
+    // the orphan arm.
+    const legacy: LegacyUniqueReplacement = {
+      column: 'v',
+      legacyNames: [ORPHAN_NAME],
+      replacement: declaredOrgUnique,
+      legacyColumns: ['v'],
+    };
+    const entries = diffManagedIndexes({
+      table: TABLE,
+      expected: [declaredOrgUnique],
+      legacy: [legacy],
+      physical: [orphanCarrier(), carrier(healthyKey)],
+      tenantField: 'organization_id',
+    });
+    expect(forName(entries, ORPHAN_NAME)).toEqual([]);
+    expect(entries).toEqual([]);
+  });
+
+  it('CONTROL: the same carrier with its key read is still offered as the orphan drop', () => {
+    const entries = diff([], [orphanCarrier(healthyKey)]);
+    expect(entries.map((e) => [e.op.type, e.category, (e.op as any).indexName])).toEqual([
+      ['drop_index', 'destructive', ORPHAN_NAME],
+    ]);
+  });
+
+  it('the widening arm\'s unresolved-carrier answer is unchanged: kept, nothing offered', () => {
+    const NARROW = 'uniq_os13015_probe_organization_id';
+    const narrower: PhysicalIndex = { name: NARROW, columns: [hashShadowColumnFor(NARROW)], unique: true };
+    const legacy: LegacyUniqueReplacement = {
+      column: 'organization_id',
+      legacyNames: [NARROW],
+      replacement: declaredOrgUnique,
+      legacyColumns: ['organization_id'],
+      widenedBy: ['v'],
+    };
+    const entries = diffManagedIndexes({
+      table: TABLE,
+      expected: [declaredOrgUnique],
+      legacy: [legacy],
+      physical: [narrower, carrier(healthyKey)],
+      tenantField: 'organization_id',
+    });
+    expect(entries).toEqual([]);
+  });
+});
+
+/**
+ * Two retired full-value UNIQUEs over columns MySQL cannot key directly, so both
+ * take the #11627 shadow route; one shadow is then rebuilt with a generation
+ * expression that names no column, which is what an unreadable carrier looks
+ * like to `resolveHashShadowKeys` (it resolves to nothing).
+ */
+const twoRetiredCarriers = (name: string, indexes: Array<'unreadable' | 'resolved'>) => ({
+  name,
+  fields: {
+    unreadable: { type: 'text', maxLength: 1024 },
+    resolved: { type: 'text', maxLength: 1024 },
+  },
+  indexes: indexes.map((f) => ({ fields: [f], unique: true as const, name: `uniq_${name}_${f}` })),
+});
+
+declareDialectCell(MYSQL_CELL, 'unresolved carrier on the orphan arm', (cell) => {
+  describe('an unresolved orphan carrier against the live catalog', () => {
+    let driver: SqlDriver;
+    afterEach(async () => {
+      await driver?.disconnect().catch(() => {});
+    });
+
+    const indexNames = async (table: string): Promise<string[]> => {
+      const knex = (driver as any).knex;
+      const idx = await knex
+        .select('INDEX_NAME')
+        .from('information_schema.STATISTICS')
+        .where({ TABLE_SCHEMA: knex.client.database(), TABLE_NAME: table });
+      return idx.map((i: any) => String(i.INDEX_NAME));
+    };
+
+    it('is never offered as drop_index and survives "os migrate apply --allow-destructive"; the resolved one is dropped', async () => {
+      const TABLE = 'os32399_orphan';
+      const unreadable = `uniq_${TABLE}_unreadable`;
+      const resolved = `uniq_${TABLE}_resolved`;
+      const shadow = hashShadowColumnFor(unreadable);
+
+      driver = new SqlDriver(cell.config());
+      await driver.initObjects([twoRetiredCarriers(TABLE, ['unreadable', 'resolved'])]);
+      const knex = (driver as any).knex;
+      await knex.raw(`ALTER TABLE \`${TABLE}\` DROP INDEX \`${unreadable}\``);
+      await knex.raw(`ALTER TABLE \`${TABLE}\` DROP COLUMN \`${shadow}\``);
+      await knex.raw(
+        `ALTER TABLE \`${TABLE}\` ` +
+          `ADD COLUMN \`${shadow}\` VARBINARY(32) GENERATED ALWAYS AS (UNHEX(SHA2('unreadable', 256))) STORED, ` +
+          `ADD UNIQUE KEY \`${unreadable}\` (\`${shadow}\`)`,
+      );
+      await driver.disconnect();
+
+      // A FRESH driver (empty runtime ledger), metadata declaring neither index.
+      const retired = twoRetiredCarriers(TABLE, []);
+      driver = new SqlDriver(cell.config());
+      await driver.initObjects([retired]);
+      expect(await indexNames(TABLE)).toEqual(expect.arrayContaining([unreadable, resolved]));
+
+      const drift = await driver.detectManagedDrift([retired]);
+      // CONTROL: the resolved carrier is read and offered as the orphan drop.
+      const gone = drift.filter((d) => (d.op as any).indexName === resolved);
+      expect(gone.map((d) => d.op.type)).toEqual(['drop_index']);
+      // The subject: nothing offered for the carrier whose key could not be read.
+      expect(drift.filter((d) => (d.op as any).indexName === unreadable)).toEqual([]);
+
+      await driver.applyMigrationEntries(drift, { allowDestructive: true });
+      const after = await indexNames(TABLE);
+      expect(after).toContain(unreadable);
+      expect(after).not.toContain(resolved);
     }, 60_000);
   });
 });

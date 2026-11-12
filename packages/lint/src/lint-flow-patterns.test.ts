@@ -34,6 +34,7 @@ import {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
+  FLOW_START_NODE_MISSING,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,
@@ -3854,5 +3855,74 @@ describe('lintFlowPatterns — a node no edge path from start reaches (flow-node
     expect(rule!.runtimeTypes).toContain('flow');
     const served = rule!.run(reachFlow([START, { id: 'stamp', type: 'assignment' }, END], [{ id: 'e1', source: 'start', target: 'end' }]) as never, {});
     expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_NODE_UNREACHABLE, severity: 'error' }));
+  });
+});
+
+describe('lintFlowPatterns — a flow with no start node (flow-start-node-missing)', () => {
+  const flowOf = (nodes: unknown, edges: unknown[] = []) => ({
+    flows: [{ name: 'startless', type: 'autolaunched', nodes, edges }],
+  });
+  const missing = (stack: unknown) =>
+    lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_START_NODE_MISSING);
+
+  it('refuses a flow whose top-level nodes hold no start node, as an error that names what it found and the fix', () => {
+    const found = missing(flowOf(
+      [{ id: 'stamp', type: 'assignment', label: 'Stamp' }, { id: 'end', type: 'end', label: 'End' }],
+      [{ id: 'e1', source: 'stamp', target: 'end' }],
+    ));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ rule: FLOW_START_NODE_MISSING, severity: 'error' });
+    expect(found[0].where).toBe("flow 'startless' · nodes");
+    expect(found[0].message).toMatch(/hold no `start` node \(found 2 node\(s\), of type `assignment`, `end`\), so it can never run/);
+    expect(found[0].hint).toMatch(/Add a node with `type: 'start'` to the top-level `nodes`/);
+  });
+
+  it('refuses an empty node list, saying the list is empty', () => {
+    const found = missing(flowOf([]));
+    expect(found).toHaveLength(1);
+    expect(found[0].message).toMatch(/\(the list is empty\)/);
+  });
+
+  it('reads only the top-level graph: a start node inside a region body does not count', () => {
+    expect(missing(flowOf([{
+      id: 'each', type: 'loop',
+      config: { collection: [1], iteratorVariable: 'r', body: { nodes: [{ id: 'inner', type: 'start' }], edges: [] } },
+    }]))).toHaveLength(1);
+  });
+
+  describe('does NOT flag (controls)', () => {
+    it('a flow with a start node', () => {
+      expect(missing(flowOf(
+        [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+        [{ id: 'e1', source: 'start', target: 'end' }],
+      ))).toEqual([]);
+    });
+
+    it('a flow with two start nodes (the engine runs it from the first; flow-node-unreachable names the extra one)', () => {
+      const stack = flowOf(
+        [{ id: 'start', type: 'start' }, { id: 'start2', type: 'start' }, { id: 'end', type: 'end' }],
+        [{ id: 'e1', source: 'start', target: 'end' }],
+      );
+      expect(missing(stack)).toEqual([]);
+      expect(lintFlowPatterns(stack as never).filter((f) => f.rule === FLOW_NODE_UNREACHABLE).map((f) => f.where))
+        .toEqual(["flow 'startless' · node 'start2' (start)"]);
+    });
+
+    it('a flow whose nodes is not a list (the flow parse refuses it first)', () => {
+      expect(missing(flowOf(undefined))).toEqual([]);
+      expect(missing(flowOf({ start: { type: 'start' } }))).toEqual([]);
+    });
+  });
+
+  it('is in the gating flow rule, so its error reaches os lint/build and the save and publish doors', () => {
+    const rule = AUTHORING_RULES.find((r) => r.name === 'lintFlowPatterns');
+    expect(rule!.tier).toBe('gating');
+    expect(rule!.runtimeTypes).toContain('flow');
+    const served = rule!.run(flowOf([{ id: 'end', type: 'end' }]) as never, {});
+    expect(served).toContainEqual(expect.objectContaining({ rule: FLOW_START_NODE_MISSING, severity: 'error' }));
+  });
+
+  it('has an os explain entry', () => {
+    expect(explainRule(FLOW_START_NODE_MISSING)).toBeDefined();
   });
 });

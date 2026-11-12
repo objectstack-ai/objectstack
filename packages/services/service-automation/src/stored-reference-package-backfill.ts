@@ -7,7 +7,7 @@
  *
  * | Row | Table . name column | Gains | Rows asked |
  * |:--|:--|:--|:--|
- * | R8 | `sys_automation_run.flow_name` | `flow_package` | `paused` rows: a paused run resumes by it; terminal history stays as written |
+ * | R8 | `sys_automation_run.flow_name` | `flow_package` | `paused` rows: a paused run resumes by it; terminal history rows are not backfilled (a new one is written with its package, #31696) |
  * | R9 | `sys_flow_credential.flow_name` | `flow_package` | every row |
  * | R11 | `sys_connector_connection.connector_name` | `connector_package` | every row |
  *
@@ -37,11 +37,15 @@
  *
  * ## What it does not change
  *
- * No reader or writer moves onto the columns (ADR-0150 red line 3): a resume,
- * the credential channel and the connection store still read by name, and no
- * writer stamps the columns — a row written after a boot is bound by the next
- * one. The readers that will read them are the flow and connector trailing
- * children (their B children) and S4's upgrade report. No unique key changes.
+ * Nothing here moves a reader or a writer onto the columns. The flow child
+ * (#31696) does, for R8 and R9: a paused run is stored with the package of the
+ * flow it runs, and so is a terminal history row; a credential is written
+ * with its flow's one holder; and a resume or a credential read of a name two
+ * packages hold reads the row's package (a row with none answers only while
+ * one package holds the name). A null left by this backfill still reads by
+ * name. The connection store (R11) still reads by name, until the connector
+ * child moves it. S4's upgrade report reads the columns too. No unique key
+ * changes.
  *
  * ## Re-runnable
  *

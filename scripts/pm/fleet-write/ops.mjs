@@ -212,10 +212,12 @@
  * `POST /repos/{repo}/actions/workflows/{file}/dispatches` starts a run of a
  * workflow file at a ref and needs `actions: write` on the token — a grant that
  * also reaches cancelling, re-running and deleting runs, and the cache,
- * artifact, secret and variable endpoints. So the row is fenced five ways:
+ * artifact, secret and variable endpoints. So the row is fenced six ways:
  * `workflow` is a closed enum — `WORKFLOW_DISPATCH_ALLOWLIST`, one file name
  * per entry, matched whole, joined only by a PR that adds the entry here and
- * never at request time; its `inputs` are closed per file (below); `ref` is a
+ * never at request time; the file is judged against the stroke's OWN
+ * repository (`WORKFLOW_DISPATCH_BY_REPO`), so a name one repository lists is
+ * refused on every other; its `inputs` are closed per file (below); `ref` is a
  * closed enum of exactly `WORKFLOW_DISPATCH_REF`; a stroke carrying this op
  * carries exactly that one action (`alone`), so the wider token serves one
  * request and nothing beside it; and the grant is minted only for such a
@@ -372,6 +374,38 @@
  * 38351525685 and 38357219168, each answering `Version PR maintenance` success
  * and the other five jobs skipped). A JSON boolean on that endpoint is not
  * measured, so it is never sent.
+ *
+ * ## The one workflow the relay starts on ANOTHER repository — cloud's `deploy-staging.yml`
+ *
+ * cloud's staging is deployed by hand only (the cost ruling in the head
+ * comment of cloud's `.github/workflows/deploy-staging.yml`), so a card whose
+ * acceptance needs a staging reading after its merge waited on the maintainer
+ * to start that run. The account owner's word on the seat's proposal to list
+ * the file, verbatim as the body of issue 32409 records it: 「同意立卡」. Its
+ * entry is `{ apps: 'affected' }` — the file's default, the lane whose `decide`
+ * job deploys only the apps changed since the last successful deploy, so a run
+ * with nothing changed is one short job. A named app list and every other
+ * value or input are refused by name, as for `release.yml`. Production is not
+ * reachable from it: cloud rebuilds production from `v*` tags alone
+ * (`deploy-cloud-prod.yml`).
+ *
+ * The entry is keyed by repository (`WORKFLOW_DISPATCH_BY_REPO`): the stroke
+ * names `repo: objectstack-ai/cloud`, so its token is minted for that ONE
+ * repository with `actions: write`, exactly as an objectstack dispatch is for
+ * objectstack — no second repository, `transfer` stays the only widening of
+ * reach. The installation must cover cloud with that grant; a gap fails the
+ * mint, or answers the POST 403, with zero runs started. Before this table
+ * was keyed, a file name was judged with no repository, so a name this
+ * repository lists was dispatchable on any repository that had a file of
+ * that name — the key closes it both ways.
+ *
+ * READING UNVERIFIED: this checkout cannot read cloud, so the input's name and
+ * default are the card's stated facts, not a reading of the file, and the
+ * self-test pins the table, never cloud's file. The platform answers an input
+ * the file does not declare with a 422 — a FAILED action, nothing started —
+ * and the seat's read-back of the run (`dispatch.mjs`) is the first
+ * measurement. WHEN a seat may send it is pm-dispatch's rule
+ * (`references/landing-operations.md`), never this table's.
  *
  * ## The one row whose token reaches a SECOND repository — `transfer`
  *
@@ -561,15 +595,15 @@
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
- *     a notice annotation name that id, so the seat follows with
- *     `advisory_collaborators_add` — the App is the submitter, so the finding
- *     seat is not a collaborator on its own;
+ *     a notice annotation name that id, and the seat is done — the App is the
+ *     submitter, so the finding seat is not a collaborator on its own, and
+ *     `advisory_collaborators_add` adds one only when a maintainer asks for it;
  *   - `advisory_create` is one POST of the row's body to the collection, and
  *     nothing is read first. It LANDS on a 2xx whose answer carries a
  *     `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`); a 2xx
  *     without an id is UNCONFIRMED and one in another state FAILED, neither
- *     ever re-sent. The row and a notice annotation name the id, so the seat
- *     follows with `advisory_collaborators_add` exactly as after a report;
+ *     ever re-sent. The row and a notice annotation name the id, and the seat
+ *     is done, exactly as after a report;
  *   - `advisory_collaborators_add` reads the advisory first (`ADVISORY_FENCES`,
  *     judged by `advisoryPreflight` on the executor's own `GET`) and refuses
  *     with nothing sent unless the read answers 200 with the advisory the
@@ -751,8 +785,12 @@
  * that cursor, never the link. A link that is none of these, a page that is not
  * a list of advisories in the state asked for, an advisory whose `severity` is
  * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
- * `updated_at` is not an ISO-8601 string (`ADVISORY_LIST_TIMESTAMP_SHAPE`), so
- * nothing but those values is ever sealed, and an advisory listed twice are
+ * `updated_at` is neither null nor an ISO-8601 string
+ * (`ADVISORY_LIST_TIMESTAMP_SHAPE`) — the platform's `repository-advisory`
+ * schema declares all three nullable, so null is a value the platform answers
+ * and the fence admits it — so nothing but those values is ever sealed, and
+ * the refusal names the field that failed and never its value
+ * (`advisoryListFieldSentence`), and an advisory listed twice are
  * each a FAILED action. A walk still pending after `ADVISORY_LIST_PAGE_CAP`
  * pages is FAILED too: a truncated listing is a SUBSET, never an answer. In
  * each, nothing is sealed or emitted.
@@ -843,12 +881,13 @@ export const TARGET_OWNER = 'objectstack-ai';
 export const TRANSFER_TARGETS = Object.freeze(GOVERNED_REPOS.map((r) => r.slug));
 
 /**
- * The workflow files a `workflow_dispatch` may start, each with the ONE inputs
- * object an action naming it carries (header: "A workflow's inputs are CLOSED
- * per file"). `null`: the workflow declares no inputs, and the action carries
- * no `inputs` key. An object: the action's `inputs`, spelled exactly.
- * `validate.mjs --self-test` pins every key here to an input the file declares
- * under its `workflow_dispatch` trigger, with the type the value has.
+ * The workflow files a `workflow_dispatch` may start on THIS repository
+ * (`RELAY_REPO`), each with the ONE inputs object an action naming it carries
+ * (header: "A workflow's inputs are CLOSED per file"). `null`: the workflow
+ * declares no inputs, and the action carries no `inputs` key. An object: the
+ * action's `inputs`, spelled exactly. `validate.mjs --self-test` pins every key
+ * here to an input the file declares under its `workflow_dispatch` trigger,
+ * with the type the value has — the files are on disk in this checkout.
  */
 export const WORKFLOW_DISPATCH_INPUTS = Object.freeze({
   'shard-timings-refresh.yml': null,
@@ -856,13 +895,46 @@ export const WORKFLOW_DISPATCH_INPUTS = Object.freeze({
   'release.yml': Object.freeze({ refresh_version_pr: true }),
 });
 /**
- * The workflow files a `workflow_dispatch` may start — one file name per
- * entry, matched whole (never a path, never a glob), joined only by a PR that
- * adds the entry, with its inputs, to `WORKFLOW_DISPATCH_INPUTS` above.
- * `validate.mjs --self-test` pins that every entry is a file under
- * `.github/workflows/` declaring a `workflow_dispatch` trigger.
+ * The workflow files a `workflow_dispatch` may start on the cloud repository
+ * (header: "The one workflow the relay starts on ANOTHER repository"). Not on
+ * disk here, so its inputs are a reading of cloud's file, recorded in that
+ * header; the platform refuses an input the file does not declare with a 422,
+ * a FAILED action that starts nothing.
  */
-export const WORKFLOW_DISPATCH_ALLOWLIST = Object.freeze(Object.keys(WORKFLOW_DISPATCH_INPUTS));
+export const CLOUD_WORKFLOW_DISPATCH_INPUTS = Object.freeze({
+  // Staging's change-detecting lane alone — never a named app list, never `all`.
+  'deploy-staging.yml': Object.freeze({ apps: 'affected' }),
+});
+/**
+ * The closed table, keyed by the stroke's REPOSITORY and then by file: a file
+ * is dispatchable only on the repository whose entry lists it, and a stroke
+ * naming any other repository starts nothing. A repository joins only by a PR
+ * that adds its entry here. `validate.mjs --self-test` pins the keys and that
+ * every repository is in the fleet's governed roster.
+ */
+export const WORKFLOW_DISPATCH_BY_REPO = Object.freeze({
+  [RELAY_REPO]: WORKFLOW_DISPATCH_INPUTS,
+  [`${TARGET_OWNER}/cloud`]: CLOUD_WORKFLOW_DISPATCH_INPUTS,
+});
+/**
+ * The entry for one file on one repository: `{ listed, inputs }` — `listed`
+ * false when that repository does not list that file (or lists nothing). Pure.
+ */
+export function workflowDispatchEntry(repo, workflow) {
+  const table = typeof repo === 'string' && Object.hasOwn(WORKFLOW_DISPATCH_BY_REPO, repo) ? WORKFLOW_DISPATCH_BY_REPO[repo] : null;
+  if (table === null || typeof workflow !== 'string' || !Object.hasOwn(table, workflow)) return { listed: false, inputs: null };
+  return { listed: true, inputs: table[workflow] };
+}
+/**
+ * The workflow file names a `workflow_dispatch` may carry at all — every file
+ * any repository's entry lists, one name per entry, matched whole (never a
+ * path, never a glob). This is the `workflow` field's enum; which repository a
+ * name is dispatchable on is `WORKFLOW_DISPATCH_BY_REPO`'s, judged against the
+ * stroke's own `repo`. `validate.mjs --self-test` pins that every name this
+ * repository lists is a file under `.github/workflows/` declaring a
+ * `workflow_dispatch` trigger.
+ */
+export const WORKFLOW_DISPATCH_ALLOWLIST = Object.freeze([...new Set(Object.values(WORKFLOW_DISPATCH_BY_REPO).flatMap((table) => Object.keys(table)))]);
 /**
  * The `inputs` object the dispatch request sends for a closed entry — every
  * value as a string, the spelling measured on the dispatch endpoint (header).
@@ -1684,9 +1756,9 @@ export function advisoryReportReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_report` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_report` prints: the id the platform gave it and its state. Pure. */
 export function advisoryReportLandedText({ ghsaId, state }) {
-  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 /** The one state a created advisory may answer in — the endpoint's default, and the only one a draft has. */
@@ -1708,9 +1780,9 @@ export function advisoryCreateReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_create` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_create` prints: the id the platform gave it and its state. Pure. */
 export function advisoryCreateLandedText({ ghsaId, state }) {
-  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2033,24 +2105,47 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
 /** The severities a listed advisory may carry, beside null (the platform's own enum for the field). */
 export const ADVISORY_LIST_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
 
-/** A listed advisory's `created_at` and `updated_at`: one ISO-8601 date-time string, as the platform answers it. */
+/** A listed advisory's `created_at` and `updated_at` when not null: one ISO-8601 date-time string, as the platform answers it. */
 export const ADVISORY_LIST_TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+const advisoryListStamp = (v) => v === null || (typeof v === 'string' && ADVISORY_LIST_TIMESTAMP_SHAPE.test(v));
+
+/**
+ * The fields the page fence judges past the id and the state, in the order a refusal names them, each with its
+ * declared shape. The platform's `repository-advisory` schema (github/rest-api-description) declares all three
+ * required and nullable: `severity` one of its four or null, `created_at` and `updated_at` a date-time or null. A
+ * field the item lacks is no value of its shape and fails. Frozen.
+ */
+export const ADVISORY_LIST_FIELD_SHAPES = Object.freeze([
+  Object.freeze({ field: 'severity', holds: (v) => v === null || ADVISORY_LIST_SEVERITIES.includes(v) }),
+  Object.freeze({ field: 'created_at', holds: advisoryListStamp }),
+  Object.freeze({ field: 'updated_at', holds: advisoryListStamp }),
+]);
+
+/**
+ * The refusal of a page whose advisories carry a field off its declared shape: the fields that failed, by NAME, in
+ * `ADVISORY_LIST_FIELD_SHAPES` order — so the run says which field to measure — and ⛔ never a value, an id, a state
+ * or a count. Pure.
+ */
+export function advisoryListFieldSentence(fields) {
+  const names = fields.length > 1 ? `${fields.slice(0, -1).join(', ')} and ${fields[fields.length - 1]}` : fields[0];
+  return `a page of the listing lists an advisory whose ${names} ${fields.length > 1 ? "are not of the fields' declared shapes" : "is not of the field's declared shape"}`;
+}
 
 /**
  * Why one listing page fails its fences, or null when it holds (header): the page answered 200 with a list, and every
  * item is an advisory — an object whose `ghsa_id` is in `GHSA_ID_SHAPE` — in the state the walk asked for, whose
- * `severity` is one of `ADVISORY_LIST_SEVERITIES` or null and whose `created_at` and `updated_at` are each one string
- * in `ADVISORY_LIST_TIMESTAMP_SHAPE`: the five fields that cross are only ever those values. ⛔ The sentence carries the
- * status alone: no id, no state, no count, no field's value. Pure.
+ * `severity`, `created_at` and `updated_at` each hold their `ADVISORY_LIST_FIELD_SHAPES` shape: the five fields that
+ * cross are only ever those values. ⛔ The sentence carries the status, or the failing fields' names, alone: no id, no
+ * state, no count, no field's value. Pure.
  */
 export function advisoryListPageFailure(answer, state) {
   if (answer?.status !== 200) return `a page of the listing answered HTTP ${answer?.status ?? 'none'}`;
   if (!Array.isArray(answer.json)) return 'a page of the listing answered HTTP 200 with no list';
   const ok = answer.json.every((item) => advisoryShaped(item) && typeof item.ghsa_id === 'string' && GHSA_ID_SHAPE.test(item.ghsa_id) && item.state === state);
   if (!ok) return 'a page of the listing lists an item that is not an advisory in the state the page asked for';
-  const stamp = (v) => typeof v === 'string' && ADVISORY_LIST_TIMESTAMP_SHAPE.test(v);
-  const fields = answer.json.every((item) => (item.severity === null || ADVISORY_LIST_SEVERITIES.includes(item.severity)) && stamp(item.created_at) && stamp(item.updated_at));
-  return fields ? null : "a page of the listing lists an advisory whose severity or dates are not of the field's declared shape";
+  const failed = ADVISORY_LIST_FIELD_SHAPES.filter(({ field, holds }) => !answer.json.every((item) => Object.hasOwn(item, field) && holds(item[field]))).map(({ field }) => field);
+  return failed.length === 0 ? null : advisoryListFieldSentence(failed);
 }
 
 /** One listed advisory as it crosses: `ADVISORY_LIST_FIELDS` it carries, in that order, as the platform answered them. Pure. */
@@ -2423,10 +2518,11 @@ export function transferRemedy(source, target) {
  *                 the seven advisory rows', the ones spending
  *                 `repository-advisories`, and `pr_enqueue_front`'s, the one
  *                 spending `merge-queues` (header above);
- *   `closedInputs` (optional) the per-workflow closed inputs —
- *                 `WORKFLOW_DISPATCH_INPUTS`, `workflow_dispatch`'s alone: the
- *                 action's `inputs` must be exactly the entry its `workflow`
- *                 names, and absent where that entry is `null` (header above);
+ *   `closedInputs` (optional) the per-repository, per-workflow closed inputs —
+ *                 `WORKFLOW_DISPATCH_BY_REPO`, `workflow_dispatch`'s alone: the
+ *                 stroke's repository must list the action's `workflow`, and the
+ *                 action's `inputs` must be exactly that entry, absent where
+ *                 the entry is `null` (header above);
  *   `alsoSpends`  (optional) grants the row spends beside `permission` —
  *                 each a literal mint input, never a stroke-scoped one
  *                 (`validate.mjs --self-test` pins it): `pr_create`'s
@@ -2674,16 +2770,17 @@ export const OPS = Object.freeze({
     requests: (a, repo) => [{ verb: 'DELETE', path: `${issues(repo, a.issue)}/sub_issue`, subIssue: { mode: 'remove', parent: a.issue, child: a.sub_issue } }],
   }),
   // The one row whose token carries `actions: write`, minted for a stroke carrying this op alone — see the header.
-  // `workflow` and `ref` are closed enums, and so are a workflow's `inputs`: exactly its `WORKFLOW_DISPATCH_INPUTS`
-  // entry, absent where that is null. The body's `inputs` is built from the TABLE's entry, never from the action.
+  // `workflow` and `ref` are closed enums, and so are a workflow's `inputs`: exactly its entry in the stroke's own
+  // repository's table (`WORKFLOW_DISPATCH_BY_REPO`), absent where that is null; a file that repository does not list
+  // is refused. The body's `inputs` is built from the TABLE's entry, never from the action.
   workflow_dispatch: Object.freeze({
     permission: 'actions',
     required: Object.freeze(['workflow', 'ref']),
     optional: Object.freeze(['inputs']),
     alone: true,
-    closedInputs: WORKFLOW_DISPATCH_INPUTS,
+    closedInputs: WORKFLOW_DISPATCH_BY_REPO,
     requests: (a, repo) => {
-      const inputs = dispatchInputsOnTheWire(Object.hasOwn(WORKFLOW_DISPATCH_INPUTS, a.workflow) ? WORKFLOW_DISPATCH_INPUTS[a.workflow] : null);
+      const inputs = dispatchInputsOnTheWire(workflowDispatchEntry(repo, a.workflow).inputs);
       return [{ verb: 'POST', path: `/repos/${repo}/actions/workflows/${enc(a.workflow)}/dispatches`, body: { ref: a.ref, ...(inputs ? { inputs } : {}) } }];
     },
   }),

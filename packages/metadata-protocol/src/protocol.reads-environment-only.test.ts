@@ -33,6 +33,7 @@ import {
     assertEngineUpdateDispatch,
 } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const ORG = 'org_a';
 const PKG = 'app.pkg';
@@ -117,6 +118,12 @@ function harness(seed: Record<string, Row[]>, artifacts: Artifact[] = []) {
             return cb(undefined, { owned: true });
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
+            // [#31699] `SchemaRegistry` reads an email template by package (its
+            // name is scoped to the namespace), so a bare read resolves through
+            // the package-scoped resolver: none of this double's names is held.
+            readsByPackage: (type: string) => type === 'email_template',
+            resolveItem: (type: string, name: string) => artifactOf(type, name),
             registerItem: () => {},
             registerObject: () => {},
             getObject: () => undefined,

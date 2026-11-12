@@ -198,3 +198,18 @@ export type {
   CommentSharingLike,
   CommentThreadTarget,
 } from './comment-access-hooks.js';
+// [ADR-0154] The audit ledger's tamper evidence. Only what a package outside
+// this one reads: the `sys_secret` reference union (`@objectstack/cli`) finds
+// the sealer's secrets through the holder list, the coordinate predicate and
+// the two sealing contexts, and `os audit verify` runs the live check (D9).
+// The rest of the pure core (`./audit-seal/`) is reached by path inside this
+// package.
+export {
+  AUDIT_ROW_VERDICTS,
+  AUDIT_SEAL_SECRET_HOLDERS,
+  checkpointSeedContext,
+  isAuditSealSecretCoordinate,
+  signingKeyContext,
+  verifyAuditLedger,
+} from './audit-seal/index.js';
+export type { AuditRowVerdict, AuditVerifyReport } from './audit-seal/index.js';

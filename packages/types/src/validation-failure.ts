@@ -107,11 +107,14 @@ export function validationFailure(message: string, fields: unknown[]): Error {
  * - **Union expansion (#5014)**: a rejection behind a `z.union` yields the
  *   union's own entry PLUS the branch entries that explain it, so entry count
  *   is not issue count. Read `fields.length` as the number of field errors.
+ * - **[#32279] `hint`**: a refusal carrying a one-line head (a retired query
+ *   key or aggregation, a refused comparand) answers the head as `message`
+ *   and its whole prescription as `hint`; the mapper does it, this passes it on.
  */
 export function fieldsFromZodIssues(
   issues: Array<{ path: Array<string | number | symbol>; code: string; message: string }>,
   ...input: [] | [unknown]
-): Array<{ field: string; code: FieldErrorCode; message: string }> {
+): Array<{ field: string; code: FieldErrorCode; message: string; hint?: string }> {
   return zodIssuesToFields(issues.map(withoutDateRangeArityRestatement), ...input).map((entry) =>
     entry.field === '' ? { ...entry, field: '(body)' } : entry,
   );

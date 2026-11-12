@@ -91,17 +91,26 @@ function FamilyBridge({ family }: { family: UserPreferenceFamily<ObjectListPrefe
   return null;
 }
 
-const authRef: { current: AuthContextValue | null } = { current: null };
-const prefsRef: { current: ReturnType<typeof useObjectListPreferences> | null } = { current: null };
+/** What one committed render showed: the session, and the list state it offered. */
+interface Committed {
+  auth: AuthContextValue;
+  prefs: ReturnType<typeof useObjectListPreferences>;
+}
+
+/** The last committed render's view, written as one object so its two halves never come from two renders. */
+const committed: { current: Committed | null } = { current: null };
 
 function Probe() {
   const auth = useAuth();
   const prefs = useObjectListPreferences(OBJECT);
   useEffect(() => {
-    authRef.current = auth;
-    prefsRef.current = prefs;
+    committed.current = { auth, prefs };
   });
   return <span data-testid="user">{auth.user?.name ?? 'none'}</span>;
+}
+
+function auth(): AuthContextValue {
+  return committed.current!.auth;
 }
 
 function renderConsole(client: AuthClient, family = serverFamily()) {
@@ -118,13 +127,33 @@ function renderConsole(client: AuthClient, family = serverFamily()) {
   return { view, family };
 }
 
+/**
+ * Sign in, and return the list state of a committed render that holds Alice's
+ * session AND reports her stored state read.
+ *
+ * Both facts are read from ONE snapshot, and the patch goes through that
+ * snapshot. The snapshot is written after commit, so it trails the screen: a
+ * signed-out render reports `ready` (no user to wait for), and Alice's first
+ * render precedes the bridge attaching her family. A patch through either is
+ * written to this browser only and queues no server save.
+ */
+async function signIn(client: AuthClient, family = serverFamily()) {
+  const rendered = renderConsole(client, family);
+  const prefs = await waitFor(() => {
+    const view = committed.current;
+    expect(view?.auth.user?.id).toBe(ALICE.id);
+    expect(view?.prefs.ready).toBe(true);
+    return view!.prefs;
+  });
+  expect(rendered.view.getByTestId('user').textContent).toBe('Alice');
+  return { ...rendered, prefs };
+}
+
 /** Sign in, then write a filter group and a search term through the real writers. */
 async function signInAndFilter(client: AuthClient) {
-  const rendered = renderConsole(client);
-  await waitFor(() => expect(rendered.view.getByTestId('user').textContent).toBe('Alice'));
-  await waitFor(() => expect(prefsRef.current?.ready).toBe(true));
+  const { prefs, ...rendered } = await signIn(client);
   act(() => {
-    prefsRef.current!.patchView(VIEW, { filters: GROUP });
+    prefs.patchView(VIEW, { filters: GROUP });
   });
   writeListFilterState(LIST_FILTER_KEY, { search: 'term' });
   // The search write has landed past its debounce; the list state is written
@@ -144,7 +173,9 @@ function expectServerRowsKept(
   family: ReturnType<typeof serverFamily>,
   userState: ObjectListPreference,
 ) {
-  // Sent by its debounce or by the flush when the user goes; sent either way.
+  // Sent by its debounce or by the flush: `signOut()` flushes it before the
+  // session ends, and a session that ends any other way flushes it as the
+  // family detaches. Sent either way, before the sign-out settles.
   expect(family.save).toHaveBeenCalled();
   for (const [, value] of family.save.mock.calls) expect(value).toEqual(userState);
 }
@@ -154,8 +185,7 @@ function listKeysLeft(): string[] {
 }
 
 beforeEach(() => {
-  authRef.current = null;
-  prefsRef.current = null;
+  committed.current = null;
   localStorage.clear();
   sessionStorage.clear();
   TokenStorage.clear();
@@ -174,13 +204,45 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     localStorage.setItem(LOCALE_SEED_STORAGE_KEY, 'de');
 
     await act(async () => {
-      await authRef.current!.signOut();
+      await auth().signOut();
     });
 
     expect(listKeysLeft()).toEqual([]);
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('de');
     expect(localStorage.getItem(LOCALE_SEED_STORAGE_KEY)).toBe('de');
     expectServerRowsKept(family, userState);
+  });
+
+  it('signOut() saves the last list change under the session, before the session ends', async () => {
+    // What happened, in order: the save is sent and settles while the session
+    // still exists. Sent after `client.signOut()`, the server would refuse it
+    // and the user's last list change would be lost on every device.
+    const events: string[] = [];
+    const client = authClient(async () => ({ user: ALICE, session: { token: 'tok-alice' } }));
+    (client.signOut as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      events.push('session ended');
+      TokenStorage.clear();
+    });
+    const family = serverFamily();
+    family.save.mockImplementation(async () => {
+      events.push('save sent');
+      // A server answer arrives in a later task, never in the same one.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      events.push('save settled');
+    });
+    const { prefs } = await signIn(client, family);
+    act(() => {
+      prefs.patchView(VIEW, { filters: GROUP });
+    });
+    const userState = JSON.parse(localStorage.getItem(LIST_STATE_KEY)!) as ObjectListPreference;
+
+    await act(async () => {
+      await auth().signOut();
+    });
+
+    expect(events).toEqual(['save sent', 'save settled', 'session ended']);
+    expect(family.save).toHaveBeenCalledWith(`ui.list.${OBJECT}`, userState);
+    expect(listKeysLeft()).toEqual([]);
   });
 
   it('a session read that answers no session removes them too', async () => {
@@ -190,7 +252,7 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
 
     live = false;
     await act(async () => {
-      await authRef.current!.refreshSession();
+      await auth().refreshSession();
     });
 
     expect(view.getByTestId('user').textContent).toBe('none');
@@ -204,7 +266,7 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
 
     writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-sign-out' });
     await act(async () => {
-      await authRef.current!.signOut();
+      await auth().signOut();
     });
     // Past the write debounce.
     await act(async () => {
@@ -222,7 +284,7 @@ describe('sign-out clears the signed-out user’s list state and list filters', 
     writeListFilterState(LIST_FILTER_KEY, { search: 'typed-at-expiry' });
     live = false;
     await act(async () => {
-      await authRef.current!.refreshSession();
+      await auth().refreshSession();
     });
     // Past the write debounce.
     await act(async () => {

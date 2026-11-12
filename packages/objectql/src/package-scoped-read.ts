@@ -15,10 +15,27 @@
  * (#31680) — app, page, dashboard, report, book, analytics cube, tool, skill
  * and agent — then `api` (#32069), whose in-memory store `@objectstack/metadata`
  * keeps per `(package, name)`, so its qualified read serves the holder's own
- * body, and the picklist (#32070), whose bare by-name read was the last of its
- * readers still on `getItem`. A later child adds its own types to the list in
+ * body, the email template (#31699), read member by member (`member`, its
+ * locale), the picklist (#32070), whose bare by-name read was the last of its
+ * readers still on `getItem`, `mapping` (#32071, a reader the
+ * picklist-family backstop #31700 needs) and `dataset` (#32072, a reader
+ * #31700 needs before it narrows: `POST /analytics/dataset/query` reads its
+ * `datasetName` through the protocol's by-name read, which is this resolver's
+ * for the types listed here), and `permission` (#32162), whose in-memory store
+ * `@objectstack/metadata` now keeps per `(package, name)` too, so a package's
+ * qualified read serves its own grants. A later child adds its own types to the list in
  * its own change; until then a type's by-name read stays
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
+ *
+ * `mapping`'s two by-name readers outside `/meta` — the import door's
+ * `mappingName` (`@objectstack/rest`) and a connector pull that names no
+ * package (`@objectstack/service-automation`) — read through the protocol's
+ * by-name read with no package, so they are callers with no package: one
+ * holder is served as before, and a name two packages hold is refused naming
+ * both (each door answers that refusal as the `409` it is). A pull that names
+ * its package (`callerPackageId`, which the job binder sets to the package
+ * declaring the job, #32071) reads through `resolvePackageScopedName` from
+ * that package instead.
  *
  * ## What a reader answers
  *
@@ -62,8 +79,10 @@ import {
 
 /**
  * The types whose by-name readers consult `(package, name)` today — child E8's
- * nine (#31680), as the registry spells them, then `api` (#32069) and the
- * picklist (#32070). Each later child of epic #31527 appends its own.
+ * nine (#31680), as the registry spells them, then `api` (#32069), child B's
+ * `email_template` (#31699), the picklist (#32070), `mapping` (#32071),
+ * `dataset` (#32072) and `permission` (#32162). Each later child of epic
+ * #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -76,9 +95,20 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'skill',
   'agent',
   'api',
+  // [ADR-0150 D9, #31699] child B's webhook family, one type per change:
+  // `/meta/email_template/NAME` and its qualified address read through the
+  // resolver before the type's one-holder rule narrows to the namespace.
+  'email_template',
   // [#32070] the bare `/meta/picklist/NAME` read; a field's `picklist:` is
   // already resolved by its referrer's package (child E6), not through here.
   'picklist',
+  // #32071: the import door's `mappingName` and the connector pull.
+  'mapping',
+  // #32072: the analytics dataset query door and the dataset AI tools.
+  'dataset',
+  // #32162: the bare `/meta/permission/NAME` read and the save door's
+  // held-grants read; `guest_portal` keeps one holder (platform-requested).
+  'permission',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

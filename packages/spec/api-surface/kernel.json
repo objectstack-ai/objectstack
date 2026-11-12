@@ -517,6 +517,7 @@
     "listUnregisteredKindSchemaTypes (function)",
     "lowerRequiresFeature (function)",
     "manifestIdRefusal (function)",
+    "namespacedHoldersMeet (function)",
     "readNamespacePositionSegment (function)",
     "redactStoredMetadataBody (function)",
     "redactStoredMetadataRow (function)",

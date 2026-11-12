@@ -28,15 +28,15 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "حدث الإشعار",
-        help: "مفتاح خارجي → sys_notification (حدث L2 الذي يجسّده هذا الصف)"
+        help: "الإشعار الذي تُسلِّمه هذه الرسالة. عند تعليم الرسالة كمقروءة تُسجَّل القراءة على هذا الإشعار."
       },
       delivery_id: {
         label: "التسليم",
-        help: "مفتاح خارجي → sys_notification_delivery (صف صندوق الصادر)؛ null حتى P1"
+        help: "سجل تسليم هذه الرسالة. لا يُملأ للرسائل داخل التطبيق."
       },
       actor_id: {
-        label: "المنفِّذ",
-        help: "المستخدم الذي تسبّب في الحدث (صاحب الإشارة، أو من أسند المهمة) — بالدلالة نفسها لـ sys_notification.actor_id. يتيح للعميل إخفاء إيصالاته الخاصة بمقارنة محلية بحتة. قيمته null في صف الملخّص بطبيعة بنائه: فالمجموعة المدمجة ليس لها منفِّذ واحد."
+        label: "تم التشغيل بواسطة",
+        help: "الشخص الذي أدى إجراؤه إلى هذا الإشعار، مثل من أشار إلى المستلم أو أسند إليه. يكون فارغًا عندما تجمع الرسالة عدة إشعارات."
       },
       topic: {
         label: "الموضوع"
@@ -60,6 +60,10 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "تاريخ الإنشاء"
+      },
+      keyed_text: {
+        label: "مفاتيح النص",
+        help: "مفاتيح الفهرس والمعلمات التي عُرض منها العنوان والنص عند التسليم. تعيد القراءة عرض العنوان والنص منها بلغة القارئ؛ وتكون فارغة (null) عندما لا يحمل الإشعار مفاتيح، فيُقدَّم العنوان والنص المخزَّنان كما كُتبا."
       }
     },
     _views: {
@@ -82,11 +86,11 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "حدث الإشعار",
-        help: "مفتاح خارجي → sys_notification (حدث L2)"
+        help: "الإشعار الذي يسجّل هذا الإيصال حالته."
       },
       delivery_id: {
         label: "التسليم",
-        help: "مفتاح خارجي → sys_notification_delivery (صف صندوق الصادر)؛ null حتى P1"
+        help: "سجل التسليم الذي ينتمي إليه هذا الإيصال. لا يُملأ حاليًا."
       },
       user_id: {
         label: "المستخدم المستلِم"
@@ -127,7 +131,7 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "حدث الإشعار",
-        help: "مفتاح خارجي → sys_notification (حدث L2)"
+        help: "الإشعار الذي يرسله هذا التسليم."
       },
       recipient_id: {
         label: "المستلِم",

@@ -52,6 +52,29 @@
 // strict env mode would not hand one to `@objectstack/dogfood#test` anyway
 // (its task `env` declares only `OS_TEST_TIERS` / `OS_TEST_SHARD`), so the
 // run declares it here, per project, beside `OS_REGISTRY_LOG`.
+//
+// ── #32154: this suite boots its stacks at `info`, DECLARATIVELY ────────────
+//
+// `bootStack` boots the kernel logger at `warn` unless `OS_LOG_LEVEL` names a
+// level (`packages/verify/src/boot-log-level.ts`), so that a project's
+// `pnpm test` and `os verify` print only warnings and errors on a run that
+// passed. This suite is a different reader: some of its files read the kernel
+// log off the process streams and judge INFO lines in it. Measured on one full
+// run with the level unset (8 tests in 6 files, every one an INFO reading):
+// a hook's `ctx.log.info` line a test waits for (both object-hook-lifecycle
+// files: timeouts), an INFO line a file keeps as the positive control for an
+// absence (`org-change-slug-bound-action`, `record-view-read-audit`,
+// `sys-migration-boot-ledger-once`), and a boot report printed at INFO
+// (`security-catalog-one-holder-http`). Those controls are why the drop was
+// loud; an absence read WITHOUT such a control would have stayed green at
+// `warn` while measuring nothing.
+//
+// So the suite asks for the level it has always booted at, per project for the
+// same measured reason as the keys beside it: a file's log reading must not
+// depend on which of the two projects lists it. ⛔ This is the suite's request,
+// not a change to `bootStack`'s default. The registry stays at `warn`:
+// `OS_REGISTRY_LOG` is its own variable, and `bootStack` leaves a value the
+// caller set alone.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { parseCLI, type TestUserConfig } from 'vitest/node';
@@ -182,7 +205,8 @@ export default defineConfig({
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Header docblock carries the measurement and the rationale.
           // PER PROJECT for the same measured reason as the line above.
-          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off' },
+          // #32154: `OS_LOG_LEVEL: 'info'` because files read INFO lines (header).
+          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'info' },
           name: 'shared-showcase',
           include: SHARED_SHOWCASE,
           isolate: false,
@@ -328,6 +352,11 @@ export default defineConfig({
               find: /^@objectstack\/service-datasource$/,
               replacement: path.resolve(__dirname, '../../services/service-datasource/src/index.ts'),
             },
+            // [#31696] `flow-credential-channel.dogfood.test.ts` builds its channel from this export.
+            {
+              find: /^@objectstack\/service-automation$/,
+              replacement: path.resolve(__dirname, '../../services/service-automation/src/index.ts'),
+            },
             // [#21880] `search-companion-field-scope.dogfood.test.ts` mounts
             // `PinyinSearchPlugin` on a real boot, and the companion values it
             // writes are what every search in that file matches through. The
@@ -370,7 +399,8 @@ export default defineConfig({
           // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
           // default. Header docblock carries the measurement and the rationale.
           // PER PROJECT for the same measured reason as the line above.
-          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off' },
+          // #32154: `OS_LOG_LEVEL: 'info'` because files read INFO lines (header).
+          env: { OS_REGISTRY_LOG: 'warn', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'info' },
           name: 'isolated',
           include: ['test/**/*.test.ts'],
           exclude: SHARED_SHOWCASE,

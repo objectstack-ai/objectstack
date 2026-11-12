@@ -18,6 +18,10 @@
  *   tooltip an entry opens does not take the key (objectstack#28078).
  * - "Keep sidebar open" on a narrow window and the wide-window choice are kept
  *   apart, across a resize and a reload (objectstack#28079).
+ * - A group declared `expanded: false` lists its entries in the rail, as an
+ *   expanded group does, reachable by pointer and keyboard; the expanded
+ *   sidebar (the overlay, a wide window) keeps the group collapsed
+ *   (objectstack#32156).
  *
  * The test DOM computes no Tailwind and no layout, so widths are read as the
  * class that sets them; the rendered widths are measured in a browser on the
@@ -30,6 +34,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -141,7 +146,12 @@ function RouteProbe() {
   return <div data-testid="route">{location.pathname}</div>;
 }
 
-function renderShell(width: number) {
+const DEFAULT_NAVIGATION = [
+  { id: 'nav_accounts', type: 'object', objectName: 'account', label: 'Accounts' },
+  { id: 'nav_contacts', type: 'object', objectName: 'contact', label: 'Contacts' },
+];
+
+function renderShell(width: number, navigation: unknown[] = DEFAULT_NAVIGATION) {
   setViewportWidth(width);
   metadataState = {
     apps: [
@@ -149,10 +159,7 @@ function renderShell(width: number) {
         name: 'crm',
         label: 'CRM',
         active: true,
-        navigation: [
-          { id: 'nav_accounts', type: 'object', objectName: 'account', label: 'Accounts' },
-          { id: 'nav_contacts', type: 'object', objectName: 'contact', label: 'Contacts' },
-        ],
+        navigation,
       },
     ],
     objects: [],
@@ -445,5 +452,92 @@ describe('the narrow-window icon rail (objectstack#27593)', () => {
     expect(sidebarRoot()).toBeNull();
     fireEvent.click(within(screen.getByTestId('app-bar')).getByRole('button', { name: 'Toggle sidebar' }));
     expect(document.querySelector('[data-mobile="true"][data-sidebar="sidebar"]')).not.toBeNull();
+  });
+});
+
+/**
+ * A group the app declares `expanded: false` (the Account app's Developer
+ * group) between two plain entries.
+ */
+const COLLAPSED_GROUP_NAVIGATION = [
+  ...DEFAULT_NAVIGATION,
+  {
+    id: 'grp_developer',
+    type: 'group',
+    label: 'Developer',
+    expanded: false,
+    children: [
+      { id: 'nav_api_keys', type: 'object', objectName: 'api_key', label: 'API Keys' },
+      { id: 'nav_oauth_apps', type: 'object', objectName: 'oauth_app', label: 'OAuth Applications' },
+    ],
+  },
+];
+
+/** The group's disclosure: the label the expanded sidebar draws. */
+const disclosure = () => within(panel()).getByRole('button', { name: /^Developer/ });
+const groupEntry = (name: string) => within(panel()).queryByRole('link', { name });
+
+describe('a collapsed group’s entries in the icon rail (objectstack#32156)', () => {
+  it('at 1360 px the rail lists the entries of a group declared expanded: false, and a click opens one', () => {
+    renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
+    expectRail();
+    expect(groupEntry('API Keys'), 'the collapsed group draws its entries in the rail').not.toBeNull();
+    expect(groupEntry('OAuth Applications')).not.toBeNull();
+
+    fireEvent.click(groupEntry('OAuth Applications')!);
+    expectRail();
+    expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/oauth_app');
+  });
+
+  it('at 1360 px Tab reaches an entry of the collapsed group and Enter opens it', async () => {
+    const user = userEvent.setup();
+    renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
+    expectRail();
+    act(() => within(panel()).getByRole('link', { name: 'Contacts' }).focus());
+    // The test DOM computes no Tailwind, so the group label the rail hides
+    // (`invisible`) is still a stop here: Tab on until the entry, a few presses at most.
+    for (let press = 0; press < 6 && document.activeElement !== groupEntry('API Keys'); press++) {
+      await user.tab();
+    }
+    expect(document.activeElement, 'Tab reaches the entry').toBe(groupEntry('API Keys'));
+    await user.keyboard('{Enter}');
+    expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/api_key');
+    expectRail();
+  });
+
+  it('a wide window collapsed to icons by hand lists them too', () => {
+    renderShell(1440, COLLAPSED_GROUP_NAVIGATION);
+    fireEvent.click(appBarTrigger());
+    expect(sidebarRoot()).toHaveAttribute('data-state', 'collapsed');
+    expect(groupEntry('API Keys')).not.toBeNull();
+    fireEvent.click(groupEntry('API Keys')!);
+    expect(screen.getByTestId('route')).toHaveTextContent('/apps/crm/api_key');
+  });
+
+  it('the rail expanded over the content keeps the group collapsed, with its count', () => {
+    renderShell(1360, COLLAPSED_GROUP_NAVIGATION);
+    expandRail();
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure()).toHaveTextContent('2');
+    expect(groupEntry('API Keys')).toBeNull();
+
+    // Folded again, the rail lists the entries; the group is still collapsed underneath.
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expectRail();
+    expect(groupEntry('API Keys')).not.toBeNull();
+    expandRail();
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+    expect(groupEntry('API Keys')).toBeNull();
+  });
+
+  it('at 1440 px the expanded sidebar keeps the group collapsed until its disclosure opens it', () => {
+    renderShell(1440, COLLAPSED_GROUP_NAVIGATION);
+    expect(sidebarRoot()).toHaveAttribute('data-state', 'expanded');
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'false');
+    expect(groupEntry('API Keys')).toBeNull();
+
+    fireEvent.click(disclosure());
+    expect(disclosure()).toHaveAttribute('aria-expanded', 'true');
+    expect(groupEntry('API Keys')).not.toBeNull();
   });
 });

@@ -25,11 +25,13 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *     reads of e.g. feature flags.
  *
  * managedBy: 'engine-owned' — never edited from a generic Object grid. All
- * writes flow through an `ICryptoProvider` on one of three privileged
- * producer paths (#4270): `SettingsService` (encrypted settings specifiers),
- * the engine's own `secret`-field encryption (`encryptSecretFields` — the
- * generic write path of any object carrying a `Field.secret()`), and the
- * datasource credential binder. Because the producers span domains and the
+ * writes flow through an `ICryptoProvider` on one of four privileged
+ * producer paths (#4270, ADR-0154): `SettingsService` (encrypted settings
+ * specifiers), the engine's own `secret`-field encryption
+ * (`encryptSecretFields` — the generic write path of any object carrying a
+ * `Field.secret()`), the datasource credential binder, and the audit
+ * ledger's sealer (`@objectstack/plugin-audit`, scope `audit_seal`: each
+ * checkpoint's seed and the signing key's private half). Because the producers span domains and the
  * engine fails CLOSED without this store, it is registered by
  * `PlatformObjectsPlugin` (platform infrastructure), not by service-settings.
  *
@@ -90,7 +92,7 @@ export const SysSecret = ObjectSchema.create({
 
     /**
      * `(namespace, key)` is a PRODUCER-SCOPED pair, not an owner. Each of the
-     * three producers named in `managedBy` (#4270) fills it from its own
+     * four producers named in `managedBy` (#4270) fills it from its own
      * vocabulary, and the reference to the resulting row lives in a different
      * column for each:
      *
@@ -102,6 +104,11 @@ export const SysSecret = ObjectSchema.create({
      *  - the datasource credential binder — caller-supplied namespace (default
      *    `datasource`) + datasource name; referenced by the artefact's
      *    `sys_secret:<id>` credentialsRef.
+     *  - the audit ledger's sealer (ADR-0154 D2, D6) — a sealed object's name +
+     *    the JCS array `[organization id or null, sequence]` for a checkpoint's
+     *    seed, referenced by `sys_audit_checkpoint.seed_handle`; and
+     *    `sys_audit_signing_key` + the key's fingerprint for the signing key's
+     *    private half, referenced by `sys_audit_signing_key.private_handle`.
      *
      * ⛔ So the pair does NOT attribute a row to a producer, and a lookup that
      * finds no `sys_setting` behind a pair has found nothing: #8103's

@@ -58,6 +58,7 @@ import '@objectstack/lint';
 // [#20611] Not on the package entry — the gate's half of the carry-forward,
 // consumed inside this package only.
 import { redactedPathsCarriedForward } from './metadata-redaction.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -129,6 +130,7 @@ function makeStubEngine() {
         },
         async syncObjectSchema() { /* no DDL in this stub */ },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             getItem: () => undefined,
@@ -226,6 +228,11 @@ describe('#8154 — the seam this card consumes', () => {
         // would serve cleartext on exactly one of the two URLs.
         expect(hasMetadataRedactor('datasource')).toBe(true);
         expect(hasMetadataRedactor('datasources')).toBe(true);
+    });
+
+    it('[#31699, #31527 B-shape item 4] registers no redactor for `email_template`, so a save never takes the carry-forward\'s code-layer read (`readCodeLayerForCarryForward`) for it, whatever package the save names', () => {
+        expect(hasMetadataRedactor('email_template')).toBe(false);
+        expect(hasMetadataRedactor('email_templates')).toBe(false);
     });
 
     it('registers no redactor for an ordinary type, and leaves its body by reference', () => {

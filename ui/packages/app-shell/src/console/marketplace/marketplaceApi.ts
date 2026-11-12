@@ -442,9 +442,19 @@ export async function installPackage(input: {
    * default stands.
    */
   installMode?: LocalInstallMode;
+  /**
+   * objectstack#32040 — the namespace an UNMANAGED copy takes, sent as
+   * `target_namespace` on the hosted route only, and only beside
+   * `installMode: 'unmanaged'`: the route refuses it beside a managed install
+   * (a managed install is never renamed). Blank or absent sends no key, and
+   * the control plane's own default stands.
+   */
+  targetNamespace?: string;
 }): Promise<InstallResponse> {
   const cloudBase = getCloudBase();
   const withMode = input.installMode ? { install_mode: input.installMode } : {};
+  const namespace = input.installMode === 'unmanaged' ? input.targetNamespace?.trim() : undefined;
+  const withNamespace = namespace ? { target_namespace: namespace } : {};
 
   // ── In-environment (tenant runtime) path ──────────────────────────────
   // When `getCloudBase()` is non-empty we're a *tenant runtime* (e.g.
@@ -469,6 +479,7 @@ export async function installPackage(input: {
         package_id: input.packageId,
         seed_sample_data: !!input.seedSampleData,
         ...withMode,
+        ...withNamespace,
       }),
     }).finally(forgetPackageListReads);
     let payload: any = null;
@@ -522,6 +533,39 @@ export async function installPackage(input: {
     throw err;
   }
   return (payload?.data ?? payload) as InstallResponse;
+}
+
+/**
+ * objectstack#32040 — the namespace the control plane would give an UNMANAGED
+ * copy of this package in this environment: the hosted install dialog's
+ * editable default.
+ *
+ * Read through the same-origin `GET /api/v1/cloud-connection/install-namespace
+ * ?package_id=` route (objectstack#32083), with the same auth as
+ * {@link installPackage}. The route relays the control plane's answer as it
+ * came; the namespace is `data.namespace`, the shape the route's preservation
+ * pin relays (`cloud-connection-plugin.test.ts`).
+ *
+ * `null` is "no default": `503 CLOUD_UNCONFIGURED`, `502
+ * EXTERNAL_SERVICE_ERROR`, any other refusal, an unreachable route, or an
+ * answer with no string there. The dialog then leaves the field empty and a
+ * typed name still installs; it never shows a guessed namespace.
+ */
+export async function getInstallNamespace(packageId: string): Promise<string | null> {
+  if (!packageId) return null;
+  try {
+    const res = await fetch(
+      `/api/v1/cloud-connection/install-namespace?package_id=${encodeURIComponent(packageId)}`,
+      { credentials: 'include', headers: withEnvAuth({ 'Accept': 'application/json' }) },
+    );
+    if (!res.ok) return null;
+    const payload = (await res.json().catch(() => null)) as { success?: unknown; data?: { namespace?: unknown } } | null;
+    if (payload?.success === false) return null;
+    const namespace = payload?.data?.namespace;
+    return typeof namespace === 'string' && namespace.trim() !== '' ? namespace.trim() : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

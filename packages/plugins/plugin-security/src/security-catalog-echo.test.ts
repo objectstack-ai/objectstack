@@ -89,6 +89,10 @@ function makeEngine() {
   const positions = new Map<string, Row>();
   const registered: Array<{ type: string; name: unknown }> = [];
   const registry = {
+    // A registry that reads no type by package (ADR-0150): every by-name read stays
+    // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+    // package-scoped type, since it cannot tell how this registry reads it.
+    readsByPackage: () => false,
     registered,
     listItems: (type: string) => (type === 'permission' ? codeArtifacts : type === 'position' ? [...positions.values()] : []),
     getItem: (type: string, name: string) => registry.listItems(type).find((item) => item.name === name),
@@ -573,3 +577,139 @@ describe('the boot pass echoes every stored env-wide overlay, and only those', (
   });
 });
 
+
+/**
+ * [#32162, ADR-0150 D4] `permission` is stored per `(package, name)` in the
+ * metadata service, and our echo carries its owner as `_packageId`, so it
+ * fills the owner's slot. When the stored row's binding moves (a namespace
+ * rename, a stamp, a re-bind), the next echo fills the NEW owner's slot — the
+ * write never replaces another package's — so the echo drops its stale slot
+ * first, naming that package. Left in place, two slots of the name refused
+ * every later read naming no package, and the projector's own bare read threw
+ * `409`, failing the save that triggered it.
+ *
+ * The double answers as `@objectstack/metadata`'s slotted store does (its
+ * write, read and removal rules are pinned there): a package's item in its own
+ * slot, a read naming no package refused across two package slots, a removal
+ * naming a package taking that slot only — and, as `MetadataManager.unregister`
+ * does, a removal announces a watcher `deleted` unless it passes
+ * `notify: false` (`announced`). The real manager honouring `notify: false`
+ * for a slotted removal is pinned in `@objectstack/metadata`
+ * (`metadata-manager-match-endpoint.test.ts`, the #32162 pins).
+ */
+describe('[#32162] a re-bound set\'s echo leaves one slot, never two', () => {
+  const NAME = 'ops_reader';
+  const P = 'com.acme.alpha';
+  const Q = 'com.acme.beta';
+  const body = () => ({ name: NAME, label: 'Ops reader', objects: {} });
+
+  /** A slotted `permission` store: `slots` maps a package (or '' for the bare slot) to its item. */
+  function slottedMetadataService() {
+    const slots = new Map<string, Row>();
+    const removals: string[] = [];
+    const holders = () => [...slots.keys()].filter((k) => k !== '');
+    const refusal = () => Object.assign(new Error(`permission set "${NAME}" is held by more than one package`), {
+      code: 'RESOURCE_CONFLICT', status: 409,
+      refusal: { reason: 'ambiguous-in-environment', candidates: holders().map((packageId) => ({ kind: 'package', packageId })) },
+    });
+    const announced: string[] = [];
+    return {
+      slots,
+      removals,
+      announced,
+      registerInMemory: (_type: string, _name: string, data: Row) => {
+        const own = typeof data._packageId === 'string' ? data._packageId : undefined;
+        if (own !== undefined) {
+          if (holders().filter((h) => h !== own).length === 0) slots.delete('');
+          slots.set(own, data);
+        } else slots.set(holders().length === 1 ? holders()[0]! : '', data);
+      },
+      get: (_type: string, _name: string, packageId?: string) => {
+        if (packageId !== undefined) return slots.get(packageId);
+        if (holders().length > 1) throw refusal();
+        return holders().length === 1 ? slots.get(holders()[0]!) : slots.get('');
+      },
+      list: () => [...slots.values()],
+      unregister: (_type: string, _name: string, options?: { packageId?: string; notify?: boolean }) => {
+        const announce = (what: string) => { if (options?.notify !== false) announced.push(what); };
+        if (options?.packageId !== undefined) { removals.push(options.packageId); slots.delete(options.packageId); announce(options.packageId); return; }
+        if (holders().length > 1) throw refusal();
+        removals.push('(by name)');
+        slots.clear();
+        announce('(by name)');
+      },
+    };
+  }
+
+  it('the owner moves from alpha to beta: alpha\'s stale echo slot is dropped by package, beta\'s registered (BASE: two slots, then 409)', async () => {
+    const metadata = slottedMetadataService();
+    const overlays: Record<string, { body: Row; packageId?: string }> = { [`permission/${NAME}`]: { body: body(), packageId: P } };
+    const protocol = stubProtocol(overlays);
+    const echo = (state: string) => echoSecurityCatalogMutation(protocol, { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state });
+
+    expect(await echo('active')).toBe('registered');
+    expect([...metadata.slots.keys()]).toEqual([P]);
+
+    overlays[`permission/${NAME}`] = { body: body(), packageId: Q };
+    expect(await echo('active')).toBe('registered');
+    expect([...metadata.slots.keys()], 'one slot, the new owner\'s').toEqual([Q]);
+    expect(metadata.removals, 'the stale slot went by its package, never by name').toEqual([P]);
+    expect(metadata.announced, 'the stale-slot drop announces nothing: the row is live and re-echoed in the same pass').toEqual([]);
+    expect(metadata.get('permission', NAME)).toMatchObject({ _packageId: Q, _envProjection: true });
+
+    // The next save of the name echoes again, and the delete drops the one echo.
+    expect(await echo('active')).toBe('registered');
+    delete overlays[`permission/${NAME}`];
+    expect(await echo('deleted')).toBe('dropped');
+    expect(metadata.slots.size).toBe(0);
+    expect(metadata.removals).toEqual([P, Q]);
+    expect(metadata.announced, 'the overlay\'s delete still announces its drop').toEqual([Q]);
+  });
+
+  it('a binding read that fails is not a moved binding: the owner\'s slot stays, and its package\'s address keeps serving the set (epic N1)', async () => {
+    const metadata = slottedMetadataService();
+    const overlays: Record<string, { body: Row; packageId?: string }> = { [`permission/${NAME}`]: { body: body(), packageId: P } };
+    const protocol: any = stubProtocol(overlays);
+    const echo = () => echoSecurityCatalogMutation(protocol, { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'active' });
+    expect(await echo()).toBe('registered');
+    expect([...metadata.slots.keys()]).toEqual([P]);
+
+    protocol.getMetaItem = async () => { throw new Error('binding read down'); };
+    expect(await echo()).toBe('registered');
+    expect(metadata.removals, 'nothing dropped on an unread binding').toEqual([]);
+    expect([...metadata.slots.keys()], 'the owner\'s slot holds the re-echo').toEqual([P]);
+    expect(metadata.get('permission', NAME, P)).toMatchObject({ name: NAME, _envProjection: true });
+  });
+
+  it('two echo slots already present (an echo before this change): the delete drops each by its package', async () => {
+    const metadata = slottedMetadataService();
+    metadata.registerInMemory('permission', NAME, { ...body(), _packageId: P, _envProjection: true });
+    metadata.registerInMemory('permission', NAME, { ...body(), _packageId: Q, _envProjection: true });
+    expect(await echoSecurityCatalogMutation(stubProtocol({}), { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'deleted' })).toBe('dropped');
+    expect(metadata.slots.size).toBe(0);
+    expect(metadata.removals).toEqual([P, Q]);
+  });
+
+  it('a declaration another package holds beside our echo is never removed, and never echoed over', async () => {
+    const metadata = slottedMetadataService();
+    metadata.registerInMemory('permission', NAME, { ...body(), _packageId: P, label: 'from a stack' });
+    metadata.registerInMemory('permission', NAME, { ...body(), _packageId: Q, _envProjection: true });
+    const overlays: Record<string, { body: Row; packageId?: string }> = { [`permission/${NAME}`]: { body: body(), packageId: Q } };
+    expect(await echoSecurityCatalogMutation(stubProtocol(overlays), { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'active' })).toBe('skipped');
+    delete overlays[`permission/${NAME}`];
+    expect(await echoSecurityCatalogMutation(stubProtocol(overlays), { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'deleted' })).toBe('dropped');
+    expect([...metadata.slots.keys()]).toEqual([P]);
+    expect(metadata.slots.get(P)).toMatchObject({ label: 'from a stack' });
+    expect(metadata.removals).toEqual([Q]);
+  });
+
+  it('CONTROL the owner stays put: one slot, no removal', async () => {
+    const metadata = slottedMetadataService();
+    const overlays: Record<string, { body: Row; packageId?: string }> = { [`permission/${NAME}`]: { body: body(), packageId: P } };
+    const protocol = stubProtocol(overlays);
+    await echoSecurityCatalogMutation(protocol, { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'active' });
+    await echoSecurityCatalogMutation(protocol, { ql: engineDeclaring(), metadata }, { type: 'permission', name: NAME, state: 'active' });
+    expect([...metadata.slots.keys()]).toEqual([P]);
+    expect(metadata.removals).toEqual([]);
+  });
+});
