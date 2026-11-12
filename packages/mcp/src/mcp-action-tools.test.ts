@@ -407,7 +407,7 @@ describe('MCP action tools: run_action takes a listed face (ADR-0150 D6)', () =>
   }
 
   const run = async (bridge: any, args: Record<string, unknown>) => {
-    const { json } = await call(runtime, toolsCall(1, 'run_action', args), bridge);
+    const json: any = (await call(runtime, toolsCall(1, 'run_action', args), bridge)).json;
     const text: string = json.result.content[0].text;
     let payload: any;
     try { payload = JSON.parse(text); } catch { payload = { text }; }
@@ -416,7 +416,7 @@ describe('MCP action tools: run_action takes a listed face (ADR-0150 D6)', () =>
   const runCalls = (bridge: any) => bridge.calls.filter((c: any[]) => c[0] === 'runAction');
 
   it('list_actions hands each binding of one name its own face', async () => {
-    const { json } = await call(runtime, toolsCall(1, 'list_actions', {}), faceBridge());
+    const json: any = (await call(runtime, toolsCall(1, 'list_actions', {}), faceBridge())).json;
     const payload = JSON.parse(json.result.content[0].text);
     const invites = payload.actions.filter((a: any) => a.name === 'invite_user');
     expect(invites.map((a: any) => a.face)).toEqual([
