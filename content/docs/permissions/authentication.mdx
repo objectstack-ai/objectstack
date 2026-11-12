@@ -1223,6 +1223,34 @@ its `token_hint` tells the two rows apart: the old one is safe to revoke once
 its `last_used_at` stops advancing while the new one's does. Each mint and each revoke writes one `sys_audit_log` row naming the
 administrator and the connection, never the credential.
 
+#### When the identity provider deactivates a user
+
+A SCIM `active: false`, or a SCIM `DELETE /Users/{id}`, disables the account
+with a ban that the platform records as the identity provider's. A password
+sign-in (`POST /api/v1/auth/sign-in/email`) by that account is refused `403`
+like any banned account's, with one field added:
+
+```json
+{
+  "code": "BANNED_USER",
+  "message": "You have been banned from this application. Please contact support if you believe this is an error.",
+  "details": { "cause": "scim_deactivated" }
+}
+```
+
+- An administrator's ban answers the same `403 BANNED_USER` with no `details`.
+  Branch on `code` and `details.cause`, never on `message`: the message is the
+  same for both, and the wording a person reads is the client's to choose.
+- `scim_deactivated` marks exactly the bans the identity provider lifts when it
+  sends `active: true` again. An administrator's ban that a deactivation
+  arrived on top of keeps the administrator's reason, and answers as an
+  administrator's ban.
+- The cause is told only after the password verified: a wrong password is the
+  ordinary `401 INVALID_EMAIL_OR_PASSWORD`, whatever the account's state. It
+  names no connection, provider or other account.
+- It is added on `/sign-in/email` only; other sign-in methods answer the plain
+  `BANNED_USER`.
+
 A connection's groups grant permission sets through the same group mappings an
 SSO provider's sign-in uses; see
 [Grant permission sets from IdP groups](/docs/permissions/sso#grant-permission-sets-from-idp-groups).

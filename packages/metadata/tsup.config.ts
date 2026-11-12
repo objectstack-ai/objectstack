@@ -34,6 +34,11 @@ export default defineConfig({
     // by both history writers: `DatabaseLoader` here and the protocol's
     // `SysMetadataRepository`. Its own entry for the reason `errors` has one.
     'src/utils/history-snapshot-body.ts',
+    // `@objectstack/metadata/stored-item-package` — the store's readers of an
+    // item's package and an action's object, which the protocol's bare action
+    // read judges the metadata service's answer by (#32365). Its own entry for
+    // the reason `errors` has one.
+    'src/stored-item-package.ts',
   ],
   splitting: false,
   sourcemap: true,
