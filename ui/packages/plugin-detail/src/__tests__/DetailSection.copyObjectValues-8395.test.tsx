@@ -375,3 +375,45 @@ describe('DetailSection copy payloads — object cells copy JSON, scalars are un
     );
   });
 });
+
+describe('a refused or absent clipboard never throws out of the copy (objectstack#32667)', () => {
+  const schema = { fields: { name: { type: 'text', label: 'Name' } } };
+  const section = { title: 'Details', fields: [{ name: 'name', label: 'Name' }] } as DetailViewSection;
+  const copyRow = (container: HTMLElement) => container.querySelector('[role="button"]') as HTMLElement;
+
+  it("a write the browser refuses is handled: no unhandled rejection reaches the page", async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      writeText.mockImplementation(() =>
+        Promise.reject(new Error("Failed to execute 'writeText' on 'Clipboard': Document is not focused.")),
+      );
+      const { container } = render(<DetailSection section={section} data={{ name: 'Ada' }} objectSchema={schema} />);
+      fireEvent.click(copyRow(container));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+    expect(writeText).toHaveBeenCalledWith('Ada');
+    expect(unhandled).not.toHaveBeenCalled();
+  });
+
+  it('a page with no clipboard API (an insecure origin) does not throw from the click', () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined });
+    const errors = vi.fn((event: ErrorEvent) => event.preventDefault());
+    window.addEventListener('error', errors);
+    try {
+      const { container } = render(<DetailSection section={section} data={{ name: 'Ada' }} objectSchema={schema} />);
+      expect(() => fireEvent.click(copyRow(container))).not.toThrow();
+    } finally {
+      window.removeEventListener('error', errors);
+    }
+    expect(errors).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a granted write still copies the stored value', async () => {
+    const { container } = render(<DetailSection section={section} data={{ name: 'Ada' }} objectSchema={schema} />);
+    fireEvent.click(copyRow(container));
+    expect(writeText).toHaveBeenCalledWith('Ada');
+  });
+});
