@@ -103,7 +103,7 @@ describe('[#32072] a widget whose dataset several packages hold is reported not 
  * #32310), so each package's publish probes its own dataset; a name the
  * publishing package cannot resolve is ITS refusal, and the fix names it.
  * The end-to-end pin over the real protocol and registry is in
- * `@objectstack/runtime` (`publish-probe-dataset-caller.test.ts`).
+ * `@objectstack/runtime` (`domains/meta-qualified-item-read.test.ts`).
  */
 describe('[#31700] the probes read a widget\'s dataset from the publishing package', () => {
     const BODIES: Record<string, unknown> = {
