@@ -2977,6 +2977,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/metadata-sync-flow-two-holders.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/package-disable-enforcement.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3023,6 +3028,21 @@
     },
     {
       "file": "packages/objectql/src/protocol-boot-object-package-binding.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-cluster-signal-package.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3148,6 +3168,11 @@
     },
     {
       "file": "packages/objectql/src/protocol-packaged-view-base.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-permission-set-name-registry-reading.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -5119,7 +5144,7 @@
     {
       "file": "packages/runtime/src/domains/actions-addressed-route.test.ts",
       "verb": "findOne",
-      "pinned": 1
+      "pinned": 2
     },
     {
       "file": "packages/runtime/src/domains/catalog-activation-door.test.ts",

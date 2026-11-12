@@ -12,11 +12,21 @@
 // The engine is the real one, over an in-file driver; the values compared are
 // the ones a write of the same row stores.
 
+// Pays the lint root's first load at collection, never inside a clocked case (the door cases run the gate).
+import './__fixtures__/lint-root-preload.testkit.js';
 import { describe, it, expect, beforeEach } from 'vitest';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
+import {
+  PublishMetaItemResponseSchema,
+  PublishPackageDraftsResponseSchema,
+  SaveMetaItemResponseSchema,
+} from '@objectstack/spec/api';
 import { ObjectQL } from './engine.js';
 import {
   announceStoredExpressionHoles,
   backfillStoredExpressions,
+  captureStoredExpressions,
   formatStoredExpressionBackfillReport,
   sameStoredValue,
   storedExpressionBackfillComplete,
@@ -235,6 +245,75 @@ describe('backfillStoredExpressions — stored computed fields on rows stored be
     expect(d.writes).toEqual([]);
   });
 
+  it('[#32527] fields walks several stored computed fields of one object in one pass, in declaration order', async () => {
+    const report = await backfillStoredExpressions(engine, quietLogger, {
+      objects: ['contract'], fields: ['qty_double', 'review_sla_days_offset'], apply: true,
+    });
+    expect(report.fields.map((f) => f.field)).toEqual(['review_sla_days_offset', 'qty_double']);
+    expect(report.fields.map((f) => f.written)).toEqual([2, 3]);
+    expect(report.writtenRows).toBe(3);
+  });
+
+  it('[#32527] refuses a fields scope it cannot act on, before any row is read', async () => {
+    const refused = (options: Parameters<typeof backfillStoredExpressions>[2]) =>
+      backfillStoredExpressions(engine, quietLogger, options).then(() => null, (e) => e);
+
+    expect(await refused({ objects: ['contract'], fields: ['qty_double', 'qty_label'] }))
+      .toMatchObject({ code: 'INVALID_FIELD', status: 400, httpStatus: 400, field: 'qty_label' });
+    expect(await refused({ objects: ['contract', 'note'], fields: ['qty_double'] }))
+      .toMatchObject({ code: 'INVALID_FIELD', status: 400 });
+    expect(await refused({ objects: ['contract'], fields: [] })).toMatchObject({ code: 'INVALID_FIELD', status: 400 });
+    expect(await refused({ objects: ['nope'], fields: ['qty_double'] })).toMatchObject({ code: 'OBJECT_NOT_FOUND', status: 404 });
+    expect(d.writes).toEqual([]);
+  });
+
+  describe('[#32527] captureStoredExpressions — the fill a door owes its change', () => {
+    const redeclare = (fields: Record<string, unknown>) => engine.registry.registerObject({
+      name: 'contract', fields: { ...(engine.getObject('contract') as any).fields, ...fields },
+    } as any);
+
+    it('a change that computes nothing new reads and writes no row', async () => {
+      const capture = captureStoredExpressions(engine, quietLogger, 'contract');
+      redeclare({ name: { type: 'text', label: 'Contract name' } });
+      expect(capture.changedFields()).toEqual([]);
+      expect(await capture.fillChanged()).toBeUndefined();
+      expect(d.writes).toEqual([]);
+    });
+
+    it('fills only the fields the change touched: an expression changed, a formula turned stored', async () => {
+      await backfillStoredExpressions(engine, quietLogger, { apply: true });
+      const capture = captureStoredExpressions(engine, quietLogger, 'contract');
+      redeclare({
+        qty_double: { type: 'number', expression: cel('record.qty * 3') },
+        qty_label: { type: 'text', expression: cel("string(record.qty) + ' pcs'") },
+      });
+      d.writes.length = 0;
+
+      expect(capture.changedFields()).toEqual(['qty_double', 'qty_label']);
+      const report = await capture.fillChanged();
+
+      expect(report?.fields.map((f) => [f.field, f.written])).toEqual([['qty_double', 3], ['qty_label', 3]]);
+      expect(report?.changed).toBe(true);
+      expect(contract('c2')).toMatchObject({ qty_double: 6, qty_label: '2 pcs', updated_at: '2026-01-02T00:00:00.000Z' });
+      expect(await captureStoredExpressions(engine, quietLogger, 'contract').fillChanged()).toBeUndefined();
+    });
+
+    it('the same expression spelled with its keys in another order is no change', () => {
+      const capture = captureStoredExpressions(engine, quietLogger, 'contract');
+      redeclare({ qty_double: { expression: { source: 'record.qty * 2', dialect: 'cel' }, type: 'number' } });
+      expect(capture.changedFields()).toEqual([]);
+    });
+
+    it('every stored computed field of an object the capture did not see yet is new', () => {
+      const capture = captureStoredExpressions(engine, quietLogger, 'fresh');
+      engine.registry.registerObject({
+        name: 'fresh',
+        fields: { qty: { type: 'number' }, twice: { type: 'number', expression: cel('record.qty * 2') }, shown: { type: 'formula', expression: cel('record.qty') } },
+      } as any);
+      expect(capture.changedFields()).toEqual(['twice']);
+    });
+  });
+
   it('an object it cannot read is reported unreadable and truncates the run', async () => {
     d.failFind('contract');
     const report = await backfillStoredExpressions(engine, quietLogger);
@@ -289,5 +368,331 @@ describe('sameStoredValue — a driver\'s spelling of the value a write stored',
     [null, null, true], [undefined, null, true], [null, 0, false], [0, null, false],
   ])('%j vs %j → %s', (stored, computed, same) => {
     expect(sameStoredValue(stored, computed)).toBe(same);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// [#32527] Ruling 6816429574, letter A — the doors fill at the change.
+//
+// Driven through the REAL protocol on a REAL ObjectQL engine, over an in-file
+// driver that seeks and orders by `id` (the fill's keyset walk) and honours the
+// `$null` and implicit-null predicates the metadata repository reads with.
+// The card's case: a `formula` turned into `type: 'number'` with the same
+// `expression` on an object that already holds rows, then the total.
+// ---------------------------------------------------------------------------
+
+const sysMetadataObject = {
+  name: 'sys_metadata',
+  label: 'System Metadata',
+  fields: {
+    id: { name: 'id', label: 'ID', type: 'text' as const },
+    type: { name: 'type', label: 'Type', type: 'text' as const, required: true },
+    name: { name: 'name', label: 'Name', type: 'text' as const, required: true },
+    organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
+    package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
+    metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
+    draft_changes: { name: 'draft_changes', label: 'Draft Changes', type: 'textarea' as const },
+    checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
+    state: { name: 'state', label: 'State', type: 'text' as const },
+    version: { name: 'version', label: 'Version', type: 'number' as const },
+    created_at: { name: 'created_at', label: 'Created', type: 'datetime' as const },
+    updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' as const },
+  },
+};
+
+function makeDoorDriver() {
+  const stores = new Map<string, Map<string, Record<string, unknown>>>();
+  const storeFor = (o: string) => {
+    let s = stores.get(o);
+    if (!s) { s = new Map(); stores.set(o, s); }
+    return s;
+  };
+  let nextId = 0;
+  const holds = (value: unknown, cond: any): boolean => {
+    const a = value === undefined ? null : value;
+    if (cond === null || typeof cond !== 'object' || Array.isArray(cond) || cond instanceof Date) return a === (cond ?? null);
+    return Object.entries(cond).every(([op, target]: [string, any]) => {
+      switch (op) {
+        case '$null': return (a === null) === (target === true);
+        case '$eq': return a === (target ?? null);
+        case '$ne': return a !== (target ?? null);
+        case '$gt': return a !== null && (a as any) > target;
+        case '$in': return Array.isArray(target) && target.includes(a);
+        default: return true;
+      }
+    });
+  };
+  const matches = (row: Record<string, unknown>, where: any): boolean => {
+    if (!where || typeof where !== 'object') return true;
+    return Object.entries(where).every(([k, v]: [string, any]) => {
+      if (k === '$and') return (v as any[]).every((w) => matches(row, w));
+      if (k === '$or') return (v as any[]).some((w) => matches(row, w));
+      if (k.startsWith('$')) return true;
+      return holds(row[k], v);
+    });
+  };
+  const updates: Array<{ object: string; id: string }> = [];
+  let failUpdateFor: string | null = null;
+  /** Runs once, after the first keyset page (`limit` 200, ordered by `id`) of a user object is read. */
+  let afterFirstPage: ((object: string) => Promise<void>) | null = null;
+  const driver: any = {
+    name: 'memory', version: '0.0.0', supports: {},
+    async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
+    async find(object: string, ast: any) {
+      const page = await this.read(object, ast);
+      const order = Array.isArray(ast?.orderBy) ? ast.orderBy[0] : undefined;
+      if (afterFirstPage && !object.startsWith('sys_') && ast?.limit === 200 && order?.field === 'id') {
+        const run = afterFirstPage;
+        afterFirstPage = null;
+        await run(object);
+      }
+      return page;
+    },
+    // The conditional write the engine's by-id precondition issues (ADR-0142 D4).
+    async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+      const hit = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      for (const r of hit) await this.update(object, String(r.id), data);
+      return hit.length;
+    },
+    async read(object: string, ast: any) {
+      let rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const order = Array.isArray(ast?.orderBy) ? ast.orderBy[0] : undefined;
+      if (order?.field === 'id') {
+        rows = rows.sort((a, b) => String(a.id).localeCompare(String(b.id)) * (order.order === 'desc' ? -1 : 1));
+      }
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
+    },
+    async findOne(object: string, ast: any) {
+      for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
+      return null;
+    },
+    async create(object: string, data: Record<string, unknown>) {
+      nextId += 1;
+      const id = (data.id as string) ?? `r_${String(nextId).padStart(4, '0')}`;
+      const row = { ...data, id };
+      storeFor(object).set(id, row);
+      return row;
+    },
+    async update(object: string, id: string, data: Record<string, unknown>) {
+      if (failUpdateFor === id) throw new Error('driver refused this row');
+      if (object !== 'sys_metadata' && !object.startsWith('sys_')) updates.push({ object, id });
+      const s = storeFor(object);
+      const cur = s.get(id);
+      if (!cur) throw new Error(`not found: ${object}/${id}`);
+      const row = { ...cur, ...data, id };
+      s.set(id, row);
+      return row;
+    },
+    async upsert(object: string, data: Record<string, unknown>) {
+      const id = data.id as string | undefined;
+      if (id && storeFor(object).has(id)) return this.update(object, id, data);
+      return this.create(object, data);
+    },
+    async delete(object: string, id: string) { return storeFor(object).delete(id); },
+    async count(object: string, ast: any) {
+      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where)).length;
+    },
+    async bulkCreate(object: string, rows: Record<string, unknown>[]) {
+      return Promise.all(rows.map((r) => this.create(object, r)));
+    },
+    async bulkUpdate() { return []; }, async bulkDelete() {},
+    async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
+    async commit() {}, async rollback() {},
+  };
+  return {
+    driver, storeFor, updates,
+    failUpdateFor: (id: string | null) => { failUpdateFor = id; },
+    afterFirstPage: (fn: (object: string) => Promise<void>) => { afterFirstPage = fn; },
+  };
+}
+
+describe('[#32527] the save and publish doors fill a stored computed field the change made live', () => {
+  const PKG = 'app.leave';
+  const OBJ = 'leave_request';
+  const DAYS = cel('record.end_day - record.start_day');
+  const objectBody = (days: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: OBJ,
+    label: 'Leave Request',
+    sharingModel: 'public_read_write',
+    fields: {
+      title: { name: 'title', label: 'Title', type: 'text' },
+      start_day: { name: 'start_day', label: 'Start', type: 'number' },
+      end_day: { name: 'end_day', label: 'End', type: 'number' },
+      // The stamp the fill keeps, and the one its write is conditional on.
+      updated_at: { name: 'updated_at', label: 'Updated', type: 'datetime' },
+      days: { name: 'days', label: 'Days', ...days },
+      ...extra,
+    },
+  });
+  const FORMULA = { type: 'formula', returnType: 'number', expression: DAYS };
+  const STORED = { type: 'number', expression: DAYS };
+
+  async function makeRig() {
+    const engine = new ObjectQL();
+    const mem = makeDoorDriver();
+    engine.registerDriver(mem.driver, true);
+    await engine.init();
+    engine.registry.registerObject(sysMetadataObject as any, 'test-package');
+    for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+      engine.registry.registerObject(o as any, 'test-package');
+    }
+    engine.registry.installPackage({ id: PKG, name: 'Leave', version: '1.0.0' } as never, 'code');
+    const protocol = new ObjectStackProtocolImplementation(engine);
+    const save = (days: Record<string, unknown>, mode?: 'draft', extra?: Record<string, unknown>) =>
+      (protocol as any).saveMetaItem({ type: 'object', name: OBJ, item: objectBody(days, extra), packageId: PKG, ...(mode ? { mode } : {}) });
+    return { engine, protocol, save, ...mem };
+  }
+
+  /** A live object whose `days` is a formula, holding three requests of 1 + 2 + 3 = 6 days. */
+  async function populated() {
+    const rig = await makeRig();
+    await rig.save(FORMULA);
+    for (const [start, end] of [[1, 2], [3, 5], [10, 13]]) {
+      await rig.engine.insert(OBJ, { title: `r${start}`, start_day: start, end_day: end }, { context: { isSystem: true } });
+    }
+    // Each row as stored carries its stamp (this bare engine runs no audit writer that would stamp one).
+    let day = 0;
+    for (const row of rig.storeFor(OBJ).values()) row.updated_at = `2026-01-0${++day}T00:00:00.000Z`;
+    rig.updates.length = 0;
+    return rig;
+  }
+
+  const stored = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
+    Array.from(rig.storeFor(OBJ).values()).map((r) => r.days ?? null);
+  const total = async (rig: Awaited<ReturnType<typeof makeRig>>) =>
+    (await stored(rig)).reduce<number>((n, v) => n + (typeof v === 'number' ? v : 0), 0);
+  const notices = (res: any, rule: string) => (res.advisories ?? []).filter((a: any) => a.rule === rule);
+
+  it('the card: a formula turned into a stored number with the same expression — the save fills the rows, the total reads 6', async () => {
+    const rig = await populated();
+    expect(await stored(rig)).toEqual([null, null, null]);
+
+    const res = await rig.save(STORED);
+
+    expect(res.success).toBe(true);
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(await total(rig)).toBe(6);
+    expect(notices(res, 'stored-expression-filled')).toEqual([expect.objectContaining({
+      severity: 'info',
+      path: `objects.${OBJ}.fields.days`,
+      where: `object "${OBJ}" · field "days"`,
+    })]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    // The declared answer carries the notice through parse unstripped.
+    expect(SaveMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a changed expression rewrites every row it changes, and counts them', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    rig.updates.length = 0;
+
+    const res = await rig.save({ type: 'number', expression: cel('(record.end_day - record.start_day) * 8') });
+
+    expect(await stored(rig)).toEqual([8, 16, 24]);
+    expect(rig.updates).toHaveLength(3);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+  });
+
+  it('a save that computes nothing new reads no row, writes none, and answers no fill notice', async () => {
+    const rig = await populated();
+    await rig.save(STORED);
+    rig.updates.length = 0;
+
+    const res = await rig.save({ ...STORED, label: 'Days off' });
+
+    expect(rig.updates).toEqual([]);
+    expect(notices(res, 'stored-expression-filled')).toEqual([]);
+    expect(notices(res, 'stored-expression-fill-incomplete')).toEqual([]);
+  });
+
+  it('a new object that holds no row answers no fill notice: a clean save is unchanged', async () => {
+    const rig = await makeRig();
+    const res = await rig.save(STORED);
+    expect(res.success).toBe(true);
+    expect('advisories' in res).toBe(false);
+  });
+
+  it('a draft save makes nothing live and fills nothing; its publish fills and reports on the publish answer', async () => {
+    const rig = await populated();
+
+    const draft = await rig.save(STORED, 'draft');
+    expect(draft.state).toBe('draft');
+    expect(await stored(rig)).toEqual([null, null, null]);
+    expect(notices(draft, 'stored-expression-filled')).toEqual([]);
+
+    const res = await rig.protocol.publishMetaItem({ type: 'object', name: OBJ, packageId: PKG } as any);
+
+    expect(await stored(rig)).toEqual([1, 2, 3]);
+    expect(notices(res, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    expect(PublishMetaItemResponseSchema.parse(res).advisories).toEqual(res.advisories);
+  });
+
+  it('a package publish fills and reports on the object\'s published element', async () => {
+    const rig = await populated();
+    await rig.save(STORED, 'draft');
+
+    const res = await rig.protocol.publishPackageDrafts({ packageId: PKG });
+
+    expect(res.outcome).toBe('published');
+    expect(await total(rig)).toBe(6);
+    const element = res.published.find((p) => p.name === OBJ)!;
+    expect(notices(element, 'stored-expression-filled')[0].message).toContain('3 rows of 3 written');
+    expect(PublishPackageDraftsResponseSchema.parse(res).published).toEqual(res.published);
+  });
+
+  it('a row the fill cannot write is reported as a warning naming what is left and the command; the save stands', async () => {
+    const rig = await populated();
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    rig.failUpdateFor(second!);
+
+    const res = await rig.save(STORED);
+
+    expect(res.success).toBe(true);
+    expect(await stored(rig)).toEqual([1, null, 3]);
+    const [warning] = notices(res, 'stored-expression-fill-incomplete');
+    expect(warning).toMatchObject({ severity: 'warning', path: `objects.${OBJ}.fields.days` });
+    expect(warning.message).toContain('2 rows written, 1 row not (1 row refused the write)');
+    expect(warning.hint).toContain(`os migrate stored-expressions --object ${OBJ} --field days --changed --apply`);
+    expect(notices(res, 'stored-expression-filled')).toEqual([]);
+  });
+
+  it('a write landing between the fill\'s read and its write keeps its updated_at, and its own computed value', async () => {
+    const rig = await populated();
+    const [, second] = Array.from(rig.storeFor(OBJ).keys());
+    const stampBefore = rig.storeFor(OBJ).get(second!)!.updated_at;
+    expect(stampBefore, 'the rows carry the stamp the guard keys on').toBeTruthy();
+    const EDITED = '2099-01-01T00:00:00.000Z';
+    // A user's edit lands after the walk read its first page, before the fill writes that row.
+    rig.afterFirstPage(async (object) => {
+      await rig.engine.update(object, { id: second, end_day: 13, updated_at: EDITED }, {
+        context: { isSystem: true, preserveAudit: true },
+      });
+    });
+
+    const res = await rig.save(STORED);
+
+    const edited = rig.storeFor(OBJ).get(second!)!;
+    expect(edited.updated_at).toBe(EDITED);
+    // The edit computed the field itself (13 - 3), under the definition the save made live.
+    expect(edited.days).toBe(10);
+    expect(await stored(rig)).toEqual([1, 10, 3]);
+    const [notice] = notices(res, 'stored-expression-filled');
+    expect(notice.message).toContain('2 rows of 3 written');
+    expect(notice.message).toContain('1 row written by another write while the fill ran');
+  });
+
+  it('a refused storage sync is not followed by a fill: no row is written, and each field is reported unfilled', async () => {
+    const rig = await populated();
+    (rig.engine as any).syncObjectSchema = async () => { throw new Error('the datasource is read-only'); };
+
+    const res = await rig.save(STORED);
+
+    expect(res.success).toBe(true);
+    expect(rig.updates).toEqual([]);
+    expect(notices(res, 'object-storage-sync-refused')).toHaveLength(1);
+    const [warning] = notices(res, 'stored-expression-fill-incomplete');
+    expect(warning.message).toContain('were NOT filled');
+    expect(notices(res, 'stored-expression-filled')).toEqual([]);
   });
 });

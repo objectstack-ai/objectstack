@@ -200,3 +200,111 @@ describe('#17052 — a refused write is reported at `warn`, and the caller is to
     expect(beforeLine).toMatch(/^\S+Z ERROR /);
   });
 });
+
+// [#32154] A caller-input refusal — the engine's own `ValidationError`, raised
+// before any statement runs — is still reported at `warn`, as ONE line with NO
+// stack, naming the object, the operation, the failing field(s) and the reason
+// (the maintainer's ruling D on that card). Every other failure keeps its
+// level and its full stack: the driver fault (the suite above) and the
+// database's NOT NULL refusal under the same envelope (below; its envelope
+// assertions live in `engine-not-null-refusal.test.ts`).
+describe('#32154 — a caller-input refusal is one `warn` line with no stack', () => {
+  const MEMO = 'memo';
+
+  /** Boot over a driver that refuses with `makeFault`, register `memo`, run the door. */
+  async function refuseWith(makeFault: () => Error, run: (e: ObjectQL) => Promise<unknown>) {
+    const logger = makeCapturingLogger();
+    const engine = new ObjectQL({ logger });
+    engine.registerDriver(refusingDriver(makeFault), true);
+    await engine.init();
+    engine.registry.registerObject({
+      name: MEMO,
+      fields: {
+        id: { name: 'id', type: 'text', primaryKey: true, readonly: true },
+        title: { name: 'title', type: 'text', required: true },
+        note: { name: 'note', type: 'text' },
+      },
+    } as any, 'test');
+    let thrown: any = null;
+    try { await run(engine); } catch (e) { thrown = e; }
+    return { thrown, lines: logger.lines as Array<{ level: string; msg: string; a?: any; b?: any }> };
+  }
+
+  /** A driver fault the input refusal must never reach. */
+  const unreachable = () => new Error('the driver was reached: the refusal is not pre-statement');
+
+  const INPUT_DOORS: ReadonlyArray<readonly [string, string, (e: ObjectQL) => Promise<unknown>]> = [
+    ['insert', 'Insert operation failed', (e) => e.insert(MEMO, { note: 'n' } as any)],
+    ['update', 'Update operation failed', (e) => e.update(MEMO, { id: 'r1', title: null } as any)],
+  ];
+
+  for (const [door, msg, run] of INPUT_DOORS) {
+    describe(`${door}()`, () => {
+      it('the caller is told, with the engine`s own refusal', async () => {
+        const { thrown } = await refuseWith(unreachable, run);
+        expect(thrown?.code).toBe('VALIDATION_FAILED');
+        expect(thrown?.fields).toEqual([expect.objectContaining({ field: 'title' })]);
+      });
+
+      it('exactly one line, at `warn`: object, operation, fields, reason, and no stack', async () => {
+        const { thrown, lines } = await refuseWith(unreachable, run);
+        const entries = lines.filter((l) => l.msg === msg);
+        expect(entries.map((l) => l.level)).toEqual(['warn']);
+        expect(lines.filter((l) => l.level === 'error')).toEqual([]);
+
+        expect(entries[0].a).toEqual({
+          object: MEMO,
+          operation: door,
+          fields: [{ field: 'title', code: thrown.fields[0].code }],
+          reason: thrown.message,
+        });
+        // No `error` bag, so no stack, at any depth.
+        expect(JSON.stringify(entries[0].a)).not.toMatch(/stack|\n\s+at /);
+        expect(entries[0].b).toBeUndefined();
+      });
+
+      it('rendered by the real platform logger, it is one line', async () => {
+        const { lines } = await refuseWith(unreachable, run);
+        const entry = lines.find((l) => l.msg === msg)!;
+        const written: string[] = [];
+        const original = process.stdout.write.bind(process.stdout);
+        (process.stdout as any).write = (s: string) => void written.push(s);
+        try {
+          createLogger({ level: 'info', format: 'pretty' }).warn(entry.msg, entry.a);
+        } finally {
+          (process.stdout as any).write = original;
+        }
+        const out = written.join('');
+        expect(out.trimEnd().split('\n')).toHaveLength(1);
+        expect(out).toMatch(new RegExp(`WARN ${msg} \\{"object":"${MEMO}","operation":"${door}","fields":`));
+        expect(out).not.toMatch(/\\n\s+at /);
+      });
+    });
+  }
+
+  it('⛔ the database`s NOT NULL refusal, a `ValidationError` too, keeps the driver`s error and stack', async () => {
+    const notNull = () =>
+      Object.assign(
+        new Error(`insert into [statement and bound values redacted] - NOT NULL constraint failed: ${MEMO}.note`),
+        { code: 'SQLITE_CONSTRAINT_NOTNULL' },
+      );
+    const { thrown, lines } = await refuseWith(notNull, (e) => e.insert(MEMO, { title: 't' } as any));
+    expect(thrown?.code).toBe('VALIDATION_FAILED');
+    expect(thrown?.cause).toBeInstanceOf(Error);
+
+    const entries = lines.filter((l) => l.msg === 'Insert operation failed');
+    expect(entries.map((l) => l.level)).toEqual(['warn']);
+    expect(entries[0].a.object).toBe(MEMO);
+    expect(entries[0].a.operation).toBeUndefined();
+    expect(entries[0].a.error.message).toMatch(/NOT NULL constraint failed: memo\.note/);
+    expect(entries[0].a.error.stack).toMatch(/\n\s+at /);
+  });
+
+  it('⛔ a driver fault keeps its stack', async () => {
+    const { lines } = await refuseWith(uniqueViolation, (e) => e.insert(MEMO, { title: 't' } as any));
+    const entry = lines.find((l) => l.msg === 'Insert operation failed')!;
+    expect(entry.level).toBe('warn');
+    expect(entry.a.operation).toBeUndefined();
+    expect(entry.a.error.stack).toMatch(/\n\s+at /);
+  });
+});

@@ -3725,6 +3725,9 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "버전"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "작업 유형",
         options: {

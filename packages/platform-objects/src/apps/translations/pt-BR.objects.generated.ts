@@ -3725,6 +3725,9 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "Versão"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "Tipo de operação",
         options: {

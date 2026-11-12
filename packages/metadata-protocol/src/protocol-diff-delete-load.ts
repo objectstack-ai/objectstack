@@ -48,6 +48,7 @@ import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMember, resolveBundleMemberSelector } from './protocol-bundle-members.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import {
     carryCatalogedErrorCode,
     carryDeclaredUserMessage,
@@ -839,6 +840,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     name: request.name,
                     state: 'deleted',
                     organizationId: null,
+                    // [#31698] The row this delete removed (ADR-0150 D4).
+                    ...projectorEventPackage(singularTypeForRepo, packageId),
                 });
                 host.emitMetadataMutation({
                     type: singularTypeForRepo,
@@ -846,6 +849,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     state: 'deleted',
                     organizationId: null,
                     ...mutationEventMember(singularTypeForRepo, member),
+                    // [#32451] The package of the row it deleted, as the heal above.
+                    ...mutationEventPackage(packageId),
                 });
                 const deletedPackage = packageId !== null ? ` (package=${packageId})` : '';
                 return {
@@ -1055,6 +1060,8 @@ export class ProtocolDiffDeleteLoadFacet {
                 name: request.name,
                 state: 'deleted',
                 organizationId: null,
+                // [#32451] The package the deleted row was bound to, as the heal above.
+                ...mutationEventPackage(existing.package_id),
             });
 
             return {
