@@ -339,15 +339,15 @@ form, which still reads `collection` as a bare variable name, unjudged.
 **A `notify` node's recipients: a list adds each recipient.** `recipients`
 holds one recipient — a user id, or an audience selector such as `team:ID` — or
 a list of them, each a string or an envelope:
-`recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }]`. The
-selectors are `user:ID`, `role:NAME` (the members of the notification's
-organization holding that role), `org:members` (every member of that
-organization, whatever their role, a member holding none included), `team:ID`
-and `owner_of:OBJECT:ID`. The organization is the run's, else that of the
-record the notification is about — never one written in the string: where
-there is none, `org:members` reaches nobody, and any other `org:` value is no
-selector and reaches nobody either, each with a warning in the server log.
-Each selector reads every member, however many there are. An
+`recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }]`. To
+reach a whole organization, write `org:members`: every member of the
+notification's organization, whatever their organization membership level, a
+member recorded with none included. The organization is the run's, else that
+of the record the notification is about — never one written in the string:
+where there is none, `org:members` reaches nobody, and any other `org:` value
+is no selector and reaches nobody either, each with a warning in the server
+log. A selector that names a group of members (`org:members`, `team:ID`) reads
+every member, however many there are. An
 envelope may evaluate to a recipient; to a list of them — a multi-user field, a
 list variable — whose every recipient is added; or to `null` or a blank string,
 which adds none, as the template dropped a token that resolved to nothing. A

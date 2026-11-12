@@ -66,7 +66,13 @@ function dataEngine(users: Row[], members: Row[] = []) {
         },
         async find(object: string, query?: { where?: Record<string, unknown>; fields?: string[]; offset?: number; limit?: number }) {
             if (object !== 'sys_member') return [];
-            const hits = members.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => r[k] === v));
+            // Equality on plain fields only, as `findOne` below: a combinator or operator is refused.
+            const hits = members.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => {
+                if (k.startsWith('$') || (typeof v === 'object' && v !== null)) {
+                    throw new Error(`this double matches equality on plain fields only: ${JSON.stringify(query?.where)}`);
+                }
+                return r[k] === v;
+            }));
             const offset = query?.offset ?? 0;
             const page = hits.slice(offset, query?.limit === undefined ? undefined : offset + query.limit);
             return page.map((r) => (query?.fields ? Object.fromEntries(query.fields.map((f) => [f, r[f]])) : { ...r }));

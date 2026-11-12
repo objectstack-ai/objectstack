@@ -166,7 +166,13 @@ function membershipTable(rows: Array<Record<string, unknown>>, opts: { throwAtOf
         const table = object === 'sys_member' || object === 'sys_team_member'
             ? rows.filter((r) => r.object === object)
             : [];
-        let out = table.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => r[k] === v));
+        // Equality on plain fields only: a combinator or operator is refused, never read as a field name.
+        let out = table.filter((r) => Object.entries(query?.where ?? {}).every(([k, v]) => {
+            if (k.startsWith('$') || (typeof v === 'object' && v !== null)) {
+                throw new Error(`this double matches equality on plain fields only: ${JSON.stringify(query.where)}`);
+            }
+            return r[k] === v;
+        }));
         for (const { field, order } of [...(query?.orderBy ?? [])].reverse()) {
             out = [...out].sort((a, b) => {
                 const x = String(a[field]);
