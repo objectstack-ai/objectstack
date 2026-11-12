@@ -35,7 +35,7 @@ import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.tes
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
-import { installDefaultOrganization } from './default-organization.testkit.js';
+import { DEFAULT_ORGANIZATION_ID, installDefaultOrganization } from './default-organization.testkit.js';
 
 const OBJ = 'qa_ticket';
 const GUARD_SET = 'qa_ticket_guard';
@@ -135,6 +135,16 @@ async function boot(policies: Policy[]) {
   const table = (driver as unknown as { knex: (t: string) => { insert(r: unknown): Promise<unknown> } }).knex;
   await table('sys_user').insert(
     ['usr_member', 'agent_1', DELEGATOR].map((id) => ({ id, name: id, email: `${id}@example.test` })),
+  );
+  // [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+  // access requires a current membership in the organization, and an
+  // on-behalf-of write runs in an organization only while the delegator holds
+  // one there: the delegator holds one in the Default Organization, so the
+  // delegator leg below is judged by its `check` policy alone.
+  await engine.insert(
+    'sys_member',
+    { id: 'mem_delegator', user_id: DELEGATOR, organization_id: DEFAULT_ORGANIZATION_ID, role: 'member' },
+    { context: SYS_CTX } as never,
   );
 
   const caller = {

@@ -101,12 +101,15 @@
  * stored as JSON, the very storage the `count_distinct` row refuses `tags`
  * for. The compile leg and the engine's `count_distinct` door both ask
  * `isMultiValueField` (`@objectstack/spec/data`) beside the row, so this rule
- * asks it too, in the same place: {@link acceptsDeclaration} is the row AND
- * the declaration, and it decides the verdict and the accepted-aggregates hint
- * alike, so the two cannot disagree. Only `count_distinct` can be moved by the
- * flag — the `sum` / `avg` / `min` / `max` rows accept no multi-capable type,
- * and `count` reads no value. ⛔ No second account of the pair table: the row
- * is still the predicate's, the flag is still the spec's helper.
+ * asks it too, through the verdict it shares with the list-view and grid
+ * surfaces: {@link aggregateAcceptsDeclaration} (`aggregate-pair-verdict.ts`)
+ * is the row AND the declaration, and it decides the verdict and the
+ * accepted-aggregates hint ({@link aggregatesAcceptingDeclaration}) alike, so
+ * the two cannot disagree. Only `count_distinct` can be moved by the flag —
+ * the `sum` / `avg` / `min` / `max` rows accept no multi-capable type, and
+ * `count` reads no value. ⛔ No second account of the pair table, and no
+ * private copy of the verdict: the row is still the predicate's, the flag is
+ * still the spec's helper, and the pair reading is the shared file's.
  *
  * ## [#20890] The dimension leg — `dimension-json-stored-field-refused`
  *
@@ -151,8 +154,8 @@
  *   - a dimension whose column is structured-JSON or multi-value —
  *     {@link groupKeyClassOf}, under `dimension-json-stored-field-refused`;
  *   - [#21419] a measure whose `type` is a row of the table and whose column's
- *     declaration that row does not accept — {@link acceptsDeclaration}, the
- *     dataset measure's own verdict, under `measure-aggregate-field-type-refused`.
+ *     declaration that row does not accept — {@link aggregateAcceptsDeclaration},
+ *     the dataset measure's own verdict, under `measure-aggregate-field-type-refused`.
  *     That is every row, as on a dataset: `count_distinct` over a JSON-stored
  *     column (the `structured-json-dimension-door.ts` half), `sum` / `avg` /
  *     `min` / `max` over a type its row refuses (the
@@ -227,7 +230,6 @@
  */
 
 import {
-  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
@@ -237,6 +239,12 @@ import {
 } from '@objectstack/spec/data';
 import { DATASET_DURATION_FIELD_TYPE } from '@objectstack/spec/ui';
 
+import {
+  aggregateAcceptsDeclaration,
+  aggregatesAcceptingDeclaration,
+  declaredAs,
+  isTableAggregate,
+} from './aggregate-pair-verdict.js';
 import { collectionEntries } from './collection-entries.js';
 import {
   indexServedObjectGraph,
@@ -316,55 +324,6 @@ const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Arra
 
 const strName = (v: unknown): string | undefined =>
   typeof v === 'string' && v.length > 0 ? v : undefined;
-
-/**
- * The table as a Map, built once — for the vocabulary skip (skip 5) and the
- * words only.
- *
- * A Map rather than property access on the frozen record because a
- * property-key lookup also answers for `Object.prototype` members, so an
- * author's `aggregate: 'toString'` would read as a declared row. The VERDICT
- * is never taken from here: it is
- * {@link isAggregateCompatibleWithFieldType}'s, which is fail-closed on both
- * vocabulary and shape. This Map only PRESENTS the same table — the
- * aggregates that would accept this field, in the hint — so the words cannot
- * name a set the verdict was not taken from. [#22161] The accepted set for
- * the refused aggregate moved out of the message: `os explain
- * measure-aggregate-field-type-refused` writes the table's rows out, and this
- * rule's test holds them to `AGGREGATE_FIELD_TYPE_COMPATIBILITY`.
- */
-const ACCEPTED_TYPES_BY_AGGREGATE: ReadonlyMap<string, readonly string[]> = new Map(
-  Object.entries(AGGREGATE_FIELD_TYPE_COMPATIBILITY).map(
-    ([fn, types]) => [fn, types as readonly string[]] as const,
-  ),
-);
-
-/**
- * May `aggregate` be applied to a field DECLARED as `shape`? The table's row
- * for the type ({@link isAggregateCompatibleWithFieldType}) AND, for
- * `count_distinct`, the declaration half the per-type row cannot see — a
- * multi-capable type flagged `multiple: true` is a list stored as JSON
- * ({@link isMultiValueField}). Asked the way the compile leg asks it, and the
- * one place this file asks it: the verdict and the hint both read it.
- */
-function acceptsDeclaration(aggregate: string, shape: ValueShapeFieldDef): boolean {
-  if (!isAggregateCompatibleWithFieldType(aggregate, shape.type)) return false;
-  return !(aggregate === 'count_distinct' && isMultiValueField(shape));
-}
-
-/** Every aggregate that accepts a field declared as `shape` — always non-empty (`count` accepts any type). */
-function aggregatesAccepting(shape: ValueShapeFieldDef): string[] {
-  const accepting: string[] = [];
-  for (const [fn] of ACCEPTED_TYPES_BY_AGGREGATE) {
-    if (acceptsDeclaration(fn, shape)) accepting.push(fn);
-  }
-  return accepting;
-}
-
-/** The declaration as the words say it: the type, and the flag when the field carries it. */
-function declaredAs(shape: ValueShapeFieldDef): string {
-  return shape.multiple === true ? `\`${shape.type}\` with \`multiple: true\`` : `\`${shape.type}\``;
-}
 
 /** The declaration the graph holds for a resolved leaf — its type and its `multiple` flag. */
 function shapeOf(verdict: Extract<FieldPathVerdict, { kind: 'ok' }>, fieldType: string): ValueShapeFieldDef {
@@ -489,7 +448,7 @@ function virtualDimensionFinding(
 
 /**
  * The finding for a measure whose aggregate the column's declaration cannot
- * carry ({@link acceptsDeclaration} said no), in one set of words for a
+ * carry ({@link aggregateAcceptsDeclaration} said no), in one set of words for a
  * dataset measure and a cube measure alike.
  *
  * [#22161] One verdict sentence: the pair, the declaration and why it is
@@ -503,7 +462,7 @@ function virtualDimensionFinding(
  *
  * [#24426] Except over a VIRTUAL field (`formula`): there the remedy line is
  * the spec's `virtualFieldAggregateRemedy`, the sentence the compile leg prints
- * too — store the value as a number field and aggregate that — because naming
+ * too — a field of its return type carrying the same `expression`, aggregated in its place — because naming
  * `count` as the way out steers a total to a plausible wrong number (a record
  * count read as a sum). The count stays named, as a different question.
  */
@@ -533,7 +492,7 @@ function refusedMeasureFinding(
       virtualFieldAggregateRemedy(aggregate, fieldType) ??
       `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
       `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
-      `${aggregatesAccepting(shape).join(', ')}.`,
+      `${aggregatesAcceptingDeclaration(shape).join(', ')}.`,
   };
 }
 
@@ -657,13 +616,12 @@ function cubeMemberFindings(cube: AnyRec, cubePath: string, graph: ObjectGraph):
     const aggregate = strName(measure.type);
     if (!aggregate) continue;
     // ── Skip 5: the `type` is outside the table's vocabulary (`number` / `string` / `boolean`) ──
-    const accepted = ACCEPTED_TYPES_BY_AGGREGATE.get(aggregate);
-    if (!accepted) continue;
+    if (!isTableAggregate(aggregate)) continue;
     const sql = strName(measure.sql);
     if (!sql) continue;
     const column = columnOf(sql);
     if (!column) continue;
-    if (acceptsDeclaration(aggregate, column.shape)) continue;
+    if (aggregateAcceptsDeclaration(aggregate, column.shape)) continue;
 
     const name = strName(measure.name) ?? path;
     findings.push(
@@ -785,8 +743,7 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
       if (!aggregate || !field) return;
 
       // ── Skip 5: the aggregate is outside the table's vocabulary ──
-      const accepted = ACCEPTED_TYPES_BY_AGGREGATE.get(aggregate);
-      if (!accepted) return;
+      if (!isTableAggregate(aggregate)) return;
 
       // ── Skip 3: the path does not resolve — `dataset-field-unknown`'s finding ──
       const verdict = resolveFieldPath(graph, object, field);
@@ -797,7 +754,7 @@ export function validateDatasetMeasureAggregates(stack: unknown): DatasetMeasure
       if (!fieldType) return;
 
       const shape = shapeOf(verdict, fieldType);
-      if (acceptsDeclaration(aggregate, shape)) return;
+      if (aggregateAcceptsDeclaration(aggregate, shape)) return;
 
       const measureName = strName(measure.name) ?? `#${k}`;
       findings.push(

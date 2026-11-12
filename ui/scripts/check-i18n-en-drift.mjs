@@ -375,6 +375,65 @@ function gitQuiet(root, args) {
 }
 
 /**
+ * Several files at ONE revision, read by ONE `git cat-file --batch` process:
+ * `rel -> text`, each value exactly what `gitQuiet(root, ['show',
+ * revPath(ref, rel)])` answers for that file — the blob trimmed, or `null`
+ * where that `git show` fails (the path, or the ref itself, is not there).
+ *
+ * Why one process: a side of {@link readPacks} is every locale pack plus its
+ * partial packs, three files per language of the table, and one `git show`
+ * each made a side cost thirty-odd subprocess spawns. On a contended CI runner
+ * the spawn is what is slow, not the read, so the gate's run time — and that of
+ * every test that drives a side — grew with the locale table instead of with
+ * the work (objectstack#32564). The batch resolves `revPath`'s
+ * `<ref>:./<path>` relative to the tree git runs in, as `git show` does, so
+ * both layouts read the same file.
+ *
+ * Anything at that path that is not a blob throws: `git show` would have
+ * printed a tree listing there, which no pack parses either.
+ *
+ * @param {string} root
+ * @param {string} ref
+ * @param {string[]} rels
+ * @returns {Map<string, string | null>}
+ */
+function showAllAt(root, ref, rels) {
+  const answers = new Map(rels.map((rel) => [rel, null]));
+  const specs = rels.map((rel) => revPath(ref, rel));
+  // The batch takes one object name per line, so a ref with a line break in
+  // it names nothing there — as it named nothing for `git show`.
+  if (specs.some((spec) => /[\r\n]/.test(spec))) return answers;
+  let out;
+  try {
+    out = execFileSync('git', ['cat-file', '--batch'], {
+      cwd: root,
+      input: `${specs.join('\n')}\n`,
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch {
+    return answers;
+  }
+  let at = 0;
+  for (const [i, rel] of rels.entries()) {
+    const eol = out.indexOf(0x0a, at);
+    if (eol === -1) throw new Error(`git cat-file --batch answered ${i} of ${rels.length} names at ${ref}`);
+    const header = out.toString('utf8', at, eol);
+    at = eol + 1;
+    // `<oid> <type> <size>` for an object; `<name> missing` or `<name>
+    // ambiguous` for a name that resolves to none: the file is not there.
+    const found = /^[0-9a-f]+ ([a-z]+) (\d+)$/.exec(header);
+    if (!found) continue;
+    const size = Number(found[2]);
+    const body = out.subarray(at, at + size);
+    at += size + 1;
+    if (found[1] !== 'blob') throw new Error(`${specs[i]} is a ${found[1]}, not a file`);
+    answers.set(rel, body.toString('utf8').trim());
+  }
+  return answers;
+}
+
+/**
  * Every pack at `ref`, or from the working tree when `ref` is null — each one
  * merged with its partial packs from `namespacePackPaths(lang)`.
  *
@@ -404,6 +463,9 @@ function gitQuiet(root, args) {
  * @returns {Map<string, Map<string, string>>} lang -> (key -> value)
  */
 export function readPacks(root, ref, absentAtRef = null) {
+  // Every file this side can read, in one process — see {@link showAllAt}.
+  const atRef =
+    ref === null ? null : showAllAt(root, ref, LOCALES.flatMap((lang) => [packPath(lang), ...namespacePackPaths(lang)]));
   const read = (rel, required) => {
     const label = ref === null ? rel : revPath(ref, rel);
     let text;
@@ -415,7 +477,7 @@ export function readPacks(root, ref, absentAtRef = null) {
       }
       text = readFileSync(full, 'utf8');
     } else {
-      text = gitQuiet(root, ['show', revPath(ref, rel)]);
+      text = atRef.get(rel);
       if (text === null) {
         if (!required) return null;
         throw new Error(`cannot read ${label} — is ${ref} in this clone?`);
