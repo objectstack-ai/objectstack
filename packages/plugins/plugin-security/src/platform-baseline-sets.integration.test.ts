@@ -30,11 +30,15 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { SysMember, SysOrganization, SysUser } from '@objectstack/platform-objects/identity';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import type { ISecurityService, PlatformBaselineSetContribution } from '@objectstack/spec/contracts';
 import { mapDataError } from '@objectstack/types';
 import { SecurityPlugin } from './security-plugin.js';
 import { defaultPermissionSets } from './objects/default-permission-sets.js';
 
 /** The platform service's package id, and the object it registers. */
+/** The members this suite drives, each one the plugin serves. */
+type SecurityService = Required<Pick<ISecurityService, 'explain' | 'resolvePermissionSetsForContext' | 'contributePlatformBaselineSet'>>;
+
 const SERVICE = 'com.example.service.notes';
 const NOTE = 'pbs_note';
 /** An object another package registers. */
@@ -116,10 +120,10 @@ function servicePlugin(outcomes: Record<string, Outcome>): Plugin {
     },
     async start(ctx: PluginContext) {
       ctx.hook('kernel:ready', async () => {
-        const security = ctx.getService<any>('security');
+        const security = ctx.getService<SecurityService>('security');
         const attempt = (set: unknown): Outcome => {
           try {
-            return { joined: security.contributePlatformBaselineSet(SERVICE, set).joined };
+            return { joined: security.contributePlatformBaselineSet(SERVICE, set as PlatformBaselineSetContribution).joined };
           } catch (e) {
             return { refused: (e as Error).message };
           }
@@ -180,14 +184,14 @@ async function contextOf(ql: ObjectQL, userId: string): Promise<Ctx> {
 describe('a platform service’s baseline set reaches every member, and no one else', () => {
   let kernel: ObjectKernel;
   let ql: ObjectQL;
-  let security: any;
+  let security: SecurityService;
   const outcomes: Record<string, Outcome> = {};
   const as: Record<string, Ctx> = {};
 
   beforeAll(async () => {
     kernel = await boot(APP_SET.name, outcomes);
     ql = kernel.getService<ObjectQL>('objectql');
-    security = kernel.getService<any>('security');
+    security = kernel.getService<SecurityService>('security');
     await seedPeople(ql);
     as.alice = await contextOf(ql, ALICE);
     as.eve = await contextOf(ql, EVE);
@@ -244,7 +248,7 @@ describe('a platform service’s baseline set reaches every member, and no one e
   });
 
   it('an agent principal gains nothing: it resolves no human baseline', async () => {
-    const agent = { userId: ALICE, tenantId: ORG, positions: [], permissions: [], principalKind: 'agent' };
+    const agent = { userId: ALICE, tenantId: ORG, positions: [], permissions: [], principalKind: 'agent' as const };
     const sets = await security.resolvePermissionSetsForContext(agent);
     expect(sets.map((s: { name: string }) => s.name)).not.toContain(SERVICE_SET.name);
     expect(await refusal(() => ql.find(NOTE, { context: agent } as never), NOTE)).toMatchObject({ status: 403 });

@@ -10,7 +10,8 @@
 // gates it installs. Driven end to end through the REAL surfaces, over the
 // attachments fixture's four objects:
 //
-//   att_case     — public read/write: the member edits it, so they attach.
+//   att_case     — public read/write: the member edits it, so they attach;
+//                  and another user's attachment on it is visible to them.
 //   att_readonly — public read: the member reads another user's record and
 //                  cannot edit it, so the attach is refused ATTACHMENT_PARENT_ACCESS.
 //   att_secret   — private: another user's record is unreadable, and so are
@@ -83,6 +84,8 @@ describe('a member attaches to the records they edit and sees the files of the r
   let adminSecretId: string;
   let nofilesId: string;
   let adminAttachmentId: string;
+  let adminCaseId: string;
+  let adminCaseAttachmentId: string;
 
   /** Presign in the attachments scope and PUT the bytes: the panel's first two steps. */
   async function presignAndPut(token: string, name = 'notes.txt'): Promise<string> {
@@ -163,6 +166,12 @@ describe('a member attaches to the records they edit and sees the files of the r
     const adminAttach = await completeOnto(adminTok, 'att_secret', adminSecretId);
     expect(adminAttach.status, JSON.stringify(adminAttach.body)).toBe(200);
     adminAttachmentId = String(adminAttach.body.data.attachmentId);
+    // And one to their own case, which every member reads: an attachment stored
+    // before the member held any attachment grant.
+    adminCaseId = String((await ql.insert('att_case', { name: 'admin case', owner_id: adminId }, { context: SYS })).id);
+    const adminCaseAttach = await completeOnto(adminTok, 'att_case', adminCaseId);
+    expect(adminCaseAttach.status, JSON.stringify(adminCaseAttach.body)).toBe(200);
+    adminCaseAttachmentId = String(adminCaseAttach.body.data.attachmentId);
   }, 180_000);
 
   afterAll(async () => {
@@ -218,6 +227,14 @@ describe('a member attaches to the records they edit and sees the files of the r
     const link = await mcpCall(memberTok, 'create_upload_link', { objectName: 'att_readonly', recordId: readonlyId, attachments: true });
     expect(link.isError).toBe(true);
     expect(link.json.error?.code).toBe('ATTACHMENT_PARENT_ACCESS');
+  });
+
+  it("another user's attachment on a record they can read is visible to them: listed and readable by id", async () => {
+    expect((await stack.apiAs(memberTok, 'GET', `/data/att_case/${adminCaseId}`)).status).toBe(200);
+    const byParent = await listAs(memberTok, `?parent_id=${adminCaseId}`);
+    expect(byParent.status).toBe(200);
+    expect(JSON.stringify(byParent.body)).toContain(adminCaseAttachmentId);
+    expect((await stack.apiAs(memberTok, 'GET', `/data/sys_attachment/${adminCaseAttachmentId}`)).status).toBe(200);
   });
 
   it("the attachments of a record they cannot read stay invisible: not listed, not counted, not readable by id", async () => {
