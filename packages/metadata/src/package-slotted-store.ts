@@ -303,18 +303,54 @@ export function bundleEntryKey(type: string, name: string, data: unknown, packag
 }
 
 /**
- * [#32521; epic #31527 red line 2] The identity a plural read over loaders
- * (`MetadataManager.loadMany`, `loadManyKeyed`) keeps one entry per, for
- * every type stored per `(package, name)`: a bundled type's `(package, name,
- * member)` ({@link bundleEntryKey}), every other one's store slot
- * ({@link storeSlotKey}: the package — `packageId`, else the one the item
- * carries — and the slot identity). So two packages' items of one name are
- * two entries, and the boot priming pass registers every holder. `undefined`
- * for every other type, whose plural reads keep one entry per name.
+ * [#32521; epic #31527 red lines 2 and 3] The names two or more packages hold
+ * among `entries` — a plural read's items of one type, each with the package
+ * it is held for. An item held for no package is never counted: beside one
+ * package's item of its name it is that holder's customization (D4), never a
+ * second holder.
  */
-export function slottedEntryKey(type: string, name: string, data: unknown, packageId?: string): string | undefined {
+export function namesSeveralPackagesHold(
+  entries: Iterable<{ readonly name: string | null; readonly packageId?: string | null }>,
+): Set<string> {
+  const holders = new Map<string, Set<string>>();
+  for (const { name, packageId } of entries) {
+    if (name === null || !isPackageCaller(packageId)) continue;
+    const held = holders.get(name) ?? new Set<string>();
+    held.add(packageId);
+    holders.set(name, held);
+  }
+  return new Set([...holders].filter(([, held]) => held.size > 1).map(([name]) => name));
+}
+
+/**
+ * [#32521; epic #31527 red lines 2 and 3] The identity a plural read over
+ * loaders (`MetadataManager.loadMany`, `loadManyKeyed`) keeps one entry per,
+ * for a type stored per `(package, name)`, the first entry of an identity
+ * kept:
+ *
+ *  - a bundled type: `(package, name, member)` ({@link bundleEntryKey});
+ *  - a name two or more packages hold among the read's entries (`contested`,
+ *    {@link namesSeveralPackagesHold}): its store slot ({@link storeSlotKey}:
+ *    the package — `packageId`, else the one the item carries — and the slot
+ *    identity). Every holder is handed on, so the boot priming pass registers
+ *    each and a bare read is refused after it, as without it (red line 2);
+ *  - any other name: the name, one entry, as before — a name no package or
+ *    one package holds hands on what it handed on, and no single-holder
+ *    answer moves (red line 3).
+ *
+ * `undefined` for every other type, whose plural reads keep one entry per name.
+ */
+export function pluralEntryKey(
+  type: string,
+  name: string,
+  data: unknown,
+  packageId: string | undefined,
+  contested: ReadonlySet<string>,
+): string | undefined {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
-  return bundleEntryKey(type, name, data, packageId) ?? storeSlotKey(type, name, packageId ?? storedItemPackageId(data), data);
+  const bundleKey = bundleEntryKey(type, name, data, packageId);
+  if (bundleKey !== undefined) return bundleKey;
+  return contested.has(name) ? storeSlotKey(type, name, packageId ?? storedItemPackageId(data), data) : name;
 }
 
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */

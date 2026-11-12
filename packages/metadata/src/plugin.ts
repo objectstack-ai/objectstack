@@ -1698,15 +1698,21 @@ export class MetadataPlugin implements Plugin {
 /**
  * [#32521; epic #31527 red line 2] The order the boot priming pass registers a
  * type's items in. `MetadataManager.loadMany` hands on every holder of a name
- * of a type stored per `(package, name)`; for an unbundled one, the items no
- * package holds are registered first, so a package's item registered after one
- * takes its slot over (the store's write rule) and the registry holds what a
- * read without the pass answers, whatever order the loaders handed them in.
- * Registered after a package's item, a package-less one would be filed into
- * that holder's slot as its customization. Every other type: as handed.
+ * two or more packages hold, of a type stored per `(package, name)`, and one
+ * item for any other name. For an unbundled such type the items a package
+ * holds are registered first, each into its own slot, and then the ones no
+ * package holds, which the store's write rule files where it files them at
+ * any later write: under a name two packages hold, the name's bare slot (the
+ * environment's own item). Registered between two packages' items, a
+ * package-less item would be filed into the first one's slot as its
+ * customization and answer a read naming that package; registered before
+ * them, the first one's item would take its bare slot over and `list` would
+ * drop it. So the registry holds what a read without the pass answers,
+ * whatever order the loaders handed the items in. A name one package holds
+ * hands on one item, whose order does not move. Every other type: as handed.
  */
 function primingOrder(type: string, items: unknown[]): unknown[] {
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return items;
     const held = (item: unknown) => storedItemPackageId(item) !== undefined;
-    return [...items.filter((item) => !held(item)), ...items.filter(held)];
+    return [...items.filter(held), ...items.filter((item) => !held(item))];
 }

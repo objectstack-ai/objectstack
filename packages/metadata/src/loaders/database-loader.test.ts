@@ -2,6 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DatabaseLoader } from './database-loader.js';
+import type { MetadataLoader } from './loader-interface.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
@@ -2166,12 +2167,12 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     m.registerLoader(new DatabaseLoader({ driver }));
     return m;
   };
-  /** The real pass (`MetadataPlugin._loadFromFileSystem`) over one database loader. */
-  const bootPass = async () => {
-    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+  /** The real pass (`MetadataPlugin._loadFromFileSystem`) over one database loader, on a host that declares `hostPackage`. */
+  const bootPass = async (hostPackage?: string, loaders: MetadataLoader[] = [new DatabaseLoader({ driver })]) => {
+    const plugin = new MetadataPlugin({ ...(hostPackage ? { packageId: hostPackage } : {}), watch: false, config: { bootstrap: 'eager' } });
     const m = (plugin as any).manager as MetadataManager;
     (m as any).loaders.clear();
-    m.registerLoader(new DatabaseLoader({ driver }));
+    for (const loader of loaders) m.registerLoader(loader);
     await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
     return m;
   };
@@ -2252,39 +2253,100 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
       id: `${type}_env_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_env_${version}`,
       source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'env' }),
     });
+  const registryKeys = (m: MetadataManager, type: string) => [...((m as any).registry.get(type)?.keys() ?? [])].sort();
+  const HOST = 'com.host.app';
+  /**
+   * What the reads answer after the pass for one package's row and a
+   * package-less row of a name, measured at `efd4ea3a` (before this change)
+   * and unchanged by it: `[order, host package, DatabaseLoader.loadMany,
+   * registry keys, bare read, read naming ALPHA, read naming HOST]`.
+   */
+  /**
+   * The same across two loaders, one holding ALPHA's item and the other a
+   * package-less item of the name, measured at `efd4ea3a` and unchanged:
+   * `[which loader is earlier, MetadataManager.loadMany, loadManyKeyed,
+   * registry keys after the pass, bare read, read naming ALPHA]`.
+   */
+  const ONE_HOLDER_ACROSS_LOADERS = [
+    ['package-less item first', ['memory'], ['memory'], ['helper'], 'memory', 'memory'],
+    ['package item first', [ALPHA], [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA],
+  ];
+  const ONE_HOLDER_AND_A_PACKAGELESS_ROW = [
+    ['package-less row saved last', 'no host package', ['env'], ['helper'], 'env', 'env', 'env'],
+    ['package-less row saved last', ALPHA, ['env'], [`${ALPHA}\u0000helper`], 'env', 'env', undefined],
+    ['package-less row saved last', HOST, ['env'], [`${HOST}\u0000helper`], 'env', ALPHA, 'env'],
+    ['package-less row saved first', 'no host package', [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+    ['package-less row saved first', ALPHA, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+    ['package-less row saved first', HOST, [ALPHA], [`${ALPHA}\u0000helper`], ALPHA, ALPHA, undefined],
+  ];
 
-  for (const order of ['package-less row first', 'package-less row last'] as const) {
-    it(`agent, a package-less row beside one package's row (${order}): after the pass the reads answer as without it — the package's item (BEFORE: the row saved last, so the package-less one when it came last)`, async () => {
-      if (order === 'package-less row first') {
-        await seedPackageless('agent', 1);
-        await seed('agent', ALPHA, 2);
-      } else {
-        await seed('agent', ALPHA, 1);
-        await seedPackageless('agent', 2);
+  for (const type of UNBUNDLED) {
+    it(`CONTROL ${type}, one package's row and a package-less row of the name (that holder's customization, D4): every read after the pass answers what it answered before — the row saved last — with no host package, a host package equal to the holder, or another`, async () => {
+      const seen: unknown[] = [];
+      for (const order of ['package-less row saved last', 'package-less row saved first'] as const) {
+        for (const hostPackage of [undefined, ALPHA, HOST]) {
+          driver = createMockDriver();
+          if (order === 'package-less row saved last') {
+            await seed(type, ALPHA, 1);
+            await seedPackageless(type, 2);
+          } else {
+            await seedPackageless(type, 1);
+            await seed(type, ALPHA, 2);
+          }
+          const m = await bootPass(hostPackage);
+          seen.push([
+            order, hostPackage ?? 'no host package',
+            labels(await new DatabaseLoader({ driver }).loadMany(type)),
+            registryKeys(m, type),
+            await answer(m, type, 'helper'), await answer(m, type, 'helper', ALPHA), await answer(m, type, 'helper', HOST),
+          ]);
+          expect(driver.update).not.toHaveBeenCalled();
+        }
       }
-      const m = await bootPass();
-      for (const packageId of [undefined, ALPHA]) {
-        expect(await answer(m, 'agent', 'helper', packageId)).toBe(await answer(cold(), 'agent', 'helper', packageId));
-        expect(await answer(m, 'agent', 'helper', packageId)).toBe(ALPHA);
-      }
-      expect([...((m as any).registry.get('agent')?.keys() ?? [])]).toEqual([`${ALPHA}\u0000helper`]);
+      expect(seen).toEqual(ONE_HOLDER_AND_A_PACKAGELESS_ROW);
     });
-  }
 
-  it('agent, the same on a host that declares its package: the package-less row is primed as the host\'s, beside the package\'s, so a bare read is refused naming both (BEFORE: the row saved last)', async () => {
-    const HOST = 'com.host.app';
-    await seed('agent', ALPHA, 1);
-    await seedPackageless('agent', 2);
-    const plugin = new MetadataPlugin({ packageId: HOST, watch: false, config: { bootstrap: 'eager' } });
-    const m = (plugin as any).manager as MetadataManager;
-    (m as any).loaders.clear();
-    m.registerLoader(new DatabaseLoader({ driver }));
-    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
-    expect(await answer(m, 'agent', 'helper')).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, HOST]);
-    expect(await answer(m, 'agent', 'helper', ALPHA)).toBe(ALPHA);
-    expect(await answer(m, 'agent', 'helper', HOST)).toBe('env');
-    expect(driver.update).not.toHaveBeenCalled();
-  });
+    it(`CONTROL ${type}, one package's item in one loader and a package-less item of the name in another: loadMany hands on the earlier loader's alone, and every read after the pass answers what it answered before`, async () => {
+      const seen: unknown[] = [];
+      for (const earlier of ['package-less item first', 'package item first'] as const) {
+        driver = createMockDriver();
+        await seed(type, ALPHA, 1);
+        const memory = new MemoryLoader();
+        await memory.save(type, 'helper', { name: 'helper', label: 'memory' });
+        const loaders = () => {
+          const database = new DatabaseLoader({ driver });
+          return earlier === 'package-less item first' ? [memory, database] : [database, memory];
+        };
+        const plain = new MetadataManager({ formats: ['json'], loaders: [] });
+        for (const loader of loaders()) plain.registerLoader(loader);
+        const m = await bootPass(undefined, loaders());
+        seen.push([
+          earlier,
+          labels(await plain.loadMany(type)), (await plain.loadManyKeyed(type)).map((entry) => (entry.data as any).label),
+          registryKeys(m, type), await answer(m, type, 'helper'), await answer(m, type, 'helper', ALPHA),
+        ]);
+      }
+      expect(seen).toEqual(ONE_HOLDER_ACROSS_LOADERS);
+    });
+
+    for (const order of ['first', 'between the two', 'last'] as const) {
+      it(`${type}, two holders and a package-less row saved ${order}: after the pass a bare read is refused naming both, a read naming a package answers its own item and list keeps the package-less one, as without it (BEFORE: the row saved last)`, async () => {
+        const writes = [(version: number) => seed(type, ALPHA, version), (version: number) => seed(type, BETA, version)];
+        writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless(type, version));
+        for (const [at, write] of writes.entries()) await write(at + 1);
+        const m = await bootPass();
+        for (const packageId of [undefined, ALPHA, BETA]) {
+          expect(await answer(m, type, 'helper', packageId)).toEqual(await answer(cold(), type, 'helper', packageId));
+        }
+        expect(await answer(m, type, 'helper')).toEqual(REFUSED);
+        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect(labels(await m.list(type))).toEqual(labels(await cold().list(type)));
+        expect(labels(await m.list(type))).toEqual([ALPHA, BETA, 'env']);
+        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']);
+      });
+    }
+  }
 
   it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
     for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {

@@ -89,10 +89,11 @@ import {
   PACKAGE_SLOTTED_STORE_TYPES,
   keyIdentityOf,
   readStoreEntry,
+  namesSeveralPackagesHold,
+  pluralEntryKey,
   recordStoreWrite,
   slotPackageOf,
   slotStoreOf,
-  slottedEntryKey,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
@@ -3353,14 +3354,7 @@ export class MetadataManager implements IMetadataService {
     options?: MetadataLoadOptions
   ): Promise<T[]> {
     const results: T[] = [];
-    // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
-    // per `(package, name, member)` (`bundleEntryKey`), never one per name.
-    // [#32521; epic #31527 red line 2] Every type stored per `(package, name)`
-    // keeps one item per store slot (`slottedEntryKey`: its package and slot
-    // identity), FROM one per `body.name` for an unbundled one: two packages'
-    // items of a name are both handed on, so the boot priming pass registers
-    // every holder and a bare read of the name is refused, as without it.
-    const slotEntries = new Set<string>();
+    const fetched: Array<{ loader: MetadataLoader; items: T[] }> = [];
 
     for (const loader of this.loaders.values()) {
         try {
@@ -3381,23 +3375,7 @@ export class MetadataManager implements IMetadataService {
             const items = PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.loadManyKeyed === 'function'
                 ? (await loader.loadManyKeyed<T>(type, options)).map((entry) => withEntryPackage(entry))
                 : await loader.loadMany<T>(type, options);
-            for (const item of items) {
-                const itemAny = item as any;
-                if (itemAny && typeof itemAny.name === 'string') {
-                    const slotKey = slottedEntryKey(type, itemAny.name, item);
-                    if (slotKey !== undefined) {
-                        if (slotEntries.has(slotKey)) continue;
-                        slotEntries.add(slotKey);
-                        results.push(item);
-                        if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-                        continue;
-                    }
-                    const exists = results.some((r: any) => r && r.name === itemAny.name);
-                    if (exists) continue;
-                }
-                results.push(item);
-                if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
-            }
+            fetched.push({ loader, items });
             this.reportLoaderReadRecovered(loader.contract.name);
         } catch (e) {
             // [#5108] Same seam, same verdict as `list()` — see
@@ -3405,6 +3383,40 @@ export class MetadataManager implements IMetadataService {
             // reporting one storage outage at two different levels is how the
             // wrong one gets copied.
             this.reportLoaderReadFailure(loader.contract.name, type, e);
+        }
+    }
+
+    // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
+    // per `(package, name, member)`, never one per name. [#32521; epic #31527
+    // red lines 2 and 3] An unbundled one keeps one item per store slot of a
+    // name two or more packages hold across every loader, FROM one per
+    // `body.name`, so the boot priming pass registers every holder and a bare
+    // read of the name is refused after it, as without it; any other name
+    // keeps one item, as before (`pluralEntryKey`).
+    const contested = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+        ? namesSeveralPackagesHold(fetched.flatMap(({ items }) => items.map((item) => ({
+            name: typeof (item as any)?.name === 'string' ? (item as any).name as string : null,
+            packageId: indexedItemPackageId(item),
+        }))))
+        : new Set<string>();
+    const slotEntries = new Set<string>();
+    for (const { loader, items } of fetched) {
+        for (const item of items) {
+            const itemAny = item as any;
+            if (itemAny && typeof itemAny.name === 'string') {
+                const slotKey = pluralEntryKey(type, itemAny.name, item, undefined, contested);
+                if (slotKey !== undefined) {
+                    if (slotEntries.has(slotKey)) continue;
+                    slotEntries.add(slotKey);
+                    results.push(item);
+                    if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
+                    continue;
+                }
+                const exists = results.some((r: any) => r && r.name === itemAny.name);
+                if (exists) continue;
+            }
+            results.push(item);
+            if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
         }
     }
     return results;
@@ -3464,15 +3476,11 @@ export class MetadataManager implements IMetadataService {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
-    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`), and
-    // [#32521] for every other type stored per `(package, name)` by its store
-    // slot (`slottedEntryKey`): every holder of a name is an entry.
-    const items = new Map<string, MetadataKeyedItem<T>>();
+    const fetched: MetadataKeyedItem<T>[] = [];
 
     for (const loader of this.loaders.values()) {
       try {
-        await this.admitKeyedLoaderItems<T>(loader, type, items, options);
+        await this.admitKeyedLoaderEntries<T>(loader, type, fetched, options);
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
         // Same seam, same verdict as `loadMany` and `list()`.
@@ -3480,12 +3488,26 @@ export class MetadataManager implements IMetadataService {
       }
     }
 
+    // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
+    // `(package, name)`, by `(package, name, member)`, and [#32521] for a name
+    // of an unbundled one that two or more packages hold across every loader,
+    // by its store slot (`pluralEntryKey`): every holder of it is an entry.
+    const contested = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? namesSeveralPackagesHold(fetched.map((entry) => ({ name: entry.name, packageId: entry.packageId ?? indexedItemPackageId(entry.data) })))
+      : new Set<string>();
+    const items = new Map<string, MetadataKeyedItem<T>>();
+    for (const entry of fetched) {
+      const key = pluralEntryKey(type, entry.name, entry.data, entry.packageId, contested) ?? entry.name;
+      if (items.has(key)) continue;
+      items.set(key, { name: entry.name, data: entry.data });
+    }
+
     return Array.from(items.values());
   }
 
   /**
-   * Merge ONE loader's answer for `type` into `items`, keyed by that loader's
-   * own key for each item — {@link loadManyKeyed}'s per-loader body.
+   * Append ONE loader's keyed answer for `type` to `entries`, in its own
+   * order — {@link loadManyKeyed}'s per-loader body.
    *
    * Distinct from {@link admitLoaderItems} on exactly one axis, and that axis
    * is the whole of the defect commit a56baa2bd fixed: the fallback for a loader with no
@@ -3493,34 +3515,36 @@ export class MetadataManager implements IMetadataService {
    * `data.name` — the pre-#14205 behaviour, verbatim, which drops a nameless
    * body. Here the fallback is `list()` + a per-name `load()`, so a loader
    * that cannot enumerate keys and bodies together still answers with both.
+   * A name already answered is not loaded again, except for a type stored
+   * per `(package, name)`, where the later item may be another package's
+   * ([#32521]).
    *
    * Read failures are NOT caught here — the caller owns that verdict, as in
    * {@link admitLoaderItems}.
    */
-  private async admitKeyedLoaderItems<T = any>(
+  private async admitKeyedLoaderEntries<T = any>(
     loader: MetadataLoader,
     type: string,
-    items: Map<string, MetadataKeyedItem<T>>,
+    entries: MetadataKeyedItem<T>[],
     options?: MetadataLoadOptions
   ): Promise<void> {
     if (typeof loader.loadManyKeyed === 'function') {
       const keyed = await loader.loadManyKeyed<T>(type, options);
       for (const entry of keyed) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        const key = slottedEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
-        if (items.has(key)) continue;
-        items.set(key, { name: entry.name, data: entry.data });
+        entries.push(entry);
       }
       return;
     }
 
+    const answered = new Set(entries.map((entry) => entry.name));
     for (const name of await loader.list(type)) {
-      if (typeof name !== 'string' || name === '' || items.has(name)) continue;
+      if (typeof name !== 'string' || name === '') continue;
+      if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) && answered.has(name)) continue;
       const result = await loader.load(type, name, options);
       if (result?.data == null) continue;
-      const key = slottedEntryKey(type, name, result.data) ?? name;
-      if (items.has(key)) continue;
-      items.set(key, { name, data: result.data as T });
+      entries.push({ name, data: result.data as T });
+      answered.add(name);
     }
   }
 
