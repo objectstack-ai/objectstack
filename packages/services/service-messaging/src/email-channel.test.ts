@@ -300,6 +300,23 @@ describe('email channel', () => {
             expect(email.sent).toHaveLength(0);
         });
 
+        it('hands the package the notify node recorded to sendTemplate as callerPackageId (ADR-0150 D3, #31699)', async () => {
+            const email = fakeTemplateEmail();
+            const data = fakeData({ users: { user_1: 'ada@example.com' } });
+            const ch = createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+            });
+            await ch.send(silentCtx(), templateDelivery({ template: 'welcome', templateCallerPackageId: 'com.acme.alpha' }));
+            // CONTROL: a delivery that names none (an environment flow, a row
+            // snapshotted before the key existed) sends no key at all.
+            await ch.send(silentCtx(), templateDelivery({ template: 'welcome' }));
+            await ch.send(silentCtx(), templateDelivery({ template: 'welcome', templateCallerPackageId: '' }));
+            expect(email.templated.map((t) => t.callerPackageId)).toEqual(['com.acme.alpha', undefined, undefined]);
+            expect(email.templated[1]).not.toHaveProperty('callerPackageId');
+        });
+
         it('a producer-set payload.locale is NOT consulted — the recipient chain decides (#13881)', async () => {
             // Until the 2026-09-01 ruling this pin read the other way: the
             // producer's single pre-fan-out value won over the deployment

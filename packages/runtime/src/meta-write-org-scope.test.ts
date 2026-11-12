@@ -160,7 +160,11 @@ function makeEngine() {
             // A registry that reads no type by package (ADR-0150): every by-name read stays
             // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
             // package-scoped type, since it cannot tell how this registry reads it.
-            readsByPackage: () => false,
+            // [#31699] Except the email template, which `SchemaRegistry` reads by
+            // package (its name is scoped to the namespace): a bare read of it
+            // resolves through the package-scoped resolver, here this double's own item.
+            readsByPackage: (type: string) => type === 'email_template',
+            resolveItem: (type: string, name: string) => registryItems.get(type)?.get(name),
             listItems: (type: string) => Array.from(registryItems.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registryItems.get(type)?.get(name),
             // Nothing here is code-shipped: every specimen below is a
