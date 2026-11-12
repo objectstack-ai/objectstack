@@ -128,6 +128,8 @@ describe('Send back for revision (ADR-0044)', () => {
     maxRevisions?: number;
     behavior?: 'first_response' | 'unanimous';
     approvers?: Array<{ type: string; value?: string }>;
+    /** [#31696] Ship it as this package's flow. */
+    packageId?: string;
   }) {
     automation.registerFlow('expense_approval', {
       name: 'expense_approval',
@@ -160,7 +162,7 @@ describe('Send back for revision (ADR-0044)', () => {
         { id: 'e6', source: 'on_approved', target: 'end' },
         { id: 'e7', source: 'on_rejected', target: 'end' },
       ],
-    });
+    }, opts?.packageId ? { source: 'package', packageId: opts.packageId, holder: opts.packageId } : undefined);
   }
 
   async function startFlow() {
@@ -788,6 +790,54 @@ describe('Send back for revision (ADR-0044)', () => {
       expect(advanced.code).toBeUndefined();
       expect(marks).toEqual(['done']);
       expect(automation.listSuspendedRuns()).toHaveLength(0);
+    });
+  });
+
+  describe('[#31696] a request reads its flow from its own slot once a second package ships the name (ADR-0150 D8 row R7)', () => {
+    const P1 = 'com.acme.alpha';
+    const P2 = 'com.acme.beta';
+    /** P2's flow of the name: no review node, so reading it in place of P1's refuses the send-back. */
+    const shipP2 = () => automation.registerFlow('expense_approval', {
+      name: 'expense_approval', label: 'Beta Expense', type: 'autolaunched',
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    }, { source: 'package', packageId: P2, holder: P2 });
+    const open = async (recordId: string, slotted = false) => {
+      const ctx = { object: 'fin_expense', record: { id: recordId }, userId: 'submitter' };
+      const paused = slotted ? await automation.executeSlot(P1, 'expense_approval', ctx) : await automation.execute('expense_approval', ctx);
+      expect(paused.status).toBe('paused');
+      return (await fake.find('sys_approval_request', { where: { record_id: recordId } }))[0];
+    };
+
+    it('requests opened before and after the second package ships it carry P1, and send-back, the read and resubmit answer as before', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const [before, returned] = [await open('x1'), await open('x2')];
+      await service.sendBack(returned.id, { actorId: 'u1' }, asUser('u1'));
+      shipP2();
+      await expect(automation.getFlow('expense_approval')).rejects.toThrow(P2);
+      const after = await open('x3', true);
+      expect([before.process_package, after.process_package]).toEqual([P1, P1]);
+
+      for (const req of [before, after]) {
+        const read: any = await service.getRequest(req.id, SYSTEM_CTX);
+        expect(read.flow_steps.map((s: any) => s.label)).toContain('Manager Review');
+        expect(read.flow_route).toBeDefined();
+        expect((await service.sendBack(req.id, { actorId: 'u1' }, asUser('u1'))).request.status).toBe('returned');
+      }
+      expect((await service.resubmit(returned.id, { actorId: 'submitter' }, asUser('submitter'))).resumed).toBe(true);
+    });
+
+    it('a request naming no package reads through its run; with no run to read either, the send-back keeps the refusal naming both', async () => {
+      registerReviseFlow({ packageId: P1 });
+      const [byRun, control] = [await open('x1'), await open('x2')];
+      shipP2();
+      await fake.update('sys_approval_request', { id: byRun.id, process_package: null });
+      await fake.update('sys_approval_request', { id: control.id, process_package: null, flow_run_id: 'run_nobody' });
+      expect((await service.sendBack(byRun.id, { actorId: 'u1' }, asUser('u1'))).request.status).toBe('returned');
+      const refused = service.sendBack(control.id, { actorId: 'u1' }, asUser('u1'));
+      await expect(refused).rejects.toThrow(P1);
+      await expect(refused).rejects.toThrow(P2);
+      expect((await fake.find('sys_approval_request', { where: { id: control.id } }))[0].status).toBe('pending');
     });
   });
 });

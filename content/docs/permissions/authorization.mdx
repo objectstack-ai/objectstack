@@ -439,7 +439,24 @@ in the security catalog, or the route answers `404`. That covers a position or
 permission set the environment authored through the metadata door as well as
 one a package ships: the ledger row records the package when there is one and
 leaves `package_id` empty when there is none, and the resolver honours both
-alike, because it keys the row by type and name. A write the ledger refuses
+alike, because it keys the row by type and name. For a permission set two
+packages hold, `?package=<id>` names one (ADR-0150 D3): without it the route
+answers `409` `RESOURCE_CONFLICT` with `details.candidates`, a package that does
+not hold the set answers `409` too, and the row records the named package.
+Each holder keeps its own row (the permission ledger is keyed by package and
+name), so switching one package's set never touches the other's. A row that
+names no package, or a package that no longer serves the name, is read by the
+name alone: while two packages hold the name and the environment does not, it
+switches off every holder, and switching a holder on while such a row stands
+answers `409`, and nothing is written. Where the environment holds the name
+beside a package, the name alone is the environment's set: a row naming no
+package, or stamped `sys_metadata` (the overlay's provenance), is the
+environment's own switch, and a row naming a package that no longer serves the
+name keeps the environment's set off the same way. A disabled package still counts as a holder here. With one holder, a
+package or the environment, such a row is the holder's and the write takes it
+over. `package` is the only query parameter, and only
+for `permission`; any other, or a repeated or blank one, answers `400`
+before any lookup. A write the ledger refuses
 answers with the status its code means: a record validation failure is `400`
 `VALIDATION_FAILED`, a hook's refusal keeps its own pair, and a store failure
 is `503` `SERVICE_UNAVAILABLE`. It is the same authority

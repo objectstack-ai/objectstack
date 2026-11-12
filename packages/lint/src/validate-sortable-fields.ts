@@ -68,6 +68,14 @@
  *    `error` because the engine's `aggregate` door refuses the pair. See
  *    `validateGridAggregations` for the walk and its skips.
  *
+ * 5. GRID COLUMN SUMMARIES (`list-view-summary-field-type-refused`, #32503):
+ *    the same block's `properties.columns[].summary`. The entry IS a list
+ *    view's column (`ObjectGridPropsSchema.columns` is
+ *    `ListViewSchema.shape.columns`), and the grid's footer asks the same
+ *    whole-set aggregate query of it, so it is judged by the list view's own
+ *    verdict (`columnSummaryRefusal`, `validate-list-view-field-refs.ts`) and
+ *    reported under the list view's rule id, from the walk check 4 rides.
+ *
  * Checks 2 and 3 are ONE question — the served sortability projection's
  * `sortable: false` — answered by `resolveObjectSortability`
  * (`@objectstack/spec/api`), the resolver the list door refuses by, never by a
@@ -284,6 +292,7 @@ import {
   type ObjectGraph,
 } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
+import { LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, columnSummaryRefusal } from './validate-list-view-field-refs.js';
 import { PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED } from './validate-page-field-bindings.js';
 import {
   SYSTEM_FIELDS,
@@ -1009,7 +1018,7 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
   // ── [#30023] Stored page sorts: existence (#30093), provenance, sortability ──
   findings.push(...validatePageSorts(stack, fieldsByObject, sortability, unprovisionedAnchors));
 
-  // ── [#32144, #32449] `object-grid` group-header aggregations the aggregate door refuses ──
+  // ── [#32144, #32449, #32503] `object-grid` aggregations and column summaries the aggregate door refuses ──
   findings.push(...validateGridAggregations(stack));
 
   return findings;
@@ -1065,6 +1074,21 @@ export function validateSortableFields(stack: AnyRec): SortableFieldFinding[] {
  * that does not resolve (existence is not this verdict), a dotted path, a
  * `type` outside the table's vocabulary (the schema's refusal), and a leaf
  * whose declaration carries no type (`id`) or a type outside `FieldType`.
+ *
+ * [#32503] The same walk judges the block's `properties.columns[].summary`,
+ * the footer figure a column declares. The entry is a list view's `ListColumn`
+ * (`ObjectGridPropsSchema.columns` reuses `ListViewSchema.shape.columns`), and
+ * a paged, ungrouped grid that owns its fetch asks the footer's whole-set
+ * aggregate query of it (`useObjectGridSummaries` → `useWholeSetSummary` →
+ * `DataSource.queryGroupHeaders` with no `groupBy`, `@object-ui/plugin-grid`),
+ * which reaches the same `aggregate` door. So the verdict, the words and the
+ * rule id are the list view's (`columnSummaryRefusal`,
+ * `list-view-summary-field-type-refused`), never a second reading here; a
+ * grid whose rows fit one page, or are handed in, sums them in the browser
+ * instead, and the declaration is refused all the same (the ruling the list
+ * view's summaries and the value-provider grid took). A grouped grid draws its
+ * header numbers from `aggregations`, not from the column summaries, so only
+ * the footer reads them. Binding and graph are the aggregations'.
  */
 function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
   const findings: SortableFieldFinding[] = [];
@@ -1078,12 +1102,31 @@ function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
     for (const { component, path } of walkPageComponents(page, `pages[${pi}]`)) {
       if (component.type !== 'object-grid') continue;
       const props = isRec(component.properties) ? component.properties : undefined;
-      if (!props || !Array.isArray(props.aggregations)) continue;
+      if (!props || (!Array.isArray(props.aggregations) && !Array.isArray(props.columns))) continue;
       const dataSource = isRec(component.dataSource) ? component.dataSource : undefined;
       const objectName =
         strName(dataSource?.object) ?? strName(valueAt(props, PAGE_BLOCK_SORT_OBJECT_PROP['object-grid']));
       if (!objectName) continue;
 
+      // [#32503] `properties.columns[].summary`: the list view's own column
+      // entry, judged by the list view's own verdict (`columnSummaryRefusal`).
+      if (Array.isArray(props.columns)) {
+        props.columns.forEach((column: unknown, ci: number) => {
+          if (!isRec(column) || column.summary === undefined) return;
+          graph ??= indexServedObjectGraph(stack, { tied: 'drop' });
+          const refusal = columnSummaryRefusal(column, graph, objectName);
+          if (refusal === undefined) return;
+          findings.push({
+            severity: 'error',
+            rule: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
+            where: `page "${pageName}" · object-grid › columns[${ci}].summary`,
+            path: `${path}.properties.columns[${ci}].summary`,
+            ...refusal,
+          });
+        });
+      }
+
+      if (!Array.isArray(props.aggregations)) continue;
       props.aggregations.forEach((entry: unknown, ai: number) => {
         if (!isRec(entry)) return;
         const fn = entry.type;
