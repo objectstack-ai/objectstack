@@ -30,13 +30,13 @@
  *    opened with no flow name, whose `process_name` carries the node id):
  *    left null, and named.
  *
- * ## What it does not change
+ * ## Its readers
  *
- * No reader or writer moves onto the column (ADR-0150 red line 3): the
- * revise-edge check, the resubmit window, the progress strip and the labels
- * still read the flow by name, and `openNodeRequest` does not stamp it — a
- * request opened after a boot is bound by the next one. Its reader-to-be is
- * the flow's trailing child (B) and S4's upgrade report. No key changes.
+ * `openNodeRequest` stamps the column from the run's own slot (#31696), so a
+ * request opened since carries it already. Once two packages hold the name,
+ * the revise-edge check, the resubmit window, the progress strip and the
+ * step's queue package read the request's flow by it, else by its run
+ * (`ApprovalService.requestFlow`). No key changes.
  *
  * ## Re-runnable
  *
@@ -178,7 +178,7 @@ export function logProcessPackageBackfill(report: ProcessPackageBackfillReport, 
   if (report.ambiguous.length > 0) {
     logger.warn(
       `[approvals] ${at}: more than one holder holds these flows, so none is picked and each open request is left naming ` +
-        'no package. Every reader still reads the flow by name as before — ' +
+        'no package. Each such request reads its flow through its run, else is refused naming every holder — ' +
         report.ambiguous.map((a) => `'${a.name}' (${rowsOf(a.rows)}; held by ${a.candidates.join('; ')})`).join(', ') + '.',
       { ambiguous: report.ambiguous },
     );
