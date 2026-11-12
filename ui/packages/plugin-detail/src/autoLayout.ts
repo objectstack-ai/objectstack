@@ -85,7 +85,10 @@ export function isWideFieldType(type: string): boolean {
 const MULTI_FILE_FIELD_TYPES = new Set(['file', 'image', 'field:file', 'field:image']);
 
 /** The object-field keys {@link isWideDetailField} reads. */
-export type DetailLayoutObjectFields = Record<string, { multiple?: unknown } | null | undefined>;
+export type DetailLayoutObjectFields = Record<
+  string,
+  { readonly multiple?: unknown; readonly [key: string]: unknown } | null | undefined
+>;
 
 /**
  * Should this detail field take the full row?
