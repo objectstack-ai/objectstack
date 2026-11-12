@@ -1850,6 +1850,39 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
       expect((registry.getPackageScopedItem('email_template', 'welcome', A) as { label?: string }).label).toBe('alpha en-US');
     });
 
+    // [#32568 × #32497] One holder disabled while the read-side hydrator
+    // runs: the served holder set is the enabled one, so an overlay type's
+    // row is that holder's customization (served at its address, and laid in
+    // under its envelope), and a sealed type's row is declined. Re-enabled,
+    // no hydration state survives: the overlay row is refused naming both,
+    // and each sealed holder serves its own.
+    const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
+    for (const type of ['email_template', 'action', 'queue']) {
+      it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state, none left behind by the hydration`, async () => {
+        const overlay = type === 'email_template';
+        if (overlay) {
+          tpl(A);
+          tpl(B);
+          storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
+        } else {
+          shipSealed(type, A);
+          shipSealed(type, B);
+          storeRow(type, 'active', 'stored');
+        }
+        const name = overlay ? 'welcome' : 'approve';
+        const answer = (at: string) => read(type, name, at).then((r) => labelOf(r) as unknown, (e: { status?: number; refusal?: { candidates?: unknown[] } }) => [e.status, e.refusal?.candidates]);
+        registry.disablePackage(B);
+        const servedAtA = overlay ? 'env en-US' : `alpha ${type}`;
+        expect(await answer(A), 'B disabled').toEqual(servedAtA);
+        await protocol.getMetaItems({ type } as never);
+        expect(await answer(A), 'B disabled, after the hydrator').toEqual(servedAtA);
+        registry.enablePackage(B);
+        for (const at of [A, B]) {
+          expect(await answer(at), `${at} re-enabled`).toEqual(overlay ? [409, BOTH] : `${at.split('.').pop()} ${type}`);
+        }
+      });
+    }
+
     it('CONTROL — overlay type, one holder: the read-side hydrator still lays the row in under its one holder\'s envelope, and the exact read serves it', async () => {
       tpl(A);
       storeRow('email_template', 'active', 'env', { name: 'welcome', label: 'env en-US', locale: 'en-US', subject: 's', bodyHtml: '<p>e</p>' });
