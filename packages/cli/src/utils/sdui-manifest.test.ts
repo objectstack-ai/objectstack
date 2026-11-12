@@ -58,7 +58,7 @@ const pkg = (id: string, pages: unknown[]) => ({
 const PACKAGE_CARRIED: Record<string, Record<string, unknown>> = {
   'top-level `pages: []`': { pages: [], packages: [pkg('com.x.site', [html('site_landing')])] },
   'a top-level kind:full page': {
-    pages: [{ name: 'home', label: 'Home', kind: 'full', regions: [] }],
+    pages: [{ name: 'home', label: 'Home', type: 'home', kind: 'full', regions: [] }],
     packages: [pkg('com.x.site', [html('site_landing')])],
   },
 };
