@@ -488,7 +488,20 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
 
   function realClient() {
     const fetchFn = vi.fn(async (_input: RequestInfo | URL) => getSessionAnswer()) as unknown as typeof fetch;
-    return { client: createAuthClient({ baseURL: AUTH_URL, fetchFn }), fetchFn };
+    const client = createAuthClient({ baseURL: AUTH_URL, fetchFn });
+    // Observed, not replaced: `recheckAnswered()` awaits the answer the provider awaits.
+    vi.spyOn(client, 'getSession');
+    return { client, fetchFn };
+  }
+
+  /**
+   * Settles once the latest `getSession()` answer has been handed to the
+   * provider. The provider awaited that same promise first, so its continuation
+   * has run by the time this one resumes.
+   */
+  async function recheckAnswered(client: AuthClient) {
+    const answers = vi.mocked(client.getSession).mock.results;
+    await answers[answers.length - 1].value;
   }
 
   /**
@@ -516,7 +529,7 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     });
     // Identity is on screen; the 401 subscription may still be pending.
     await providerListening;
-    return fetchFn;
+    return { client, fetchFn };
   }
 
   /** An API call on the data lane answers 401. */
@@ -537,7 +550,7 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
   });
 
   it('the server answers "no session": identity clears, so the guard can send the visitor to sign in', async () => {
-    const fetchFn = await signedIn();
+    const { fetchFn } = await signedIn();
     const reads = sessionReads(fetchFn);
 
     getSessionAnswer = async () => new Response('null', { status: 401 });
@@ -555,7 +568,7 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
   });
 
   it('the server says the session is live: nothing changes', async () => {
-    const fetchFn = await signedIn();
+    const { client, fetchFn } = await signedIn();
     const reads = sessionReads(fetchFn);
 
     await apiAnswers401();
@@ -563,16 +576,14 @@ describe('a 401 on an API call re-checks the session (objectstack#32138)', () =>
     await waitFor(() => expect(sessionReads(fetchFn)).toBeGreaterThan(reads), {
       timeout: CHAIN_MS,
     });
-    // Let the re-check's answer land before reading that nothing changed.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // Read "nothing changed" after the provider has the re-check's answer, not while it is in flight.
+    await recheckAnswered(client);
     expect(screen.getByTestId('authenticated').textContent).toBe('true');
     expect(screen.getByTestId('user-name').textContent).toBe('Alice');
   });
 
   it('the re-check is not answered (transport error): the session is kept, an unanswered read is not a sign-out', async () => {
-    const fetchFn = await signedIn();
+    const { fetchFn } = await signedIn();
     const reads = sessionReads(fetchFn);
 
     getSessionAnswer = async () => {
