@@ -11,7 +11,7 @@
 - 每日看板的车道一节展示 devx 六项度量;清单住 `lanes/devx.md` 范围节度量行,⛔ 不另抄。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
 - 轮次记录按车道计欠审逾一轮的 head 数并点名车道(`check-owed-reviews.mjs`),只报 ⛔ 不接审。
-- 轮次记录分写「决策卡 N」与「待您审合 PR M」,不合计;后者 = open `pm:awaiting-merge` PR。
+- 每日看板与轮次记录列「待维护者」:当前里程碑已清的专题,注小结贴否;读数非门禁。
 - 析取 ①全裸(无 `pm:*`/`needs-user-decision`/`domain:*`);② `pm:queue` 无 `domain:*`(仅多车道仓);
 - ③ `domain:*` 无 pm-state;④ `pm:queue`+`domain:*` 无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2min。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
@@ -68,11 +68,12 @@
 - 跨层功能点(≥2 层)立父单带 `area:*`+`tracking`+清单项级,逐层子单按 `Blocked-by:` 排。
 - 每张留一条英文审计评论(`Triage: lands in …; rationale: …`),可选带 `Size/model suggestion:` 行。
 - 改作者可写面(种类非 `none` 或带 `(narrowing)`)的卡,首触 done-when 写 skills + docs + eval 三项。
+- ADR/技能文本的携带注记 ⛔ 不挂实施卡:ADR 由落地席合并后立卡,余各立 `domain:skills` 卡。
 - 查重/shadow 检查先按文件/机制查本仓与姊妹仓 open 卡(含 `pm:dispatched`),再跟引用与关键词。
 - 同文件同机制 = 同一发现,不分车道即并:证据搬先卡,后卡经中继 `issue_patch` 关 `duplicate`。
 - 同族发现并入收口卡,不开单点卡;在飞(assignee/open PR)永不并,`Blocked-by:` 不派;完工查过期。
 - 执行席 ⛔ 不并卡,疑重复挂 `pm:retriage` 写明哪两张同文件同机制;同 assignee 者自关后卡。
-- 关重复卡须目标具名且新读重叠;追踪父单 sub-issue 全关、无 open 工作 ⇒ `completed`。
+- 关重复卡须目标具名且新读重叠;追踪父单子卡全关、表完成、无 open 工作 ⇒ `completed`。
 - 关卡先贴签名评论点名裁决与证据;⛔ 是非关、活认领卡、安全卡不在此权,归维护者。
 - 首触答责任三问:谁的代码出险/有正路否/谁可达且有人用否;据答改卡范围、域与路由。
 - 三类外不可逆或有硬时限(发版即固化、只被消费的文件、过窗不可补)⇒ 不关,报维护者。
@@ -97,5 +98,4 @@
 - 例外一:`platform-readings.md` 增量抬上限到落地行数,免决策卡,记 `ruledRaises` 引常设裁决。
 - 例外二:AGENTS.md 报告态翻转,须①不删门不跳测;②同笔附两红 run 入下批待决;③否即翻回。
 - 条件:席位验收评论逐条核实、去重计数(候选/落地/已有/拒收)、一事一行、不计重排。
-- 回翻条款:实施中发现契约终究要动 ⇒ dev 停手,卡回决策箱,⛔ 永不静默重裁。
 - 请示纪律:方向性授权覆盖整条执行链一并做完,⛔ 不逐项回问。
