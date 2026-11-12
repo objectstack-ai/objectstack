@@ -2610,6 +2610,74 @@ function validateNamespacePrefix(config: ObjectStackDefinition): string[] {
  */
 const SINGLE_APP_PACKAGE_TYPES: ReadonlySet<string> = new Set(['app', 'module']);
 
+/** The rule every single-app finding closes on — ADR-0019 D3 as amended. */
+const SINGLE_APP_RULE =
+  'ADR-0019 (app-as-consumer-unit) D3 as amended (a suite may surface several apps, one per package)';
+
+/**
+ * The remedy every single-app finding names: the suite shape the amended D3
+ * allows, and the one composition that keeps it. A flat composition (the
+ * default `manifest: 'last'`, `'first'` or an index) keeps ONE manifest, so it
+ * puts every input's apps back under that one package id — the shape the rule
+ * removes, refused by {@link collectComposedSingleAppErrors}. Only
+ * `manifest: 'preserve'` keeps each package's own id.
+ */
+const SINGLE_APP_COMPOSE_REMEDY =
+  "compose the packages into one artifact with composeStacks(stacks, { manifest: 'preserve' }), " +
+  "which keeps each package's own id (a flat composition puts every app back under one)";
+
+/**
+ * How a finding names a package type: derived from the type itself, so a type
+ * added to {@link SINGLE_APP_PACKAGE_TYPES} is reported under its own name and
+ * never under another's.
+ */
+function singleAppPackageKind(type: string): string {
+  return `${/^[aeiou]/.test(type) ? 'An' : 'A'} '${type}' package`;
+}
+
+/** Each app quoted by name, in declaration order; an entry with no name by its position. */
+function quotedAppNames(apps: readonly unknown[]): string[] {
+  return apps.map((app, i) => (isRecord(app) && typeof app.name === 'string' ? `'${app.name}'` : `#${i}`));
+}
+
+/**
+ * The single-app finding for ONE package — its `type`, its `id` and the `apps`
+ * it defines — or `undefined` when the rule holds. Every door judges a package
+ * through this, so the authored stack, a `packages[]` body and a composed
+ * result are held to one rule with one sentence. `where` locates a package
+ * that is not the stack's own (a `packages[]` body).
+ */
+function singleAppFinding(type: unknown, packageId: unknown, apps: unknown, where = ''): string | undefined {
+  if (typeof type !== 'string' || !SINGLE_APP_PACKAGE_TYPES.has(type)) return undefined;
+  if (!Array.isArray(apps) || apps.length <= 1) return undefined;
+  const fold = type === 'app' ? ', or fold them into one app with multiple tabs' : '';
+  return (
+    `${singleAppPackageKind(type)} must define at most one app, but package '${String(packageId)}'${where} defines ` +
+    `${apps.length} (${quotedAppNames(apps).join(', ')}). Keep one app per package: move each other app into a ` +
+    `'module' package of its own and ${SINGLE_APP_COMPOSE_REMEDY}${fold} — ${SINGLE_APP_RULE}.`
+  );
+}
+
+/**
+ * The single-app rule applied to every body of `stack.packages` — each is a
+ * package of its own, so each is judged by its own `type`, `id` and `apps`
+ * (ADR-0019 D3 as amended reads per package). On the authored route every body
+ * is the output of its own `defineStack` call and was judged there; this is
+ * what holds a hand-assembled `packages[]` body, and one that reached a
+ * composition through `strict: false`, to the same rule.
+ */
+function collectPackageBodySingleAppErrors(stack: unknown): string[] {
+  const entries = isRecord(stack) && Array.isArray(stack.packages) ? stack.packages : [];
+  const errors: string[] = [];
+  for (const [i, entry] of entries.entries()) {
+    const body = isRecord(entry) && isRecord(entry.manifest) ? entry.manifest : undefined;
+    if (body === undefined) continue;
+    const finding = singleAppFinding(body.type, body.id, body.apps, ` (packages[${i}])`);
+    if (finding !== undefined) errors.push(finding);
+  }
+  return errors;
+}
+
 /**
  * Validate the "at most one app per package" rule — ADR-0019
  * (app-as-consumer-unit) D3 as amended, on the package types of
@@ -2617,30 +2685,24 @@ const SINGLE_APP_PACKAGE_TYPES: ReadonlySet<string> = new Set(['app', 'module'])
  *
  * An app package (`manifest.type === 'app'`) or a module package
  * (`manifest.type === 'module'`) must not define **more than one** app: a
- * package that holds N apps is the shape D3 removes. The finding names the
- * package, every app found and the remedy: one app per package, so each further
- * app moves into a module package of its own (an app package may instead fold
- * its apps into one app with several tabs). Zero apps is allowed (a module may
- * contribute objects and navigation to another package's app, and a package
- * may still be under authoring).
+ * package that holds N apps is the shape D3 removes. The stack's own package is
+ * judged, and so is every `packages[]` body it carries
+ * ({@link collectPackageBodySingleAppErrors}). The finding names the package,
+ * every app found and the remedy: one app per package, so each further app
+ * moves into a module package of its own and the packages are composed under
+ * `manifest: 'preserve'` (an app package may instead fold its apps into one app
+ * with several tabs). Zero apps is allowed (a module may contribute objects and
+ * navigation to another package's app, and a package may still be under
+ * authoring).
  *
  * Mirrors {@link validateNamespacePrefix}: returns one error per violation;
- * `defineStack` aggregates and throws.
+ * `defineStack` aggregates and throws. `composeStacks` judges its result by the
+ * same rule ({@link collectComposedSingleAppErrors}).
  */
 function validateSingleApp(config: ObjectStackDefinition): string[] {
   const type = config.manifest?.type;
-  if (type === undefined || !SINGLE_APP_PACKAGE_TYPES.has(type)) return [];
-  const apps = config.apps ?? [];
-  if (apps.length <= 1) return [];
-  const names = apps.map((a) => `'${a.name}'`).join(', ');
-  const kind = type === 'app' ? "An 'app' package" : "A 'module' package";
-  const fold = type === 'app' ? ', or fold them into one app with multiple tabs' : '';
-  return [
-    `${kind} must define at most one app, but package '${config.manifest?.id}' defines ` +
-      `${apps.length} (${names}). Keep one app per package: move each other app into a 'module' package ` +
-      `of its own${fold} — ADR-0019 (app-as-consumer-unit) D3 as amended (a suite may surface several apps, ` +
-      `one per package).`,
-  ];
+  const own = singleAppFinding(type, config.manifest?.id, config.apps ?? []);
+  return [...(own === undefined ? [] : [own]), ...collectPackageBodySingleAppErrors(config)];
 }
 
 /**
@@ -3739,6 +3801,16 @@ class StackNamespacePrefixInvalidError extends StackRefusalError {
  * surface several apps, one per package — {@link validateSingleApp}.
  * Spelled `_VIOLATION` like the ledger's other rule-violation refusals
  * (`UNIQUE_VIOLATION`, `EXTERNAL_SCHEMA_MODE_VIOLATION`).
+ *
+ * TWO raise sites since #32810, one rule and one code, the header naming the
+ * pass (as {@link StackCrossReferenceError}'s two do):
+ *
+ * - `defineStack` — the stack's own package and every `packages[]` body it
+ *   carries. Header: `defineStack single-app validation failed (N issues):`.
+ * - `composeStacks` — what a composition puts under each package id: a flat
+ *   composition's one selected manifest, and every `packages[]` body
+ *   ({@link collectComposedSingleAppErrors}). Header:
+ *   `composeStacks single-app validation failed (N issues):`.
  */
 class StackSingleAppViolationError extends StackRefusalError {
   readonly code = 'STACK_SINGLE_APP_VIOLATION';
@@ -7014,6 +7086,13 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    * keeps its own identity so a product can be split into modules without
    * renaming a single object.
    *
+   * A pick-one composition puts every input's `apps` under the one manifest it
+   * keeps, so when that manifest is an `app` or `module` package and the inputs
+   * bring two or more apps, it is refused (`STACK_SINGLE_APP_VIOLATION`,
+   * ADR-0019 D3 as amended: at most one app per package). A suite — an app
+   * package plus module packages, each with an app of its own — composes under
+   * `'preserve'`.
+   *
    * `'preserve'` composes the artifact's package list instead of discarding it:
    * every input stack contributes its packages to `packages` (ADR-0130 D4), in
    * stack order, each element the `{ manifest: … }` wrapper object
@@ -8717,6 +8796,67 @@ function collectArtifactCrossReferenceErrors(
 }
 
 /**
+ * The single-app rule (ADR-0019 D3 as amended, {@link validateSingleApp})
+ * applied to what a composition of two or more stacks puts under each package
+ * id.
+ *
+ * - **A flat composition** (`manifest: 'last'`, the default, `'first'` or an
+ *   index) keeps ONE manifest and concatenates every input's `apps` under it,
+ *   so its result is one package that defines all of them. Each input passed
+ *   its own `defineStack` with one app; the composition is what puts several
+ *   apps under one package id, so it is refused here, naming the package, each
+ *   app with the input it came from, and the remedy: `manifest: 'preserve'`.
+ *   Judged on the selected manifest's `type`, as `defineStack` judges a stack.
+ * - **Every `packages[]` body** the result carries — the bodies of an input
+ *   that carried `packages[]`, and under `'preserve'` the body each input with
+ *   a manifest is assembled into — by its own `type`, `id` and `apps`
+ *   ({@link collectPackageBodySingleAppErrors}).
+ *
+ * Under `'preserve'` the singular `manifest` is the artifact's identity
+ * (ADR-0130 D6), not a package: the load path registers the bodies and only the
+ * bodies (D4's read-both rule), and the flattened collections beside them, where
+ * the emitter keeps any, are a copy of the bodies' — so the top level is not
+ * judged there. A one-app-per-package `'preserve'` composition is therefore
+ * accepted as before.
+ *
+ * Never reached for a single input: the `stacks.length === 1` early return of
+ * {@link composeStacks} hands that input back untouched, and its own
+ * `defineStack` already judged it.
+ */
+function collectComposedSingleAppErrors(
+  stacks: readonly ObjectStackDefinition[],
+  composed: Record<string, unknown>,
+  manifestOption: ComposeStacksOptionsParsed['manifest'],
+): string[] {
+  const errors: string[] = [];
+  const manifest = isRecord(composed.manifest) ? composed.manifest : undefined;
+  const type = manifest?.type;
+  const apps = Array.isArray(composed.apps) ? composed.apps : [];
+  if (
+    manifestOption !== 'preserve'
+    && typeof type === 'string' && SINGLE_APP_PACKAGE_TYPES.has(type)
+    && apps.length > 1
+  ) {
+    // The composed `apps` is every input's `apps`, concatenated in input order
+    // (step 3 of `composeBuiltStacks`), so walking the inputs names the input
+    // each app came from.
+    const sourced = stacks.flatMap((stack, i) => {
+      const own: unknown = (stack as Record<string, unknown>).apps;
+      return Array.isArray(own) ? quotedAppNames(own).map((name) => `${name} from ${stackLabel(stack, i)}`) : [];
+    });
+    const option = typeof manifestOption === 'number' ? String(manifestOption) : `'${manifestOption}'`;
+    errors.push(
+      `${singleAppPackageKind(type)} must define at most one app, but composeStacks with manifest: ${option} ` +
+        `gives package '${String(manifest?.id)}' ${apps.length} (${sourced.join(', ')}): a composition that keeps ` +
+        `one manifest puts every input's apps under that one package id. Keep one app per package and ` +
+        `${SINGLE_APP_COMPOSE_REMEDY} — ${SINGLE_APP_RULE}.`,
+    );
+  }
+  errors.push(...collectPackageBodySingleAppErrors(composed));
+  return errors;
+}
+
+/**
  * Declaratively compose multiple stack definitions into a single unified stack.
  *
  * This eliminates the manual `...spread` merging pattern when combining
@@ -8750,6 +8890,14 @@ function collectArtifactCrossReferenceErrors(
  * `defineStack`'s door rather than this one; and an embedded action that
  * `objectConflict: 'override'` did not carry into the composed object cannot
  * collide.
+ * **Apps** concatenate too, and the result is held to ADR-0019 D3 as amended —
+ * at most one app per `app` or `module` package (#32810): a flat composition
+ * (`manifest: 'last'`, the default, `'first'` or an index) keeps ONE manifest,
+ * so two inputs with an app each would put both apps under that one package id,
+ * and it is refused (`STACK_SINGLE_APP_VIOLATION`, 422) naming the package,
+ * each app with the input it came from, and the remedy. Compose a suite's
+ * packages with `manifest: 'preserve'`, which keeps each package's own id;
+ * every `packages[]` body is judged by its own type and apps either way.
  * **`objectConflict: 'merge'`** shallow-merges `fields` only (#14848): two
  * objects that both declare any other object-level collection (`actions`,
  * `indexes`, `listViews`, `validations`, …) or fixed-shape config object
@@ -8967,6 +9115,21 @@ function composeBuiltStacks(
     const header = `composeStacks artifact cross-reference validation failed (${count} issue${count === 1 ? '' : 's'}):`;
     const lines = artifactCrossRefErrors.map((e) => `  ✗ ${e}`);
     throw new StackCrossReferenceError(`${header}\n\n${lines.join('\n')}`, artifactCrossRefErrors);
+  }
+
+  // 3c. [ADR-0019 D3 as amended · #32810] At most one app per package, judged
+  //     on what this composition puts under each package id: a flat
+  //     composition's one selected manifest, and every `packages[]` body. AFTER
+  //     the manifest (step 1), the `apps` concatenation (step 3) and the
+  //     preserved bodies (step 3a) exist, and after the artifact pass (3b) —
+  //     the order `defineStack` runs its cross-reference and single-app
+  //     refusals in. See {@link collectComposedSingleAppErrors}.
+  const singleAppErrors = collectComposedSingleAppErrors(stacks, composed, opts.manifest);
+  if (singleAppErrors.length > 0) {
+    const count = singleAppErrors.length;
+    const header = `composeStacks single-app validation failed (${count} issue${count === 1 ? '' : 's'}):`;
+    const lines = singleAppErrors.map((e) => `  ✗ ${e}`);
+    throw new StackSingleAppViolationError(`${header}\n\n${lines.join('\n')}`, singleAppErrors);
   }
 
   // 4. Named handler functions — merged by name (#5005).

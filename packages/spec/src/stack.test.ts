@@ -1524,6 +1524,142 @@ describe('defineStack — at most one App per package (ADR-0019 D1/D3)', () => {
   });
 });
 
+describe('composeStacks — at most one App per package, judged on what the composition puts under each package id (ADR-0019 D3 as amended)', () => {
+  // Each input passes its own `defineStack` with one app; what is judged here
+  // is the composition. A flat composition keeps one manifest and concatenates
+  // every input's apps under it; `manifest: 'preserve'` keeps each package's
+  // own id.
+  const objectOf = (name: string) => ({ name, label: name, fields: { title: { type: 'text' as const } } });
+  const appOf = (name: string, objectName: string) => ({
+    name,
+    label: name,
+    navigation: [{ id: `nav_${objectName}`, type: 'object' as const, label: objectName, objectName }],
+  });
+  const pkg = (id: string, type: 'app' | 'module' | 'plugin') =>
+    ({ id, version: '1.0.0', type, name: id, namespace: 'crm' });
+  const salesInput = () => ({
+    manifest: pkg('com.example.crm', 'app'),
+    objects: [objectOf('crm_account')],
+    apps: [appOf('crm_sales', 'crm_account')],
+  });
+  const serviceInput = () => ({
+    manifest: pkg('com.example.crm.service', 'module'),
+    objects: [objectOf('crm_case')],
+    apps: [appOf('crm_service', 'crm_case')],
+  });
+  const sales = () => defineStack(salesInput());
+  const service = () => defineStack(serviceInput());
+
+  type Refusal = { code?: string; status?: number; issues?: readonly string[]; message: string };
+  /** The refusal `run` throws, or `null` when it returns. */
+  const refusalOf = (run: () => unknown): Refusal | null => {
+    try {
+      run();
+      return null;
+    } catch (e) {
+      return e as Refusal;
+    }
+  };
+  /** The one single-app finding of `r`, after asserting the ADR-0112 envelope and the pass's header. */
+  const singleAppFinding = (r: Refusal | null, header: string): string => {
+    expect(r, 'refused').not.toBeNull();
+    expect(r!.code).toBe('STACK_SINGLE_APP_VIOLATION');
+    expect(r!.status).toBe(422);
+    expect(r!.issues).toHaveLength(1);
+    expect(r!.message.startsWith(`${header} (1 issue):`)).toBe(true);
+    const finding = r!.issues![0];
+    expect(r!.message).toContain(`  ✗ ${finding}`);
+    return finding;
+  };
+
+  it('refuses a flat composition (the default manifest: \'last\') of an app package and a module package with one app each, naming the package, each app with its input, and the preserve remedy', () => {
+    const finding = singleAppFinding(
+      refusalOf(() => composeStacks([sales(), service()])),
+      'composeStacks single-app validation failed',
+    );
+    // 'last' selects the module's manifest, so both apps sit under its id.
+    expect(finding).toMatch(/^A 'module' package must define at most one app/);
+    expect(finding).toContain("package 'com.example.crm.service' 2");
+    expect(finding).toContain("'crm_sales' from 'com.example.crm' (stack #0)");
+    expect(finding).toContain("'crm_service' from 'com.example.crm.service' (stack #1)");
+    expect(finding).toContain("manifest: 'preserve'");
+  });
+
+  it('refuses the same composition under manifest: \'first\' and under an index, which select the app package', () => {
+    for (const manifest of ['first', 0] as const) {
+      const finding = singleAppFinding(
+        refusalOf(() => composeStacks([sales(), service()], { manifest })),
+        'composeStacks single-app validation failed',
+      );
+      expect(finding).toMatch(/^An 'app' package must define at most one app/);
+      expect(finding).toContain("package 'com.example.crm' 2");
+    }
+  });
+
+  it('builds the same packages under manifest: \'preserve\' unchanged — each keeps its own id and its one app', () => {
+    const artifact = composeStacks([sales(), service()], { manifest: 'preserve' });
+    expect(
+      (artifact.packages ?? []).map((p) => {
+        const body = p.manifest as { id: string; apps?: Array<{ name: string }> };
+        return [body.id, (body.apps ?? []).map((a) => a.name)];
+      }),
+    ).toEqual([
+      ['com.example.crm', ['crm_sales']],
+      ['com.example.crm.service', ['crm_service']],
+    ]);
+    expect(artifact.manifest?.id).toBe('com.example.crm.service');
+  });
+
+  /** A hand-assembled artifact whose one `packages[]` body is a module package defining two apps. */
+  const handBuiltArtifact = () => ({
+    manifest: pkg('com.example.crm', 'app'),
+    packages: [{
+      manifest: {
+        ...pkg('com.example.crm.service', 'module'),
+        objects: [objectOf('crm_case')],
+        apps: [appOf('crm_service', 'crm_case'), appOf('crm_field_service', 'crm_case')],
+      },
+    }],
+  });
+
+  it('refuses, at defineStack, a packages[] body that defines two apps, naming the body\'s package and both apps', () => {
+    const finding = singleAppFinding(
+      refusalOf(() => defineStack(handBuiltArtifact() as never)),
+      'defineStack single-app validation failed',
+    );
+    expect(finding).toMatch(/^A 'module' package must define at most one app/);
+    expect(finding).toContain("package 'com.example.crm.service' (packages[0]) defines 2");
+    expect(finding).toContain("'crm_service', 'crm_field_service'");
+    expect(finding).toContain("manifest: 'preserve'");
+  });
+
+  it('refuses, at composeStacks, a packages[] body with two apps that reached it unjudged (strict: false), under every manifest option', () => {
+    for (const manifest of ['last', 'preserve'] as const) {
+      const unjudged = defineStack(handBuiltArtifact() as never, { strict: false });
+      const finding = singleAppFinding(
+        refusalOf(() => composeStacks([unjudged, defineStack({ manifest: pkg('com.example.crm.tools', 'plugin') })], { manifest })),
+        'composeStacks single-app validation failed',
+      );
+      expect(finding).toContain("package 'com.example.crm.service' (packages[0]) defines 2");
+    }
+  });
+
+  it('control: a single-input composition is handed back untouched, and a flat composition whose inputs bring one app is accepted', () => {
+    const one = sales();
+    expect(composeStacks([one])).toBe(one);
+    const withoutApp = defineStack({ manifest: pkg('com.example.crm.revenue', 'module'), objects: [objectOf('crm_quote')] });
+    const flat = composeStacks([sales(), withoutApp]);
+    expect(flat.manifest?.id).toBe('com.example.crm.revenue');
+    expect((flat.apps ?? []).map((a) => a.name)).toEqual(['crm_sales']);
+  });
+
+  it('control: a flat composition whose selected manifest is not an app or module package is not judged', () => {
+    const tools = defineStack({ manifest: pkg('com.example.crm.tools', 'plugin') });
+    const flat = composeStacks([sales(), service(), tools]);
+    expect((flat.apps ?? []).map((a) => a.name)).toEqual(['crm_sales', 'crm_service']);
+  });
+});
+
 // ── ADR-0087 D2 conversion notices reach the author ─────────────────────────
 //
 // Moved to `stack-conversion-notices.test.ts` with #23543 F5-http: the block
