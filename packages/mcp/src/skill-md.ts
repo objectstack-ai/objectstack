@@ -354,7 +354,9 @@ create/update payload.
 - **validate_expression({ objectName, expression, site?, severity?, triggerKind?, sweepObject? })** — check a CEL
   expression against an object's schema *before* you author it into a formula,
   validation, or flow condition. Returns build-time errors (bare field refs,
-  unknown fields/functions) and advisory warnings (text/boolean fields misused
+  unknown fields/functions; at a \`formula\` or \`validation\` site, a reference
+  field read both through the relationship and as a plain value, or more than
+  one hop) and advisory warnings (text/boolean fields misused
   in arithmetic; an error at a \`validation\` site, worded for the rule's
   \`severity\`, and at a \`flow_condition\` of a record-triggered or
   time-relative flow, where it fails the run; a warning on any other flow), plus the fields and
