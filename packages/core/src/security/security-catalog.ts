@@ -757,7 +757,11 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     if (outcome.status === 'resolved') {
       // The registry's answer is final: a holder it resolved that may not be
       // served (a disabled package's set) is not-found, never a second,
-      // by-name lookup in the metadata service.
+      // by-name lookup in the metadata service. [#31698] The holder the rule
+      // resolved is asked directly, as `holdsPlatformPermissionSet` asks it:
+      // a disabled package's set is not served whether or not its item
+      // carries the package's stamp.
+      if (outcome.holder.kind === 'package' && registry.isPackageDisabled(outcome.holder.packageId)) return { status: 'not-found' };
       const definition = servable(outcome.item, name);
       return definition ? { status: 'resolved', entry: entry('permission', definition, 'registry') } : { status: 'not-found' };
     }

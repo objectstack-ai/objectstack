@@ -319,6 +319,18 @@ describe('security catalog read — permission sets by (package, name) through t
     expect(answer.message).toContain(P);
   });
 
+  it('[#31698] a disabled holder the rule resolves is not served, whether or not its item carries the package\'s stamp', async () => {
+    for (const item of [{ name: 'q_set', _packageId: Q }, { name: 'q_set' }]) {
+      const opts = { packages: { [Q]: {} }, holders: { q_set: [{ packageId: Q, item }] } };
+      const off = createSecurityCatalogReader({ registry: scopedRegistry({}, { ...opts, disabled: [Q] }), metadata: metadata({}) });
+      expect(await resolveCatalogReference(off, 'permission', 'q_set'), JSON.stringify(item)).toEqual({ status: 'not-found' });
+      expect(await off.resolve('permission', 'q_set'), JSON.stringify(item)).toBeUndefined();
+      // CONTROL: enabled, the same holder grants its set.
+      const on = createSecurityCatalogReader({ registry: scopedRegistry({}, opts), metadata: metadata({}) });
+      expect((await on.resolve('permission', 'q_set'))?.definition, JSON.stringify(item)).toBe(item);
+    }
+  });
+
   it('a name two packages in the closure hold is refused, naming both; with no package, environment-wide, naming both', async () => {
     const two = {
       packages: { [P]: { deps: [Q, 'com.acme.r'] }, [Q]: {}, 'com.acme.r': {} },
