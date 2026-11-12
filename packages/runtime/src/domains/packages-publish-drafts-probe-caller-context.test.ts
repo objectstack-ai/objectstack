@@ -106,7 +106,17 @@ function makeDoor(items: Record<string, unknown> = ITEMS) {
         result: { version: 'h', seq: 1, item: { body: items[`${req.type} ${req.name}`] }, packageId: null },
     }));
     vi.spyOn(p, 'runPublishSideEffects').mockResolvedValue({});
-    p.getMetaItem = async ({ type, name }: any) => ({ item: items[`${type} ${name}`] });
+    // [#31700] The probe reads a widget's dataset from the publishing package:
+    // the caller's resolution first (`resolveCallerPackageAddress`, ADR-0150
+    // D3), then the read at the holder's address. This double has no registry,
+    // so it answers as one in which the publishing package, whose drafts carry
+    // the dataset, holds it.
+    const metaReads: Array<{ type: string; name: string; packageId?: string }> = [];
+    p.resolveCallerPackageAddress = ({ callerPackageId }: any) => ({ kind: 'package', packageId: callerPackageId });
+    p.getMetaItem = async ({ type, name, packageId }: any) => {
+        metaReads.push({ type, name, ...(packageId !== undefined ? { packageId } : {}) });
+        return { item: items[`${type} ${name}`] };
+    };
     p.getMetaItems = async () => ({ items: [] });
     const engineFinds: Array<{ object: string; context: unknown }> = [];
     p.engine = {
@@ -139,7 +149,7 @@ function makeDoor(items: Record<string, unknown> = ITEMS) {
         },
         context: { getService: () => null, trigger: vi.fn() },
     };
-    return { dispatcher: new HttpDispatcher(kernel), admissionContexts, engineFinds };
+    return { dispatcher: new HttpDispatcher(kernel), admissionContexts, engineFinds, metaReads };
 }
 
 async function publishAs(userId: string, items: Record<string, unknown> = ITEMS) {
@@ -157,9 +167,11 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('publish-drafts widget probes run as the publishing caller (#25484)', () => {
     it('a correct dataset over a gated object the caller CAN read yields no error-tier issue', async () => {
-        const { probes, admissionContexts, engineFinds } = await publishAs(READER);
+        const { probes, admissionContexts, engineFinds, metaReads } = await publishAs(READER);
 
         expect(probes?.checked?.widgets).toBe(1);
+        // The widget's dataset was read at the publishing package's address.
+        expect(metaReads).toContainEqual({ type: 'dataset', name: 'task_metrics', packageId: 'com.tasks' });
         expect(probes.issues.filter((i: any) => i.severity === 'error')).toEqual([]);
         // Admission was asked about the caller, never about a system principal.
         expect(admissionContexts.length).toBeGreaterThan(0);
