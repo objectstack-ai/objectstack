@@ -32,6 +32,8 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_audit_checkpoint.fields.kind.options.late": "fe2faaecdcaa74d3",
   "objects.sys_audit_checkpoint.fields.kind.options.window": "cf300084968a650c",
   "objects.sys_audit_checkpoint.fields.leaf_count.label": "3879d38d4e5176e5",
+  "objects.sys_audit_checkpoint.fields.leaf_hashes.help": "8c59d342be41804c",
+  "objects.sys_audit_checkpoint.fields.leaf_hashes.label": "74230d1d6453537c",
   "objects.sys_audit_checkpoint.fields.previous_digest.help": "f1e76ab5745fa68b",
   "objects.sys_audit_checkpoint.fields.previous_digest.label": "c0df1553d55fcdd6",
   "objects.sys_audit_checkpoint.fields.root.label": "2a87592c30d680bc",

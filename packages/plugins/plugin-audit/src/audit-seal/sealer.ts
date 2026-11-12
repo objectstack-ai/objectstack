@@ -592,7 +592,9 @@ class ObjectPass {
     }
     const { body, keyId, signature } = signed;
     try {
-      await engine.insert(AUDIT_CHECKPOINT_OBJECT, checkpointRow(body, { id: randomUUID(), signature }), { context: { isSystem: true } });
+      // The leaf hashes ride beside the signed root, which authenticates them (D9's per-row verdicts).
+      const leafHashes = ordered.map((l) => l.hash.toString('hex'));
+      await engine.insert(AUDIT_CHECKPOINT_OBJECT, checkpointRow(body, { id: randomUUID(), signature, leafHashes }), { context: { isSystem: true } });
     } catch (err) {
       // M1: an insert can reject after its row is stored (an afterInsert hook that throws, a lost
       // acknowledgement), so the seed is kept either way: a stored checkpoint whose seed was dropped could
