@@ -183,8 +183,9 @@ export type PackageScopedFunctionEngine = Pick<ObjectQL, 'registry' | 'functionH
  * calling flow's armed package as the caller. An action `target` is no
  * reader: it names a handler key in the action registry, which E2 resolves
  * by package, never a registered function. `resolveFunction` /
- * `resolveFunctionEntry` keep answering the one last-registered function per
- * name for any other caller.
+ * `resolveFunctionEntry` answer the one last-registered function per name for
+ * any other caller, and refuse a name two packages hold (#31700, epic seat
+ * ruling R2-C).
  */
 export function resolvePackageScopedFunction(
   engine: PackageScopedFunctionEngine,
