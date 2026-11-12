@@ -2,7 +2,7 @@
   "number": 32739,
   "kind": "pull_request",
   "title": "fix(metadata-protocol, metadata): the cluster metadata-mutation signal names the row's package, so replicas converge per package (ADR-0150 D4)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -22,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:59:17Z",
-  "updated_at": "2026-11-12T13:55:11Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-12T14:23:41Z",
+  "closed_at": "2026-11-12T14:23:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T14:23:38Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/32739",

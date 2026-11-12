@@ -2,8 +2,8 @@
   "number": 32643,
   "kind": "issue",
   "title": "First-run checklist: Email delivery must not be a required row — an administrator who sends no mail keeps the checklist (and Home's deployment notice) forever",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:studio",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:56:39Z",
-  "updated_at": "2026-11-12T10:58:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T20:06:04Z",
+  "closed_at": "2026-11-12T20:05:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32643",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\nFiling gate: **③ a task on the maintainer's word.** The maintainer, verbatim, 2026-11-12: 「环境的新手清单中要求设置邮箱。我觉得这个不应该是必须的设置」.\n\nReader: the `domain:ui` lane (`ui/apps/console/src/pages/settings/FirstRunChecklist.tsx`, `firstRunChecklistLogic.ts`, and the deployment notice in `ui/packages/app-shell/src/console/deployment-notice/`). Suggested priority **p2**. Triage decides.\n\nDedupe (objectstack, open and closed):\n- `first-run checklist mail`: 0.\n- `FirstRunChecklist email`: 0.\n- `checklist email optional`: 0.\n\n## 维护者速读\n\n环境首页的新手清单里有一行「设置邮件发送」。清单要等每一行都完成才会消失，所以用不到邮件的管理员会一直看到它，首页顶部的部署提示也会一直说「没有设置邮件服务」。维护者认为邮件不应该是必须设置的。改法建议：把这一行改成「可选」，不计入完成；清单在必需的行都完成后就收起。部署提示只在应用真的要发邮件、却发不出去时才出现。\n\n## Readings (objectstack `origin/main`)\n\n- `FirstRunChecklist.tsx` header, row 5 is \"Email delivery: mail can deliver; links to Setup → Mail Delivery\", shown to any session that may write `mail`. Its `done` comes from `isMailConfigured` in `firstRunChecklistLogic.ts`: a delivering provider (not `log`), a From address, and an SMTP host when SMTP.\n- \"Once every row shown is done the checklist draws nothing\", so an unset mail row keeps it on Home indefinitely.\n- While mail is unset, Home's deployment notice claims the `mail` item and states that no email service is set up (`homeItemClaims.ts`, `DeploymentNotice.tsx`).\n- On hosted, a tenant has **no** platform mail transport by design (cloud `capability-loader.ts`: the control plane's `OS_EMAIL_*` sender is not inherited by tenant apps). So the row is unfinishable without the administrator bringing their own provider.\n\n## Work, recommended shape\n\n1. Mark the mail row **optional**: labelled as such, not counted toward completion, and the checklist collapses once the required rows are done. It can stay reachable from Setup.\n2. Raise the deployment notice's mail line only when something needs mail and cannot send it, for example an installed app's email-sending flow, or an invitation or notification that failed to deliver. Do not raise it merely because mail is unset.\n3. Keep \"done is read from the real setting\": an administrator who configures mail still sees the row done.\n\n## Done when\n\nOn a fresh environment with mail unset:\n- the checklist disappears once the non-mail rows are done;\n- Home shows no \"email not set up\" line;\n- configuring mail later still marks the row done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

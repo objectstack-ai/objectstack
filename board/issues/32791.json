@@ -1,0 +1,34 @@
+{
+  "number": 32791,
+  "kind": "issue",
+  "title": "metadata: a stored row bound to the host package is counted as two holders (host package + environment) in the bare action read's loader judgement (regression of #32560 / PR #32719)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T18:45:33Z",
+  "updated_at": "2026-11-12T19:57:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32791",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32560 (PR #32719, merged as `070e87964f199734aee147b35f1948e2fdc99d33`). Found by the contract review of PR #32676 (card #32521), comment 6832698813, finding B4. Ruled a regression of #32560 by the epic #31527 seat. It is on the epic release line: fix it before the release. Suggested level p1; final level is triage's call.\n\n## What moved\n\nMain's `070e87964` makes a bare read of an `action` name judge the loaders' slots beside the registry's. In one composition the same stored row is counted twice.\n\nComposition (CONTROL C3 of #32676's `[#32521]` suite in `packages/metadata/src/loaders/database-loader.test.ts`, \"CONTROL action, one package's row and a package-less row of the name (that holder's customization, D4)\"):\n\n- one package (`com.alpha.app`) holds the action name in a stored row;\n- a package-less stored row of the same name (that holder's customization) is saved last;\n- the host declares another package (`com.host.app`).\n\n| | Answer of the bare read |\n|:--|:--|\n| FROM (main before `070e87964`, and #32560's changeset sentence for an environment item beside one package) | the package-less row (the environment's item answers first beside one package) |\n| Measured on main's tip (`88282a78` + #32676's head, 22 of 22 runs) | `409 RESOURCE_CONFLICT` `ambiguous-in-environment` naming `com.alpha.app`, `com.host.app` and the environment |\n| TO | no phantom holder: the candidates name only the real holders under ADR-0150 D4 (alpha and the environment at most), or the package-less row as before, whichever D4 gives; `com.host.app` is never a candidate |\n\nLikely mechanism (from the candidates and the new judge): the boot priming pass files the package-less stored row into the host's slot; the new judge counts that registry slot as a holder for the host package, and counts the loader's package-less stored slot as the environment's. One row, two holders. It fails closed (409), so it is not a widening, but it reports a holder that does not exist (ADR-0150 red line 2: report ambiguity truthfully). First-party reach measured 0.\n\n## Owed\n\n1. Fix the judgement so a registry slot that the boot pass filled from a stored row is not counted again beside the same loader row. Pin red on main's tip, green after.\n2. Re-measure the other eight by-package types in the same composition and say whether any answers move.\n3. After this lands: tighten #32676's C3 `action` cell (which, by the epic seat's ruling, asserts only `409 RESOURCE_CONFLICT` with `com.alpha.app` and the environment among the candidates) to the exact answer this card settles.\n4. Changeset: the moved answer, FROM → TO.\n\n## Repro\n\nPR #32676's C3 CONTROL for `action`, run on its head merged with `origin/main` (any main at or after `070e87964`). The review's logs and probe are in the seat's card folder.\n\nRestart-when: none, this card is on the epic #31527 release line (ruling 6824949405 on #31527)."
+}

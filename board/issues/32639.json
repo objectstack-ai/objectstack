@@ -2,8 +2,8 @@
   "number": 32639,
   "kind": "issue",
   "title": "objectql: the engine's bare function read answers nothing after the last-registered of two holders leaves, though the other still holds the name (ADR-0150 D4, after #31700)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "duplicate",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T08:54:39Z",
-  "updated_at": "2026-11-12T12:50:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T17:46:20Z",
+  "closed_at": "2026-11-12T17:46:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32639",
   "body": "epic:#31527#1 · os-bill · session_01Utp6CbqzUZJRphdYbBQ16b\n\nParent: #31700 (ADR-0150 child B; epic #31527, red line 2: ambiguity is reported, never guessed).\nFound by: the dev of #31700 (PR #32513, report 6818542238, `out_of_scope_findings`). The seat's contract review 6819064294 measured it at `caf6941d89` (boundary flags) and asked for this card.\n\n## Premise\n\nThe engine keeps two function maps: `functions`, the bare map (one entry per name, the last registration), and `functionHolders`, the per-package holder set (ADR-0150 D4, #31716). `ObjectQL#unregisterFunctionsByPackage(P)` (`packages/objectql/src/engine-hooks-and-functions.ts`) deletes the bare entry only when it is P's, and drops P from the holder set. So when two packages hold a name and the one registered LAST leaves, the bare map loses the name while the other package still holds it. `resolveFunctionEntry(NAME)` and `resolveFunction(NAME)` then answer nothing, although the remaining package is now the name's one holder and a one-holder name should resolve to it.\n\n- `main` behaves the same. #31700 makes the state newly reachable: two namespaces' packages may now each bind a function of one name through a package bind. Before, only a direct `ObjectQL#registerFunction` under two package owners reached it.\n- Re-check: alpha and beta bind `f`, beta last. Call `unregisterFunctionsByPackage` with beta's owner id. `functionHoldersOf('f').packageHolders` still names alpha, and `resolveFunctionEntry('f')` is `undefined`.\n\n## Who reads it\n\n- The readers by package go through `functionHoldersOf` and are not affected: the flow `script` and screen nodes (`AutomationEngine.resolveFunction` → `resolvePackageScopedFunction`) and the hook binder (`functionHoldersOf(name).packageItem(own package)`).\n- The one production reader of the bare entry, runtime `releaseMovedFunctions` (#32468), reads it only for a one-holder name since #31700 R3-B. The seat measured that it tolerates the miss.\n- So the miss is the bare read itself, by a caller with no package.\n\n## Fix shape (estimate)\n\n- When a holder leaves and exactly one holder of the name remains, the bare read answers that holder's entry: put it back into the bare map, or derive the bare answer from the holder set. An environment (package-less) registration keeps its current rules.\n- Pin it: two holders, the last-registered leaves → the bare read answers the remaining holder's entry. CONTROLs: the first-registered leaves (unchanged), two holders remain (409 naming both, unchanged), a one-holder name leaves (nothing, unchanged).\n- If a public answer moves, declare it FROM → TO with its Clause-② arm, and check the other bare-map holders the same way (`hook` has no bare read).\n\n## Order\n\nLands after #31700 (PR #32513), which this builds on. Same lane (epic #31527 seat 1).\n\nBlocked-by: #31700"

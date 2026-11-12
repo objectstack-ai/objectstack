@@ -11,17 +11,20 @@
     "type": "User"
   },
   "labels": [
-    "needs-user-decision"
+    "area:files",
+    "domain:server",
+    "needs-user-decision",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:11:20Z",
-  "updated_at": "2026-11-12T14:18:19Z",
+  "updated_at": "2026-11-12T16:56:17Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32747",
   "body": "Filing category: ② a decision only the maintainer can make.\n\n## 维护者速读\n\n- 现象：用户把 3 张发票发给 AI，AI 能读懂并通过 MCP 建好报销单，但发票文件本身只能走 `create_upload_link`：AI 给用户 3 个链接，用户在浏览器里把同样的 3 个文件再各选一次。一个链接只收一个文件，哪怕字段是 `multiple: true`。\n- 要你裁：① 一个链接能否一次传多个文件；② 能读本地文件的 AI 客户端（Claude Code、桌面代理）能否把文件内容直接交给 MCP（base64），不用再让人选一遍。\n- 推荐：A（只做①：多文件字段的链接一次可选多个文件），② 暂不开。\n\n## One-sentence problem\n\n\"Here are my three invoices, file the claim\" costs the user three link clicks and three re-picks of files they already gave the agent.\n\n## Evidence (reach)\n\nHosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), member's MCP OAuth token, claim object with `invoices: { type: 'file', multiple: true }`:\n- `create_record` → draft claim; `create_upload_link { field: 'invoices' }` ×2 → each link takes one file and appends it (`record-file-access.ts`: `value = [...fileIdsIn(current[field]), fileId]`); `read_file` (with `fileId`) reads each back; `run_action` submits. Measured end to end.\n- `packages/mcp/src/mcp-http-tools.ts` `create_upload_link`: \"uploads one file\"; no MCP tool takes file content.\n\n## Governing text\n\n- objectstack#30892 (closed): \"An AI client sees an image the user attaches in its own chat, but it has no bytes to send. The MCP protocol has no standard client-to-server file transfer.\" → upload link, ruled option B (signed-in user only).\n- That premise holds for chat clients; it does not hold for clients that read local files (they can send base64 in a tool argument).\n\n## Options\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | On a `multiple: true` field, one link accepts several files (same user, same record and field, one use, same expiry) | \"Open this link and pick your 3 invoices\" — once | storage seat · 1 PR · precedent: the console form already takes several files at once |\n| B | A + an `attach_file` tool taking `{ objectName, recordId, field, filename, contentBase64 }`, size-capped (e.g. 5 MiB), stored as the calling user and marked as added by an AI client | Claude Code / desktop agents attach directly; chat clients still use the link | storage + mcp seats · 2 PRs · widens the write surface |\n| C | Keep as is | One link per file | none |\n\nBusiness reading: A removes the repetition for everyone without a new door; B removes the re-pick for agents with file access but lets an agent put bytes the user never picked onto a record (an agent could generate a plausible \"invoice\" PDF), so provenance becomes the reviewer's problem.\n\n## Recommendation\n\nA. It cuts the cost of the common case (several invoices) with no new trust question. Confidence gap: whether B's convenience is worth the provenance question for expense-type records; recommend revisiting B when a customer workflow needs agent-side bulk attach.\nSelf-check: ① and ③ pick A; ② (business pull) would pick B for Claude Code users; ④ picks A.\n\n## After the ruling\n\nA: the upload-link page takes `multiple` on a multi-file field, appends each file in one write, e2e: one link, three PDFs, three files on the field.\n\nos-decision-facets\n① 项目长远合理性: A 沿用已裁定的链接通道，只放宽\"一个链接一个文件\"。\n② 实际业务拉动: 报销一次常有多张发票（本次实测 2 张需 2 个链接）；能读本地文件的 agent 用户更想要 B。\n③ 防 AI 犯错: B 让 agent 能写入用户没亲手选的文件（可伪造发票）；A 仍由人选文件。\n④ 创业阶段不扩散: A 一个 PR；B 新增写入工具和来源标记。\nPrior rulings read: #30892 (upload link, option B sign-in only); thread: none\n\nReader who acts: the storage seat (upload-link door) and the `packages/mcp` seat, after the ruling.\nDedupe: `repo:objectstack-ai/objectstack is:issue mcp upload base64 file content` → 9 hits, QA runs only; `upload link multiple files one link` → 22 hits, none on this; `mcp attach file bytes agent local file` → 258 hits, none on this."

@@ -1,0 +1,32 @@
+{
+  "number": 32766,
+  "kind": "issue",
+  "title": "mcp: give a host a per-request instructions seam for grants that do not admit the authoring family, and say on the data-only surfaces (default instructions, SKILL.md, Connect page) that building needs an OAuth metadata:write connection",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T15:40:29Z",
+  "updated_at": "2026-11-12T15:48:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32766",
+  "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: executing a recorded ruling: cloud#4329, ruled **B** by the account owner (comment 6826838112). Keep the gate; add a hint where the build door is mounted. The cloud half is PR objectstack-ai/cloud#4417. This card is the framework half the ruling names.\n\n## What\n\n1. **No seam for a data-only grant.** `packages/mcp/src/mcp-server-runtime.ts` ~1645-1651: `authoringInstructions` reads the host's instructions only under `grantsAuthoringTools`. At ~2573-2576 it falls back to `config.instructions ?? default`. So a host has no per-request seam for an API key, a session, or a data-only OAuth grant. Cloud therefore rewrites the `initialize` answer itself (`withMcpBuildHint` in cloud `mcp-build-door.ts`), and wants to drop that rewrite after the next pin move. Fix: add a seam, for example an injection or `handleHttpRequest` option that the runtime reads when the grant does **not** admit the family.\n2. **Default sentence.** The fallback at ~2576 (\"query and modify your app's data objects as tools.\") says nothing about build tools.\n3. **SKILL.md.** `packages/mcp/src/skill-md.ts` ~79-87 and ~259 render the data-only SKILL.md byte-identical for an API key or session, with no line on building. `GET /mcp/skill` is public and has no host hook.\n4. **Connect page copy.** `ui/packages/i18n/src/namespaces/developer/en.ts:258` `connectAgent.apiKey.body` does not say an API key cannot build. The client hints at :225, :229, :234 and :239 point clients without browser sign-in to an API key. The other locales of that namespace need the same change.\n\n## Constraint from the ruling\n\nThe hint may appear **only where a build door is actually mounted**. Otherwise it misleads, for example on a deployment without AI Studio. So the copy has to be conditional, or worded so it never promises building.\n\nEvidence: framework main `34890e0e72` and the cloud pin `c5758b0dc36a`, both read directly.\n\nDedupe words: MCP instructions API key build hint, authoringInstructions withheld grant seam, SKILL.md data-only metadata:write, connectAgent apiKey body cannot build. Related: cloud#4329, cloud#4336."
+}

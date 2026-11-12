@@ -1,0 +1,32 @@
+{
+  "number": 32763,
+  "kind": "issue",
+  "title": "spec: a blueprint object cannot carry icon, so a blueprint-built table gets the generic glyph that create_object tells agents to avoid",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "bug",
+    "domain:spec",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T15:29:53Z",
+  "updated_at": "2026-11-12T15:46:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32763",
+  "body": "repo:cloud#4 · os-bob · session_012dn2AdARJtc4RgABPH7PHk\n\nFiling gate: finding from the cloud lane (cloud#4339, PR objectstack-ai/cloud#4409, merged).\n\n## What\n`BlueprintObjectSchema` (`packages/spec/src/ai/solution-blueprint.zod.ts`, main ~:348; pin ~:309) declares name, label, description, fields, sharingModel, nameField, stageField — no `icon`, though `ObjectSchema` has one and `create_object`'s tool schema tells agents to ALWAYS set it. `/api/v1/mcp` apply_blueprint with `objects[0].icon` is refused: `carries \"icon\", which a blueprint object does not declare` (measured on a hosted tenant, cloud#4339 comment 6819231279).\n\n## Expected\n`BlueprintObjectSchema` accepts an optional `icon` with the same vocabulary/validation as `ObjectSchema.icon`; cloud's stager then passes it to the staged object and the nav entry. Pin test.\n\nDedupe words: BlueprintObjectSchema icon, blueprint object icon undeclared. Related: cloud#4339."
+}

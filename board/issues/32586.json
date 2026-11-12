@@ -13,18 +13,20 @@
   "labels": [
     "area:devpath",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T06:44:24Z",
-  "updated_at": "2026-11-12T12:24:15Z",
+  "updated_at": "2026-11-12T20:10:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32586",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ③ a task the maintainer assigned in session (2026-11-12). The seat proposed \"a spec check: each module package defines at most one app\" together with the ADR-0019 D3 amendment (#32585); the maintainer answered 「同意」, then 「相关任务都是 p1」.\n\nBlocked-by: #32585\n\nReader: the `domain:spec` lane (`packages/spec/src/stack.zod.ts`, `validateSingleApp`, and its tests), once #32585 is merged.\n\nDedupe (objectstack, open and closed): `\"at most one app\" is:issue` → 8, none of which extends the check past `type: app` packages; the dedupe of #32585 applies too.\n\n## 维护者速读\n\nADR-0019 改完以后，「每个包最多一个应用」要由代码执行，不能只写在 ADR 里。今天的检查只看主包（`type: app`），模块包放几个应用都不拦。这张卡把检查扩到模块包。\n\n## Business reason\n\nThe amended D3 (#32585) lets a suite surface several apps only because each one is housed in its own package; the reasons are the console's package-id routing, ADR-0130's object ownership, and module disable removing the module's app. Today `validateSingleApp` (`packages/spec/src/stack.zod.ts`, about line 2597 on main `67c49d77`) returns early for any `manifest.type !== 'app'`. A module package that defines two apps builds clean and breaks all three. Declared means enforced: the rule the ADR states is refused at `defineStack`, loudly, at author time.\n\n## Work\n\n1. Extend the refusal to `type: 'module'` packages: at most one app, with the error naming the package, the apps found and the remedy (one app per package; a second function gets its own module). Keep the existing `type: app` wording intact, or adjust it to cite the amended D3.\n2. **Measure before narrowing:** list every package in this repo, in hotcrm and in the cloud repo, and the shipped templates, that defines more than one app today, at any package type. Report the list. A non-empty list outside module packages is a question for the PM, not a widening of this card's scope.\n3. Tests: a module package with two apps is refused (assert the message names both apps); one app passes; the `type: app` behaviour is unchanged.\n\n`Clause-②: no`: this narrows a published accept set. It owes one contract-review-tier review before the queue.\n\n## Acceptance\n\n`defineStack` refuses a `type: 'module'` package with two apps, with the named message. The measured list from item 2 is in the PR body. HotCRM's planned shape (one app in each of the app, service and marketing packages) still builds."

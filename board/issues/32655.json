@@ -14,18 +14,20 @@
     "area:i18n",
     "domain:spec",
     "pm:blocking",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:24:02Z",
-  "updated_at": "2026-11-12T12:32:26Z",
+  "updated_at": "2026-11-12T17:33:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32655",
   "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nPart of #32654 (tracking). Layer 1 of 3: the contract. Filed by triage from #32654's scope. ⛔ Not a claim.\n\nRuling (maintainer, verbatim, quoted on #32654): 「32440 选C，32043 一起按C处理」 (option C of 6819513436: the server returns localized advisory text in the request's language, rule id unchanged).\n\n## Do\n\n1. In `packages/spec`: state that `ApiErrorSchema.userMessage` (`src/api/contract.zod.ts`) and `EnhancedApiErrorSchema.userMessage` (`src/api/errors.zod.ts`) are in the request's locale, with the fallback rule (workspace default, then `en`).\n2. Give advisory findings a user-facing text field beside the stable rule id (or extend an existing one), and have `packages/lint`'s findings (for example `validate-security-posture.ts`) carry it. Whether the catalog is spec-shipped or per producer is this lane's call within the ruling.\n3. Declare it as a protocol addition; the server and console layers read it.\n\n## Order\n\nLayer 2 (server producers) and layer 3 (console) are `Blocked-by:` this card."

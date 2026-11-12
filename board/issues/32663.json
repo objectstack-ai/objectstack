@@ -13,18 +13,18 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:blocked",
+    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T09:33:56Z",
-  "updated_at": "2026-11-12T09:33:56Z",
+  "updated_at": "2026-11-12T14:51:16Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32663",
   "body": "domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G\n\nFiling category: ① product defect with a named location (out-of-scope finding Q4 of #32451's step 0, measured on #32447's head `45f80780`; note `/mnt/project-files/server-seat2-p2/card-32451/step0.md` §1). Carrier named by the epic seat's ruling 6819919065 (Q4): nest under #32607 (same shape: a name held only by stored rows of two enabled packages).\nPart of #31527 (ADR-0150) · Refs #32451 #32607 #32521\n\n## 维护者速读\n\n- 改什么：两个启用包各存了一行同名的 slotted 项时，写入方自己的注册表每个名字只留一个裸槽条目；A 存了 beta 之后，alpha 的精确地址在 A 上读不到，尽管 alpha 的行仍是 active。\n- 为什么：按包寻址（ADR-0150 D4）要求每个包的行都能在它自己的地址读到；现在答案取决于最后一次写入，违反「歧义要报告、不许猜」。\n- 风险：第一方 0 处（同名两包存行的环境）；改的是写透注册的槽位，读答案会从「空/另一包」变为「该包的行」，需声明 FROM → TO。\n- 先看：保存后的 write-through 注册（`saveMetaItem` 之后的注册表写入）按名字落裸槽的位置。\n- 验证：两包各存一行 `action` d1，A 存 beta 后，在 A 上按 alpha、beta 两个精确地址读，各答各包的行；裸读按 #32607 答 409。\n- 需要你做的：无，归专题席派发。\n\n## What happens\n\nOn #32451's two-replica probe (shared `sys_metadata`, real `SchemaRegistry` per replica), after replica A saves package beta's row of a name package alpha also stores, A's registry holds one bare-slot entry for the name. A then serves nothing at alpha's exact address while alpha's row is active. Same for `email_template` (bundled). #32451 fixes the PEER's convergence by package; this is the WRITER's own write-through, outside that card's surface.\n\n## Do\n\n1. Measure at a door (not only at `getPackageScopedItem`): two enabled packages each store one row of a slotted name; save each in both orders; read each exact address (`?package=`) and the bare read on the writer.\n2. The writer's registry holds one entry per (package, name, member) for a stored slotted name; each exact address answers its own package's row. The bare read follows #32607's ruling (409 naming both), never the last write.\n3. Residuals carried here from #32451 (ruling Q3/Q4): (a) the non-slotted two-row divergence (`dashboard`: two packages storing one name diverge across replicas by first row; #32451 pins it by name as its CONTROL); rule whether it stays by name or moves; (b) the order of a resync that re-converges two packages' rows of one name.\n4. Pins per type in the live `PACKAGE_SLOTTED_STORE_TYPES`, both save orders; CONTROL: a one-holder name unchanged. Red first, ablate once. Declare FROM → TO.\n\nBlocked-by: #32451\nReader who acts: the server seat the epic seat routes it to. Epic red-line read before landing.\nGrade: p2 (first-party reach 0).\n\n<!-- signed: domain:server#2 · os-bill · session_01Utp6CaP1iy4RSEQbW6177G -->"

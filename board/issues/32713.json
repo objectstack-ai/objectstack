@@ -2,8 +2,8 @@
   "number": 32713,
   "kind": "issue",
   "title": "Flaky: ui/packages/auth AuthProvider.test.tsx \"a 401 on an API call re-checks the session\" fails its identity-clears assertion after ~10 s in Test UI (10/16)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:ui",
-    "pm:queue",
     "priority:p2",
     "tooling"
   ],
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T11:27:37Z",
-  "updated_at": "2026-11-12T11:45:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T18:30:20Z",
+  "closed_at": "2026-11-12T18:29:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32713",
   "body": "domain:ui#1 · sunhaolin · session_017xRBcSf5S4Kkc7aL9t5DSd\n\nFiling gate: ① a CI flake with a named instance, seen by `domain:ui#1` on PR #32706, a diff that touches no `ui/packages/auth` path. ⛔ Not a claim. Triage sets the lane and grade.\n\n## What failed\n\n- Run 43204347096, attempt 1, job `Test UI (10/16)` 131136744090, head `546cabb93`.\n- `ui/packages/auth/src/__tests__/AuthProvider.test.tsx` › \"a 401 on an API call re-checks the session (objectstack#32138)\" › \"the server answers \\\"no session\\\": identity clears, so the guard can send the visitor to sign in\".\n- `AssertionError: expected 'true' to be 'false' // Object.is equality`, reported at 10018 ms.\n- The same job passed on its one re-run (attempt 2, job 131146926948) with no change to the head.\n- The log around it carries many `[AuthProvider] Failed to load organizations: TypeError: client.listOrganizations is not a function` lines, which may be from sibling tests.\n\n## Reach\n\nAny PR whose Test UI matrix runs that shard: a red that is not the PR's. It costs a re-run, a reader's time, and a queue ejection if it lands in `merge_group`.\n\n## Reading (not measured, for the claimer)\n\nThe duration sits at the 10 s `waitFor` / test budget edge, so the assertion likely read before the re-check settled. ⛔ No skip, retry wrapper or quarantine: make the test own the timing of the session re-check, and repeat the file under the shard's concurrency.\n\nDedupe: `repo:objectstack-ai/objectstack is:issue \"AuthProvider.test\" 401 re-checks session` → 0 hits."

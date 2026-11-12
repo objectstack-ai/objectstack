@@ -1,0 +1,32 @@
+{
+  "number": 32755,
+  "kind": "issue",
+  "title": "Studio publish dialog lists an update to an already-published view as 「新增 · 发布后将新增此项」",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T14:43:30Z",
+  "updated_at": "2026-11-12T14:48:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32755",
+  "body": "Filing category: ① product defect (misleading review screen).\nreach: public entry — Studio › 发布 in a browser (Playwright, zh-CN), measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`).\n\n## Business reason\n\nThe publish dialog is where a person reviews what an AI client drafted before it goes live. If an edit reads as \"new\", the reviewer cannot tell that a live form layout is about to change.\n\n## Steps\n\n1. Draft and publish view `ebqu_claim.default` (form layout) — the first publish lists it as 新增 (correct).\n2. Over MCP: `update_metadata { type: 'view', name: 'ebqu_claim.default', patch: { form: { … span: 'full' … } } }` → `Drafted update to view`, `changedKeys: ['form']`.\n3. Studio › 发布.\n\n## What happens\n\nThe dialog shows `报销单 · ebqu_claim.default · 新增 · 发布后将新增此项。` In the same dialog, the other edited view `ebqu_claim.by_status` reads `更新` with its changed keys (`~ 列 · ~ 看板`). After publishing, the form shows the new layout, so it was an update of the live view.\n\n## Expected\n\nAn update to a published view reads 更新 with what changes (here `~ 表单`), as the sibling view does.\n\nReader who acts: the Studio seat (publish-drafts diff in `ui/apps/console`), possibly the metadata seat if the draft is diffed against the wrong base for `<object>.default` views.\nDedupe: `repo:objectstack-ai/objectstack is:issue publish dialog view shown as new existing` → 66 hits (#30057 closed: Studio Data 表单 edits a layout users never see — related surface, different defect); none on this label."
+}

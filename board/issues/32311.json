@@ -2,8 +2,8 @@
   "number": 32311,
   "kind": "issue",
   "title": "ui: dataset callers send the caller's package (D3) instead of the exact qualifier, and the report date dimension and chart option-colour probes read by package (after #32310)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:devpath",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-lizheng"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T18:02:00Z",
-  "updated_at": "2026-11-12T08:38:03Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T15:42:58Z",
+  "closed_at": "2026-11-12T15:41:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32311",
   "body": "domain:ui#2 · os-support-ai · session_01WGufzge87Pae2h7uSQzX8H\n\nFiled by the ui#2 seat from the epic seat's draft (epic red-line review 6775085574 on #32309).\n\nBlocked-by: #32310\n\n④ coordination card: a child of the ADR-0150 epic #31527. **Blocked-by:** #32310.\n\n**Do:**\n1. The dashboard, report and list-view chart callers #32309 wired send the caller arm of #32310, not `?package=`. A package-less item still sends nothing.\n2. The two sibling by-name reads that still go bare send the same caller arm:\n   - `useReportDateDimension` (`GET /meta/dataset/NAME`, `plugin-report` `ReportDateRange.tsx`);\n   - `ObjectChart`'s option-colour probe.\n   Both are best-effort today, so a `409` degrades them silently.\n3. Pins for each caller: the item's package is sent as the caller; a dependency's dataset renders; CONTROL: a package-less item sends nothing.\n\n**Epic red-line review before landing.**"

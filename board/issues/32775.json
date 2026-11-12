@@ -1,0 +1,35 @@
+{
+  "number": 32775,
+  "kind": "pull_request",
+  "title": "docs(pm): record the contract-review tier upgrade ruling in CONTRACT_REVIEW_TIER's docblock",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T16:34:51Z",
+  "updated_at": "2026-11-12T17:07:26Z",
+  "closed_at": "2026-11-12T17:07:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-12T17:07:24Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/32775",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-sales\"} -->\n_Requested by **Sales** · [project thread](https://claude.ai/code/project/chan_01D5bWFY3rFzgJcytD5gD4Uu?thread=cmsg_01D5bWFY3rFzgJcytD5gD4Uu6oWRUSwxGV9XCnNjvLAvNt)_\n\nFixes #31982\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:在 `CONTRACT_REVIEW_TIER` 的文档注释里补记了 11-09 那条把复审档位上调一个小版本的裁决原话、日期与卡号;常量的值已由 #31983 改好,本 PR 不动任何代码。\n- 为什么改:卡的第 2 步要求裁决留档在常量旁边,以后的席位能看到「这是按裁决升级,不是退役」,不会误把旧版本当退役或把这一行改回去。\n- 风险与回滚:纯注释,零运行时影响;回滚即 revert 这一个 commit。\n- 先看:`scripts/pm/dispatch-gates.mjs` 中 `CONTRACT_REVIEW_TIER` 上方新增的那一段(紧接 2026-09-22 裁决及其规则段之后)。\n- 两分钟验证:`git grep -n \"claude-fable-5-2\" -- 'scripts/pm/**' '.claude/skills/pm-dispatch/**'`,预期只有常量定义那一行命中。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne paragraph added to the `CONTRACT_REVIEW_TIER` docblock in `scripts/pm/dispatch-gates.mjs` (+11 / -0), placed after the 2026-09-22 ruling and the \"As one rule\" paragraph that closes it, before the `Rulebook:` line. It records the card's step 2:\n\n- the maintainer's words verbatim and untranslated as a quotation (the AGENTS.md exemption for a verbatim maintainer ruling), the date 2026-11-09, and this card's number as the ruling record;\n- that the move is an upgrade by ruling, not a retirement: `RETIRED_TIER_WORDS` (`dispatch-gates.data.mjs`) stays empty, and the family word `TIER_CEILING` derives is unchanged;\n- that the comparison stays EXACT (the previous minor is not accepted beside the new one), and that a seat still served the previous minor uses an isolated at-tier subagent or waits outside the queue, never editing the line back.\n\nSteps 1 and 3 of the card landed in #31983; this PR is the remainder and closes the card. The quotation is byte-compared against the card body (one hit for the full bracketed quote in the file). The model id is not spelled as a value anywhere in the paragraph, so the single-value-site pin still holds.\n\n## Tests\n\nNo behaviour changed (comment only), so no ablation. Local runs at head `616a3c99`:\n\n- `pnpm check:pm-dispatch-gates` :: exit 0 — `dispatch-gates self-test (fast tier): 2205 cases pass; 9 slow section(s) deferred.` It includes `the tier constant's VALUE is spelled in exactly ONE site under .claude/skills/pm-dispatch + scripts/pm — 40+46 files read, the definition at scripts/pm/dispatch-gates.mjs:12818 the only one allowed`, `no RETIRED tier word survives in any live RULE (dirty: none)` and `the ladder prints a ceiling DERIVED from the contract-review constant`.\n- `git grep -n \"claude-fable-5-2\" -- 'scripts/pm/**' '.claude/skills/pm-dispatch/**'` :: exit 0, exactly one hit: `scripts/pm/dispatch-gates.mjs:12818`.\n\n## Acceptance notes\n\n- The card's Checks line spells `node scripts/pm/dispatch-gates.self-test.mjs`. That module runs nothing on import: it exited 0 with 0 bytes of output here, so it measures nothing. Its battery runs through `pnpm check:pm-dispatch-gates` (above) and `node scripts/pm/dispatch-gates.mjs --self-test`, which is the reading cited.\n- Placement: the card says \"beside the 2026-09-22 paragraph\". The new paragraph follows the \"As one rule\" paragraph instead of sitting between it and the 2026-09-22 quotation, so that rule stays next to the ruling it states.\n\n## Verification\n\n<details><summary>dispatch-gates --commands (30 families) and --ran reconciliation</summary>\n\nDerived from tree `objectstack-ai/objectstack` at `616a3c99`, change set 1 path vs merge base `af90f307c`. Every family exited 0:\n`check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus`, `check-declaration-mirrors` (+ `--self-test`), `check-self-test-wired` (+ `--self-test`), `check-self-test-workflow-commands` (+ `--self-test`), `check-whole-set-label-write` (+ `--self-test`), `ci/plan-test-core-shards --self-test`, `check:agent-test-spelling`, `check:bash32-floor`, `check:ci-filter-parity`, `check:cli-command-ids`, `check:cross-package-test-inputs`, `check:declared-population-live`, `check:driver-memory-census`, `check:entry-guard`, `check:gitlink-declared`, `check:nul-bytes`, `check:parse-guard`, `check:pm-dispatch-gates`, `check:pnpm-filter-targets`, `check:pnpm-flag-spellings`, `check:ratchet-remedy-authority`, `check:refd-timer-probe`, `check:scripts-symbol-anchors`, `check:watch-hint-literal`.\n\n`dispatch-gates --ran`: `30 derived famil(ies) accounted for — 30 run, 0 NOT-MEASURED (a DERIVED zero — all 30 recorded an exit code and none of them is 3).`\n\n</details>\n\nNo changeset: `scripts/pm/**` is not published (`skip-changeset`).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01L6bhgW8hTkKksL7dcS4MSk\n"
+}

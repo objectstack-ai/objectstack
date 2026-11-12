@@ -2,8 +2,8 @@
   "number": 32734,
   "kind": "issue",
   "title": "Upload links: a link is issued for a record the user cannot change, and the upload page then says \"Done. The file was attached\" when nothing was attached (readonlyWhen), or \"Upload failed\" with no reason (approval lock, 500)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "os-bob",
@@ -14,18 +14,23 @@
     "area:files",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-sales"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T12:53:45Z",
-  "updated_at": "2026-11-12T13:44:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T18:31:12Z",
+  "closed_at": "2026-11-12T18:29:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32734",
   "body": "Filing category: ① product defect (user-visible false success).\nreach: public entries `/api/v1/mcp` `create_upload_link` + the upload-link page in a browser, measured once each on a hosted tenant (`pnpm dev:stack --with-ui`, Team plan; cloud `ff373e02`, framework `d7c3d44e`), member's own MCP OAuth token and browser session.\n\n## Business reason\n\nAn employee asks the agent to add an invoice to their expense claim. The agent hands them a link, they upload, the page says it worked, and the claim has no new invoice. Nobody finds out until finance asks where the invoice is.\n\n## Setup\n\nObject `ebqu_claim` with `invoices: { type: 'file', multiple: true, readonlyWhen: \"record.status == 'pending' || record.status == 'approved'\" }` and an approval flow on `status = pending` (record lock while pending).\n\n## What happens\n\n| Record state | `create_upload_link { field: 'invoices' }` | Upload page after Send | Record |\n|---|---|---|---|\n| draft | link | \"Done. The file was attached\" | file appended ✅ |\n| pending (approval lock) | **link issued** | **\"Upload failed\"** — `PUT /api/v1/storage/upload-links/…` → **500**; log: `[5xx] 500 — RECORD_LOCKED: 报销单 '…' is locked while an approval is in progress` | unchanged |\n| approved (`readonlyWhen` true) | **link issued** | **\"Done. The file was attached; you can close this page.\"** | **unchanged** — log `WARN Field 'invoices' is read-only (readonlyWhen) — ignoring incoming change` |\n\nFor comparison, `update_record` on the same approved record answers `droppedFields: [{ fields: ['amount'], reason: 'readonly_when' }]`, so the agent is told; the upload page tells the person nothing.\n\n## Expected\n\n- `create_upload_link` refuses when the field is not writable for this user on this record now (locked or `readonly`/`readonlyWhen`), with the reason, so the agent does not hand out a dead link.\n- If state changes after the link was issued, the page shows a refusal with the reason (`RECORD_LOCKED` as a 4xx, a read-only field as a refusal) and does not keep the uploaded `sys_file`.\n- The page never says \"attached\" when the field did not take the file.\n\nReader who acts: the storage seat (`service-storage` upload-link door, `record-file-access.ts` field commit) and the `packages/mcp` seat (`create_upload_link`).\nDedupe: `repo:objectstack-ai/objectstack is:issue upload link readonly attached` → 24 hits (#30892, #26479, #25572 closed — none on this); `upload link RECORD_LOCKED` → 7 hits, QA runs only; `\"Upload failed\" upload link` → 19 hits (#24548 closed, a different commit bug). The page's English-only copy is objectstack#32684."

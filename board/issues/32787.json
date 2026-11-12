@@ -1,0 +1,34 @@
+{
+  "number": 32787,
+  "kind": "issue",
+  "title": "Organization delete: an owner's first organization is refused DELETE_RESTRICTED over the self-registration permission-set grant row that names it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-sales"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T17:25:07Z",
+  "updated_at": "2026-11-12T19:59:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32787",
+  "body": "repo:cloud#5 · hotlong · session_01Q4EjjPP1zuWBNq3nBXVei9\n\nFiling gate: ① a product defect on a public door, measured by the dev of cloud#4387 (PR objectstack-ai/cloud#4427, report on cloud#4387 comment 6830791616) on a booted cloud control plane at framework pin `c5758b0dc36a`. The producer and the counter are framework code, so the fix lands here (cross-repo rule 1); cloud is the reporter.\n\n## 维护者速读\n\n托管上，业主的第一个组织删不掉：删除时报错说它「还拥有 1 条权限集记录」。这条记录是业主注册时框架自动给的成员权限，框架把它挂在了第一个组织上，删除检查又把它算成了组织的业务数据。第二个组织没有这条记录，可以正常删除。修法是让删除检查把这类注册授权当作组织结构，或者注册授权不挂在组织上；具体选哪个由读代码的人来定。\n\n## What happens\n\n`POST /auth/organization/delete` on the owner's FIRST organization (OS_MODE=cloud, isolated posture) answers 409 `DELETE_RESTRICTED` naming `sys_user_permission_set (1)`. The counted row is the self-registration grant:\n- permission_set `cloud_control_plane_member`, package `com.objectstack.plugin-security`, `reason` null, `granted_by` null\n- stamped with that organization's id\n\nThe auto-org-admin grant (`organization_admin_no_bypass`) is not counted. A second organization of the same owner has no such row and deletes cleanly.\n\n- Producer: the auth audience's `selfRegistrationPermissionSet` grant (cloud configures the set in `control-plane-preset.ts`; the framework writes the row).\n- Counter: plugin-auth / engine `organizationDeleteRefusal` (objectstack#24948 letter B counts every row naming the organization except its auth structure and `append-only` / `engine-owned` objects).\n\n## Expected\n\nThe self-registration grant does not block deleting the organization. Either it counts as auth structure (like the auto-org-admin grant), or it is not stamped with an organization at all, if it is a deployment-level grant. Whoever reads the producer decides, from what the grant means.\n\n## Acceptance\n\nAn owner's first organization with no other blocking rows deletes with 200. A test pins it. The grant's later fate is defined: the person keeps it if it is deployment-level, or it is removed with the organization.\n\nDedupe: `selfRegistrationPermissionSet organization delete` and `DELETE_RESTRICTED sys_user_permission_set` → no open issue."
+}

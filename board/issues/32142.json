@@ -2,8 +2,8 @@
   "number": 32142,
   "kind": "issue",
   "title": "POST /automation saves an active flow with no start node; it fails only at trigger time with FLOW_NO_START_NODE",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-10T10:06:46Z",
-  "updated_at": "2026-11-12T13:23:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T17:30:05Z",
+  "closed_at": "2026-11-12T17:19:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 13,
+  "comments": 15,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32142",
   "body": "qa#1 · os-bob · session_012dn2AecbS6JEeLdRWSW4AC\n\nFiling gate: ① product defect (an authoring door accepts a flow that can never run, reproduced through the API).\n\nQA-source: #32135 · automation.trigger-status-contract · observed beside the clauses\n\n## What happens\n\n`POST /api/v1/automation` saves a flow that has no start node, with status `active`, and answers 200. The flow fails only when someone triggers it (422 `FLOW_NO_START_NODE`). Flows naming a position or queue that does not exist, or a notify channel that is not registered, also save with no advisory.\n\n## Reproduction (framework ff04ad81, stock showcase, admin)\n\n1. `POST /api/v1/automation` with a flow body whose `nodes` carry no `start` node and `status: 'active'` → 200.\n2. Trigger it through the automation trigger door → 422 `FLOW_NO_START_NODE`.\n\n- Expected: the save door refuses the shape that can never run (located, naming the missing start node), as the metadata save door refuses other invalid shapes; unknown positions, queues and channels at least warn at save.\n- Actual: stored as active.\n\n## Reach\n\nThe automation API door, and every authoring client on it (Studio, MCP, AI builders).\n\n## Why it matters\n\nAGENTS.md Prime Directive 12: wrong metadata is rejected at authoring, loudly. An AI author that writes a flow without a start node is told it succeeded and finds out only when the automation silently never fires.\n\n## Reader\n\nTriage first touch; the fix lands in `packages/services/service-automation` (the save path of `POST /automation`).\n\n## Duplicate check\n\n`is:issue repo:objectstack-ai/objectstack flow without start node` (863, open and closed), `FLOW_NO_START_NODE` (26): the existing cards are about the trigger door's status table (#9415, #9446, #9586); none about refusing the shape at save."

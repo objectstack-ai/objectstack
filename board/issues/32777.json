@@ -1,0 +1,29 @@
+{
+  "number": 32777,
+  "kind": "issue",
+  "title": "Hosted-tenant dogfood findings · batch 2026-11-12 (tracking, kept by eval#1)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "tracking"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T16:44:44Z",
+  "updated_at": "2026-11-12T16:44:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32777",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ④ a tracking parent ordered by the maintainer, verbatim in session `session_01Q4EjjMnyLqJdzuktEmRPXH`: 「同意，开汇总卡，交给测试席维护」. ⛔ Never dispatched; no pm state. **Kept by `eval#1`**, which found most of these cards building leave and expense apps on a hosted tenant.\n\n## 维护者速读\n\n- 这张卡汇总 2026-11-12 这一批在托管环境里像真实客户一样搭应用、测出来的缺陷，按用户路径分组。\n- 每张子卡照常由各车道认领、修复、关闭；本卡只看全貌，不派发。\n- 完成标准：子卡全关之后，测试席把同一套场景（报销、请假）在托管环境里重跑一遍，全部走通才关本卡；重跑又发现的问题开下一批次卡。\n\n## Cards, by user path (state as of filing; the keeper refreshes)\n\n**Upload and attachments**\n- #32734 (p1) upload link issued for a record the user cannot change; page reports \"attached\" when nothing was\n- #32754 (p1) a member cannot attach a file to their own editable record (403)\n- #32711 unique violation names no field (split from #32684)\n- #32712 upload-link page English-only (split from #32684)\n- #32746 multi-file field truncated in half a row\n- #32684 closed (file type refused as a permission error)\n\n**Flows, approvals and read-only**\n- #32666 (p1) a flow writing a read-only field publishes clean; the button does nothing\n- #32667 approval request opens in an unrelated app's shell\n- #32756 编辑 offered on a fully read-only record\n- #32757 `run_action` returns the engine chain instead of the business refusal\n\n**Field types, forms and lists**\n- #32595 (p1) datetime typed Timestamp at authoring but a string at runtime\n- #32590 (p1) a published field change does not alter the table\n- #32589, #32631, #32685 closed\n\n**Studio and publishing**\n- #32755 publish dialog shows an edit as \"new\"\n- #32610 copilot draft not reflected until reload\n\n**AI and MCP authoring**\n- #32640 `validate_expression` disagrees with the publish gate\n\n**Console performance (staging browser pass)**\n- #32633 boot from the `/_console/` root fetches twice\n- #32627 every list navigation sends extra requests\n\n**Decision cards from this batch** (`needs-user-decision`; triage gives each a fable-tier evaluation before the maintainer discusses them, per the standing order)\n- #32591 agent publishing its own staged changes over MCP\n- #32592 Studio showing changes staged outside the tab\n- #32641 MCP agent finding a colleague for a person field\n- #32686 MCP agent creating a record with a required file field\n- #32747 AI client attaching a file it already holds\n- #32749 console AI chat attaching an invoice photo\n\n## Done when\n\nEvery card above is closed or ruled, and `eval#1` has re-run the same leave and expense scenarios on a hosted tenant end to end. Anything the re-run finds opens the next batch card, not new rows here."
+}

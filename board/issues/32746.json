@@ -11,17 +11,21 @@
     "type": "User"
   },
   "labels": [
-    "bug"
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T14:08:28Z",
-  "updated_at": "2026-11-12T14:08:28Z",
+  "updated_at": "2026-11-12T14:50:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32746",
   "body": "Filing category: ① product defect (user-visible layout).\nreach: public entry — the console record detail panel in a browser (Playwright, zh-CN, 1440×900), measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`).\n\n## Business reason\n\nAn expense claim carries its e-invoices in one `file` field with `multiple: true`. On the claim, the approver sees `taxi-invoice-2431200000012345678…` / `hotel-invoice-243120000009876543…`, so they cannot tell the invoices apart by name, which is the field's whole content.\n\n## What happens\n\n- **Form:** the field is half-width by default; the author fixes it with `{ field: 'invoices', span: 'full' }` in the form section (measured: 455px → 926px). Fine.\n- **Detail panel:** the same field sits in the right half of the overview grid and its file names are truncated with `…`. `applyAutoSpan` (`ui/packages/plugin-detail/src/autoLayout.ts`, `WIDE_FIELD_TYPES`) widens only textarea / markdown / html / grid / richtext; a file field never qualifies. The object field has no layout key the author can set to change this (the form's `span` does not reach the detail panel), so the AI builder cannot fix it either.\n\n## Expected\n\nEither a `file` / `image` field with `multiple: true` counts as wide in the detail panel (as it does in practice for its content), or the form's `span: 'full'` (or a field-level hint) is honoured there too.\n\nReader who acts: the `domain:ui` seat (`plugin-detail` auto layout).\nDedupe: `repo:objectstack-ai/objectstack is:issue detail file field span full width` → 29 hits (#28913 highlight strip in edit mode, closed, different); `WIDE_FIELD_TYPES file` → 6 hits (#18516 closed: the spec describe named file as wide but the renderer did not — the describe was corrected, the renderer left as is); `multi-file field detail truncated` → 13 hits, none on this."

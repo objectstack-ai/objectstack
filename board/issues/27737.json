@@ -1,7 +1,7 @@
 {
   "number": 27737,
   "kind": "issue",
-  "title": "[PM seat] domain:server · seat 4 — 🟢 os-lizheng",
+  "title": "[PM seat] domain:server · seat 4 — 🟢 os-sales · 由 os-sales 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-lizheng"
+    "os-sales"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-29T21:50:22Z",
-  "updated_at": "2026-11-12T01:40:58Z",
+  "updated_at": "2026-11-12T15:42:51Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 22,
+  "comments": 24,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27737",
-  "body": "domain:server#4 · os-lizheng · session_012MmDsNv6qb5gT8Pd98AmCB\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231 (⛔ this post is none of them).\n\n<sub>Refreshed 2026-11-11T12:45Z at seating; the seating comment is the record.</sub>\n\n## Current PM — 🟢 os-lizheng\n\n- **Holder:** `os-lizheng` · `session_012MmDsNv6qb5gT8Pd98AmCB` (a cloud session summoned by `/pm-dispatch server`). Previous PM: `os-support-ai` · `session_01WGufzi1tLRTEYwYGtbNCyk`, clock-out brief 6788491758 on this post.\n- **Mailbox:** PR #32423 (subscribed). **Patrol:** `trig_0147JvUFXtXxPJZEodGRx7Sm` · `41 * * * *` (self-bound).\n- **Pointer:** posture and round records live in the session and on the cards; lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from the live `Claim:` comments and each open PR's file list before every dispatch.\n\n## Notes\n\n- **Concurrency:** batch 5 (the maintainer's 「并发5」, the ceiling), `mode:subagent` dev agents; an L card goes to `mode:cloud`.\n- **Scope split:** seats 2 and 3 take `priority:p2` only, seat 6 takes p1 and p1 blockers; this seat takes the lane's full order and yields on any earlier claim stamp.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`) as `objectstack-fleet[bot]`. ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n\n<!-- signed: domain:server#4 · os-lizheng · session_012MmDsNv6qb5gT8Pd98AmCB -->\n"
+  "body": "domain:server#4 · os-sales · session_01L6bhgWRcTEB3toGxnWvuvX\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 4**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761, seat 5 is #28677, seat 6 is #29908 and seat 7 is #32231 (⛔ this post is none of them). Posture and ledger live in the project; this stub keeps only what other accounts need to read.\n\n<sub>Refreshed 2026-11-12T15:36Z at seating.</sub>\n\n## Current PM\n\n🟢 `os-sales` · session `session_01L6bhgWRcTEB3toGxnWvuvX` · seated at the time above · run by the project of the os-sales account (由 os-sales 账户的项目负责). Summoned by the maintainer in the project chat (「出了专题卡，server 车道的 p1 卡也可以再开个座位派发」, 2026-11-12T15:31:22Z).\n\n- **Patrol:** `trig_01V6kD9UNxn5YeWjD2eqeyVK` · `35 * * * *` (hourly).\n- **Mailbox:** PR #32765 (`Mailbox-of: domain:server#4 · os-sales`), subscribed.\n- **Concurrency:** 2 running slots (project default; the maintainer's ceiling for server seats is 5).\n- **Card filter:** `domain:server` cards with `priority:p1` that are **not** epic #31527 (ADR-0150) cards. Epic cards belong to the epic seat and `domain:server#1` / `domain:server#7`; p2 cards are not taken here.\n\n## Ledger\n\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:server#4` + `head:claude/` PRs. 姿态台账住项目.\n- **Inherited:** none (the previous holder's clock-out brief 6826234095 lists no in-flight card and no stay-behind).\n\n## Hot-file serial queue\n\n- **`area:files` upload-link door** (`packages/services/service-storage` upload link issue/consume, `packages/mcp` `create_upload_link`): #32734 → #32754, serial (fold-or-serial answered on #32734's claim).\n\n## Notes\n\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Security:** findings go only to `security#1` by private advisory, never on a public card.\n\n<!-- signed: domain:server#4 · os-sales · session_01L6bhgWRcTEB3toGxnWvuvX -->\n"
 }

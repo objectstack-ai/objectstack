@@ -1,0 +1,31 @@
+{
+  "number": 32784,
+  "kind": "issue",
+  "title": "pm-dispatch(execution-duties): per-card effort drops from `high` to `medium` for review-nit follow-ups, same-family edge cards and copy- or changeset-only touch-ups; epic cards join the `xhigh` list (Sales 2026-11-12)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T17:21:46Z",
+  "updated_at": "2026-11-12T17:46:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32784",
+  "body": "coordinator#1 · os-sales · session_01L6bhgUryPC4A9RDaGRsq4W\n\nFiling gate: ③ 维护者直派 (a pm rule change, filed only because the maintainer named it; relayed by the project coordinator). Filed from project thread \"Update pm-dispatch effort rules\" (`cmsg_01D5bWFY3rFzgJcytD5gD4UuUZ9URKazdwZeWD8MWEd9Bn`, project chan_01D5bWFY3rFzgJcytD5gD4Uu). ⛔ Not a claim.\n\n**Maintainer's words, verbatim.** Sales, project chat, 2026-11-12T17:16:42Z: 「待办任务很多，是否建议尝试降低任务的effort」. The project coordinator answered at 17:16:49Z with the proposal below. Sales, 2026-11-12T17:17:18Z: 「同意，立卡更新 skills」.\n\nThe part of the proposal that is a rule, verbatim (the coordinator's words, which the maintainer agreed to):\n\n> - **不降**：专题卡、p1 卡、安全卡、红线复读，继续用 xhigh。\n> - **可以降**：评审 nit 的跟进卡、同族合并的边角卡、纯文案或 changeset 的小改，从 high 降到 medium。\n\nThe proposal's third bullet (open more seats, raise concurrency) is a per-project word of the maintainer, not skill text, and is out of this card.\n\n**Governing text.** `.claude/skills/pm-dispatch/references/execution-duties.md` 〈派发〉, read at `origin/main` 88282a78:\n- 「effort 按卡难度定,与档位、降档理由写进 Container & model 行与派发令,显式传参,⛔ 不留空。」\n- 「S 机械 `medium`;M `high`(默认);L/XL/security/p1/契约复核/四轴分析/ADR `xhigh`;`max` 凭点名/常设令。」\n- Pointers that only say \"effort by card difficulty\" and repeat no list: `coordinator.md` section 四, `dispatch-runbook.md` 〈卡线程〉, and the `Container & model:` line of the claim template in `SKILL.md`.\n\n**What is wrong today.** The effort line knows three sizes and one default. Every card that is not S-mechanical and not on the `xhigh` list dispatches at `high`, so a card whose whole content is a reviewer's nit, an edge member of a family that already landed its main fix, or a wording or changeset correction costs the same as an M card with a design judgment in it. With a long backlog that is spend with no return: these cards have their answer written on them before dispatch. In the other direction, the text does not name epic cards, so a seat reads an M-sized epic card as `high` although one rework round on a serial epic chain costs more than the effort it saved.\n\n**Wanted.** Amend the effort rule in `execution-duties.md` 〈派发〉 so that it says, in these words or tighter:\n- **`medium`, down from `high`, for three kinds of card that would otherwise be M:**\n  - a review-nit follow-up card (a card carrying only `nit`-level findings of a review of record, `contract-review.md`);\n  - a same-family edge card (an edge member folded into, or left over from, a family whose main fix is ruled and landed);\n  - a copy-only or changeset-only touch-up (wording, or `.changeset/*` text, with no behaviour or contract change).\n- **`xhigh` stays, and outranks the three above:** L/XL, `security`, p1, contract review (the proposal's 「红线复读」: a review of record, a re-read of a new head included), four-axis analysis and ADR cards, as today; **epic cards** (a child of an epic parent, `seat-lifecycle.md` 〈Epic 子树车道〉) join the list. A nit follow-up that is p1, `security` or an epic child is `xhigh`, not `medium`.\n- Unchanged: S mechanical `medium`; M `high` as the default; `max` only by a named word or a standing order; mandatory clause ① and the tier rules; seat sessions at `high` (`seat-lifecycle.md`).\n- The claim's `Container & model:` line names which of the three kinds a `medium` rests on, as it already names the reason for any step down.\n\n**Line budget, measured.** `execution-duties.md` is 189 lines against a ceiling of 189 (headroom 0), and the two effort lines are 119 and 120 bytes against the 120-byte line budget (`node scripts/pm/check-skill-line-ratchet.mjs`). The rule therefore needs one more line: paid by a deletion in the same file, or by a ceiling raise of the measured increment that cites the ruling record on this card, as the ratchet's own rule allows. ⛔ No re-wrap to find the line.\n\n**Acceptance.**\n- `execution-duties.md` 〈派发〉 states the three `medium` kinds, epic cards on the `xhigh` list, and that the `xhigh` list wins where both apply.\n- `SKILL.md`, `coordinator.md` and `dispatch-runbook.md` are untouched unless one of them is measured to contradict the new text (today they only point).\n- `pnpm check:pm-skill-ratchet` and `pnpm check:pm-skill-id-lint` are green.\n\nReader who acts: the `domain:skills` seat (an os-dev on `.claude/**`; `references/**` only, so default-judgment tier with the seat's contract review at `CONTRACT_REVIEW_TIER`; Tier S landing after a PASS of record). The maintainer's project already dispatches by this rule from the words above; the card makes the skill say it for every project.\n\nDedupe (open AND closed): `repo:objectstack-ai/objectstack is:issue effort in:title` → 8 hits; nearest #28901 (closed: seat sessions at `high`), #29741 (closed: docs-only ADR cards at `xhigh` by standing order), #25729 (closed: `docs/adr/**` tier and `xhigh` floor), #25185 (closed: card threads and effort by difficulty). None lowers an effort or names epic cards. `is:issue is:open label:domain:skills xhigh` → 1 hit, a seat post. **New.**\n\nClause-②: no · Metadata-protocol: none · skip-changeset (`.claude/**` is not published).\n\nSuggested-grade: p2 · rules text only; a maintainer-directed rule the fleet's dispatch cost rides on (same grade as #28901 and #29741).\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

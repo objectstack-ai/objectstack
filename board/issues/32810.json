@@ -1,0 +1,26 @@
+{
+  "number": 32810,
+  "kind": "issue",
+  "title": "spec: a flat composeStacks (default manifest 'last') of packages with one app each yields one package id with several apps, and no door refuses it (the single-app rule of ADR-0019 D3 as amended)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T20:12:59Z",
+  "updated_at": "2026-11-12T20:12:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32810",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ a follow-up the landing PR #32792 (for #32586) owes. Carried from #32586 comment 6818884972 (first bullet) and confirmed by the contract review of #32792 (comment 6833950860, ③, first and third flags). #32586 deliberately kept off `composeStacks`.\n\nReader: the `domain:spec` lane (`packages/spec/src/stack.zod.ts`, `composeStacks` and its tests).\n\n## 维护者速读\n\n#32586 让 `defineStack` 对应用包和模块包都限一个应用。但把几个各带一个应用的包用 `composeStacks` 默认方式（`manifest: 'last'`，扁平合并）组合后，结果是一个包 id 下挂多个应用，目前没有任何一道门拦。按修订后的 ADR-0019 D3，这正是被禁止的形状。这张卡让组合这一步也守住「每包最多一个应用」。\n\n## Business reason\n\nADR-0019 D3 as amended: no package of a suite defines more than one app, because the Console addresses an app by its package id, an app names no object of another package where its own package defines objects, and disabling a module removes the app that module owns. On `main` after #32792:\n\n- `composeStacks` with the default `manifest: 'last'` concatenates `apps` under the one selected manifest and never calls `validateSingleApp`; `os compile` parses the result with `ObjectStackDefinitionSchema`, which does not judge it either. An app package and a module package with one app each, composed without `preserve`, become one package id with two apps.\n- A hand-built `packages[]` body that holds two apps is not judged either; on the authored route each body went through its own `defineStack`, so only a hand-assembled artifact reaches this.\n- The finding #32792 adds tells the author to move each other app into a module package of its own, and does not say the packages must then be composed under `manifest: 'preserve'` (review nit N3), so following the remedy with the default composition lands in the first bullet.\n\n## Work\n\n1. Measure first: which callers in this repo, hotcrm and the shipped templates compose suite packages, and with which `manifest` option. Report the list.\n2. Refuse, at `composeStacks`, a composed result whose one package id would carry more than one app (default/flat path), and judge each `packages[]` body by the same rule, reusing `validateSingleApp` and `STACK_SINGLE_APP_VIOLATION`. A narrowing: `Clause-②: no (narrowing)`, ADR-0087 semantic entry, contract-review-tier review before the queue.\n3. Name `manifest: 'preserve'` in the `validateSingleApp` finding's remedy (nit N3), and let the message derive its package-type label from the type (nit N2).\n4. Out of scope: whether a `type: 'plugin'` package is held to one app. The amended D3 defines a suite as an app package plus module packages and no ruling covers plugins; if the lane wants it judged, that is a decision card, not this card.\n\n## Acceptance\n\nA flat composition that would put two apps under one package id is refused with `STACK_SINGLE_APP_VIOLATION`, naming the packages and apps and the `preserve` remedy; a `preserve` composition of one app per package builds unchanged; HotCRM's planned shape still builds.\n\n## Dedupe\n\n`\"composeStacks\" single app is:issue` → 65, none open besides #32586 and none judges apps at composition; `\"validateSingleApp\" is:issue` → 8, none open besides #32586.\n\nSuggested-grade: p1 · the same enforcement line the maintainer graded 「相关任务都是 p1」 on #32586."
+}

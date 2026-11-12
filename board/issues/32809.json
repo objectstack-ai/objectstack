@@ -1,0 +1,26 @@
+{
+  "number": 32809,
+  "kind": "issue",
+  "title": "skills, docs(adr): objectstack-ui § App Navigation, the ADR-0019 status line and the ADR-0130 fact row still say defineStack judges only a type: 'app' package, now that #32586 holds a module package to one app",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T20:12:28Z",
+  "updated_at": "2026-11-12T20:12:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32809",
+  "body": "domain:spec#2 · os-sales · session_01L6bhgU7jN46DmQ6XFvz28s\n\nFiling gate: ③ a follow-up the landing PR #32792 (for #32586) owes. The `Skills-docs: follow-up owed — skills/objectstack-ui/SKILL.md` line of the #32586 PR (a `Metadata-protocol: narrowed` change owes the skills follow-up; product PRs never edit `skills/**`). Serial note 6821116381 on #32586 asked for it.\n\nReader: the `domain:skills` lane, once the #32586 PR is merged.\n\n## 维护者速读\n\n#32586 让 `defineStack` 也拒绝定义了两个以上应用的模块包（`type: 'module'`）。技能文档 objectstack-ui 的「App Navigation」一段只说它拒绝应用包（`type: 'app'`）里的第二个应用，读者会以为模块包可以放多个。这张卡把那句话扩到套件里的每个包。\n\n## Business reason\n\n`skills/objectstack-ui/SKILL.md` § App Navigation (on `main` at the #32586 PR's merge commit) reads: \"`defineStack` refuses a second in a `type: 'app'` package. A suite (an app package plus its modules) may surface more apps: a `type: 'module'` package may carry its own app, ...\". Once #32586 lands, `defineStack` refuses a second app in a `type: 'module'` package as well, with `STACK_SINGLE_APP_VIOLATION` (`packages/spec/src/stack.zod.ts#validateSingleApp`, package types `SINGLE_APP_PACKAGE_TYPES`). The sentence is not false, but an agent reading it can conclude that a module package may carry several apps, write one, and meet the refusal at `os validate` / `os build`. That is a metadata-authoring trap the skill should close.\n\n## Work\n\n1. In § App Navigation, say that `defineStack` refuses a second app in an app package and in a module package alike: at most one app per package of the suite (ADR-0019 (app-as-consumer-unit) D3 as amended). The remedy is the refusal's own: one app per package, each further app in a `type: 'module'` package of its own with the objects it shows.\n2. Check the `objectstack-ui` eval `views-apps-actions-pages.json` (the \"second app for the support team\" prompt): its expected output already says a support product with objects of its own carries its app in its own module package; confirm it still grades the rule and needs no edit.\n3. Pay for any added line with a removal, per the skills line ratchet.\n\n## Also in this card: two governed records the landing makes stale\n\nNamed by the contract review of #32792 (comment 6833950860, ③); governed text, so it rides this skills-lane card, Tier H:\n\n- `docs/adr/0019-*.md` status line (\"Pending: the `defineStack` check that holds a module package to at most one app\") and its \"Enforced today, and not yet\" paragraph: after #32792 merges, the check is enforced; record it with the merge commit.\n- `docs/adr/0130-*.md` fact row (around line 154) \"`validateSingleApp` constrains only `type: 'app'`\": a dated reading that becomes false; amend or annotate it with the merge commit.\n- Serial: #32664 (open, `domain:skills`) edits ADR-0130 D2 too; the claiming seat folds the two or serialises them.\n\n## Out of scope (note only)\n\n- `content/docs/ui/audience-based-interfaces.mdx` line 22 says the same thing for `type: 'app'` only (\"A package of `type: 'app'` exposes exactly one App\"). It is not a `skills/**` file; the lane may widen it in the same PR as a docs touch or leave it, it stays true.\n- `docs/design/marketplace-publishing.md` (around line 430) says `defineStack` enforces at most one app per `type: app` package. Design record, not shipped.\n\n## Acceptance\n\n§ App Navigation states the rule for both package types, cites ADR-0019 D3 as amended, and the eval still grades it. `check:skill-docs` and `check:skill-refs` green.\n\n## Dedupe\n\n`\"validateSingleApp\" is:issue` → 8 (none open besides #32586); `App Navigation module package is:issue label:domain:skills` → 8, of which #32664 is the only open card and covers the D3 fold restatements, not this sentence."
+}

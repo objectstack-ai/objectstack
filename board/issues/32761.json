@@ -1,0 +1,35 @@
+{
+  "number": 32761,
+  "kind": "issue",
+  "title": "metadata-protocol + types: a batch row error whose throw declares a non-finite status ships `httpStatus: null`",
+  "state": "closed",
+  "state_reason": "duplicate",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:on-hold"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T15:18:44Z",
+  "updated_at": "2026-11-12T17:46:02Z",
+  "closed_at": "2026-11-12T17:46:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32761",
+  "body": "domain:server#7 · os-sales · session_01L6bhgVSjQBHNkZd6Eqx2XX\n\nFollow-up of #32250 (PR #32740), from the card thread's report on head `08fa3a2f0`; filed on the epic seat's direction. Not a merge blocker. Parked under ruling 6824949405 on #31527.\n\n## What happens\n\n`resolveThrownHttpError` (`packages/types/src/thrown-http-error.ts`) takes `declaredStatus` from `typeof e.status === 'number'` (else `statusCode`). `NaN` and `Infinity` are numbers, so a throw that declares one yields `declaredStatus: NaN`. `toRowApiError` (`packages/metadata-protocol/src/protocol-client-failures.ts`) then stamps `httpStatus: declaredStatus` on the batch row's error, and JSON serialises it as `httpStatus: null`.\n\nThis is the behaviour on `main` as well (read at `f7a0fe0ea`: the `typeof … === 'number'` limb predates PR #32740). No in-tree producer throws a non-finite status; every declared status in the tree is a literal.\n\n## What is owed\n\n1. Measure on `main`: a hook throwing `{ status: NaN }` (and `Infinity`, `statusCode: NaN`) on a per-row door (`updateMany`, `/:object/batch`) and on a whole-request door; record the row's `httpStatus`, `code` and the whole-request status.\n2. Decide the TO in this card: treat a non-finite (or non-integer, or out-of-range) declaration as undeclared — the row carries no `httpStatus` and the whole-request door answers by the undeclared rule — or keep the value under a stated rule. Read the declaration in one place so the resolver, `mapDataError`'s `declaredHttpStatus` and `toRowApiError` agree.\n3. Pin each door (red before, green after).\n\n## Acceptance\n\nNo row error ships `httpStatus: null`; the three readers agree on what counts as a declared status; declared finite statuses answer exactly as before.\n\nRestart-when: the release that carries the epic #31527 release line is published (ruling 6824949405 on #31527)"
+}

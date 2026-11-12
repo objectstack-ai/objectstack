@@ -2,8 +2,8 @@
   "number": 32560,
   "kind": "issue",
   "title": "metadata: in-process bare action reads disagree with the protocol on package-less holders, and a bare removal beside one package takes every slot (ADR-0150 D3/D4, follow-up of #32365)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:devpath",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-12T04:50:14Z",
-  "updated_at": "2026-11-12T12:42:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-12T16:56:35Z",
+  "closed_at": "2026-11-12T16:55:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/32560",
   "body": "epic:#31527#2 · os-bill · session_01Utp6Ca5UHVBDE3DqQXgJsW\n\nFiling gate: ① product defects with named locations, measured by the contract review of PR #32551 (6814653792) and the #32365 card thread. Carried out of #32365 by the seat `epic:#31527#2`. Part of #31527 (ADR-0150). ⛔ Not a claim.\n\n## 维护者速读\n\n1. 来源：#32551（卡 #32365）合约复核 6814653792 留下的五项，都不在 #32365 的范围内，合成一张卡跟进。\n2. F4：进程内（`MetadataManager`）把所有无包项都当成环境自己的项；协议层把没有存储行的无包项当平台项并在包旁边拒绝。两层对同一状态答案不同。\n3. F6(a)：`MetadataManager.get` 命中内存就返回，不再看 loader 里的槽位，所以\"环境项先答\"只在两者都在同一视图时成立。\n4. F5：服务存储里有环境项、注册表里没有时，协议判断只看注册表，旁边一个启用包就由包答，不是环境项先答。\n5. 措辞：候选里有环境项时，拒绝文案仍写 \"held by N packages\"。\n6. 与 #32533 对齐：拒绝文案里是否点名环境项、一包加环境槽时\"按名读答环境、按名删删全部\"，两边要统一口径。\n\n---\n\n**Title:** ADR-0150 D3 residues of the bare action read after #32551: in-process platform vs environment, loader slots, service-only environment items, refusal wording, and removal alignment\n\n**Labels (proposed):** p2, ADR-0150, epic #31527 child\n\n### Context\n\n#32551 (card #32365) made the bare read of an action name (`GET /meta/action/NAME`, its `/layers` and `/published`, and `MetadataManager.get('action', NAME)`) weigh its package-less holder: the environment's own item answers first beside one package, the platform's item is refused beside a package, and a package-less holder is named beside two packages. Its contract review (6814653792) left five items outside that card. Each is unchanged from `main` before #32551 or is a seam #32551 exposes; none loosens a resolution.\n\n### 1. In process, the platform's item is the environment's (review F4)\n\n`package-slotted-store.ts` classifies every package-less slot of an action name as the environment's: beside one package it answers first (`readStoreEntry`), beside two it is named `{ kind: 'environment' }` (`refuseAcrossOwners`, `readIdentity`). The protocol tells the two apart by whether the environment's store holds an active package-less row of the name (`judgeBareActionRead`), refuses the platform's item beside any package (seat ruling Q1), and names it `{ kind: 'platform' }`.\n\n- Shape: a package-less item registered by host code or a plugin (no `sys_metadata` row) on `contact`, package A's on `account`. Protocol: 409 `[A, platform]`. In process: the package-less item.\n- On `main` the store answered the slot written last, so this is no loosening, but the in-process read still picks where the rule refuses.\n- Ask: give the store a way to know which package-less slot is backed by an environment row (or have it defer that judgment to the protocol), so both layers answer the same.\n\n### 2. An in-memory hit returns before the loaders' slots are read (review F6(a))\n\n`MetadataManager.get` returns on an in-memory hit before it reads its loaders. Env-first holds only when both items are in one view.\n\n- Shape: package A's action in memory, the environment's item of the same name held only by a loader. `MetadataManager.get('action', NAME)` answers A's item; D3 says the environment's answers first.\n- Ask: for slotted, owner-keyed types, judge the bare read over the in-memory slots and the loaders' slots together, or pin and document that the in-memory view alone is authoritative.\n\n### 3. A service-only environment item is invisible to the protocol's judge (review F5)\n\nThe protocol's bare action read judges the registry's holders (`judgeBareActionRead`). The metadata service is read first, and its refusal is passed through only when two or more of the packages it names are enabled (`rethrowPackageScopedRefusal`).\n\n- Shape: the service holds A's item, a disabled B's, and the environment's on `lead`; the registry holds A's only. The service store refuses (two packages); one enabled package remains, so the read falls through; the judge sees one enabled holder and serves A's item. Pinned in `packages/runtime/src/action-package-addressing.test.ts` (`[#32365]`, real `MetadataManager`, \"CONTROL — … DISABLED package …\") as the current answer.\n- Without the disabled B (service: A's and the environment's), the same read answers the environment's item. D3 says the environment's answers first in both.\n- Ask: when the service's refusal is dropped for naming a disabled package, read the service's package-less slot before falling back to the registry's judge, or hydrate it into the registry so the judge counts it.\n\n### 4. Refusal wording names an environment candidate as a package\n\n`packageScopedRefusalMessage` (`@objectstack/core`) says \"held by N packages\" when one candidate is the environment (it says \"holders\" only when a candidate is the platform). With A, B and the environment's item the sentence reads \"held by 3 packages\".\n\n- Ask: say \"holders\" whenever any candidate is not a package, and pin the sentence for the environment candidate.\n\n### 5. Align the read with #32533's removal (card #32352)\n\nBoth count holders by package and both refuse at two packages; the hunks do not overlap. Two differences remain:\n\n- (a) The read's refusal names the environment beside two packages; #32533's removal refusal names the packages only.\n- (b) With one package and an environment slot, the bare read answers the environment's item, while a bare removal takes every slot of the name.\n- Ask: decide one reading for both (does a bare removal beside one package remove the environment's item only, as the read answers it, or refuse?), and name the same candidates in both refusals.\n\n### Acceptance\n\n- Each item either changes with a FROM → TO and a pin, or is closed with a written reason.\n- No resolution loosens: every change refuses where a read served, or serves the D3 holder where it served another.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

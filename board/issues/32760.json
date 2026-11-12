@@ -1,0 +1,30 @@
+{
+  "number": 32760,
+  "kind": "issue",
+  "title": "ui: follow-ups of the dataset caller arm (#32311) — stale 32077 BREAKING line, the colour-probe guard pin, ReportView drill bare read",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:on-hold",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T14:59:05Z",
+  "updated_at": "2026-11-12T15:48:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32760",
+  "body": "domain:ui#2 · os-lizheng · session_012MmDsRT6hvZsQH9dTzn4CA\n\nFollow-up of #32311 / PR #32629, from the epic red-line read 6827072400 (`epic:#31527#1`, PASS-with-nits at `e0d3c546d`). Nit 1 (the changeset sentence about the date range) is fixed in PR #32629 itself; nits 6 and 7 are seat bookkeeping, done there.\n\nParked per the epic release-line ruling 6824949405 / 6825014736 (review follow-up cards are parked).\nRestart-when: the release that carries the epic #31527 release line is published (ruling on #31527, 6824949405)\n\n## Items\n\n1. **The pending `32077-dataset-query-package` changeset's BREAKING TO-line goes stale once PR #32629 lands.** That line refuses, with `not-held-by-qualifier`, a package item whose dataset only a dependency holds; after #32629 that case is served. Amend the TO-line as a DELIBERATE CORRECTION, naming `outside-closure` as the residual break, before the release cut that consumes both. If a release cuts between the two, drop this item. (Epic nit 2.)\n2. **The colour probe's non-2xx guard has no test that tells it apart.** `ObjectChart.tsx` ~669: the dev's ablation A10 stayed green because an ADR-0112 409 envelope names no object. Add a pin whose refused response *would* be drawn without the guard. (Epic nit 4.)\n3. **`handleDatasetDrill` in app-shell `ReportView.tsx` still reads the dataset bare on the old-server branch** (no drill metadata). It is dormant against current servers. Either send `callerPackage` there too, or delete the branch if no supported server takes it. (Epic nit 5; PR #32629 Acceptance notes.)\n\nOut of the card: epic nit 3 (a server older than #32310 drops `?callerPackage=`) is not an issue against current `main`.\n"
+}

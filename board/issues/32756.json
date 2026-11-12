@@ -1,0 +1,32 @@
+{
+  "number": 32756,
+  "kind": "issue",
+  "title": "Record panel offers 「编辑」 on a record whose every field is read-only by readonlyWhen; it opens a form with nothing to edit and an active 「更新」 button",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T14:43:37Z",
+  "updated_at": "2026-11-12T14:47:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32756",
+  "body": "Filing category: ① product defect (minor, user-visible).\nreach: public entry — the console record panel in a browser (Playwright, zh-CN), measured on a hosted tenant (`pnpm dev:stack --with-ui`; cloud `ff373e02`, framework `d7c3d44e`), as the record's owner (a member).\n\n## Business reason\n\nOn an approved expense claim, the employee sees an active 编辑 button, opens it, and finds every field locked with an 更新 button that does nothing. It reads as \"you may change this\" until it doesn't.\n\n## What happens\n\nObject `ebqu_claim`: every form field carries `readonlyWhen: \"record.status == 'pending' || record.status == 'approved'\"`. On an approved claim the panel's 编辑 is enabled; the dialog 编辑报销单 renders all fields as read-only text and links (correct), with 取消 / 更新 enabled. Server side is right (a write is dropped with `droppedFields … reason: readonly_when`).\n\n## Expected\n\nWhen no field of the form is writable for this record, 编辑 is hidden or disabled with a reason (e.g. 「已批准，不能修改」), as it is during an approval lock (「审批中已锁定」 + disabled 编辑).\n\nReader who acts: the `domain:ui` seat (record panel header actions).\nDedupe: `repo:objectstack-ai/objectstack is:issue edit button readonlyWhen all fields read-only` → 21 hits (#32666 open: readonly write by a flow reports success — different), none on the button."
+}

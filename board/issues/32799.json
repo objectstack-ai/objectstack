@@ -1,0 +1,31 @@
+{
+  "number": 32799,
+  "kind": "issue",
+  "title": "plugin-email: GET /api/settings/mail serves no live.provider, so the hosted platform mail channel cannot read as configured (#32643 item 1, cloud#4386)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T19:29:03Z",
+  "updated_at": "2026-11-12T19:45:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32799",
+  "body": "domain:ui#2 · os-lizheng · session_012MmDsRT6hvZsQH9dTzn4CA\n\nFiling gate: ② the remaining half of a ruled card, split out after measurement. ⛔ Not a claim; triage sets the lane and grade.\n\nSource: #32643 (coordinator 6819876581 item 1, after cloud#4386 「A 平台默认代发」), PR #32797, out-of-scope finding 2 in the os-dev-report on #32643.\n\n## The rule this follows\n\nThe coordinator, item 1: \"When the platform channel is present (hosted, once cloud#4386 ships), mail counts as configured. The checklist's mail row reads done with no administrator action… Either the hosted mail namespace reports the platform channel as a configured provider, or `isMailConfigured` accepts it. The cloud lane and this lane agree which, and it is recorded here.\"\n\n## Measured on `main`\n\n- `packages/plugins/plugin-email/src/email-plugin.ts` `registerLiveStatus('mail')` and `live-transport-status.ts` `describeLiveMailTransport` return `label`, `bannerSeverity` and `bannerText` only, with no `values`.\n- So `GET /api/settings/mail` serves no `live.provider` with a `source`. The console's checklist cannot read a hosted platform channel as configured the way `aiProviderState` reads the `ai` namespace (`live.provider { value, source }`).\n- PR #32797 makes the mail row optional, ruling item 2. The row now never holds the checklist open, but on hosted it reads \"not done\" even when the platform channel delivers.\n\n## Do\n\nHave `plugin-email`'s live status state the provider in use, in the same shape the `ai` namespace's `live.provider` takes (`{ value, source: 'settings' | 'environment' | 'platform' | 'none' }`, or whatever the cloud lane agrees for the platform channel). Then a follow-up ui change reads it in `isMailConfigured`, as `aiProviderState` does. Agree the shape with the cloud lane (cloud#4386) and record it on #32643's thread.\n\nDedupe words: mail live provider, live.provider mail, platform mail channel, describeLiveMailTransport values.\n"
+}

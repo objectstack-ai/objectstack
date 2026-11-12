@@ -1,7 +1,7 @@
 {
   "number": 19287,
   "kind": "issue",
-  "title": "[PM seat] domain:skills · seat 2 — 🟢 os-sales",
+  "title": "[PM seat] domain:skills · seat 2 — ⏳ vacant",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,18 +14,16 @@
     "domain:skills",
     "pm:seat"
   ],
-  "assignees": [
-    "os-sales"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-09-20T09:45:20Z",
-  "updated_at": "2026-11-12T11:17:26Z",
+  "updated_at": "2026-11-12T17:14:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 48,
+  "comments": 49,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/19287",
-  "body": "domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:skills` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here).\n- The other skills seats: seat 1 objectstack-ai/objectstack#7623, seat 3 objectstack-ai/objectstack#29747. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T11:15Z at seating.</sub>\n\n## Current PM — 🟢 os-sales\n\n- **Holder:** `os-sales` · `session_01L6bhgW8hTkKksL7dcS4MSk` (project \"Objectstack security ui\", thread \"skills 席 1\"), seated at this refresh.\n- **Terms (maintainer, verbatim, 2026-11-12, in this project's chat):** 「所有座位只处理 p1 p2 卡」: `priority:p1` / `priority:p2` cards only. Batch 2 (no number named; the project's coordinator set 2). M+ / p1 cards run as card threads opened by this project's coordinator; S mechanical cards as in-seat subagents.\n- **Mailbox:** PR #32710 (head `claude/project-thread-d3k8e3`, the session's own branch; `--close` leaves it for a person to delete). **Patrol:** `trig_01JzJ63Rp4uRB63nK1H4iEPF` · `14 * * * *` (hourly, bound to the seated session).\n- **Posture ledger:** lives in the project. The canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none at seating.\n- **Inherited from the previous holder (brief 6821818323):** nothing claimed. #32584 (p2) is now `pm:awaiting-maintainer`; #32673 (`needs-user-decision`) and #32664 (p3) stay with the box and the lane.\n- **Alternation:** with seat 3 (#29747, `os-bill`) on the full order; seat 2 takes odd positions.\n\n## Hot-file serial queue\n\n- None held. ⛔ Re-derive from live `Claim:` comments and open PR file lists before each dispatch.\n\n## Notes\n\n- **Publication:** objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n- **Write path:** the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n\n<!-- signed: domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk -->\n"
+  "body": "domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk\n\n⚠️ **Project-seat stub.** This post is the seat, **`domain:skills` seat 2**. Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here).\n- The other skills seats: seat 1 objectstack-ai/objectstack#7623, seat 3 objectstack-ai/objectstack#29747. ⛔ This post is neither.\n\n<sub>Refreshed 2026-11-12T17:11Z at clock-out.</sub>\n\n## Current PM — ⏳ vacant\n\n- **Holder:** none. Last PM: `os-sales` · `session_01L6bhgW8hTkKksL7dcS4MSk`, seated 2026-11-12 11:15Z, clocked out on the maintainer order 「skills 当前任务处理完就下班」. See the clock-out brief 6830516034.\n- **Mailbox:** PR #32710, closed at clock-out. Its head `claude/project-thread-d3k8e3` (one empty commit, the session's own branch) is left for a person to delete. **Patrol:** `trig_01JzJ63Rp4uRB63nK1H4iEPF`, deleted at clock-out.\n- **Pointer:** lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#2` + `head:claude/` PRs.\n\n## Ledger\n\n- **In flight:** none. `check-handover.mjs --session=session_01L6bhgW8hTkKksL7dcS4MSk --account=os-sales` exit 0.\n- **Landed this shift:** #32539 (PR #32745), #31982 (PR #32775).\n- **Left in the lane, not claimed (p1/p2):** #32703 `pm:blocked` on #32529; #32584, #25583 `pm:awaiting-maintainer`; #32522, #32065 `pm:on-hold`; #29471 held by `zhuangjianguo`.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- **Successor:** run `/pm-dispatch 接手`, then read this post and the latest brief.\n\n<!-- signed: domain:skills#2 · os-sales · session_01L6bhgW8hTkKksL7dcS4MSk -->\n"
 }

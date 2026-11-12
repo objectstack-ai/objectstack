@@ -1,0 +1,31 @@
+{
+  "number": 32749,
+  "kind": "issue",
+  "title": "[Decision] Should the console's own AI chat read an invoice photo and attach that same upload to the record it files, instead of declining non-spreadsheet attachments?",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "os-bob",
+    "id": 353326562,
+    "type": "User"
+  },
+  "labels": [
+    "area:ai",
+    "domain:cloud",
+    "needs-user-decision",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-12T14:32:29Z",
+  "updated_at": "2026-11-12T16:56:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/32749",
+  "body": "Filing category: ② a decision only the maintainer can make.\n\n## 维护者速读\n\n- 现象：员工最自然的做法是\"把发票照片发给 AI，让它填报销单\"。用外部 AI（Claude 等）走 MCP 时，照片在 AI 厂商那边，平台拿不到原文件，只能再发上传链接让人重选一次（#32747）。而平台自带的「问 AI」聊天，照片本来就是传到平台自己的页面里的，现在却直接回一句\"当前仅支持读取表格类附件……这些文件的内容我没有读取\"。\n- 要你裁：自带 AI 是否读取图片/PDF 附件，并把**同一份上传**直接写进它建的记录的文件字段（不再让人选第二次）。\n- 推荐：A：读取 + 直接附加，附加仍以当前用户身份、走记录的编辑门，图片与 PDF、限大小。\n\n## One-sentence problem\n\nThe one place where the photo's bytes are already inside the platform (the console's own chat) is the one place that refuses to look at it.\n\n## Evidence (reach)\n\n- `ui/packages/app-shell/src/console/ai/AiChatPage.tsx` `doSend`: files not matching `\\.(xlsx|xlsm|csv|tsv|txt)$` are not sent; the user's message gets `(用户上传了 N 个附件:… — 当前仅支持读取表格类附件(Excel/CSV),这些文件的内容我没有读取。)` (read at framework `d7c3d44e`).\n- External-client path measured on a hosted tenant (`pnpm dev:stack --with-ui`, cloud `ff373e02`): `create_record` → `create_upload_link` → user re-picks the file → `read_file` reads it back → `run_action` submits. Works, at the cost of re-picking every invoice.\n\n## Governing text\n\n- objectstack#30892 (closed): \"An AI client sees an image the user attaches in its own chat, but it has no bytes to send.\" True for external clients; not true for the console chat, whose composer holds the `File`.\n- `docs/NORTH-STAR.md`: \"Every step of the road must hold for both kinds of user.\"\n\n## Options\n\n| Option | What it does | What the customer sees | Effort |\n|---|---|---|---|\n| A | Console chat uploads image/PDF attachments to storage as the user (pending `sys_file`), sends them to the model as image/text parts, and lets the agent put that file id into a file field of a record it creates or edits (edit door as the user; only files this user uploaded in this conversation) | \"Here's my taxi receipt\" → claim drafted with amount filled and the photo attached, nothing to pick twice | ui + cloud AI seats · 2–3 PRs · precedent: spreadsheet attachments (cloud#797) |\n| B | Read only: the agent sees the photo and fills fields; attaching still goes through an upload link | Fields filled, photo picked again | ui + cloud AI seats · 1–2 PRs |\n| C | Keep declining non-spreadsheet attachments | User types the numbers or uses the form | none |\n\nBusiness reading: A makes the built-in assistant the shortest path for expenses, claims, contracts; B halves it; C keeps it a spreadsheet-only helper.\n\n## Recommendation\n\nA. The bytes are already the user's own upload inside the platform, so attaching them raises none of #32747's provenance question (the user picked the file; the agent only routes it). Confidence gap: model vision cost per image and the size cap; recommend images ≤ 10 MiB, PDFs through the existing `read_file` text extraction.\nSelf-check: ①②③④ all pick A or B; only ④ alone would accept B first.\n\n## After the ruling\n\nA: composer uploads non-spreadsheet attachments as pending files; the agent gets them as parts plus their file ids; a write that names such an id in a file field commits it; e2e: one photo in chat → a draft claim with the amount and the photo on `invoices`.\n\nos-decision-facets\n① 项目长远合理性: A 让文件只上传一次、由用户本人上传，复用现有文件字段和编辑门。\n② 实际业务拉动: 报销（发票照片）是最常见的\"拍照即录入\"场景，本次实测用户第一反应就是把照片发给 AI。\n③ 防 AI 犯错: A 只允许附加本人在本对话里上传的文件，agent 不能凭空造文件；读出的金额仍可用 read_file 复核。\n④ 创业阶段不扩散: B 更小，A 多一步附加；都复用现有通道，不新增对外接口。\nPrior rulings read: #30892 (external-client upload link); #32747 (open, one link for several files); thread: none\n\nReader who acts: the `domain:ui` seat (`AiChatPage` composer) and the cloud AI seat (agent message parts and the attach step), after the ruling.\nDedupe: `repo:objectstack-ai/objectstack is:issue AI chat image attachment` → 31 hits (#30892 closed, external clients; others PM seats); `repo:objectstack-ai/cloud is:issue chat image attachment invoice photo` → 0; `Non-spreadsheet attachments chat` → 0."
+}
