@@ -859,6 +859,92 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
     expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'de-DE')).toBeUndefined();
   });
 
+  describe('[#32561] the exact read adopts the registry\'s binding of an undeclared pair row: no owner\'s row where the registry binds it to no package', () => {
+    const Z = 'com.acme.zeta';
+    const installZ = () => registry.installPackage({ ...(memberOf(Z) as object), dependencies: { [APP]: '^1.0.0', [X]: '^1.0.0' } } as never, 'code');
+    const hydratePairRow = () => registry.registerItem('email_template', {
+      name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', _packageId: PAIR, _provenance: 'org',
+    }, 'name' as never);
+    /** Each address answers its own shipped item; the pair's own address still serves the row. */
+    const expectNoOwnersRow = async () => {
+      expect(registry.getPackageScopedItem('email_template', 'welcome', X, 'fr-FR'), 'the registry binds it to no package').toBeUndefined();
+      expect((await read(X, 'fr-FR'))?.item, '`?package=X`: X ships no fr-FR').toBeUndefined();
+      expect(labelOf(await read(Z, 'fr-FR')), '`?package=Z`: Z\'s own fr-FR').toBe('zeta fr-FR');
+      expect(labelOf(await read(PAIR, 'fr-FR')), '`?package=A.custom` still serves the row').toBe('pair fr-FR');
+      expect(await listed(X), 'X\'s list leaves it out').not.toContain('pair fr-FR');
+      // CONTROL: X's own member is still its own.
+      expect(labelOf(await read(X, 'en-US'))).toBe('suitex en-US');
+    };
+
+    it('NARROWING — an undeclared row of the very locale a bundle addition of another package of the App ships, addition installed first (residual 1; BASE at 075fb3188: `?package=X` served the row)', async () => {
+      installZ();
+      tpl('en-US', X);
+      tpl('fr-FR', Z);
+      pairRow();
+      hydratePairRow();
+      await expectNoOwnersRow();
+    });
+
+    it('NARROWING — the same row stored before the addition is installed: once the addition ships the row\'s locale, X\'s address no longer serves it (residual 1, the other order)', async () => {
+      tpl('en-US', X);
+      pairRow();
+      hydratePairRow();
+      expect(labelOf(await read(X, 'fr-FR')), 'CONTROL — before the addition, X is the one owner').toBe('pair fr-FR');
+      installZ();
+      tpl('fr-FR', Z);
+      await expectNoOwnersRow();
+    });
+
+    it('CONTROL — a row that declares X keeps X\'s address beside the addition, as declared', async () => {
+      installZ();
+      tpl('en-US', X);
+      tpl('fr-FR', Z);
+      pairRow({ overrides: { package: X } });
+      registry.registerItem('email_template', {
+        name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: X }, _packageId: PAIR, _provenance: 'org',
+      }, 'name' as never);
+      expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
+      expect(labelOf(await read(Z, 'fr-FR'))).toBe('zeta fr-FR');
+    });
+
+    it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
+      // App B: P ships en-US, Q (on P) ships de-DE; B's pair stores an undeclared fr-FR row.
+      // App A: U (on A and P, A's namespace) ships fr-FR, Y ships it-IT; A's pair stores an undeclared es-ES row.
+      const BAPP = 'com.beta.base';
+      const P = 'com.beta.basep';
+      const Q = 'com.beta.baseq';
+      const U = 'com.acme.suiteu';
+      const BPAIR = `${BAPP}.custom`;
+      const module = (id: string, deps: string[], namespace = id.split('.').pop()!) => registry.installPackage({
+        id, name: id, version: '1.0.0', type: 'module', namespace, dependencies: Object.fromEntries(deps.map((d) => [d, '^1.0.0'])),
+      } as never, 'code');
+      registry.installPackage(manifest(BAPP), 'code');
+      module(P, [BAPP]);
+      module(Q, [BAPP, P]);
+      module(U, [APP, P], 'suite');
+      tpl('en-US', P);
+      tpl('de-DE', Q);
+      tpl('fr-FR', U);
+      tpl('it-IT', Y);
+      const stored = (pairId: string, locale: string, label: string) => {
+        const body = { name: 'welcome', label, locale, subject: label, bodyHtml: '<p>p</p>' };
+        rows.push({ id: `row_${label}`, type: 'email_template', name: 'welcome', state: 'active', package_id: pairId, bundle_member: locale, metadata: JSON.stringify(body) });
+        registry.registerItem('email_template', { ...body, _packageId: pairId, _provenance: 'org' }, 'name' as never);
+      };
+      stored(BPAIR, 'fr-FR', 'bpair fr-FR');
+      stored(PAIR, 'es-ES', 'pair es-ES');
+      expect(registry.getPackageScopedItem('email_template', 'welcome', P, 'fr-FR'), 'the registry binds neither row').toBeUndefined();
+      expect(registry.getPackageScopedItem('email_template', 'welcome', Y, 'es-ES')).toBeUndefined();
+      expect((await read(Y, 'es-ES'))?.item, '`?package=Y`: Y ships no es-ES').toBeUndefined();
+      expect((await read(P, 'fr-FR'))?.item, '`?package=P`: P ships no fr-FR').toBeUndefined();
+      expect(labelOf(await read(PAIR, 'es-ES')), 'each pair\'s own address still serves its row').toBe('pair es-ES');
+      expect(labelOf(await read(BPAIR, 'fr-FR'))).toBe('bpair fr-FR');
+      // CONTROL: each holder's own member is still its own.
+      expect(labelOf(await read(Y, 'it-IT'))).toBe('suitey it-IT');
+      expect(labelOf(await read(P, 'en-US'))).toBe('basep en-US');
+    });
+  });
+
   it('a sole owner keeps its member: another package of the pair does not serve it (delta review S2; through the doors the qualifier refuses the non-holder first)', async () => {
     tpl('en-US', X);
     pairRow();
