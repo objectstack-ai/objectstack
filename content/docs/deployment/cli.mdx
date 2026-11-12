@@ -2086,6 +2086,9 @@ when:
 
 - the run has no crypto provider (no data key here, or the provider a plugin
   declares does not load), or the signer cannot sign;
+- a checkpoint that lists the row does not verify under a trusted signing key.
+  A stored checkpoint or amendment counts only when it verifies, by the rule
+  `os audit verify` applies;
 - the row no longer matches the checkpoint that sealed it. What was sealed
   cannot be shown, so it is never amended, and `os audit verify` reads it
   `modified`;

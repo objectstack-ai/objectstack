@@ -246,8 +246,8 @@ lifecycle: {
   `cryptoProvider`. `os serve` passes the one it seals every secret with; an
   app that puts its own `AuditPlugin` in `plugins` passes one itself. Without
   one, nothing is sealed and the plugin says so at `error`, again each hour
-  while it lasts. A one-shot command (`os audit verify`, `os migrate …`)
-  starts no sealer (`armSealer: false`).
+  while it lasts. A one-shot command (`os audit verify`, `os migrate …`,
+  an `OS_MIGRATE_AND_EXIT=1` boot) starts no sealer (`armSealer: false`).
 - A platform migration that rewrites a value column of a sealed row writes a
   signed redaction amendment first, or leaves the row as it is
   ([sealed audit rows](/docs/deployment/cli#sealed-audit-rows-os-migrate-audit-)).
