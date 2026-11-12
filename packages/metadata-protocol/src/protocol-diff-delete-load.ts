@@ -55,6 +55,7 @@ import {
 import { collectCompositeKeyHeadHits, collectReferenceHits } from './protocol-reference-hits.js';
 import { diffShallow } from './protocol-write-face.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
+import { mutationEventPackage } from './protocol-mutation-events.js';
 import type { DeleteMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { ProtocolHost } from './protocol-host.js';
@@ -836,6 +837,8 @@ export class ProtocolDiffDeleteLoadFacet {
                     name: request.name,
                     state: 'deleted',
                     organizationId: null,
+                    // [#31698] The row this delete removed (ADR-0150 D4).
+                    ...mutationEventPackage(singularTypeForRepo, packageId),
                 });
                 host.emitMetadataMutation({
                     type: singularTypeForRepo,

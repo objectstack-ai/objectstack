@@ -79,6 +79,7 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
+import { mutationEventPackage } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
@@ -2158,6 +2159,8 @@ export class ProtocolSaveFacet {
                 state: mode === 'draft' ? 'draft' : 'active',
                 organizationId: null,
                 body: request.item,
+                // [#31698] The row a set's save landed in (ADR-0150 D4).
+                ...mutationEventPackage(singularType, permissionLandsIn),
             });
             host.emitMetadataMutation({
                 type: singularTypeForRepo,

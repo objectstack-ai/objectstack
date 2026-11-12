@@ -27,6 +27,13 @@ export interface MetadataMutationEvent {
      * for every type with no members, as on every by-name door.
      */
     member?: string;
+    /**
+     * [ADR-0150 D4, #31698] The package the mutated row is bound to (its
+     * `package_id`), or `null` for the package-unbound row — part of the row's
+     * address for a type stored per `(package, name)`. Absent where the door
+     * does not state it; a consumer then reads the name with no package.
+     */
+    packageId?: string | null;
 }
 
 /**
@@ -116,6 +123,16 @@ export interface MetaItemPublishedEvent {
 export type MetadataMutationProjector = (
     evt: MetadataMutationEvent & { body?: unknown },
 ) => Promise<void>;
+
+/**
+ * [ADR-0150 D4, #31698] The {@link MetadataMutationEvent.packageId} a door's
+ * projector event carries: the row's package, for `permission` — the one type
+ * whose projector (the security catalog's echo) keeps a copy per `(package,
+ * name)`. Every other type's event keeps its shape.
+ */
+export function mutationEventPackage(type: string, packageId: string | null | undefined): { packageId?: string | null } {
+    return type === 'permission' && packageId !== undefined ? { packageId } : {};
+}
 
 /** Per-write outcome of the awaited mutation projector (ADR-0094). */
 export interface MutationProjectionOutcome {

@@ -42,6 +42,7 @@ import { memberOption, mutationEventMemberOfBody, resolveBundleMemberSelector } 
 import { clientFacingFailureCode, clientFacingFailureText } from './protocol-client-failures.js';
 import type { PublishMaterializeResult } from './protocol-package-lifecycle-types.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
+import { mutationEventPackage } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
@@ -1423,6 +1424,8 @@ export class ProtocolHistoryAndPublishFacet {
             state: 'active',
             organizationId: null,
             body: args.body,
+            // [#31698] The row this publish wrote (ADR-0150 D4).
+            ...mutationEventPackage(args.singularType, args.packageId),
         });
         if (publishProjection) out.projectionApplied = publishProjection;
         host.emitMetadataMutation({
