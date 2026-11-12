@@ -1863,9 +1863,12 @@ export class MetadataManager implements IMetadataService {
    * the `409` naming every holder, where the storage loop would have caught
    * each loader's own refusal as a failed delete and announced a removal that
    * never happened. Every loader's holders of the name are within this view,
-   * so a loader the removal deletes from does not refuse once it has passed —
-   * ⛔ except an object-bound action's slots, which the holder count does not
-   * read (the registry's own rule; a separate card).
+   * so a loader the removal deletes from does not refuse once it has passed.
+   * [#32352] That includes an action's object-bound slots: holders are counted
+   * by package over every slot of the name, as `DatabaseLoader`'s row key
+   * `(package, name)` counts them, so a name two packages hold on one object
+   * or on two is refused here rather than by the loader's `delete` after the
+   * registry had already dropped it and announced `deleted`.
    *
    * @throws {PackageScopedNameRefusedError} no package named, two or more
    *   packages holding the name in the registry or the loaders.

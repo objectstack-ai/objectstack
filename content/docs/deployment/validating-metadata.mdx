@@ -257,8 +257,10 @@ declares one over its own object with `400 DATASET_INVALID`, whichever members
 the query names. So such a dimension is refused
 (`dimension-virtual-field-refused`) at `datasets[N].dimensions[M].field`; a
 dimension through a relationship path is judged on the object the path
-reaches. Store the value in a field of its own (written by a hook or a flow
-when its source changes) and point the dimension at that field.
+reaches. Store the value in a field of its own: a field of the formula's
+`returnType` (`number`, `text`, `boolean`, `date` or `currency`) carrying the
+same `expression`, which the engine computes and stores on every write, and
+point the dimension at that field.
 
 Both checks also judge the members of an analytics cube (`analyticsCubes`),
 because an authored cube is queried through the same analytics door. A cube
