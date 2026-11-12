@@ -155,12 +155,21 @@ function packageScopedRegistryOf(registry: EmailTemplateRegistrySources['registr
  * bundle ADDITION (a locale a dependent adds to another package's template,
  * which holds no name for anyone else) meets its base: the name is resolved
  * again from its closure over the holders every other reader sees.
+ *
+ * [ADR-0150 D3, #32183] Every read here counts every holder, a disabled
+ * package's included (`includeDisabledPackages`): the address and the
+ * refusal never move with a reversible disable. The door reads a flat list
+ * after the resolve, so judging the served holders here would hand a send
+ * another package's body; until #32670 lands, a disabled package still
+ * counts at the send and a refusal still names it, as before.
  */
 function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPackageId: string | null): string | undefined {
-  const resolved = resolvePackageScopedName(scoped, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
+  const resolved = resolvePackageScopedName(scoped, {
+    type: EMAIL_TEMPLATE_TYPE, name, callerPackageId, includeDisabledPackages: true,
+  });
   if (resolved.status === 'refused') throw new EmailTemplateAmbiguousError(resolved);
   if (resolved.status !== 'resolved' || resolved.holder.kind !== 'package') return undefined;
-  const holders = (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name) ?? [])
+  const holders = (scoped.packageScopedHoldersOf(EMAIL_TEMPLATE_TYPE, name, null, { includeDisabledPackages: true }) ?? [])
     .filter((id) => id !== BUILTIN_EMAIL_TEMPLATES_PACKAGE_ID);
   if (holders.length < 2) return undefined;
   const holder = resolved.holder.packageId;
@@ -172,7 +181,7 @@ function bundleAddressOf(scoped: PackageScopedRegistry, name: string, callerPack
     getAllPackages: () => scoped.getAllPackages(),
     getPackageScopedItem: (type, n, packageId, member) => scoped.getPackageScopedItem(type, n, packageId, member),
     getEnvironmentScopedItem: (type, n, member) => scoped.getEnvironmentScopedItem(type, n, member),
-    packageScopedHoldersOf: (type, n) => scoped.packageScopedHoldersOf(type, n),
+    packageScopedHoldersOf: (type, n) => scoped.packageScopedHoldersOf(type, n, null, { includeDisabledPackages: true }),
   } as PackageScopedRegistry;
   const base = resolvePackageScopedName(shared, { type: EMAIL_TEMPLATE_TYPE, name, callerPackageId });
   if (base.status === 'refused') throw new EmailTemplateAmbiguousError(base);

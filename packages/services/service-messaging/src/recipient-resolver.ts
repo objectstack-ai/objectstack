@@ -28,6 +28,29 @@ export const MEMBER_OBJECT = 'sys_member';
 export const TEAM_MEMBER_OBJECT = 'sys_team_member';
 
 /**
+ * [#32445, ruling 6810324463 letter A] The one organization-wide audience:
+ * every member of the EMITTING organization — every `sys_member` row of
+ * {@link ResolveContext.organizationId}, whatever its `role` (none, or one
+ * outside the built-in four, included).
+ *
+ * A closed literal. The organization is the emit's own, exactly as `role:`
+ * scopes to it; ⛔ it is never read from the audience string, so no spelling
+ * of this selector names another organization. Every other value under the
+ * `org:` prefix is refused — warned, 0 recipients — rather than read as a bare
+ * user id: a misspelt organization-wide send must not look like a send.
+ */
+export const ORGANIZATION_MEMBERS_AUDIENCE = 'org:members';
+/** The selector namespace {@link ORGANIZATION_MEMBERS_AUDIENCE} lives in; reserved whole. */
+export const ORGANIZATION_AUDIENCE_PREFIX = 'org:';
+
+/**
+ * Rows read per page by a membership expansion (`org:members`, `role:`,
+ * `team:`). Each expansion pages to the end — there is no cap, so a large
+ * membership is never truncated without a word.
+ */
+export const MEMBERSHIP_PAGE_SIZE = 1000;
+
+/**
  * Conventional owner/assignee field names tried, in order, for `owner_of:`
  * audience resolution. This is the sole home for the convention: the audit
  * writer's kernel-side assignment notifier (which mirrored this list) was
@@ -53,10 +76,16 @@ export interface RecipientResolverOptions {
     teamMemberObject?: string;
     /** Owner field candidates for `owner_of:` (default {@link DEFAULT_OWNER_FIELDS}). */
     ownerFields?: string[];
+    /** Rows per page of a membership expansion (default {@link MEMBERSHIP_PAGE_SIZE}; tests shrink it). */
+    membershipPageSize?: number;
 }
 
 export interface ResolveContext {
-    /** Tenant scope applied to `role:` expansion. */
+    /**
+     * The emitting organization: the tenant scope applied to `role:`
+     * expansion, and the organization whose members `org:members` names —
+     * which resolves to nobody without it.
+     */
     organizationId?: string;
 }
 
@@ -76,25 +105,32 @@ export interface ResolveContext {
  *   - `'user:<id>'`           → the id (prefix stripped)
  *   - `'<email>'`             → `sys_user` lookup by email → id (verbatim on miss)
  *   - `'role:<name>'`         → `sys_member` where `role = name` (tenant-scoped)
+ *   - `'org:members'`         → every `sys_member` of the emitting organization
  *   - `'team:<id>'`           → `sys_team_member` where `team_id = id`
  *   - `'owner_of:<obj>:<id>'` → the owner field of that record
  *   - `{ ownerOf: { object, id } }` → same, structured form
  *
  * Every lookup is best-effort: a failed query resolves to no recipients for
  * that spec (logged) rather than throwing — emit() must never fail because a
- * directory lookup hiccupped.
+ * directory lookup hiccupped. A membership expansion reads every page
+ * ({@link MEMBERSHIP_PAGE_SIZE}), never a capped first one.
  */
 export class RecipientResolver {
     private readonly userObject: string;
     private readonly memberObject: string;
     private readonly teamMemberObject: string;
     private readonly ownerFields: string[];
+    private readonly membershipPageSize: number;
 
     constructor(private readonly opts: RecipientResolverOptions) {
         this.userObject = opts.userObject ?? USER_OBJECT;
         this.memberObject = opts.memberObject ?? MEMBER_OBJECT;
         this.teamMemberObject = opts.teamMemberObject ?? TEAM_MEMBER_OBJECT;
         this.ownerFields = opts.ownerFields ?? DEFAULT_OWNER_FIELDS;
+        const pageSize = opts.membershipPageSize;
+        this.membershipPageSize = Number.isInteger(pageSize) && (pageSize as number) > 0
+            ? (pageSize as number)
+            : MEMBERSHIP_PAGE_SIZE;
     }
 
     /** Expand an audience to a de-duplicated list of recipient user ids. */
@@ -132,6 +168,14 @@ export class RecipientResolver {
         if (value.startsWith('user:')) return [value.slice(5)].filter(Boolean);
         if (value.startsWith('role:')) return this.resolveRole(value.slice(5), data, ctx);
         if (value.startsWith('team:')) return this.resolveTeam(value.slice(5), data);
+        if (value.startsWith(ORGANIZATION_AUDIENCE_PREFIX)) {
+            if (value === ORGANIZATION_MEMBERS_AUDIENCE) return this.resolveOrganizationMembers(data, ctx);
+            this.opts.logger.warn(
+                `[recipients] unrecognized organization audience '${value}': the one organization-wide audience is `
+                + `'${ORGANIZATION_MEMBERS_AUDIENCE}', every member of the emitting organization; 0 recipients`,
+            );
+            return [];
+        }
         if (value.startsWith('owner_of:')) {
             // `owner_of:<object>:<id>` — id may itself contain ':' (rare), so
             // split only on the first two segments.
@@ -152,14 +196,7 @@ export class RecipientResolver {
         const where: Record<string, unknown> = { role };
         if (ctx.organizationId) where.organization_id = ctx.organizationId;
         try {
-            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: a
-            // membership read whose only use is the recipient ids.
-            const rows = await data.find(
-                this.memberObject,
-                { where, fields: ['user_id'], limit: 10000 },
-                { context: FAN_OUT_SYSTEM_CONTEXT },
-            );
-            return userIds(rows);
+            return await this.memberUserIds(data, this.memberObject, where);
         } catch (err) {
             this.opts.logger.warn(`[recipients] role '${role}' lookup failed (${msg(err)}); 0 recipients`);
             return [];
@@ -170,16 +207,84 @@ export class RecipientResolver {
     private async resolveTeam(teamId: string, data: IDataEngine | undefined): Promise<string[]> {
         if (!teamId || !data) return [];
         try {
-            // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT.
-            const rows = await data.find(this.teamMemberObject, {
-                where: { team_id: teamId },
-                fields: ['user_id'],
-                limit: 10000,
-            }, { context: FAN_OUT_SYSTEM_CONTEXT });
-            return userIds(rows);
+            return await this.memberUserIds(data, this.teamMemberObject, { team_id: teamId });
         } catch (err) {
             this.opts.logger.warn(`[recipients] team '${teamId}' lookup failed (${msg(err)}); 0 recipients`);
             return [];
+        }
+    }
+
+    /**
+     * `org:members` → every `sys_member` row of the emitting organization —
+     * the member's `role` is not asked, so a member holding none, or one
+     * outside the built-in four, is reached as surely as an owner.
+     *
+     * The posture `role:` carries (see FAN_OUT_SYSTEM_CONTEXT): a membership
+     * read under the explicit system opt-in, projected to `user_id` alone,
+     * whose result leaves this method only as recipient ids. The organization
+     * filter is the read's ONLY tenant boundary — the opt-in lifts the
+     * engine's own — so with no emitting organization there is no read at
+     * all: ⛔ never an unfiltered `sys_member` scan, which would reach every
+     * organization on the install. The resolved count is logged, so a send to
+     * a large organization says how many it reached instead of stopping at a
+     * cap.
+     */
+    private async resolveOrganizationMembers(data: IDataEngine | undefined, ctx: ResolveContext): Promise<string[]> {
+        const organizationId = ctx.organizationId;
+        if (!organizationId) {
+            this.opts.logger.warn(
+                `[recipients] '${ORGANIZATION_MEMBERS_AUDIENCE}' names the members of the emitting organization, and `
+                + 'this emit names no organization; 0 recipients — pass organizationId to emit()',
+            );
+            return [];
+        }
+        if (!data) return [];
+        try {
+            const ids = await this.memberUserIds(data, this.memberObject, { organization_id: organizationId });
+            this.opts.logger.info?.(
+                `[recipients] '${ORGANIZATION_MEMBERS_AUDIENCE}' resolved ${ids.length} member(s) of organization `
+                + `'${organizationId}'`,
+            );
+            return ids;
+        } catch (err) {
+            this.opts.logger.warn(
+                `[recipients] '${ORGANIZATION_MEMBERS_AUDIENCE}' lookup for organization '${organizationId}' failed `
+                + `(${msg(err)}); 0 recipients`,
+            );
+            return [];
+        }
+    }
+
+    /**
+     * Every distinct `user_id` of `object`'s rows matching `where`, read one
+     * page of {@link membershipPageSize} rows at a time, ordered by `id` so the
+     * pages partition the rows, until a short page — no cap. The explicit
+     * system opt-in (see FAN_OUT_SYSTEM_CONTEXT): a membership read whose only
+     * use is the recipient ids, so the projection is `user_id` and nothing
+     * else. A failed page throws to the caller, which reports the expansion
+     * as 0 recipients.
+     */
+    private async memberUserIds(
+        data: IDataEngine,
+        object: string,
+        where: Record<string, unknown>,
+    ): Promise<string[]> {
+        const ids = new Set<string>();
+        for (let offset = 0; ; offset += this.membershipPageSize) {
+            const rows = await data.find(
+                object,
+                {
+                    where,
+                    fields: ['user_id'],
+                    orderBy: [{ field: 'id', order: 'asc' }],
+                    limit: this.membershipPageSize,
+                    offset,
+                },
+                { context: FAN_OUT_SYSTEM_CONTEXT },
+            );
+            const page = Array.isArray(rows) ? rows : [];
+            for (const id of userIds(page)) ids.add(id);
+            if (page.length < this.membershipPageSize) return [...ids];
         }
     }
 
