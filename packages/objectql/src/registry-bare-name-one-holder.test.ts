@@ -434,7 +434,7 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       const { registry, register } = await boot();
       expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
       expect(await register(coOwner('com.acme.alpha', 'com.acme.gamma'))).toBeUndefined();
-      const authored = (tag: string) => ({ ...body(type, name, tag), _provenance: 'org' });
+      const authored = (tag: string): Record<string, unknown> => ({ ...body(type, name, tag), _provenance: 'org' });
       expectRefusal(await caught(() => registry.registerItem(type, authored('gamma'), 'name', 'com.acme.gamma')), 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' });
       // CONTROL: the holder's own tenant-authored overlay adds no holder.
       expect(await caught(() => registry.registerItem(type, authored('alpha'), 'name', 'com.acme.alpha'))).toBeUndefined();
