@@ -2107,7 +2107,11 @@ export function registerObjectTools(
       note('describe_object'),
       {
         description:
-          'Get the schema of a data object: its fields (name, type, label, required) and enabled features.',
+          'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
+          + 'required, readonly (a write to it is dropped), system (a platform-injected column), options (value + label; '
+          + 'send the value) on a field that offers a fixed set, and defaultValue when an insert applies one. '
+          + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
+          + 'message is what a refused write answers). Also the enabled features.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
           { objectName: z.string().describe('The object/table name, e.g. "task"') },
