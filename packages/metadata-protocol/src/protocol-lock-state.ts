@@ -151,19 +151,24 @@ export function declinesStoredRow(
     this: Pick<LockStateHost, 'engine' | 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner' | 'shippedArtifactsOf'>,
     type: string, name: unknown, row?: ServedOverrideRow): boolean {
     const installed = installedManifestsOfEngine(this.engine);
+    // [ADR-0150 D4, #31696, #32613] Whether `row` is the declared override of
+    // a package that ships `(type, name)`, judged against EVERY such package:
+    // two packages' items of one name are two items, each with its own
+    // declared override, so the read serves each in its package's slot —
+    // never only the override of whichever shipper the by-name lookup happens
+    // to find first (the first holder to register), which made the answer
+    // depend on registration order (red line 2).
+    // No row, no override: the shippers are not read for a name-only question.
+    const servedOverrideOfAShipper = (shippedType: string, shippedName: string): boolean => row !== undefined && row !== null
+        && (isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: shippedType, name: shippedName }), installed)
+        || [...shippingPackageIds(this.shippedArtifactsOf(shippedType, shippedName))]
+            .some((shipper) => isServedOverrideRowOf(row, shipper, installed)));
     if (this.isShippedFlowName(type, name)) {
         // [#28412, ADR-0146 D9 item 1] …except the one row that IS the
         // packaged flow now: the shipping package's declared override, judged
         // on the row's own `package_id` and body by the one served-override
         // predicate. Every other stored row of the name stays declined.
-        // [ADR-0150 D4, #31696] Judged against EVERY package that ships the
-        // name: two packages' flows of one name are two items, each with its
-        // own declared override, so the read serves each in its package's
-        // slot — never only the override of whichever shipper the by-name
-        // lookup happens to find first.
-        if (isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }), installed)) return false;
-        return ![...shippingPackageIds(this.shippedArtifactsOf('flow', name as string))]
-            .some((shipper) => isServedOverrideRowOf(row, shipper, installed));
+        return !servedOverrideOfAShipper('flow', name as string);
     }
     if (typeof name !== 'string' || name === '') return false;
     if (this.isDeclaredCodeDatasource(type, name)) return true;
@@ -177,8 +182,13 @@ export function declinesStoredRow(
     // way: its declared override is served over the base's name from its
     // row, so the layered read's `effective` and a by-name read answered by
     // the metadata service see it as the registry's readers do.
+    // [#32613] …against every package that ships the name, as the flow's
+    // above: with two holders of an action name, the second holder's declared
+    // override was judged against the first's package and declined at its own
+    // address, in the served list and in the execution view, so which
+    // holder's override ran depended on which package registered first.
     return !((servesSealedOverrideRow(type) || canonicalMetaType(type) === 'action')
-        && isServedOverrideRowOf(row, this.packagedArtifactOwner({ type, name }), installed));
+        && servedOverrideOfAShipper(type, name));
 }
 
 /** The body of `ObjectStackProtocolImplementation#isUnservedSealedOverlay`; the method's docblock there is its contract. */
