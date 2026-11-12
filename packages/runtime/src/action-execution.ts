@@ -72,6 +72,8 @@ import {
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
 import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
+// [#31696] A flow action's `target` resolves from the action's own package.
+import { flowServiceForCaller } from './flow-slot-view.js';
 import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
@@ -2652,9 +2654,15 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         recordId?: string;
         ec: any;
         envId?: string;
+        /**
+         * [ADR-0150 D3, #31696] The package whose item the action is
+         * ({@link actionDeclaringPackage}); absent for an environment-authored
+         * action. The `target` flow name resolves from it.
+         */
+        callerPackageId?: string;
     },
 ): Promise<any> {
-    const { objectName, subject, params, recordId, ec, envId } = wiring;
+    const { objectName, subject, params, recordId, ec, envId, callerPackageId } = wiring;
     // [#29881] A per-record flow action with no record id is refused before
     // the flow starts: no run exists, and no node's diagnostic reaches the caller.
     const perRecordRefusal = perRecordActionRecordIdRefusal(action, recordId);
@@ -2664,10 +2672,25 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         });
     }
     const record = subject.record;
-    const automation = await resolveAutomationService(deps, requestContext, envId);
-    if (!automation) {
+    const service = await resolveAutomationService(deps, requestContext, envId);
+    if (!service) {
         throw new Error(flowActionUnavailableError(action));
     }
+    // [ADR-0150 D3, #31696] The `target` is a reference the action's own
+    // package wrote, so it resolves from that package: a flow name two
+    // packages hold (two namespaces may, ADR-0150 D9) reaches the action
+    // package's own flow, else the one holder in its closure, from that
+    // holder's slot; anything else is refused naming every candidate (409),
+    // before anything below reads or runs. Every step below (existence,
+    // start admission, the row reads, the run) reads the one flow. An
+    // action with no package keeps the bare name, which the engine refuses
+    // for a shared name, naming both.
+    const automation = flowServiceForCaller(
+        service,
+        (await deps.getObjectQL(requestContext, envId).catch(() => null) as { registry?: any } | null)?.registry,
+        action?.target,
+        callerPackageId,
+    );
     // [#9446] Row 1 of the table, answered by the SAME optional `getFlow`
     // registry probe the trigger door uses — the engine's not-found exit
     // carries no classification, so this is the only way to read it that is not
@@ -5110,6 +5133,17 @@ export async function collectActionDeclarations(deps: ActionExecutionDeps,
 function declaringPackageOf(row: any): string | undefined {
     const packageId = row?._packageId;
     return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
+}
+
+/**
+ * [ADR-0150 D3, #31696] The package whose item a resolved action is: the
+ * declaration's own stamp, else its object's — the package
+ * {@link collectActionDeclarations} files the row under. `undefined` for an
+ * environment-authored action. A reference the action writes (a flow
+ * action's `target`) resolves from it.
+ */
+export function actionDeclaringPackage(action: unknown, obj: unknown): string | undefined {
+    return declaringPackageOf(action) ?? declaringPackageOf(obj);
 }
 
 

@@ -51,7 +51,8 @@
  *
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
  * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent` and
- * `skill` (#31701). Two packages of two namespaces may each install such a
+ * `skill` (#31701), the object-less `action` (#31697, below) and `flow`
+ * (#31696). Two packages of two namespaces may each install such a
  * name, so a store keyed by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
@@ -96,9 +97,10 @@ import { peelStoredEnvelope } from './stored-envelope.js';
 /**
  * The types whose in-memory items are stored per `(package, name)`: `api`,
  * then every namespace-scoped type (#32151, #31697; see "Which types" above),
- * then `permission` (#32162).
+ * then `permission` (#32162), then `flow` (#31696), which joins in the same
+ * change that adds it to `NAMESPACE_SCOPED_BARE_NAME_TYPES`.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'permission']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'permission', 'flow']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';

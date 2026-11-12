@@ -27,6 +27,8 @@ import {
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
+// [#31696] One holder's flow of a shared name, served from its own slot.
+import { flowSlotView } from '../flow-slot-view.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -3606,7 +3608,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
-    const automationService = await deps.getService(context, CoreServiceName.enum.automation);
+    let automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
     // automation capability. This domain is the sharpest case for the rule: a
@@ -3620,19 +3622,33 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
 
     // [ADR-0150 D5, epic child G1] THE ADDRESS, judged: an addressed path is
-    // served only when its qualifier names the one holder the bare name
-    // resolves to — then it is exactly its bare path below — and is refused
-    // otherwise (`404` when nothing there holds the name, else `409` naming
-    // every candidate). A bare by-name run or read whose name the resolver
-    // refuses (two packages hold it) is answered `409` naming every candidate,
-    // the same answer (D5). The definition writes (`PUT` / `DELETE /:name`,
-    // the clone) are left to their own `409` and its remedy
-    // (`flowWriteRefusal`), unchanged.
+    // served when its qualifier names the one holder the bare name resolves
+    // to — then it is exactly its bare path below — and is refused otherwise
+    // (`404` when nothing there holds the name, else `409` naming every
+    // candidate). A bare by-name run or read whose name the resolver refuses
+    // (two packages hold it) is answered `409` naming every candidate, the
+    // same answer (D5). The definition writes (`PUT` / `DELETE /:name`, the
+    // clone) are left to their own `409` and its remedy (`flowWriteRefusal`),
+    // unchanged.
+    //
+    // [ADR-0150 D4/D9, #31696] A flow name two packages hold, addressed by the
+    // namespace of one of them: the by-name runs and reads (the doors the bare
+    // `409` covers) are served from that holder's own slot, every step of the
+    // door reading the one flow (`../flow-slot-view.ts`). The definition
+    // writes keep the `409`, as does an engine with no slot entries.
     {
-        const refusal = address.qualifier && address.item
+        const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
             : bareByNameRefusal(addressRegistry, parts, m);
-        if (refusal) return { handled: true, response: automationAddressRefusalResponse(deps, refusal) };
+        if (admission?.status === 'slot') {
+            const slotted = bareByNameItem(parts, m)?.type === 'flow' && address.item
+                ? flowSlotView(automationService, admission.packageId, address.item.name)
+                : undefined;
+            if (!slotted) return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
+            automationService = slotted;
+        } else if (admission) {
+            return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
+        }
     }
 
     // Legacy: POST /automation/trigger/:name — the shape

@@ -45,7 +45,8 @@
  *    arms ONE flow per name, the lexicographically-first package's, whichever
  *    registered first (it warns, naming both); `/meta/flow/NAME` serves the
  *    FIRST-registered package's declaration, so the body the designer opens
- *    and the body that runs can come from two packages;
+ *    and the body that runs can come from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `webhook` — the dispatcher's declared-webhook reader keeps the
  *    FIRST-registered package's declaration per name and never subscribes
  *    the other, and `/meta/webhook/NAME` serves the same one;
@@ -147,7 +148,13 @@
  * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
  * `run_action` with `namespace`) reaches each. The same 409 answers two
  * packages' same-named action bound to ONE object (epic ruling record
- * 6729825528, letter A), which this rule never covered.
+ * 6729825528, letter A), which this rule never covered. `flow` followed
+ * (#31696): the automation engine holds and arms one flow per
+ * `(package, name)` slot and refuses a bare name two packages hold, naming
+ * both; `/meta/flow/NAME` reads through `readPackageScopedItem`; the
+ * namespace-qualified `/automation/NS/NAME` doors serve each holder's own
+ * slot; and a flow action or a flow endpoint runs the flow its own package
+ * names (D3).
  *
  * ## What it deliberately does not judge
  *
