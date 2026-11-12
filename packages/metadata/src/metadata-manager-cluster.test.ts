@@ -682,6 +682,47 @@ describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (
         expect(await readsOf(b.mgr, 'view', 'unlinked')).toEqual(answering('alpha view unlinked'));
     });
 
+    /**
+     * [#32560, ADR-0150 D3] A removal naming no package of an action name
+     * beside the environment's own item takes that item only — the one the
+     * bare read answers. The doors (and registries) hold A's item alone, the
+     * shared store the environment's; the origin's door and every peer's must keep A, so the
+     * removal carries that judgment to each node-local delete.
+     */
+    it('an action\'s removal naming none beside the environment\'s own item: every door keeps A\'s, every node then answers A (BASE: both doors deleted A)', async () => {
+        const type = 'action';
+        // A's action bound to an object, the environment's object-less: on one
+        // binding a package-less body would be A's customization (D4).
+        const env = { name: 'shared', label: 'env action shared' };
+        const alpha = { ...doorItem(type, 'shared', P), objectName: 'account' };
+        const { a, b, store } = await bootDoorCluster(type, [alpha], { sharedStore: true });
+        // The environment's own item as its store holds it beside a package's:
+        // a row of the shared store (a register would bind it to A's slot, D4).
+        await store.save(type, 'shared', env);
+        for (const node of [a, b]) expect(((await node.mgr.get(type, 'shared')) as any)?.label).toBe('env action shared');
+
+        await a.mgr.unregister(type, 'shared');
+        await flush();
+
+        expect(await store.load(type, 'shared')).toEqual({ data: null });
+        for (const [which, node] of [['A', a], ['B', b]] as const) {
+            expect((await node.door.loadSlots(type, 'shared')).map((slot) => slot.packageId), which).toEqual([P]);
+            expect(((await node.mgr.get(type, 'shared')) as any)?.label, which).toBe(`alpha ${type} shared`);
+        }
+    });
+
+    it.each(SLOTTED)('%s: a removal whose package-less judgment is not a boolean is dropped — B deletes nothing, not by name', async (type) => {
+        const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'only')], { sharedStore: false });
+        await bus.publish('metadata.changed', {
+            originNode: 'node-X',
+            type,
+            event: { type: 'deleted', metadataType: type, name: 'only', path: '', timestamp: new Date().toISOString() },
+            removal: { packagelessOnly: 'yes' },
+        });
+        await flush();
+        expect((await b.door.loadSlots(type, 'only')).map((slot) => slot.packageId)).toEqual([P]);
+    });
+
     it.each(SLOTTED)('%s: a removal whose package is not a string is dropped — B deletes nothing, not by name', async (type) => {
         const { bus, b } = await bootDoorCluster(type, [doorItem(type, 'only')], { sharedStore: false });
         await bus.publish('metadata.changed', {

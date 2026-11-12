@@ -2208,15 +2208,19 @@ export class DatabaseLoader implements MetadataLoader {
    * the rows of the slots the store's removal rule picks (`storeRemovalKeys`):
    * that package's row with `options.packageId`; with none, every row of the
    * name while at most one package holds it, and refused
-   * (`PackageScopedNameRefusedError`) when two or more do. Every other type
-   * deletes its name's row, as before.
+   * (`PackageScopedNameRefusedError`) when two or more do. [#32560] With
+   * `options.packagelessOnly` (and no `packageId`), the name's package-less
+   * rows only: the manager judged the removal over every store. Every other
+   * type deletes its name's row, as before.
    */
   async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     await this.ensureSchema();
 
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
       const bySlot = await this.rowSlots(type, name);
-      const { keys } = storeRemovalKeys(bySlot, type, name, options?.packageId);
+      const keys = options?.packageId === undefined && options?.packagelessOnly === true
+        ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
+        : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
       for (const key of keys) {
         for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
       }
