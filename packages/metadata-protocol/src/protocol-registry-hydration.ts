@@ -53,6 +53,7 @@ import { bundleMemberDiscriminator } from './protocol-bundle-members.js';
 import { packageScopedRefusalOf } from './protocol-meta-item-reads.js';
 import { isPairRowRemoval } from './protocol-packaged-base-refusal.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { HEAL_BINDING_UNKNOWN, type HealPackageBinding } from './protocol-heal-binding.js';
 import type { ViewContainerWrite } from './protocol-package-bindings.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
@@ -69,16 +70,23 @@ import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplemen
  * hold) is named as one, with the package the refused read named as the store
  * read it (its `callerPackageId`: a package-less read is "no package") and the
  * holders its message lists. `entry` says what became of the registry entry:
- * left as it was, or retired from the bare slot (a refused package-less heal,
- * seat ruling 6812637203 Q2).
+ * left as it was, retired from the bare slot (a refused package-less heal,
+ * seat ruling 6812637203 Q2), or none retired because the verb removed nothing
+ * (an empty slot, or a packaged artifact it refuses).
  */
-function registryHealStoppedMessage(type: string, name: string, error: unknown, entry: 'kept' | 'retired' = 'kept'): string {
+function registryHealStoppedMessage(type: string, name: string, error: unknown, entry: 'kept' | 'retired' | 'none-retired' = 'kept'): string {
     const reason = error instanceof Error ? error.message : String(error);
     const refusal = packageScopedRefusalOf(error);
     const named = boundPackageOf(refusal?.callerPackageId);
     const why = refusal !== undefined
         ? `the metadata service refused the baseline read, which named ${named === undefined ? 'no package' : `package '${named}'`}: ${reason}`
         : reason;
+    if (entry === 'none-retired') {
+        return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
+            + 'No registry entry was retired, because the bare slot held none the heal may remove (it was empty, or it holds a '
+            + 'packaged artifact, which is never retired), and no baseline was registered; the stored rows are already correct, and '
+            + 'if a registry reader still serves the removed row, the next reload (or restart) re-hydrates the registry from them.';
+    }
     if (entry === 'retired') {
         return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
             + 'The removed row\'s registry entry was retired from the bare slot and no baseline was registered, so a read naming no '
@@ -1377,12 +1385,14 @@ export class ProtocolRegistryHydrationFacet {
      * pair relation and never guessed ({@link readHealBaseline}).
      *
      * REQUIRED, never optional, for the reason `organizationId` is: an omitted
-     * package would read bare. A caller with no package to name passes `null`
-     * and says why at its call site: the removed row was package-less (the
-     * environment's own item, which D3 reads bare), the name is a global
-     * literal (a `view`, ADR-0150 bucket 1), or the caller never learns the
-     * binding (a peer converging on the cluster signal, whose payload carries
-     * an address and no binding).
+     * package would read bare. A caller with no package to name says why at
+     * its call site: it passes `null` when the removed row was package-less
+     * (the environment's own item, which D3 reads bare) or the name is a
+     * global literal (a `view`, ADR-0150 bucket 1), and
+     * {@link HEAL_BINDING_UNKNOWN} when it never learns the binding (a peer
+     * converging on the cluster signal, whose payload carries an address and
+     * no binding). Both read with no package; only `null` retires on a
+     * refusal (below).
      *
      * Best-effort: a failure must never block the delete that already
      * succeeded; the next full reload fixes the registry anyway. Never silent:
@@ -1400,10 +1410,12 @@ export class ProtocolRegistryHydrationFacet {
             organizationId: string | null,
             /**
              * [#32366] The package the removed row was bound to, which tier 2's
-             * baseline read names; `null` for a package-less row, or where the
-             * caller has no binding to name (see the header).
+             * baseline read names; `null` for a row known to be package-less;
+             * {@link HEAL_BINDING_UNKNOWN} where the caller does not know the
+             * binding (a peer on the cluster signal), read with no package but
+             * never retired on a refusal (see the header).
              */
-            packageId: string | null,
+            packageId: HealPackageBinding,
             /**
              * [#22877] The bundle member whose row was removed, as the door's
              * selector named it; omitted, the canonical member. For a type whose
@@ -1553,7 +1565,7 @@ export class ProtocolRegistryHydrationFacet {
             // pair row overrides — see the header and {@link readHealBaseline}.
             let baseline: ServiceRead;
             try {
-                baseline = await readHealBaseline(host, type, name, boundPackageOf(packageId));
+                baseline = await readHealBaseline(host, type, name, packageId === HEAL_BINDING_UNKNOWN ? undefined : boundPackageOf(packageId));
             } catch (error) {
                 // [#32366, seat ruling 6812637203 Q2] A PACKAGE-LESS row's heal
                 // whose bare baseline read is refused (two or more packages hold
@@ -1563,13 +1575,20 @@ export class ProtocolRegistryHydrationFacet {
                 // removed row's body. `removeOverlayEntry` keeps refusing a
                 // packaged artifact, as on tier 3. A row bound to a package keeps
                 // the logged stop ({@link readHealBaseline}); the ruling names
-                // the package-less heal only.
-                if (boundPackageOf(packageId) !== undefined || packageScopedRefusalOf(error) === undefined) throw error;
+                // the package-less heal only. So does a caller that does not know
+                // the binding ({@link HEAL_BINDING_UNKNOWN}, a peer on the
+                // cluster signal): it cannot tell the removed row was the
+                // package-less one.
+                if (packageId === HEAL_BINDING_UNKNOWN || boundPackageOf(packageId) !== undefined
+                    || packageScopedRefusalOf(error) === undefined) throw error;
+                // What the verb answers is what the line says: an empty slot, or
+                // a packaged artifact the verb refuses, retires nothing.
+                let retired = false;
                 if (typeof registry.removeOverlayEntry === 'function') {
-                    registry.removeOverlayEntry(singular, name, memberKey);
-                    if (type !== singular) registry.removeOverlayEntry(type, name, memberKey);
+                    retired = registry.removeOverlayEntry(singular, name, memberKey) === true;
+                    if (type !== singular) retired = registry.removeOverlayEntry(type, name, memberKey) === true || retired;
                 }
-                console.error(registryHealStoppedMessage(type, name, error, 'retired'));
+                console.error(registryHealStoppedMessage(type, name, error, retired ? 'retired' : 'none-retired'));
                 return;
             }
             // [#22877] A baseline of ANOTHER member is no baseline of this one:

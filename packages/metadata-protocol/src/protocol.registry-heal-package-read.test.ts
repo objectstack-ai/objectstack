@@ -32,6 +32,7 @@ import '@objectstack/lint';
 import { MetadataManager } from '@objectstack/metadata';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { undoBatchRowWrite } from './batch-object-registration.js';
 
 const ALPHA = 'com.acme.alpha';
 const BETA = 'com.acme.beta';
@@ -75,6 +76,8 @@ function makeHarness(opts: {
     shadowThrows?: Error;
     /** Installed package ids besides the holders (a pair, an unrelated package). */
     installed?: readonly string[];
+    /** What `removeOverlayEntry` answers: `false` is an empty slot, or a packaged artifact the verb refuses. */
+    retireAnswers?: boolean;
 }) {
     const rows = [...opts.rows];
     const manager = new MetadataManager({ formats: ['json'], loaders: [] });
@@ -103,7 +106,7 @@ function makeHarness(opts: {
             shadowLifts.push(false);
             return false;
         },
-        removeOverlayEntry: (type: string, name: string) => { retired.push(`${type}|${name}`); return true; },
+        removeOverlayEntry: (type: string, name: string) => { retired.push(`${type}|${name}`); return opts.retireAnswers ?? true; },
     };
     const engine: any = {
         async findOne(table: string, query: { where?: Record<string, unknown> } = {}) {
@@ -314,5 +317,68 @@ describe('[#32366 S1, ADR-0146] a row bound to a package that holds no item of t
 
         expect(tiers(h)).toEqual({ tier1: [false], tier2: [], tier3: [`action|${NAME}`] });
         expect(healLines(h.logged)).toEqual([]);
+    });
+});
+
+describe('[#32366 round 3] the package-less retire says what the verb did, and a peer that does not know the binding never retires', () => {
+    it('the verb removed the entry: the line says it was retired', async () => {
+        const h = makeHarness({ rows: [overlayRow(null)], holders: [[ALPHA, 'alpha'], [BETA, 'beta']] });
+
+        await h.protocol.deleteMetaItem({ type: 'action', name: NAME });
+
+        expect(h.retired).toEqual([`action|${NAME}`]);
+        const lines = healLines(h.logged);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('was retired from the bare slot');
+        expect(lines[0]).not.toContain('No registry entry was retired');
+    });
+
+    it('the verb removed nothing (an empty slot, or a packaged artifact it refuses): the line says no entry was retired', async () => {
+        const h = makeHarness({ rows: [overlayRow(null)], holders: [[ALPHA, 'alpha'], [BETA, 'beta']], retireAnswers: false });
+
+        await h.protocol.deleteMetaItem({ type: 'action', name: NAME });
+
+        // The verb was asked, and answered `false`.
+        expect(h.retired).toEqual([`action|${NAME}`]);
+        expect(h.registered).toEqual([]);
+        const lines = healLines(h.logged);
+        expect(lines).toHaveLength(1);
+        // At 6f806d9f: "was retired" whatever the verb answered.
+        expect(lines[0]).toContain('No registry entry was retired');
+        expect(lines[0]).not.toContain('was retired from the bare slot');
+    });
+
+    it('a peer converging on the cluster signal (binding unknown) keeps the logged stop: nothing retired, nothing registered', async () => {
+        const h = makeHarness({ rows: [], holders: [[ALPHA, 'alpha'], [BETA, 'beta']] });
+
+        await h.protocol.applyRemoteMetadataMutation({ type: 'action', name: NAME, state: 'deleted', organizationId: null });
+
+        // At 6f806d9f the peer passed `null` and retired the entry.
+        expect(h.retired).toEqual([]);
+        expect(h.registered).toEqual([]);
+        const lines = healLines(h.logged);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(ALPHA);
+        expect(lines[0]).toContain(BETA);
+        expect(lines[0]).not.toContain('retired from the bare slot');
+    });
+});
+
+describe('[#32366 round 3] the batch row undo heals for the row\'s package', () => {
+    it('undoBatchRowWrite hands the heal the package the undone row is bound to, on both of its moves', async () => {
+        for (const row of [
+            { type: 'action', name: NAME, packageId: ALPHA, prevVersion: 3 },
+            { type: 'action', name: NAME, packageId: ALPHA, prevVersion: null, writtenHash: 'sha256:written' },
+        ]) {
+            const heal = vi.fn(async () => {});
+            const repo = { restoreVersion: vi.fn(async () => ({})), delete: vi.fn(async () => ({})) };
+            await undoBatchRowWrite(
+                { getOverlayRepo: () => repo, isArtifactBacked: () => false, restoreArtifactRegistryView: heal } as never,
+                row,
+                { source: 'test', message: 'undo' },
+            );
+            // At 6f806d9f a `null` here compiled and passed every pin.
+            expect(heal.mock.calls as unknown[][]).toEqual([['action', NAME, null, ALPHA]]);
+        }
     });
 });

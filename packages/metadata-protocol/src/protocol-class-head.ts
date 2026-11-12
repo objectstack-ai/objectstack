@@ -46,6 +46,7 @@ import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-ob
 import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
+import { HEAL_BINDING_UNKNOWN } from './protocol-heal-binding.js';
 import { memberOption } from './protocol-bundle-members.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import type {
@@ -519,10 +520,12 @@ export class ProtocolClassHeadFacet {
             // write-through; see the docblock.
             await host.ensureObjectStorage(type, evt.name);
         } else {
-            // [#32366] No package to name: the removed row's binding went with
-            // it, and the signal carries an address, never a binding (see
-            // above). A refusal of the bare baseline read is logged by the heal.
-            await host.restoreArtifactRegistryView(type, evt.name, null, null, evt.member);
+            // [#32366] The binding is UNKNOWN, not package-less: the removed
+            // row's binding went with it, and the signal carries an address,
+            // never a binding (see above). The heal reads with no package, and
+            // a refusal of that read is a logged stop that keeps the entry,
+            // never the package-less row's retirement (HEAL_BINDING_UNKNOWN).
+            await host.restoreArtifactRegistryView(type, evt.name, null, HEAL_BINDING_UNKNOWN, evt.member);
         }
         // [#13609] Retire this replica's overlay-row cache at the moment of
         // convergence — never a direct `@objectstack/objectql` import, see
