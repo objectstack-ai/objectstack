@@ -503,6 +503,35 @@ export function createHolderPackagePayload(
 }
 
 /**
+ * The values a CREATE form for `columns.object` opens with: `seed` without the
+ * holder's package column (objectstack#32795). Every other object, every other
+ * key, and every edit form's values are returned untouched.
+ *
+ * A package the form opened with is never a pick:
+ * {@link createHolderPackagePayload} keeps the column only when the user
+ * changed it against the seed, so a seeded package the user left alone stays
+ * off the wire and the server stamps the column by its rule. Shown on the New
+ * form, that seed would read as the user's pick of that holder while the save
+ * wrote the name alone. So the form does not open with it: the screen then
+ * reads the name as the server will, and a holder the user picks is a change
+ * against the seed that the payload keeps. This drops a value; it never lets
+ * one through — `createHolderPackagePayload`'s conditions are unchanged.
+ *
+ * The caller passes the object only on a create form (`null` on an edit).
+ */
+export function withoutSeededHolderPackage(
+  seed: Record<string, unknown>,
+  createObjectName: string | null | undefined,
+  columns: HolderPackageColumns,
+): Record<string, unknown> {
+  if (!seed || typeof seed !== 'object') return seed;
+  if (createObjectName !== columns.object) return seed;
+  if (!Object.prototype.hasOwnProperty.call(seed, columns.packageField)) return seed;
+  const { [columns.packageField]: _seeded, ...rest } = seed;
+  return rest;
+}
+
+/**
  * What a save hands {@link dirtyEditPayload} (an edit) or
  * {@link createOwnerPayload} (a create) so it can judge the owner, and
  * {@link createHolderPackagePayload} (a create) the holder's package.

@@ -103,11 +103,66 @@ export const PERMISSION_SET_GRANT_COLUMNS = Object.freeze({
 });
 
 /**
+ * [objectstack#32795] The key a record form stamps the OBJECT it edits under,
+ * on the field definition it hands a `permission-ref` widget (as it stamps a
+ * followed parent object, `FOLLOWED_PARENT_OBJECT_KEY`): a widget receives one
+ * field, not the object, so it could not otherwise tell the grant's name
+ * column from a column of the same name on another object.
+ */
+export const FORM_OBJECT_KEY = 'formObject';
+
+/** The widgets that read {@link FORM_OBJECT_KEY}. */
+const FORM_OBJECT_READING_WIDGETS: ReadonlySet<string> = new Set(['permission-ref']);
+
+/**
+ * `def` with `objectName` stamped under {@link FORM_OBJECT_KEY} when `def`
+ * declares a widget that reads it (`permission-ref`), else `def` itself. Every
+ * other field definition is handed on untouched.
+ */
+export function withFormObject<T extends object>(def: T, objectName: unknown): T {
+  const widget = (def as { widget?: unknown } | null | undefined)?.widget;
+  if (typeof widget !== 'string' || !FORM_OBJECT_READING_WIDGETS.has(widget)) return def;
+  if (typeof objectName !== 'string' || objectName === '') return def;
+  return { ...def, [FORM_OBJECT_KEY]: objectName };
+}
+
+/** The object a form stamped on `field`, or `undefined`. */
+export function readFormObject(field: unknown): string | undefined {
+  const value = (field as Record<string, unknown> | null | undefined)?.[FORM_OBJECT_KEY];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
  * The sibling column that stores the holder of the set a `permission-ref`
  * field names, or `null` where the target has none. Only the grant's name
- * column has one; an action param (`create_user`'s `permissionSet`, the group
- * mappings') names a set by its name alone.
+ * column has one, recognised by its object AND its column (objectstack#32795):
+ * a column named alike on another object, a field no form stamped with its
+ * object, and an action param (`create_user`'s `permissionSet`, the group
+ * mappings') name a set by its name alone.
  */
-export function holderPackageFieldOf(fieldName: unknown): string | null {
-  return fieldName === PERMISSION_SET_GRANT_COLUMNS.nameField ? PERMISSION_SET_GRANT_COLUMNS.packageField : null;
+export function holderPackageFieldOf(objectName: unknown, fieldName: unknown): string | null {
+  return objectName === PERMISSION_SET_GRANT_COLUMNS.object && fieldName === PERMISSION_SET_GRANT_COLUMNS.nameField
+    ? PERMISSION_SET_GRANT_COLUMNS.packageField
+    : null;
+}
+
+/**
+ * [objectstack#32795] The sibling column that stores the holder of the set a
+ * READ face's `permission-ref` cell names, or `null`: the grant's package
+ * column when the cell's field is the grant's name column AND the row the call
+ * site handed over carries the package column. A cell is handed a field and a
+ * row, never the object, so the row carrying the pair's other column is what
+ * says it is the grant's pair. A row without that column (a call site that
+ * hands no row, a list that did not read the column, another object) labels
+ * the name by its name alone, exactly as before.
+ */
+export function rowHolderPackageFieldOf(
+  fieldName: unknown,
+  row: Readonly<Record<string, unknown>> | null | undefined,
+): string | null {
+  if (fieldName !== PERMISSION_SET_GRANT_COLUMNS.nameField) return null;
+  if (!row || typeof row !== 'object') return null;
+  return Object.prototype.hasOwnProperty.call(row, PERMISSION_SET_GRANT_COLUMNS.packageField)
+    ? PERMISSION_SET_GRANT_COLUMNS.packageField
+    : null;
 }
