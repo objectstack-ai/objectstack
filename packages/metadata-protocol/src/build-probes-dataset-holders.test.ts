@@ -21,7 +21,7 @@ import { describe, expect, it } from 'vitest';
 // clocked window (`pnpm check:test-source-alias`).
 import '@objectstack/lint';
 import { PackageScopedNameRefusedError, type PackageScopedRefusal } from '@objectstack/core';
-import { runBuildProbes, type ProbeEngine } from './build-probes.js';
+import { publishedItemReader, runBuildProbes, type ProbeEngine, type ProbeItemProtocol } from './build-probes.js';
 
 const ALPHA = 'com.qa.alpha';
 const BETA = 'com.qa.beta';
@@ -93,5 +93,94 @@ describe('[#32072] a widget whose dataset several packages hold is reported not 
         expect(report.issues.map((i) => i.code)).toEqual(['widget_not_probed']); // adr0112-ok: D6c build-probe diagnostics code
         expect(queried).toEqual(['own_ds']);
         expect(report.checked.widgets).toBe(1);
+    });
+});
+
+/**
+ * [ADR-0150 D3, #31700] A dataset name is held once per namespace now, so two
+ * namespaces may each hold it. The publish's probes read a widget's dataset
+ * FROM the publishing package (`publishedItemReader`, the caller arm of
+ * #32310), so each package's publish probes its own dataset; a name the
+ * publishing package cannot resolve is ITS refusal, and the fix names it.
+ * The end-to-end pin over the real protocol and registry is in
+ * `@objectstack/runtime` (`domains/meta-qualified-item-read.test.ts`).
+ */
+describe('[#31700] the probes read a widget\'s dataset from the publishing package', () => {
+    const BODIES: Record<string, unknown> = {
+        [ALPHA]: { name: 'qa_ds', object: 'alpha_item', measures: [{ name: 'total', aggregate: 'count' }] },
+        [BETA]: { name: 'qa_ds', object: 'beta_item', measures: [{ name: 'total', aggregate: 'count' }] },
+    };
+    const reads: Array<Record<string, unknown>> = [];
+    const protocol: ProbeItemProtocol = {
+        async getMetaItem(request) {
+            reads.push(request);
+            if (request.type === 'dashboard') return { item: { name: request.name, widgets: [{ id: 'w', dataset: 'qa_ds', values: ['total'] }] } };
+            if (request.type !== 'dataset') return undefined;
+            if (request.packageId === undefined) throw new PackageScopedNameRefusedError({ ...refusal, name: 'qa_ds' });
+            return { item: BODIES[request.packageId] };
+        },
+        resolveCallerPackageAddress: ({ callerPackageId }) => ({ kind: 'package', packageId: callerPackageId }),
+    };
+
+    for (const publisher of [ALPHA, BETA]) {
+        it(`publishing ${publisher} probes ${publisher}'s own dataset, read at its exact address`, async () => {
+            reads.length = 0;
+            const queried: unknown[] = [];
+            const report = await runBuildProbes({
+                engine,
+                getItem: publishedItemReader(protocol, publisher),
+                analytics: { queryDataset: async (dataset: any) => { queried.push(dataset.object); return { rows: [{ total: 1 }] }; } },
+                published: [{ type: 'dashboard', name: 'board' }],
+            });
+            expect(report.issues).toEqual([]);
+            expect(report.checked.widgets).toBe(1);
+            expect(queried).toEqual([(BODIES[publisher] as { object: string }).object]);
+            expect(reads).toContainEqual({ type: 'dataset', name: 'qa_ds', packageId: publisher });
+            expect(reads).toContainEqual({ type: 'dashboard', name: 'board' });
+        });
+    }
+
+    it('CONTROL — with no publishing package the dataset is read by name, and two holders refuse it as before', async () => {
+        const report = await runBuildProbes({
+            engine,
+            getItem: publishedItemReader(protocol, undefined),
+            analytics: { queryDataset: async () => ({ rows: [{ total: 1 }] }) },
+            published: [{ type: 'dashboard', name: 'board' }],
+        });
+        expect(report.issues.map((i) => i.code)).toEqual(['widget_not_probed']); // adr0112-ok: D6c build-probe diagnostics code
+        expect(report.issues[0]!.fix).toBe('Keep one dataset named "qa_ds": rename or remove the others, then republish.');
+    });
+
+    const refusedFrom = (reason: PackageScopedRefusal['reason']): ProbeItemProtocol => ({
+        getMetaItem: protocol.getMetaItem,
+        resolveCallerPackageAddress: ({ callerPackageId }) => {
+            throw new PackageScopedNameRefusedError({ ...refusal, name: 'qa_ds', reason, callerPackageId });
+        },
+    });
+
+    it('a name two holders in the publishing package\'s closure hold is ITS refusal: the fix names that package', async () => {
+        const report = await runBuildProbes({
+            engine,
+            getItem: publishedItemReader(refusedFrom('ambiguous-in-closure'), 'com.qa.app'),
+            published: [{ type: 'dashboard', name: 'board' }],
+            analytics: { queryDataset: async () => ({ rows: [] }) },
+        });
+        const [issue] = report.issues;
+        expect(issue).toMatchObject({ code: 'widget_not_probed', severity: 'warning' }); // adr0112-ok: D6c build-probe diagnostics code
+        expect(issue!.message).toContain(`dataset "qa_ds" has 2 holders package "com.qa.app" reaches (${ALPHA}, ${BETA})`);
+        expect(issue!.fix).toBe('Make "qa_ds" mean one dataset from package "com.qa.app": hold it in "com.qa.app" itself, '
+            + 'or depend on only one of the packages that hold it, then republish.');
+    });
+
+    it('a name held only outside the publishing package\'s closure: the fix is the dependency', async () => {
+        const report = await runBuildProbes({
+            engine,
+            getItem: publishedItemReader(refusedFrom('outside-closure'), 'com.qa.app'),
+            published: [{ type: 'dashboard', name: 'board' }],
+            analytics: { queryDataset: async () => ({ rows: [] }) },
+        });
+        const [issue] = report.issues;
+        expect(issue!.message).toContain('is held only outside the declared dependencies of package "com.qa.app"');
+        expect(issue!.fix).toContain('Declare package "com.qa.app"\'s dependency');
     });
 });

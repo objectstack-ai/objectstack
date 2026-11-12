@@ -406,6 +406,9 @@ const de = {
       tomorrow: "Morgen",
       clear: "Datum löschen",
       openCalendar: "Kalender öffnen",
+      time: "Uhrzeit",
+      hour: "Stunde",
+      minute: "Minute",
       invalid:
         "Nicht gespeichert: „{{value}}“ ist kein Datum. Geben Sie es als {{format}} ein oder wählen Sie es im Kalender aus.",
     },
@@ -920,6 +923,8 @@ const de = {
     addGroup: "Gruppenfeld hinzufügen",
     collapsedByDefault: "Standardmäßig eingeklappt",
     removeGroup: "Entfernen",
+    groupingUnstoredNotice: "Diese Liste kann nicht nach {{fields}} gruppiert werden: Der Wert wird bei der Anzeige berechnet und nicht gespeichert. Die Liste wird ohne diese Gruppierung angezeigt.",
+    groupingUnstoredRemove: "Aus Gruppierung entfernen",
     inlineEditShort: "Inline bearbeiten",
     inlineEditLabel: "Datensätze inline bearbeiten (Zelle anklicken zum Bearbeiten)",
   },

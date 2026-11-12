@@ -416,6 +416,9 @@ const zhHant = {
       tomorrow: '明天',
       clear: '清除日期',
       openCalendar: '開啟日曆',
+      time: '時間',
+      hour: '小時',
+      minute: '分鐘',
       invalid:
         '未儲存：“{{value}}”不是有效日期。請按 {{format}} 格式輸入，或從日曆中選擇。',
     },
@@ -947,6 +950,8 @@ const zhHant = {
     addGroup: '新增分組欄位',
     collapsedByDefault: '預設摺疊',
     removeGroup: '刪除',
+    groupingUnstoredNotice: '無法按 {{fields}} 分組：它的值在顯示時計算，並未儲存。列表已暫不按它分組顯示。',
+    groupingUnstoredRemove: '從分組中移除',
     inlineEditShort: '行內編輯',
     inlineEditLabel: '行內編輯記錄(點選單元格進行編輯)',
   },

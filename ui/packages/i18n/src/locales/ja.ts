@@ -406,6 +406,9 @@ const ja = {
       tomorrow: "明日",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
+      time: "時刻",
+      hour: "時",
+      minute: "分",
       invalid:
         "保存されていません：「{{value}}」は日付ではありません。{{format}} の形式で入力するか、カレンダーから選択してください。",
     },
@@ -920,6 +923,8 @@ const ja = {
     addGroup: "グループフィールドを追加",
     collapsedByDefault: "デフォルトで折りたたむ",
     removeGroup: "削除",
+    groupingUnstoredNotice: "{{fields}} ではこの一覧をグループ化できません。値は表示時に計算され、保存されていません。このグループ化を除いて一覧を表示しています。",
+    groupingUnstoredRemove: "グループ化から削除",
     inlineEditShort: "インライン編集",
     inlineEditLabel: "レコードをインラインで編集(セルをクリックして編集)",
   },

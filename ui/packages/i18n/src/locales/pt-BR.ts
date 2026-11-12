@@ -409,6 +409,9 @@ const pt = {
       tomorrow: "Amanhã",
       clear: "Limpar data",
       openCalendar: "Abrir calendário",
+      time: "Horário",
+      hour: "Hora",
+      minute: "Minuto",
       invalid:
         "Não salvo: “{{value}}” não é uma data. Digite no formato {{format}} ou escolha no calendário.",
     },
@@ -945,6 +948,8 @@ const pt = {
     addGroup: "Adicionar campo de grupo",
     collapsedByDefault: "Recolhido por padrão",
     removeGroup: "Remover",
+    groupingUnstoredNotice: "Esta lista não pode ser agrupada por {{fields}}: o valor é calculado ao ser exibido e não é armazenado. A lista é exibida sem esse agrupamento.",
+    groupingUnstoredRemove: "Remover do agrupamento",
     inlineEditShort: "Edição em linha",
     inlineEditLabel: "Editar registros em linha (clique em uma célula para editar)",
   },
