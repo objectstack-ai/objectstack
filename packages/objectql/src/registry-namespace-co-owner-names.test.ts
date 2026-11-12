@@ -58,7 +58,9 @@ const pkg = (id: string, ns: string | undefined, decl: Partial<Record<NamespaceU
   const tag = id.split('.').pop()!;
   const out: Record<string, unknown> = { id, name: tag, version: '1.0.0', type: 'app', ...(ns ? { namespace: ns } : {}), ...extra };
   for (const [type, names] of Object.entries(decl) as Array<[NamespaceUniqueType, string[]]>) {
-    out[COLLECTION[type]] = names.map((name) => ({ name, label: `${tag} ${type}` }));
+    // A page is a `home` page: a record page (the default type) placing no
+    // component is refused at parse, and this file is about names, not bodies.
+    out[COLLECTION[type]] = names.map((name) => ({ name, label: `${tag} ${type}`, ...(type === 'page' ? { type: 'home' } : {}) }));
   }
   return out;
 };

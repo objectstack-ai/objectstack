@@ -36,7 +36,8 @@ const recordPage = (name: string, object: string, isDefault = true, extra: Recor
     type: 'record',
     object,
     isDefault,
-    regions: [],
+    // A full record page places at least one component (#32434).
+    regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
     ...extra,
 });
 
@@ -314,7 +315,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
 // the keys the shape varies.
 const PLACEMENT_SHAPES: ReadonlyArray<[label: string, body: Record<string, unknown>, says: string, served: Record<string, unknown>]> = [
     ['a home page with `isDefault: true`', { name: 'env_shape', label: 'Shape', type: 'home', isDefault: true, regions: [] }, '`isDefault: true` is refused', { isDefault: undefined, regions: [] }],
-    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [] }] }, "`template: 'full-width'` was removed", { template: 'default', regions: [{ name: 'main', components: [] }] }],
+    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [{ type: 'record:details' }] }] }, "`template: 'full-width'` was removed", { template: 'default', regions: [{ name: 'main', components: [{ type: 'record:details' }] }] }],
     ['a `left_sidebar` region on `three-column`', { name: 'env_shape', label: 'Shape', type: 'home', template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }, 'Region `left_sidebar` is refused', { template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }],
 ];
 

@@ -44,7 +44,25 @@ describe('address grammar (ADR-0150 D5)', () => {
   });
 
   it('derives the install-refused set from the literals the namespace grammar admits', () => {
-    expect(NAMESPACE_REFUSED_LITERALS).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'trigger']);
+    expect(NAMESPACE_REFUSED_LITERALS).toEqual(['actions', 'connectors', 'global', 'hooks', 'oauth', 'runs', 'trigger']);
+  });
+
+  it('the inbound hook\'s namespace position carries `runs`, the run doors\' literal of a flow named `hooks`', () => {
+    expect([...NAMESPACE_POSITION_LITERALS.inboundHook.literals]).toEqual(['runs']);
+    // No other door lists it, so the judge names the hook's address alone.
+    const doorsListingRuns = Object.entries(NAMESPACE_POSITION_LITERALS)
+      .filter(([, position]) => position.literals.includes('runs'))
+      .map(([door]) => door);
+    expect(doorsListingRuns).toEqual(['inboundHook']);
+    expect(validateNamespaceNotAddressLiteral('runs')).toContain('(/automation/hooks/runs)');
+  });
+
+  it('the judge\'s sentence is about the doors it names, not every qualified address of the package', () => {
+    // `runs` is read as a namespace on every door but the hook's, so "its
+    // qualified addresses would never reach it" would be false of it.
+    for (const literal of NAMESPACE_REFUSED_LITERALS) {
+      expect(validateNamespaceNotAddressLiteral(literal)).toContain('so the package\'s qualified addresses there would never reach it');
+    }
   });
 
   it('refuses a namespace that spells a literal, naming the address it would shadow', () => {
@@ -66,6 +84,8 @@ describe('address grammar (ADR-0150 D5)', () => {
       expect(readNamespacePositionSegment('actions', 'global', isInstalled)).toEqual({ reading: 'literal', literal: 'global' });
       expect(readNamespacePositionSegment('automation', '_status', isInstalled)).toEqual({ reading: 'literal', literal: '_status' });
       expect(readNamespacePositionSegment('actions', '', isInstalled)).toEqual({ reading: 'literal', literal: '' });
+      // A package the boot still holds under `runs` is never the hook's qualifier.
+      expect(readNamespacePositionSegment('inboundHook', 'runs', () => true)).toEqual({ reading: 'literal', literal: 'runs' });
     });
 
     it('step 1: the reserved environment segment', () => {
@@ -77,6 +97,8 @@ describe('address grammar (ADR-0150 D5)', () => {
       expect(readNamespacePositionSegment('automation', 'crm', isInstalled)).toEqual({ reading: 'namespace', namespace: 'crm' });
       // `trigger` is a literal only where a door serves it.
       expect(readNamespacePositionSegment('actions', 'trigger', isInstalled)).toEqual({ reading: 'namespace', namespace: 'trigger' });
+      // CONTROL: so is `runs`, which only the inbound hook's position reads as one.
+      expect(readNamespacePositionSegment('automation', 'runs', () => true)).toEqual({ reading: 'namespace', namespace: 'runs' });
     });
 
     it('step 3: anything else is the bare grammar, never a guess', () => {

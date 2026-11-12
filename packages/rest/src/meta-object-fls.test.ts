@@ -37,8 +37,11 @@ import {
     type ObjectSchemaMaskExit,
     type ObjectSchemaMaskOutcome,
 } from '@objectstack/metadata-core/testing';
-import { isObjectSchemaMaskExempt } from '@objectstack/metadata-core';
+import { isObjectSchemaMaskExempt, type ObjectSchemaMaskPosture } from '@objectstack/metadata-core';
 import { RestServer } from './rest-server';
+import { projectMetaActionForCaller } from './meta-item-read-gate';
+// Paid at collection, not inside a case's clock: the routes' reach loads it lazily.
+import '@objectstack/objectql';
 
 const ACCOUNT = FLS_CONTRACT_OBJECT as unknown as Record<string, unknown>;
 
@@ -69,17 +72,29 @@ interface BootOptions {
     /** Supply `getMetaItemCached` (cached branch) or leave it off (uncached branch). */
     cached?: boolean;
     etag?: string;
+    /** A `security` service in place of the case's double. */
+    security?: Record<string, unknown>;
 }
 
+/** The protocol's miss for a name it holds nothing for: the bare not-found the cached read throws. */
+const notFound = (name: string) => Object.assign(new Error(`Metadata item object/${name} not found`), {
+    status: 404, code: 'RESOURCE_NOT_FOUND',
+});
+
+/** A name the protocol holds nothing for — what an absent object must be answered exactly as. */
+const UNKNOWN = 'no_such_object';
+
 function boot(opts: BootOptions) {
+    // Only `account` is held: any other name is the protocol's own miss.
+    const held = (name: string) => name === 'account';
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' } }),
         getMetaTypes: vi.fn().mockResolvedValue([]),
         getMetaItems: vi.fn(async () => [account()]),
-        getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: account(), lock: 'none' })),
-        getMetaItemLayered: vi.fn(async ({ type, name }: any) => ({
-            type, name, code: account(), overlay: account(), effective: account(),
-        })),
+        getMetaItem: vi.fn(async ({ type, name }: any) => ({ type, name, item: held(name) ? account() : undefined, lock: 'none' })),
+        getMetaItemLayered: vi.fn(async ({ type, name }: any) => (held(name)
+            ? { type, name, code: account(), overlay: account(), effective: account() }
+            : { type, name, code: null, overlay: null, effective: null })),
         findData: vi.fn().mockResolvedValue([]),
         getData: vi.fn().mockResolvedValue({}),
         createData: vi.fn().mockResolvedValue({ id: '1' }),
@@ -91,15 +106,19 @@ function boot(opts: BootOptions) {
         listDrafts: vi.fn(async () => [{ type: 'object', name: 'account', item: account() }]),
     };
     if (opts.cached) {
-        protocol.getMetaItemCached = vi.fn(async () => ({
-            data: account(),
-            etag: { value: opts.etag ?? 'shared-validator', weak: false },
-            cacheControl: { directives: ['private', 'no-cache'] },
-            notModified: false,
-        }));
+        protocol.getMetaItemCached = vi.fn(async ({ name, cacheRequest }: any) => {
+            if (!held(name)) throw notFound(name);
+            return {
+                data: account(),
+                etag: { value: opts.etag ?? 'shared-validator', weak: false },
+                cacheControl: { directives: ['private', 'no-cache'] },
+                // The protocol judges `If-Modified-Since` itself: anything sent is "not modified".
+                notModified: typeof cacheRequest?.ifModifiedSince === 'string',
+            };
+        });
     }
 
-    const security = securityDoubleFor(opts.testCase);
+    const security = opts.security ?? securityDoubleFor(opts.testCase);
     const rest = new RestServer(
         mockServer() as any,
         protocol as any,
@@ -121,16 +140,41 @@ function routeFor(rest: RestServer, path: string) {
     return (rest as any).getRoutes().find((r: any) => r.method === 'GET' && r.path === path);
 }
 
-/** Turn a handler run into the contract's `document | fault` outcome. */
+/**
+ * Turn a handler run into the contract's outcome. A refusal is `absent` when
+ * it is BYTE-IDENTICAL to the same door's answer for {@link UNKNOWN} — status
+ * and body — on the same server with no security service (so the reference is
+ * the door's own answer for a name, never a fault the case's service raises),
+ * and a `fault` otherwise.
+ */
 async function outcomeOf(
-    run: (res: any) => Promise<void>,
+    run: (res: any, name: string, reference?: boolean) => Promise<void>,
     pick: (body: any) => unknown,
 ): Promise<ObjectSchemaMaskOutcome & { res?: any }> {
     const res = mockRes();
+    await run(res, 'account');
+    const body = res.json.mock.calls.at(-1)?.[0];
+    if (res.statusCode >= 400) {
+        const unknown = mockRes();
+        await run(unknown, UNKNOWN, true);
+        const unknownBody = unknown.json.mock.calls.at(-1)?.[0];
+        if (unknown.statusCode === res.statusCode && JSON.stringify(unknownBody) === JSON.stringify(body)) {
+            return { kind: 'absent' };
+        }
+        return { kind: 'fault', status: res.statusCode, res };
+    }
+    return { kind: 'document', document: pick(body), res };
+}
+
+/** A list's outcome: the listed `account`, or `absent` when the list leaves it out. */
+async function listOutcomeOf(run: (res: any) => Promise<void>): Promise<ObjectSchemaMaskOutcome> {
+    const res = mockRes();
     await run(res);
     const body = res.json.mock.calls.at(-1)?.[0];
-    if (res.statusCode >= 400) return { kind: 'fault', status: res.statusCode, res };
-    return { kind: 'document', document: pick(body), res };
+    if (res.statusCode >= 400) return { kind: 'fault', status: res.statusCode };
+    const items: any[] = Array.isArray(body) ? body : body?.items ?? [];
+    const listed = items.find((item) => item?.name === 'account');
+    return listed === undefined ? { kind: 'absent' } : { kind: 'document', document: listed };
 }
 
 const SINGLE_PATH = '/api/v1/meta/:type/:name';
@@ -141,9 +185,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name — cached branch (default)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res) => routeFor(rest, SINGLE_PATH)!.handler(
-                    { params: { type: 'object', name: 'account' }, query: {}, headers: {} }, res,
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
+                    { params: { type: 'object', name }, query: {}, headers: {} }, res,
                 ),
                 (body) => body?.item,
             );
@@ -153,9 +198,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name — uncached branch',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: false });
+            const { rest: reference } = boot({ testCase, cached: false, security: {} });
             return outcomeOf(
-                (res) => routeFor(rest, SINGLE_PATH)!.handler(
-                    { params: { type: 'object', name: 'account' }, query: {}, headers: {} }, res,
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
+                    { params: { type: 'object', name }, query: {}, headers: {} }, res,
                 ),
                 (body) => body?.item,
             );
@@ -168,9 +214,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
             // the raw `:type` param is a gate it walks past. Driving one row of
             // the table through it keeps that from being re-learned.
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res) => routeFor(rest, SINGLE_PATH)!.handler(
-                    { params: { type: 'objects', name: 'account' }, query: { state: 'draft' }, headers: {} }, res,
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
+                    { params: { type: 'objects', name }, query: { state: 'draft' }, headers: {} }, res,
                 ),
                 (body) => body?.item,
             );
@@ -180,9 +227,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name?layers=true — layered diagnostic view (`effective`)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res) => routeFor(rest, SINGLE_PATH)!.handler(
-                    { params: { type: 'object', name: 'account' }, query: { layers: 'true' }, headers: {} }, res,
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
+                    { params: { type: 'object', name }, query: { layers: 'true' }, headers: {} }, res,
                 ),
                 (body) => body?.effective,
             );
@@ -192,9 +240,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object/:name?layers=true — layered diagnostic view (`code`)',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
+            const { rest: reference } = boot({ testCase, cached: true, security: {} });
             return outcomeOf(
-                (res) => routeFor(rest, SINGLE_PATH)!.handler(
-                    { params: { type: 'object', name: 'account' }, query: { layers: 'true' }, headers: {} }, res,
+                (res, name, ref) => routeFor(ref ? reference : rest, SINGLE_PATH)!.handler(
+                    { params: { type: 'object', name }, query: { layers: 'true' }, headers: {} }, res,
                 ),
                 (body) => body?.code,
             );
@@ -209,11 +258,10 @@ const EXITS: ObjectSchemaMaskExit[] = [
         name: 'GET /meta/object — list read',
         run: (testCase) => {
             const { rest } = boot({ testCase, cached: true });
-            return outcomeOf(
+            return listOutcomeOf(
                 (res) => routeFor(rest, LIST_PATH)!.handler(
                     { params: { type: 'object' }, query: {}, headers: {} }, res,
                 ),
-                (body) => (Array.isArray(body) ? body[0] : body?.items?.[0]),
             );
         },
     },
@@ -415,4 +463,72 @@ describe('[ADR-0106 D5(4)] GET /meta/_drafts — per-caller authoring gate', () 
             }
         });
     }
+});
+
+describe('[ruling record 6787890900] an object the caller may not read shares no answer with one who may', () => {
+    const READER: ObjectSchemaMaskCase = {
+        id: 'object-read/reader', why: 'the control', context: { userId: 'u_portal' },
+        readable: ['id', 'name', 'salary_grade', 'bonus_formula'], expect: { kind: 'unmasked' },
+    };
+    const NON_READER: ObjectSchemaMaskCase = { ...READER, id: 'object-read/non-reader', readableObject: false, expect: { kind: 'absent' } };
+
+    async function read(testCase: ObjectSchemaMaskCase, name: string, headers: Record<string, string> = {}, security?: Record<string, unknown>) {
+        const { rest, protocol } = boot({ testCase, cached: true, etag: 'v1', ...(security ? { security } : {}) });
+        const res = mockRes();
+        await routeFor(rest, SINGLE_PATH)!.handler({ params: { type: 'object', name }, query: {}, headers }, res);
+        return { status: res.statusCode, etag: res.headers.ETag, body: res.json.mock.calls.at(-1)?.[0], protocol };
+    }
+
+    it('the item read answers a caller who may not read the object exactly as a name it holds nothing for, whatever validator it presents', async () => {
+        const reader = await read(READER, 'account');
+        expect(reader.status).toBe(200);
+        const unknown = await read(READER, UNKNOWN);
+        expect(unknown.status).toBe(404);
+        const validators: Array<Record<string, string>> = [
+            {}, { 'if-none-match': reader.etag! }, { 'if-modified-since': 'Thu, 01 Jan 2099 00:00:00 GMT' },
+        ];
+        for (const headers of validators) {
+            const nonReader = await read(NON_READER, 'account', headers);
+            expect(nonReader.status, JSON.stringify(headers)).toBe(404);
+            expect(JSON.stringify(nonReader.body)).toBe(JSON.stringify(unknown.body));
+            expect(nonReader.etag).toBeUndefined();
+            // Decided before the fetch: no store validator is ever judged for it.
+            expect(nonReader.protocol.getMetaItemCached).not.toHaveBeenCalled();
+        }
+        // CONTROL: the reader's own conditional read still revalidates.
+        expect((await read(READER, 'account', { 'if-none-match': reader.etag! })).status).toBe(304);
+    });
+
+    it('the list read serves a caller who may not read the object a list without it, under a validator of its own', async () => {
+        const list = async (testCase: ObjectSchemaMaskCase, headers: Record<string, string> = {}) => {
+            const { rest } = boot({ testCase, cached: true });
+            const res = mockRes();
+            await routeFor(rest, LIST_PATH)!.handler({ params: { type: 'object' }, query: {}, headers }, res);
+            const body = res.json.mock.calls.at(-1)?.[0];
+            return { status: res.statusCode, etag: res.headers.ETag, names: (Array.isArray(body) ? body : body?.items ?? []).map((o: any) => o?.name) };
+        };
+        const reader = await list(READER);
+        expect(reader.names).toContain('account');
+        expect(reader.etag).toBeDefined();
+        const nonReader = await list(NON_READER, { 'if-none-match': reader.etag! });
+        expect(nonReader.status).toBe(200);
+        expect(nonReader.names).not.toContain('account');
+        expect(nonReader.etag).not.toBe(reader.etag);
+    });
+
+    it('an action is judged on its object\'s field projection whether or not the object is served — the schema doors move, not the action verdict', async () => {
+        const fieldsOnly: ObjectSchemaMaskPosture = { kind: 'project', readable: new Set(['id', 'name']) };
+        const hidden: ObjectSchemaMaskPosture = { kind: 'hidden', fields: fieldsOnly };
+        const verdict = async (posture: ObjectSchemaMaskPosture, name: string) => projectMetaActionForCaller(
+            { masker: async () => posture, readObject: async () => account() },
+            (account().actions as any[]).find((a) => a.name === name), 'account',
+        );
+        for (const name of ['rename', 'regrade']) {
+            const asField = await verdict(fieldsOnly, name);
+            const asHidden = await verdict(hidden, name);
+            expect(asHidden.kind, name).toBe(asField.kind);
+        }
+        expect((await verdict(hidden, 'rename')).kind).toBe('serve');
+        expect((await verdict(hidden, 'regrade')).kind).toBe('withhold');
+    });
 });

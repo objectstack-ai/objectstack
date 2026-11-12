@@ -6493,8 +6493,8 @@ const warnedAddressLiteralNamespaces = new Set<string>();
  * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
  * namespace this stack declares (its own `manifest.namespace` or a
  * `packages[]` body's) that spells a literal segment of the address grammar
- * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
- * sentence is the install door's own judge
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`).
+ * The sentence is the install door's own judge
  * (`validateNamespaceNotAddressLiteral`).
  *
  * ## Why a warning here and a refusal at the build
@@ -7765,6 +7765,15 @@ function mergeObjects(
  * two bodies of one package, and a package with no namespace stay refused
  * under either manifest, and an object-bound key keeps the one-holder rule.
  *
+ * [ADR-0150 D4 · #32335] A nested artifact's package bodies are read too: an
+ * input carrying `packages[]` keeps its declarations there (and a
+ * multi-package `'preserve'` artifact carries no flattened copy), so walking
+ * only top levels admitted a nested artifact beside a third package of one of
+ * its bodies' namespaces declaring the same name — the pair the install gate
+ * refuses, and which the boot then reached at neither address. Each body's
+ * declaration is noted against its input and judged with the body as its
+ * holder, so compose and install refuse the same pairs.
+ *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
  *
@@ -7788,15 +7797,24 @@ function collectComposedActionKeyCollisions(
   type Action = NonNullable<ObjectStackDefinition['actions']>[number];
   // key → stack index → where that stack declares it
   const sitesByKey = new Map<string, Map<number, string[]>>();
+  // key → stack index → who in that stack declares it: its top level, and/or
+  // the package bodies of a nested artifact ({@link composedPackagesHoldApart}).
+  const declarersByKey = new Map<string, Map<number, ComposedKeyDeclarers>>();
   // Keys some object EMBEDS: object-bound, whatever the scope string reads.
   const embeddedKeys = new Set<string>();
-  const note = (scope: string, name: string, stackIndex: number, site: string): void => {
+  const note = (scope: string, name: string, stackIndex: number, site: string, body?: ComposedBodyHolder): void => {
     const key = `${scope}:${name}`;
     const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
     const sites = byStack.get(stackIndex) ?? [];
     sites.push(site);
     byStack.set(stackIndex, sites);
     sitesByKey.set(key, byStack);
+    const declarers = declarersByKey.get(key) ?? new Map<number, ComposedKeyDeclarers>();
+    const own = declarers.get(stackIndex) ?? { topLevel: false, bodies: [] };
+    if (body === undefined) own.topLevel = true;
+    else if (!own.bodies.some((held) => held.id === body.id && held.namespace === body.namespace)) own.bodies.push(body);
+    declarers.set(stackIndex, own);
+    declarersByKey.set(key, declarers);
   };
 
   for (const [i, stack] of stacks.entries()) {
@@ -7833,6 +7851,43 @@ function collectComposedActionKeyCollisions(
       embeddedKeys.add(`${obj.name}:${action.name}`);
     }
   }
+  // [ADR-0150 D4 · #32335] A nested artifact — an input that already carries
+  // `packages[]`, such as one `composeStacks` built under `manifest: 'preserve'`
+  // — keeps its declarations in its package bodies, and a multi-package one
+  // carries no flattened copy at all, so the two walks above see none of them.
+  // The boot binds each body's actions (`actionBindingGroups` in
+  // `@objectstack/runtime`), and installing the same packages one by one judges
+  // each body, so a key a body declares is noted against its input here as well.
+  const composedObjectNames = new Set((composedObjects ?? []).filter(isRecord).map((obj) => obj.name));
+  for (const [i, stack] of stacks.entries()) {
+    const packages = (stack as Record<string, unknown>).packages;
+    if (!Array.isArray(packages)) continue;
+    for (const [k, entry] of packages.entries()) {
+      const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+      if (!isRecord(body)) continue;
+      const holder = composedBodyHolder(body);
+      if (Array.isArray(body.actions)) {
+        for (const [j, action] of (body.actions as unknown[]).entries()) {
+          if (!isRecord(action)) continue;
+          // Truthiness, as the top-level walk above keys it.
+          note((action.objectName as string) || GLOBAL_ACTION_SCOPE, action.name as string, i, `packages[${k}].actions[${j}]`, holder);
+        }
+      }
+      if (!Array.isArray(body.objects)) continue;
+      for (const obj of body.objects as unknown[]) {
+        // A body object the composed top level also carries is the composed
+        // one at the boot (the top level claims it over every body), and the
+        // walk above already judged what that object carries.
+        if (!isRecord(obj) || typeof obj.name !== 'string' || composedObjectNames.has(obj.name)) continue;
+        if (!Array.isArray(obj.actions)) continue;
+        for (const [j, action] of (obj.actions as unknown[]).entries()) {
+          if (!isRecord(action)) continue;
+          note(obj.name, action.name as string, i, `packages[${k}].objects['${obj.name}'].actions[${j}]`, holder);
+          embeddedKeys.add(`${obj.name}:${action.name as string}`);
+        }
+      }
+    }
+  }
 
   const errors: string[] = [];
   // [ADR-0150 D2/D4] Whether `preserve` would admit EVERY refused key: the
@@ -7844,7 +7899,7 @@ function collectComposedActionKeyCollisions(
     // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
     // under `preserve`, and under the flattening manifest the refusal names it.
     if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
-      && composedPackagesHoldApart(stacks, [...byStack.keys()])) {
+      && composedPackagesHoldApart(stacks, declarersByKey.get(key)!)) {
       if (preserve) continue;
       admissible += 1;
     } else {
@@ -7862,22 +7917,76 @@ function collectComposedActionKeyCollisions(
 }
 
 /**
- * [ADR-0150 D2/D4] Do the input stacks at `indices` hold one object-less
- * action name APART, as packages the install gate would admit side by side?
- * Each must be ONE package — a `manifest` with an `id`, and no `packages` list
- * of its own (a nested artifact's top-level actions belong to no single body)
- * — no two may be one package (two bodies of one package are one holder, and
- * it holds one body per name), and no two may meet under
- * {@link namespacedHoldersMeet}, the namespace half of the install gate's rule,
- * read from its one copy: a package with no namespace, or two packages of one
- * namespace, meet.
+ * Who in one input stack declares a key: its own top level (`topLevel`), and
+ * the package bodies of a nested artifact that declare it (`bodies`).
  * @internal
  */
-function composedPackagesHoldApart(stacks: readonly ObjectStackDefinition[], indices: readonly number[]): boolean {
+interface ComposedKeyDeclarers {
+  topLevel: boolean;
+  bodies: ComposedBodyHolder[];
+}
+
+/**
+ * One package body of a nested artifact, as a holder of an action name: the id
+ * the body is keyed by and its namespace.
+ * @internal
+ */
+interface ComposedBodyHolder {
+  id: string | undefined;
+  namespace: string | undefined;
+}
+
+/**
+ * [ADR-0150 D4 · #32335] A package body as the holder of the actions it
+ * declares, read as the boot reads it: the id is `id || name`, the spelling
+ * `artifactPackageId` in `@objectstack/core` keys every package by (so an
+ * empty `id` falls back to `name`), and an empty or absent namespace is none.
+ * @internal
+ */
+function composedBodyHolder(body: Record<string, unknown>): ComposedBodyHolder {
+  const id = body.id || body.name;
+  const namespace = body.namespace;
+  return {
+    id: typeof id === 'string' && id !== '' ? id : undefined,
+    namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined,
+  };
+}
+
+/**
+ * [ADR-0150 D2/D4] Do the input stacks that declare one object-less action
+ * name (`declarers`, by stack index) hold it APART, as packages the install
+ * gate would admit side by side? Each input contributes its holders:
+ *
+ * - a flat input is ONE package — a `manifest` with an `id`;
+ * - [#32335] a nested artifact (an input carrying `packages[]`) contributes
+ *   each package body that declares the name, as installing those packages one
+ *   by one would. A nested artifact whose own TOP LEVEL declares the name
+ *   holds none apart: that declaration belongs to no single body.
+ *
+ * No two holders may be one package (two bodies of one package are one
+ * holder, and it holds one body per name), and no two may meet under
+ * {@link namespacedHoldersMeet}, the namespace half of the install gate's
+ * rule, read from its one copy: a package with no namespace, or two packages
+ * of one namespace, meet. So a nested artifact composed with a third package
+ * of one of its bodies' namespaces is refused, as the install of that third
+ * package is.
+ * @internal
+ */
+function composedPackagesHoldApart(
+  stacks: readonly ObjectStackDefinition[],
+  declarers: ReadonlyMap<number, ComposedKeyDeclarers>,
+): boolean {
   const holders: Array<{ id: string; namespace: string | undefined }> = [];
-  for (const index of indices) {
+  for (const [index, declared] of declarers) {
     const stack = stacks[index] as Record<string, unknown> & ObjectStackDefinition;
-    if (Array.isArray(stack.packages)) return false;
+    if (Array.isArray(stack.packages)) {
+      if (declared.topLevel || declared.bodies.length === 0) return false;
+      for (const body of declared.bodies) {
+        if (body.id === undefined) return false;
+        holders.push({ id: body.id, namespace: body.namespace });
+      }
+      continue;
+    }
     const id = stack.manifest?.id;
     if (typeof id !== 'string' || id === '') return false;
     const namespace = stack.manifest?.namespace;

@@ -347,7 +347,10 @@ describe('validateFilterTokens — {record_id}', () => {
   it('an untyped page is judged as the schema default, a record page', () => {
     // The rule runs on the parsed stack, where `PageSchema` has filled `type`.
     // This holds the rule's reading of an absent `type` equal to that default.
-    const parsed = PageSchema.parse({ name: 'person_page', label: 'Person' });
+    const parsed = PageSchema.parse({
+      name: 'person_page', label: 'Person',
+      regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
+    });
     expect(parsed.type).toBe('record');
     expect(validateFilterTokens({ pages: [recordPage(undefined, { assignee: '{record_id}' })] })).toEqual([]);
   });

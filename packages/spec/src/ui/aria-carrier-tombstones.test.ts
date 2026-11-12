@@ -104,7 +104,7 @@ describe('the `aria` tombstones name only live `AriaProps` carriers', () => {
 
   it('every surface the tombstones name really accepts `AriaProps`', () => {
     expect(PageSchema.safeParse({
-      name: 'sales_home', label: 'Home', regions: [], aria: ARIA,
+      name: 'sales_home', label: 'Home', type: 'home', regions: [], aria: ARIA,
     }).success, '`page.aria`').toBe(true);
 
     expect(PageComponentSchema.safeParse({
