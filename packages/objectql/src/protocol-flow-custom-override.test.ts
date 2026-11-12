@@ -751,7 +751,60 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
         });
     }
 
+    // [ADR-0150 D3] One holder disabled after its override was declared. The
+    // bare-name lookup still answers the first-registered holder, disabled or
+    // not, so the second-registered holder's pair was judged against the
+    // wrong base whichever of the two is disabled. Each pair is judged
+    // against its own base, the disabled holder's pair included: a binding
+    // never moves with a reversible disable.
+    for (const first of [ALPHA, BETA]) {
+        for (const disabled of [ALPHA, BETA]) {
+            it(`${nsOf(first)} registered first, ${nsOf(disabled)} disabled: each holder's pair removal and commit revert are admitted, and the census names neither`, async () => {
+                for (const target of [ALPHA, BETA]) {
+                    const other = target === ALPHA ? BETA : ALPHA;
+                    const { engine, protocol, active } = await bootTwo(first);
+                    await protocol.saveMetaItem({
+                        type: 'flow', name: FLOW, item: flowBody('EDITED', { overrides: { package: target, basedOn: '1.0.0' } }),
+                        mode: 'draft', packageId: `${target}.custom`,
+                    } as any);
+                    const commit: any = await protocol.publishPackageDrafts({ packageId: `${target}.custom` } as any);
+                    engine.registry.disablePackage(disabled);
+                    const census = vi.spyOn(console, 'warn').mockImplementation(() => {});
+                    try {
+                        await (protocol as any).loadMetaFromDb();
+                        expect(census.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('metadata_sealed_overlay_unserved')), nsOf(target)).toEqual([]);
+                    } finally {
+                        census.mockRestore();
+                    }
+
+                    const reverted: any = await (protocol as any).revertCommit({ commitId: commit.commitId, packageId: `${target}.custom` });
+                    expect({ target: nsOf(target), success: reverted.success, failed: reverted.failed ?? [] })
+                        .toEqual({ target: nsOf(target), success: true, failed: [] });
+
+                    const removed: any = await protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: `${target}.custom` } as any);
+                    expect([nsOf(target), removed.success]).toEqual([nsOf(target), true]);
+                    expect(active()).toEqual([`${other}.custom`]);
+                }
+            });
+        }
+    }
+
     // CONTROLS — one holder: each moved answer answers as it did before.
+    it('CONTROL, one holder disabled: its pair\'s removal and its commit revert are admitted as before', async () => {
+        const { engine, protocol, active } = await bootHolders([ALPHA]);
+        await protocol.saveMetaItem({
+            type: 'flow', name: FLOW, item: flowBody('EDITED', { overrides: { package: ALPHA, basedOn: '1.0.0' } }),
+            mode: 'draft', packageId: `${ALPHA}.custom`,
+        } as any);
+        const commit: any = await protocol.publishPackageDrafts({ packageId: `${ALPHA}.custom` } as any);
+        engine.registry.disablePackage(ALPHA);
+        const reverted: any = await (protocol as any).revertCommit({ commitId: commit.commitId, packageId: `${ALPHA}.custom` });
+        expect([reverted.success, reverted.failed ?? []]).toEqual([true, []]);
+        const removed: any = await protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: `${ALPHA}.custom` } as any);
+        expect(removed.success).toBe(true);
+        expect(active()).toEqual([]);
+    });
+
     it('CONTROL, one holder: its pair\'s removal, its commit revert and the boot census answer as before', async () => {
         const { engine, protocol, active, labelAt } = await bootHolders([ALPHA]);
         const census = async () => {
