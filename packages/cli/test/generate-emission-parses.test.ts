@@ -59,7 +59,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
+import { GENERATOR_SCAFFOLD_TARGETS, barrelExportLine } from '../src/commands/generate.js';
 import { metadataFileName } from '../src/utils/metadata-file-name.js';
 import { findEmissionParseFailures } from '../src/utils/emitted-source-parses.js';
 import { probeBindings } from './helpers/scaffold-bindings.js';
@@ -74,11 +74,6 @@ function toSnakeCase(str: string): string {
   return str.replace(/[-]/g, '_').replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`).replace(/^_/, '');
 }
 
-/** `toCamelCase` as `generate.ts` spells it — hyphen AND underscore. */
-function toCamelCase(str: string): string {
-  return str.replace(/[-_]([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
 /**
  * The two emissions one `os generate <type> <name>` produces, built the way
  * the command builds them.
@@ -90,9 +85,11 @@ function emissionsFor(type: string, generate: (name: string) => string, name: st
   return {
     fileName,
     scaffold: { label: fileName, source: generate(name) },
+    // The line the command appends, from the command's own builder (#32153:
+    // a generator that `exportsByName` re-exports its binding by name).
     barrel: {
       label: 'index.ts',
-      source: `export { default as ${toCamelCase(name)} } from '${moduleSpecifier}';`,
+      source: barrelExportLine(type, name, moduleSpecifier).line,
     },
   };
 }
@@ -129,7 +126,7 @@ describe('[#16541] CONTROL — an ordinary name still emits, and still parses', 
   it.each(ROSTER)('$type still derives `orderLine` — acceptance and output are unmoved', ({ type, generate }) => {
     const { scaffold, barrel } = emissionsFor(type, generate, 'order-line');
     expect(scaffold.source).toContain('orderLine');
-    expect(barrel.source).toContain('export { default as orderLine }');
+    expect(barrel.source).toMatch(/^export \{ (?:default as )?orderLine \} from /);
   });
 
   it.each(ROSTER)('$type leaves the written filename as the registry derives it', ({ type, generate }) => {

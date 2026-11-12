@@ -91,6 +91,15 @@ const waitInput = (c: HTMLElement, name: string) =>
     return el;
   });
 
+/**
+ * The form's own error line for a field — `<FormMessage/>`, the text a submit
+ * refusal draws — or `null` while the field carries none. Distinct from the
+ * widget's own refusal line, which shows before any validation has run.
+ */
+function formError(container: HTMLElement, name: string): string | null {
+  return container.querySelector(`[data-field="${name}"] [id$="-form-item-message"]`)?.textContent ?? null;
+}
+
 /** The whole rendered row for `place`, so any text the field draws is seen. */
 function placeRowText(container: HTMLElement): string {
   let node: HTMLElement | null = container.querySelector('input[name="place"]');
@@ -123,8 +132,15 @@ async function typeAndSubmit(typed: string) {
   };
 
   fireEvent.submit(container.querySelector('form') as HTMLFormElement);
-  await waitFor(() => expect(ds.create).toHaveBeenCalled());
-  return { ...observed, stored: ds.create.mock.calls[0][1].place };
+  // Settle either way: since objectstack#32139 a refused coordinate blocks the
+  // submit, so `create` is never called for one.
+  await waitFor(() => {
+    if (!ds.create.mock.calls.length && formError(container, 'place') === null) {
+      throw new Error('form has neither written nor refused yet');
+    }
+  });
+  const payload = ds.create.mock.calls[0]?.[1];
+  return { ...observed, written: payload !== undefined, stored: payload?.place };
 }
 
 /** What a bare `parseFloat` WOULD have stored — the reading this card removes. */
@@ -158,8 +174,10 @@ describe('ObjectForm never stores a truncated coordinate (objectui#6715)', () =>
 
     const after = await typeAndSubmit(typed);
 
-    // 2. Nothing was stored — not the truncation, not anything.
+    // 2. Nothing was stored — not the truncation, not anything. Since
+    //    objectstack#32139 the refusal blocks the submit itself.
     expect(after.stored).toBeUndefined();
+    expect(after.written).toBe(false);
     // 3. The refusal is ANNOUNCED, through objectui#6716's machinery: the a11y
     //    state a screen reader reads, and a reason a person can read.
     expect(after.ariaInvalid).toBe('true');

@@ -608,6 +608,22 @@ describe('LocalCryptoProvider — crypto semantics', () => {
     expect(await p.decrypt(h2, ctx)).toBe('hello');
   });
 
+  it('[ADR-0154 D2] rotateKey keeps the handle id under every scope, audit_seal included', async () => {
+    // A checkpoint's signed body names its seed by this id: a re-wrap under a
+    // new id would leave every signed body naming a row that no longer exists.
+    // `audit_seal` makes keeping it a MUST of the contract
+    // (`ICryptoProvider.rotateKey`); this is the shipped provider honouring it.
+    expect(CRYPTO_CONTEXT_SCOPES).toContain('audit_seal');
+    const p = new LocalCryptoProvider({ key: randomBytes(32) });
+    for (const scope of CRYPTO_CONTEXT_SCOPES) {
+      const at: CryptoContext = { scope, namespace: 'sys_audit_log', key: '["org_1",0]' };
+      const h1 = await p.encrypt('seed', at);
+      const h2 = await p.rotateKey(h1, at);
+      expect(h2.id, scope).toBe(h1.id);
+      expect(await p.decrypt(h2, at), scope).toBe('seed');
+    }
+  });
+
   it('digest is a non-reversible sha256 tag', () => {
     const p = new LocalCryptoProvider({ key: randomBytes(32) });
     const d = p.digest('super-secret');

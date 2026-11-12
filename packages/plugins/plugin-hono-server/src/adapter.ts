@@ -24,7 +24,7 @@ import {
 } from '@objectstack/observability';
 import { Hono } from 'hono';
 import { routePath } from 'hono/route';
-import { serve } from '@hono/node-server';
+import { serve, type HttpBindings, type Http2Bindings } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 // The TLS listener factory (#16804). `@hono/node-server` takes it as an
 // OPTION — its `Options` type is a union whose https arm is
@@ -577,6 +577,40 @@ function readQuery(c: any): Record<string, string | string[]> {
 }
 
 /**
+ * The longest {@link HonoHttpServer.close} waits, once the drain window has
+ * ended, for the refusals it just wrote to reach their sockets before it
+ * force-closes every connection left. A refusal is a few hundred bytes and
+ * normally closes its connection within milliseconds; this only bounds a
+ * connection that does not.
+ */
+const DRAIN_REFUSAL_FLUSH_MS = 1_000;
+
+/**
+ * The answer for a request whose body was still arriving when the drain
+ * window ended: `503 SERVICE_UNAVAILABLE` in the ADR-0112 envelope, with
+ * `Connection: close`. The app never had the whole body, so it did not act
+ * on the request, and the client may send it again.
+ */
+function drainWindowRefusal(): Response {
+    const body = JSON.stringify({
+        success: false,
+        error: {
+            code: HttpStatusErrorCodeMap[503],
+            message: 'The server is shutting down and the request body did not finish arriving before it stopped. The request was not processed; send it again.',
+        },
+    });
+    return new Response(body, {
+        status: 503,
+        headers: { 'content-type': 'application/json; charset=UTF-8', connection: 'close' },
+    });
+}
+
+/** Whether an answer is an event stream, which stays open until its client leaves. */
+function isEventStream(response: Response): boolean {
+    return (response.headers.get('content-type') ?? '').toLowerCase().startsWith('text/event-stream');
+}
+
+/**
  * Hono Implementation of IHttpServer
  */
 export class HonoHttpServer implements IHttpServer {
@@ -602,6 +636,22 @@ export class HonoHttpServer implements IHttpServer {
      * is — see {@link closeIdleConnectionsOnceFlushed}.
      */
     private deferredIdleSweep: (() => void) | undefined;
+    /**
+     * For each request whose answer the app has not produced yet: settle that
+     * answer as {@link drainWindowRefusal} instead. {@link close} calls it when
+     * the drain window ends on a request whose body is still arriving. Keyed
+     * by the response the answer is written to, and set and dropped by
+     * {@link answerRequest}.
+     */
+    private windowRefusals = new WeakMap<object, () => void>();
+    /**
+     * The app's answer for each response it is being written to, noted by
+     * {@link answerRequest}. {@link close} reads it when the drain begins, to
+     * release an event stream: such a stream does not end on its own. Read
+     * only then, after the answer has been written: reading a `Response`'s
+     * headers changes how the Node listener writes them.
+     */
+    private answers = new WeakMap<object, Response>();
     /**
      * Every `(method, pattern)` pair registered through this server, kept so
      * the `notFound` handler can answer "the path exists but the method is
@@ -1864,7 +1914,7 @@ export class HonoHttpServer implements IHttpServer {
             // everything about `close()`, is identical.
             const server = this.tls
                 ? serve({
-                    fetch: this.app.fetch,
+                    fetch: this.answerRequest,
                     port,
                     createServer: createHttpsServer,
                     serverOptions: { cert: this.tls.cert, key: this.tls.key },
@@ -1873,7 +1923,7 @@ export class HonoHttpServer implements IHttpServer {
                     resolve();
                 })
                 : serve({
-                    fetch: this.app.fetch,
+                    fetch: this.answerRequest,
                     port
                 }, (info) => {
                     this.listeningPort = info.port;
@@ -1895,6 +1945,53 @@ export class HonoHttpServer implements IHttpServer {
                 reject(err);
             });
         });
+    }
+
+    /**
+     * The `fetch` the Node listener calls: the app's own answer, plus the two
+     * things the drain in {@link close} needs to know about it.
+     *
+     * - **An answer still pending can be settled as the window refusal.**
+     *   While the app works on a request, {@link windowRefusals} holds a way
+     *   to settle its answer as {@link drainWindowRefusal}. When the drain
+     *   window ends on a request whose body is still arriving, {@link close}
+     *   uses it. The refusal then goes out through the listener's normal
+     *   write path, so the connection carries exactly one answer. Whatever the
+     *   app answers afterwards is dropped.
+     * - **The answer is noted** in {@link answers}, so that {@link close} can
+     *   tell an event stream: it stays open until its client leaves, so there
+     *   is no end for a drain to wait for, and the drain releases it.
+     *
+     * An answer the app produced synchronously has nothing to settle, and is
+     * passed on unchanged.
+     */
+    private readonly answerRequest = (
+        request: Request,
+        env: HttpBindings | Http2Bindings,
+    ): Response | Promise<Response> => {
+        const answer = this.app.fetch(request, env);
+        const outgoing: object | undefined = env?.outgoing;
+        if (!outgoing) return answer;
+        if (!(answer instanceof Promise)) return this.noteAnswer(answer, outgoing);
+        return new Promise<Response>((resolve, reject) => {
+            this.windowRefusals.set(outgoing, () => resolve(drainWindowRefusal()));
+            answer.then(
+                (response) => {
+                    this.windowRefusals.delete(outgoing);
+                    resolve(this.noteAnswer(response, outgoing));
+                },
+                (error: unknown) => {
+                    this.windowRefusals.delete(outgoing);
+                    reject(error);
+                },
+            );
+        });
+    };
+
+    /** Note the app's answer for `outgoing` — see {@link answerRequest}. */
+    private noteAnswer(response: Response, outgoing: object): Response {
+        this.answers.set(outgoing, response);
+        return response;
     }
 
     /**
@@ -1995,6 +2092,48 @@ export class HonoHttpServer implements IHttpServer {
         return this.app;
     }
 
+    /** Whether `res` carries an event stream whose headers are out — see {@link answers}. */
+    private isOpenEventStream(res: ServerResponse): boolean {
+        const answer = this.answers.get(res);
+        return answer !== undefined && isEventStream(answer);
+    }
+
+    /**
+     * At the end of the drain window: answer every request whose body is
+     * still arriving with {@link drainWindowRefusal}, then wait (at most
+     * {@link DRAIN_REFUSAL_FLUSH_MS}) until each of those connections has
+     * closed. Node closes each one once its refusal is sent, because a
+     * draining response carries `Connection: close`.
+     *
+     * Only a request still uploading is refused. Its app never had the whole
+     * body, so it cannot have acted on it, and the refusal tells the client
+     * so. A request whose body did arrive, and whose handler is still running,
+     * keeps the force-close: a refusal there could claim that work was not
+     * done when it was. A response whose headers already went out cannot
+     * carry a refusal either, and is force-closed too.
+     */
+    private refuseUnfinishedUploads(): Promise<void> {
+        const closed: Array<Promise<void>> = [];
+        for (const owed of this.inFlightResponses.values()) {
+            for (const res of owed) {
+                const refuse = this.windowRefusals.get(res);
+                const socket = res.socket;
+                if (!refuse || !socket || res.headersSent || res.req.complete) continue;
+                closed.push(new Promise<void>((done) => socket.once('close', () => done())));
+                refuse();
+            }
+        }
+        if (closed.length === 0) return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            const cap = setTimeout(resolve, DRAIN_REFUSAL_FLUSH_MS);
+            if (typeof cap.unref === 'function') cap.unref();
+            void Promise.all(closed).then(() => {
+                clearTimeout(cap);
+                resolve();
+            });
+        });
+    }
+
     async close() {
         if (!this.server) return;
         const server = this.server;
@@ -2006,11 +2145,20 @@ export class HonoHttpServer implements IHttpServer {
         // until they complete or the drain window elapses, and each one's
         // connection closes as soon as its response ends (`trackForDrain`), so
         // the drain finishes with the last in-flight request rather than a
-        // keep-alive window after it.
+        // keep-alive window after it. A request whose body is still arriving
+        // is one of them: it is served if its body arrives inside the window,
+        // and refused with a 503 if it is still arriving when the window ends
+        // (`refuseUnfinishedUploads`).
+        //
+        // An event stream already open is released here, at the start: it
+        // does not end on its own, so waiting for it would hold every drain
+        // for the whole window. Its client sees the connection close and
+        // reconnects, which a rolling restart sends to another instance.
         this.draining = true;
         for (const owed of this.inFlightResponses.values()) {
             for (const res of owed) {
                 if (!res.headersSent) res.shouldKeepAlive = false;
+                else if (this.isOpenEventStream(res)) res.destroy();
             }
         }
         await new Promise<void>((resolve) => {
@@ -2023,13 +2171,16 @@ export class HonoHttpServer implements IHttpServer {
                 server.closeIdleConnections();
             }
 
-            // Safety net: if requests outlast the drain window, force-close the
-            // remainder so shutdown can't hang past the kernel's shutdownTimeout.
+            // Safety net: if requests outlast the drain window, refuse the
+            // ones still uploading, then force-close the remainder so shutdown
+            // can't hang past the kernel's shutdownTimeout.
             const timer = setTimeout(() => {
-                if (typeof server.closeAllConnections === 'function') {
-                    server.closeAllConnections();
-                }
-                finish();
+                void this.refuseUnfinishedUploads().then(() => {
+                    if (typeof server.closeAllConnections === 'function') {
+                        server.closeAllConnections();
+                    }
+                    finish();
+                });
             }, this.drainTimeoutMs);
             if (typeof timer.unref === 'function') timer.unref();
         });

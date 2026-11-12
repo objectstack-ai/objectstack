@@ -561,15 +561,15 @@
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
- *     a notice annotation name that id, so the seat follows with
- *     `advisory_collaborators_add` — the App is the submitter, so the finding
- *     seat is not a collaborator on its own;
+ *     a notice annotation name that id, and the seat is done — the App is the
+ *     submitter, so the finding seat is not a collaborator on its own, and
+ *     `advisory_collaborators_add` adds one only when a maintainer asks for it;
  *   - `advisory_create` is one POST of the row's body to the collection, and
  *     nothing is read first. It LANDS on a 2xx whose answer carries a
  *     `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`); a 2xx
  *     without an id is UNCONFIRMED and one in another state FAILED, neither
- *     ever re-sent. The row and a notice annotation name the id, so the seat
- *     follows with `advisory_collaborators_add` exactly as after a report;
+ *     ever re-sent. The row and a notice annotation name the id, and the seat
+ *     is done, exactly as after a report;
  *   - `advisory_collaborators_add` reads the advisory first (`ADVISORY_FENCES`,
  *     judged by `advisoryPreflight` on the executor's own `GET`) and refuses
  *     with nothing sent unless the read answers 200 with the advisory the
@@ -751,8 +751,12 @@
  * that cursor, never the link. A link that is none of these, a page that is not
  * a list of advisories in the state asked for, an advisory whose `severity` is
  * not one of `ADVISORY_LIST_SEVERITIES` or null or whose `created_at` or
- * `updated_at` is not an ISO-8601 string (`ADVISORY_LIST_TIMESTAMP_SHAPE`), so
- * nothing but those values is ever sealed, and an advisory listed twice are
+ * `updated_at` is neither null nor an ISO-8601 string
+ * (`ADVISORY_LIST_TIMESTAMP_SHAPE`) — the platform's `repository-advisory`
+ * schema declares all three nullable, so null is a value the platform answers
+ * and the fence admits it — so nothing but those values is ever sealed, and
+ * the refusal names the field that failed and never its value
+ * (`advisoryListFieldSentence`), and an advisory listed twice are
  * each a FAILED action. A walk still pending after `ADVISORY_LIST_PAGE_CAP`
  * pages is FAILED too: a truncated listing is a SUBSET, never an answer. In
  * each, nothing is sealed or emitted.
@@ -1684,9 +1688,9 @@ export function advisoryReportReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_report` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_report` prints: the id the platform gave it and its state. Pure. */
 export function advisoryReportLandedText({ ghsaId, state }) {
-  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 /** The one state a created advisory may answer in — the endpoint's default, and the only one a draft has. */
@@ -1708,9 +1712,9 @@ export function advisoryCreateReadBack(answer) {
   return { ok: true, ghsaId, state, why: '' };
 }
 
-/** The row a landed `advisory_create` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+/** The row a landed `advisory_create` prints: the id the platform gave it and its state. Pure. */
 export function advisoryCreateLandedText({ ghsaId, state }) {
-  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -2033,24 +2037,47 @@ export function advisoryListNextCursor(link, { api, repo, state }) {
 /** The severities a listed advisory may carry, beside null (the platform's own enum for the field). */
 export const ADVISORY_LIST_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
 
-/** A listed advisory's `created_at` and `updated_at`: one ISO-8601 date-time string, as the platform answers it. */
+/** A listed advisory's `created_at` and `updated_at` when not null: one ISO-8601 date-time string, as the platform answers it. */
 export const ADVISORY_LIST_TIMESTAMP_SHAPE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+const advisoryListStamp = (v) => v === null || (typeof v === 'string' && ADVISORY_LIST_TIMESTAMP_SHAPE.test(v));
+
+/**
+ * The fields the page fence judges past the id and the state, in the order a refusal names them, each with its
+ * declared shape. The platform's `repository-advisory` schema (github/rest-api-description) declares all three
+ * required and nullable: `severity` one of its four or null, `created_at` and `updated_at` a date-time or null. A
+ * field the item lacks is no value of its shape and fails. Frozen.
+ */
+export const ADVISORY_LIST_FIELD_SHAPES = Object.freeze([
+  Object.freeze({ field: 'severity', holds: (v) => v === null || ADVISORY_LIST_SEVERITIES.includes(v) }),
+  Object.freeze({ field: 'created_at', holds: advisoryListStamp }),
+  Object.freeze({ field: 'updated_at', holds: advisoryListStamp }),
+]);
+
+/**
+ * The refusal of a page whose advisories carry a field off its declared shape: the fields that failed, by NAME, in
+ * `ADVISORY_LIST_FIELD_SHAPES` order — so the run says which field to measure — and ⛔ never a value, an id, a state
+ * or a count. Pure.
+ */
+export function advisoryListFieldSentence(fields) {
+  const names = fields.length > 1 ? `${fields.slice(0, -1).join(', ')} and ${fields[fields.length - 1]}` : fields[0];
+  return `a page of the listing lists an advisory whose ${names} ${fields.length > 1 ? "are not of the fields' declared shapes" : "is not of the field's declared shape"}`;
+}
 
 /**
  * Why one listing page fails its fences, or null when it holds (header): the page answered 200 with a list, and every
  * item is an advisory — an object whose `ghsa_id` is in `GHSA_ID_SHAPE` — in the state the walk asked for, whose
- * `severity` is one of `ADVISORY_LIST_SEVERITIES` or null and whose `created_at` and `updated_at` are each one string
- * in `ADVISORY_LIST_TIMESTAMP_SHAPE`: the five fields that cross are only ever those values. ⛔ The sentence carries the
- * status alone: no id, no state, no count, no field's value. Pure.
+ * `severity`, `created_at` and `updated_at` each hold their `ADVISORY_LIST_FIELD_SHAPES` shape: the five fields that
+ * cross are only ever those values. ⛔ The sentence carries the status, or the failing fields' names, alone: no id, no
+ * state, no count, no field's value. Pure.
  */
 export function advisoryListPageFailure(answer, state) {
   if (answer?.status !== 200) return `a page of the listing answered HTTP ${answer?.status ?? 'none'}`;
   if (!Array.isArray(answer.json)) return 'a page of the listing answered HTTP 200 with no list';
   const ok = answer.json.every((item) => advisoryShaped(item) && typeof item.ghsa_id === 'string' && GHSA_ID_SHAPE.test(item.ghsa_id) && item.state === state);
   if (!ok) return 'a page of the listing lists an item that is not an advisory in the state the page asked for';
-  const stamp = (v) => typeof v === 'string' && ADVISORY_LIST_TIMESTAMP_SHAPE.test(v);
-  const fields = answer.json.every((item) => (item.severity === null || ADVISORY_LIST_SEVERITIES.includes(item.severity)) && stamp(item.created_at) && stamp(item.updated_at));
-  return fields ? null : "a page of the listing lists an advisory whose severity or dates are not of the field's declared shape";
+  const failed = ADVISORY_LIST_FIELD_SHAPES.filter(({ field, holds }) => !answer.json.every((item) => Object.hasOwn(item, field) && holds(item[field]))).map(({ field }) => field);
+  return failed.length === 0 ? null : advisoryListFieldSentence(failed);
 }
 
 /** One listed advisory as it crosses: `ADVISORY_LIST_FIELDS` it carries, in that order, as the platform answered them. Pure. */

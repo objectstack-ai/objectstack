@@ -47,6 +47,8 @@ import { SysAuditLog } from '../src/objects/sys-audit-log.object.js';
 import { SysActivity } from '../src/objects/sys-activity.object.js';
 import { SysComment } from '../src/objects/sys-comment.object.js';
 import { SysCommentReaction } from '../src/objects/sys-comment-reaction.object.js';
+import { SysAuditCheckpoint } from '../src/objects/sys-audit-checkpoint.object.js';
+import { SysAuditSigningKey } from '../src/objects/sys-audit-signing-key.object.js';
 import { enObjects } from '../src/translations/en.objects.generated.js';
 import { zhCNObjects } from '../src/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../src/translations/ja-JP.objects.generated.js';
@@ -76,7 +78,9 @@ import { auditPageTranslations } from '../src/translations/pages.js';
  * precision: the annotated type is the function's own return type.
  */
 const config: ObjectStackDefinition = defineStack({
-  objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction] as any,
+  // [ADR-0154] The two objects the plugin registers ahead of their writers;
+  // `sys_audit_amendment` joins when P3 registers it with its writer.
+  objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction, SysAuditCheckpoint, SysAuditSigningKey] as any,
   pages: [SysAuditLogDetailPage],
   translations: [
     { en: { objects: enObjects, pages: auditPageTranslations.en } },

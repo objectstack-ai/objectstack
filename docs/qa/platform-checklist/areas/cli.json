@@ -2626,7 +2626,7 @@
       "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate; a namespace that spells a grammar literal is refused by os validate and os build (exit 1, no artifact) and at the running install door, while a package the boot registers keeps booting with a warning; and lint's namespace-prefix rule judges only capabilities and positions",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
@@ -2660,7 +2660,7 @@
         {
           "clause": "the running install door refuses a namespace that spells a grammar literal with 422 naming it",
           "oracle": "api",
-          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth and trigger)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth, runs and trigger)",
           "evidence": "the 422 body"
         },
         {
@@ -2698,6 +2698,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child P, the G1 install refusal and the build doors' refusal (#31765, #31959, #31968). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, after #31968 landed, at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-11",
+          "change": "the install-door clause's list of NAMESPACE_REFUSED_LITERALS gains runs: the inbound hook's namespace position now carries it (the run doors of a flow named hooks serve it there), so the same judge refuses it at the same three doors. Steps, fixtures and the other clauses are unchanged; read from source, no live run made",
+          "ref": "#32075"
         }
       ]
     },
@@ -2765,6 +2771,386 @@
       ],
       "variants": [
         "an installed package whose namespace spells an address literal (one the boot kept, with its warning) is listed under literalNamespaces with its id, its namespace and the install door's sentence, and the text face says its items are read with ?package=ID (packages/cli/src/utils/stored-package-references.ts#LiteralNamespaceFinding, #31968)"
+      ]
+    },
+    {
+      "id": "cli.serve-multi-replica-local-database-refusal",
+      "title": "os serve refuses to start several replicas declared on the redis cluster driver over a database local to each replica, naming a shared Postgres, before anything connects",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "an operator scaling a deployment to several replicas"
+      ],
+      "fixtures": {
+        "app": "none — a scratch app directory (requires), not the showcase",
+        "requires": [
+          "a scratch app directory (never the shared examples) whose package.json declares @objectstack/service-cluster and @objectstack/service-cluster-redis and whose node_modules resolves both, as the pin's fixture app does (packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts#writeApp); no Redis server is needed: the refusal fires before anything connects",
+          "the os CLI built from this tree"
+        ]
+      },
+      "steps": [
+        "in the scratch app run os serve with OS_CLUSTER_DRIVER=redis, OS_CLUSTER_REPLICAS=2 and OS_DATABASE_URL=file:./app.db; record the exit code and the output",
+        "repeat with OS_EXPECT_MULTI_NODE=true in place of OS_CLUSTER_REPLICAS, and again with no OS_DATABASE_URL (the SQLite default)",
+        "control: the same file: database with neither declaration"
+      ],
+      "acceptance": [
+        {
+          "clause": "each declared run exits 1 with the database refusal, naming a shared Postgres",
+          "oracle": "log",
+          "verify": "the output carries \"[database] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) over the redis cluster driver, but the primary database is SQLite, local to each replica\" and \"OS_DATABASE_URL=postgres://\" (packages/cli/src/commands/serve.ts#multiReplicaLocalDatabaseRefusal), and the exit code is 1",
+          "evidence": "the three outputs and exit codes"
+        },
+        {
+          "clause": "the refusal comes before anything is connected or created",
+          "oracle": "log",
+          "verify": "no app.db file appears in the scratch directory after the declared runs, and no kernel boot line follows the refusal; the multi-node gate's own warning ([cluster] multi-node not authorized (…) may precede it, since the gate is asked first and denies when none is registered",
+          "evidence": "the directory listing and the outputs"
+        },
+        {
+          "clause": "nothing declared, nothing changes",
+          "oracle": "log",
+          "verify": "the control boots over the file database as before and prints no database refusal",
+          "evidence": "the control output"
+        }
+      ],
+      "negative": [
+        "a declared run that starts serving over SQLite, or exits with a split-brain guard message instead of the database one, is a FAIL: the database refusal comes first"
+      ],
+      "traps": [
+        "stale-dist",
+        "absence-inference"
+      ],
+      "automated": {
+        "kind": "test",
+        "ref": "packages/cli/test/serve-multi-node-gate-declaration.integration.test.ts (its second describe) and packages/cli/src/commands/serve-multi-replica-local-database.test.ts"
+      },
+      "source": [
+        "packages/cli/src/commands/serve.ts#multiReplicaLocalDatabaseRefusal",
+        "packages/cli/src/commands/start.ts#declaresReplicasSharingState (the pre-boot form of the declaration)",
+        "packages/services/service-cluster/src/multi-replica.ts#declaresMultiReplicaOnRedis",
+        "content/docs/kernel/cluster.mdx",
+        "#31954"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: os serve refuses a database local to each replica (#31954). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "cli.start-multi-replica-auth-secret-refusal",
+      "title": "os start refuses a declared multi-replica boot on the redis cluster driver without OS_AUTH_SECRET, instead of minting a sign-in secret per replica, and writes no secret",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "an operator scaling a deployment to several replicas"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "the os CLI built from this tree, run from examples/app-showcase with --home pointing at a new empty directory per leg, OS_AUTH_SECRET (and AUTH_SECRET, BETTER_AUTH_SECRET) unset in the shell, and no --auth-secret flag"
+        ]
+      },
+      "steps": [
+        "os start --home HOME1 with OS_CLUSTER_DRIVER=redis and OS_CLUSTER_REPLICAS=2; record the exit code, stderr, and the contents of HOME1",
+        "repeat with OS_EXPECT_MULTI_NODE=true in place of OS_CLUSTER_REPLICAS (HOME2)",
+        "control: OS_CLUSTER_DRIVER=memory with OS_CLUSTER_REPLICAS=2 (HOME3), stopping it once the auth step has passed"
+      ],
+      "acceptance": [
+        {
+          "clause": "each declared run exits 1 with the auth refusal, naming the variable and how to generate it",
+          "oracle": "log",
+          "verify": "stderr carries \"[auth] Refusing to start: several replicas are declared (OS_EXPECT_MULTI_NODE / OS_CLUSTER_REPLICAS>1) over the redis cluster driver, but OS_AUTH_SECRET is not set\" and \"OS_AUTH_SECRET=$(openssl rand -hex 32)\" (packages/cli/src/commands/start.ts#MULTI_REPLICA_AUTH_SECRET_REFUSAL); exit code 1",
+          "evidence": "both stderr captures and exit codes"
+        },
+        {
+          "clause": "the refusal writes no secret",
+          "oracle": "log",
+          "verify": "HOME1 and HOME2 hold no auth-secret file after the run (the refusal is asked before the persisted secret is read or created)",
+          "evidence": "the directory listings"
+        },
+        {
+          "clause": "a driver other than redis is not this declaration",
+          "oracle": "log",
+          "verify": "the memory-driver control prints no auth refusal and HOME3 gains an auth-secret file, as a single node always has (declaresReplicasSharingState is redis-only, packages/cli/src/commands/start.ts#declaresReplicasSharingState)",
+          "evidence": "the control output and listing"
+        }
+      ],
+      "negative": [
+        "a declared run that mints HOME/auth-secret, or prints the refusal and goes on booting, is a FAIL",
+        "the refusal names the variable and never a value: a secret printed in any output is a FAIL"
+      ],
+      "traps": [
+        "stale-dist",
+        "auth-state-leak"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/commands/start-deployment-durability.test.ts (the MULTI_REPLICA_AUTH_SECRET_REFUSAL cases)"
+      },
+      "source": [
+        "packages/cli/src/commands/start.ts#MULTI_REPLICA_AUTH_SECRET_REFUSAL and #declaresReplicasSharingState",
+        "packages/services/service-cluster/src/multi-replica.ts#declaresMultiReplicaOnRedis",
+        "#31718"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — multi-replica on Redis: os start refuses to boot without OS_AUTH_SECRET (#31718). Scoped sweep #32020 (epic #32022 M2), read from source at 43a51b55; no live run made",
+          "ref": "#32020"
+        }
+      ]
+    },
+    {
+      "id": "cli.deploy-runtime-dry-run-json",
+      "title": "os deploy to a self-hosted runtime builds, previews the upgrade plan and installs: --dry-run prints the plan and installs nothing, --json writes one document to stdout with every human line on stderr, and an install that needs a confirmation says so and how",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "cli",
+      "personas": [
+        "a developer with a local shell, targeting a runtime as its admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase boot as the target runtime: `pnpm dev -- --fresh -p PORT --seed-admin`, and an osk_ admin key minted on it via POST /api/v1/keys",
+          "a scratch app directory outside examples/ holding a defineStack project (manifest id com.qa.deploy, version 1.0.0, one object qa_deploy_item with fields name and note) that `objectstack build` compiles; v1.1.0 of it drops the note field",
+          "`os environments use-runtime http://localhost:PORT --token osk_…` run once in the scratch directory, so os deploy targets the runtime"
+        ]
+      },
+      "steps": [
+        "run `os deploy --dry-run` at v1.0.0; then GET /api/v1/packages",
+        "run `os deploy --dry-run --json`, keeping stdout and stderr apart",
+        "run `os deploy` (off a TTY); GET /api/v1/packages and the qa_deploy_item list",
+        "create two qa_deploy_item rows with a note; bump to v1.1.0; run `os deploy --dry-run`, then `os deploy --json` off a TTY"
+      ],
+      "acceptance": [
+        {
+          "clause": "--dry-run prints the plan and installs nothing, and says whether the install would stop",
+          "oracle": "log",
+          "verify": "the output prints the plan, 'Nothing in this plan asks for a confirmation: `os deploy` installs it as it is.' and 'Dry run: nothing was installed into http://localhost:PORT'; exit 0; GET /api/v1/packages lists no com.qa.deploy (packages/cli/src/commands/deploy.ts)",
+          "evidence": "the output, the exit code and the GET"
+        },
+        {
+          "clause": "--json writes one document to stdout, every key present, and the human lines go to stderr",
+          "oracle": "log",
+          "verify": "stdout parses as one JSON object with target 'runtime', url, result 'planned', package { manifestId: 'com.qa.deploy', version: '1.0.0', installedVersion: null }, plan, environment, wouldStop [], refusal null, confirm null, error null; stderr holds the progress lines (packages/cli/src/commands/deploy.ts#deployDocument)",
+          "evidence": "stdout and stderr, captured apart"
+        },
+        {
+          "clause": "without --dry-run the build is installed and live",
+          "oracle": "log",
+          "verify": "'Live: http://localhost:PORT now serves com.qa.deploy 1.0.0.'; exit 0; the object answers on the data door",
+          "evidence": "the output and the GETs"
+        },
+        {
+          "clause": "an upgrade that needs a confirmation is previewed as stopping, and refused off a TTY with the command that confirms it",
+          "oracle": "log",
+          "verify": "the dry run warns 'Deploying this build would stop for your confirmation — N finding(s):' with the dropped field; the --json run exits non-zero with result 'refused', the runtime's refusal verbatim and confirm 'os deploy --confirm-upgrade FINDINGSET'; no question is asked off a TTY",
+          "evidence": "both outputs and the exit codes"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: the terminal question accepts the findings only on y, a kernel that could not load the build answers failed, and the cloud target refuses --dry-run and --json by name before building",
+          "oracle": "test",
+          "verify": "run packages/cli/test/deploy.test.ts with the cli vitest; it reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a dry run that installs, or a --json run whose stdout carries a human line, is a FAIL",
+        "an off-TTY run that waits on a question is a FAIL"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/deploy.test.ts; no live spec deploys to a runtime"
+      },
+      "source": [
+        "packages/cli/src/commands/deploy.ts#DEPLOY_ARTIFACT",
+        "packages/cli/src/commands/deploy.ts#deployDocument",
+        "packages/cli/src/utils/upgrade-plan.ts#renderUpgradePlan",
+        "packages/cli/src/commands/environments/use-runtime.ts"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — os deploy to a self-hosted runtime: the plan, --dry-run and --json. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "cli.validate-target-restriction-profile",
+      "title": "os validate --target judges the stack against a target's restriction profile: each refused item printed as [rule] where: message with exit 1, a profile that cannot be read refused and never judged as no restriction, and a version drift warned only",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "a developer with a local shell"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a scratch copy of the showcase outside examples/ (it declares hooks with handlers, sandboxed bodies and flows)",
+          "a profile file qa-profile.json: { allowCode: false, allowSandboxedJs: false, allowScheduledAutomation: false, allowedFlowNodeTypes: ['assignment', 'decision'], versions: { spec: '0.0.1', skills: '0.0.1' } }, and a copy with every allow true and every node type listed",
+          "a running showcase boot for the URL leg: no open-tree server serves the profile route, so it answers 404"
+        ]
+      },
+      "steps": [
+        "run `os validate --target ./qa-profile.json`; record the exit and the list",
+        "run it with the permissive copy",
+        "run it with --target ./missing.json, with a file holding `{`, and with a profile missing allowCode",
+        "run it with --target ftp://example.com and with --target http://localhost:PORT"
+      ],
+      "acceptance": [
+        {
+          "clause": "a restrictive profile refuses the stack with one row per item and exit 1",
+          "oracle": "log",
+          "verify": "\"The target environment's restriction profile refuses this stack (N items)\", then rows like [allowCode] hook 'NAME': … and [allowSandboxedJs] action 'NAME': …; exit 1 (packages/cli/src/utils/restriction-profile.ts#judgeRestrictionProfile)",
+          "evidence": "the output and the exit code"
+        },
+        {
+          "clause": "a permissive profile passes, and a version that differs from the target's is a warning, never a refusal",
+          "oracle": "log",
+          "verify": "exit 0; the restrictive run's output also warns 'This project builds against @objectstack/spec … and the target runs 0.0.1' without adding a refusal row (packages/cli/src/utils/restriction-profile.ts#restrictionProfileVersionDrift)",
+          "evidence": "both outputs"
+        },
+        {
+          "clause": "a profile file that is missing, not JSON or not a valid profile is refused naming the file",
+          "oracle": "log",
+          "verify": "'no restriction profile file at', 'is not JSON' and 'is not a valid restriction profile (RestrictionProfileSchema'; each exits non-zero (packages/cli/src/utils/restriction-profile.ts#loadRestrictionProfile)",
+          "evidence": "the three outputs"
+        },
+        {
+          "clause": "a URL target is fetched from the profile route; a non-http scheme and a 404 are refused, never judged as no restriction",
+          "oracle": "log",
+          "verify": "ftp: 'only an http:// or https:// environment URL can be fetched'; the boot: 'answered HTTP 404' with ' — no environment is served at this host' and 'never judged as \"no restriction\"' (packages/cli/src/utils/restriction-profile.ts#RESTRICTION_PROFILE_ROUTE)",
+          "evidence": "both outputs"
+        }
+      ],
+      "negative": [
+        "any unreadable profile that lets the stack pass is a FAIL",
+        "a version drift that fails the run is a FAIL: it is advice"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/validate-target-restriction-profile.test.ts, packages/cli/src/utils/restriction-profile.test.ts; no live spec runs os validate --target"
+      },
+      "source": [
+        "packages/cli/src/utils/restriction-profile.ts#loadRestrictionProfile",
+        "packages/cli/src/utils/restriction-profile.ts#judgeRestrictionProfile",
+        "packages/cli/src/utils/restriction-profile.ts#restrictionProfileVersionDrift",
+        "packages/cli/src/commands/validate.ts (the refusal header and the row format)",
+        "packages/spec/src/system/restriction-profile.zod.ts#RestrictionProfileSchema"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — os validate --target and the restriction profile. Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
+      ]
+    },
+    {
+      "id": "cli.package-upgrade-plan-override-advice",
+      "title": "A package upgrade's dry run returns the plan and writes nothing, and lists as advice the customizations that would hide a change of the upgrade; the upgrade installs without a token",
+      "since": "v18.4",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123), over the CLI and REST"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin`",
+          "a scratch package directory outside examples/ (manifest id com.qa.upgrade, namespace qa_up, version 1.0.0) holding an object qa_up_ticket and a list view of it with columns name and status, compiled with `objectstack build`; v1.1.0 changes that view's columns",
+          "v1.0.0 installed with `os package install DIR/dist/objectstack.json` (admin credentials), then its view customized in Studio into com.qa.upgrade.custom and published, as studio-authoring.package-customize-restore-display does for a showcase view"
+        ]
+      },
+      "steps": [
+        "build v1.1.0; run `os package install DIR/dist/objectstack.json --dry-run`; then GET /api/v1/packages",
+        "POST /api/v1/marketplace/install-local with the v1.1.0 manifest and dryRun: true; then with dryRun: \"yes\"",
+        "run `os package install DIR/dist/objectstack.json` with no confirmation flag; GET the view"
+      ],
+      "acceptance": [
+        {
+          "clause": "the dry run prints the plan and installs nothing",
+          "oracle": "log",
+          "verify": "the CLI prints the plan and 'Dry run — nothing was installed or written'; GET /api/v1/packages still shows 1.0.0 (packages/cli/src/commands/package/install.ts)",
+          "evidence": "the output and the GET"
+        },
+        {
+          "clause": "the plan lists the customization that hides a change, as advice",
+          "oracle": "log",
+          "verify": "a section 'Overrides that hide a change in this upgrade (advisory; the upgrade installs either way)' names the view and the change 'changed' with a next step (packages/cli/src/utils/upgrade-plan.ts#renderUpgradePlan; packages/objectql/src/package-upgrade-environment.ts#nextStepHiding)",
+          "evidence": "the section"
+        },
+        {
+          "clause": "install-local answers a dry run 200 with the plan, and refuses a dryRun that is not a boolean",
+          "oracle": "api",
+          "verify": "dryRun true: 200 with the plan and environment.overrides.hidesChange holding the view; dryRun \"yes\": 400 INVALID_REQUEST '`dryRun` must be true or false, received \"yes\". Nothing was installed or written.' (packages/cloud-connection/src/marketplace-install-local-plugin.ts)",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "the upgrade installs without a token, and the customization still serves",
+          "oracle": "api",
+          "verify": "the install exits 0 at 1.1.0 with no --confirm flag; GET the view serves the customized columns",
+          "evidence": "the output and the GET"
+        },
+        {
+          "clause": "the pins pass at the run subject sha: a stale override (taken from another version) is listed in its own section, and unread overrides say they could not be read",
+          "oracle": "test",
+          "verify": "run each file in automated.ref with its package's vitest; each reports ≥1 test and 0 failed",
+          "evidence": "the vitest summary line per file, with the subject sha"
+        }
+      ],
+      "negative": [
+        "a dry run that writes, or advice that blocks the install or asks for a token, is a FAIL"
+      ],
+      "traps": [
+        "stale-dist"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/package-install-dry-run.test.ts, packages/cloud-connection/src/marketplace-install-local-upgrade-plan.test.ts, packages/objectql/src/package-upgrade-environment.test.ts; no live spec runs an upgrade dry run"
+      },
+      "source": [
+        "packages/cli/src/utils/upgrade-plan.ts#renderUpgradePlan",
+        "packages/objectql/src/package-upgrade-environment.ts#readOverrideAdvisories",
+        "packages/objectql/src/package-upgrade-environment.ts#nextStepHiding",
+        "packages/cloud-connection/src/marketplace-install-local-plugin.ts (dryRun, step 2a′)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md as amended by #30899 (an override that hides a vendor change is reported as advice only)",
+        "#30884",
+        "#31627"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-10",
+          "change": "initial — the package upgrade plan's dry run (#30884) and its override advice (#31627). Scoped sweep #32269 (epic #32022 M3, theme 8: federation and CLI), read from source at 9091955b; no live run made",
+          "ref": "#32269"
+        }
       ]
     }
   ]

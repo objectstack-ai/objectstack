@@ -10,6 +10,7 @@ import { useFieldTranslation } from './useFieldTranslation.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatCurrency, currencyDisplayWidth } from './number-format.js';
 import { HomeAmountPreview } from './homeAmountPreview.js';
+import { useFollowedParentRecord } from './followedParentRow.js';
 
 export function CurrencyField({ value, onChange, field, readonly, error, className, dependentValues, dataSource, ...props }: FieldWidgetComponentProps<number>) {
   const currencyField = field as any;
@@ -19,7 +20,10 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
   // sibling select moves this box's symbol and decimals with it.
   const { currency: tenantCurrency } = useLocalization();
   const locale = useDisplayLocale();
-  const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency, dependentValues);
+  // An amount that follows its parent's currency (ADR-0144 D2 as amended)
+  // reads the code off the parent row, read once for the id the form holds.
+  const record = useFollowedParentRecord(currencyField, dependentValues, dataSource);
+  const currency: string | undefined = resolveFieldCurrency(currencyField, tenantCurrency, record);
   // A currency's decimal places are the CURRENCY's, not a field setting — the
   // maintainer ruling recorded on objectstack-ai/objectstack#19910 (batch #218
   // item 2), executed here by objectui#10276. The width is the CLDR
@@ -63,7 +67,7 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
       return (
         <span className="flex flex-col">
           <span className="text-sm font-medium tabular-nums">{formatCurrency(Number(value), currency, locale)}</span>
-          <HomeAmountHint source={homeSource} record={dependentValues} />
+          <HomeAmountHint source={homeSource} record={record} />
         </span>
       );
     }
@@ -220,7 +224,7 @@ export function CurrencyField({ value, onChange, field, readonly, error, classNa
       </div>
       <BadInputMessage refusal={refusal} />
       {/* A record-mode amount declaring `homeAmount` (ADR-0144 D5): what the save will store. */}
-      <HomeAmountPreview field={currencyField} amount={value} record={dependentValues} dataSource={dataSource} />
+      <HomeAmountPreview field={currencyField} amount={value} record={record} dataSource={dataSource} />
     </div>
   );
 }
@@ -245,7 +249,9 @@ export function HomeAmountHint({
   const locale = useDisplayLocale();
   const rate = record?.[source.rateField];
   if (rate == null || rate === '' || Number.isNaN(Number(rate))) return null;
-  const code = record?.[source.codeField];
+  // Through the one resolver, so a code that lives on the parent (ADR-0144 D2
+  // as amended) is read off the parent row, as the amount's symbol is.
+  const code = resolveFieldCurrency({ currencyConfig: { currencyMode: 'record', currencyField: source.codeField } }, undefined, record);
   const className = 'text-xs text-muted-foreground';
   if (typeof code === 'string' && homeCurrency !== undefined && code.trim() === homeCurrency) {
     return <span className={className} data-testid="home-amount-hint">{t('fields.currencyHome.homeCurrency')}</span>;

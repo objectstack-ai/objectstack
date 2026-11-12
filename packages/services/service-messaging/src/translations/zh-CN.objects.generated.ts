@@ -60,6 +60,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "创建时间"
+      },
+      keyed_text: {
+        label: "文本键",
+        help: "投递时渲染标题和正文所用的目录键与参数。读取时按读者的语言用它们重新渲染标题和正文;通知未带键时为空,此时按存储原样返回标题和正文。"
       }
     },
     _views: {

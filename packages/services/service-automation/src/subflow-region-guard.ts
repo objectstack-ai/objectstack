@@ -37,7 +37,7 @@
 
 import { collectFlowGraphs } from '@objectstack/spec/automation';
 import type { FlowParsed } from '@objectstack/spec/automation';
-import { describeSuspendingNode, suspendingNode } from './subflow-notice-guard.js';
+import { describeSuspendingNode, suspendingNode, type FlowCallKey } from './subflow-notice-guard.js';
 import type { SuspendingNode } from './subflow-notice-guard.js';
 
 /** A `subflow` / `map` node of a flow and the flow it names. */
@@ -114,12 +114,13 @@ export interface RegionSuspendingCall {
 export function regionSuspendingCall(
     flows: ReadonlyMap<string, FlowParsed>,
     name: string,
+    callKey?: FlowCallKey,
 ): RegionSuspendingCall | undefined {
     const flow = flows.get(name);
     if (!flow) return undefined;
     for (const call of subflowCalls(flow)) {
         if (!call.region) continue;
-        const suspends = suspendingNode(flows, call.flowName);
+        const suspends = suspendingNode(flows, callKey ? callKey(name, call.flowName) : call.flowName, undefined, callKey);
         if (suspends) {
             return { region: call.region, callNode: { id: call.id, type: call.type }, child: call.flowName, suspends };
         }

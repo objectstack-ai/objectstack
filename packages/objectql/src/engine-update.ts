@@ -49,8 +49,9 @@ import { NotNullRefusalError, envelopeDriverWriteRefusal } from './not-null-refu
 import { redactBoundStatement } from '@objectstack/types';
 import { ORGANIZATION_OBJECT } from './tenancy/system-write-organization.js';
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
-import { assertRecordCurrencyCodes, touchesRecordCurrency } from './validation/record-currency-code.js';
+import { assertRecordCurrencyCodes, followParentCurrencyCodes, recordCurrencyPairs, touchesRecordCurrency } from './validation/record-currency-code.js';
 import { homeAmountsTouched, planHomeAmounts, projectHomeAmounts, settleBulkHomeAmounts } from './home-amount-projection.js';
+import { assertFollowedCurrencyCodesUnchanged, parentCurrencyLockReads, touchesFollowedCurrencyCode } from './record-currency-parent-lock.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { declaredOptionLabels } from './formula-option-labels.js';
 import { ValidationError, coerceBooleanFields, normalizeBlankTypedValues, normalizeMultiValueFields, normalizeNumericStringValues, validateRecord, validateRecordInScope } from './validation/record-validator.js';
@@ -1508,11 +1509,31 @@ export class UpdateFacet {
                // [ADR-0144 D8 rule 4] The stored row with the FINAL payload laid
                // over it keeps a currency code beside a record-mode amount the
                // payload touches (`ERR_CURRENCY_CODE_REQUIRED`).
-               assertRecordCurrencyCodes(
-                 object, (updateSchema as { fields?: unknown } | undefined)?.fields,
-                 { ...(priorRecord ?? {}), ...(hookContext.input.data as Record<string, unknown>) },
-                 'update', hookContext.input.data as Record<string, unknown>, hookContext.input.id,
-               );
+               // [ADR-0144 D2, amended] A child amount's code is its parent's:
+               // read only when the payload touches a pair (its amount, or the
+               // master_detail it follows), and laid on a copy of the image.
+               {
+                 const currencyFields = (updateSchema as { fields?: unknown } | undefined)?.fields;
+                 const currencyPayload = hookContext.input.data as Record<string, unknown>;
+                 const currencyImage = { ...(priorRecord ?? {}), ...currencyPayload };
+                 const followCodes = touchesRecordCurrency(currencyFields, currencyPayload)
+                   ? await followParentCurrencyCodes(recordCurrencyPairs(currencyFields), [currencyImage], this.homeAmountServing(opCtx.context).parentRows)
+                   : undefined;
+                 assertRecordCurrencyCodes(
+                   object, currencyFields, followCodes ? followCodes(currencyImage) : currencyImage,
+                   'update', currencyPayload, hookContext.input.id, updateMsgCtx,
+                 );
+               }
+               // [ADR-0144 D2, amended] …and a record a child row follows the
+               // currency of keeps its code field: a change of it is refused
+               // (`VALIDATION_FAILED`, `invalid_value`) before anything is
+               // written. Free unless the payload touches a followed code field.
+               if (touchesFollowedCurrencyCode(this._registry as never, object, hookContext.input.data as Record<string, unknown>)) {
+                 await assertFollowedCurrencyCodesUnchanged(
+                   this._registry as never, parentCurrencyLockReads({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never), getDriver: (o) => this.getDriver(o), buildDriverOptions: (o, c) => this.buildDriverOptions(o, c) }, ObjectQL.referenceCheckContext(opCtx.context)), object,
+                   hookContext.input.data as Record<string, unknown>, [priorRecord],
+                 );
+               }
                // ── [#19989] The post-image seam on the BY-ID path ─────────────
                //
                // The by-id twin of the predicate-path call below, placed at the
@@ -1877,9 +1898,11 @@ export class UpdateFacet {
                    if (touched.length > 0) {
                        const matched = ((await readPriorRows()) ?? []).filter((row) => row != null && typeof row === 'object');
                        const homeServing = this.homeAmountServing(opCtx.context);
+                       // [ADR-0144 D2, amended] One parent read for every matched row.
+                       const followCodes = await followParentCurrencyCodes(touched, matched.map((row) => ({ ...row, ...homePatch })), homeServing.parentRows);
                        const projected: Array<Record<string, unknown>> = [];
                        for (const row of matched) {
-                           const image = { ...row, ...homePatch };
+                           const image = followCodes({ ...row, ...homePatch });
                            projected.push(await projectHomeAmounts(touched, image, homeServing, {
                              object,
                              operation: 'update',
@@ -1905,9 +1928,23 @@ export class UpdateFacet {
                    const currencyPayload = hookContext.input.data as Record<string, unknown>;
                    const currencyFields = (updateSchema as { fields?: unknown } | undefined)?.fields;
                    if (touchesRecordCurrency(currencyFields, currencyPayload)) {
-                       for (const row of (await readPriorRows()) ?? []) {
-                           assertRecordCurrencyCodes(object, currencyFields, { ...row, ...currencyPayload }, 'update', currencyPayload, row?.id);
+                       // [ADR-0144 D2, amended] One parent read for every matched row.
+                       const images = ((await readPriorRows()) ?? []).map((row) => ({ row, image: { ...row, ...currencyPayload } }));
+                       const followCodes = await followParentCurrencyCodes(
+                         recordCurrencyPairs(currencyFields), images.map((i) => i.image), this.homeAmountServing(opCtx.context).parentRows,
+                       );
+                       for (const { row, image } of images) {
+                           assertRecordCurrencyCodes(object, currencyFields, followCodes(image), 'update', currencyPayload, row?.id, updateMsgCtx);
                        }
+                   }
+                   // [ADR-0144 D2, amended] The predicate-path twin of the
+                   // parent-code lock: every matched row whose followed code the
+                   // payload would change.
+                   if (touchesFollowedCurrencyCode(this._registry as never, object, currencyPayload)) {
+                       await assertFollowedCurrencyCodesUnchanged(
+                         this._registry as never, parentCurrencyLockReads({ _registry: this._registry, find: (o, q) => this.facade.find(o, q as never), getDriver: (o) => this.getDriver(o), buildDriverOptions: (o, c) => this.buildDriverOptions(o, c) }, ObjectQL.referenceCheckContext(opCtx.context)), object,
+                         currencyPayload, (await readPriorRows()) ?? [],
+                       );
                    }
                }
                // ── [#19950] The post-image seam on the PREDICATE path ─────────

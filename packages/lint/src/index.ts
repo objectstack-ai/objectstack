@@ -368,6 +368,7 @@ export {
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
@@ -421,6 +422,17 @@ export type {
   ExternalOwnerSharingFinding,
   ExternalOwnerSharingSeverity,
 } from './validate-external-owner-sharing.js';
+
+// [ADR-0153 D4] A `private` `synced` object that no sharing rule grants read on
+// shows a member none of its owner-less pulled rows.
+export {
+  validateSyncedPrivateReadability,
+  SECURITY_SYNCED_PRIVATE_UNREADABLE,
+} from './validate-synced-private-readability.js';
+export type {
+  SyncedPrivateReadabilityFinding,
+  SyncedPrivateReadabilitySeverity,
+} from './validate-synced-private-readability.js';
 
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
@@ -551,6 +563,7 @@ export {
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  GRID_AGGREGATION_FIELD_TYPE_REFUSED,
 } from './validate-sortable-fields.js';
 export type {
   SortableFieldFinding,
@@ -1053,6 +1066,7 @@ export {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
+  FLOW_START_NODE_MISSING,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,

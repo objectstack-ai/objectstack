@@ -42,12 +42,20 @@
 // graft no longer reaches a stored flow row, so the rank has to say what
 // ADR-0126 §2 says, and it does.
 //
-// ⛔ NOT DONE HERE: making the engine's flow map package-aware. That is a much
-// larger change, and ADR-0048 does not ask for it. ADR-0150 D3 answers a
-// bare name the package-scoped resolver cannot answer for a caller with no
-// package (two packages hold it) with a refusal: `registerFlow` refuses it,
-// naming every holder, and arms nothing. So the warning below asks that same
-// resolver (`refusalOf`) and, when it refuses, says no definition is armed.
+// [ADR-0150 D4, #31696] TWO PACKAGES' FLOWS OF ONE NAME ARE TWO SLOTS.
+//
+// The engine holds flows by `(package, name)` now (./flow-slots.ts). Where the
+// loader's sets of two or more packages each hold the name — asked per
+// package, `packagedFlowOwner(name, packageId)` — every package gets its own
+// winner, ranked within its slot as one owner's name is ranked here, and the
+// winner names its slot (`holder`). A stored row of the name that no package
+// holds overlays neither (seat ruling Q4). Where the reader answers for one
+// package only (one holder, or a reader that reads only the name), the
+// one-owner precedence below is unchanged, and so is its refusal line:
+// ADR-0150 D3 answers a bare name the package-scoped resolver cannot answer
+// for a caller with no package with a refusal, so the warning below asks that
+// same resolver (`refusalOf`) and, when it refuses, says no definition is
+// armed.
 //
 // [#20864, ADR-0126 §2 / §7.3] WHICH CONTENDER IS PACKAGED IS THE LOADER'S SET.
 //
@@ -118,6 +126,101 @@ export interface FlowPrecedenceWinner {
     contender: FlowContender;
     /** Present only when this name had more than one contender. */
     shadowing?: FlowShadowingRecord;
+    /**
+     * [ADR-0150 D4, #31696] Present when two or more packages' loader sets
+     * hold the name: the package whose slot this winner is armed in (its own
+     * flow, or its declared override). Every such package gets a winner. The
+     * engine reads it as the arm's `holder`.
+     */
+    holder?: string;
+}
+
+/**
+ * [ADR-0150 D4, #31696] The packages whose loader set holds a flow `name` of
+ * their own, among the code bodies of `members` — asked per package
+ * (`packagedFlowOwner(name, packageId)`), in lexicographic order. Fewer than
+ * two is the one-owner precedence below, unchanged; two or more arm one
+ * winner per package ({@link resolveSlotPrecedence}).
+ */
+function slotOwners(
+    members: ReadonlyArray<{ definition: unknown }>,
+    name: string,
+    packagedFlowOwner: PackagedFlowSource | undefined,
+): string[] {
+    if (!packagedFlowOwner) return [];
+    const candidates = new Set<string>();
+    for (const { definition } of members) {
+        const packageId = (definition as { _packageId?: unknown } | null | undefined)?._packageId;
+        if (typeof packageId === 'string' && packageId !== '' && isCodeArtifactBody(definition)) candidates.add(packageId);
+    }
+    if (candidates.size < 2) return [];
+    return [...candidates].filter((packageId) => packagedFlowOwner(name, packageId) === packageId).sort();
+}
+
+/**
+ * [ADR-0150 D4, #31696] Precedence for a name two or more packages hold: one
+ * slot per package, each ranked as the one-owner precedence ranks a name
+ * (the declared override over the package's own body, ADR-0146 D9 item 1),
+ * and every slot armed. A contender no package holds — an environment row of
+ * the name — customizes one holder, and with two there is no one to
+ * customize: it overlays neither and is never armed, with one warning naming
+ * the holders and the row (seat ruling Q4 on #31696). ⛔ Never a pick.
+ */
+function resolveSlotPrecedence(
+    name: string,
+    members: ReadonlyArray<{ definition: unknown; index: number }>,
+    owners: readonly string[],
+    logger: { warn(message: string, meta?: unknown): void } | undefined,
+    installed: InstalledManifestLookup,
+): FlowPrecedenceWinner[] {
+    const slots = new Map<string, Array<{ definition: unknown; index: number; contender: FlowContender }>>();
+    const overlays: FlowContender[] = [];
+    for (const member of members) {
+        let placed = false;
+        for (const owner of owners) {
+            const contender = classifyContender(member.definition, owner, installed);
+            const own = contender.source === 'override' || (contender.source === 'package' && contender.packageId === owner);
+            if (!own) continue;
+            const slot = slots.get(owner) ?? [];
+            slot.push({ ...member, contender });
+            slots.set(owner, slot);
+            placed = true;
+            break;
+        }
+        if (!placed) overlays.push(classifyContender(member.definition, undefined, installed));
+    }
+    if (overlays.length > 0) {
+        logger?.warn(
+            `[Automation] Flow name '${name}' is held by ${owners.length} packages (${owners.map((o) => `'${o}'`).join(', ')}), `
+            + `and ${overlays.length === 1 ? 'a stored row of that name names' : `${overlays.length} stored rows of that name name`} `
+            + 'no package: a row naming no package customizes the one holder of its name, so here it customizes '
+            + `neither and is not armed. Each package's flow is armed. To change one package's flow, declare an override `
+            + `in that package's paired .custom package; or save the row under a new name.`,
+            { flow: name, holders: [...owners], overlays },
+        );
+    }
+    const winners: FlowPrecedenceWinner[] = [];
+    for (const owner of owners) {
+        const group = slots.get(owner);
+        if (!group || group.length === 0) continue;
+        const ranked = [...group].sort((a, b) => precedenceRank(a.contender) - precedenceRank(b.contender) || a.index - b.index);
+        const armed = ranked[0];
+        const shadowed = ranked.slice(1).map((entry) => entry.contender);
+        // As the one-owner precedence: the declared override over its own
+        // base is the packaged flow, and leaves no receipt.
+        const overrideOverOwnBase = armed.contender.source === 'override'
+            && shadowed.every((contender) => contender.source === 'package' && contender.packageId === owner);
+        winners.push({
+            name,
+            definition: armed.definition,
+            contender: armed.contender,
+            holder: owner,
+            ...(shadowed.length > 0 && !overrideOverOwnBase
+                ? { shadowing: { name, armed: armed.contender, shadowed } }
+                : {}),
+        });
+    }
+    return winners;
 }
 
 /**
@@ -383,6 +486,12 @@ export function resolveFlowPrecedence(
     const winners: FlowPrecedenceWinner[] = [];
     for (const name of order) {
         const members = groups.get(name)!;
+        // [ADR-0150 D4, #31696] Two or more packages hold the name: one slot each.
+        const owners = slotOwners(members, name, packagedFlowOwner);
+        if (owners.length >= 2) {
+            winners.push(...resolveSlotPrecedence(name, members, owners, logger, installed));
+            continue;
+        }
         const owner = loaderSetOwner(packagedFlowOwner, name);
         if (members.length === 1) {
             const definition = members[0].definition;

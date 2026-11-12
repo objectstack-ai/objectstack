@@ -1383,6 +1383,13 @@ function staticTextSegments(node, source) {
 /** @type {Readonly<Record<string, readonly string[]>>} */
 export const PACK_NAMESPACE_FRAMES = Object.freeze({
   'packages/i18n/src/namespaces/marketplace/': Object.freeze(['packages/app-shell/src/console/marketplace/']),
+  // objectstack#32225: `console.developer.*` and `connectAgent.*`, read under
+  // app-shell's `DeveloperNamespaceGate` by the Developer pages and the
+  // `console/connect/` widgets.
+  'packages/i18n/src/namespaces/developer/': Object.freeze([
+    'apps/console/src/pages/developer/',
+    'packages/app-shell/src/console/connect/',
+  ]),
 });
 
 /** The pack-shaped namespace directories: the keys of {@link PACK_NAMESPACE_FRAMES}. */

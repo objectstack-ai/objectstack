@@ -40,7 +40,9 @@
  *    accept page as before, which shows the refusal.
  *  - A language picked in the footer's menu before signing up is saved as the
  *    new person's own (app-shell's `saveSignInLanguagePick`), awaited before
- *    every exit of the post-signup step, as `/login` does (#30338).
+ *    every exit of the post-signup step, as `/login` does (#30338). *  - On a deployment with no account yet (the server's `hasOwner: false`), the
+ *    card says the account being created owns the deployment, the way `/login`
+ *    leads that visitor here.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -54,8 +56,8 @@ import {
   signUpRefusalMessages,
   decideSignUpOffer,
   isInvitationRedirect,
-  needsBootstrapProbe,
-  useBootstrapStatus,
+  needsOwnerProbe,
+  useBootstrapProbe,
   InvitationGoneNotice,
   invitationArrivalCopy,
   invitationIdOf,
@@ -167,17 +169,22 @@ export function RegisterPage() {
   }, [getAuthConfig, configReadAttempt]);
 
   // objectui#11691 — the offer reads `disableSignUp` AND the audience posture;
-  // the bootstrap probe runs only when the posture is closed to strangers and
-  // the visitor did not come from an invitation. See app-shell's
-  // `decideSignUpOffer`.
+  // see app-shell's `decideSignUpOffer`, which consults the bootstrap probe
+  // only for a posture closed to strangers. The probe runs for every posture
+  // that offers a form to a visitor not invited (`needsOwnerProbe`), so the
+  // deployment's first visitor is told the account they create is the owner.
   const invitationRedirect = isInvitationRedirect(redirect);
-  const bootstrap = useBootstrapStatus(
+  const ownerProbe = useBootstrapProbe(
     configRead === 'known' &&
       hasBootstrapped &&
       signUpNeeded &&
-      needsBootstrapProbe(authConfig, invitationRedirect),
+      needsOwnerProbe(authConfig, invitationRedirect),
   );
+  const bootstrap = ownerProbe.status;
   const signUpOffer = decideSignUpOffer(authConfig, { invitationRedirect, bootstrap });
+  // The server answered that nobody has an account here yet: this sign-up
+  // creates the deployment's owner.
+  const firstOwner = ownerProbe.noOwner && !invitationRedirect;
   // #26473 — who invited this visitor, and to what; `null` keeps the generic
   // copy. #27509 — `gone` when the server no longer knows the invitation.
   const invitationArrival = useInvitationArrival(redirect);
@@ -377,14 +384,21 @@ export function RegisterPage() {
         title={
           invitationCopy
             ? invitationCopy.title
-            : t('auth.register.title', { defaultValue: 'Create an account' })
+            : firstOwner
+              ? t('auth.register.firstOwner.title', { defaultValue: 'Create the owner account' })
+              : t('auth.register.title', { defaultValue: 'Create an account' })
         }
         description={
           invitationCopy
             ? invitationCopy.description
-            : t('auth.register.description', {
-                defaultValue: 'Create your account to start building.',
-              })
+            : firstOwner
+              ? t('auth.register.firstOwner.description', {
+                  defaultValue:
+                    'Nobody has an account here yet. The account you create now owns this deployment; you can invite colleagues after.',
+                })
+              : t('auth.register.description', {
+                  defaultValue: 'Create your account to start building.',
+                })
         }
         loginUrl={loginUrl}
         verificationCallbackURL={mailCallbackURL}
@@ -431,6 +445,13 @@ export function RegisterPage() {
           }),
           passwordTooShortError: t('auth.register.passwordTooShortError', {
             defaultValue: 'Password must be at least 8 characters',
+          }),
+          nameRequiredError: t('auth.register.nameRequiredError', { defaultValue: 'Enter your name' }),
+          emailRequiredError: t('auth.register.emailRequiredError', {
+            defaultValue: 'Enter your email address',
+          }),
+          emailInvalidError: t('auth.register.emailInvalidError', {
+            defaultValue: 'Enter an email address such as name@example.com',
           }),
           submitButton: t('auth.register.submitButton', { defaultValue: 'Create Account' }),
           submittingButton: t('auth.register.submittingButton', { defaultValue: 'Creating account…' }),

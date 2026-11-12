@@ -132,12 +132,16 @@ type UnverifiedPostCause =
     | UnverifiedSignatureCause
     | DeclaredSignatureCause
     | 'declared-unusable'
-    | 'unadmitted-address';
+    | 'unadmitted-address'
+    | 'shared-name';
 
 const UNVERIFIED_POST_CAUSE_TEXT: Readonly<Record<UnverifiedPostCause, string>> = {
     'unknown-flow': 'no hook is armed for the flow it names',
     'unadmitted-address':
         'its qualifier (a namespace, or `_env`) does not name the package that ships the flow it names (ADR-0150 D5)',
+    'shared-name':
+        'it names, at the bare hook, a flow name more than one package holds; each holder\'s flow is reached only by '
+        + 'its namespace-qualified hook (ADR-0150 D5)',
     'wrong-hook-id': 'the hook id it names is not the one its flow is armed with',
     'signature-absent': 'it carries no x-objectstack-signature',
     'signature-malformed': 'its x-objectstack-signature is in neither the timestamped form nor the body-only one',
@@ -535,6 +539,26 @@ export class ApiTrigger implements FlowTrigger {
     }
 
     /**
+     * [#31696] A bare hook naming a slot key (`PACKAGE/NAME`): no flow is
+     * named so, and a slot is reached only by its qualified address. The one
+     * refusal, its cause the unknown flow's.
+     */
+    refuseUnknownFlow(flowName: string): { status: number; body: Record<string, unknown> } {
+        return this.refuseUnverified('unknown-flow', flowName);
+    }
+
+    /**
+     * [ADR-0150 D5, #31696] The bare hook of a flow name two packages hold:
+     * it names neither flow. The one refusal, its cause (`shared-name`) and
+     * every holder logged here only. D5's `409` naming the holders does not
+     * apply to this anonymous door, whose answer never says whether a flow
+     * name exists or which packages are installed.
+     */
+    refuseSharedName(flowName: string, holders: readonly unknown[]): { status: number; body: Record<string, unknown> } {
+        return this.refuseUnverified('shared-name', flowName, { holders });
+    }
+
+    /**
      * Refuse a post that did not verify: log its real cause, then answer
      * {@link unverifiedPostAnswer}, the same for every cause. The line names
      * the cause and the flow name the post carried, as structured fields, and
@@ -543,7 +567,7 @@ export class ApiTrigger implements FlowTrigger {
     private refuseUnverified(
         cause: UnverifiedPostCause,
         flowName: string,
-        extra?: { readonly qualifier: string },
+        extra?: { readonly qualifier: string } | { readonly holders: readonly unknown[] },
     ): { status: number; body: Record<string, unknown> } {
         this.logger.warn(
             `[trigger-api] refused an inbound post (${cause}): ${UNVERIFIED_POST_CAUSE_TEXT[cause]}. ` +

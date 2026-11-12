@@ -56,6 +56,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { PackageScopedNameRefusedError, type PackageScopedRefusal } from '@objectstack/core';
 import type { FlowCredentialSource } from './engine.js';
 import {
     FLOW_METADATA_TYPE,
@@ -142,6 +143,13 @@ interface ChannelRow {
     node_id: string;
     credential_key: string;
     state: FlowCredentialState;
+    /** [ADR-0150 D8 row R9] The row's `flow_package`; `''` for a row naming none. */
+    flow_package: string;
+}
+
+/** A row's `flow_package`, `''` for one naming no package. */
+function rowPackage(row: Record<string, unknown>): string {
+    return typeof row.flow_package === 'string' ? row.flow_package : '';
 }
 
 /** The identity of a position within one flow and state. */
@@ -169,10 +177,36 @@ function rowsOf(found: unknown): Record<string, unknown>[] {
  * credential channel, the publish promotion and the delete projection.
  */
 export class FlowCredentialChannel implements FlowCredentialSource {
-    /** flow name → the ACTIVE positions the channel holds. */
-    private readonly activeIndex = new Map<string, Set<string>>();
+    /** [ADR-0150 D8 row R9, #31696] Given `flowPackage`, only that package's rows answer; a row naming none is refused. */
+    readonly readsByPackage = true;
 
-    constructor(private readonly resolveEngine: () => FlowCredentialEngine | undefined) {}
+    /**
+     * flow name → row package (`''` for none) → the ACTIVE positions the
+     * channel holds. [ADR-0150 D8 row R9, #31696] Keyed by package too, so a
+     * flow of a name two packages hold reads only its own package's rows.
+     */
+    private readonly activeIndex = new Map<string, Map<string, Set<string>>>();
+
+    /**
+     * @param sharedRefusalOf [ADR-0150 D8 row R9, #31696] The refusal of `name` for a writer with no package
+     *   when two or more packages hold it (the engine's `flowHolder`), else `undefined`. The save door names
+     *   no package, so under such a name it writes no row: a holder's row is never read, and a save that would
+     *   set a credential, clear a standing one or remove a row naming no package is refused ({@link store}).
+     * @param holderOf [ADR-0150 D8 row R9, #31696] The one package holding the flow a write names (the
+     *   engine's `flowHolderPackage`), stamped on every row the write door writes as `flow_package`. `null`
+     *   (an environment-authored flow, a shared name, no reader) stamps none: such a row answers only a read
+     *   naming no package, so under two holders it serves neither.
+     */
+    constructor(
+        private readonly resolveEngine: () => FlowCredentialEngine | undefined,
+        private readonly sharedRefusalOf?: (name: string) => PackageScopedRefusal | undefined,
+        private readonly holderOf?: (name: string) => string | null,
+    ) {}
+
+    /** The package a write of the flow `name` stamps, `''` for none. */
+    private writePackage(name: string): string {
+        return this.holderOf?.(name) ?? '';
+    }
 
     // ── the presence index ─────────────────────────────────────────────────
 
@@ -187,41 +221,76 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         if (!engine) return false;
         const found = await engine.find(FLOW_CREDENTIAL_OBJECT, {
             where: { state: 'active' },
-            fields: ['id', 'flow_name', 'node_id', 'credential_key'],
+            fields: ['id', 'flow_name', 'flow_package', 'node_id', 'credential_key'],
             context: SYSTEM_CONTEXT,
         });
         this.activeIndex.clear();
         for (const row of rowsOf(found)) {
             const flow = row.flow_name;
             if (typeof flow !== 'string' || typeof row.node_id !== 'string' || typeof row.credential_key !== 'string') continue;
-            this.indexOf(flow).add(positionKey(row.node_id, row.credential_key));
+            this.indexOf(flow, rowPackage(row)).add(positionKey(row.node_id, row.credential_key));
         }
         return true;
     }
 
-    private indexOf(flowName: string): Set<string> {
-        let set = this.activeIndex.get(flowName);
+    private indexOf(flowName: string, flowPackage: string): Set<string> {
+        let packages = this.activeIndex.get(flowName);
+        if (!packages) {
+            packages = new Map();
+            this.activeIndex.set(flowName, packages);
+        }
+        let set = packages.get(flowPackage);
         if (!set) {
             set = new Set();
-            this.activeIndex.set(flowName, set);
+            packages.set(flowPackage, set);
         }
         return set;
     }
 
-    private setIndexed(flowName: string, keys: Iterable<string>): void {
-        const set = new Set(keys);
-        if (set.size === 0) this.activeIndex.delete(flowName);
-        else this.activeIndex.set(flowName, set);
+    /**
+     * Index the ACTIVE positions of `flowName`: `rows` read with no package
+     * replace every package's positions of the name; read for one package
+     * (`flowPackage`), only that package's.
+     */
+    private setIndexed(flowName: string, rows: Iterable<{ key: string; flowPackage: string }>, flowPackage?: string): void {
+        const packages: Map<string, Set<string>> = flowPackage === undefined ? new Map<string, Set<string>>() : new Map(this.activeIndex.get(flowName) ?? []);
+        if (flowPackage !== undefined) {
+            packages.delete(flowPackage);
+            packages.delete('');
+        }
+        for (const row of rows) {
+            const set = packages.get(row.flowPackage) ?? new Set<string>();
+            set.add(row.key);
+            packages.set(row.flowPackage, set);
+        }
+        if (packages.size === 0) this.activeIndex.delete(flowName);
+        else this.activeIndex.set(flowName, packages);
+    }
+
+    /**
+     * The positions of `flowName` that answer `flowPackage` — every package's when it is not given. Given one
+     * (a shared name), a row naming no package answers too: whose it is cannot be told, so it fails closed
+     * ({@link unboundRowRefusal}) and is never read as "no credential".
+     */
+    private indexedPositions(flowName: string, flowPackage: string | undefined): Set<string> {
+        const packages = this.activeIndex.get(flowName);
+        if (!packages) return new Set();
+        if (flowPackage !== undefined) return new Set([...(packages.get(flowPackage) ?? []), ...(packages.get('') ?? [])]);
+        const all = new Set<string>();
+        for (const set of packages.values()) for (const k of set) all.add(k);
+        return all;
     }
 
     /** {@link FlowCredentialSource.holds}: does the channel hold this ACTIVE position? */
-    holds(flowName: string, nodeId: string, key: string): boolean {
-        return this.activeIndex.get(flowName)?.has(positionKey(nodeId, key)) ?? false;
+    holds(flowName: string, nodeId: string, key: string, flowPackage?: string): boolean {
+        return this.indexedPositions(flowName, flowPackage).has(positionKey(nodeId, key));
     }
 
     /** {@link FlowCredentialSource.held}: every ACTIVE position the channel holds for a flow. */
-    held(flowName: string): Array<{ nodeId: string; key: string }> {
-        return [...(this.activeIndex.get(flowName) ?? [])].map((k) => {
+    held(flowName: string, flowPackage?: string): Array<{ nodeId: string; key: string }> {
+        const unbound = flowPackage === undefined ? [] : [...(this.activeIndex.get(flowName)?.get('') ?? [])];
+        if (unbound.length > 0) throw unboundRowRefusal(flowName, flowPackage!, unbound.map((k) => (JSON.parse(k) as [string, string])[1]));
+        return [...this.indexedPositions(flowName, flowPackage)].map((k) => {
             const [nodeId, key] = JSON.parse(k) as [string, string];
             return { nodeId, key };
         });
@@ -243,21 +312,27 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         engine: FlowCredentialEngine,
         flowName: string,
         state: FlowCredentialState,
+        flowPackage?: string,
     ): Promise<Map<string, ChannelRow>> {
         const found = await engine.find(FLOW_CREDENTIAL_OBJECT, {
             where: { flow_name: flowName, state },
-            fields: ['id', 'node_id', 'credential_key', 'state'],
+            fields: ['id', 'node_id', 'credential_key', 'state', 'flow_package'],
             context: SYSTEM_CONTEXT,
         });
         const out = new Map<string, ChannelRow>();
         for (const row of rowsOf(found)) {
             if (typeof row.node_id !== 'string' || typeof row.credential_key !== 'string') continue;
             if (typeof row.id !== 'string' && typeof row.id !== 'number') continue;
+            // [#31696] Read for one package: that package's rows, and those naming none (whose is unknown).
+            if (flowPackage !== undefined && rowPackage(row) !== flowPackage && rowPackage(row) !== '') continue;
+            // [R1] Beside the package's row at one position, the row naming none wins, whatever the store's order.
+            if (flowPackage !== undefined && rowPackage(row) !== '' && out.get(positionKey(row.node_id, row.credential_key))?.flow_package === '') continue;
             out.set(positionKey(row.node_id, row.credential_key), {
                 id: String(row.id),
                 node_id: row.node_id,
                 credential_key: row.credential_key,
                 state,
+                flow_package: rowPackage(row),
             });
         }
         return out;
@@ -270,19 +345,21 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * when a row exists and does not come back (no crypto provider, a missing
      * ciphertext row, an engine without the privileged dereference).
      */
-    async resolve(flowName: string, nodeId: string, key: string): Promise<string | undefined> {
+    async resolve(flowName: string, nodeId: string, key: string, flowPackage?: string): Promise<string | undefined> {
         const engine = this.resolveEngine();
         if (!engine) {
             throw new FlowCredentialUnresolvableError(
                 `Flow '${flowName}': ${flowCredentialClassList([key])} cannot be read — no data engine is available.`,
             );
         }
-        const rows = await this.readRows(engine, flowName, 'active');
+        const rows = await this.readRows(engine, flowName, 'active', flowPackage);
         const k = positionKey(nodeId, key);
         const row = rows.get(k);
         // Keep the index honest with what the store says right now.
-        this.setIndexed(flowName, rows.keys());
+        this.setIndexed(flowName, indexedRows(rows), flowPackage);
         if (!row) return undefined;
+        // [R1] Under a shared name a row naming no package is no slot's to read: refused, never a fallback.
+        if (flowPackage !== undefined && row.flow_package === '') throw unboundRowRefusal(flowName, flowPackage, [key]);
         if (typeof engine.resolveSecretField !== 'function') {
             throw new FlowCredentialUnresolvableError(
                 `Flow '${flowName}': ${flowCredentialClassList([key])} is stored encrypted, but this data engine `
@@ -315,10 +392,23 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      *
      * Throws {@link FlowCredentialChannelRefusal} (503) when a value cannot be
      * stored safely; nothing is written in that case.
+     *
+     * [ADR-0150 D8 row R9, #31696] Under a name two or more packages hold, the
+     * save is no holder's write (the door names no package): it never reads
+     * a holder's row. A save that sets a credential there, clears one where a
+     * row of any package stands, or would delete a row naming no package (it
+     * may be any holder's: [R1]) is refused with {@link
+     * PackageScopedNameRefusedError} (409), naming every holder, before
+     * anything is written. A save that touches no row still saves.
      */
     async store(args: { name: string; state: FlowCredentialState; body: unknown }): Promise<unknown> {
         const positions = flowCredentialPositions(args.body);
         const explicit = positions.filter((p) => p.form === 'value');
+        const shared = this.sharedRefusalOf?.(args.name);
+        if (shared && explicit.length > 0) throw sharedNameWriteRefusal(args.name, shared);
+        // The rows this write may touch: every row of the name, or under a
+        // shared name only the rows naming no package.
+        const scope = shared ? '' : undefined;
         const engine = this.resolveEngine();
         if (!engine) {
             // Nothing to write and nothing held: a body with no credential keeps
@@ -326,7 +416,21 @@ export class FlowCredentialChannel implements FlowCredentialSource {
             if (explicit.length > 0) this.requireEngine(args.name);
             return stripFlowCredentialValues(args.body);
         }
-        const rows = await this.readRows(engine, args.name, args.state);
+        const live = new Set(
+            positions
+                .filter((p) => p.form === 'absent' || p.form === 'value')
+                .map((p) => positionKey(p.nodeId, p.key)),
+        );
+        // A clear where some package's row stands would leave that credential in force: refused. A clear where
+        // no row stands touches nothing, so it saves.
+        const cleared = positions.filter((p) => p.form === 'cleared').map((p) => positionKey(p.nodeId, p.key));
+        if (shared && cleared.length > 0) {
+            const standing = await this.readRows(engine, args.name, args.state);
+            if (cleared.some((k) => standing.has(k))) throw sharedNameWriteRefusal(args.name, shared);
+        }
+        const rows = await this.readRows(engine, args.name, args.state, scope);
+        // [R1] A row naming no package may be any holder's: a save that would delete one is refused.
+        if (shared && [...rows.keys()].some((k) => !live.has(k))) throw sharedNameWriteRefusal(args.name, shared);
 
         // 1. Every explicit value FIRST. With no crypto provider the engine
         //    refuses the first write before any row exists, so a refused save
@@ -345,6 +449,8 @@ export class FlowCredentialChannel implements FlowCredentialSource {
                         FLOW_CREDENTIAL_OBJECT,
                         {
                             flow_name: args.name,
+                            // [ADR-0150 D8 row R9, #31696] The flow's one holder, beside its name.
+                            ...(this.writePackage(args.name) ? { flow_package: this.writePackage(args.name) } : {}),
                             state: args.state,
                             node_id: position.nodeId,
                             credential_key: position.key,
@@ -370,11 +476,6 @@ export class FlowCredentialChannel implements FlowCredentialSource {
 
         // 2. Rows whose position no longer holds a credential the channel
         //    keeps: cleared on purpose, replaced by something unusable, or gone.
-        const live = new Set(
-            positions
-                .filter((p) => p.form === 'absent' || p.form === 'value')
-                .map((p) => positionKey(p.nodeId, p.key)),
-        );
         for (const [k, row] of rows) {
             if (live.has(k)) continue;
             await engine.delete(FLOW_CREDENTIAL_OBJECT, { where: { id: row.id }, context: SYSTEM_CONTEXT });
@@ -382,9 +483,13 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         }
 
         if (args.state === 'active') {
-            const held = new Set(rows.keys());
-            for (const p of explicit) held.add(positionKey(p.nodeId, p.key));
-            this.setIndexed(args.name, held);
+            const held = new Map(indexedRows(rows).map((row) => [row.key, row] as const));
+            const written = this.writePackage(args.name);
+            for (const p of explicit) {
+                const k = positionKey(p.nodeId, p.key);
+                if (!held.has(k)) held.set(k, { key: k, flowPackage: written });
+            }
+            this.setIndexed(args.name, held.values(), scope);
         }
         return stripFlowCredentialValues(args.body);
     }
@@ -427,12 +532,27 @@ export class FlowCredentialChannel implements FlowCredentialSource {
      * absent position with no draft row keeps the active one; a cleared,
      * unusable or vanished position loses its active row. The draft rows are
      * consumed either way.
+     *
+     * [ADR-0150 D8 row R9, #31696] Under a name two or more packages hold, a
+     * publish is no holder's: it never reads a holder's row, and one that
+     * would promote, consume or remove a row naming no package is refused
+     * (409), as {@link store} is.
      */
     async promote(args: { name: string; body: unknown }): Promise<{ promoted: number; removed: number }> {
         const engine = this.requireEngine(args.name);
         const positions = flowCredentialPositions(args.body);
-        const draft = await this.readRows(engine, args.name, 'draft');
-        const active = await this.readRows(engine, args.name, 'active');
+        const shared = this.sharedRefusalOf?.(args.name);
+        const scope = shared ? '' : undefined;
+        const draft = await this.readRows(engine, args.name, 'draft', scope);
+        const active = await this.readRows(engine, args.name, 'active', scope);
+        const kept = new Set(
+            positions
+                .filter((p) => p.form === 'absent' || p.form === 'value')
+                .map((p) => positionKey(p.nodeId, p.key)),
+        );
+        // [R1] A row naming no package may be any holder's: a publish that would promote, consume or remove one
+        // is refused before anything is written.
+        if (shared && (draft.size > 0 || [...active.keys()].some((k) => !kept.has(k)))) throw sharedNameWriteRefusal(args.name, shared);
         let promoted = 0;
         let removed = 0;
         for (const position of positions) {
@@ -447,11 +567,6 @@ export class FlowCredentialChannel implements FlowCredentialSource {
             active.set(k, { ...pending, state: 'active' });
             promoted++;
         }
-        const kept = new Set(
-            positions
-                .filter((p) => p.form === 'absent' || p.form === 'value')
-                .map((p) => positionKey(p.nodeId, p.key)),
-        );
         for (const [k, row] of active) {
             if (kept.has(k)) continue;
             await engine.delete(FLOW_CREDENTIAL_OBJECT, { where: { id: row.id }, context: SYSTEM_CONTEXT });
@@ -461,7 +576,7 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         for (const row of draft.values()) {
             await engine.delete(FLOW_CREDENTIAL_OBJECT, { where: { id: row.id }, context: SYSTEM_CONTEXT });
         }
-        this.setIndexed(args.name, active.keys());
+        this.setIndexed(args.name, indexedRows(active), scope);
         return { promoted, removed };
     }
 
@@ -485,6 +600,34 @@ export class FlowCredentialChannel implements FlowCredentialSource {
         }
         return removed;
     }
+}
+
+/**
+ * [ADR-0150 D8 row R9, #31696] The save door's refusal of a credential write
+ * under a flow name two or more packages hold: the ADR-0150 refusal (409
+ * `RESOURCE_CONFLICT`), every holder named, prefixed with what was refused.
+ */
+function sharedNameWriteRefusal(name: string, refusal: PackageScopedRefusal): PackageScopedNameRefusedError {
+    return new PackageScopedNameRefusedError({
+        ...refusal,
+        message: `Flow '${name}' was not saved: it sets or clears a flow credential, and a flow credential belongs to `
+            + 'one package\'s flow, but this save names no package. Nothing was written. ' + refusal.message,
+    });
+}
+
+/** [R1] The refusal of a read under a shared name that meets a stored row naming no package. */
+function unboundRowRefusal(name: string, flowPackage: string, keys: string[]): FlowCredentialUnresolvableError {
+    return new FlowCredentialUnresolvableError(
+        `Flow '${name}'${flowPackage ? ` of package "${flowPackage}"` : ' (no package)'}: ${flowCredentialClassList(keys)} `
+            + `is stored in a row that names no package, and two or more packages hold a flow named '${name}', so it `
+            + 'cannot be told whose it is. Nothing was read. Bind the row to its package with the stored-reference '
+            + 'backfill, or save the credential again from the package that holds the flow.',
+    );
+}
+
+/** The index entries of a read's rows: each position with its row's package. */
+function indexedRows(rows: ReadonlyMap<string, ChannelRow>): Array<{ key: string; flowPackage: string }> {
+    return [...rows].map(([key, row]) => ({ key, flowPackage: row.flow_package }));
 }
 
 /**

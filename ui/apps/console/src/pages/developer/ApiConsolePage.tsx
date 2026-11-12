@@ -29,7 +29,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAdapter } from '@object-ui/app-shell';
+import { useAdapter, DeveloperNamespaceGate } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Badge,
@@ -149,7 +149,19 @@ function MethodPicker({
   );
 }
 
+/**
+ * Its strings are the lazy `developer` i18n namespace's, so the page body
+ * renders under `DeveloperNamespaceGate` (objectstack#32225).
+ */
 export function ApiConsolePage() {
+  return (
+    <DeveloperNamespaceGate>
+      <ApiConsolePageBody />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function ApiConsolePageBody() {
   // objectui#13460 — the page's copy reads `console.developer.apiConsole.*`;
   // each inline `defaultValue` is the `en` pack's value, held byte-identical to
   // it by `pnpm check:i18n-keys`, so a provider-less mount still reads English.

@@ -67,7 +67,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId, declaredDependencyIds, type SecurityCatalogType } from '@objectstack/core';
+import { artifactPackageId, declaredDependencyIds, PackageScopedNameRefusedError, resolvePackageScopedHolders, type SecurityCatalogType } from '@objectstack/core';
 // One name, one holder for positions, permission sets and capabilities — the
 // rule, the holders and the one place a declaration is read from (module doc).
 import {
@@ -90,6 +90,7 @@ import {
   BARE_NAME_ONE_HOLDER_TYPES,
   bareNameHoldersMeet,
   declaredBareNames,
+  declaredBuiltInBoundActions,
   describeBareNameHolder,
   handlerOwnerPackageId,
   holdsBareName,
@@ -166,8 +167,9 @@ import {
   type PackageScopedRegistry,
   type PackageScopedResolution,
 } from './package-scoped-resolver.js';
-import { standaloneActionOwnerKey, isObjectLessActionKey } from './action-governance.js';
-import { recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
+import { standaloneActionOwnerKey, isObjectLessActionKey, GLOBAL_ACTION_OBJECT_KEY } from './action-governance.js';
+import { actionOwnerScopedRegistry, resolveActionByPackage } from './action-package-addressing.js';
+import { recordCurrencyFollowRefusal, recordCurrencySummaryRefusal } from './record-currency-aggregate-door.js';
 
 /**
  * [#24400] A bound top-level action whose target object no package has
@@ -2887,12 +2889,17 @@ export interface BareNameConflict {
   readonly existingHolder: BareNameHolder;
   /** The rename that clears it — the incoming package's namespace prefixed — when it has one. */
   readonly rename?: string;
+  /** [#31697] For an action bound to an object under a built-in key ({@link BUILT_IN_BOUND_ACTION_KEYS}): that object. */
+  readonly objectName?: string;
 }
 
 /** One conflict's line, the same at every door. */
 function bareNameConflictLine(c: BareNameConflict): string {
+  const what = c.objectName !== undefined
+    ? `action "${c.name}" bound to "${c.objectName}"`
+    : `${bareNameTypeLabel(c.type)} "${c.name}"`;
   return (
-    `package "${c.incomingPackageId}" declares the ${bareNameTypeLabel(c.type)} "${c.name}", ` +
+    `package "${c.incomingPackageId}" declares the ${what}, ` +
     `already held by ${describeBareNameHolder(c.existingHolder)}` +
     (c.rename ? ` — rename it to "${c.rename}" in "${c.incomingPackageId}"` : '')
   );
@@ -3799,6 +3806,27 @@ class RegistrationRestorePoint {
   restore(): void {
     for (let i = this.undo.length - 1; i >= 0; i--) this.undo[i]();
   }
+}
+
+/**
+ * [#31697] Does one of an action's stored environment rows (the protocol's
+ * by-name row read: active, the environment's own) belong to no package and
+ * bind no object — the row the environment's own object-less item comes
+ * from? Its `package_id` column decides the binding; its body's owner key
+ * ({@link standaloneActionOwnerKey}) the object. A body that does not parse
+ * is no such row.
+ */
+function storesObjectLessPackagelessRow(rows: readonly { package_id?: string | null; metadata?: unknown }[]): boolean {
+  return rows.some((row) => {
+    if (row?.package_id !== null && row?.package_id !== undefined && row?.package_id !== '') return false;
+    let body: unknown;
+    try {
+      body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+    } catch {
+      return false;
+    }
+    return body !== null && typeof body === 'object' && isObjectLessActionKey(standaloneActionOwnerKey(body));
+  });
 }
 
 export class SchemaRegistry {
@@ -5015,6 +5043,17 @@ export class SchemaRegistry {
         });
       }
     }
+    // [#31697, contract review G6] An action bound to an object under a key the
+    // platform holds (`BUILT_IN_BOUND_ACTION_KEYS`): the platform's own UI posts
+    // to that route by its fixed name.
+    for (const { name, objectName } of declaredBuiltInBoundActions(manifest)) {
+      if (this.getPackage(selfId) !== undefined && declaredBuiltInBoundActions(this.getPackage(selfId)?.manifest)
+        .some((held) => held.name === name && held.objectName === objectName)) continue;
+      conflicts.push({
+        type: 'action', name, objectName, incomingPackageId: selfId, existingHolder: { kind: 'built-in' },
+        rename: this.bareNameRenameFor(selfId, name, manifest.namespace),
+      });
+    }
     if (conflicts.length > 0) throw new BareNameConflictError(conflicts);
   }
 
@@ -5146,6 +5185,18 @@ export class SchemaRegistry {
         });
       }
     }
+    // [#31697, contract review G6] A package the boot registered that declares
+    // an action bound to a key the platform holds (`BUILT_IN_BOUND_ACTION_KEYS`).
+    for (const pkg of this.getAllPackages()) {
+      const packageId = pkg.manifest?.id;
+      if (typeof packageId !== 'string') continue;
+      for (const { name, objectName } of declaredBuiltInBoundActions(pkg.manifest)) {
+        conflicts.push({
+          type: 'action', name, objectName, incomingPackageId: packageId, existingHolder: { kind: 'built-in' },
+          rename: this.bareNameRenameFor(packageId, name),
+        });
+      }
+    }
     return conflicts;
   }
 
@@ -5166,12 +5217,15 @@ export class SchemaRegistry {
    * shape as the ADR-0029 D9.9 representability refusal they already ask.
    *
    * Covers the doors that judge the body ALONE. The record-currency
-   * `summary` door is left out: it judges the body against the registry as it
-   * stands (the pair is judged at whichever registration completes it), so
+   * `summary` door and its follow door are left out: each judges the body
+   * against the registry as it stands (the pair is judged at whichever registration completes it), so
    * asked of a draft before its batch registers it answers both ways wrong —
    * it refuses a draft whose sibling in the same batch takes the child amount
    * out of record-currency mode, and it passes one whose sibling completes the
-   * pair. It stays the registration's own question. The single-owner rule is
+   * pair. D6's door stays the registration's own question, and the follow
+   * door is asked nowhere else: both are asked here only for a single save
+   * or publish that names `againstRegistry` on a sealed registry (see that
+   * option). The single-owner rule is
    * the protocol's (`classifyObjectContribution`), and a code package's action
    * parse never judges a tenant-authored body.
    */
@@ -5179,8 +5233,30 @@ export class SchemaRegistry {
     schema: ServiceObject,
     packageId?: string,
     ownership: ObjectOwnership = 'own',
+    options: {
+      /**
+       * [ADR-0144 D2 and D6, amended] The caller is a SINGLE save or publish
+       * that makes the body live in the same breath and relays the refusal to
+       * its author (the producers are enumerated in `@objectstack/metadata-protocol`'s
+       * `registry-question.ts`; not a batch publish, an install or a migration
+       * pass): no sibling of a batch can still change the other end of a pair,
+       * so the doors that read the registry's other objects are asked too —
+       * D6's roll-up half and its follow door — once the cold boot has sealed
+       * the registry. A refused save is then answered with the door's own
+       * envelope and stores nothing, instead of being stored and refused,
+       * logged, at the write-through.
+       *
+       * The follow door is asked ONLY under this option (seat ruling on the
+       * contract review of PR #32368): {@link registerObject} never asks it,
+       * so the boot, hydration, `registerApp` (install and reload, whose
+       * `objectExtensions` register after its `objects`), the batch writers
+       * and a package publish register the follow pair exactly as before.
+       */
+      againstRegistry?: boolean;
+    } = {},
   ): Error | null {
-    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: true });
+    const againstRegistry = options.againstRegistry === true && this.bareNameHoldersAreSealed;
+    const door = this.judgeRegistrationDoors(schema, packageId, ownership, { bodyOnly: !againstRegistry, againstRegistry });
     return 'refusal' in door ? door.refusal : null;
   }
 
@@ -5188,15 +5264,16 @@ export class SchemaRegistry {
    * [#29673] The registration doors of {@link registerObject}, moved here
    * whole so {@link objectRegistrationRefusal} asks exactly what the
    * registration throws: the refusal, or the body to register (an `extend`
-   * body re-keyed to the object it extends). `bodyOnly` skips the one door
-   * that reads the registry's other objects (see
-   * {@link objectRegistrationRefusal}).
+   * body re-keyed to the object it extends). `bodyOnly` skips the doors
+   * that read the registry's other objects, and `againstRegistry` (a sealed
+   * registry's single save or publish) is the only way the follow door is
+   * asked (see {@link objectRegistrationRefusal}).
    */
   private judgeRegistrationDoors(
     schema: ServiceObject,
     packageId: string | undefined,
     ownership: ObjectOwnership,
-    opts: { bodyOnly?: boolean } = {},
+    opts: { bodyOnly?: boolean; againstRegistry?: boolean } = {},
   ): { refusal: Error } | { schema: ServiceObject } {
     // [#16319] ⭐ THE FIELD-`type` DOOR — first statement in the method, and
     // its position is the whole point.
@@ -5264,6 +5341,39 @@ export class SchemaRegistry {
       () => this.getAllObjects(),
     );
     if (recordCurrencySummary) return { refusal: recordCurrencySummary };
+    // [ADR-0144 D2 and D6, amended] Beside it, for the same reason: a
+    // following amount whose parent holds no code field under that name, and a
+    // `record` roll-up over a child amount that follows nothing — the halves
+    // `defineStack` judges where a stack holds both objects, for the
+    // single-object save that holds one. Asked only of a single save or
+    // publish that relays the refusal (`againstRegistry`, which
+    // {@link objectRegistrationRefusal} grants only once the cold boot has
+    // sealed the registry): before the seal an `extend` contribution or the
+    // other end can still register and contradict the verdict (AGENTS.md,
+    // startup registry reads), and a multi-registration unit after it —
+    // `registerApp`'s objects before its `objectExtensions`, a batch writer's
+    // rows in its own order — has the same hazard and hears a refusal only as
+    // a log line. So `registerObject` registers the follow pair as before.
+    if (opts.againstRegistry === true && this.bareNameHoldersAreSealed) {
+      const recordCurrencyFollow = recordCurrencyFollowRefusal(schema, {
+        lookup: (name) => this.getObject(name),
+        all: () => this.getAllObjects(),
+        extensionFieldsOf: (name) => {
+          const fqn = this.resolveObjectKey(name);
+          // As the served fold reads the parent ({@link resolveObject}): a
+          // disabled package's extension is withheld, so both ends of the pair
+          // read one parent.
+          const extensions = fqn === undefined
+            ? []
+            : this.getObjectContributors(fqn).filter((c) => c.ownership === 'extend' && !this.isPackageDisabled(c.packageId));
+          return extensions.length === 0
+            ? undefined
+            : Object.assign({}, ...extensions.map((c) => (c.definition as { fields?: Record<string, unknown> }).fields ?? {}));
+        },
+        partial: ownership === 'extend',
+      });
+      if (recordCurrencyFollow) return { refusal: recordCurrencyFollow };
+    }
     return { schema };
   }
 
@@ -8714,6 +8824,79 @@ export class SchemaRegistry {
   resolveItem<T>(type: string, name: string, callerPackageId?: string | null, member?: string): T | undefined {
     if (!isPackageScopedReadType(type)) return this.getItem<T>(type, name, callerPackageId ?? undefined, member);
     return readPackageScopedItem<T>(this, { type, name, callerPackageId, member });
+  }
+
+  /**
+   * [ADR-0150 D5, #31697] The by-name read of an action that names no package
+   * and no object (`GET /meta/action/NAME`): when the object-less holders of
+   * `name` resolve to no one, the read is refused naming each
+   * (`409 RESOURCE_CONFLICT`), never the first registered — two namespaces'
+   * packages may each hold the name once the action's one-holder rule
+   * narrowed to the namespace. Resolved by the ONE rule over the object-less
+   * holders ({@link resolveActionByPackage} for a caller with no package),
+   * with the classification the action doors apply (review 6762242732 F3,
+   * F4):
+   *
+   *  - a package-less item is the ENVIRONMENT's own — it answers first, as
+   *    before — only when the environment's store holds an active
+   *    package-less row of the name that is itself object-less
+   *    (`readStoredRows`, the protocol's by-name row read). Otherwise it is
+   *    code the host or a plugin registered with no package: the PLATFORM's,
+   *    one more holder, refused beside a package holder, naming both. With no
+   *    `readStoredRows`, every package-less item is the platform's. The store
+   *    is read only when a package-less item stands beside a package holder,
+   *    and a read that throws travels to the caller (ADR-0110 D3).
+   *  - a DISABLED package is no holder: the merged listings and the by-name
+   *    read withhold its item (#25308), so it neither answers nor makes the
+   *    enabled holder's read refuse.
+   *
+   * An action bound to an object is not judged here: the protocol's by-name
+   * read counts {@link packageScopedHoldersOf}, which keys an action by package
+   * and name whatever its object, and refuses two or more enabled package
+   * holders itself (ADR-0150 D3, #32244).
+   *
+   * @throws {PackageScopedNameRefusedError} when the object-less holders refuse.
+   */
+  async refuseAmbiguousObjectLessAction(
+    name: string,
+    readStoredRows?: () => Promise<readonly { package_id?: string | null; metadata?: unknown }[]>,
+  ): Promise<void> {
+    const live: PackageScopedRegistry = {
+      getPackage: (id) => this.getPackage(id),
+      getAllPackages: () => this.getAllPackages(),
+      packageScopedHoldersOf: (type, holderName) =>
+        this.packageScopedHoldersOf(type, holderName).filter((id) => !this.isPackageDisabled(id)),
+      getPackageScopedItem: (type, itemName, packageId, member) =>
+        this.isPackageDisabled(packageId) ? undefined : this.getPackageScopedItem(type, itemName, packageId, member),
+      getEnvironmentScopedItem: (type, itemName, member) => this.getEnvironmentScopedItem(type, itemName, member),
+    };
+    const objectLess = actionOwnerScopedRegistry(live, GLOBAL_ACTION_OBJECT_KEY);
+    const packages = objectLess.packageScopedHoldersOf('action', name);
+    // Every package-less object-less item of the name, bound or not: the
+    // registry reads one over a held name as that holder's overlay (ADR-0150
+    // D4), which only the environment's own row is — host code's is not.
+    const collection = this.metadata.get('action');
+    const packageless = collection === undefined ? undefined : this.bareSlotEntriesOf('action', collection, name)
+      .map(({ item }) => item)
+      .find((item) => item !== null && typeof item === 'object' && !(item as any)._packageId
+        && isObjectLessActionKey(standaloneActionOwnerKey(item)));
+    if (packageless !== undefined && packages.length > 0
+      && !(readStoredRows !== undefined && storesObjectLessPackagelessRow(await readStoredRows()))) {
+      const resolution = resolvePackageScopedHolders(
+        { type: 'action', name, callerPackageId: null },
+        {
+          packageHolders: packages,
+          packageItem: (packageId) => objectLess.getPackageScopedItem('action', name, packageId),
+          environmentItem: () => undefined,
+          platformItem: () => packageless,
+        },
+        () => new Set<string>(),
+      );
+      if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+      return;
+    }
+    const resolution = resolveActionByPackage(live, { objectName: GLOBAL_ACTION_OBJECT_KEY, actionName: name, callerPackageId: null });
+    if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
   }
 
   /** The bare-slot entries of `(type, name)`: one, or a bundle's members, canonical first. */

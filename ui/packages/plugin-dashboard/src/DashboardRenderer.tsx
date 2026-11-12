@@ -10,6 +10,7 @@ import type { BaseSchema, DashboardComponentSchema, DataSource, ObjectChartSchem
 import { SchemaRenderer, useActionEngine, useObjectLabel, PageVariablesProvider, usePageVariables, useResolvedDataSource, type SchemaRendererProps } from '@object-ui/react';
 import { useObjectTranslation, useSafeTranslate, pickLocalized, useDisplayLocale } from '@object-ui/i18n';
 import type { ActionDef, ActionResult, ActionContext, ModalHandler, SduiDomPassThroughKey } from '@object-ui/core';
+import { servedPackageId } from '@object-ui/core';
 import {
   resolveDashboardFilterDefs,
   dashboardFilterVariableDefs,
@@ -47,6 +48,7 @@ import { DatasetWidget } from './DatasetWidget';
 import type { DashboardChartRenderSchema } from './chartRenderHandoff';
 import { useDashboardAutoRefresh, type DashboardAutoRefresh } from './useDashboardAutoRefresh';
 import { DashboardFilterBar } from './DashboardFilterBar';
+import { DatasetQueryCoalescerContext, useDatasetQueryCoalescer } from './datasetQueryBatch';
 
 /**
  * One `header.actions[]` entry, as the node's declaration types it: the spec's
@@ -335,6 +337,9 @@ export interface DashboardRendererProps
 
 const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps>(
   ({ schema, className, dataSource: dataSourceProp, onRefresh, recordCount, userActions, designMode, selectedWidgetId, onWidgetClick, onWidgetsReorder, modalHandler, scriptHandlers, hideHeaderText, onRefreshStateChange, localized, ...props }: DashboardRendererProps & { [key: string]: any }, ref) => {
+    // ADR-0150 D5 — the package this dashboard is served from: its widgets'
+    // datasets were authored against it, so each dataset query names it.
+    const dashboardPackageId = servedPackageId(schema);
     // objectui#10815 — the adapter every child of this dashboard reads, resolved
     // ONCE here the way the page-embeddable blocks of the family resolve theirs
     // (`useResolvedDataSource`, the `object-grid` / `object-form` /
@@ -351,6 +356,10 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
     // source. A host that binds no capable adapter anywhere still gets
     // `DatasetWidget`'s visible alert: that state is deliberate and unchanged.
     const dataSource = useResolvedDataSource<DataSource>(dataSourceProp);
+    // objectstack#32165 — the dataset queries this render's widgets and filter
+    // bar ask go out as one batch request per package, not one request each.
+    // Provided around the whole dashboard; each caller still asks for itself.
+    const datasetQueries = useDatasetQueryCoalescer(dataSource);
     // Auto-infer the grid column count when the dashboard schema doesn't
     // specify one. Spec convention is a 12-column grid (widgets use w: 3 for
     // quarter-row KPIs, w: 6 for half-row charts, etc.). If we always default
@@ -1171,6 +1180,7 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
                           ? <DatasetWidget
                               widget={datasetWidget}
                               dataSource={dataSource}
+                              packageId={dashboardPackageId}
                               onForbidden={refusedTileKey ? () => markTileRefused(refusedTileKey) : undefined}
                               heading={datasetMetric
                                 ? { title: resolvedTitle || '', description: resolvedDescription || undefined }
@@ -1494,11 +1504,15 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
         </div>
       );
 
-      return dragEnabled ? (
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSortableDragEnd}>
-          {mobileBody}
-        </DndContext>
-      ) : mobileBody;
+      return (
+        <DatasetQueryCoalescerContext.Provider value={datasetQueries}>
+          {dragEnabled ? (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSortableDragEnd}>
+              {mobileBody}
+            </DndContext>
+          ) : mobileBody}
+        </DatasetQueryCoalescerContext.Provider>
+      );
     }
 
     const desktopTiles = (schema.widgets ?? []).map((widget: DashboardWidgetSlotEntry, index: number) => renderWidget(widget, index));
@@ -1543,11 +1557,15 @@ const DashboardRendererInner = forwardRef<HTMLDivElement, DashboardRendererProps
       </div>
     );
 
-    return dragEnabled ? (
-      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSortableDragEnd}>
-        {desktopBody}
-      </DndContext>
-    ) : desktopBody;
+    return (
+      <DatasetQueryCoalescerContext.Provider value={datasetQueries}>
+        {dragEnabled ? (
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSortableDragEnd}>
+            {desktopBody}
+          </DndContext>
+        ) : desktopBody}
+      </DatasetQueryCoalescerContext.Provider>
+    );
   }
 );
 
