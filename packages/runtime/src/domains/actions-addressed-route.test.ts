@@ -17,6 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@objectstack/metadata';
+import { MetadataManager } from '@objectstack/metadata';
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -638,4 +639,84 @@ describe('[ADR-0106 D6] a run whose action definition read fails is refused 503 
         expect(outcome).not.toEqual({ code: 'FIELD_VISIBILITY_UNRESOLVED' });
         expect(outcome).toEqual({ thrown: 'schema registry unavailable' });
     });
+});
+
+/**
+ * [#32521; epic #31527 red lines 2 and 3] With no protocol merged listing the
+ * bare door reads its declarations from the metadata service's own plural read
+ * (`collectActionDeclarations` over `loadMany('action')`). Driven here over a
+ * real `MetadataManager` whose loader hands on rows the way `DatabaseLoader`'s
+ * keyed read does: each row with its package beside an unstamped body.
+ */
+describe('[#32521] the bare door over the metadata service\'s own plural read, with no merged listing', () => {
+    const SAVED_LAST = HR;
+    /** A read-only loader whose keyed plural read of `action` hands on `rows`. */
+    const rowsLoader = (rows: Array<{ name: string; data: any; packageId?: string }>) => ({
+        contract: { name: 'rows', protocol: 'memory:', capabilities: { read: true, write: false, watch: false, list: true } },
+        load: async () => ({ data: null }),
+        loadMany: async () => rows.map((row) => row.data),
+        loadManyKeyed: async (type: string) => (type === 'action' ? rows : []),
+        exists: async () => false,
+        stat: async () => null,
+        list: async () => [],
+    });
+    /** `send_digest`'s row held for `pkg` (none: a package-less row), its body unstamped. */
+    const row = (pkg: string | undefined) => {
+        const { _packageId: _stamp, ...data } = act('send_digest', pkg) as Record<string, unknown>;
+        return { name: 'send_digest', data, ...(pkg ? { packageId: pkg } : {}) };
+    };
+    /**
+     * The dispatcher over a manager reading `rows`. The engine's action map
+     * holds one `send_digest` (`object:name`, no package): `engineHolds`, the
+     * one its rebind kept, which the by-name rung serves.
+     */
+    const over = (rows: Array<{ name: string; data: any; packageId?: string }>, engineHolds: any) => {
+        const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+        manager.registerLoader(rowsLoader(rows) as any);
+        const metadata = {
+            listObjects: vi.fn(async () => []),
+            getObject: vi.fn(async () => undefined),
+            load: vi.fn(async () => null),
+            loadMany: (type: string) => manager.loadMany(type),
+            loadDiagnosed: vi.fn(async (_t: string, name: string) => ({
+                data: engineHolds.name === name ? engineHolds : null, degraded: false, errors: [],
+            })),
+        };
+        const harness = dispatcherWith([], [engineHolds], undefined, { metadata });
+        // The environment's store holds no package-less `send_digest`.
+        harness.ql.find = vi.fn(async (object: string) => (object === 'sys_metadata' ? [] : [{ id: 'r1' }]));
+        return { ...harness, manager };
+    };
+    const holders = async (manager: MetadataManager) =>
+        ((await manager.loadMany('action')) as Array<{ _packageId?: string }>).map((item) => item._packageId ?? 'none');
+
+    it('two packages\' rows of the name: the bare call is refused on REST and MCP, 409 naming both (BEFORE: one declaration reached the door and the call ran)', async () => {
+        const { post, bridge, ran, manager } = over([row(CRM), row(HR)], act('send_digest', SAVED_LAST));
+        expect(await holders(manager)).toEqual([CRM, HR]);
+        const rest = await post('/global/send_digest');
+        expect(rest.status, JSON.stringify(rest.body)).toBe(409);
+        expect(codeOf(rest)).toBe('RESOURCE_CONFLICT');
+        expect(messageOf(rest)).toContain(CRM);
+        expect(messageOf(rest)).toContain(HR);
+        const mcp = await refusalOf(bridge.runAction('send_digest', {}));
+        expect(mcp.status ?? mcp.httpStatus).toBe(409);
+        expect(String(mcp.message)).toContain(CRM);
+        expect(String(mcp.message)).toContain(HR);
+        expect(ran).toEqual([]);
+    });
+
+    for (const [shape, rows] of [
+        ['one package\'s row', [row(CRM)]],
+        ['one package\'s row and a package-less row of the name (its customization)', [row(CRM), row(undefined)]],
+        ['a package-less row and one package\'s row of the name', [row(undefined), row(CRM)]],
+    ] as const) {
+        it(`CONTROL — ${shape}: one declaration reaches the door, and the bare call runs on REST and MCP, as before`, async () => {
+            const { post, bridge, ran, manager } = over([...rows], act('send_digest', CRM));
+            expect(await holders(manager)).toEqual([rows[0].packageId ?? 'none']);
+            const rest = await post('/global/send_digest');
+            expect(rest.status, JSON.stringify(rest.body)).toBe(200);
+            expect((await bridge.runAction('send_digest', {})).ok).toBe(true);
+            expect(ran.length).toBe(2);
+        });
+    }
 });
