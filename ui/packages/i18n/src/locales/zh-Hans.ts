@@ -4243,6 +4243,7 @@ const zh = {
       get_authoring_rules: '查阅编写规范',
       get_metadata_schema: '查阅元数据的格式',
       get_package: '查看应用包信息',
+      get_record_history: '读取这条记录的修改历史',
       list_metadata: '列出已有元数据',
       list_objects: '列出已有对象',
       list_packages: '列出已有应用包',
