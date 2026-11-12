@@ -105,8 +105,9 @@ export default class MigrateStoredReferencesBind extends Command {
         composeHostStack: true,
         composeServedPlatform: true,
         composeAuthGatedSecurity: true,
-        // Composed in full, so the bind's write leaves its `sys_audit_log` row.
-        extraPlugins: [new AuditPlugin()],
+        // Composed in full, so the bind's write leaves its `sys_audit_log` row;
+        // its sealer is not armed, as on every one-shot boot [ADR-0154 D3].
+        extraPlugins: [new AuditPlugin({ armSealer: false })],
         serveFlags: { dev: flags.dev === true, ...(flags.preset ? { preset: flags.preset } : {}) },
       });
     } catch (error: any) {

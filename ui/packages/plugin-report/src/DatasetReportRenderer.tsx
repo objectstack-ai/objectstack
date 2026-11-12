@@ -117,7 +117,8 @@ import {
   // report's TABLE rows, its matrix headers and its chart's categories are put
   // in it (see `arrangeByDeclaredOptions`).
   buildCategoryRank,
-  // ADR-0150 D5 — the report's served package, sent on its dataset queries.
+  // The report's served package, sent as the reader's package (`callerPackage`,
+  // ADR-0150 D3) on its dataset queries and its dataset definition read.
   servedPackageId,
   type DatasetResultField,
   type DatasetDrillRange,
@@ -163,7 +164,7 @@ interface DatasetCapableSource {
   queryDataset?: (
     dataset: string,
     selection: unknown,
-    options?: { packageId?: string },
+    options?: { callerPackage?: string },
   ) => Promise<{
     rows: Row[];
     fields?: DatasetResultField[];
@@ -603,10 +604,13 @@ function spanDrillRanges(
 }
 
 /**
- * The package the rendered report is served from (ADR-0150 D5), which every
- * dataset selection under it names as `?package=`: its datasets, the joined
- * blocks' included, were authored against it. `undefined` for a report
- * authored in the environment, whose selections send the bare name. Provided
+ * The package the rendered report is served from, which every dataset
+ * selection under it names as the reader's package, `callerPackage`
+ * (ADR-0150 D3): its datasets, the joined blocks' included, were authored
+ * against it, so the server reads the report's own dataset, else the unique
+ * holder in its dependency closure plus `sys`, else refuses `409` naming the
+ * candidates. `undefined` for a report authored in the environment, whose
+ * selections send the bare name. Provided
  * once by {@link DatasetReportRenderer} from the report's own `_packageId`, so
  * the table, matrix, chart and joined-block readers below need no parameter.
  */
@@ -726,7 +730,7 @@ function useDatasetRows(
         // `runtimeFilter`, never a bucket. Absent, the selection is exactly
         // what a report without a period has always posted.
         ...(timeWindow ? { timeDimensions: [timeWindow] } : {}),
-      }, ...(packageId ? [{ packageId }] : []))
+      }, ...(packageId ? [{ callerPackage: packageId }] : []))
       .then((res) => {
         if (!cancelled) {
           setDatasetObject(typeof res?.object === 'string' && res.object ? res.object : undefined);
@@ -2245,7 +2249,7 @@ function DatasetMatrixTable({
 
 /**
  * Renders a dataset-bound report. The report's own served package
- * (`servedPackageId`, ADR-0150 D5) is provided to every selection under it.
+ * (`servedPackageId`) is provided to every selection under it.
  */
 export const DatasetReportRenderer: React.FC<DatasetReportRendererProps> = (props) => (
   <ReportPackageContext.Provider value={servedPackageId(props.report)}>
@@ -2285,7 +2289,8 @@ const DatasetReportRendererBody: React.FC<DatasetReportRendererProps> = ({
       ? picked.period
       : initialReportPeriod(dateRangeDecl)
     : undefined;
-  const dateDimension = useReportDateDimension(String(report.dataset ?? ''), dateRangeDecl);
+  const reportPackageId = React.useContext(ReportPackageContext);
+  const dateDimension = useReportDateDimension(String(report.dataset ?? ''), dateRangeDecl, reportPackageId);
   const timeWindow =
     period && dateDimension.status === 'ready' ? reportTimeWindow(dateDimension.dimension, period) : undefined;
 

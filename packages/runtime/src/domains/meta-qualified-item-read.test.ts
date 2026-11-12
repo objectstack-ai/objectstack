@@ -585,6 +585,33 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
 });
 
 /**
+ * [#32250, ADR-0150 D5; Refs #32622] The dispatcher's layered read of a name
+ * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
+ * holders as `details.candidates`, as the item read does. The refusal leaves
+ * through `errorFromThrown`, which composes `details` from
+ * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
+ * row's layered refusal, and the REST `/layers` door, are not.
+ */
+describe('#32250 — the dispatcher /layers 409 names the holders', () => {
+    it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {
+        ship('dashboard', 'sales', A);
+        ship('dashboard', 'sales', B);
+        const answer = await read('/dashboard/sales/layers');
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(answer.body?.error?.details?.candidates).toEqual([
+            { kind: 'package', packageId: A },
+            { kind: 'package', packageId: B },
+        ]);
+    });
+
+    it('CONTROL — one holder: its layers are served', async () => {
+        ship('dashboard', 'sales', A);
+        const answer = await read('/dashboard/sales/layers');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    });
+});
+
+/**
  * [ADR-0150 D3, #31700] A dataset name is held once per NAMESPACE now, so two
  * namespaces may each hold `qa_ds`. A publish's runtime probes
  * (`publishPackageDrafts` → `runBuildProbes`) read each widget's dataset
@@ -676,8 +703,9 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
     const pkg = (packageId: string) => ({ kind: 'package', packageId });
     const conflictOf = (answer: { status?: number; body?: any }) => [answer.status, answer.body?.error?.code, answer.body?.error?.details?.candidates];
     const DOORS = ['/action/approve', '/action/approve/layers', '/action/approve/published'];
-    // `/layers` and `/published` carry the refusal's text, not its
-    // `details.candidates`: each holder is read from the message there.
+    // Each holder is read from the refusal's text, and, since #32250 carried a
+    // thrown refusal's candidates through `resolveThrownHttpError`, from its
+    // `details.candidates` on all three doors (before it, the item read only).
     const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
     const refusalOf = (answer: { status?: number; body?: any }) => {
         const message = String(answer.body?.error?.message ?? '');
@@ -690,9 +718,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), { kind: 'platform' }]);
     });
 
     it('beside two packages\' on two objects: 409 naming both packages and the package-less holder, on all three doors', async () => {
@@ -702,9 +729,8 @@ describe('#32365 — the bare action read weighs the package-less holder on the 
         for (const door of DOORS) {
             const answer = await read(door);
             expect(refusalOf(answer), `${door} ${JSON.stringify(answer.body)}`).toEqual([409, 'RESOURCE_CONFLICT', [A, B], true]);
+            expect(conflictOf(answer)[2], door).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
         }
-        const item = await read('/action/approve');
-        expect(conflictOf(item)[2]).toEqual([pkg(A), pkg(B), { kind: 'platform' }]);
     });
 
     it('a disabled package registered before the one enabled holder: the item read answers the enabled holder', async () => {

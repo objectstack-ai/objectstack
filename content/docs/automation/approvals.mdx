@@ -442,6 +442,10 @@ Set Manager** — see [the `manager` callout above](#3-the-approval-node). `posi
 organization's directory resolves them — see
 [Approving across organizations](#cross-org-approvers).
 
+A `position` or `queue` name is not checked when the flow is saved: positions and
+queues are runtime data an administrator adds and removes, so a name nobody holds
+yet saves, and it is resolved when the run reaches the node.
+
 What an entry that resolves to nobody leaves on the slate depends on its kind:
 
 - **A person entry** (`manager`, `field`) adds no slot. Nor does a `queue`

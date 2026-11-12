@@ -290,6 +290,14 @@ const STUDIO_EN: Record<string, string> = {
     'The copy was saved in package \'{package}\', beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
   'perm.clone.notice.inCreatedPackage':
     'The copy was saved in package \'{package}\', created for it to hold your changes to the package the set came from, beside the original rather than in place of it, and travels with that package. The copy is a new permission set authored in this system, with no link to the set it was copied from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. The copy is held by nobody yet: add it to a position, or assign it to users.',
+  // objectstack#32537 — a door refused a permission-set name more than one
+  // package holds (409 RESOURCE_CONFLICT naming every holder, ADR-0150 D3):
+  // the holders are offered as a pick, never chosen by order
+  // (`PermissionSetHolderPick.tsx`). The server's sentence is shown above it.
+  'perm.holder.pick.title': 'Which package\'s {name}?',
+  'perm.holder.pick.hint': 'Choose the package whose permission set this applies to.',
+  'perm.holder.pick.package': 'Package {package}',
+  'perm.holder.pick.environment': 'This environment\'s own set',
   // A save that still reached the server and was refused as a packaged set:
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.

@@ -108,17 +108,25 @@ export type ReportDateDimension =
  * declared, or — omitted — the dataset's one `type: 'date'` dimension, read
  * from the dataset definition through the host's authenticated `apiFetch`
  * (the read `ObjectChart`'s dataset path makes).
+ *
+ * `callerPackage` is the report's own served package: the definition is read
+ * as that reader's (`?callerPackage=`, ADR-0150 D3), the same dataset the
+ * report's queries resolve. A refusal (a `409` naming the candidates) is this
+ * read's error, shown as the hook's error state; it is never retried bare.
  */
 export function useReportDateDimension(
   dataset: string,
   decl: ReportDateRangeDeclaration | undefined,
+  callerPackage?: string,
 ): ReportDateDimension {
   const { t } = useObjectTranslation();
   const apiFetch = React.useContext(SchemaRendererContext)?.apiFetch;
   const declared = typeof decl?.dimension === 'string' && decl.dimension ? decl.dimension : undefined;
   const needsRead = !!decl && !declared && !!dataset;
+  // The read's identity: another caller package may resolve another dataset.
+  const readKey = `${callerPackage ?? ''}|${dataset}`;
   const [read, setRead] = React.useState<
-    { dataset: string; dateDimensions: string[] } | { dataset: string; failed: string } | null
+    { key: string; dateDimensions: string[] } | { key: string; failed: string } | null
   >(null);
 
   React.useEffect(() => {
@@ -127,7 +135,8 @@ export function useReportDateDimension(
     (async () => {
       try {
         const doFetch = apiFetch ?? fetch;
-        const res = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(dataset)}`, {
+        const query = callerPackage ? `?${new URLSearchParams({ callerPackage })}` : '';
+        const res = await doFetch(`/api/v1/meta/dataset/${encodeURIComponent(dataset)}${query}`, {
           headers: { accept: 'application/json' },
           credentials: 'include',
         });
@@ -140,19 +149,19 @@ export function useReportDateDimension(
             !!d && typeof (d as { name?: unknown }).name === 'string')
           .filter((d) => d.type === 'date')
           .map((d) => d.name);
-        if (!cancelled) setRead({ dataset, dateDimensions });
+        if (!cancelled) setRead({ key: readKey, dateDimensions });
       } catch (e) {
-        if (!cancelled) setRead({ dataset, failed: String((e as Error)?.message ?? e) });
+        if (!cancelled) setRead({ key: readKey, failed: String((e as Error)?.message ?? e) });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [needsRead, dataset, apiFetch]);
+  }, [needsRead, dataset, callerPackage, readKey, apiFetch]);
 
   if (!decl) return { status: 'off' };
   if (declared) return { status: 'ready', dimension: declared };
-  if (!read || read.dataset !== dataset) return { status: 'loading' };
+  if (!read || read.key !== readKey) return { status: 'loading' };
   if ('failed' in read) {
     return {
       status: 'error',

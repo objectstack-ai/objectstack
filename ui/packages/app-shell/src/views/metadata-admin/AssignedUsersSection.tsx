@@ -36,6 +36,20 @@
  *    binding is part of the position's definition), read through the console's
  *    metadata store, never `sys_position_permission_set` / `sys_position` rows.
  *
+ * ## A name more than one package holds (objectstack#32537, ADR-0150 D4/D8)
+ *
+ * A permission set is identified by `(package, name)`. Where the host lists
+ * more than one holder of the name it passes the one this section is for
+ * ({@link AssignedUsersSectionProps.holding}); the reads are the same, and
+ * each grant and position is kept when the resolver reads it as this holder's
+ * (`permission-set-holder.ts`: a grant by its `permission_set_package`, a
+ * position from the package that declared it). ADD names the holder's package
+ * in the grant's stored column, `permission_set_package`, where the name alone
+ * does not address it. A position whose declaring package holds no set of the
+ * name is judged by that package's dependencies on the server, which this
+ * section does not read; it is listed. With one holder the host passes none,
+ * and every request and row is as before.
+ *
  * Permission-set-agnostic: every role gets the same UI, and the AI seat
  * (`ai_seat`) is just one of them. The generic add-by-picker engine (spec
  * RecordRelatedListProps.add) powers the capability; this is the polished
@@ -88,6 +102,13 @@ import { Plus, X, Users, Loader2, AlertCircle } from 'lucide-react';
 import { useMetadataLocale } from './i18n.js';
 import { isZhLocale } from './schema-field-label.js';
 import { membershipOrganization, readOrganizationMemberIds, type MemberFilter } from './organization-members.js';
+import {
+  holderPackageOf,
+  holdingPackage,
+  positionReach,
+  storedGrantHolders,
+  type PermissionSetHolding,
+} from './permission-set-holder.js';
 
 /** The object a permission set's direct grants are rows of: ADD creates one, REMOVE deletes one. */
 const GRANT_OBJECT = 'sys_user_permission_set';
@@ -105,6 +126,13 @@ export interface AssignedUsersSectionProps {
    * is held (objectui#13272).
    */
   onHoldersRead?: (count: number, permissionSetName: string) => void;
+  /**
+   * objectstack#32537 — which holder of the name this section is for, where the
+   * host lists more than one (module doc). Omitted, the set is the name's one
+   * holder, addressed by the name alone. Read by its value, so a host may pass
+   * a new object each render.
+   */
+  holding?: PermissionSetHolding;
 }
 
 interface AssignedRow {
@@ -244,14 +272,25 @@ const ANCHOR_POSITIONS = new Set(['everyone', 'guest']);
 
 /**
  * The positions whose DEFINITION distributes `setName` — its `permissionSets`
- * list names the set (ADR-0131 D4; `PositionSchema.permissionSets`).
+ * list names the set (ADR-0131 D4; `PositionSchema.permissionSets`). Given a
+ * `holding`, only those whose reference the resolver reads as that holder's
+ * set, or judges by the declaring package's dependencies (`positionReach`).
  */
-export function positionsDistributing(positions: readonly unknown[], setName: string): string[] {
+export function positionsDistributing(
+  positions: readonly unknown[],
+  setName: string,
+  holding?: PermissionSetHolding,
+): string[] {
   const out: string[] = [];
   for (const raw of positions) {
     const p = raw as { name?: unknown; permissionSets?: unknown } | null;
     if (typeof p?.name !== 'string' || !p.name) continue;
-    if (Array.isArray(p.permissionSets) && p.permissionSets.includes(setName)) out.push(p.name);
+    if (!Array.isArray(p.permissionSets) || !p.permissionSets.includes(setName)) continue;
+    if (holding) {
+      const reach = positionReach(raw, holding.holders);
+      if (reach !== 'closure' && !reach.includes(holding.packageId)) continue;
+    }
+    out.push(p.name);
   }
   return out;
 }
@@ -272,8 +311,16 @@ function positionLabels(positions: readonly unknown[]): Map<string, string> {
   return out;
 }
 
-export function AssignedUsersSection({ permissionSetName, onHoldersRead }: AssignedUsersSectionProps) {
+export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding: holdingProp }: AssignedUsersSectionProps) {
   const adapter = useAdapter() as any;
+  // The holding by its value: `load` re-keys when the holder changes, never
+  // when a host rebuilds the same holding.
+  const holdingValue = holdingProp ? JSON.stringify([holdingProp.packageId, holdingProp.holders]) : '';
+  const holding = React.useMemo<PermissionSetHolding | undefined>(() => {
+    if (!holdingValue) return undefined;
+    const [packageId, holders] = JSON.parse(holdingValue) as [PermissionSetHolding['packageId'], PermissionSetHolding['holders']];
+    return { packageId, holders };
+  }, [holdingValue]);
   // Read through a ref so a host's inline callback does not re-key `load`.
   const onHoldersReadRef = React.useRef(onHoldersRead);
   onHoldersReadRef.current = onHoldersRead;
@@ -345,9 +392,14 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
-      // Direct grants, by the set's NAME.
+      // Direct grants, by the set's NAME — under more than one holder, the
+      // ones the resolver reads as this holder's (module doc).
       const grants = asArray(
         await adapter.find(GRANT_OBJECT, { $filter: { permission_set: permissionSetName }, $top: 500 }),
+      ).filter(
+        (g: { permission_set_package?: unknown } | null) =>
+          !holding ||
+          storedGrantHolders(holderPackageOf(g?.permission_set_package), holding.holders).includes(holding.packageId),
       );
 
       // Effective holders = direct grants ∪ holders of every position that
@@ -360,7 +412,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
       try {
         const positions = await metadataStoreRef.current.ensureType('position');
         labelByPosition = positionLabels(positions);
-        const names = positionsDistributing(positions, permissionSetName);
+        const names = positionsDistributing(positions, permissionSetName, holding);
         // The audience anchors are implicit memberships — `everyone` is every
         // signed-in member; enumerating them as rows would be noise. Surface
         // a note instead and expand only the explicit positions.
@@ -421,13 +473,14 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
     } finally {
       setLoading(false);
     }
-  }, [adapter, permissionSetName]);
+  }, [adapter, permissionSetName, holding]);
 
   React.useEffect(() => {
     void load();
   }, [load]);
 
   const assignedIds = React.useMemo(() => new Set(rows.map((r) => r.userId)), [rows]);
+  const addressing = holdingPackage(holding);
 
   const addUsers = React.useCallback(
     async (records: any[]) => {
@@ -437,11 +490,13 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
         for (const u of records || []) {
           const uid = u?.id != null ? String(u.id) : null;
           if (!uid || assignedIds.has(uid)) continue;
-          // By name alone: no catalog row is read and no legacy
-          // `permission_set_id` is written (module doc).
+          // By name: no catalog row is read and no legacy
+          // `permission_set_id` is written (module doc). The holder's package
+          // only where the name alone does not address it.
           await adapter.create(GRANT_OBJECT, {
             user_id: uid,
             permission_set: permissionSetName,
+            ...(addressing ? { permission_set_package: addressing } : {}),
           });
         }
         await load();
@@ -459,7 +514,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead }: Assig
         setPickerOpen(false);
       }
     },
-    [adapter, permissionSetName, assignedIds, load, rows.length, c],
+    [adapter, permissionSetName, addressing, assignedIds, load, rows.length, c],
   );
 
   /**
