@@ -167,7 +167,7 @@ describe('[#31699 F2] the upgrade report lists a pair member row two holders cou
     tpl(Y);
     pairRow();
     registry.disablePackage(Y);
-    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers.map((f) => f.candidates.map((c) => c.packageId)))
+    expect((await collectStoredPackageReferences(engine, carrying())).pairMembers.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
       .toEqual([[X, Y]]);
   });
 
@@ -250,7 +250,7 @@ describe('[#31699] the upgrade report lists a package-less row two holders could
     tpl(Y);
     envRow('row_fr', 'email_template', 'welcome', 'fr-FR');
     registry.disablePackage(Y);
-    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => c.packageId)))
+    expect((await collectStoredPackageReferences(engine, carrying())).packageLessRows.map((f) => f.candidates.map((c) => ('packageId' in c ? c.packageId : c.holder))))
       .toEqual([[X, Y]]);
   });
 
