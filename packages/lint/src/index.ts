@@ -596,11 +596,14 @@ export type {
 // over another object than the one the list view lists.
 // [#28018] Its EIGHTH: a `kanban.lanes` entry that is not an option of the
 // group field, or a lane listed twice.
+// [#32449] Its NINTH: a column summary whose function the aggregate door
+// refuses over the aggregated field's declaration.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
@@ -1067,6 +1070,7 @@ export {
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
   FLOW_START_NODE_MISSING,
+  FLOW_AFTER_SAVE_INLINE_RETRY,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,

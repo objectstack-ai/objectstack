@@ -4,7 +4,7 @@
  * ADR-0154 — the audit ledger's tamper evidence: the pure core (canonical
  * form, commitments, seed salts, Merkle tree, signed bodies), which reads and
  * writes no storage, and the live verifier built on it (`verifier.ts`, D9),
- * which only reads. The sealer (`sealer.ts`) and the default signer
+ * which only reads, with the offline check of its proof bundle (`bundle.ts`). The sealer (`sealer.ts`) and the default signer
  * (`signer.ts`) stay inside the package and are not re-exported here.
  */
 
@@ -73,12 +73,16 @@ export type {
   ExpiryAmendmentBody,
   RedactionAmendmentBody,
 } from './signed-body.js';
-export { AUDIT_ROW_VERDICTS, verifyAuditLedger } from './verifier.js';
+export { AUDIT_PROOF_BUNDLE_FORMAT, AUDIT_ROW_VERDICTS, verifyAuditLedger } from './verifier.js';
 export type {
   AuditChainFault,
   AuditChainFaultKind,
   AuditChainReport,
   AuditDanglingRedaction,
+  AuditProofBundle,
+  AuditProofBundleCheckpoint,
+  AuditProofBundleLeaf,
+  AuditProofBundleObject,
   AuditRowFinding,
   AuditRowVerdict,
   AuditVerdictCounts,
@@ -86,3 +90,5 @@ export type {
   AuditVerifyOptions,
   AuditVerifyReport,
 } from './verifier.js';
+export { AuditProofBundleError, verifyAuditProofBundle } from './bundle.js';
+export type { AuditProofBundleVerifyOptions } from './bundle.js';

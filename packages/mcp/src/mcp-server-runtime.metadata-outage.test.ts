@@ -275,7 +275,9 @@ describe('object_schema resource — a metadata outage is not "Object not found"
     const body = resourceBody(await buildObjectSchemaResource(holding(OBJECT), 'acct'));
 
     expect(body).toMatchObject({ name: 'acct', label: 'Account' });
-    expect(body.fields).toEqual([{ name: 'title', type: 'text', label: 'title', required: false }]);
+    // [#32435] The projection `describe_object` serves, write facts included.
+    expect(body.fields).toEqual([{ name: 'title', type: 'text', label: 'title', required: false, readonly: false, system: false }]);
+    expect(body.validations).toEqual([]);
   });
 
   it('PRESENT: the hit path costs no second read', async () => {

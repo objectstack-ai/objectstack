@@ -1,6 +1,6 @@
 # ADR-0067: Commit history and rollback for AI authoring — turns become atomic, revertible commits
 
-**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten.
+**Status**: Accepted (2026-06-24; completed 2026-07-16) · **Amended** (2026-08-06, #5351/#5696 — the D2 join is now distinguishable (`owned`), and Decision-2's atomicity is enforced as a ONE-datasource promise, with audit rows carved out and possibly orphaned; see the Amendment at the end) — fully implemented: commit grouping (`sys_metadata_commit`), `revertCommit`/`rollbackToPackageCommit`/`listCommits`, REST routes; **Decision-2 landed via #3066**: `publishPackageDrafts` runs every promotion + the commit record inside ONE `engine.transaction()` (two-phase — side effects post-commit), so a commit cannot half-land; `engine.transaction()` joins ambient transactions to make nested repository writes participate. Locked by `protocol-publish-package-drafts.test.ts` (all-or-nothing + rollback tracking) and `engine-ambient-transaction.test.ts`. **Letter index** (2026-08-29, #12786): the Decision headings are relabeled `1.`–`6.` → `D1`–`D6` so `Dk` citations verify — recognition of the record's own numbering (this status line and the Amendment already say "D2"); no decision is renumbered, reordered, or rewritten. · **Amended** (2026-11-12, #32396/#32480 — Decision-2's atomicity holds where the engine can roll back (`engineCanRollBack`), which is not the same line as "a SQL driver"; elsewhere a package publish is judged first and undone by compensation, best effort; see the 2026-11-12 Amendment at the end).
 **Deciders**: ObjectStack Protocol Architects
 **Builds on / amends**: [ADR-0045](./0045-additive-materialization-and-visibility-gate.md) (**amended**: ADR-0045 keeps a *draft + human-confirm* gate on mutations as the safety mechanism; this ADR replaces *confirm-before* with *revert-after* for everything except irreversible data loss, and unifies the two authoring regimes under one primitive — the commit), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (draft workspace — retained as a *review affordance*, demoted from *safety mechanism*), [ADR-0033](./0033-ai-assisted-metadata-authoring.md) ("AI never publishes — it drafts" → **AI commits; commits are revertible**), [ADR-0034](./0034-transactional-writes-and-ambient-transaction.md) (per-write transaction — **extended to span a whole turn**), [ADR-0038](./0038-build-verification-loop.md) (machine gate — runs per commit, before it lands)
 **Consumers**: `@objectstack/objectql` (commit grouping, atomic turn-apply, `revertCommit`, history query — built on the existing `sys_metadata_history` + `restoreVersion`), `@objectstack/runtime` + `@objectstack/rest` (commit/revert routes), `../cloud/service-ai-studio` (turn = commit; auto-commit policy; data-loss confirmation), `../objectui` (commit timeline + "revert to here")
@@ -76,7 +76,7 @@ The server owns commit assembly — the model never constructs it. `apply_bluepr
 
 All metadata writes in a turn execute inside **one `engine.transaction()`**; any failure rolls the whole commit back — no half-built app, no orphan rows, no partial visibility flip. This replaces `publishPackageDrafts`'s per-item best-effort loop with a turn-spanning transaction (the per-item `withTxn` composes into it). The visibility flip (ADR-0045 `hidden:false`) is part of the same transaction — never "some apps visible, some not."
 
-*Driver caveat*: in-memory drivers have no real transaction (`withTxn` no-ops); atomicity is a SQL-driver guarantee. Production is SQL; document the gap, don't paper over it.
+*Driver caveat*: in-memory drivers have no real transaction (`withTxn` no-ops); atomicity is a SQL-driver guarantee. Production is SQL; document the gap, don't paper over it. *(Scope amended 2026-11-12 — see the Amendment of that date at the end.)*
 
 ### D3 — Rollback is first-class and append-only
 
@@ -125,7 +125,7 @@ The **mechanism** — commit grouping, turn-atomic apply, `revertCommit` / `roll
 - **Governance is untouched.** Governed orgs keep approval by policy; the change is purely in the default self-use path.
 
 **Costs**
-- Turn-atomicity is a **SQL-driver** guarantee; in-memory loses it (documented, acceptable).
+- Turn-atomicity is a **SQL-driver** guarantee; in-memory loses it (documented, acceptable). *(Scope amended 2026-11-12 — see the Amendment of that date at the end.)*
 - Revert safety **depends on soft-delete discipline** — any path that hard-drops on a non-discard operation breaks the model; needs a test guard.
 - **Schema migration**: `commit_id` on history + the `sys_metadata_commit` grouping row.
 - The **timeline UI** is net-new (but replaces, not adds to, the publish-card/changes-panel surface).
@@ -222,3 +222,130 @@ including the one path the same-origin gate declines to judge (handles the
 engine never opened and cannot attribute). **Implemented in**
 `packages/objectql/src/engine.ts`; pinned by
 `engine-transaction-same-origin.test.ts`.
+
+---
+
+## Amendment (2026-11-12, #32396 / #32480) — Decision-2's atomicity holds where the engine can roll back; elsewhere a package publish is judged first and undone by compensation, best effort
+
+Decision-2's design — one `engine.transaction()` around every promotion and the
+commit record — is **unchanged**. What is amended is the scope of its promise.
+D2's *Driver caveat* and the first line of *Costs* drew that scope by driver
+family: "atomicity is a SQL-driver guarantee", "Production is SQL". The line is
+not there. A SQL driver can be unable to roll back, a production deployment can
+run on one, and #32396 was the half-land this record says cannot happen: a
+package of eleven drafts, the ninth refused, the first eight live under a
+response that said nothing took effect.
+
+### The scope is "this runtime can roll back", not "this driver is SQL"
+
+"A commit cannot half-land" holds where `engineCanRollBack(engine)`
+(`@objectstack/core`) answers yes: the engine has `transaction()`, and its
+default driver has `beginTransaction` and does not declare
+`supports.transactionsUnsupported` (`driverSupportsTransactions`,
+`@objectstack/spec`). Where the engine exposes no driver registry to inspect,
+the engine-level probe is all the gate has. On a runtime that passes, D2 reads
+exactly as written.
+
+Where the gate answers no, `engine.transaction()` still exists and still runs
+its callback — with no transaction and no rollback. That is the degrade
+ADR-0119 D1 declares (and D1-R4 lets a caller refuse), not a fault in the
+engine. The fault was a caller reading the method's presence as atomicity,
+which is what the publish door did.
+
+Which runtimes those are, read from the code on `main` at `e765a092d` — a
+reading of that date, not part of the decision:
+
+- **`driver-turso` on its remote transport.** `TursoDriver` extends `SqlDriver`
+  and declares `transactionsUnsupported` when `transportMode === 'remote'`; its
+  local and embedded-replica modes do not. This is the case the original caveat
+  missed: SQL, a production shape, and no rollback.
+- **`driver-odata`**, which declares it unconditionally.
+- **Any default driver with no `beginTransaction`, and any engine with no
+  `transaction()`** — a foreign engine, a test double.
+
+**The in-memory driver is not on that list.** The original caveat named it
+("in-memory drivers have no real transaction"), and that is not what the code
+shows today: `driver-memory` implements `beginTransaction` / `commit` /
+`rollback` by snapshotting the store and restoring the snapshot, declares no
+`transactionsUnsupported`, and the gate answers yes for it. The driver half is
+pinned by `memory-driver.test.ts` ("should rollback a transaction"); the engine
+half was measured at the same commit by a one-time probe, not kept as a test:
+on ObjectQL over `InMemoryDriver`, a transaction that inserted two
+rows and then threw left none of them, with `owned: true`; the same driver made
+to declare `transactionsUnsupported` left both. What it rolls back is the whole
+store, to its state at `begin` — a rollback, without the isolation a SQL
+transaction gives.
+
+### What a package publish does where the engine cannot roll back (#32396, PR #32454)
+
+`publishPackageDrafts` now asks that gate instead of
+`typeof engine.transaction === 'function'`. Where it answers yes nothing
+changed. Where it answers no:
+
+1. **Every draft is judged before any is written.** A first pass runs each
+   draft's promotion in judge-only mode. A draft the publish-time gate refuses
+   — the class #32396 hit — refuses the batch with no draft promoted. (The
+   refusal itself is still recorded in the audit trail.)
+2. **Then the drafts are promoted, each judged again** against the store as the
+   earlier promotions left it, and the commit is recorded.
+3. **A failure the first pass could not see is undone by compensation** — a
+   refusal that only the earlier promotions provoke, a draft saved in between,
+   a store fault. Every promotion already made is undone, newest first: the
+   active row is removed when the publish created it and restored to its prior
+   version when the publish edited it, and the draft the promotion consumed is
+   put back as the pending draft, byte for byte. Each undo appends its own
+   history events, as a Decision-3 revert does, so the log records a publish
+   that was undone rather than nothing.
+4. **An undo that fails is named.** One item's failure does not stop the others
+   from being undone. An item that could not be undone is reported in
+   `failed[]` as live, without the `BATCH_ABORTED` code that means "not
+   published"; and it is logged at `error` with the fix. The refusal's audit
+   note names it too, but only when the refusal has an identifiable causal
+   item: that audit row is written per causal item, and a failure outside any
+   one promotion — the commit record failing after every promotion — has
+   none.
+
+### That is best effort, not atomicity
+
+Compensation is not a transaction, and this record says where it falls short
+rather than leaving it to be discovered:
+
+- **A process that stops between a promotion and its undo leaves that
+  promotion live.** The list of what to undo is held by the publishing call
+  itself; nothing durable records that an undo is owed, and nothing retries one.
+- **An undo is a write, and a write can fail.** The item then stays live — named
+  in the response and the log, and in the audit note only where the refusal
+  has a causal item, as above.
+- **There is no isolation.** Between a promotion and its undo the store holds
+  the promoted row. The publishing runtime's registry does not serve it —
+  registry refresh is a Phase-2 side effect, which a refused batch never
+  reaches.
+- **One promotion is itself more than one write** (the active row, then its
+  history row), and the per-item `withTxn` degrades the same way. A promotion
+  the store left half-written threw, so it is not among the promotions the undo
+  walks.
+
+So on a runtime that cannot roll back, this record's "a commit cannot
+half-land" (TL;DR 2, the status line), D2's "no half-built app, no orphan
+rows", and the gain "The half-land class dies" read as: a batch refused at
+judgement writes nothing; a batch that fails mid-promotion is put back, unless
+the process stops first or an undo fails — and a failed undo is named.
+
+### What this amendment does not decide
+
+- **Whether the remote Turso transport gets real transactions** is open on
+  #32481. Nothing here assumes either answer. The scope above is written
+  against the gate, not against a list of drivers, so the list is the part
+  that would move.
+- **It describes the package-publish door only** — the one PR #32454 changed.
+  It makes no statement about Decision-3's revert doors or about any other
+  caller of `engine.transaction()`.
+
+**Decided by**: the maintainer, 2026-11-12, on #32480 (option A — amend this
+record; no historical text is rewritten). **Mechanism**: ADR-0119 D1, the
+declared no-rollback degrade, and its D1-R4. **Implemented in**
+`packages/metadata-protocol/src/protocol-history-and-publish.ts`
+(`publishPackageDrafts`, `undoLandedPromotions`) by PR #32454 (`976770ccb3`);
+the gate is `engineCanRollBack` in
+`packages/core/src/utils/migration-journal.ts`. Pinned by
+`protocol-publish-drafts-all-or-nothing.test.ts`.

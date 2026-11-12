@@ -15,13 +15,33 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *
  * Read-state is **not** stored here — it lives in `sys_notification_receipt`
  * (ADR-0030), so cross-channel read semantics stay reachable. `notification_id`
- * links back to the event; `delivery_id` links to the outbox row (P1).
+ * links back to the event (FK → `sys_notification`); `delivery_id` was meant to
+ * link the outbox row (FK → `sys_notification_delivery`), but no writer sets it
+ * on an inbox row today, so it is always empty.
+ *
+ * [#32444] Engine-owned, like its siblings `sys_notification`,
+ * `sys_notification_receipt`, `sys_notification_delivery` and
+ * `sys_http_delivery`. ADR-0030's single ingress: "No producer writes an
+ * inbox/materialization row directly." The generic New/Edit door broke that:
+ * a row written through it carries no `notification_id`, so read-state (keyed
+ * by the event) can never be recorded for it and it stays unread until its
+ * TTL. Two halves close the door, the same pair the siblings declare:
+ *   - `managedBy: 'engine-owned'` resolves every write affordance to `false`
+ *     (the console offers no New/Edit/Delete) and makes the security plugin's
+ *     ADR-0103 write guard refuse a user-context engine write;
+ *   - `enable.apiMethods: ['get', 'list']` answers the REST data door's
+ *     create/update/delete with `405 OBJECT_API_METHOD_NOT_ALLOWED`.
+ * The one writer, the inbox channel, writes under `isSystem` and is unaffected.
+ * Consequence carried with the bucket: these rows outlive an organization
+ * delete (they no longer make it refuse), as the siblings' rows already do.
  */
 export const InboxMessage = ObjectSchema.create({
     name: 'sys_inbox_message',
     label: 'Inbox Message',
     pluralLabel: 'Inbox Messages',
     icon: 'inbox',
+    // [#32444] Engine-owned: written only by the inbox channel (see above).
+    managedBy: 'engine-owned',
     // ADR-0057: user-facing but ephemeral — expires with the pipeline's 90d
     // window, enforced by the platform LifecycleService.
     lifecycle: {
@@ -63,22 +83,33 @@ export const InboxMessage = ObjectSchema.create({
             searchable: true,
         }),
 
+        // FK → `sys_notification`: the event this row materializes. Read-state
+        // is keyed by it (`sys_notification_receipt`), so a row without one
+        // can never be marked read.
         notification_id: Field.text({
             label: 'Notification Event',
             searchable: true,
-            description: 'FK → sys_notification (the L2 event this row materializes)',
+            description:
+                'The notification this message delivers. Marking the message read records it against this notification.',
         }),
 
+        // FK → `sys_notification_delivery` (the outbox row). No writer sets it
+        // on an inbox row: the inbox channel writes `delivery_id: null` on the
+        // RECEIPT only and omits it here, so the column is always empty.
         delivery_id: Field.text({
             label: 'Delivery',
-            description: 'FK → sys_notification_delivery (outbox row); null until P1',
+            description: 'The delivery record of this message. Not filled in for in-app messages.',
         }),
 
+        // Same semantics as `sys_notification.actor_id`: the mentioner or
+        // assigner. It is not a sender: a client compares it to the current
+        // user to suppress its own receipts locally. Null on a digest row by
+        // construction (a collapsed group has no single actor).
         actor_id: Field.lookup('sys_user', {
-            label: 'Actor',
+            label: 'Triggered By',
             required: false,
             description:
-                'User who caused the event (mentioner, assigner) — same semantics as sys_notification.actor_id. Lets a client suppress its own receipts with a purely local comparison. Null on a digest row by construction: a collapsed group has no single actor.',
+                'The person whose action raised this notification, for example who mentioned or assigned the recipient. Empty when the message groups several notifications.',
         }),
 
         topic: Field.text({
@@ -122,5 +153,12 @@ export const InboxMessage = ObjectSchema.create({
             description:
                 'The catalog keys and params the title and body were rendered from at delivery. A read re-renders the title and body from them in the reader\'s language; null when the notification carried no keys, and the stored title and body are then served as written.',
         }),
+    },
+
+    enable: {
+        // [#32444, ADR-0103] Engine-owned: written only by the inbox channel
+        // under `isSystem`, never via the generic data API. Reads stay open
+        // (the owner's own rows through the `_self` RLS policy).
+        apiMethods: ['get', 'list'],
     },
 });
