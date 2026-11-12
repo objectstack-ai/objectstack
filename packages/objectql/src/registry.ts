@@ -8794,8 +8794,9 @@ export class SchemaRegistry {
    * it naming both). A row that declares an addition's package as its base is
    * still that package's. When the count would read an undeclared row of
    * another shared pair (a binding that waits on that pair's own count), the
-   * row binds to no package (epic seat 1's ruling; #32561 carries the shapes
-   * where the exact read answers otherwise).
+   * row binds to no package (epic seat 1's ruling). The exact read adopts
+   * this binding ({@link overlayRowBinding}, #32561), so it never serves such
+   * a row on a package's address.
    *
    * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
    * `pairId` customizes: the row keeps the per-package reading of
@@ -8845,11 +8846,11 @@ export class SchemaRegistry {
    * declaring the holder, an App's own pair row (#28390 ruling A), a
    * per-package pair's row, the holder's own stored row. The undeclared rows
    * of `pairId`, the pair this arm decides, are left out, since the members
-   * they add are what it answers (the accepted residual, #32561). An
+   * they add are what it answers (the exact read adopts the answer, #32561). An
    * undeclared row of ANOTHER shared pair would make this count wait on that
    * pair's, which may wait on this one: then `owners` is answered whole, so
-   * the row binds to no package (never a guess; epic seat 1's ruling, the
-   * shapes where the exact read answers otherwise carried by #32561). An
+   * the row binds to no package (never a guess; epic seat 1's ruling, which
+   * the exact read adopts, #32561). An
    * addition that ships the member `row` is ITS member too, so it stays an
    * owner: the row may customize that package's member, and two owners bind
    * it to no package. `owners` unchanged for a type that is no bundle, or with

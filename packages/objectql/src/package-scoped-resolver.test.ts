@@ -612,7 +612,7 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
       ...body('email_template', 'welcome', 'bpair'), locale: 'fr-FR', _packageId: `${B}.custom`, _provenance: 'org',
     }, 'name' as never);
     pairRow('email_template', 'welcome', 'pair', undefined, 'es-ES');
-    // Each pair's row would wait on the other pair's count, so neither binds (the exact read serves both: #32561).
+    // Each pair's row would wait on the other pair's count, so neither binds (the exact read adopts this, #32561: `package-scoped-exact-qualifier.test.ts`).
     expect(registry.getPackageScopedItem('email_template', 'welcome', P, 'fr-FR')).toBeUndefined();
     expect([templateOf(U, 'es-ES'), templateOf(Y, 'es-ES')]).toEqual([undefined, undefined]);
     expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'es-ES')).toBeUndefined();

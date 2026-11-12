@@ -903,8 +903,9 @@ describe('[#31699 F2] a pair member row two holders could own is refused on both
       registry.registerItem('email_template', {
         name: 'welcome', label: 'pair fr-FR', locale: 'fr-FR', subject: 'pair fr-FR', bodyHtml: '<p>p</p>', overrides: { package: X }, _packageId: PAIR, _provenance: 'org',
       }, 'name' as never);
+      expect(registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', X, 'fr-FR')?.label).toBe('pair fr-FR');
       expect(labelOf(await read(X, 'fr-FR'))).toBe('pair fr-FR');
-      expect(labelOf(await read(Z, 'fr-FR'))).toBe('zeta fr-FR');
+      expect(labelOf(await read(PAIR, 'fr-FR'))).toBe('pair fr-FR');
     });
 
     it('NARROWING — an undeclared row while another App\'s pair stores an undeclared row of the name: neither address serves it, as the registry binds neither (residual 2, contract review F6; BASE at 075fb3188: `?package=Y` served es-ES, `?package=P` fr-FR)', async () => {
