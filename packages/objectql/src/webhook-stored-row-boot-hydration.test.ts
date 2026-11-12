@@ -54,10 +54,11 @@ async function hydrate(ids: string[], rows: Array<{ packageId: string | null; ur
         metadata: JSON.stringify(hook(r.url)),
     }));
     const engine: any = {
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
             const where = opts?.where ?? {};
-            return stored.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || (r as any)[k] === v));
+            const rows = stored.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || (r as any)[k] === v));
+            return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
         },
         async findOne(object: string, query?: EngineFindOneQueryInput) {
             assertEngineFindOnePredicate(object, query);
@@ -87,7 +88,7 @@ describe('a stored webhook row at boot: loadMetaFromDb registers it in its own h
             expect([got.holders, got.environment, got.slots], String(packageId)).toEqual([[A], undefined, { [A]: 'https://stored.example/row' }]);
         }
         // The boot census names the sealed residue row (ADR-0131 D6).
-        expect(warn.mock.calls.some(([msg]) => String(msg).includes('metadata_sealed_overlay_unserved'))).toBe(true);
+        expect(warn.mock.calls.some((call: unknown[]) => String(call[0]).includes('metadata_sealed_overlay_unserved'))).toBe(true);
     });
 
     for (const order of [[A, B], [B, A]]) {
