@@ -561,6 +561,21 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
   });
 
+  it('CONTROL — two real holders (two independent Apps, no shared pair) still refuse the bare read naming both, with or without a pair row beside them', () => {
+    install(A);
+    install(B);
+    ship('page', 'home', A);
+    ship('page', 'home', B);
+    const refusedNamingBoth = {
+      status: 'refused', reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+    };
+    expect(resolve('page', 'home')).toMatchObject(refusedNamingBoth);
+    registry.registerItem('page', { ...body('page', 'home', 'alpha-pair'), _packageId: `${A}.custom`, _provenance: 'org' }, 'name' as never);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([A, B]);
+    expect(resolve('page', 'home')).toMatchObject(refusedNamingBoth);
+  });
+
   it('CONTROL — the App\'s own address keeps #28390 ruling A: an unbound row of its pair is the App\'s, beside a package of the App', () => {
     ship('page', 'home', APP);
     ship('page', 'home', X);
