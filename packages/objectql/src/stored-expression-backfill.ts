@@ -379,7 +379,7 @@ async function computePage(
  * stored and the values the write computes there: the patch, whether it holds
  * a hole or a stale value, and whether a field that does not evaluate there
  * holds a value the write would erase. The walk and the re-check of a moved
- * row ({@link writeUnlessMovedSince}) judge a row by this one predicate.
+ * row ({@link fillRowUnlessMovedSince}) judge a row by this one predicate.
  */
 interface RowVerdict {
   patch: Record<string, unknown>;
@@ -482,7 +482,7 @@ type RowRejudge = (row: Record<string, unknown>) => Promise<RowVerdict>;
  * and is written unconditionally. Runs inside the caller's retry: a
  * `CONCURRENT_UPDATE` is an answer, never retried.
  */
-async function writeUnlessMovedSince(
+async function fillRowUnlessMovedSince(
   engine: StoredExpressionBackfillEngine,
   object: string,
   id: unknown,
@@ -492,7 +492,7 @@ async function writeUnlessMovedSince(
   changed: boolean,
   onStampUnmatched: () => void,
 ): Promise<RowLanding> {
-  const first = await writeOnce(engine, object, id, patch, stamp, onStampUnmatched);
+  const first = await writeUnlessMovedSince(engine, object, id, patch, stamp, onStampUnmatched);
   if (first.kind === 'written') return { kind: 'written', fields: Object.keys(patch), computedElsewhere: [] };
   if (first.kind === 'gone') return { kind: 'moved', fields: Object.keys(patch) };
   const verdict = await rejudge(first.row);
@@ -505,7 +505,7 @@ async function writeUnlessMovedSince(
     };
   }
   const nextStamp = isBlank(first.row.updated_at) ? undefined : first.row.updated_at;
-  const second = await writeOnce(engine, object, id, verdict.patch, nextStamp, onStampUnmatched);
+  const second = await writeUnlessMovedSince(engine, object, id, verdict.patch, nextStamp, onStampUnmatched);
   if (second.kind === 'written') {
     return {
       kind: 'written',
@@ -526,7 +526,7 @@ async function writeUnlessMovedSince(
  * re-read found when the precondition matched no row — `gone`, or `moved`
  * with the row as it stands. The same stamp read back is written unconditionally.
  */
-async function writeOnce(
+async function writeUnlessMovedSince(
   engine: StoredExpressionBackfillEngine,
   object: string,
   id: unknown,
@@ -663,7 +663,7 @@ export async function backfillStoredExpressions(
             // [#32527] The stamp the page read: the write keeps it, and is made only while the row still holds it.
             const stamp = hasUpdatedAt && !isBlank(row.updated_at) ? row.updated_at : undefined;
             const landed = await withTransientRetry(
-              () => writeUnlessMovedSince(engine, object, row.id, verdict.patch, stamp, rejudge, changed, onStampUnmatched),
+              () => fillRowUnlessMovedSince(engine, object, row.id, verdict.patch, stamp, rejudge, changed, onStampUnmatched),
               options.retry ?? {},
             );
             // Bumped AFTER the retry settles, never inside the retried closure.
