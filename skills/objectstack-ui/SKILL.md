@@ -139,10 +139,10 @@ Build an App with `App.create({...})` from
 
 ⛔ **At most one App per package** (ADR-0019 (app-as-consumer-unit) D3):
 `defineStack` refuses a second in a `type: 'app'` package. A suite (an app
-package plus its modules) may surface more: a `type: 'module'` package may
+package plus its modules) may surface more apps: a `type: 'module'` package may
 carry its own app, served under the module's package id and gone when the
-module is disabled. Audiences sharing one product and its objects are
-`requiredPermissions`-gated groups **inside** one app instead.
+module is disabled. Audiences sharing one product and its objects stay
+`requiredPermissions`-gated groups **inside** one app.
 
 Who sees an app (`tabPermissions`) and who may open it (app
 `requiredPermissions`): [Navigation](./rules/navigation.md#who-sees-or-opens-an-app).
