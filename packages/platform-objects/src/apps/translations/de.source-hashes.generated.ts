@@ -133,6 +133,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_metadata_commit.pluralLabel": "20e7caa05a2b0373",
   "objects.sys_metadata_history.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata_history.fields.name.label": "5274417ff1ccaf01",
+  "objects.sys_metadata_history.fields.package_id.label": "cf01d56712075feb",
   "objects.sys_metadata_history.fields.version.label": "b74a37c0879ec50e",
   "objects.sys_migration.fields.details.label": "974694e5c164374e",
   "objects.sys_notification.fields.severity.options.info": "592615dc5222c9a4",

@@ -163,6 +163,16 @@ function slotIdentityOf(type: string, name: string, data: unknown): string {
   return owner === undefined ? name : `${owner}${OWNER_SEPARATOR}${name}`;
 }
 
+/**
+ * [#32351 S4] The store key of the environment's (package-less) item of
+ * `(type, name, data)`: the bare slot, whoever else holds the name. A write
+ * addressed to the environment goes here, where {@link storeWriteKey} would
+ * file a package-less body under the name's one package slot.
+ */
+export function environmentStoreKey(type: string, name: string, data: unknown): string {
+  return slotIdentityOf(type, name, data);
+}
+
 /** The identity a store key addresses: the key without its package. */
 export function keyIdentityOf(key: string): string {
   const at = key.indexOf(SLOT_SEPARATOR);
@@ -432,7 +442,7 @@ export function storeRowWriteKey(
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
-function isPackageCaller(packageId: string | null | undefined): packageId is string {
+export function isPackageCaller(packageId: string | null | undefined): packageId is string {
   return typeof packageId === 'string' && packageId !== '' && packageId !== OVERLAY_SENTINEL;
 }
 
@@ -545,6 +555,33 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
       const packageId = slotPackageOf(key);
       return packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId };
     }),
+  };
+  throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+}
+
+/**
+ * [ADR-0150 D3/D4, #32351] Refuse a write that addresses `packageId` (the
+ * package a rollback names, or the package whose version it restores; `null`
+ * for the environment's package-less slot) when `store` holds no slot of
+ * `name` for it: no row is that holder's to write, and ⛔ never another
+ * holder's. The refusal names every slot the store holds, packages first, then
+ * the environment (the exact-qualifier door's order). The caller answers a
+ * name with no slot at all as its own miss and never asks this.
+ *
+ * @throws {PackageScopedNameRefusedError} always (`not-held-by-qualifier`).
+ */
+export function refuseSlotNotHeld(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string, packageId: string | null): never {
+  const holders = storeKeysNamed(store, type, name).map(slotPackageOf);
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'not-held-by-qualifier',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: packageId,
+    candidates: [
+      ...holders.filter((holder): holder is string => holder !== undefined).map((holder) => ({ kind: 'package' as const, packageId: holder })),
+      ...(holders.includes(undefined) ? [{ kind: 'environment' as const }] : []),
+    ],
   };
   throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
 }
