@@ -45,6 +45,7 @@ import type { StudioBaseCustomization } from './StudioPillarKit.js';
 import { formViewSectionsOf, withFormViewSections } from './formViewSections.js';
 import type { DraftSend } from './useDraftAutoSave.js';
 import { readAuthoredDraft } from './authoredDraft.js';
+import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 
 type Row = Record<string, unknown>;
 
@@ -150,13 +151,26 @@ export function useFormViewDraft({
   });
   // The package the installed buffer's draft read was asked at: the address its pin describes.
   const readAtRef = React.useRef<{ viewId: string; at: string } | null>(null);
+  // objectstack#32610 — a draft the in-tab copilot writes, or the discard its
+  // undo runs, is announced on the assistant bus; the view is re-read on it,
+  // held while the buffer carries an edit or a save not yet landed.
+  const held = buffer.dirty || saving;
+  const refreshNonce = useMetadataRefreshNonce(held);
+  const heldRef = React.useRef(held);
+  React.useLayoutEffect(() => {
+    heldRef.current = held;
+  });
+  // The view the installed buffer was read for: a re-read of that view on the pulse keeps it shown.
+  const loadedViewRef = React.useRef('');
 
   React.useEffect(() => {
     setFailure(null);
     if (!viewId) {
+      loadedViewRef.current = '';
       setBuffer({ for: '', row: null, dirty: false, hasDraft: false });
       return;
     }
+    const refreshOnly = loadedViewRef.current === viewId;
     let cancelled = false;
     (async () => {
       try {
@@ -191,7 +205,11 @@ export function useFormViewDraft({
         if (cancelled) return;
         const published = (lay as { effective?: unknown; code?: unknown } | null)?.effective ?? (lay as { code?: unknown } | null)?.code;
         const row = draft ?? (isRow(published) ? (stripReadDecorations(published) as Row) : null);
+        // An edit begun while a re-read on the pulse was in flight keeps its
+        // buffer; its save is pinned to the read it was made on.
+        if (refreshOnly && heldRef.current) return;
         recordRead('view', viewId, readAt, draftRead.pin);
+        loadedViewRef.current = viewId;
         readAtRef.current = { viewId, at: readAt };
         setBuffer({ for: `form-view:${viewId}`, row, dirty: false, hasDraft: !!draft });
       } catch (e) {
@@ -201,7 +219,7 @@ export function useFormViewDraft({
     return () => {
       cancelled = true;
     };
-  }, [client, viewId, packageId, publishNonce, reloadNonce, recordRead, customizing]);
+  }, [client, viewId, packageId, publishNonce, reloadNonce, refreshNonce, recordRead, customizing]);
 
   const loaded = buffer.for === targetKey && targetKey !== '';
   const row = loaded ? buffer.row : null;
