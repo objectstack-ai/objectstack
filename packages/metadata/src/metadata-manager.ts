@@ -76,7 +76,7 @@ import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
-import { DatabaseLoader } from './loaders/database-loader.js';
+import { DatabaseLoader, type MetadataHistoryAddress } from './loaders/database-loader.js';
 import { isAmbiguousMetadataStemError } from './loaders/ambiguous-metadata-stem.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isPackageCaller,
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
@@ -100,6 +101,7 @@ import {
   storeRemovalKeys,
   storeSlotKey,
   storeWriteKey,
+  environmentStoreKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -475,6 +477,89 @@ export interface MetadataManagerOptions extends MetadataManagerConfig {
   loaders?: MetadataLoader[];
   /** Optional IDataDriver instance. When provided alongside config.datasource, auto-configures DatabaseLoader. */
   driver?: IDataDriver;
+  /**
+   * [#32154] Set by a host that will hand this manager its own logger later,
+   * through {@link MetadataManager.useHostLogger}. Until it does, the manager's
+   * `debug` / `info` lines are HELD and then replayed through the host's
+   * logger, so they follow the host's level (a boot at `warn` prints none of
+   * them, `OS_LOG_LEVEL=info` prints them all); `warn` and above print at
+   * once, as they always have. `MetadataPlugin` sets it and hands over the
+   * kernel's logger in `init()`. Without it, the manager logs through its own
+   * `info` logger exactly as before.
+   */
+  awaitHostLogger?: boolean;
+}
+
+/** [#32154] How many `debug` / `info` lines a manager holds while it waits for its host's logger. */
+const HELD_CHATTER_CAP = 200;
+
+/**
+ * [#32154] The manager's logger: ONE object for the manager's lifetime, so the
+ * loaders and the endpoint matcher it is handed to at construction follow the
+ * host's logger too once {@link HostFollowingLogger.adopt} switches the target.
+ *
+ * Why it exists: `MetadataPlugin` builds its manager in its own constructor,
+ * before any kernel exists, and `NodeMetadataManager` registers its
+ * filesystem loader in ITS constructor, so `Registered metadata loader: …`
+ * was written by a logger fixed at `info` before any host level could reach
+ * it, and printed into every quiet (`warn`) boot. The host's logger first
+ * reaches the manager in `MetadataPlugin.init()`.
+ *
+ * ⛔ `warn`, `error` and `fatal` are never held: a line that matters prints
+ * when it happens, even if no host ever arrives. Only chatter waits, bounded
+ * by {@link HELD_CHATTER_CAP}; what overflowed is counted on the replay.
+ */
+class HostFollowingLogger implements Logger {
+  private target: Logger;
+  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined = [];
+  private overflowed = 0;
+
+  constructor(initial: Logger) {
+    this.target = initial;
+  }
+
+  /** Send every later line to `host`, after replaying the held chatter through it. */
+  adopt(host: Logger): void {
+    this.target = host;
+    const held = this.held ?? [];
+    this.held = undefined;
+    for (const line of held) host[line.level](line.message, line.meta);
+    if (this.overflowed > 0) {
+      host.debug(`MetadataManager: ${this.overflowed} earlier debug/info line(s) were not kept while waiting for the host logger`);
+      this.overflowed = 0;
+    }
+  }
+
+  debug(message: string, meta?: Record<string, any>): void {
+    this.chatter('debug', message, meta);
+  }
+
+  info(message: string, meta?: Record<string, any>): void {
+    this.chatter('info', message, meta);
+  }
+
+  warn(message: string, meta?: Record<string, any>): void {
+    this.target.warn(message, meta);
+  }
+
+  error(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.target.error(message, error, meta);
+  }
+
+  fatal(message: string, error?: Error, meta?: Record<string, any>): void {
+    if (this.target.fatal) this.target.fatal(message, error, meta);
+    else this.target.error(message, error, meta);
+  }
+
+  private chatter(level: 'debug' | 'info', message: string, meta?: Record<string, any>): void {
+    if (this.held === undefined) {
+      this.target[level](message, meta);
+    } else if (this.held.length < HELD_CHATTER_CAP) {
+      this.held.push({ level, message, meta });
+    } else {
+      this.overflowed++;
+    }
+  }
 }
 
 /**
@@ -520,6 +605,8 @@ export class MetadataManager implements IMetadataService {
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
+  /** [#32154] Under `awaitHostLogger`, the object {@link logger} is built as; {@link useHostLogger} switches its target. */
+  private readonly hostFollowingLogger: HostFollowingLogger | undefined;
   protected watchCallbacks = new Map<string, Set<WatchCallback>>();
   protected config: MetadataManagerOptions;
 
@@ -745,7 +832,12 @@ export class MetadataManager implements IMetadataService {
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
-    this.logger = createLogger({ level: 'info', format: 'pretty' });
+    const ownLogger = createLogger({ level: 'info', format: 'pretty' });
+    // [#32154] Under `awaitHostLogger`, a logger that holds the chatter until
+    // the host hands over its own (see `HostFollowingLogger`,
+    // `useHostLogger`); otherwise its own `info` logger, exactly as before.
+    this.hostFollowingLogger = config.awaitHostLogger === true ? new HostFollowingLogger(ownLogger) : undefined;
+    this.logger = this.hostFollowingLogger ?? ownLogger;
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
     // covering overlapping but non-identical event sets — both are kept:
@@ -951,6 +1043,24 @@ export class MetadataManager implements IMetadataService {
     this.logger.info(`Registered metadata loader: ${loader.contract.name} (${loader.contract.protocol})`);
   }
 
+  /**
+   * [#32154] Log through the host's logger from now on, so every line of this
+   * manager (and of the loaders and matcher it handed its logger to) follows
+   * the host's level. The `debug` / `info` lines held since construction
+   * under {@link MetadataManagerOptions.awaitHostLogger} are replayed through
+   * it first, in order. `MetadataPlugin.init()` calls it with the kernel's
+   * logger.
+   *
+   * On a manager built WITHOUT that option, the manager's own later lines go
+   * to `logger`, but a loader or the endpoint matcher handed the earlier
+   * logger at construction keeps it: a host that wants those to follow too
+   * sets `awaitHostLogger`.
+   */
+  useHostLogger(logger: Logger): void {
+    if (this.hostFollowingLogger) this.hostFollowingLogger.adopt(logger);
+    else this.logger = logger;
+  }
+
   // ==========================================
   // IMetadataService — Core CRUD Operations
   // ==========================================
@@ -1085,9 +1195,9 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` the item's package slot), dropping any key the write
    * replaces. Whether an item was replaced — the `added` / `changed` split.
    */
-  private writeRegistryEntry(type: string, name: string, data: unknown): boolean {
+  private writeRegistryEntry(type: string, name: string, data: unknown, slot?: string): boolean {
     let typeStore = this.registry.get(type);
-    const { key, replaces } = storeWriteKey(typeStore, type, name, data);
+    const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
@@ -1790,12 +1900,23 @@ export class MetadataManager implements IMetadataService {
    *    slot and the precedence above decides between them, as the bare-name
    *    map did;
    *  - an item that carries none, under a name no package holds, is the
-   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *    environment's own (D1 bucket 4) and fills the environment's slot;
+   *  - [#31700] an item that carries none, under a name TWO or more packages
+   *    hold here (packages of different namespaces, since the API narrowed to
+   *    one holder per namespace), is a customization of no one holder: none is
+   *    picked, so it fills the environment's slot. The store's write rule
+   *    puts the same row there ({@link storeWriteKey}: a package-less write of
+   *    a name two packages hold lands in the bare slot), so the index and the
+   *    store agree on what that row is.
    *
-   * While phase 1 keeps one package holder per `api` name, every slot holds
-   * what the bare-name map held, so the index answers what it answered. No
-   * name is resolved here: a request carries no caller package, and the
-   * matcher keys its routes by METHOD + path (bucket 1).
+   * Each holder keeps its own slot, so two namespaces' same-named APIs are
+   * both indexed. They cannot claim one route between them: the publish gate
+   * requires each path under `/api/v1/apps/<namespace>/`, so their paths
+   * differ by namespace. Only the environment's row can share a holder's
+   * METHOD + path, and the matcher's duplicate-claim rule decides that,
+   * announced at `error`. No name is resolved here: a request carries no
+   * caller package, and the matcher keys its routes by METHOD + path
+   * (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
     // [#32246] Every item a loader stores, each with the package the loader
@@ -4070,11 +4191,17 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get version history for a metadata item.
    * Returns a timeline of all changes made to the item.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` reads that package's versions only (`null`: the
+   * environment's, recorded under no package); naming none, a
+   * name more than one row slot holds is refused 409 naming every holder
+   * (`PackageScopedNameRefusedError`), and one holder answers as before.
    */
   async getHistory(
     type: string,
     name: string,
-    options?: MetadataHistoryQueryOptions
+    options?: MetadataHistoryQueryOptions & MetadataHistoryAddress
   ): Promise<MetadataHistoryQueryResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4088,12 +4215,20 @@ export class MetadataManager implements IMetadataService {
       limit: options?.limit,
       offset: options?.offset,
       includeMetadata: options?.includeMetadata,
+      packageId: options?.packageId,
     });
   }
 
   /**
    * Rollback a metadata item to a specific version.
    * Restores the metadata definition from the history snapshot.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` names whose row is restored, and the version must be
+   * that package's ("not found" otherwise). Naming none, the name's one row is
+   * restored; several are refused 409 naming every holder, and so is a version
+   * of a package that holds no row of the name (`not-held-by-qualifier`) —
+   * ⛔ never written into another package's row.
    */
   async rollback(
     type: string,
@@ -4102,7 +4237,7 @@ export class MetadataManager implements IMetadataService {
     options?: {
       changeNote?: string;
       recordedBy?: string;
-    }
+    } & MetadataHistoryAddress
   ): Promise<unknown> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4110,10 +4245,15 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the target version snapshot directly from the history table
-    const targetVersion = await dbLoader.getHistoryRecord(type, name, version);
+    const address = historyAddressOf(options);
+    const targetVersion = await dbLoader.getHistoryRecord(type, name, version, address);
 
     if (!targetVersion) {
-      throw new Error(`Version ${version} not found in history for ${type}/${name}`);
+      // [#32351 F1] An addressed read leaves out a version attributed to no
+      // package; on a name several row slots hold it is refused naming every
+      // holder, not answered "not found".
+      if (address !== undefined) await dbLoader.refuseUnattributedVersion(type, name, version);
+      throw new Error(`Version ${version} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!targetVersion.metadata) {
@@ -4129,11 +4269,24 @@ export class MetadataManager implements IMetadataService {
       restoredMetadata,
       version,
       options?.changeNote,
-      options?.recordedBy
+      options?.recordedBy,
+      address,
     );
 
-    // Update in-memory registry with the restored metadata
-    this.writeRegistryEntry(type, name, restoredMetadata);
+    // Update in-memory registry with the restored metadata. [#32351] A
+    // package's restored version that names no package itself (a package-less
+    // customization of that package's row) is filed under that package's slot,
+    // as the row it was written to is. [S4] One restored by the environment
+    // address is filed under the bare slot, as its row is, even when one
+    // package holds the name (the write rule would file it under that package's).
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (slotted && isPackageCaller(address?.packageId)) {
+      this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
+    } else if (slotted && address !== undefined) {
+      this.writeRegistryEntry(type, name, restoredMetadata, environmentStoreKey(type, name, restoredMetadata));
+    } else {
+      this.writeRegistryEntry(type, name, restoredMetadata);
+    }
 
     return restoredMetadata;
   }
@@ -4141,12 +4294,18 @@ export class MetadataManager implements IMetadataService {
   /**
    * Compare two versions of a metadata item.
    * Returns a diff showing what changed between versions.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` compares two of that package's versions ("not found"
+   * for another's); naming none, a name more than one row slot holds is
+   * refused 409 naming every holder.
    */
   async diff(
     type: string,
     name: string,
     version1: number,
-    version2: number
+    version2: number,
+    options?: MetadataHistoryAddress
   ): Promise<MetadataDiffResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4154,15 +4313,16 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the two version snapshots directly from the history table
-    const v1 = await dbLoader.getHistoryRecord(type, name, version1);
-    const v2 = await dbLoader.getHistoryRecord(type, name, version2);
+    const address = historyAddressOf(options);
+    const v1 = await dbLoader.getHistoryRecord(type, name, version1, address);
+    const v2 = await dbLoader.getHistoryRecord(type, name, version2, address);
 
     if (!v1) {
-      throw new Error(`Version ${version1} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version1} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v2) {
-      throw new Error(`Version ${version2} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version2} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v1.metadata || !v2.metadata) {
@@ -4186,6 +4346,21 @@ export class MetadataManager implements IMetadataService {
       summary,
     };
   }
+}
+
+/**
+ * [#32351] The package address a history door forwards to the database
+ * loader: only `packageId`, so the loader's answer never depends on what else
+ * the caller's options carry; `undefined` when none is named.
+ */
+function historyAddressOf(options?: MetadataHistoryAddress): MetadataHistoryAddress | undefined {
+  return options?.packageId === undefined ? undefined : { packageId: options.packageId };
+}
+
+/** [#32351] The "not found" message's address, for a by-package type read by address; empty otherwise. */
+function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): string {
+  if (address?.packageId === undefined || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return '';
+  return isPackageCaller(address.packageId) ? ` (package ${address.packageId})` : ' (environment)';
 }
 
 /**

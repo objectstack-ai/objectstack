@@ -3725,6 +3725,9 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "الإصدار"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "نوع العملية",
         options: {

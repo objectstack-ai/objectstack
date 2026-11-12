@@ -802,7 +802,11 @@ export class MetadataPlugin implements Plugin {
         this.manager = new NodeMetadataManager({
             rootDir,
             watch: effectiveWatch,
-            formats: ['yaml', 'json', 'typescript', 'javascript']
+            formats: ['yaml', 'json', 'typescript', 'javascript'],
+            // [#32154] The kernel's logger arrives in `init()`; until then the
+            // manager holds its debug/info lines and replays them through it,
+            // so they follow the boot's level.
+            awaitHostLogger: true,
         });
 
         // Initialize with default type registry
@@ -813,6 +817,9 @@ export class MetadataPlugin implements Plugin {
         // [#10772] Retained for `destroy()`, which the kernel calls with no
         // context. Assigned before anything that can throw.
         this.initCtx = ctx;
+        // [#32154] Every line of the manager follows the kernel's level from
+        // here, the lines it held since construction included.
+        this.manager.useHostLogger(ctx.logger);
         ctx.logger.info('Initializing Metadata Manager', {
             root: this.options.rootDir || process.cwd(),
             watch: this.options.watch,
