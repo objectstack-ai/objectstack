@@ -134,7 +134,9 @@ export type StoredReferenceRefusal = 'ambiguous' | 'environment-only' | 'outside
 export type ReferenceCandidate =
   | { readonly holder: 'package'; readonly packageId: string; readonly address: string }
   | { readonly holder: 'environment'; readonly address: string }
-  | { readonly holder: 'platform' };
+  | { readonly holder: 'platform' }
+  /** [#32412] A stack's residual (ADR-0130 D4); the registry's rule never names one, the job binder's refusal does. */
+  | { readonly holder: 'residual'; readonly ownerId: string };
 
 /** One stored row the rule refused. */
 export interface StoredReferenceFinding {
@@ -275,6 +277,7 @@ export function refusalOf(answer: PackageScopedResolution): StoredReferenceRefus
 function candidateOf(registry: StoredReferenceRegistry, holder: PackageScopedHolder, name: string): ReferenceCandidate {
   if (holder.kind === 'environment') return { holder: 'environment', address: `_env/${name}` };
   if (holder.kind === 'platform') return { holder: 'platform' };
+  if (holder.kind === 'residual') return { holder: 'residual', ownerId: holder.ownerId };
   const pkg = registry.getPackage(holder.packageId) as { manifest?: { namespace?: unknown } } | undefined;
   const namespace = typeof pkg?.manifest?.namespace === 'string' && pkg.manifest.namespace !== '' ? pkg.manifest.namespace : undefined;
   return { holder: 'package', packageId: holder.packageId, address: namespace ? `${namespace}/${name}` : `${holder.packageId}:${name}` };
