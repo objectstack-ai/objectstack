@@ -141,3 +141,120 @@ describe('registration: a flow with no start node is refused, naming the missing
         }
     });
 });
+
+/**
+ * Ruling 6810500711 (letter D): a flow that runs after a record change holds
+ * the save until it returns, so an outbound call it retries inline holds the
+ * save for the whole backoff ladder. Registration refuses that node, naming it
+ * and the background path; the durable node, the unretried node and every
+ * flow no save waits on register as before.
+ */
+describe('registration: an inline outbound call retried in an after-save flow is refused', () => {
+    const silent = () => loggerCapturing([]);
+    const http = (config: Record<string, unknown> = {}) => ({
+        id: 'push', type: 'http', label: 'Push',
+        config: { url: 'https://api.example.com/v1/tasks', method: 'POST', body: { id: 1 }, ...config },
+    });
+    const connector = () => ({
+        id: 'post_slack', type: 'connector_action', label: 'Post',
+        connectorConfig: { connectorId: 'slack', actionId: 'post_message', input: {} },
+    });
+    const flag = { id: 'flag', type: 'assignment', label: 'Flag', config: { failed: true } };
+    const guarded = (inner: unknown, maxRetries = 3, catchNodes: unknown[] = [flag]) => ({
+        id: 'guarded_push', type: 'try_catch', label: 'Push with retry',
+        config: {
+            retry: { maxRetries, backoffMs: 1000, backoffMultiplier: 2, maxRetryDelayMs: 10000 },
+            try: { nodes: [inner], edges: [] },
+            catch: { nodes: catchNodes, edges: [] },
+        },
+    });
+    const flowOf = (startConfig: Record<string, unknown> | undefined, step: unknown, extra: Record<string, unknown> = {}) => ({
+        name: 'sync', label: 'Sync', type: 'autolaunched', status: 'active',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start', ...(startConfig ? { config: startConfig } : {}) },
+            step,
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: (step as { id: string }).id },
+            { id: 'e2', source: (step as { id: string }).id, target: 'end' },
+        ],
+        ...extra,
+    });
+    const afterUpdate = { objectName: 'task', triggerType: 'record-after-update' };
+    const refusalOf = (flow: unknown): Error => {
+        try {
+            new AutomationEngine(silent()).registerFlow('sync', flow as never);
+        } catch (e) {
+            return e as Error;
+        }
+        throw new Error('control: registerFlow was expected to refuse this flow');
+    };
+    const registers = async (flow: unknown) => {
+        const engine = new AutomationEngine(silent());
+        engine.registerFlow('sync', flow as never);
+        return (await engine.getFlow('sync')) !== null;
+    };
+
+    it.each(['record-after-create', 'record-after-insert', 'record-after-update', 'record-after-delete', 'record-after-write'])(
+        '%s: an inline http node inside a retrying try_catch is refused, naming the node, the retry and the fix',
+        async (triggerType) => {
+            const engine = new AutomationEngine(silent());
+            const flow = flowOf({ objectName: 'task', triggerType }, guarded(http()));
+            expect(() => engine.registerFlow('sync', flow as never)).toThrow(/^Flow 'sync' rejected: 1 inline outbound call\(s\) retried on the save path/);
+            const message = refusalOf(flow).message;
+            expect(message).toContain("node 'push' (`http`)");
+            expect(message).toContain("`try_catch` 'guarded_push' (`retry.maxRetries: 3`)");
+            expect(message).toContain('Set `durable: true` on the node');
+            expect(await engine.getFlow('sync')).toBeNull();
+        },
+    );
+
+    it('the flow-level retry (`errorHandling.strategy: retry`) reaches an inline http node outside any try_catch', () => {
+        const flow = flowOf(afterUpdate, http(), { errorHandling: { strategy: 'retry', maxRetries: 2 } });
+        expect(refusalOf(flow).message).toContain("retried by the flow's `errorHandling` (`strategy: 'retry'`, `maxRetries: 2`)");
+    });
+
+    it('a retried connector_action is refused with its own fix: it has no background path', () => {
+        const message = refusalOf(flowOf(afterUpdate, guarded(connector()))).message;
+        expect(message).toContain("node 'post_slack' (`connector_action`)");
+        expect(message).toContain('Remove the retry around it, or run the flow on demand or on a schedule instead of after the save');
+        expect(message).toContain('fits only a call that needs no credential');
+    });
+
+    it('a token with surrounding blanks is judged as the record-change trigger reads it (trimmed)', () => {
+        const flow = flowOf({ objectName: 'task', triggerType: 'record-after-update ' }, guarded(http()));
+        expect(refusalOf(flow).message).toContain("(`record-after-update`)");
+    });
+
+    it('the flow-level retry also re-runs a try_catch catch region, so an inline call there is refused', () => {
+        const flow = flowOf(afterUpdate, guarded(flag, 0, [http()]), { errorHandling: { strategy: 'retry', maxRetries: 2 } });
+        expect(refusalOf(flow).message).toContain("node 'push' (`http`) calls an outside system inline and is retried by the flow's `errorHandling`");
+    });
+
+    it('a node nested deeper in the retried try region (a loop body) is refused too', () => {
+        const loop = {
+            id: 'each', type: 'loop', label: 'Each',
+            config: { collection: { dialect: 'cel', source: '[1, 2]' }, body: { nodes: [http()], edges: [] } },
+        };
+        expect(refusalOf(flowOf(afterUpdate, guarded(loop))).message).toContain("node 'push' (`http`)");
+    });
+
+    it('the same node with `durable: true` registers: queued on the outbox where one is wired', async () => {
+        expect(await registers(flowOf(afterUpdate, guarded(http({ durable: true }))))).toBe(true);
+        expect(await registers(flowOf(afterUpdate, http({ durable: true }), { errorHandling: { strategy: 'retry', maxRetries: 2 } }))).toBe(true);
+    });
+
+    it('control: an inline call that is not retried registers (`maxRetries: 0`, no retry, or in the catch region)', async () => {
+        expect(await registers(flowOf(afterUpdate, http()))).toBe(true);
+        expect(await registers(flowOf(afterUpdate, guarded(http(), 0)))).toBe(true);
+        expect(await registers(flowOf(afterUpdate, guarded(flag, 3, [http()])))).toBe(true);
+    });
+
+    it('control: a before-trigger, a scheduled, an api and a manual flow with the inline retried node register', async () => {
+        expect(await registers(flowOf({ objectName: 'task', triggerType: 'record-before-update' }, guarded(http())))).toBe(true);
+        expect(await registers(flowOf({ triggerType: 'api', secret: 'hook-secret' }, guarded(http())))).toBe(true);
+        expect(await registers(flowOf({ schedule: { type: 'cron', expression: '0 8 * * *' } }, guarded(http()), { type: 'schedule' }))).toBe(true);
+        expect(await registers(flowOf(undefined, guarded(http())))).toBe(true);
+    });
+});
