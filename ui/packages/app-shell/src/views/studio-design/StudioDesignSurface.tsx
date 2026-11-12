@@ -359,7 +359,16 @@ import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { ObjectPicker } from '../metadata-admin/inspectors/ObjectPicker.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { SuggestedBindingsPanel } from '../../components/SuggestedBindingsPanel.js';
-import { AppNavCanvas, navPayloadOf } from '../metadata-admin/previews/AppNavCanvas.js';
+import {
+  AppNavCanvas,
+  heldNavEntriesOf,
+  heldNavKey,
+  navPayloadOf,
+  readHeldNav,
+  withHeldNavEntries,
+  writeHeldNav,
+} from '../metadata-admin/previews/AppNavCanvas.js';
+import { ActiveOrganizationStorage } from '@object-ui/auth';
 import {
   FlowRegistrationContext,
   FlowRuntimeContext,
@@ -589,6 +598,19 @@ function publishRefusalKey(type: string, name: string): string {
 }
 
 const NO_PUBLISH_REFUSALS: ReadonlyMap<string, StudioRefusal> = new Map();
+
+/**
+ * The app document as the nav editor holds it: `body` with the entries this
+ * browser holds for the app at `packageId` (`HeldNavEntry`: an entry a nav save
+ * left out for want of a target) put back in their places. `body` itself when
+ * none is put back.
+ */
+function withHeldNav(body: Record<string, unknown>, packageId: string, appName: string): Record<string, unknown> {
+  const navigation = Array.isArray(body.navigation) ? (body.navigation as unknown[]) : [];
+  const held = readHeldNav(heldNavKey(ActiveOrganizationStorage.get(), packageId, appName));
+  const kept = withHeldNavEntries(navigation, held);
+  return kept === navigation ? body : { ...body, navigation: kept };
+}
 
 export interface StudioDesignSurfaceProps {
   /** Open-core slot — the cloud edition injects its AI copilot panel here. */
@@ -2745,7 +2767,11 @@ export function InterfacesPillar({
         // that sends the edit signals again, and that re-read installs. A
         // package switch replaces the buffer, as it always has.
         if (!isSameApp || !navCommittedRef.current.dirty) {
-          setAppDraft(body);
+          // The buffer is the document plus the entries this browser holds
+          // for it (an entry a save left out for want of a target), so the
+          // editor keeps showing them, marked incomplete. The baseline below
+          // stays the document as served.
+          setAppDraft(withHeldNav(body, navReadAt, name));
           setAppDraftFor(`app:${name}`);
           // objectui#11773 — the next nav save is pinned to what this read
           // served, unless it is the read-back of this pillar's own nav save
@@ -3613,6 +3639,10 @@ export function InterfacesPillar({
       }
       navEchoRef.current = publishNonce;
       navBaselineRef.current = saved;
+      // The entries this save left out for want of a target are held in this
+      // browser, in their places, so the next read of the app puts them back
+      // (`withHeldNav`); a save that leaves none out drops what was held.
+      writeHeldNav(heldNavKey(ActiveOrganizationStorage.get(), target, appName), heldNavEntriesOf(editorNav));
       setNavHasDraft(true);
       // The rail's mark reads the declaration the server now serves.
       if (entering) setServedNonce((n) => n + 1);
@@ -3796,7 +3826,9 @@ export function InterfacesPillar({
         // through the nav editor's own save, as an edit there would be: its
         // refusal shows in the canvas strip and keeps the buffer dirty, so the
         // leave guard holds and the next nav edit sends it again.
-        const base = navBaselineRef.current;
+        // The buffer as the load installed it: held entries included, so the
+        // save below keeps holding them.
+        const base = appName ? withHeldNav(navBaselineRef.current, packageId, appName) : navBaselineRef.current;
         const navigation = Array.isArray(base.navigation) ? (base.navigation as NavNode[]) : [];
         const entry = interfaceNavEntry(kind, name, label, navigation);
         const linked = { ...base, navigation: [...navigation, entry] };
