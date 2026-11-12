@@ -30,7 +30,9 @@
  *  - objectstack#29691: once the base object carries the pair's extension
  *    (published, or the first add), the object header says where it is saved
  *    ("Saved to HotCRM’s customizations"); before that, and on a writable
- *    package, it says nothing of the kind.
+ *    package, it says nothing of the kind;
+ *  - objectstack#32610: an extension draft the in-tab copilot writes is
+ *    re-read on the assistant bus's pulse, and its field shows in the Form.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -38,7 +40,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // Module scope as well as in the `vi.mock` factory below: the cold transform is paid
 // during collection, which no test or hook timeout clocks (AGENTS.md, flaky-test discipline).
 import '@object-ui/components';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -121,6 +123,7 @@ vi.mock('@object-ui/plugin-view', async (importOriginal) => {
 
 import { DataPillar, type StudioBaseCustomization } from './StudioDesignSurface';
 import { t, tFormat } from '../metadata-admin/i18n';
+import { emitMetadataRefresh } from '../../assistant/assistantBus';
 import { registerMetadataInspector } from '../metadata-admin/inspector-registry';
 import { ObjectFieldInspector } from '../metadata-admin/inspectors/ObjectFieldInspector';
 // The pinyin dictionary a Chinese label derives through, resident before any
@@ -493,5 +496,25 @@ describe('the object header says where a base object’s extension is saved (obj
     );
     await waitFor(() => expect(screen.getByTestId('records-panel')).toBeInTheDocument(), { timeout: 8000 });
     expect(savedTo()).toBeNull();
+  });
+});
+
+describe('a base object follows an extension draft the copilot writes (objectstack#32610)', () => {
+  it('the pair\'s extension is re-read on the pulse, and its field shows in the Form', async () => {
+    await renderBase();
+    await openForm();
+    expect(cardOf('Region')).toHaveLength(0);
+    const extensionDraftReads = () =>
+      (mockClient.getDraft.mock.calls as unknown as Array<[string, string]>).filter(([type]) => type === 'object_extension').length;
+    const before = extensionDraftReads();
+
+    // The copilot's tool stored an extension draft at the pair.
+    srv.draftExt = { extend: OBJECT, fields: { region__c: { type: 'text', label: 'Region' } } };
+    await act(async () => {
+      emitMetadataRefresh();
+    });
+
+    await waitFor(() => expect(cardOf('Region')).toHaveLength(1), { timeout: 8000 });
+    expect(extensionDraftReads()).toBe(before + 1);
   });
 });

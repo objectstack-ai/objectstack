@@ -251,8 +251,8 @@ describe('Data pillar field properties — a copilot write while the field is op
 
   it('CONTROL: a pulse during an unsent save is held — nothing is replaced until the save lands, then it is re-read', async () => {
     const rail = await openRail('Renewals', 'renewal_count');
-    let landSave: (value: unknown) => void = () => {};
-    mockClient.save.mockImplementationOnce(() => new Promise((resolve) => (landSave = resolve)));
+    let landSave: () => void = () => {};
+    mockClient.save.mockImplementationOnce(() => new Promise<object>((resolve) => (landSave = () => resolve({}))));
     const label = within(rail).getByTestId('field-label-input');
     fireEvent.change(label, { target: { value: 'Renewal total' } });
     fireEvent.blur(label);
@@ -271,7 +271,7 @@ describe('Data pillar field properties — a copilot write while the field is op
 
     // The author's save lands: the held pulse is released, not dropped.
     await act(async () => {
-      landSave({});
+      landSave();
     });
     // Only the pillar's load installs the drafted field; the save's own
     // verdict re-read (the other draft read here) installs no buffer.
