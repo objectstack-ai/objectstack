@@ -23,8 +23,7 @@ export const entry: SemanticMigration = {
     + 'package of the App as the base it customizes (overrides.package)',
   replacement:
     'Ship a locale of the template that the App ships too, so the package holds the name beside the App instead of '
-    + 'adding to the App\'s template; or rename the template in the package being installed. A row of the App\'s pair '
-    + 'that should customize the App\'s own template drops its overrides.package declaration, or declares the App.',
+    + 'adding to the App\'s template; or rename the template in the package being installed.',
   reason:
     'Before ADR-0150 D4 the registry read a row of an App\'s pair by the pair\'s base only, whatever the row '
     + 'declared, so a pair row of locale L declaring package X counted as the App\'s own member of the template. A '
