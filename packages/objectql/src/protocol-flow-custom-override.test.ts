@@ -583,22 +583,34 @@ describe('[#30065] a declared .custom action override is the packaged action, at
  * holder's live override as an unserved row to delete. Each is judged against
  * every shipper now (`someShipperOf`).
  *
+ * After the second holder's override is removed, every entry the list and the
+ * execution view carry for the name is its own package's, a package-less row
+ * of the name stored beside them, for a flow and for an object-less action.
+ *
  * CONTROLS: removing a stored row of a package that depends on both holders
  * and is the pair of neither keeps the refusal it had, and the census still
- * names such a row, in both orders. The one-holder answers are pinned above.
+ * names such a row, in both orders; with one holder, the removal, the revert
+ * and the census answer as before.
  */
 describe('[#32552] a pair\'s row of a name two namespaces hold is judged against its own base', () => {
     const ALPHA = 'com.example.alpha';
     const BETA = 'com.example.beta';
     const STRANGER = 'com.example.stranger';
+    /** An object-less action of one name, which two namespaces may each ship too. */
+    const SHARED = 'shared_close';
+    const sharedAction = (label: string, extra: Record<string, unknown> = {}) => ({
+        name: SHARED, label, type: 'script', body: { language: 'js', source: `return { ran: '${label}' };` }, ...extra,
+    });
     const holderManifest = (id: string, ns: string) => ({
         id, name: ns, version: '1.0.0', namespace: ns, type: 'app',
         objects: [{ name: `${ns}_task`, label: 'Task', sharingModel: 'private', fields: { title: { name: 'title', label: 'title', type: 'text' } } }],
         flows: [flowBody(`SHIPPED-${ns}`)],
+        actions: [sharedAction(`SHIPPED-${ns}`)],
     });
     const nsOf = (id: string) => id.split('.').pop()!;
 
-    async function bootTwo(first: string) {
+    /** The holders registered in `holders`' order, each with its pair and its pair's declared flow and action overrides. */
+    async function bootHolders(holders: readonly string[]) {
         const engine = new ObjectQL();
         const { driver, stores } = makeMemoryDriver();
         engine.registerDriver(driver, true);
@@ -607,9 +619,9 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
         for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
             engine.registry.registerObject(o as any, 'test-package');
         }
-        for (const id of first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA]) engine.registerApp(holderManifest(id, nsOf(id)));
+        for (const id of holders) engine.registerApp(holderManifest(id, nsOf(id)));
         const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
-        for (const base of [ALPHA, BETA]) {
+        for (const base of holders) {
             await (protocol as any).installPackage({
                 manifest: {
                     id: `${base}.custom`, name: `${nsOf(base)}-custom`, version: '0.1.0', type: 'app',
@@ -617,17 +629,22 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
                 },
             });
         }
-        // A package that depends on both holders and is the pair of neither.
+        // A package that depends on every holder and is the pair of none.
         await (protocol as any).installPackage({
-            manifest: { id: STRANGER, name: 'stranger', version: '0.1.0', type: 'app', dependencies: { [ALPHA]: '*', [BETA]: '*' } },
+            manifest: {
+                id: STRANGER, name: 'stranger', version: '0.1.0', type: 'app',
+                dependencies: Object.fromEntries(holders.map((id) => [id, '*'])),
+            },
         });
-        // Each holder's pair declares its own override, through the save door.
-        for (const base of [ALPHA, BETA]) {
-            await protocol.saveMetaItem({
-                type: 'flow', name: FLOW, item: flowBody(`OVERRIDE-${nsOf(base)}`, { overrides: { package: base, basedOn: '1.0.0' } }),
-                mode: 'draft', packageId: `${base}.custom`,
-            } as any);
-            await protocol.publishMetaItem({ type: 'flow', name: FLOW, packageId: `${base}.custom` } as any);
+        // Each holder's pair declares its own overrides, through the save door.
+        for (const base of holders) {
+            for (const [type, name, body] of [['flow', FLOW, flowBody], ['action', SHARED, sharedAction]] as const) {
+                await protocol.saveMetaItem({
+                    type, name, item: body(`OVERRIDE-${nsOf(base)}`, { overrides: { package: base, basedOn: '1.0.0' } }),
+                    mode: 'draft', packageId: `${base}.custom`,
+                } as any);
+                await protocol.publishMetaItem({ type, name, packageId: `${base}.custom` } as any);
+            }
         }
         const active = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
             .filter((r) => r.type === 'flow' && r.name === FLOW && r.state === 'active')
@@ -635,6 +652,7 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
         const labelAt = async (packageId: string) => (await read(protocol, packageId)).label;
         return { engine, protocol, active, labelAt };
     }
+    const bootTwo = (first: string) => bootHolders(first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA]);
 
     for (const first of [ALPHA, BETA]) {
         for (const target of [ALPHA, BETA]) {
@@ -706,5 +724,67 @@ describe('[#32552] a pair\'s row of a name two namespaces hold is judged against
             expect(named[0]).toContain(`flow×1 (${FLOW})`);
         });
 
+
+        it(`${nsOf(first)} registered first: after the second holder's override is removed, every listed flow and action is its own package's, beside a package-less row of the name`, async () => {
+            const { engine, protocol } = await bootTwo(first);
+            const second = first === ALPHA ? BETA : ALPHA;
+            for (const [type, name, body] of [['flow', FLOW, flowBody], ['action', SHARED, sharedAction]] as const) {
+                // A package-less row of the name, laid down by the store's own write.
+                await engine.insert('sys_metadata', {
+                    type, name, organization_id: null, package_id: null, metadata: JSON.stringify(body('PACKAGE-LESS')), state: 'active', version: 1,
+                }, { context: { isSystem: true } });
+                const removed: any = await protocol.deleteMetaItem({ type, name, packageId: `${second}.custom` } as any);
+                expect(removed.success, type).toBe(true);
+                for (const face of ['served', 'execution'] as const) {
+                    const res: any = face === 'served'
+                        ? await protocol.getMetaItems({ type })
+                        : await (protocol as any).getMetaItemsForExecution({ type });
+                    const entries = (res.items as any[]).filter((i) => i?.name === name);
+                    expect(entries.length, `${type} ${face}`).toBeGreaterThan(0);
+                    for (const entry of entries) {
+                        expect([`SHIPPED-${nsOf(entry._packageId)}`, `OVERRIDE-${nsOf(entry._packageId)}`], `${type} ${face}: ${entry._packageId} lists '${entry.label}'`)
+                            .toContain(entry.label);
+                    }
+                    expect(entries.map((e) => e._packageId), `${type} ${face}`).toContain(second);
+                }
+            }
+        });
     }
+
+    // CONTROLS — one holder: each moved answer answers as it did before.
+    it('CONTROL, one holder: its pair\'s removal, its commit revert and the boot census answer as before', async () => {
+        const { engine, protocol, active, labelAt } = await bootHolders([ALPHA]);
+        const census = async () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            try {
+                await (protocol as any).loadMetaFromDb();
+                return warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('metadata_sealed_overlay_unserved'));
+            } finally {
+                warn.mockRestore();
+            }
+        };
+        expect(await census()).toEqual([]);
+
+        await protocol.saveMetaItem({
+            type: 'flow', name: FLOW, item: flowBody('EDITED', { overrides: { package: ALPHA, basedOn: '1.0.0' } }),
+            mode: 'draft', packageId: `${ALPHA}.custom`,
+        } as any);
+        const commit: any = await protocol.publishPackageDrafts({ packageId: `${ALPHA}.custom` } as any);
+        const reverted: any = await (protocol as any).revertCommit({ commitId: commit.commitId, packageId: `${ALPHA}.custom` });
+        expect([reverted.success, reverted.failed ?? []]).toEqual([true, []]);
+        expect(await labelAt(ALPHA)).toBe('OVERRIDE-alpha');
+
+        const removed: any = await protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: `${ALPHA}.custom` } as any);
+        expect(removed.success).toBe(true);
+        expect(active()).toEqual([]);
+        expect(await labelAt(ALPHA)).toBe('SHIPPED-alpha');
+
+        await engine.insert('sys_metadata', {
+            type: 'flow', name: FLOW, organization_id: null, package_id: STRANGER,
+            metadata: JSON.stringify(flowBody('STRANGER', { overrides: { package: ALPHA, basedOn: '1.0.0' } })), state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+        await expect(protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: STRANGER } as any))
+            .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(await census()).toHaveLength(1);
+    });
 });
