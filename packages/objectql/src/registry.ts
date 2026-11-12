@@ -47,6 +47,11 @@ import {
   // installed?" asks it, over this registry's installed manifests.
   pairsOf,
   installedManifestsOf,
+  // [ADR-0150 D4, #32408] …and which holders a pair's row is the
+  // customization of, the way the exact read's owner check reads it.
+  appOf,
+  isPairOf,
+  pairOf,
   // [ADR-0150 D3, #28802] The one closure walk: a dependent's bundle addition
   // under a dependency's name is no holder of that name for a bare read.
   packageDependencyClosure,
@@ -8713,6 +8718,12 @@ export class SchemaRegistry {
    *    to no package and is no environment item either (never a guess);
    *  - a package that holds the name in its composite slot → that package
    *    (an ADR-0005 overlay of its item);
+   *  - a customization pair's row, when some holder of the name is a package
+   *    the pair customizes (`isPairOf`: the App's pair is shared by every
+   *    package of the App, ADR-0146 D3) → {@link pairRowBinding}, the exact
+   *    read's owner check (`pairRowOnAddress`, metadata-protocol): the holder
+   *    its `overrides.package` declares, else the App whose own pair it is
+   *    (#28390 ruling A), else its one owner, else no package;
    *  - a paired `<base>.custom` package holding no composite slot of the name,
    *    whose base does → the base (ADR-0146 D9: the pair's declared override
    *    customizes its base's item);
@@ -8729,9 +8740,48 @@ export class SchemaRegistry {
       return composite.size === 1 ? [...composite][0] : undefined;
     }
     if (composite.has(stamped)) return stamped;
+    const paired = this.pairRowBinding(stamped, item, composite);
+    if (paired !== NOT_A_PAIR_ROW_OF_A_HOLDER) return paired;
     const base = customizationBasePackageId(stamped);
     if (base !== null && composite.has(base)) return base;
     return stamped;
+  }
+
+  /**
+   * [ADR-0150 D4, epic ruling 6761802819 on #31699 F2, #32408] The holder a
+   * customization pair's row `item` (stored under `pairId`, which holds no
+   * composite slot of the name) binds to, read as the exact read's one owner
+   * check reads it (`pairRowOnAddress`, `@objectstack/metadata-protocol`), so
+   * every reader of {@link overlaySlotBinding} — the holder set, a holder's
+   * bundle members, a package's item and the environment's item — answers
+   * the owner the exact address serves it to:
+   *
+   *  - the row declares the base it customizes (`overrides.package`, ADR-0146
+   *    D2) → that holder when the pair customizes it; a declared holder the
+   *    pair does not customize, or a declared package that holds no item of
+   *    the name, binds it to no package (it is never the declaring row of
+   *    another holder);
+   *  - else a holder that is the App whose own pair it is → that App (#28390
+   *    ruling A: the App's address keeps its pair's row);
+   *  - else exactly one holder the pair customizes → that holder;
+   *  - else two or more → no package (`undefined`): the row cannot say whose
+   *    it is, never a pick between them.
+   *
+   * {@link NOT_A_PAIR_ROW_OF_A_HOLDER} when no holder of the name is a package
+   * `pairId` customizes: the row keeps the per-package reading of
+   * {@link overlaySlotBinding}.
+   */
+  private pairRowBinding(pairId: string, item: unknown, composite: ReadonlySet<string>): string | undefined | typeof NOT_A_PAIR_ROW_OF_A_HOLDER {
+    if (customizationBasePackageId(pairId) === null) return NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const installed = installedManifestsOf(this);
+    const owners = [...composite].filter((holder) => isPairOf(pairId, holder, installed));
+    if (owners.length === 0) return NOT_A_PAIR_ROW_OF_A_HOLDER;
+    const declared = declaredOverrideBase(item);
+    if (declared !== undefined) return owners.includes(declared) ? declared : undefined;
+    const app = owners.find((holder) => appOf(holder, installed) === holder && pairOf(holder, installed).ok
+      && (pairOf(holder, installed) as { value: string }).value === pairId);
+    if (app !== undefined) return app;
+    return owners.length === 1 ? owners[0] : undefined;
   }
 
   /**
@@ -10758,8 +10808,17 @@ export class SchemaRegistry {
 function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders: ReadonlySet<string>): boolean {
   const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
   if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
-  const declaration = (item as { overrides?: unknown }).overrides;
-  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
-  const declared = (declaration as { package?: unknown }).package;
-  return typeof declared === 'string' && declared !== '' && declared !== packageId && holders.has(declared);
+  const declared = declaredOverrideBase(item);
+  return declared !== undefined && declared !== packageId && holders.has(declared);
 }
+
+/** The base a row's body declares it customizes (`overrides.package`, ADR-0146 D2), or `undefined`. */
+function declaredOverrideBase(item: unknown): string | undefined {
+  const declaration = (item as { overrides?: unknown } | null | undefined)?.overrides;
+  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return undefined;
+  const declared = (declaration as { package?: unknown }).package;
+  return typeof declared === 'string' && declared !== '' ? declared : undefined;
+}
+
+/** {@link SchemaRegistry}'s `pairRowBinding` answer for a row no holder's pair stores: not its question. */
+const NOT_A_PAIR_ROW_OF_A_HOLDER: unique symbol = Symbol('not-a-pair-row-of-a-holder');
