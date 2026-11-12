@@ -15,7 +15,9 @@ What moves:
 
 - `POST`, `PATCH` and `DELETE` on `/api/v1/data/sys_inbox_message` answer `405 OBJECT_API_METHOD_NOT_ALLOWED` (they answered `201` / `200`). `GET` and list are unchanged: a member still reads their own messages, an administrator still inspects them.
 - The console offers no New, Edit, Delete or Import on the inbox list, and a user-context engine write to the object is refused `403 PERMISSION_DENIED` by the security plugin's engine-owned write guard.
-- **Moved answer: organization delete.** Inbox rows now outlive the organization they name, as the four sibling objects' rows already do. An organization that holds inbox messages is no longer refused `DELETE_RESTRICTED` for them; the rows are kept and keep naming the deleted organization until their 90-day expiry.
+- **Moved answer: organization delete.** Inbox rows now outlive the organization they name, as the four sibling objects' rows already do. An organization that holds inbox messages is no longer refused `DELETE_RESTRICTED` for them; the rows are kept and keep naming the deleted organization until their 90-day expiry. Until then they are still served in the recipient's bell, because the inbox list is read by recipient, not by organization.
+
+**Rows already written through the old door.** Such a row has no notification id, so it can never be marked read, and after this change a user can no longer delete it either: it stays on the recipient's unread badge until it expires (90 days). Before upgrading, delete the inbox rows that have no notification id over the data API (`DELETE /api/v1/data/sys_inbox_message/:id` for each row whose `notification_id` is empty); otherwise they stay unread until they expire.
 
 The inbox channel, the only first-party writer, writes as the system and is unaffected; messages delivered by `emit()` are still marked read as before.
 
