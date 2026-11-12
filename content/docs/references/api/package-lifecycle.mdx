@@ -446,6 +446,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
@@ -478,6 +479,7 @@ Whole-deployment export, the answer of `GET /packages/export` (`os package expor
 | **message** | `string` | ✅ | What is wrong, in the rule author's own words. |
 | **hint** | `string` | ✅ | How to fix it. |
 | **severity** | `Enum<'error' \| 'warning' \| 'info'>` | ✅ | How the gate treated this finding. `error` means the write was REFUSED (these appear on the 422, never on a 2xx); `warning` / `info` are advisory — the write succeeded and the finding is FYI. |
+| **userMessage** | `string` | optional | The finding's user-facing sentence, composed by its producer in the request's locale (else the workspace default locale, else `en`) — the same field name and producer-marked meaning as `ApiErrorSchema.userMessage`. Present only when the producer authors a user sentence for this `rule`; absent, a consumer renders `message` as before. Consumers render it as received; `rule` stays the stable id and `message` / `hint` stay the developer-facing text. |
 
 
 ---
