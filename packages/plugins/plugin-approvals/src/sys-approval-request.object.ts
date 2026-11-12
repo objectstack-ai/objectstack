@@ -643,7 +643,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Approve a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. Only a current approver of the request may decide it; anyone else is refused and the request stays pending. Ask the human to confirm before calling.',
+          'Approve a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused and the request stays pending. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -679,7 +679,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. A rejection is final for every approver. Only a current approver of the request may decide it; anyone else is refused. Ask the human to confirm before calling.',
+          'Reject a pending approval request (the record: a sys_approval_request id) on behalf of the user, with an optional comment. A rejection is final for every approver. Only a current approver of the request, or an administrator who may override a stuck request, may decide it; anyone else is refused. Ask the human to confirm before calling.',
         requiresConfirmation: true,
       },
     },
@@ -708,7 +708,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       ai: {
         exposed: true,
         description:
-          'Hand the user\'s pending step on an approval request (the record: a sys_approval_request id) to another person (param: to, that person\'s user id), with an optional comment. Only a current approver of the request may reassign it. Ask the human to confirm before calling.',
+          'Hand the user\'s pending step on an approval request (the record: a sys_approval_request id) to another person (param: to, that person\'s user id), with an optional comment. Only a current approver of the request, or an administrator who may override a stuck request, may reassign it. Ask the human to confirm before calling.',
         requiresConfirmation: true,
         paramHints: {
           to: { description: 'The user id of the person who takes over this approval step.' },
