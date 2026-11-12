@@ -189,7 +189,11 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
   /** What the evaluator answers over `row`: the value, or `fault`. */
   function evaluated(source: string, row: Record<string, unknown> = ROW_2026): unknown {
     const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row });
-    return r.ok ? r.value : 'fault';
+    // Only an overload fault (a call or an operator the bound text cannot
+    // take) reads as 'fault'; any other fault (an unbound name, a typo) is
+    // returned as itself and fails the row.
+    if (r.ok) return r.value;
+    return /no (matching|such) overload/.test(r.error.message) ? 'fault' : r.error;
   }
 
   // [role, source, faultOutcome, the codes the gate answers, what the evaluator reads over ROW_2026]
@@ -275,7 +279,10 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     expect(validateExpression('predicate', source, flattened).errors.map((e) => e.code)).toEqual(['date-text-call-run-may-fail']);
     expect(validateExpression('predicate', source, { ...flattened, faultOutcome: 'run-fails' }).errors.map((e) => e.code))
       .toEqual(['date-text-call-run-fails']);
-    expect(celEngine.evaluate({ dialect: 'cel', source }, { start_time: ROW_2026.start_time }).ok).toBe(false);
+    expect(celEngine.evaluate({ dialect: 'cel', source }, { extra: { start_time: ROW_2026.start_time } })).toMatchObject({
+      ok: false,
+      error: { message: expect.stringContaining("no matching overload for 'isoDate(string)'") },
+    });
     expect(validateExpression('predicate', '"Due: " + start_time != ""', flattened).warnings).toEqual([]);
   });
 
