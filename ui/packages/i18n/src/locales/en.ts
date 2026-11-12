@@ -498,6 +498,10 @@ const en = {
     registryRef: {
       loadFailed: 'The list could not be loaded. You can still type the name.',
       notFound: '{{name}} (not found)',
+      holderPackage: '{{item}} · package {{package}}',
+      holderEnvironment: '{{item}} · defined in this environment',
+      holderUnresolved: '{{name}} (several packages provide it; none named)',
+      holderNeedsPackage: 'This form names a permission set by its name only. Where several packages provide a set of one name, only the one defined in this environment can be picked here.',
     },
     preferenceOption: {
       allTopics: 'All topics ({{value}})',

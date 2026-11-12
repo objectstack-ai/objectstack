@@ -6,10 +6,12 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import {
   sanitizeFormData,
   dirtyEditPayload,
   createOwnerPayload,
+  createHolderPackagePayload,
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { isCreateFormMode, omitServerResolvedDefaults } from './schemaDefaults';
@@ -50,8 +52,9 @@ export interface FormWritePayloads {
   /**
    * Every value the form may write, as the form now holds it: stripped of what
    * a form never writes and, on a create, of the fields the producer owns. On
-   * a create it also carries an owner the user picked (objectui#12359), since
-   * a create writes `payload` itself.
+   * a create it also carries an owner the user picked (objectui#12359) and,
+   * on a permission-set grant, the package of the holder the user picked
+   * (objectstack#32770), since a create writes `payload` itself.
    */
   payload: Record<string, unknown>;
   /**
@@ -72,7 +75,9 @@ export interface FormWritePayloads {
  *    does not declare, and every field the caller's field-level security
  *    refuses (`canEdit`, `80c54122e`).
  * 2. On a create, `createOwnerPayload` adds back an owner the user picked
- *    against {@link FormWriteSources.createBaseline} (objectui#12359), and then
+ *    against {@link FormWriteSources.createBaseline} (objectui#12359),
+ *    `createHolderPackagePayload` adds back the package of the permission-set
+ *    holder the user picked on a grant (objectstack#32770), and then
  *    `omitServerResolvedDefaults` drops an empty field whose runtime default
  *    the producer resolves (#4069).
  * 3. On an edit, `dirtyEditPayload` keeps only the fields that differ from the
@@ -116,7 +121,9 @@ export function formWritePayload(
   // A picked owner is added BEFORE that omission, so an owner the user emptied
   // over a runtime default is left to the producer like any other empty field.
   if (isCreateFormMode(form)) {
-    payload = omitServerResolvedDefaults(createOwnerPayload(payload, createBaseline, owner), definition);
+    payload = createOwnerPayload(payload, createBaseline, owner);
+    payload = createHolderPackagePayload(payload, createBaseline, form.objectName, PERMISSION_SET_GRANT_COLUMNS, owner);
+    payload = omitServerResolvedDefaults(payload, definition);
   }
   return {
     payload,

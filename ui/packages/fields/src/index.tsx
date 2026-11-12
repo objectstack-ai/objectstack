@@ -5369,6 +5369,11 @@ export { evalArith, lookupAutofillPatch, computeRow, GridField, LineItemsField }
 export type { ColumnCurrencies } from './widgets/GridField.js';
 export type { GridColumn } from './widgets/GridField.js';
 export * from './widgets/lookupAutofill.js';
+// objectstack#32770 (ADR-0150 D8 R1) — the grant's set-name column and the
+// package column beside it, which `permission-ref` writes on a create grant
+// form. `@object-ui/plugin-form`'s create payload reads it to keep that one
+// column. The widget's holder readings stay module-private.
+export { PERMISSION_SET_GRANT_COLUMNS } from './widgets/permissionSetHolders.js';
 // New widgets according to @objectstack/spec
 export * from './widgets/ColorField.js';
 export * from './widgets/SliderField.js';

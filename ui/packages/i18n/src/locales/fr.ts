@@ -338,6 +338,10 @@ const fr = {
     registryRef: {
       loadFailed: "La liste n'a pas pu être chargée. Vous pouvez toujours saisir le nom.",
       notFound: "{{name}} (introuvable)",
+      holderPackage: "{{item}} · paquet {{package}}",
+      holderEnvironment: "{{item}} · défini dans cet environnement",
+      holderUnresolved: "{{name}} (fourni par plusieurs paquets ; aucun n'est indiqué)",
+      holderNeedsPackage: "Ce formulaire désigne un ensemble d'autorisations par son seul nom. Lorsque plusieurs paquets fournissent un ensemble du même nom, seul celui défini dans cet environnement peut être choisi ici.",
     },
     preferenceOption: {
       allTopics: "Tous les sujets ({{value}})",

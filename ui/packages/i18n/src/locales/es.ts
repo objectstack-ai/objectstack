@@ -343,6 +343,10 @@ const es = {
     registryRef: {
       loadFailed: "No se pudo cargar la lista. Todavía puede escribir el nombre.",
       notFound: "{{name}} (no encontrado)",
+      holderPackage: "{{item}} · paquete {{package}}",
+      holderEnvironment: "{{item}} · definido en este entorno",
+      holderUnresolved: "{{name}} (lo proporcionan varios paquetes; no se indica ninguno)",
+      holderNeedsPackage: "Este formulario indica un conjunto de permisos solo por su nombre. Si varios paquetes proporcionan un conjunto con el mismo nombre, aquí solo se puede elegir el definido en este entorno.",
     },
     preferenceOption: {
       allTopics: "Todos los temas ({{value}})",

@@ -29,6 +29,14 @@ import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
 import type { FieldWidgetComponentProps } from './types.js';
 import { registryLister, type RegistryItemHeader, type RegistryLister } from './registryCatalog.js';
+import {
+  addressingPackageOf,
+  holderOrder,
+  holderPackageFieldOf,
+  holderPackageOf,
+  storedGrantHolders,
+  type PermissionSetHolder,
+} from './permissionSetHolders.js';
 import { loadPreferenceOptions, type PreferenceList, type PreferenceOptionItem } from './preferenceOptions.js';
 import { toDomProps } from './toDomProps.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -83,6 +91,33 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  *
  * ⛔ No arm writes anything but a name the person picked or typed: no label,
  * no id, no first-item default.
+ *
+ * ## A permission-set name more than one holder serves (objectstack#32770)
+ *
+ * A permission set is identified by `(package, name)` (ADR-0150 D3/D4), and
+ * the registry serves one item per holder of a name (`./permissionSetHolders.ts`).
+ * A name one holder serves is listed, written and shown exactly as above. A
+ * name more than one holder serves is listed once per holder, each option
+ * naming its holder beside the label — a package, or the environment's own
+ * set — and the value still written is the NAME. What else a pick writes
+ * depends on what the form's target accepts:
+ *
+ *  - the environment's own set is reached by the name alone, so its option is
+ *    picked on every form;
+ *  - a package's set is reached only by naming the package, which only the
+ *    grant's package column can carry, and only on a create
+ *    (`PERMISSION_SET_GRANT_COLUMNS`). The record form hands the widget
+ *    its sibling writer (`onAutofill`) on a create form alone, so there the
+ *    pick writes the holder's package into that column, and a later pick that
+ *    needs none clears what an earlier one wrote;
+ *  - everywhere else — an edit of a grant, whose stored package the server
+ *    re-stamps by its rule, and an action param, which names a set by its
+ *    name alone — a package's option is listed but cannot be picked, and a
+ *    note says why. ⛔ It is never resolved to one holder by order.
+ *
+ * A stored name is shown as the holder the server reads it as: the holder the
+ * row's package column names, else the environment's own set, else — two
+ * packages and none named — the name marked as naming no holder.
  *
  * ## The fillable arm — `notification-topic` / `notification-channel`
  *
@@ -228,6 +263,48 @@ function itemText(item: RegistryItemHeader): string {
   return item.label && item.label !== item.name ? `${item.label} (${item.name})` : item.name;
 }
 
+/** The registry types whose names are addressed by `(package, name)` (objectstack#32770). */
+const HOLDER_ADDRESSED_TYPES: ReadonlySet<string> = new Set(['permission']);
+
+/** One holder of a name, and the item the registry served for it. */
+interface NameHolder {
+  holder: PermissionSetHolder;
+  item: RegistryItemHeader;
+}
+
+/**
+ * The holders of every listed name, each once, in the order served — for the
+ * registry types addressed by `(package, name)`, else `null` (every name is
+ * read by itself, as before).
+ */
+function holdersByName(type: string, items: readonly RegistryItemHeader[] | null): Map<string, NameHolder[]> | null {
+  if (!items || !HOLDER_ADDRESSED_TYPES.has(type)) return null;
+  const out = new Map<string, NameHolder[]>();
+  for (const item of items) {
+    const holder = holderPackageOf(item.packageId);
+    const group = out.get(item.name);
+    if (!group) out.set(item.name, [{ holder, item }]);
+    else if (!group.some((h) => h.holder === holder)) group.push({ holder, item });
+  }
+  return out;
+}
+
+/** The option key for one holder of a name: the name for the environment's own set, else name and package. */
+function holderOptionValue(name: string, holder: PermissionSetHolder): string {
+  return holder === null ? name : `${name}@${holder}`;
+}
+
+/** What one option writes: the name, and the package that addresses its holder (or none). */
+interface OptionTarget {
+  name: string;
+  addressing: string | undefined;
+}
+
+/** A non-blank string in the package column: a holder the record already names. */
+function namesAPackage(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
 export interface RegistryRefFieldProps extends FieldWidgetComponentProps<string> {
   /** The registry type whose items this field names (`position`, `permission`). */
   registryType: string;
@@ -240,6 +317,8 @@ export function RegistryRefField({
   readonly,
   className,
   error,
+  dependentValues,
+  onAutofill,
   ...props
 }: RegistryRefFieldProps) {
   const ctx = React.useContext(SchemaRendererContext);
@@ -251,15 +330,44 @@ export function RegistryRefField({
   const testId = `registry-ref-${registryType}`;
 
   const listed = catalog.status === 'loaded' ? catalog.items : null;
-  const entry = listed?.find((item) => item.name === current);
-  const notFound = listed !== null && current !== '' && !entry;
+  // objectstack#32770 — the holders of each name, where a name is addressed by
+  // `(package, name)` (file header): the sibling column that stores the
+  // holder's package, the package the record names there, and whether this
+  // form can write it (the record form's sibling writer, on a create only).
+  const holders = holdersByName(registryType, listed);
+  const packageField = holders ? holderPackageFieldOf(props.field?.name) : null;
+  const storedPackage = packageField ? dependentValues?.[packageField] : undefined;
+  const writePackage = packageField !== null && typeof onAutofill === 'function' ? onAutofill : null;
+
+  // The stored name as the server reads it: one holder by itself; more than
+  // one by the package the record names (`storedGrantHolders`), and none when
+  // that leaves no single holder — never the first one served.
+  const currentHolders = holders?.get(current);
+  const shared = currentHolders !== undefined && currentHolders.length > 1;
+  const reached = shared ? storedGrantHolders(holderPackageOf(storedPackage), currentHolders.map((h) => h.holder)) : [];
+  const reachedHolder = shared && reached.length === 1 ? currentHolders.find((h) => h.holder === reached[0]) : undefined;
+  const unresolved = shared && !reachedHolder;
+  const entry = shared ? reachedHolder?.item : listed?.find((item) => item.name === current);
+  const notFound = listed !== null && current !== '' && !entry && !unresolved;
   const notFoundText = t('fields.registryRef.notFound', { name: current });
+  const unresolvedText = t('fields.registryRef.holderUnresolved', { name: current });
+  const holderText = (item: RegistryItemHeader, holder: PermissionSetHolder) =>
+    holder === null
+      ? t('fields.registryRef.holderEnvironment', { item: itemText(item) })
+      : t('fields.registryRef.holderPackage', { item: itemText(item), package: holder });
+  const currentText = (item: RegistryItemHeader) =>
+    reachedHolder ? holderText(item, reachedHolder.holder) : itemText(item);
 
   if (readonly) {
     if (!current) return <EmptyValue />;
     return (
-      <span className={cn('text-sm', className)} data-testid={testId} data-not-found={notFound || undefined}>
-        {notFound ? notFoundText : entry ? itemText(entry) : current}
+      <span
+        className={cn('text-sm', className)}
+        data-testid={testId}
+        data-not-found={notFound || undefined}
+        data-holder-unresolved={unresolved || undefined}
+      >
+        {notFound ? notFoundText : unresolved ? unresolvedText : entry ? currentText(entry) : current}
       </span>
     );
   }
@@ -320,27 +428,66 @@ export function RegistryRefField({
   const offered = (listed ?? []).filter((item) => !excluded.has(item.name));
   if (offered.length === 0) return typedName;
 
-  const options = offered
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((item) => ({ value: item.name, label: itemText(item) }));
+  // A name one holder serves is one option per item, its value the name, as
+  // before. A name more than one serves is one option per holder (file
+  // header), keyed apart, each naming its holder; a package's option this form
+  // cannot address is listed and disabled.
+  const options: Array<{ value: string; label: string; disabled?: boolean }> = [];
+  const targets = new Map<string, OptionTarget>();
+  const listedShared = new Set<string>();
+  let unaddressable = false;
+  for (const item of offered.sort((a, b) => a.name.localeCompare(b.name))) {
+    const group = holders?.get(item.name);
+    if (!group || group.length <= 1) {
+      options.push({ value: item.name, label: itemText(item) });
+      continue;
+    }
+    if (listedShared.has(item.name)) continue;
+    listedShared.add(item.name);
+    const all = group.map((h) => h.holder);
+    for (const h of [...group].sort((a, b) => holderOrder(a.holder, b.holder))) {
+      const key = holderOptionValue(item.name, h.holder);
+      const addressing = addressingPackageOf(all, h.holder);
+      const blocked = addressing !== undefined && !writePackage;
+      if (blocked) unaddressable = true;
+      options.push({ value: key, label: holderText(h.item, h.holder), ...(blocked ? { disabled: true } : {}) });
+      targets.set(key, { name: item.name, addressing });
+    }
+  }
   // A stored name the picker does not offer stays its own option, so it is
   // neither dropped nor replaced: a listed name a grant cannot name by its
-  // label beside its name, a name the registry lacks flagged "not found".
-  if (entry && excluded.has(entry.name)) options.unshift({ value: current, label: itemText(entry) });
+  // label beside its name, a name the registry lacks flagged "not found", a
+  // name two packages serve and the record addresses neither of, said so.
+  if (entry && excluded.has(entry.name)) options.unshift({ value: current, label: currentText(entry) });
   if (notFound) options.unshift({ value: current, label: notFoundText });
+  if (unresolved) options.unshift({ value: current, label: unresolvedText });
+  const selected = reachedHolder && !excluded.has(current) ? holderOptionValue(current, reachedHolder.holder) : current;
+
+  // A pick writes the NAME. On a form that can write the holder's package, it
+  // also writes the package that addresses the picked holder, or clears one an
+  // earlier pick wrote where the new pick needs none; a pick that needs none on
+  // a record that names none writes nothing beside the name.
+  const commit = (next: string) => {
+    const target = targets.get(next);
+    onChange(target ? target.name : next);
+    if (!writePackage || !packageField) return;
+    if (target?.addressing !== undefined) writePackage({ [packageField]: target.addressing });
+    else if (namesAPackage(storedPackage)) writePackage({ [packageField]: null });
+  };
 
   // DOM pass-through onto the combobox trigger, the widget's focusable control
   // (objectui#3318). `name` is withheld: the trigger is a button, not a
   // submission control (the `ObjectRefField` reasoning).
   const { name: _domName, ...triggerDomProps } = domProps;
-  return (
+  const picker = (
     <Combobox
       {...triggerDomProps}
       data-testid={testId}
       data-not-found={notFound || undefined}
+      data-holder-unresolved={unresolved || undefined}
       options={options}
-      value={current}
-      onValueChange={(next) => onChange(next)}
+      value={selected}
+      onValueChange={commit}
       placeholder={t('common.select')}
       searchPlaceholder={t('table.search')}
       emptyText={t('common.noResults')}
@@ -348,6 +495,15 @@ export function RegistryRefField({
       className={cn('w-full', className)}
       aria-invalid={!!error}
     />
+  );
+  if (!unaddressable) return picker;
+  return (
+    <div className="space-y-1.5">
+      {picker}
+      <p data-testid={`${testId}-holder-needs-package`} className="text-xs text-muted-foreground">
+        {t('fields.registryRef.holderNeedsPackage')}
+      </p>
+    </div>
   );
 }
 

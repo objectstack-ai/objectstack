@@ -338,6 +338,10 @@ const pt = {
     registryRef: {
       loadFailed: "Não foi possível carregar a lista. Você ainda pode digitar o nome.",
       notFound: "{{name}} (não encontrado)",
+      holderPackage: "{{item}} · pacote {{package}}",
+      holderEnvironment: "{{item}} · definido neste ambiente",
+      holderUnresolved: "{{name}} (fornecido por vários pacotes; nenhum indicado)",
+      holderNeedsPackage: "Este formulário indica um conjunto de permissões apenas pelo nome. Quando vários pacotes fornecem um conjunto com o mesmo nome, aqui só é possível escolher o definido neste ambiente.",
     },
     preferenceOption: {
       allTopics: "Todos os tópicos ({{value}})",
