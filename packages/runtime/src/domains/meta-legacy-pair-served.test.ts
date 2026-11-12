@@ -219,6 +219,16 @@ for (const environmentId of [undefined, 'env_hotcrm'] as const) {
  *  - the App pair's row, two modules of the App holding the name: under alpha's
  *    envelope (the first package that registered the name, not a module of the
  *    App), and `/layers` 200 with alpha's body as its code layer.
+ *
+ * Re-measured on main 2f80f2897 (#32497 landed): every plain-read envelope
+ * above stands, and the gamma row beside a disabled only shipper is 404 on
+ * both doors. `/layers` already answers alpha's code layer for alpha's pair
+ * row, `code: null` for the gamma row, and 409 for the App pair's row when
+ * alpha registered ahead of the modules (the code layer's lookup lands on
+ * alpha, which #32497's `exactQualifierItem` refuses); with a module of the
+ * App registered first and no other shipper, `/layers` there answered 200
+ * with that module's body as its code layer, the move the last pin's
+ * module-first cases hold.
  */
 describe('#32501 — a stored row at an exact address wears the envelope of the package the address reads', () => {
     const ALPHA = 'com.acme.alpha';
@@ -312,10 +322,20 @@ describe('#32501 — a stored row at an exact address wears the envelope of the 
         expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))
             .toEqual([200, 'gamma authored', GAMMA, undefined]);
         expect(JSON.stringify(plain.body)).not.toContain(ALPHA);
+        // …and `/layers` at the same address: the row, no code layer (BASE: 404).
+        const layers = await read('/meta/dashboard/d/layers', { package: GAMMA });
+        expect([layers.status, ...layered(layers.body)], JSON.stringify(layers.body).slice(0, 400))
+            .toEqual([200, null, 'gamma authored', undefined]);
     }, 60_000);
 
-    it.each([['one first', [ONE, TWO]], ['two first', [TWO, ONE]]] as const)('the App pair\'s row, two modules holding the name (%s): its own stamp; `/layers` refuses the ambiguous code layer naming both', async (_order, shippers) => {
-        const { read, seed } = await bootShippers([ALPHA, ...shippers]);
+    // Both shapes of the code layer's lookup: another package (alpha) registered
+    // ahead of the modules, where it lands on alpha, and a module first with no
+    // other shipper, where it landed on that module and `/layers` served it.
+    it.each([
+        ['alpha, then one', [ALPHA, ONE, TWO]], ['alpha, then two', [ALPHA, TWO, ONE]],
+        ['one first, no other shipper', [ONE, TWO]], ['two first, no other shipper', [TWO, ONE]],
+    ] as const)('the App pair\'s row, two modules holding the name (%s): its own stamp; `/layers` refuses the ambiguous code layer naming both', async (_order, shippers) => {
+        const { read, seed } = await bootShippers(shippers);
         await seed(`${SUITE}.custom`, 'suite pair row', ONE);
         const plain = await read('/meta/dashboard/d', { package: `${SUITE}.custom` });
         expect([plain.status, ...envelope(plain.body)], JSON.stringify(plain.body).slice(0, 400))

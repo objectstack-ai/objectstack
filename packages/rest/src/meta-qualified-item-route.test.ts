@@ -877,6 +877,11 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
  *    registered holder's body;
  *  - `?package=<App>.custom` and its `/layers`, two enabled modules of the App
  *    holding the name: the first registered module's item.
+ *
+ * Re-measured on main 2f80f2897 (#32497 landed): the `/layers` code layer at
+ * `?package=<base>.custom` already answers the base's (#32497 judges it
+ * through `exactQualifierItem`), so that half of the two-holder pin holds on
+ * `main`; its plain-read envelope does not. Every other line stands.
  */
 describe('#32501 — a pair address reads the package it names, never the first registered holder', () => {
     const P = 'com.acme.app';
@@ -932,6 +937,10 @@ describe('#32501 — a pair address reads the package it names, never the first 
             const answer = await drive(ITEM, { type, name: 'shared' }, { package: `${A}.custom` });
             servedAs(answer, `alpha ${type}`, A);
             expect(JSON.stringify(answer.body)).not.toContain(B);
+            // …and `/layers` at the same address (was 404 with the disabled holder registered first).
+            const layers = await drive(LAYERS, { type, name: 'shared' }, { package: `${A}.custom` });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layersOf(layers)?.code?.label, layersOf(layers)?.packageId]).toEqual([`alpha ${type}`, A]);
         });
 
         it.each([['mone first', [M1, M2]], ['mtwo first', [M2, M1]]] as const)(`${type}: two enabled modules of one App hold the name (%s) — the App's pair is refused naming both, on the plain read and /layers`, async (_order, order) => {
@@ -950,6 +959,10 @@ describe('#32501 — a pair address reads the package it names, never the first 
             ship(type, 'shared', M1);
             registry.disablePackage(M2);
             servedAs(await drive(ITEM, { type, name: 'shared' }, { package: `${P}.custom` }), `mone ${type}`, M1);
+            // …and `/layers` at the App's pair (was 404).
+            const layers = await drive(LAYERS, { type, name: 'shared' }, { package: `${P}.custom` });
+            expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+            expect([layersOf(layers)?.code?.label, layersOf(layers)?.code?._packageId]).toEqual([`mone ${type}`, M1]);
         });
 
         it(`${type}: CONTROL — a single holder's pair address answers as before`, async () => {
