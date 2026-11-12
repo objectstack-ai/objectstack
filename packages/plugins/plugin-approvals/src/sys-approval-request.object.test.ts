@@ -169,10 +169,14 @@ describe('sys_approval_request declared actions', () => {
     // `ActionAiSchema.description` is the LLM-facing contract (min 40 chars,
     // required when `ai.exposed`) — the same name one level down. Putting the
     // question there would arm a tool description while the dialog fell back to
-    // its generic line.
+    // its generic line. `approval_reject` is exposed to AI since #32442, so its
+    // tool description exists — and must be its own text, never the question.
     for (const name of ['approval_reject', 'approval_recall']) {
-      expect(byName(name).ai?.description, `${name}.ai.description`).toBeUndefined();
+      const a = byName(name);
+      expect(typeof a.description, `${name}.description`).toBe('string');
+      expect(a.ai?.description, `${name}.ai.description`).not.toBe(a.description);
     }
+    expect(byName('approval_recall').ai?.description).toBeUndefined();
   });
 
   it('reassign collects the new approver via a field-backed sys_user picker keyed as `to`', () => {
@@ -228,5 +232,52 @@ describe('sys_approval_request declared actions', () => {
         + ' || has(record.status) && record.status == "pending"'
         + ' && has(record.viewer) && has(record.viewer.is_submitter) && record.viewer.is_submitter == true',
     );
+  });
+});
+
+/**
+ * [#32442, ruling A] An approver's agent decides over MCP through the request's
+ * own decide actions. The four decisions are exposed (`ai.exposed`, ADR-0011)
+ * with `requiresConfirmation: true` (bucket C); every other action on the
+ * object stays off the AI surface. Who may decide is not declared here: each
+ * exposed action forwards to its approvals route, whose service admits only a
+ * current approver, so the pin also holds that no exposed action targets
+ * anything but its own decision route.
+ */
+describe('sys_approval_request AI exposure (#32442)', () => {
+  const DECISIONS: Record<string, string> = {
+    approval_approve: 'approve',
+    approval_reject: 'reject',
+    approval_reassign: 'reassign',
+    approval_send_back: 'revise',
+  };
+
+  it('exposes exactly the four approver decisions to AI', () => {
+    const exposed = actions.filter((a) => a.ai?.exposed === true).map((a) => a.name).sort();
+    expect(exposed).toEqual(Object.keys(DECISIONS).sort());
+  });
+
+  it('every exposed decision asks for the human\'s confirmation and carries its own tool description', () => {
+    for (const name of Object.keys(DECISIONS)) {
+      const ai = byName(name).ai;
+      expect(ai.requiresConfirmation, `${name}.ai.requiresConfirmation`).toBe(true);
+      expect(typeof ai.description).toBe('string');
+      expect(ai.description.length, `${name}.ai.description length`).toBeGreaterThanOrEqual(40);
+      expect(ai.description).toMatch(/current approver/);
+      expect(ai.description).toMatch(/confirm/);
+    }
+  });
+
+  it('every exposed decision forwards to its own same-origin decision route, so the service decides who may act', () => {
+    for (const [name, verb] of Object.entries(DECISIONS)) {
+      const a = byName(name);
+      expect(a.type).toBe('api');
+      expect(a.method).toBe('POST');
+      expect(a.target).toBe(`/api/v1/approvals/requests/{id}/${verb}`);
+    }
+  });
+
+  it('reassign tells the agent what `to` is', () => {
+    expect(byName('approval_reassign').ai.paramHints?.to?.description).toMatch(/user id/);
   });
 });

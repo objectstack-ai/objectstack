@@ -365,6 +365,15 @@ can reach is the **default exposure policy (v1)**:
   identity routes that accept a signed-in session only, so an agent connected
   over OAuth sees them listed, but a call that reaches the identity route is
   refused there (`401`) and changes nothing.
+- **An approver's decisions are exposed to the approver's agent.** The four
+  decisions on an approval request (`sys_approval_request`): approve, reject,
+  reassign and send back, are exposed with `ai.requiresConfirmation: true`, so
+  `run_action` decides only once the call carries `confirm: true`. Each forwards
+  to its approvals route as the caller, and the approval service admits the
+  same people the console's buttons admit: a current approver of the request,
+  or the administrator who may override it. Anyone else, the submitter
+  included, is refused and the request stays pending. The submitter's own
+  levers (remind, recall, resubmit), request-info and comments are not exposed.
 
 <Callout type="info">
 This is the default policy, not a ceiling. A finer, **metadata-declared** exposure
