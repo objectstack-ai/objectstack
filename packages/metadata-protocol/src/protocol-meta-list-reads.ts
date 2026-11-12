@@ -32,7 +32,7 @@ import {
     isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
 } from './protocol-authoring-refusals.js';
-import { soleShippingPackage } from './protocol-environment-rows.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { mergePackageAwareOverlay, servedViewExpansion, withoutServedRowName } from './protocol-overlay-merge.js';
@@ -771,19 +771,38 @@ export async function readFlattenedMetaItems(host: Pick<ProtocolHost, 'artifactL
     // ({@link baseServesBundleMember}), so a locale the customer adds in
     // `.custom` is listed and executed (the email loader reads this list).
     // A dependent's member under the name is still dropped here.
+    //
+    // [#32613, ADR-0150 D4] …and a name two or more packages ship drops the
+    // pair's own slot of a row that declares one shipper's override: the
+    // merges above have served that row in its shipper's slot, under its
+    // shipper's provenance, so its pair's slot is the same row a second time.
+    // Kept, it was enveloped by the name's first shipper
+    // ({@link lookupArtifactItem} with the pair's id finds no own artifact), so
+    // the list served one holder's override under another holder's package,
+    // by registration order (red line 2). Judged by the one served-override
+    // predicate on the item's own binding (the pair, its `package_id` column)
+    // and body, against each shipper. Every other item of such a name is kept
+    // as before (ADR-0048 §3.3), and a name one package ships is narrowed
+    // above as before, which already drops the pair's slot.
     if (servedOverride && !packageId && request.type !== 'package') {
         const typeShipping = host.shippingPackagesOf(request.type);
         const isBundle = ITEM_KEY_DISCRIMINATORS[request.type] !== undefined;
-        const soleShipperOf = new Map<string, string | undefined>();
+        const shippersOf = new Map<string, ReadonlySet<string>>();
         items = (items as any[]).filter((it) => {
             const itemName = it?.name;
             const bound = boundPackageOf(it?._packageId);
             if (typeof itemName !== 'string' || bound === undefined) return true;
-            if (!soleShipperOf.has(itemName)) {
-                soleShipperOf.set(itemName, soleShippingPackage(host.shippedArtifactsOf(request.type, itemName, typeShipping)));
+            if (!shippersOf.has(itemName)) {
+                shippersOf.set(itemName, shippingPackageIds(host.shippedArtifactsOf(request.type, itemName, typeShipping)));
             }
-            const soleShipper = soleShipperOf.get(itemName);
-            if (soleShipper === undefined || soleShipper === bound) return true;
+            const shippers = shippersOf.get(itemName)!;
+            if (shippers.has(bound)) return true;
+            if (shippers.size > 1) {
+                return ![...shippers].some((shipper) =>
+                    isServedOverrideRowOf({ type: request.type, package_id: bound, metadata: it }, shipper, installed));
+            }
+            if (shippers.size === 0) return true;
+            const [soleShipper] = shippers;
             return isBundle && host.baseServesBundleMember(request.type, itemName, soleShipper, it, typeShipping);
         });
     }

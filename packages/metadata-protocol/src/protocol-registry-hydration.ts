@@ -36,6 +36,7 @@ import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
 import { bindStoredRow } from './stored-row-binding.js';
 import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
+import { shippingPackageIds } from './protocol-environment-rows.js';
 import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import { canonicalMetaType } from './protocol-meta-type-schema.js';
 import { remainingRowsPhrase } from './protocol-authoring-refusals.js';
@@ -425,7 +426,7 @@ export class ProtocolRegistryHydrationFacet {
      * anything the static map does not carry, so a runtime kind the platform
      * has never heard of can never trip this gate.
      */
-    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension'>, type: string,
+    static async hydrateOverlayIntoRegistry(host: Pick<ProtocolHost, 'anotherPackageShips' | 'engine' | 'hydrateExpandedViewItems' | 'lookupArtifactItem' | 'packagedArtifactOwner' | 'registerStoredObjectExtension' | 'shippedArtifactsOf'>, type: string,
             data: unknown,
             options: HydrationOptions,): Promise<boolean> {
         // [#9111] See the header: the mint door asserts, the caller folds.
@@ -523,8 +524,16 @@ export class ProtocolRegistryHydrationFacet {
             const held = typeof registry.getItem === 'function'
                 ? registry.getItem(type, String((data as any).name))
                 : undefined;
-            const owner = host.packagedArtifactOwner({ type, name: String((data as any).name) });
-            if (!incomingTakesStoredFlowSlot(held, registered, owner, installedManifestsOf(registry))) return true;
+            // [#32613, ADR-0150 D4] …judged against EVERY package that ships
+            // the name, each by its own pair, never only the bare-name owner
+            // (the first holder to register): a second holder's declared
+            // override is its package's override too, and a package-less row
+            // read after it no longer drops it from the boot pull.
+            const name = String((data as any).name);
+            const shippers = new Set<string>(shippingPackageIds(host.shippedArtifactsOf(type, name)));
+            const owner = host.packagedArtifactOwner({ type, name });
+            if (typeof owner === 'string' && owner !== '') shippers.add(owner);
+            if (!incomingTakesStoredFlowSlot(held, registered, shippers, installedManifestsOf(registry))) return true;
         }
         registry.registerItem(type, registered, 'name' as any);
         await host.hydrateExpandedViewItems(type, data, options);
