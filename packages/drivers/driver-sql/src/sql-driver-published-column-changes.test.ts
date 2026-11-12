@@ -209,18 +209,18 @@ function declarePublishedColumnSuite(cell: DialectCell): void {
 
     it('an ISO datetime written after the publish reads back with its time', async () => {
       await driver.update(TABLE, editedId, { start_date: LATER });
-      const row: any = await driver.findOne(TABLE, { where: { id: editedId } } as any);
+      const row: any = await driver.findOne(TABLE, { where: { id: editedId } });
       expect(row.start_date).toBe(LATER);
     });
 
     it('a day stored before the publish keeps its day', async () => {
-      const row: any = await driver.findOne(TABLE, { where: { id: keptId } } as any);
+      const row: any = await driver.findOne(TABLE, { where: { id: keptId } });
       expect(String(row.start_date).slice(0, 10)).toBe('2026-11-12');
     });
 
     it('a create omitting the field the declaration made optional succeeds', async () => {
       const created: any = await driver.create(TABLE, { start_date: LATER, code: 'n' });
-      const row: any = await driver.findOne(TABLE, { where: { id: created.id } } as any);
+      const row: any = await driver.findOne(TABLE, { where: { id: created.id } });
       expect(row.title ?? null).toBeNull();
       expect(row.start_date).toBe(LATER);
     });

@@ -121,7 +121,7 @@ async function boot() {
     };
     /** The column as the database reports it. */
     const column = async (name: string) => ((await driver.getKnex()(OBJECT).columnInfo()) as any)[name] as { type: string; nullable: boolean };
-    const read = async (id: string) => (await engine.findOne(OBJECT, { where: { id }, context: SYSTEM } as any)) as any;
+    const read = async (id: string) => (await engine.findOne(OBJECT, { where: { id }, context: SYSTEM })) as any;
     return { engine, protocol: p, saveAndPublish, column, read };
 }
 
@@ -136,14 +136,14 @@ describe('[#32590] publishing a field change on a live object — the table foll
         const rig = await boot();
         const first = await rig.saveAndPublish(v1());
         expect(first.published?.success, JSON.stringify(first.published)).toBe(true);
-        const kept: any = await rig.engine.insert(OBJECT, { title: 'kept', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM } as any);
-        const edited: any = await rig.engine.insert(OBJECT, { title: 'edited', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM } as any);
+        const kept: any = await rig.engine.insert(OBJECT, { title: 'kept', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
+        const edited: any = await rig.engine.insert(OBJECT, { title: 'edited', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
 
         const second = await rig.saveAndPublish(v2());
         expect(second.published?.success, JSON.stringify(second.published)).toBe(true);
         expect(advisoryRules(second)).not.toContain(COLUMN_CHANGES_NOT_APPLIED);
 
-        await rig.engine.update(OBJECT, { id: edited.id, start_date: LATER }, { context: SYSTEM } as any);
+        await rig.engine.update(OBJECT, { id: edited.id, start_date: LATER }, { context: SYSTEM });
         expect((await rig.read(edited.id)).start_date).toBe(LATER);
         // The day a row held before the publish is still its day.
         expect(String((await rig.read(kept.id)).start_date).slice(0, 10)).toBe('2026-11-12');
@@ -152,14 +152,14 @@ describe('[#32590] publishing a field change on a live object — the table foll
     it('required: true → false with storage.notNull: false — a create omitting the field succeeds', async () => {
         const rig = await boot();
         await rig.saveAndPublish(v1());
-        await rig.engine.insert(OBJECT, { title: 'before', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM } as any);
+        await rig.engine.insert(OBJECT, { title: 'before', start_date: '2026-11-12', organization_id: ORG }, { context: SYSTEM });
         expect((await rig.column('title')).nullable).toBe(false);
 
         const second = await rig.saveAndPublish(v2());
         expect(second.published?.success, JSON.stringify(second.published)).toBe(true);
 
         expect((await rig.column('title')).nullable).toBe(true);
-        const created: any = await rig.engine.insert(OBJECT, { start_date: LATER, organization_id: ORG }, { context: SYSTEM } as any);
+        const created: any = await rig.engine.insert(OBJECT, { start_date: LATER, organization_id: ORG }, { context: SYSTEM });
         const row = await rig.read(created.id);
         expect(row.title ?? null).toBeNull();
         expect(row.start_date).toBe(LATER);
@@ -168,7 +168,7 @@ describe('[#32590] publishing a field change on a live object — the table foll
     it('a change the table says needs a migration (number → text) is refused at the save with its reason; the table and the served object stay', async () => {
         const rig = await boot();
         await rig.saveAndPublish(v1());
-        await rig.engine.insert(OBJECT, { title: 'x', start_date: '2026-11-12', days: 3, organization_id: ORG }, { context: SYSTEM } as any);
+        await rig.engine.insert(OBJECT, { title: 'x', start_date: '2026-11-12', days: 3, organization_id: ORG }, { context: SYSTEM });
         await rig.saveAndPublish(v2());
         const columnBefore = await rig.column('days');
 
