@@ -424,6 +424,9 @@ const ar = {
       tomorrow: "غدًا",
       clear: "مسح التاريخ",
       openCalendar: "فتح التقويم",
+      time: "الوقت",
+      hour: "الساعة",
+      minute: "الدقيقة",
       invalid:
         "لم يتم الحفظ: «{{value}}» ليس تاريخًا. اكتبه بالصيغة {{format}} أو اختره من التقويم.",
     },
@@ -1029,6 +1032,8 @@ const ar = {
     addGroup: "إضافة حقل مجموعة",
     collapsedByDefault: "مطوي افتراضياً",
     removeGroup: "إزالة",
+    groupingUnstoredNotice: "لا يمكن تجميع هذه القائمة حسب {{fields}}: تُحسب القيمة عند العرض ولا تُخزَّن. تُعرض القائمة دون هذا التجميع.",
+    groupingUnstoredRemove: "إزالة من التجميع",
     inlineEditShort: "تحرير مضمّن",
     inlineEditLabel: "حرّر السجلات مباشرة (انقر خلية للتحرير)",
   },

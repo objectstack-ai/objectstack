@@ -409,6 +409,9 @@ const fr = {
       tomorrow: "Demain",
       clear: "Effacer la date",
       openCalendar: "Ouvrir le calendrier",
+      time: "Heure",
+      hour: "Heures",
+      minute: "Minutes",
       invalid:
         "Non enregistré : « {{value}} » n’est pas une date. Saisissez-la au format {{format}} ou choisissez-la dans le calendrier.",
     },
@@ -945,6 +948,8 @@ const fr = {
     addGroup: "Ajouter un champ de groupe",
     collapsedByDefault: "Réduit par défaut",
     removeGroup: "Supprimer",
+    groupingUnstoredNotice: "Cette liste ne peut pas être regroupée par {{fields}} : sa valeur est calculée à l’affichage et n’est pas stockée. La liste est affichée sans ce regroupement.",
+    groupingUnstoredRemove: "Retirer du regroupement",
     inlineEditShort: "Édition en ligne",
     inlineEditLabel: "Modifier les enregistrements en ligne (cliquez sur une cellule pour modifier)",
   },
