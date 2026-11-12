@@ -36,14 +36,14 @@
 - 写序:认领一笔 `label-write --comment-file`,评论排首、标签随后;执行器首败即停,标签不先翻。
 - 评论存而标签未翻 ⇒ 非零退出;补标签用不带 `--comment-file` 的 `label-write`,⛔ 不重发评论。
 
-## 巡查常设项(每席巡查与总监席摘要)
+## 巡查常设项(每席巡查与总监席巡查)
 
-- 座位贴活性归总监席摘要:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
+- 座位贴活性归总监席巡查:扫 `label:pm:seat` 挂 `🟢 <github-login>` 的贴,Routine 席读调度器。
 - 判据只认在任者自有产出(评论、认领、改正文)及其作者与时间戳,⛔ 收到的通知不算。
 - >24h 无自有产出 ⇒ 当场降级:改 `⏳ vacant` + 摘 assignee 同笔 + 证据评论(时间戳与链接)。
 - 跨账户复审:每席巡查跑 `node scripts/pm/check-owed-reviews.mjs`,TAKE 行剔除本账户署名的 PR。
 - 复核前落 `Contract-review-claim:` 行,形、失效、双认照 `contract-review.md`;有活认领 ⛔ 不双做。
-- 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席摘要列等候逾 24h 的 PR。
+- 复核照 `contract-review.md`;PASS 同笔摘标记、FAIL 不摘;总监席巡查列等候逾 24h 的 PR。
 - 车道巡查同跑:hold/closed 解锁重验回队;本仓无卡 fork PR 按 `external-contributions.md` 立卡。
 
 ## 分诊席读数成本三则

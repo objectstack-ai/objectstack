@@ -1665,7 +1665,8 @@ export const CEILINGS = new Map([
   // repo's business-rationale first touch. Measured +1, ceiling moved by +1;
   // recorded under the move below as a `ruledRaises` record.
   // 88 → 87 (#26765, main's governed-draft rule) → 86 (#25753): the objectui pin-chain line retired; landed count.
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 86],
+  // 86 → 82 (#32869): the daily digest and its external-demand rows retired; landed count.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 82],
   // Triage seat charter (maintainer ruling: the triage seat stays single; pickup
   // is oldest-first, with a 4-hour starvation guard). A seat charter is read per
   // seat session like every entry above. Set at the landed line count read from
