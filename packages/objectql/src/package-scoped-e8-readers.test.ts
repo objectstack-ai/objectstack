@@ -369,13 +369,19 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
     await expectRefusal(() => protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }), 'ambiguous-in-environment', [A, B]);
   });
 
-  // BASE (2200b8c9, same fixture): the protocol read served nothing (404) already, while
-  // `MetadataFacade.get` answered the disabled package's body (#32497's row 1, now for the webhook).
+  // BASE (2200b8c9, and this head with `webhook` out of the three type sets, as
+  // main has them; same fixture): the protocol read served nothing (404) already,
+  // while `MetadataFacade.get` / `getEntry` and `SchemaRegistry.resolveItem`
+  // answered the disabled package's body and `exists` true (#32497's row 1, now
+  // for the webhook).
   it('[FROM the disabled body TO undefined, library] a lone disabled holder: the protocol read serves nothing, as before, and `MetadataFacade.get` answers undefined', async () => {
     ship('webhook', 'gone_hook', B);
     registry.disablePackage(B);
     expect((await protocol.getMetaItem({ type: 'webhook', name: 'gone_hook' }))?.item ?? null).toBeNull();
     expect(await facade.get('webhook', 'gone_hook')).toBeUndefined();
+    expect(facade.getEntry('webhook', 'gone_hook')).toBeUndefined();
+    expect(await facade.exists('webhook', 'gone_hook')).toBe(false);
+    expect(registry.resolveItem('webhook', 'gone_hook')).toBeUndefined();
   });
 });
 
