@@ -711,3 +711,57 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         expect(labelOf(await read('/dataset/pipeline', { package: A }))).toBe('alpha dataset');
     });
 });
+
+/**
+ * [#32183 × #32310, ADR-0150 D3] The caller arm (`?callerPackage=`) is a D3
+ * resolution, so it judges the served holders: a disabled package holds no
+ * name for it either. It reads `packageScopedHoldersOf` from the exact
+ * qualifier's module, which this change does not edit; the move comes from
+ * the source.
+ *
+ * BASE (main f0f729e7, the arm's first release): two closure holders, one
+ * disabled, were refused naming both; a name the closure reached only through
+ * a disabled package resolved to it and answered that package's withheld 404.
+ */
+describe('#32183 × #32310 — the caller arm judges the served holders', () => {
+    const P = 'com.acme.app';
+    beforeEach(() => {
+        registry.installPackage({
+            id: P, name: P, version: '1.0.0', type: 'app', namespace: 'app',
+            dependencies: { [A]: '^1.0.0', [B]: '^1.0.0' },
+        } as never, 'code');
+    });
+
+    it.each([['enabled first', [A, B]], ['disabled first', [B, A]]] as const)('two holders in the closure, one disabled (%s): the enabled holder\'s dataset; re-enabled, 409 naming both', async (_order, order) => {
+        for (const id of order) ship('dataset', 'twin', id);
+        registry.disablePackage(B);
+        const served = await read('/dataset/twin', { callerPackage: P });
+        expect(served.status, JSON.stringify(served.body)).toBe(200);
+        expect(labelOf(served)).toBe('alpha dataset');
+        expect(JSON.stringify(served.body)).not.toContain('beta dataset');
+        registry.enablePackage(B);
+        const refused = await read('/dataset/twin', { callerPackage: P });
+        expect([refused.status, refused.body?.error?.code], JSON.stringify(refused.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(refused.body?.error?.message).toContain(`package "${A}"`);
+        expect(refused.body?.error?.message).toContain(`package "${B}"`);
+    });
+
+    it('the closure reaches the name only through a disabled package, an enabled one outside holds it: 409 outside-closure naming the enabled holder only', async () => {
+        ship('dataset', 'far', B);
+        ship('dataset', 'far', C);
+        registry.disablePackage(B);
+        const answer = await read('/dataset/far', { callerPackage: P });
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(answer.body?.error?.message).toContain(`held outside the declared dependency closure of package "${P}"`);
+        expect(answer.body?.error?.message).toContain(`package "${C}"`);
+        expect(JSON.stringify(answer.body)).not.toContain(B);
+    });
+
+    it('a name only a disabled closure package holds: 404, naming no package', async () => {
+        ship('dataset', 'gone', B);
+        registry.disablePackage(B);
+        const answer = await read('/dataset/gone', { callerPackage: P });
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([404, 'RESOURCE_NOT_FOUND']);
+        expect(JSON.stringify(answer.body)).not.toContain(B);
+    });
+});

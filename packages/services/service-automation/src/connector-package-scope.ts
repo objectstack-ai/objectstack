@@ -144,10 +144,12 @@ export function mappingNameResolver(
  *    the one holder in its closure): `not-found`.
  *  - Refused `outside-closure` naming exactly one holder, a disabled package:
  *    `not-found`, as the no-package read withholds that one holder's item.
- *  - Every other refusal stands as the resolver wrote it. A disabled holder
- *    beside an enabled one in the closure still counts, as it does for the
- *    no-package read today; dropping disabled holders from the holder set is
- *    #32183's change at `packageScopedHoldersOf`, which this does not touch.
+ *    [#32183] The resolver no longer writes this refusal: a disabled package
+ *    holds no name in the served holder set (`packageScopedHoldersOf`), so
+ *    such a name resolves to `not-found` before this arm is asked.
+ *  - Every other refusal stands as the resolver wrote it. [#32183] A disabled
+ *    holder beside an enabled one in the closure no longer counts (the served
+ *    holder set leaves it out), so the enabled holder's mapping is pulled.
  *
  * A registry that cannot say whether a package is disabled is read as is
  * (plugin-sharing's `listedHoldersView` precedent).
