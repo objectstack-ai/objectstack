@@ -54,15 +54,21 @@
  *  - `_env` names the environment's own item, or a name no package holds;
  *    a name only packages hold is refused naming them (`not-held-by-qualifier`).
  *
- * The engine keeps one slot per bare name (#31677 Q1) and is never re-keyed
- * here, so an admitted address serves the bare name's item and nothing else:
- * the address is served only when the bare name, resolved by the resolver the
- * engine itself asks (`resolvePackageScopedName`, a caller with no package),
- * IS the addressed holder. Otherwise it is refused with that resolution's
- * candidates. An environment overlay of package P's flow is P's item (D4),
- * which the bare door already serves, so P's address serves it too: the
- * address narrows the candidates to one holder and never widens what is
- * reached.
+ * An admitted address serves the bare name's item when the bare name,
+ * resolved by the resolver the engine itself asks (`resolvePackageScopedName`,
+ * a caller with no package), IS the addressed holder: the address is then its
+ * bare path. An environment overlay of package P's flow is P's item (D4),
+ * which the bare door already serves, so P's address serves it too.
+ *
+ * [ADR-0150 D4/D9, #31696] A FLOW name two packages hold (two namespaces may,
+ * since the flow's one-holder rule narrowed to the namespace) is refused bare,
+ * and the engine holds each holder's flow in its own slot. Its address names
+ * one holder, so it is admitted to that holder's slot
+ * ({@link AutomationAddressSlot}): the domain serves the door from the slot
+ * (`../flow-slot-view.ts`), and from nothing else. The address still narrows
+ * the candidates to one holder and never widens what is reached. Any other
+ * bare name the address's holder is not is refused with the resolution's
+ * candidates.
  *
  * {@link bareNameRefusal} is the same resolution for a bare address: a bare
  * name the resolver refuses is answered `409` naming every candidate (D5), on
@@ -189,6 +195,19 @@ export type AutomationAddressRefusal =
     | { readonly status: 404; readonly message: string }
     | { readonly status: 409; readonly refusal: PackageScopedRefusal };
 
+/**
+ * [ADR-0150 D4/D9, #31696] An address admitted to one holder's slot: the flow
+ * name is one two packages hold, which the bare doors refuse (`refusal`), and
+ * the address names `packageId`, one of them. The domain serves it from that
+ * package's slot, or answers `refusal` where it cannot (a door that writes the
+ * definition, an engine with no slot entries).
+ */
+export interface AutomationAddressSlot {
+    readonly status: 'slot';
+    readonly packageId: string;
+    readonly refusal: PackageScopedRefusal;
+}
+
 function refused(
     reason: PackageScopedRefusal['reason'],
     type: 'flow' | 'connector',
@@ -207,8 +226,12 @@ function refused(
     return { status: 409, refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
-function holdersOf(registry: AutomationAddressRegistry, type: string, name: string): string[] {
-    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name) ?? [] : [];
+/** [#32183] The served holders, or every holder with `options.includeDisabledPackages`; `options` reaches the registry's read as given. */
+function holdersOf(
+    registry: AutomationAddressRegistry, type: string, name: string,
+    options?: { includeDisabledPackages?: boolean },
+): string[] {
+    return typeof registry.packageScopedHoldersOf === 'function' ? registry.packageScopedHoldersOf(type, name, null, options) ?? [] : [];
 }
 
 function canResolve(registry: AutomationAddressRegistry): registry is AutomationAddressRegistry & PackageScopedRegistry {
@@ -229,22 +252,26 @@ export function bareNameRefusal(
     name: string,
 ): PackageScopedRefusal | undefined {
     if (!registry || !canResolve(registry)) return undefined;
-    const resolution = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
+    // [#32183, R4-G] Over every holder, a disabled package's included: it
+    // only refuses a name two packages hold, which a disable must not move
+    // (`main`'s answer). A one-holder name resolves either way.
+    const resolution = resolvePackageScopedName(registry, { type, name, callerPackageId: null, includeDisabledPackages: true });
     return resolution.status === 'refused' ? resolution : undefined;
 }
 
 /**
  * Judge an addressed path's qualifier (see the module note). `undefined`
  * admits it: the path is then served as its bare path, whose item is the
- * address's. A registry that cannot answer admits nothing it could not judge:
- * a namespace was read through it, so it answers; `_env` with no registry is
- * the bare path.
+ * address's. An {@link AutomationAddressSlot} admits it to one holder's slot
+ * of a flow name two packages hold. A registry that cannot answer admits
+ * nothing it could not judge: a namespace was read through it, so it answers;
+ * `_env` with no registry is the bare path.
  */
 export function admitAutomationAddress(
     registry: AutomationAddressRegistry | undefined,
     qualifier: AutomationAddressQualifier,
     item: { readonly type: 'flow' | 'connector'; readonly name: string },
-): AutomationAddressRefusal | undefined {
+): AutomationAddressRefusal | AutomationAddressSlot | undefined {
     const { type, name } = item;
     const noun = type === 'flow' ? 'Flow' : 'Connector';
     if (!registry || !canResolve(registry)) {
@@ -252,7 +279,14 @@ export function admitAutomationAddress(
             ? undefined
             : { status: 404, message: `${noun} '${name}' not found in namespace '${qualifier.namespace}'` };
     }
-    const holders = holdersOf(registry, type, name);
+    // [#32183, R4-G] A name two or more packages hold over every holder (the
+    // state #31696 opened for a flow, each holder's flow in its own engine
+    // slot) is judged over every holder, a disabled package's included, so a
+    // disable moves no address of it (`main`'s answer). A one-holder name is
+    // judged over the served holders, as every by-name door is.
+    const everyHolder = holdersOf(registry, type, name, { includeDisabledPackages: true });
+    const shared = everyHolder.length > 1;
+    const holders = shared ? everyHolder : holdersOf(registry, type, name);
     let holder: PackageScopedHolder;
     if (qualifier.kind === 'environment') {
         if (registry.getEnvironmentScopedItem(type, name) !== undefined || holders.length === 0) return undefined;
@@ -270,10 +304,18 @@ export function admitAutomationAddress(
         }
         holder = { kind: 'package', packageId: holding[0] };
     }
-    // The engine serves the bare name's item: the address is served only when
-    // that item is the addressed holder's.
-    const bare = resolvePackageScopedName(registry, { type, name, callerPackageId: null });
-    if (bare.status === 'refused') return { status: 409, refusal: bare };
+    // The bare door serves the bare name's item: the address is its bare path
+    // only when that item is the addressed holder's.
+    const bare = resolvePackageScopedName(registry, {
+        type, name, callerPackageId: null, ...(shared ? { includeDisabledPackages: true } : {}),
+    });
+    if (bare.status === 'refused') {
+        // [#31696] A flow name two packages hold: each holder's flow is its own
+        // slot, and the address names one holder of it.
+        return type === 'flow' && holder.kind === 'package'
+            ? { status: 'slot', packageId: holder.packageId, refusal: bare }
+            : { status: 409, refusal: bare };
+    }
     if (bare.status === 'resolved' && bare.holder.kind === 'package' && bare.holder.packageId === holder.packageId) return undefined;
     const served: PackageScopedHolder[] = bare.status === 'resolved' ? [bare.holder] : [];
     return refused('ambiguous-in-environment', type, name, null, [holder, ...served]);

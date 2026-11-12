@@ -134,7 +134,11 @@ function makeEngine() {
             // A registry that reads no type by package (ADR-0150): every by-name read stays
             // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
             // package-scoped type, since it cannot tell how this registry reads it.
-            readsByPackage: () => false,
+            // [#31696] Except the flow, which `SchemaRegistry` reads by package (its
+            // name is scoped to the namespace): a bare read of it resolves through the
+            // package-scoped resolver, here this double's own item.
+            readsByPackage: (type: string) => type === 'flow',
+            resolveItem: (type: string, name: string) => runtimeItems.get(type)?.get(name) ?? artifacts.get(type)?.get(name),
             listItems: (type: string) => [
                 ...Array.from(artifacts.get(type)?.values() ?? []),
                 ...Array.from(runtimeItems.get(type)?.values() ?? []),

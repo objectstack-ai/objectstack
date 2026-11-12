@@ -23,6 +23,13 @@
 // a `receipt` file field). The member owns one invoice and its line; the admin
 // owns the other pair, which the member can neither read nor edit.
 //
+// [#32734] And a field that cannot take the upload when it arrives: an extra
+// object, `dogfood_upload_claim`, whose multi-file `invoices` field is
+// read-only once the claim is approved (`readonlyWhen`). A link minted on the
+// draft and used after the approval is refused with the reason, attaches
+// nothing and keeps no file — never "attached" for a change the engine
+// ignored.
+//
 // Not eligible for the shared showcase project: it boots its own plugins.
 
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -61,9 +68,38 @@ const memberSet = PermissionSetSchema.parse({
     showcase_invoice: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     showcase_invoice_line: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
     sys_attachment: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
+    dogfood_upload_claim: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
   rowLevelSecurity: [RLS.ownerPolicy('showcase_invoice', 'created_by')],
 });
+
+/** [#32734] An expense claim whose invoices lock once it is approved. */
+const UPLOAD_CLAIM = 'dogfood_upload_claim';
+const uploadClaimApp = {
+  name: 'com.dogfood.upload-claim',
+  type: 'standard' as const,
+  version: '0.0.0',
+  optionalDependencies: ['com.objectstack.engine.objectql'],
+  async init(ctx: any) {
+    ctx.getService('manifest').register({
+      id: 'com.dogfood.upload-claim',
+      name: 'Upload claim',
+      version: '0.0.0',
+      type: 'plugin',
+      scope: 'system',
+      objects: [{
+        name: UPLOAD_CLAIM,
+        label: 'Upload Claim',
+        fields: {
+          name: { type: 'text', label: 'Name' },
+          status: { type: 'text', label: 'Status' },
+          invoices: { type: 'file', label: 'Invoices', multiple: true, readonlyWhen: "record.status == 'approved'" },
+        },
+      }],
+    });
+  },
+  async start() {},
+};
 
 /** A one-page PDF whose text layer says `text`. */
 function minimalPdf(text: string): Buffer {
@@ -174,6 +210,7 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       extraPlugins: [
         new MCPServerPlugin(),
         new StorageServicePlugin({ adapter: 'local', local: { rootDir }, bindToSettings: false }),
+        uploadClaimApp as never,
       ],
     });
     adminToken = await stack.signIn();
@@ -388,6 +425,44 @@ describe('[#30892] showcase: an agent reads and attaches a record\'s files over 
       } finally {
         storage.setLimitsSnapshot({});
       }
+    });
+  });
+
+  describe('[#32734] a field read-only when the upload arrives (`readonlyWhen`)', () => {
+    const invoicesOf = async (id: string): Promise<string[]> => {
+      const row = await ql.findOne(UPLOAD_CLAIM, { where: { id }, ...SYS });
+      const value = row?.invoices;
+      const list = Array.isArray(value) ? value : value == null ? [] : [value];
+      return list.map((v: any) => String(typeof v === 'object' ? v.id : v));
+    };
+    const filesNamed = (name: string) => ql.find('sys_file', { where: { name }, ...SYS });
+
+    it('a draft takes the upload; after approval a link minted before is refused 403 with the reason, attaching and keeping nothing', async () => {
+      const users = (await ql.find('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS })) as Array<{ id: string }>;
+      const created = await ql.insert(UPLOAD_CLAIM, { name: 'Trip to Lyon', status: 'draft', created_by: users[0]!.id, owner_id: users[0]!.id }, SYS);
+      const claimId = String(created?.id ?? created?.record?.id ?? created);
+
+      const draft = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      const first = await put(draft.path, minimalPdf('Hotel invoice'), { 'x-file-name': 'hotel-invoice.pdf' });
+      const firstBody: any = await first.json();
+      expect(first.status, JSON.stringify(firstBody)).toBe(200);
+      expect(await invoicesOf(claimId)).toEqual([firstBody.data.fileId]);
+      expect((await stack.apiAs(memberToken, 'GET', `/data/${UPLOAD_CLAIM}/${claimId}`)).status, 'the member owns the claim').toBe(200);
+
+      const late = await mint({ objectName: UPLOAD_CLAIM, recordId: claimId, field: 'invoices' });
+      await ql.update(UPLOAD_CLAIM, { status: 'approved' }, { where: { id: claimId }, ...SYS });
+      const res = await put(late.path, minimalPdf('Taxi invoice'), { 'x-file-name': 'taxi-invoice.pdf' });
+      const body: any = await res.json();
+
+      expect(res.status, JSON.stringify(body)).toBe(403);
+      expect(body.success).toBe(false);
+      expect(body.error.code).toBe('FIELD_NOT_ACCESSIBLE');
+      expect(body.error.message).toMatch(/^Nothing was attached: /);
+      expect(body.error.message).toContain(`${UPLOAD_CLAIM}.invoices`);
+      expect(await invoicesOf(claimId)).toEqual([firstBody.data.fileId]);
+      expect(await filesNamed('taxi-invoice.pdf')).toEqual([]);
+      // Spent: the link is not usable a second time.
+      expect((await put(late.path, minimalPdf('Taxi invoice'))).status).toBe(404);
     });
   });
 });

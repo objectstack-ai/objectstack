@@ -24,7 +24,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { resolveThrownHttpError } from '@objectstack/types';
 import type { PermissionSet } from '@objectstack/spec/security';
 import { SysUser } from '@objectstack/platform-objects/identity';
-import { bindSecurityCatalogReader } from '@objectstack/core';
+import { bindSecurityCatalogReader, createSecurityCatalogReader } from '@objectstack/core';
 
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
@@ -206,6 +206,23 @@ describe('[ADR-0151 D3] a set above the agent ceiling is refused for an AI servi
     expect((await rows(h, 'sys_user_position', { user_id: 'u_bot' })).map((r) => r.position)).toEqual([SAFE_POSITION]);
   });
 
+  // [#32164, contract review 6817263634 should-fix A] The one-grant check runs after this refusal.
+  // BASE (ec39bd8e5): it answered first, 409 DUPLICATE_RECORD. CONTROL: within the ceiling it is the check's 409.
+  it('[#32164] the account already holds the breaching set: a second grant of it is refused for the ceiling (400), not as a second grant', async () => {
+    const h = await boot();
+    await h.engine.insert('sys_user_permission_set', { id: 'held', user_id: 'u_bot', permission_set: BREACHING_SET, organization_id: ORG }, { context: SYS });
+    expectAccountRefusal(await refusalOf(() => grant(h, 'u_bot', BREACHING_SET)), 'permission_set', BREACHING_SET);
+    const person: any = await grant(h, 'u_person', BREACHING_SET);
+    expectAccountRefusal(await refusalOf(() => h.engine.update(
+      'sys_user_permission_set', { id: person.id, user_id: 'u_bot' }, { context: PLATFORM_ADMIN } as any,
+    )), 'permission_set', BREACHING_SET);
+    expect((await rows(h, 'sys_user_permission_set', { user_id: 'u_bot' })).map((r) => r.id)).toEqual(['held']);
+
+    // CONTROL: within the ceiling, the second grant is the one-grant check's refusal.
+    await h.engine.insert('sys_user_permission_set', { id: 'held_safe', user_id: 'u_bot', permission_set: SAFE_SET, organization_id: ORG }, { context: SYS });
+    expect(envelopeOf(await refusalOf(() => grant(h, 'u_bot', SAFE_SET)))).toMatchObject({ status: 409, code: 'DUPLICATE_RECORD' });
+  });
+
   it('CONTROL: a person is assigned the breaching set and the breaching position, as before', async () => {
     const h = await boot();
     await grant(h, 'u_person', BREACHING_SET);
@@ -269,5 +286,118 @@ describe('[ADR-0151 D3] a set above the agent ceiling is refused for an AI servi
     const warn = vi.fn();
     expect(registerAgentAccountGrantRefusal({}, { warn })).toBe(false);
     expect(warn.mock.calls[0]?.[0]).toContain('is NOT refused');
+  });
+});
+
+/**
+ * [#32164, red-line review E3] The set an account would hold is read the way
+ * the authorization resolver reads the row: a grant at the package it stores
+ * (ADR-0150 D8 R1), a position's sets from the package that declared the
+ * position (ADR-0150 D3/D7). A read the rule refuses (two holders, none
+ * placed) fails closed. BASE: the bare name was read, two holders refused it,
+ * and a refused read answered no breach, so either holder's set was admitted.
+ */
+describe('[E3] two packages hold one name: the account is judged on the set it would hold', () => {
+  const CRM = 'com.acme.crm';
+  const HR = 'com.acme.hr';
+  /** CRM's set of this name is within the ceiling, HR's is above it. */
+  const TWO = 'qa_shared_lead';
+  const def = (name: string, packageId: string, breaching: boolean) => ({
+    name,
+    label: name,
+    objects: { crm_lead: breaching ? { allowRead: true, viewAllRecords: true } : { allowRead: true, allowEdit: true } },
+    _packageId: packageId,
+  });
+  /** Each package's position binding `TWO` by name, read from its own package. */
+  const CRM_POSITION = 'crm_lead_clerk';
+  const HR_POSITION = 'hr_lead_chief';
+
+  function standIn(opts: { hrBreaches: boolean }) {
+    const sets: Record<string, Record<string, unknown>> = {
+      [CRM]: def(TWO, CRM, false),
+      [HR]: def(TWO, HR, opts.hrBreaches),
+    };
+    const positions: Record<string, Record<string, unknown>> = {
+      [CRM_POSITION]: { name: CRM_POSITION, label: CRM_POSITION, permissionSets: [TWO], _packageId: CRM },
+      [HR_POSITION]: { name: HR_POSITION, label: HR_POSITION, permissionSets: [TWO], _packageId: HR },
+    };
+    const manifests = [CRM, HR].map((id) => ({ manifest: { id, namespace: id.split('.').pop() } }));
+    return {
+      getItem: (type: string, name: string) =>
+        type === 'permission' ? (name === TWO ? sets[CRM] : undefined) : type === 'position' ? positions[name] : undefined,
+      listItems: (type: string) => (type === 'permission' ? [sets[CRM], sets[HR]] : type === 'position' ? Object.values(positions) : []),
+      isPackageDisabled: () => false,
+      packageScopedHoldersOf: (type: string, name: string) => (type === 'permission' && name === TWO ? [CRM, HR] : []),
+      getPackageScopedItem: (type: string, name: string, packageId: string) =>
+        type === 'permission' && name === TWO ? sets[packageId] : undefined,
+      getEnvironmentScopedItem: () => undefined,
+      getArtifactItem: (type: string, name: string, packageId: string) =>
+        type === 'position' && positions[name]?._packageId === packageId ? positions[name] : undefined,
+      getPackage: (id: string) => manifests.find((m) => m.manifest.id === id),
+      getAllPackages: () => manifests,
+      bareNameHoldersAreSealed: true,
+    };
+  }
+
+  function handlers(opts: { hrBreaches: boolean }) {
+    const bound: Record<string, (ctx: any) => Promise<void>> = {};
+    const engine = {
+      registerHook: (event: string, handler: any) => { bound[event] = handler; },
+      find: vi.fn(async () => [{ id: 'u_bot', principal_kind: 'agent' }]),
+      getSchema: (name: string) => ({ name }),
+    };
+    bindSecurityCatalogReader(engine, createSecurityCatalogReader({
+      registry: standIn(opts) as never,
+      metadata: { get: async () => undefined, list: async () => [] },
+    }));
+    expect(registerAgentAccountGrantRefusal(engine)).toBe(true);
+    return bound;
+  }
+
+  const ctxOf = (object: string, data: Record<string, unknown>, previous?: Record<string, unknown>) => ({
+    object,
+    session: { userId: 'u_caller' },
+    input: { data, ...(previous ? { id: previous.id } : {}) },
+    ...(previous ? { previous } : {}),
+    api: { object: () => ({ find: async () => [{ id: 'u_bot' }] }) },
+  });
+
+  it('a grant naming the package whose set breaches is refused; naming the one within the ceiling is admitted', async () => {
+    const h = handlers({ hrBreaches: true });
+    const refused = await refusalOf(() =>
+      h.beforeInsert!(ctxOf('sys_user_permission_set', { user_id: 'u_bot', permission_set: TWO, permission_set_package: HR })));
+    const env = expectAccountRefusal(refused, 'permission_set', TWO);
+    expect(env.fields[0].message).toContain('objects.crm_lead.viewAllRecords');
+    await expect(h.beforeInsert!(ctxOf('sys_user_permission_set', { user_id: 'u_bot', permission_set: TWO, permission_set_package: CRM })))
+      .resolves.toBeUndefined();
+  });
+
+  it('an update keeps the stored package: moving an HR grant onto the account is refused, a CRM grant is admitted', async () => {
+    const h = handlers({ hrBreaches: true });
+    const hrRow = { id: 'g1', user_id: 'u_person', permission_set: TWO, permission_set_package: HR };
+    expectAccountRefusal(
+      await refusalOf(() => h.beforeUpdate!(ctxOf('sys_user_permission_set', { user_id: 'u_bot' }, hrRow))),
+      'permission_set', TWO,
+    );
+    const crmRow = { ...hrRow, id: 'g2', permission_set_package: CRM };
+    await expect(h.beforeUpdate!(ctxOf('sys_user_permission_set', { user_id: 'u_bot' }, crmRow))).resolves.toBeUndefined();
+  });
+
+  it('a grant whose read the rule refuses (no package placed) fails closed: refused when either holder\'s set breaches; CONTROL: admitted when neither does', async () => {
+    const refused = await refusalOf(() =>
+      handlers({ hrBreaches: true }).beforeInsert!(ctxOf('sys_user_permission_set', { user_id: 'u_bot', permission_set: TWO })));
+    expectAccountRefusal(refused, 'permission_set', TWO);
+    await expect(handlers({ hrBreaches: false }).beforeInsert!(ctxOf('sys_user_permission_set', { user_id: 'u_bot', permission_set: TWO })))
+      .resolves.toBeUndefined();
+  });
+
+  it('a position binding the name is judged on its own package\'s set: HR\'s position refused, CRM\'s admitted', async () => {
+    const h = handlers({ hrBreaches: true });
+    const env = expectAccountRefusal(
+      await refusalOf(() => h.beforeInsert!(ctxOf('sys_user_position', { user_id: 'u_bot', position: HR_POSITION }))),
+      'position', HR_POSITION,
+    );
+    expect(env.fields[0].message).toContain(`'${TWO}'`);
+    await expect(h.beforeInsert!(ctxOf('sys_user_position', { user_id: 'u_bot', position: CRM_POSITION }))).resolves.toBeUndefined();
   });
 });

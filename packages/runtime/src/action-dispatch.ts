@@ -550,8 +550,12 @@ async function dispatchAdmittedAction(
                 // [#15168] `subject`, not `record`: the shared door derives the
                 // flow context's `record` AND its `recordLoadDenied` sibling
                 // from the one load outcome.
+                // [ADR-0150 D3, #31696] The action's own package: its `target`
+                // flow name resolves from it.
+                const callerPackageId = call.declaration.packageId ?? actionExec.actionDeclaringPackage(actionDef, call.declaration.obj);
                 const result = await actionExec.dispatchFlowAction(deps, requestContext, actionDef, {
                     objectName, subject, params, recordId, ec, envId,
+                    ...(callerPackageId !== undefined ? { callerPackageId } : {}),
                 });
                 return { kind: 'answered', result };
             } catch (err) {

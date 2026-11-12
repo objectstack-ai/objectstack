@@ -26,6 +26,7 @@ import {
     type PackageScopedRefusal,
 } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
+import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
 import { storedDraftChanges } from './draft-changes.js';
@@ -75,9 +76,16 @@ export function packageScopedRefusalOf(error: unknown): PackageScopedRefusal | u
 
 /** The registry reads {@link refuseActionHeldByPackages} counts an action name's holders with. */
 interface ActionHolderRegistry {
-    packageScopedHoldersOf(type: string, name: string): string[];
+    /** [#32183] The served holders; `options.includeDisabledPackages` asks for every holder. */
+    packageScopedHoldersOf(
+        type: string,
+        name: string,
+        callerPackageId?: string | null,
+        options?: { includeDisabledPackages?: boolean },
+    ): string[];
     getPackageScopedItem(type: string, name: string, packageId: string): unknown;
     isPackageDisabled?(packageId: string): boolean;
+    getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
 }
 
 /** The engine registry's action-holder reads; `undefined` when it lacks them. */
@@ -137,29 +145,242 @@ function isDisabledHolder(registry: ActionHolderRegistry | undefined, packageId:
  * @throws {PackageScopedNameRefusedError} when two or more enabled packages hold the name.
  * @throws `objectLessRefused` when it is set and the packages alone are fewer than two.
  */
-export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, name: string, objectLessRefused?: unknown): void {
+export function refuseActionHeldByPackages(
+    host: Pick<ProtocolHost, 'engine'>,
+    name: string,
+    objectLessRefused?: unknown,
+    packageless?: PackagelessActionHolder,
+): void {
     const registry = actionHolderRegistry(host);
-    const holders = registry
-        ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id))
-        : [];
-    if (!registry || holders.length < 2) {
+    const holders = enabledActionHolders(registry, name);
+    // [#32365] A package-less item the bare read may not answer beside a
+    // package holder is one more holder ({@link judgeBareActionRead}).
+    const packagelessHolds = packageless !== undefined && holders.length > 0;
+    if (!registry || (holders.length < 2 && !packagelessHolds)) {
         if (objectLessRefused !== undefined) throw objectLessRefused;
         return;
     }
     const narrower = objectLessRefused === undefined ? undefined : packageScopedRefusalOf(objectLessRefused);
-    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind !== 'package' || !holders.includes(candidate.packageId));
-    const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(registry.getPackageScopedItem('action', name, id))]] as const));
+    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind === 'package'
+        ? !holders.includes(candidate.packageId)
+        : !(packagelessHolds && candidate.kind === packageless.candidate.kind));
+    const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(holderOwnItem(registry, name, id))]] as const));
     const base: Omit<PackageScopedRefusal, 'message'> = {
         status: 'refused',
         reason: 'ambiguous-in-environment',
         type: 'action',
         name,
         callerPackageId: null,
-        candidates: [...holders.map((packageId) => ({ kind: 'package' as const, packageId })), ...extra],
+        candidates: [
+            ...holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+            ...extra,
+            ...(packagelessHolds ? [packageless.candidate] : []),
+        ],
     };
+    const owners = [packageScopedActionOwnersSentence(objectsByPackage)];
+    if (packagelessHolds) owners.push(packagelessOwnerSentence(packageless));
     throw new PackageScopedNameRefusedError({
         ...base,
-        message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsByPackage)}`,
+        message: `${packageScopedRefusalMessage(base)} ${owners.join(' ')}`,
+    });
+}
+
+/**
+ * [ADR-0150 D3, #32365] The package-less item of an action name the bare read
+ * weighs beside its package holders: whose it is (the environment's own, or
+ * the platform's), as a refusal names it, and the object it binds the name to.
+ */
+export interface PackagelessActionHolder {
+    readonly candidate: { readonly kind: 'environment' } | { readonly kind: 'platform' };
+    readonly object: string | undefined;
+    readonly item: unknown;
+}
+
+/** The sentence a refusal appends for the package-less holder it names. */
+function packagelessOwnerSentence(packageless: PackagelessActionHolder): string {
+    const whose = packageless.candidate.kind === 'environment' ? 'The environment\'s own item' : 'The platform\'s item';
+    return `${whose} binds it to ${packageless.object === undefined ? 'no object' : `object "${packageless.object}"`}.`;
+}
+
+/**
+ * [#32365] A package holder's own item of an action name, as a refusal names
+ * its object: its package-scoped item when that carries the package, else its
+ * own artifact (`getArtifactItem` at the package, which reads the composite
+ * slot before the bare one) — never a package-less entry the registry binds
+ * to it.
+ */
+function holderOwnItem(registry: ActionHolderRegistry, name: string, packageId: string): unknown {
+    const scoped = registry.getPackageScopedItem('action', name, packageId);
+    if ((scoped as { _packageId?: unknown } | null | undefined)?._packageId === packageId) return scoped;
+    const artifact = typeof registry.getArtifactItem === 'function' ? registry.getArtifactItem('action', name, packageId) : undefined;
+    return (artifact as { _packageId?: unknown } | null | undefined)?._packageId === packageId ? artifact : scoped;
+}
+
+/** The enabled packages holding an action name in the registry, in its order (#25308: a disabled package holds nothing). */
+function enabledActionHolders(registry: ActionHolderRegistry | undefined, name: string): string[] {
+    return registry ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id)) : [];
+}
+
+/**
+ * The registry's package-less entry of an action name: the bare slot's item
+ * (which `getItem` answers first) when it carries no package — none, `''` or
+ * the `sys_metadata` provenance sentinel — else `undefined`.
+ */
+function packagelessActionEntry(host: Pick<ProtocolHost, 'engine'>, name: string): unknown {
+    const registry = (host.engine as { registry?: { getItem?(type: string, name: string): unknown } } | undefined)?.registry;
+    if (typeof registry?.getItem !== 'function') return undefined;
+    const item = registry.getItem('action', name);
+    if (item === null || typeof item !== 'object') return undefined;
+    const stamped = (item as { _packageId?: unknown })._packageId;
+    return typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' ? undefined : item;
+}
+
+/**
+ * [ADR-0150 D3/D5, #32365] The bare by-name read of an action (`GET
+ * /meta/action/NAME`, its `/layers`): judged over EVERY holder of the name,
+ * the package-less one included, before any layer is read. Answers the item
+ * the read serves when the rule picks one, `undefined` when it leaves the
+ * layers' own answer standing, and throws the refusal otherwise:
+ *
+ *  - **the environment's own item** (a package-less registry entry the
+ *    environment's store holds an active package-less row of, on the same
+ *    object or none) answers first beside ONE package holder (D3), whatever
+ *    object each binds the name to. Beside two or more it is refused, naming
+ *    every package AND the environment: the refusal names every candidate.
+ *  - **the platform's item** (a package-less entry the store holds no row
+ *    of: host code or a plugin) beside any package holder is refused naming
+ *    both — the rule #31697 applies to an object-less one, now on any object.
+ *  - **one enabled package holder and no package-less item**: that holder's
+ *    item ({@link ActionHolderRegistry.getPackageScopedItem}), never the
+ *    registry's first composite, which is a DISABLED package's when it
+ *    registered first (the face would then withhold it, and the read answered
+ *    no item though an enabled package holds the name).
+ *  - two or more enabled package holders: refused, as {@link refuseActionHeldByPackages}.
+ *
+ * The store is read only when a package-less item stands beside a package
+ * holder, and a read that throws travels to the caller (ADR-0110 D3).
+ *
+ * @throws {PackageScopedNameRefusedError} as above.
+ * @throws `objectLessRefused` when it is set and nothing wider refuses.
+ */
+export async function judgeBareActionRead(
+    host: Pick<ProtocolHost, 'engine' | 'readItemActiveRows'>,
+    name: string,
+    objectLessRefused?: unknown,
+    face: 'served' | 'execution' = 'served',
+): Promise<{ item: unknown } | undefined> {
+    const registry = actionHolderRegistry(host);
+    const holders = enabledActionHolders(registry, name);
+    const entry = holders.length > 0 ? packagelessActionEntry(host, name) : undefined;
+    let packageless: PackagelessActionHolder | undefined;
+    if (entry !== undefined && face === 'execution') {
+        // The execution face (the `/actions/:object/NAME` route's declaration
+        // read) keeps main's answer beside a package-less item: the route
+        // sees the object and judges the declaration it gets by it. Aligning
+        // it with the served face is followed up separately by its owner seat.
+        refuseActionHeldByPackages(host, name, objectLessRefused);
+        return undefined;
+    }
+    if (entry !== undefined) {
+        const object = actionObjectOf(entry);
+        const environment = storesPackagelessActionRow(await host.readItemActiveRows('action', name), object);
+        if (environment && holders.length === 1 && objectLessRefused === undefined) return { item: entry };
+        packageless = { candidate: environment ? { kind: 'environment' } : { kind: 'platform' }, object, item: entry };
+    }
+    refuseActionHeldByPackages(host, name, objectLessRefused, packageless);
+    if (registry && holders.length === 1 && entry === undefined) {
+        const item = registry.getPackageScopedItem('action', name, holders[0]!);
+        if (item !== undefined) return { item };
+    }
+    return undefined;
+}
+
+/**
+ * [ADR-0150 D3, #32365] Does the MetadataService's answer to a bare action
+ * read agree with the judged answer ({@link judgeBareActionRead})? The
+ * service is read before the registry, and holds its own copies, so its bare
+ * answer may be another holder's item (a disabled package's, the one
+ * package's beside the environment's own item, or a package's customization
+ * the store keeps in that package's slot) where the rule answers otherwise.
+ *
+ * Both items are read the way the store reads them
+ * ({@link storedItemPackageId}: the stored envelope's `packageId`, flat or
+ * under the publish envelope, else the body's stamp). The answer fits when it
+ * carries the judged holder's package; a package-less answer fits a judged
+ * package holder (its customization, or the environment's item the registry
+ * does not hold), and fits a package-less judged answer only when it binds
+ * the same object ({@link boundObjectOf}) — a package-less body on a
+ * package's object is that package's customization, never the environment's
+ * item. Anything else is not this read's answer, and the judged answer is
+ * served in its place.
+ */
+export function serviceAnswerFitsBareAction(judged: { item: unknown }, data: unknown): boolean {
+    const served = storedItemPackageId(data);
+    const holder = storedItemPackageId(judged.item);
+    if (served !== undefined) return served === holder;
+    return holder !== undefined || boundObjectOf(data) === boundObjectOf(judged.item);
+}
+
+/**
+ * [ADR-0150 D3, #32560] Is the MetadataService's package-less answer to a bare
+ * action read a DISABLED package's customization? The store keeps a
+ * package-less body written under a name one package holds in that package's
+ * slot (D4), so a service holding no enabled holder's slot answers the
+ * disabled package's customization, which {@link serviceAnswerFitsBareAction}
+ * cannot tell from the environment's own item by its body. It is that
+ * package's when the service, asked at a disabled holder the registry names,
+ * answers the same item. A disabled package holds nothing to a by-name action
+ * read (#25308), so such an answer is not this read's.
+ */
+export async function servedFromDisabledHolder(
+    host: Pick<ProtocolHost, 'engine' | 'readItemFromMetadataService'>,
+    name: string,
+    data: unknown,
+): Promise<boolean> {
+    if (storedItemPackageId(data) !== undefined) return false;
+    const registry = actionHolderRegistry(host);
+    // [#32183] Every holder, a disabled package's included: the served
+    // holders leave a disabled package out, and this read asks which disabled
+    // holder's slot the answer came from.
+    const disabled = (registry?.packageScopedHoldersOf('action', name, null, { includeDisabledPackages: true }) ?? [])
+        .filter((id) => isDisabledHolder(registry, id));
+    for (const packageId of disabled) {
+        const atHolder = (await host.readItemFromMetadataService('action', name, packageId)).data;
+        if (atHolder !== undefined && atHolder !== null && sameStoredItem(atHolder, data)) return true;
+    }
+    return false;
+}
+
+/** The same item: one object, or (a loader's fresh copy) the same JSON. */
+function sameStoredItem(left: unknown, right: unknown): boolean {
+    if (left === right) return true;
+    try {
+        return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Does the environment's store hold an active package-less row of the action
+ * that binds its name to `object` (`undefined`: none)? Such a row is the
+ * environment's own item; a package-less registry entry with none behind it
+ * is the platform's (objectql's `storesObjectLessPackagelessRow`, on any
+ * object).
+ */
+function storesPackagelessActionRow(
+    rows: readonly { package_id?: string | null; metadata?: unknown }[] | undefined,
+    object: string | undefined,
+): boolean {
+    return (rows ?? []).some((row) => {
+        if (row?.package_id !== null && row?.package_id !== undefined && row?.package_id !== '') return false;
+        let body: unknown;
+        try {
+            body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+        } catch {
+            return false;
+        }
+        return body !== null && typeof body === 'object' && actionObjectOf(body) === object;
     });
 }
 
@@ -173,18 +394,85 @@ export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, n
  * For an `action` the store counts every package holding a slot, the disabled
  * ones too, while a disabled package holds nothing to a by-name action read
  * ({@link refuseActionHeldByPackages} has already judged the enabled ones): a
- * refusal that names fewer than two enabled packages, and nothing else, falls
- * through as before.
+ * refusal that names fewer than two enabled packages falls through as before,
+ * [#32365] the environment's item it may name beside them included — that one
+ * is the bare read's own judge's ({@link judgeBareActionRead}).
  */
-export function rethrowPackageScopedRefusal(host: Pick<ProtocolHost, 'engine'>, type: string, error: unknown): void {
+export function rethrowPackageScopedRefusal(
+    host: Pick<ProtocolHost, 'engine'>,
+    type: string,
+    error: unknown,
+): PackageScopedRefusal | undefined {
     const refusal = packageScopedRefusalOf(error);
-    if (refusal === undefined) return;
+    if (refusal === undefined) return undefined;
     if (type === 'action') {
         const registry = actionHolderRegistry(host);
-        const live = refusal.candidates.filter((c) => c.kind !== 'package' || !isDisabledHolder(registry, c.packageId));
-        if (live.length < 2) return;
+        // [#32365] Counted over the packages alone: the environment's item the
+        // store names beside them refuses only with two enabled packages, and
+        // with fewer the bare read's own judge answers it.
+        // [#32560] The refusal so dropped is handed back: the package-less
+        // item it names is the store's, which the registry's judge may not
+        // see ({@link judgeDroppedServiceRefusal}).
+        const live = refusal.candidates.filter((c) => c.kind === 'package' && !isDisabledHolder(registry, c.packageId));
+        if (live.length < 2) return refusal;
     }
     throw error;
+}
+
+/**
+ * [ADR-0150 D3, #32560] The bare served read of an action whose
+ * MetadataService refusal {@link rethrowPackageScopedRefusal} dropped (it
+ * named fewer than two ENABLED packages) and named a package-less holder:
+ * the service holds that item, and the registry the judge counts may not
+ * ({@link judgeBareActionRead} sees only the registry's holders), so the read
+ * would fall through to the one enabled package's item.
+ *
+ * Judged as the judge judges a package-less item, over the service's own
+ * package-less item of the name: with no enabled package beside it, it
+ * answers; beside one, it answers when the environment's store holds an
+ * active package-less row of it on the same object (the environment's own
+ * item answers first, D3), and is refused naming the package and the
+ * platform otherwise (host code or a plugin: seat ruling Q1 on the bare
+ * action read). `undefined` — the read goes on as before — when the refusal
+ * names no package-less holder, the service lists no such item, or lists
+ * more than one (nothing here picks one).
+ *
+ * @throws {PackageScopedNameRefusedError} the platform's item beside an enabled package.
+ */
+export async function judgeDroppedServiceRefusal(
+    host: Pick<ProtocolHost, 'engine' | 'getServicesRegistry' | 'readItemActiveRows'>,
+    name: string,
+    dropped: PackageScopedRefusal,
+): Promise<{ item: unknown } | undefined> {
+    if (!dropped.candidates.some((c) => c.kind === 'environment' || c.kind === 'platform')) return undefined;
+    const service = host.getServicesRegistry?.()?.get('metadata') as { list?(type: string): Promise<unknown[]> } | undefined;
+    if (typeof service?.list !== 'function') return undefined;
+    const packageless = ((await service.list('action')) ?? []).filter((item) =>
+        (item as { name?: unknown } | null | undefined)?.name === name && storedItemPackageId(item) === undefined);
+    if (packageless.length !== 1) return undefined;
+    const entry = packageless[0];
+    const registry = actionHolderRegistry(host);
+    const live = dropped.candidates.filter((c): c is Extract<typeof c, { kind: 'package' }> =>
+        c.kind === 'package' && !isDisabledHolder(registry, c.packageId));
+    if (live.length === 0) return { item: entry };
+    const object = actionObjectOf(entry);
+    if (storesPackagelessActionRow(await host.readItemActiveRows('action', name), object)) return { item: entry };
+    const platform: PackagelessActionHolder = { candidate: { kind: 'platform' }, object, item: entry };
+    // Named with each package's object where the registry holds it…
+    refuseActionHeldByPackages(host, name, undefined, platform);
+    // …else with the packages the service named.
+    const base: Omit<PackageScopedRefusal, 'message'> = {
+        status: 'refused',
+        reason: 'ambiguous-in-environment',
+        type: 'action',
+        name,
+        callerPackageId: null,
+        candidates: [...live, platform.candidate],
+    };
+    throw new PackageScopedNameRefusedError({
+        ...base,
+        message: `${packageScopedRefusalMessage(base)} ${packagelessOwnerSentence(platform)}`,
+    });
 }
 
 /** The body of `ObjectStackProtocolImplementation#getMetaItem`; the method's docblock there is its contract. */
@@ -209,7 +497,7 @@ export async function getMetaItemForExecution(host: Pick<ProtocolHost, 'readMeta
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItem`; the method's docblock there is its contract. */
-export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'getServicesRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, opts: { face?: 'served' | 'execution' } = {}) {
@@ -266,6 +554,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // object-less judge's refusal is merged into that one (review 6781770671
     // S5), so a third package bound to an object is named beside two
     // object-less holders; alone, it is thrown as before.
+    // [ADR-0150 D3, #32365] …over every holder, the package-less item
+    // included: the environment's own answers first beside one package, the
+    // platform's is refused beside any, and one enabled package's answers
+    // even when a disabled package's registered first ({@link judgeBareActionRead}).
+    // Step 3 serves that answer in place of `getItem`'s.
+    let bareActionAnswer: { item: unknown } | undefined;
     if (!request.packageId && request.type === 'action') {
         let objectLessRefused: unknown;
         if (typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
@@ -276,7 +570,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 objectLessRefused = error;
             }
         }
-        refuseActionHeldByPackages(host, request.name, objectLessRefused);
+        bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused, opts.face);
     }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
@@ -722,7 +1016,13 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 request.name,
                 request.packageId,
             );
-            if (fromService.data !== undefined && fromService.data !== null) {
+            // [#32365] …unless a bare action read's judged answer says it is
+            // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
+            // or it is a disabled package's customization
+            // ({@link servedFromDisabledHolder}).
+            if (fromService.data !== undefined && fromService.data !== null
+                && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
+                    || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
@@ -742,7 +1042,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             // [ADR-0150 D3, #32244] A package-scoped refusal is the store's
             // answer, naming every holder ({@link rethrowPackageScopedRefusal});
             // anything else is a MetadataService not available — fall through.
-            rethrowPackageScopedRefusal(host, request.type, error);
+            const dropped = rethrowPackageScopedRefusal(host, request.type, error);
+            // [ADR-0150 D3, #32560] …and a dropped one naming the service's
+            // package-less item is judged here, on the served face
+            // ({@link judgeDroppedServiceRefusal}).
+            if (dropped !== undefined && !execution && !request.packageId && request.type === 'action') {
+                const answer = await judgeDroppedServiceRefusal(host, request.name, dropped);
+                if (answer !== undefined) item = answer.item;
+            }
         }
     }
 
@@ -776,6 +1083,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         // first-composite read and no plural-spelling retry beside it.
         if (packagelessScopedRead) {
             item = packagelessScopedRead.item;
+        } else if (bareActionAnswer) {
+            item = bareActionAnswer.item;
         } else {
             item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {

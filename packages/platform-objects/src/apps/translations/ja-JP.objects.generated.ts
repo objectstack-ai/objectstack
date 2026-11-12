@@ -3725,6 +3725,9 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "バージョン"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "操作タイプ",
         options: {

@@ -3725,6 +3725,9 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "Версия"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "Тип операции",
         options: {

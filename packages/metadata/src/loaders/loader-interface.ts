@@ -252,9 +252,17 @@ export interface MetadataLoader {
    * another package's stored item. A loader that ignores the option deletes by
    * name, as every delete did before.
    *
+   * [ADR-0150 D3, #32560] `options.packagelessOnly` is passed when a removal
+   * naming no package of an action name was judged, over the registry and
+   * every loader, to take the environment's own item only (the item a read
+   * naming no package answers beside one package's). The loader then deletes
+   * the name's package-less slots only — ⛔ never a package's, even where it
+   * holds that package's item alone and its own rule would take every slot.
+   *
    * @param type The metadata type
    * @param name The item name
-   * @param options `packageId`: delete only that package's row of the name
+   * @param options `packageId`: delete only that package's row of the name;
+   *   `packagelessOnly`: delete only the name's package-less slots
    */
   delete?(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void>;
 }
@@ -263,5 +271,12 @@ export interface MetadataLoader {
 export interface MetadataLoaderDeleteOptions {
   /** Delete the name's row only when it holds this package's item. */
   packageId?: string;
+  /**
+   * [ADR-0150 D3, #32560] Delete only the name's package-less slots (the
+   * environment's own item): the manager judged a removal naming no package
+   * over every holder of the name, and a package's item is not what it takes.
+   * Never sent beside `packageId`.
+   */
+  packagelessOnly?: true;
 }
 

@@ -485,7 +485,8 @@ describe('phase 1 parity — under the one-holder rule the resolver answers as `
   it('a second package holder is still refused by phase 1, so no reader can meet two', () => {
     sealedWithHolder(false);
     install(B);
-    expect(() => ship('flow', NAME, B)).toThrow();
+    // A type whose rule has not narrowed to the namespace (`flow` has, #31696).
+    expect(() => ship('webhook', NAME, B)).toThrow();
   });
 });
 
@@ -616,10 +617,11 @@ describe('R2 — engine functions resolve in their referrer\'s package (ADR-0150
     engine.registry.logLevel = 'silent';
   });
 
-  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare map still keeps the last', () => {
+  it('keeps every package\'s function of one name, the owner `app:ID` read as the package; the bare read refuses the name (#31700)', () => {
     engine.registerFunction('score', fn('alpha'), `app:${A}`);
     engine.registerFunction('score', fn('beta'), { packageId: B, effect: 'writes' });
-    expect((engine.resolveFunction('score') as unknown as { tag: string }).tag).toBe('beta');
+    // [#31700, epic seat ruling R2-C] The bare map keeps the last, and the bare read picks neither holder.
+    expect(() => engine.resolveFunction('score')).toThrow(/The function "score" is held by 2 packages/);
     const holders = engine.functionHoldersOf('score');
     expect(holders.packageHolders).toEqual([A, B]);
     expect((holders.packageItem(A)?.handler as unknown as { tag: string }).tag).toBe('alpha');
@@ -878,5 +880,108 @@ describe('R2 — a residual owner (ADR-0130 D4) reaches what it declares through
     install(P);
     registry.recordResidualOwnerDependencies(P, [A]);
     expect(resolve('flow', 'send_email', P)).toMatchObject({ status: 'refused', reason: 'outside-closure' });
+  });
+});
+
+describe('#32183 — a disabled package holds no name for a by-name read (the served holders)', () => {
+  const D = 'com.acme.addon';
+  // [contract review S2] Both registration orders of every two-holder pin.
+  const ORDERS = [['enabled first', [A, B]], ['disabled first', [B, A]]] as const;
+
+  for (const type of ['flow', 'app', 'page'] as const) {
+    it.each(ORDERS)(`${type}: two holders, one disabled (%s) — the enabled holder answers a caller with no package`, (_order, order) => {
+      install(A);
+      install(B);
+      for (const id of order) ship(type, 'shared', id);
+      expect(resolve(type, 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+      registry.disablePackage(B);
+      expect(registry.packageScopedHoldersOf(type, 'shared')).toEqual([A]);
+      expect(resolve(type, 'shared')).toMatchObject({ status: 'resolved', via: 'unique-holder', holder: { kind: 'package', packageId: A } });
+      expect(label(resolve(type, 'shared'))).toBe(`alpha ${type}`);
+      // The served list shows the same holder.
+      expect(registry.listItems<{ _packageId?: string }>(type).map((i) => i._packageId)).toEqual([A]);
+    });
+  }
+
+  it.each(ORDERS)('a caller outside both closures is refused naming the enabled holder only (%s)', (_order, order) => {
+    install(A);
+    install(B);
+    install(C);
+    for (const id of order) ship('flow', 'shared', id);
+    registry.disablePackage(B);
+    expect(resolve('flow', 'shared', C)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+  });
+
+  // [contract review M3] The declared served → refused move. BASE (main
+  // de141e32): the caller resolved the disabled holder inside its closure.
+  it.each(ORDERS)('served → refused: a caller whose closure holds the name only through the disabled holder, the enabled one outside, is refused naming the enabled one (%s)', (_order, order) => {
+    install(A);
+    install(B);
+    install(C, [B]);
+    for (const id of order) ship('flow', 'shared', id);
+    expect(resolve('flow', 'shared', C)).toMatchObject({ status: 'resolved', via: 'closure', holder: { kind: 'package', packageId: B } });
+    registry.disablePackage(B);
+    expect(resolve('flow', 'shared', C)).toMatchObject({
+      status: 'refused', reason: 'outside-closure', candidates: [{ kind: 'package', packageId: A }],
+    });
+  });
+
+  it("the caller's own holding stays when its package is disabled: it answers its own item, as before", () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared', B)).toEqual([A, B]);
+    expect(resolve('flow', 'shared', B)).toMatchObject({ status: 'resolved', via: 'own', holder: { kind: 'package', packageId: B } });
+  });
+
+  it('only disabled holders: no holder, and not-found — the disabled package is named nowhere', () => {
+    install(B);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([]);
+    expect(resolve('flow', 'shared')).toEqual({ status: 'not-found' });
+    install(C);
+    expect(resolve('flow', 'shared', C)).toEqual({ status: 'not-found' });
+  });
+
+  it('`includeDisabledPackages` reads every holder: the read a durable judgment takes', () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    ship('flow', 'only_beta', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared', undefined, { includeDisabledPackages: true })).toEqual([A, B]);
+    expect(resolvePackageScopedName(registry, { type: 'flow', name: 'shared', callerPackageId: null, includeDisabledPackages: true }))
+      .toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    expect(resolvePackageScopedName(registry, { type: 'flow', name: 'only_beta', callerPackageId: null, includeDisabledPackages: true }))
+      .toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: B } });
+  });
+
+  it('disable is reversible: on enable the package holds the name again', () => {
+    install(A);
+    install(B);
+    ship('flow', 'shared', A);
+    ship('flow', 'shared', B);
+    registry.disablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([A]);
+    registry.enablePackage(B);
+    expect(registry.packageScopedHoldersOf('flow', 'shared')).toEqual([A, B]);
+    expect(resolve('flow', 'shared')).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+  });
+
+  it("a disabled base never promotes a dependent's bundle addition to a holder of the name", () => {
+    install(A);
+    install(D, [A]);
+    ship('email_template', 'welcome', A);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'addon-fr'), locale: 'fr-FR' }, 'name' as never, D);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([A]);
+    registry.disablePackage(A);
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([]);
+    expect(resolve('email_template', 'welcome')).toEqual({ status: 'not-found' });
   });
 });

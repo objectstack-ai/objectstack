@@ -3725,6 +3725,9 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "Versión"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "Tipo de operación",
         options: {
