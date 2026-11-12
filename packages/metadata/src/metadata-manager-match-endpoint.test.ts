@@ -1920,4 +1920,64 @@ describe('[#32560] a removal naming none of an action beside the environment\'s 
     expect(await ctx.served()).toEqual([]);
     expect(ctx.rowHolders()).toEqual([]);
   });
+
+  /**
+   * The artifact door's boot: the door's `MemoryLoader` holds the package's
+   * body alone (its sink saves it, then registers it with `{ notify: false }`)
+   * and the `DatabaseLoader` holds A's row and the environment's. Each loader
+   * judges a delete by its own slots, so a loader that holds A alone must be
+   * told the manager's judgment — the environment's own item only — or its
+   * "one holder, every slot" rule takes A.
+   */
+  it.each([
+    ['on another object', 'contact'],
+    ['object-less', undefined],
+  ] as const)('the door holding A\'s action alone, the rows holding A\'s and the environment\'s %s: a removal naming none takes the environment\'s row and slot, and the door keeps A (BASE: the door\'s copy of A was deleted)', async (_shape, envObject) => {
+    const door = new MemoryLoader();
+    const alpha = item(A, 'alpha', 'account');
+    await door.save('action', NAME, alpha);
+    const ctx = await boot([alpha, item(undefined, 'env', envObject)]);
+    ctx.manager.registerLoader(door);
+    const doorHolders = async () => (await door.loadSlots('action', NAME)).map((slot) => slot.packageId ?? null);
+    expect(await doorHolders(), 'the door holds A alone').toEqual([A]);
+    expect(ctx.rowHolders(), 'a row each').toEqual([A, null]);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('env');
+
+    await ctx.manager.unregister('action', NAME);
+
+    expect(await doorHolders(), 'the door keeps A').toEqual([A]);
+    expect(ctx.rowHolders()).toEqual([A]);
+    expect(await ctx.served()).toEqual(['alpha']);
+    expect(((await ctx.manager.get('action', NAME)) as any)?.label).toBe('alpha');
+    // A manager over the door alone still answers A.
+    const overDoor = new MetadataManager({ formats: ['json'], loaders: [door] });
+    expect(((await overDoor.get('action', NAME)) as any)?.label).toBe('alpha');
+    expect(ctx.loggedErrors).not.toHaveBeenCalled();
+  });
+
+  it('each loader told the judgment deletes the name\'s package-less slots only: the rows keep A\'s, the door keeps A\'s (BASE: a store holding A alone took it)', async () => {
+    const alpha = item(A, 'alpha', 'account');
+    const ctx = await boot([alpha, item(undefined, 'env', 'contact')]);
+    const [database] = [...(ctx.manager as any).loaders.values()] as DatabaseLoader[];
+    await database.delete('action', NAME, { packagelessOnly: true });
+    expect(ctx.rowHolders(), 'the environment\'s row taken').toEqual([A]);
+    await database.delete('action', NAME, { packagelessOnly: true });
+    expect(ctx.rowHolders(), 'A\'s row alone is kept').toEqual([A]);
+    const door = new MemoryLoader();
+    await door.save('action', NAME, alpha);
+    await door.delete('action', NAME, { packagelessOnly: true });
+    expect((await door.loadSlots('action', NAME)).map((slot) => slot.packageId)).toEqual([A]);
+  });
+
+  it('CONTROL — the door holding A\'s action alone and no environment item: a removal naming none takes A from the door and the rows, as before', async () => {
+    const door = new MemoryLoader();
+    const alpha = item(A, 'alpha', 'account');
+    await door.save('action', NAME, alpha);
+    const ctx = await boot([alpha]);
+    ctx.manager.registerLoader(door);
+    await ctx.manager.unregister('action', NAME);
+    expect(await door.loadSlots('action', NAME)).toEqual([]);
+    expect(ctx.rowHolders()).toEqual([]);
+    expect(await ctx.served()).toEqual([]);
+  });
 });

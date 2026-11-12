@@ -552,7 +552,7 @@ export function storeRemovalKeys(
   name: string,
   packageId?: string | null,
   platformKeys?: ReadonlySet<string>,
-): { keys: string[]; packageId?: string } {
+): { keys: string[]; packageId?: string; packagelessOnly?: true } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
   const keys = storeKeysNamed(store, type, name);
   if (isPackageCaller(packageId)) {
@@ -562,10 +562,12 @@ export function storeRemovalKeys(
   // [ADR-0150 D3, #32560] A removal naming none removes what a read naming
   // none answers: beside ONE package, an action name's package-less slots
   // (the environment's own item, which that read answers first) — never the
-  // package's item the read does not answer.
+  // package's item the read does not answer. `packagelessOnly` says so, so
+  // a store holding the package's item alone keeps it when the judgment is
+  // carried to it (`MetadataLoaderDeleteOptions.packagelessOnly`).
   if (OWNER_KEYED_SLOT_TYPES.has(type)) {
     const packageless = keys.filter((key) => slotPackageOf(key) === undefined);
-    if (packageless.length > 0 && packageless.length < keys.length) return { keys: packageless };
+    if (packageless.length > 0 && packageless.length < keys.length) return { keys: packageless, packagelessOnly: true };
   }
   return { keys };
 }
