@@ -83,7 +83,9 @@ const UPLOAD_SCRIPT = [
   'headers:{"content-type":file.type||"application/octet-stream","x-file-name":encodeURIComponent(file.name)},body:file})',
   '.then(function(r){return r.json().catch(function(){return null;}).then(function(b){return{ok:r.ok,body:b};});})',
   '.then(function(r){',
-  'if(r.ok){status.textContent="Done. The file was attached; you can close this page.";return;}',
+  // [#32734] "Attached" only on the answer that says where the file landed:
+  // a success naming the stored file. Anything else is the refusal it carries.
+  'if(r.ok&&r.body&&r.body.success===true&&r.body.data&&r.body.data.fileId){status.textContent="Done. The file was attached; you can close this page.";return;}',
   'var m=r.body&&r.body.error&&r.body.error.message;status.textContent=m||"The upload failed.";})',
   '.catch(function(){status.textContent="The upload failed: the connection was lost. Ask for a new link if this one no longer works.";});',
   '});',

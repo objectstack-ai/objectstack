@@ -15,6 +15,12 @@
  *
  * Both draw the same cell and ask the same confirm before a switch-off, so the
  * two cannot say different things about one item.
+ *
+ * objectstack#32537 (ADR-0150 D4/D5) — a permission set whose name more than
+ * one package holds: the cell shows the state of the holder it is drawn for
+ * (`isCatalogHolderActive`), and the write names that holder's package. A door
+ * that refuses the name and names its holders opens a pick among them
+ * (`PermissionSetHolderPickDialog`); ⛔ nothing is chosen for the administrator.
  */
 
 import * as React from 'react';
@@ -34,21 +40,34 @@ import {
 import { useAdapter, useMetadata } from '@object-ui/react';
 import {
   audienceAnchorsOf,
-  isCatalogItemActive,
-  readCatalogActivation,
+  isCatalogHolderActive,
+  ledgerAfterSwitch,
+  readCatalogLedger,
   writeCatalogActivation,
   type CatalogActivation,
+  type PermissionLedgerRow,
 } from './catalog-activation.js';
 import { countsCatalogHolders, readCatalogHolderCount, type CatalogHolderCount } from './catalog-holders.js';
 import { useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { t, tFormat, useMetadataLocale } from './i18n.js';
+import {
+  holderKey,
+  holdingFromPick,
+  holdingPackage,
+  PermissionSetHolderConflict,
+  type PermissionSetHolderCandidate,
+  type PermissionSetHolding,
+} from './permission-set-holder.js';
+import { PermissionSetHolderPickDialog, type PendingHolderPick } from './PermissionSetHolderPick.js';
 
 /** A switch-off waiting on its confirm: the item, and its holder count once read. */
 export interface PendingDeactivation {
   name: string;
   label: string;
   holders: CatalogHolderCount | { error: string } | null;
+  /** objectstack#32537 — the holder of the name being switched, where the page lists more than one. */
+  holding?: PermissionSetHolding;
 }
 
 /**
@@ -114,6 +133,13 @@ export function DeactivateConfirmDialog({
 export interface CatalogLedger {
   states: CatalogActivation;
   anchors: ReadonlySet<string>;
+  /** The `permission` rows with the holder each names (objectstack#32537); empty for every other type. */
+  permissionRows: readonly PermissionLedgerRow[];
+}
+
+/** The test id suffix of a cell drawn for one holder of a name more than one package holds. */
+function holdingSuffix(holding: PermissionSetHolding | undefined): string {
+  return holding ? `@${holderKey(holding.packageId)}` : '';
 }
 
 /**
@@ -125,6 +151,7 @@ export interface CatalogLedger {
  */
 export function CatalogActiveCell({
   itemName,
+  holding,
   ledger,
   refusal,
   canSwitch,
@@ -133,6 +160,8 @@ export function CatalogActiveCell({
   onToggle,
 }: {
   itemName: string;
+  /** objectstack#32537 — the holder this cell is drawn for, where the page lists more than one. */
+  holding?: PermissionSetHolding;
   ledger: CatalogLedger | 'error' | null;
   /** Why the read failed: the server's refusal, as `actionErrorDetail` read it. */
   refusal: string | null;
@@ -150,13 +179,13 @@ export function CatalogActiveCell({
       <span
         className="text-xs text-muted-foreground whitespace-nowrap"
         title={why}
-        data-testid={`catalog-active-unreadable-${itemName}`}
+        data-testid={`catalog-active-unreadable-${itemName}${holdingSuffix(holding)}`}
       >
         {t('engine.catalog.active.notVisible', locale)}
       </span>
     );
   }
-  const enabled = isCatalogItemActive(ledger.states, itemName);
+  const enabled = isCatalogHolderActive(ledger, itemName, holding);
   const anchor = ledger.anchors.has(itemName);
   // A switch the caller cannot use states the state, and offers no click; the
   // page's read-only reason says why.
@@ -172,7 +201,7 @@ export function CatalogActiveCell({
         disabled={anchor || !canSwitch || busy}
         onCheckedChange={() => onToggle(itemName, enabled)}
         aria-label={label}
-        data-testid={`catalog-active-${itemName}`}
+        data-testid={`catalog-active-${itemName}${holdingSuffix(holding)}`}
       />
     </span>
   );
@@ -185,16 +214,29 @@ export function CatalogActiveCell({
  * confirm before a switch-off (with the holder count) and the same door as
  * the list's; a caller who may not author metadata, or whom the deployment's
  * wall refuses the catalog, sees the state and no live switch.
+ *
+ * objectstack#32537 — the page addresses the set by its name. Where the door
+ * refuses the name and names its holders, the administrator picks one; the
+ * write is sent again with that holder's package, and from then on the switch
+ * shows and writes that holder's set.
  */
 export function CatalogItemActiveSwitch({
   type,
   name,
   label,
+  holding: holdingProp,
 }: {
   type: string;
   name: string;
   /** The item's label for the confirm and the toast; the name when it has none. */
   label?: string;
+  /**
+   * objectstack#32537 — which holder of the name the host shows, where more
+   * than one holds it (`holdingOfRead`). The switch reads and writes that
+   * holder's state. Read by its value, so a host may pass a new object each
+   * render. Absent, the switch is by the name, as before.
+   */
+  holding?: PermissionSetHolding;
 }): React.ReactElement {
   const locale = useMetadataLocale();
   const canAuthor = useCanAuthorMetadata();
@@ -212,15 +254,26 @@ export function CatalogItemActiveSwitch({
   const [busy, setBusy] = React.useState(false);
   const [switchError, setSwitchError] = React.useState<string | null>(null);
   const [pendingOff, setPendingOff] = React.useState<PendingDeactivation | null>(null);
+  // objectstack#32537 — a refused write waiting on the administrator's pick,
+  // with the state it asked for; and the holder picked, once one was.
+  const [pendingPick, setPendingPick] = React.useState<(PendingHolderPick & { enabled: boolean }) | null>(null);
+  const hostHoldingKey = holdingProp ? JSON.stringify([holdingProp.packageId, holdingProp.holders]) : '';
+  const hostHolding = React.useMemo<PermissionSetHolding | undefined>(() => {
+    if (!hostHoldingKey) return undefined;
+    const [packageId, holders] = JSON.parse(hostHoldingKey) as [PermissionSetHolding['packageId'], PermissionSetHolding['holders']];
+    return { packageId, holders };
+  }, [hostHoldingKey]);
+  const [holding, setHolding] = React.useState<PermissionSetHolding | undefined>(hostHolding);
   const shownLabel = label || name;
 
   React.useEffect(() => {
     const controller = new AbortController();
     setLedger(null);
     setRefusal(null);
-    Promise.all([readCatalogActivation(type, controller.signal), audienceAnchorsOf(type)])
-      .then(([states, anchors]) => {
-        if (!controller.signal.aborted) setLedger({ states, anchors });
+    setHolding(hostHolding);
+    Promise.all([readCatalogLedger(type, controller.signal), audienceAnchorsOf(type)])
+      .then(([read, anchors]) => {
+        if (!controller.signal.aborted) setLedger({ states: read.states, permissionRows: read.permissionRows, anchors });
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return;
@@ -228,20 +281,16 @@ export function CatalogItemActiveSwitch({
         setRefusal(err instanceof Error ? err.message : String(err));
       });
     return () => controller.abort();
-  }, [type, name]);
+  }, [type, name, hostHolding]);
 
   const write = React.useCallback(
-    async (enabled: boolean) => {
+    async (enabled: boolean, writeHolding: PermissionSetHolding | undefined) => {
       setBusy(true);
       setSwitchError(null);
       try {
-        const now = await writeCatalogActivation(type, name, !enabled);
-        setLedger((prev) => {
-          if (!prev || prev === 'error') return prev;
-          const states = new Map(prev.states);
-          states.set(name, now);
-          return { ...prev, states };
-        });
+        const now = await writeCatalogActivation(type, name, !enabled, holdingPackage(writeHolding));
+        const holder = writeHolding && writeHolding.holders.length > 1 ? writeHolding.packageId : undefined;
+        setLedger((prev) => (!prev || prev === 'error' ? prev : ledgerAfterSwitch(prev, name, now, holder)));
         if (countsCatalogHolders(type)) {
           toast.success(
             tFormat(now ? 'engine.catalog.active.switchedOn' : 'engine.catalog.active.switchedOff', locale, {
@@ -250,12 +299,27 @@ export function CatalogItemActiveSwitch({
           );
         }
       } catch (err: any) {
-        setSwitchError(err?.message ?? String(err));
+        if (err instanceof PermissionSetHolderConflict) {
+          setPendingPick({ name, label: shownLabel, conflict: err, enabled });
+        } else {
+          setSwitchError(err?.message ?? String(err));
+        }
       } finally {
         setBusy(false);
       }
     },
     [type, name, locale, shownLabel],
+  );
+
+  const pick = React.useCallback(
+    (candidate: PermissionSetHolderCandidate) => {
+      if (!pendingPick) return;
+      const picked = holdingFromPick(pendingPick.conflict, candidate);
+      setPendingPick(null);
+      setHolding(picked);
+      void write(pendingPick.enabled, picked);
+    },
+    [pendingPick, write],
   );
 
   // The holder-count read of the confirm now open; a newer open (or a close)
@@ -264,12 +328,12 @@ export function CatalogItemActiveSwitch({
   const toggle = React.useCallback(
     (_itemName: string, enabled: boolean) => {
       if (!enabled || !countsCatalogHolders(type)) {
-        void write(enabled);
+        void write(enabled, holding);
         return;
       }
       const read = ++holderReadRef.current;
-      setPendingOff({ name, label: shownLabel, holders: null });
-      readCatalogHolderCount(adapter, metadataStoreRef.current, type, name)
+      setPendingOff({ name, label: shownLabel, holders: null, holding });
+      readCatalogHolderCount(adapter, metadataStoreRef.current, type, name, holding)
         .then((holders) => {
           if (holderReadRef.current === read) setPendingOff((prev) => (prev ? { ...prev, holders } : prev));
         })
@@ -279,7 +343,7 @@ export function CatalogItemActiveSwitch({
           setPendingOff((prev) => (prev ? { ...prev, holders: { error } } : prev));
         });
     },
-    [type, name, shownLabel, adapter, write],
+    [type, name, shownLabel, adapter, write, holding],
   );
   const closeConfirm = React.useCallback(() => {
     holderReadRef.current++;
@@ -294,6 +358,7 @@ export function CatalogItemActiveSwitch({
       <span className="text-sm font-medium">{t('engine.catalog.col.active', locale)}</span>
       <CatalogActiveCell
         itemName={name}
+        holding={holding}
         ledger={ledger}
         refusal={refusal}
         canSwitch={canAuthor && !walled}
@@ -312,8 +377,15 @@ export function CatalogItemActiveSwitch({
         onCancel={closeConfirm}
         onConfirm={() => {
           closeConfirm();
-          void write(true);
+          void write(true, holding);
         }}
+      />
+      <PermissionSetHolderPickDialog
+        pending={pendingPick}
+        locale={locale}
+        busy={busy}
+        onPick={pick}
+        onCancel={() => setPendingPick(null)}
       />
     </div>
   );

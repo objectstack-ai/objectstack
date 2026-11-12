@@ -498,6 +498,10 @@ const en = {
     registryRef: {
       loadFailed: 'The list could not be loaded. You can still type the name.',
       notFound: '{{name}} (not found)',
+      holderPackage: '{{item}} · package {{package}}',
+      holderEnvironment: '{{item}} · defined in this environment',
+      holderUnresolved: '{{name}} (several packages provide it; none named)',
+      holderNeedsPackage: 'This form names a permission set by its name only. Where several packages provide a set of one name, only the one defined in this environment can be picked here.',
     },
     preferenceOption: {
       allTopics: 'All topics ({{value}})',
@@ -2469,6 +2473,7 @@ const en = {
       dismiss: 'Hide checklist',
       showDone: 'Show completed ({{done}})',
       hideDone: 'Hide completed',
+      optional: 'Optional',
       set: 'Set',
       change: 'Change',
       view: 'View',
@@ -5777,6 +5782,9 @@ const en = {
     setsEmptyBody: 'No permission set is defined in this environment yet.',
     setsPick: 'Pick a permission set to see its users.',
     setsLoadFailed: 'Could not read the permission sets.',
+    // objectstack#32537 — a permission set more than one package holds is listed once per holder.
+    setsHolderPackage: 'Package {{package}}',
+    setsHolderEnvironment: 'This environment’s own set',
     noMatch: 'Nothing matches the filter.',
     notFound: '"{{name}}" is not in this list.',
     retry: 'Try again',

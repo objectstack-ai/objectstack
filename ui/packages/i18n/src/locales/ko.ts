@@ -335,6 +335,10 @@ const ko = {
     registryRef: {
       loadFailed: "목록을 불러오지 못했습니다. 이름을 직접 입력할 수 있습니다.",
       notFound: "{{name}} (찾을 수 없음)",
+      holderPackage: "{{item}} · 패키지 {{package}}",
+      holderEnvironment: "{{item}} · 이 환경에서 정의됨",
+      holderUnresolved: "{{name}} (여러 패키지가 제공하며 패키지가 지정되지 않음)",
+      holderNeedsPackage: "이 양식은 권한 세트를 이름으로만 지정합니다. 여러 패키지가 같은 이름의 권한 세트를 제공하는 경우 여기서는 이 환경에서 정의된 것만 선택할 수 있습니다.",
     },
     preferenceOption: {
       allTopics: "모든 주제 ({{value}})",
@@ -2293,6 +2297,7 @@ const ko = {
       dismiss: "체크리스트 숨기기",
       showDone: "완료된 항목 보기({{done}})",
       hideDone: "완료된 항목 접기",
+      optional: "선택 사항",
       set: "설정",
       change: "변경",
       view: "보기",
@@ -4916,6 +4921,8 @@ const ko = {
     setsEmptyBody: "이 환경에는 아직 정의된 권한 집합이 없습니다.",
     setsPick: "권한 집합을 선택하면 사용자가 표시됩니다.",
     setsLoadFailed: "권한 집합을 읽을 수 없습니다.",
+    setsHolderPackage: "패키지 {{package}}",
+    setsHolderEnvironment: "이 환경 자체의 권한 집합",
     noMatch: "필터와 일치하는 항목이 없습니다.",
     notFound: "\"{{name}}\"은(는) 이 목록에 없습니다.",
     retry: "다시 시도",

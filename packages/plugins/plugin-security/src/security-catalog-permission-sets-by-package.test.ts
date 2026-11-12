@@ -213,9 +213,12 @@ describe('ADR-0150 D3/D7 — the environment\'s references resolve as a caller w
     expect((await grantedThrough(['everyone'])).get('everyone')).toEqual(['sys_baseline', 'p_default']);
   });
 
-  it("a second package holding an anchor's set name is refused, naming both holders, and the anchor keeps the first", async () => {
+  // [ADR-0150 D2/D9, #31698] A permission set is one name per namespace: the
+  // one-holder refusal stays for a package that declares no namespace (it has
+  // no address of its own, so it meets every holder).
+  it("a package with no namespace holding an anchor's set name is refused, naming both holders, and the anchor keeps the first", async () => {
     install(P);
-    install(Q);
+    install(Q, [], '');
     ship('permission', { name: 'p_default', label: 'first', isDefault: true }, P);
     let refusal: unknown;
     try {
@@ -227,6 +230,22 @@ describe('ADR-0150 D3/D7 — the environment\'s references resolve as a caller w
     expect(String((refusal as Error | undefined)?.message)).toContain(Q);
     ship('position', { name: 'everyone', permissionSets: ['p_default'] }, SYS);
     expect((await catalog().resolve('permission', 'p_default', { position: await position('everyone') }))?.definition.label).toBe('first');
+  });
+
+  // FROM main: the second package was refused, as above. TO: two packages of
+  // two namespaces each hold the name, and the anchor's composed binding —
+  // the environment's, read with no package — is refused naming both and
+  // grants nothing through that name; the rest of the anchor still grants.
+  it("[#31698] two namespaces' sets of an anchor's set name are both held: the anchor's binding of it is refused naming both, and grants nothing through it", async () => {
+    install(P);
+    install(Q);
+    ship('permission', { name: 'p_default', label: 'first', isDefault: true }, P);
+    ship('permission', { name: 'p_default', label: 'second', isDefault: true }, Q);
+    ship('position', { name: 'everyone', permissionSets: ['p_default', 'sys_baseline'] }, SYS);
+    const answer = await catalog().resolveReference!('permission', 'p_default', { position: await position('everyone') });
+    expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(P), expect.stringContaining(Q)]);
+    expect((await grantedThrough(['everyone'])).get('everyone')).toEqual(['sys_baseline']);
   });
 });
 

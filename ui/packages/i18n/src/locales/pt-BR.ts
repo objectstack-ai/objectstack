@@ -338,6 +338,10 @@ const pt = {
     registryRef: {
       loadFailed: "Não foi possível carregar a lista. Você ainda pode digitar o nome.",
       notFound: "{{name}} (não encontrado)",
+      holderPackage: "{{item}} · pacote {{package}}",
+      holderEnvironment: "{{item}} · definido neste ambiente",
+      holderUnresolved: "{{name}} (fornecido por vários pacotes; nenhum indicado)",
+      holderNeedsPackage: "Este formulário indica um conjunto de permissões apenas pelo nome. Quando vários pacotes fornecem um conjunto com o mesmo nome, aqui só é possível escolher o definido neste ambiente.",
     },
     preferenceOption: {
       allTopics: "Todos os tópicos ({{value}})",
@@ -2354,6 +2358,7 @@ const pt = {
       dismiss: "Ocultar lista",
       showDone: "Mostrar concluídos ({{done}})",
       hideDone: "Ocultar concluídos",
+      optional: "Opcional",
       set: "Definir",
       change: "Alterar",
       view: "Ver",
@@ -5054,6 +5059,8 @@ const pt = {
     setsEmptyBody: "Ainda não há nenhum conjunto de permissões definido neste ambiente.",
     setsPick: "Escolha um conjunto de permissões para ver seus usuários.",
     setsLoadFailed: "Não foi possível ler os conjuntos de permissões.",
+    setsHolderPackage: "Pacote {{package}}",
+    setsHolderEnvironment: "Conjunto de permissões próprio deste ambiente",
     noMatch: "Nada corresponde ao filtro.",
     notFound: "\"{{name}}\" não está nesta lista.",
     retry: "Tentar novamente",

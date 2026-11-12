@@ -335,6 +335,10 @@ const de = {
     registryRef: {
       loadFailed: "Die Liste konnte nicht geladen werden. Sie können den Namen weiterhin eingeben.",
       notFound: "{{name}} (nicht gefunden)",
+      holderPackage: "{{item}} · Paket {{package}}",
+      holderEnvironment: "{{item}} · in dieser Umgebung definiert",
+      holderUnresolved: "{{name}} (von mehreren Paketen bereitgestellt; kein Paket angegeben)",
+      holderNeedsPackage: "Dieses Formular gibt einen Berechtigungssatz nur über seinen Namen an. Stellen mehrere Pakete einen Satz mit demselben Namen bereit, kann hier nur der in dieser Umgebung definierte ausgewählt werden.",
     },
     preferenceOption: {
       allTopics: "Alle Themen ({{value}})",
@@ -2293,6 +2297,7 @@ const de = {
       dismiss: "Checkliste ausblenden",
       showDone: "Erledigte anzeigen ({{done}})",
       hideDone: "Erledigte ausblenden",
+      optional: "Optional",
       set: "Festlegen",
       change: "Ändern",
       view: "Anzeigen",
@@ -4918,6 +4923,8 @@ const de = {
     setsEmptyBody: "In dieser Umgebung ist noch kein Berechtigungssatz definiert.",
     setsPick: "Wählen Sie einen Berechtigungssatz, um seine Benutzer zu sehen.",
     setsLoadFailed: "Die Berechtigungssätze konnten nicht gelesen werden.",
+    setsHolderPackage: "Paket {{package}}",
+    setsHolderEnvironment: "Eigener Berechtigungssatz dieser Umgebung",
     noMatch: "Nichts entspricht dem Filter.",
     notFound: "„{{name}}“ ist nicht in dieser Liste.",
     retry: "Erneut versuchen",

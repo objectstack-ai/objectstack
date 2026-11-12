@@ -353,6 +353,10 @@ const ar = {
     registryRef: {
       loadFailed: "تعذّر تحميل القائمة. لا يزال بإمكانك كتابة الاسم.",
       notFound: "{{name}} (غير موجود)",
+      holderPackage: "{{item}} · الحزمة {{package}}",
+      holderEnvironment: "{{item}} · معرّفة في هذه البيئة",
+      holderUnresolved: "{{name}} (توفّره عدة حزم، ولم تُحدَّد أي حزمة)",
+      holderNeedsPackage: "يحدّد هذا النموذج مجموعة الأذونات باسمها فقط. عندما توفّر عدة حزم مجموعة بالاسم نفسه، لا يمكن هنا اختيار سوى المجموعة المعرّفة في هذه البيئة.",
     },
     preferenceOption: {
       allTopics: "كل الموضوعات ({{value}})",
@@ -2548,6 +2552,7 @@ const ar = {
       dismiss: "إخفاء القائمة",
       showDone: "عرض العناصر المكتملة ({{done}})",
       hideDone: "إخفاء العناصر المكتملة",
+      optional: "اختياري",
       set: "تعيين",
       change: "تغيير",
       view: "عرض",
@@ -5484,6 +5489,8 @@ const ar = {
     setsEmptyBody: "لم تُعرَّف أي مجموعة أذونات في هذه البيئة بعد.",
     setsPick: "اختر مجموعة أذونات لعرض مستخدميها.",
     setsLoadFailed: "تعذّرت قراءة مجموعات الأذونات.",
+    setsHolderPackage: "الحزمة {{package}}",
+    setsHolderEnvironment: "مجموعة الأذونات الخاصة بهذه البيئة",
     noMatch: "لا شيء يطابق عامل التصفية.",
     notFound: "\"{{name}}\" ليس في هذه القائمة.",
     retry: "إعادة المحاولة",

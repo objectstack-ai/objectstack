@@ -34,6 +34,13 @@
  * keep is whether this administrator HID it, on this device; see
  * {@link dismissRecordKey}.
  *
+ * ## Required and optional rows
+ *
+ * The checklist stays on Home until its REQUIRED rows are done. An optional row
+ * ({@link OPTIONAL_ROWS}: email delivery) is shown and says so, but is not
+ * counted toward completion: once the required rows are done the checklist
+ * draws nothing, whether or not the optional ones are ({@link checklistCompletion}).
+ *
  * ## One offer
  *
  * Language, country and currency are all read from the browser's first
@@ -104,6 +111,47 @@ export type ChecklistRowId =
   | 'mail'
   | 'invite'
   | 'ai_provider';
+
+/**
+ * The rows an administrator may leave undone: shown, and marked optional, but
+ * never what keeps the checklist on Home.
+ *
+ * `mail`, on the maintainer's ruling on objectstack#32643: 「环境的新手清单中要求
+ * 设置邮箱。我觉得这个不应该是必须的设置」. A deployment whose applications send
+ * no mail has nothing to set up, and a hosted tenant has no transport of its
+ * own to set up, so a required mail row kept the checklist open for good. A
+ * mail setup that delivers still reads done ({@link isMailConfigured}).
+ */
+export const OPTIONAL_ROWS: ReadonlySet<string> = new Set<ChecklistRowId>(['mail']);
+
+/** Whether the checklist row `id` may be left undone ({@link OPTIONAL_ROWS}). */
+export function isOptionalRow(id: string): boolean {
+  return OPTIONAL_ROWS.has(id);
+}
+
+/** How far the checklist's required rows are along. */
+export interface ChecklistCompletion {
+  /** Required rows that are done. */
+  done: number;
+  /** Required rows shown. */
+  total: number;
+  /**
+   * Every required row shown is done (or none is shown): the checklist draws
+   * nothing, whatever the optional rows say.
+   */
+  complete: boolean;
+}
+
+/**
+ * The checklist's completion, counted over the rows it shows that are not
+ * optional. An optional row neither holds the checklist open nor counts toward
+ * the progress line.
+ */
+export function checklistCompletion(rows: ReadonlyArray<{ id: string; done: boolean }>): ChecklistCompletion {
+  const required = rows.filter((row) => !isOptionalRow(row.id));
+  const done = required.filter((row) => row.done).length;
+  return { done, total: required.length, complete: done === required.length };
+}
 
 /**
  * Where the "this administrator hid the checklist" record lives, per workspace
