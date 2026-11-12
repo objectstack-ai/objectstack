@@ -436,7 +436,8 @@ const flaggedStackWith = (aggregate: string, fieldType: string): Record<string, 
   });
 
 // [#24426] A total over a VIRTUAL field. A `formula` stores no value, so the
-// way to its total is to store the value as a number field and aggregate that;
+// way to its total is a number field carrying the same `expression` (a stored
+// computed field, computed and stored on every write) aggregated in its place;
 // the hint used to name `count` / `count_distinct` as the way out instead,
 // which turns "total leave days" into a record count. The sentence is the
 // spec's, the one the compile leg prints too.
@@ -449,10 +450,10 @@ describe('measure-aggregate-field-type-refused — a total over a formula names 
     expect(issue.severity).toBe('error');
     expect(issue.path).toBe('datasets[0].measures[0].aggregate');
     expect(issue.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
-    expect(issue.hint).toContain('store the value as a number field');
-    expect(issue.hint).toContain('answer a different question: how many records');
+    expect(issue.hint).toContain('make it a number field with the same `expression`');
+    expect(issue.hint).not.toMatch(/hook/i);
     // The remedy comes first, and no count is offered as the way to the total.
-    expect(issue.hint.indexOf('number field')).toBeLessThan(issue.hint.indexOf('`count`'));
+    expect(issue.hint.indexOf('number field')).toBeLessThan(issue.hint.indexOf('Counting records is a different question'));
     expect(issue.hint).not.toContain('accepts: count');
     expect(issue.hint).not.toContain('Either point');
   });

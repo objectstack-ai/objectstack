@@ -259,21 +259,29 @@ const VALUE_READING_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'mi
  * field's declared `returnType` says (see the module TSDoc).
  *
  * The way to a total, an average or an extreme of a computed value is to STORE
- * it: a number field kept in step by a hook, aggregated as one — the remedy the
- * semantic migration `dataset-measure-aggregate-field-type-refused` prescribes.
- * `count` and `count_distinct` stay named, but as a DIFFERENT question: a count
- * substituted for the total is a plausible wrong number (a "total leave days"
- * tile reading 3 records against a true 10 days), not a way to the total.
+ * it, and the platform already does that declaratively: a `number` field (not a
+ * `formula`) carrying the same `expression` is a stored computed field — the
+ * engine computes it from the row every write stores, on insert, on an update
+ * by id and on a batch insert, and stores the result, so a client-sent value
+ * never stands (`expression` on `FieldSchema`). It has a column, so the pair
+ * is accepted on it. The prescription names that mechanism and nothing that
+ * needs code: a hook is no answer an author on a hosted tier can always take.
+ * A count stays named only as a DIFFERENT question, and by no aggregate name:
+ * a count substituted for the total is a plausible wrong number (a "total leave
+ * days" tile reading 3 records against a true 10 days), not a way to the
+ * total, and the surfaces that print this sentence spell their counts apart (a
+ * dataset measure's `count_distinct` is a list-view summary's `count_unique`).
  *
  * Every refusal of the pair reads this one sentence — the dataset compile leg
- * (`service-analytics`) and the authoring lint leg (`@objectstack/lint`, whose
- * `os explain` entry holds it verbatim) — so the two cannot drift into two
- * prescriptions. It is at most 200 characters: the lint prints it whole as a
- * one-line `fix:`.
+ * (`service-analytics`) and the authoring lint leg (`@objectstack/lint`: a
+ * dataset measure, a list-view column summary or group order, an object-grid
+ * aggregation; each rule's `os explain` entry holds it verbatim) — so they
+ * cannot drift into several prescriptions. It is at most 200 characters: the
+ * lint prints it whole as a one-line `fix:`.
  */
 export const VIRTUAL_FIELD_AGGREGATE_REMEDY =
-  'The field is computed on read and stores no value: store the value as a number field (kept by a hook) '
-  + 'and aggregate that. `count` / `count_distinct` answer a different question: how many records.';
+  'The field is computed on read and stores no value: make it a number field with the same `expression` '
+  + '(computed and stored on every write) and aggregate that. Counting records is a different question.';
 
 /**
  * The prescription a refusal of `aggregate` over a `fieldType` field prints

@@ -2517,9 +2517,11 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
     // the compile leg's remedy, for this pair — by `validate-dataset-measure-aggregates.test.ts`.
     'A `formula` field stores no value, whatever its `returnType` says, so `sum`, `avg`, `min` and `max` ' +
       'over one have no column to read, and a count substituted for the total is a plausible wrong ' +
-      'number. Its fix line reads: The field is computed on read and stores no value: store the value as ' +
-      'a number field (kept by a hook) and aggregate that. `count` / `count_distinct` answer a different ' +
-      'question: how many records.',
+      'number. A `number` field carrying the same `expression` is stored: the engine computes it from the ' +
+      'row every write stores and stores the result, so it aggregates like any number. Its fix line reads: ' +
+      'The field is computed on read and stores no value: make it a number field with the same ' +
+      '`expression` (computed and stored on every write) and aggregate that. Counting records is a ' +
+      'different question.',
     JSON_STORED_COLUMN,
     'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
       'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
@@ -2568,8 +2570,10 @@ const DIMENSION_VIRTUAL_FIELD_REFUSED_EXPLANATION: RuleExplanation = {
       'own object with `400 DATASET_INVALID`, so no report, dashboard or query is ever served from it. ' +
       'Before those refusals the group key reached the driver as a column that does not exist, or an ' +
       'engine that aggregates in memory put every row into one null group while the answer looked served.',
-    'Denormalise the value: store it in a field of its own on the object (written by a hook or a flow ' +
-      'when its source changes), and point the dimension at that stored field. This rule makes the same ' +
+    'Denormalise the value: make it a stored field of its own on the object, of the formula\'s ' +
+      '`returnType` (`number`, `text`, `boolean`, `date` or `currency`) and carrying the same `expression`, ' +
+      'which the engine computes and stores on every write, and point the dimension at that stored field. ' +
+      'This rule makes the same ' +
       'refusal where the author is standing. A dotted path is judged on the leaf\'s own declaration.',
     ANALYTICS_MEMBER_WALK,
   ],
@@ -2828,8 +2832,10 @@ const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'cannot mean, `0` for a text sum; the declaration is refused either way.',
     AGGREGATE_PAIR_ROWS,
     'The fix is a field of a type the function accepts, or a function the field accepts. A `formula` ' +
-      'field stores no value, whatever its `returnType`, so a total over it has to be STORED as a number ' +
-      'field (kept by a hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      'field stores no value, whatever its `returnType`, so a total over it has to be STORED, and its fix ' +
+      'line reads: The field is computed on read and stores no value: make it a number field with the same ' +
+      '`expression` (computed and stored on every write) and aggregate that. Counting records is a ' +
+      'different question. The block is bound by its `dataSource.object`, else ' +
       '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
       'dotted path, a field two packages define at the same priority, and a field with no declared ' +
       'type (or one outside `FieldType`) are not judged here.',
@@ -4028,7 +4034,9 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
       'stores no column, and the file, structured and vector types. The engine\'s aggregate door (`engine.aggregate`) asks ' +
       'the same table, so such an `orderBy` gets the grouped view\'s header query refused ' +
       '(`400 INVALID_FIELD`) and no group renders. To order text labels, store each label\'s rank in a ' +
-      'number field and order by that.',
+      'number field and order by that. Over a `formula` the fix line reads: The field is computed on read ' +
+      'and stores no value: make it a number field with the same `expression` (computed and stored on ' +
+      'every write) and aggregate that. Counting records is a different question.',
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
@@ -4055,7 +4063,9 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
       'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
       'A `formula` field stores no value, whatever its `returnType`, so a total over it has to be ' +
-      'STORED as a number field (kept by a hook). Not judged: ' +
+      'STORED, and its fix line reads: The field is computed on read and stores no value: make it a number ' +
+      'field with the same `expression` (computed and stored on every write) and aggregate that. Counting ' +
+      'records is a different question. Not judged: ' +
       '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
       'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +
       'outside `FieldType`, which the door does not judge either.',
