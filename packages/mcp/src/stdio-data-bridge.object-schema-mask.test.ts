@@ -117,16 +117,33 @@ async function answersUnder(testCase: ObjectSchemaMaskCase | undefined) {
   });
 }
 
-/** The answer this tool always served: the declared fields, projected to name/type/label/required. */
+/**
+ * The answer this tool serves an unrestricted caller: the declared fields with
+ * what a write needs ([#32435]: `readonly`, `system`, a select's options as
+ * value + label), and the declared rules' messages without their expressions.
+ */
 const DECLARED_ANSWER = {
   name: FLS_CONTRACT_OBJECT.name,
   label: FLS_CONTRACT_OBJECT.label,
-  fields: Object.entries(FLS_CONTRACT_OBJECT.fields as Record<string, any>).map(([name, f]) => ({
-    name,
-    type: f?.type,
-    label: f?.label ?? name,
-    required: f?.required ?? false,
-  })),
+  fields: [
+    { name: 'id', type: 'text', label: 'Id', required: false, readonly: false, system: false },
+    { name: 'name', type: 'text', label: 'Name', required: false, readonly: false, system: false },
+    {
+      name: 'salary_grade',
+      type: 'select',
+      label: 'Salary Grade',
+      required: false,
+      readonly: false,
+      system: false,
+      options: [{ value: 'band_a', label: 'Band A' }, { value: 'band_b', label: 'Band B' }],
+    },
+    { name: 'bonus_formula', type: 'formula', label: 'Bonus', required: false, readonly: false, system: false },
+  ],
+  validations: [
+    { name: 'graded_account_needs_name', type: 'script', message: 'A graded account needs a name.', fields: [] },
+    { name: 'bonus_needs_name', type: 'cross_field', message: 'A bonus needs a name.', fields: ['bonus_formula', 'name'] },
+    { name: 'name_not_blank', type: 'script', message: 'Name must not be blank.', fields: [] },
+  ].map(({ fields, ...rule }) => ({ ...rule, severity: 'error', events: ['insert', 'update'], fields })),
   enableFeatures: (FLS_CONTRACT_OBJECT as { enable?: unknown }).enable ?? {},
 };
 
@@ -312,5 +329,136 @@ describe('[ADR-0106] MCPServerPlugin hands the stdio bridge and the object resou
     } finally {
       await k.close();
     }
+  });
+});
+
+describe('[#32435] stdio describe_object serves what a write needs, as the caller is served the object', () => {
+  const WRITE_OBJECT = {
+    name: 'leave_request',
+    label: 'Leave request',
+    fields: {
+      subject: { type: 'text', label: 'Subject', required: true },
+      leave_type: {
+        type: 'select',
+        label: 'Leave type',
+        required: true,
+        // `color` is presentation: the answer carries value + label only.
+        options: [{ value: 'annual', label: 'Annual', color: '#0a0' }, { value: 'sick', label: 'Sick' }],
+        defaultValue: 'annual',
+      },
+      secret_margin: { type: 'currency', label: 'Margin' },
+      created_at: { type: 'datetime', label: 'Created At', readonly: true, system: true },
+    },
+    validations: [
+      { type: 'script', name: 'subject_not_blank', condition: 'record.subject == ""', message: 'Subject must not be blank.' },
+      {
+        type: 'cross_field',
+        name: 'margin_needs_subject',
+        fields: ['secret_margin', 'subject'],
+        condition: 'record.subject == null',
+        message: 'A margin needs a subject.',
+      },
+      // Names the hidden field in its MESSAGE alone.
+      { type: 'script', name: 'message_names_hidden', condition: 'record.subject == "x"', message: 'Fill secret_margin first.' },
+      { type: 'script', name: 'retired_rule', active: false, condition: 'record.subject == "y"', message: 'Retired.' },
+      {
+        type: 'state_machine',
+        name: 'leave_type_flow',
+        field: 'leave_type',
+        transitions: { annual: ['sick'] },
+        severity: 'warning',
+        events: ['update'],
+        message: 'Leave type cannot change back.',
+      },
+      {
+        type: 'conditional',
+        name: 'sick_needs_subject',
+        when: 'record.leave_type == "sick"',
+        message: 'Sick leave validation',
+        then: { type: 'script', name: 'sick_subject', condition: 'record.subject == null', message: 'Sick leave needs a subject.' },
+      },
+    ],
+  };
+
+  async function describeAs(readable: readonly string[] | undefined) {
+    const security = readable
+      ? {
+          getReadableFields: async () => [...readable],
+          getMetadataReadableFields: async () => [...readable],
+          canReadObject: async () => true,
+        }
+      : undefined;
+    const object = () => JSON.parse(JSON.stringify(WRITE_OBJECT));
+    const bridge = createStdioDataBridge({
+      engine: {} as unknown as IDataEngine,
+      metadataService: {
+        listObjects: vi.fn(async () => [object()]),
+        getObject: vi.fn(async (name: string) => (name === WRITE_OBJECT.name ? object() : undefined)),
+      } as unknown as IMetadataService,
+      resolvePrincipal: async () => ({ userId: 'u_member' }) as unknown as ExecutionContext,
+      ...(security ? { security: () => security } : {}),
+    });
+    const server = new McpServer({ name: 'pin', version: '0' });
+    registerObjectTools(server, bridge);
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverSide);
+    const client = new Client({ name: 'pin', version: '0' });
+    await client.connect(clientSide);
+    try {
+      const res = (await client.callTool({ name: 'describe_object', arguments: { objectName: WRITE_OBJECT.name } })) as {
+        isError?: boolean;
+        content: Array<{ text: string }>;
+      };
+      expect(res.isError === true).toBe(false);
+      return { text: res.content[0]!.text, json: JSON.parse(res.content[0]!.text) };
+    } finally {
+      await client.close();
+    }
+  }
+
+  const SUBJECT = { name: 'subject', type: 'text', label: 'Subject', required: true, readonly: false, system: false };
+  const LEAVE_TYPE = {
+    name: 'leave_type',
+    type: 'select',
+    label: 'Leave type',
+    required: true,
+    readonly: false,
+    system: false,
+    options: [{ value: 'annual', label: 'Annual' }, { value: 'sick', label: 'Sick' }],
+    defaultValue: 'annual',
+  };
+  const CREATED_AT = { name: 'created_at', type: 'datetime', label: 'Created At', required: false, readonly: true, system: true };
+  const RULE = (name: string, type: string, message: string, fields: string[], extra: Record<string, unknown> = {}) => ({
+    name, type, message, severity: 'error', events: ['insert', 'update'], fields, ...extra,
+  });
+
+  it('a member denied a field is served options, defaults, readonly/system and the rule messages, and nothing of the field', async () => {
+    const { text, json } = await describeAs(['subject', 'leave_type', 'created_at']);
+    expect(json.fields).toEqual([SUBJECT, LEAVE_TYPE, CREATED_AT]);
+    expect(json.validations).toEqual([
+      RULE('subject_not_blank', 'script', 'Subject must not be blank.', []),
+      RULE('leave_type_flow', 'state_machine', 'Leave type cannot change back.', ['leave_type'], { severity: 'warning', events: ['update'] }),
+      RULE('sick_needs_subject', 'conditional', 'Sick leave validation', [], {
+        then: RULE('sick_subject', 'script', 'Sick leave needs a subject.', []),
+      }),
+    ]);
+    // The hidden field is named nowhere: not a field, not a rule's `fields`, not a message.
+    expect(mentions(text, 'secret_margin')).toBe(false);
+    // A rule's expression is never served, only its message and the fields it names.
+    expect(text).not.toContain('record.');
+  });
+
+  it('CONTROL — a caller who may read every field is served every active rule, the hidden-field ones included', async () => {
+    const { text, json } = await describeAs(['subject', 'leave_type', 'secret_margin', 'created_at']);
+    expect(json.fields.map((f: any) => f.name)).toEqual(['subject', 'leave_type', 'secret_margin', 'created_at']);
+    expect(json.validations.map((r: any) => r.name)).toEqual([
+      'subject_not_blank', 'margin_needs_subject', 'message_names_hidden', 'leave_type_flow', 'sick_needs_subject',
+    ]);
+    expect(json.validations[1].fields).toEqual(['secret_margin', 'subject']);
+    // An inactive rule never runs, so it is not described.
+    expect(mentions(text, 'retired_rule')).toBe(false);
+    expect(text).not.toContain('record.');
+    // …and it is the answer a deployment with no security service gets.
+    expect(text).toBe((await describeAs(undefined)).text);
   });
 });
