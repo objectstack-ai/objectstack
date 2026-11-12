@@ -29,6 +29,10 @@
 
 import { describe, it, expect } from 'vitest';
 
+// The package entry reaches `@objectstack/metadata` through dynamic imports;
+// pay that load during collection, not inside a clocked case
+// (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { composeStacks, defineStack } from '@objectstack/spec';
 
 import * as runtimeEntry from './index';
