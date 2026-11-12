@@ -348,6 +348,31 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
     expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
   });
 
+  // [#31700] The API narrowed to one holder per namespace: two namespaces may
+  // each publish an api of one name. The publish gate puts each path under
+  // `/api/v1/apps/<namespace>/` (`apis-publish-gates.test.ts`: "rejects a path
+  // under ANOTHER package's namespace"), so their routes differ and the
+  // matcher's duplicate-claim rule is never reached between them.
+  const duplicateClaims = (manager: MetadataManager) =>
+    (manager as unknown as { logger: { error: ReturnType<typeof vi.fn> } }).logger.error.mock.calls
+      .map((c) => String(c[0]))
+      .filter((m) => m.includes('duplicate endpoint claim'));
+
+  it('[#31700] two namespaces\' same-named apis are both indexed, each on its own path, with no duplicate claim', async () => {
+    const manager = twoHolders();
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBe('a');
+    expect((await manager.matchEndpoint(B_PATH))?.endpoint.target).toBe('b');
+    expect(duplicateClaims(manager)).toEqual([]);
+  });
+
+  it('CONTROL — the same two items on ONE path is a duplicate claim, announced at error', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('api', 'feed', shipped('com.acme.alpha', A_PATH.path, 'a'));
+    manager.registerInMemory('api', 'feed', shipped('com.acme.beta', A_PATH.path, 'b'));
+    expect((await manager.matchEndpoint(A_PATH))?.endpoint.target).toBeDefined();
+    expect(duplicateClaims(manager)).toHaveLength(1);
+  });
+
   it('a read naming a package answers that package\'s item, both faces alike; a package holding no slot answers nothing', async () => {
     const manager = twoHolders();
     expect(((await manager.get('api', 'feed', 'com.acme.alpha')) as any)?.target).toBe('a');
@@ -440,7 +465,9 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
  * `(package, name)` for every type whose one-holder rule has narrowed to the
  * namespace — `agent` and `skill` (objectql's
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`, #31701; objectql pins that set a subset
- * of `PACKAGE_SLOTTED_STORE_TYPES`), and `flow` (#31696). Two packages of two namespaces may each
+ * of `PACKAGE_SLOTTED_STORE_TYPES`), `flow` (#31696), and [#31700] the
+ * picklist family's `picklist`, `mapping` and `dataset` (`api` has its own
+ * describe above, the object-less `action` its own file). Two packages of two namespaces may each
  * install such a name, and the artifact door registers every package body's
  * items here through `register(…, { notify: false })`, stamped by
  * `applyProtection` (`_packageId`). On main 45f0f81f the store was keyed by
@@ -449,7 +476,7 @@ describe('the in-memory api store keeps one slot per (package, name) (ADR-0150 D
  * answered the survivor.
  */
 describe('the in-memory store keeps one slot per (package, name) for every namespace-scoped type (ADR-0150 D4, #32151)', () => {
-  const NAMESPACE_SCOPED = ['agent', 'skill', 'flow'] as const;
+  const NAMESPACE_SCOPED = ['agent', 'skill', 'flow', 'picklist', 'mapping', 'dataset'] as const;
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
   const shipped = (type: string, packageId: string, tag: string, envelope = false) => ({
@@ -727,7 +754,8 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: `unregisterPackage` removes each package\'s `_packageId`-only item from its own slot and leaves the other\'s, in either order (BASE: it removed nothing)', async (type) => {
@@ -797,6 +825,30 @@ describe('removal by (package, name) for every type stored per package (ADR-0150
     await ctx.manager.unregister(type, ctx.name, { packageId: B });
     expect(ctx.rowBodies(), 'beta\'s row: deleted with beta').toEqual([]);
     // No slot of the name is left; the residue pin below reads what is served now (#32246).
+  });
+
+  /**
+   * [#31700, epic seat ruling R2-B (a)] A removal naming a package that holds
+   * no slot of the name takes nothing: that package's slot is empty. Outside
+   * the set the store keeps one item per name and the removal takes it
+   * whatever package it names, which is what `picklist`, `mapping` and
+   * `dataset` did before #31700. The announcement is unchanged and is not
+   * this move: `unregister` announces every call, an absent name's too — the
+   * watcher hears `deleted` by name and the realtime event names the package
+   * the call named.
+   */
+  it.each(SLOTTED)('%s: `unregister(type, name, { packageId })` naming a package that holds no slot of a one-holder name removes nothing (BASE, outside the set: the item and its row went)', async (type) => {
+    const ctx = await boot(type, [A]);
+    await ctx.manager.unregister(type, ctx.name, { packageId: B });
+    expect(await ctx.labels()).toEqual([`alpha ${type}`]);
+    expect(((await ctx.manager.get(type, ctx.name)) as any)?.label).toBe(`alpha ${type}`);
+    expect(ctx.rowBodies()).toEqual([`alpha ${type}`]);
+    expect(ctx.watched.map((event) => [event.type, event.name])).toEqual([['deleted', ctx.name]]);
+    if (hasRealtimeDeleted(type)) {
+      expect(ctx.published.map((event) => (event.payload as any).packageId)).toEqual([B]);
+    } else {
+      expect(ctx.published).toEqual([]);
+    }
   });
 
   describe.each(SLOTTED)('CONTROL — %s, one holder: a removal naming no package is unchanged', (type) => {
@@ -957,7 +1009,8 @@ describe('per-package loader storage for every type stored per package (ADR-0150
 
   it('the live set is the one these pins iterate, and it is not empty', () => {
     expect(SLOTTED.length).toBeGreaterThan(0);
-    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill']));
+    // [#31700] The picklist family is iterated here since it joined the set.
+    expect(SLOTTED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'picklist', 'mapping', 'dataset']));
   });
 
   it.each(SLOTTED)('%s: each package\'s item has its own row with `package_id` filled, and its own entry in the door\'s store (BASE: one row and one entry, the body saved last)', async (type) => {

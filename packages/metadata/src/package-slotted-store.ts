@@ -53,8 +53,9 @@
  * `api` (#32069), and every type whose one-holder rule has narrowed to the
  * namespace — objectql's `NAMESPACE_SCOPED_BARE_NAME_TYPES`, today `agent`,
  * `skill` (#31701), `action` (#31697, below), `email_template` (#31699) and
- * `flow` (#31696). Two packages of two namespaces may each install such a
- * name, so a store keyed by bare name would keep whichever registered last:
+ * `flow` (#31696) and the picklist family's `picklist`, `mapping` and
+ * `dataset` (#31700). Two packages of two namespaces may each install such
+ * a name, so a store keyed by bare name would keep whichever registered last:
  * the artifact door registers every package body's items here, and a read
  * naming the other package (`get(type, name, packageId)`, the `/meta` code
  * layer) was served the survivor. ⛔ A type joins the narrowed set only in the
@@ -88,6 +89,15 @@
  * stamped with `_packageId`, the stack registrar (`AppPlugin`) likewise for
  * this type — so a read naming one package (`/meta/permission/NAME?package=`)
  * is served that package's grants, never the set registered last.
+ *
+ * `picklist`, `mapping` and `dataset` (#31700) join in the change that
+ * narrows their one-holder rule to the namespace, with `api` (already here)
+ * and the engine's functions (which are no metadata type: the engine keeps
+ * their holders per package itself). The artifact door registers each
+ * package's item stamped with `_packageId`, so two namespaces' same-named
+ * lists, mappings or datasets keep a slot each; a read naming no package of
+ * such a name answers D3's refusal naming both, never the one registered
+ * last.
  */
 
 import {
@@ -108,9 +118,12 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
  * ADR-0150 child B), which joins in the same change that adds it to
  * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then `flow`
- * (#31696), which joins in the same change that adds it to that set.
+ * (#31696), which joins in the same change that adds it to that set; then the
+ * picklist family's `picklist`, `mapping` and `dataset` (#31700).
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set([
+  'api', 'agent', 'skill', 'action', 'email_template', 'permission', 'flow', 'picklist', 'mapping', 'dataset',
+]);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';
