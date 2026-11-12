@@ -3725,6 +3725,9 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       version: {
         label: "版本"
       },
+      package_id: {
+        label: "Package ID"
+      },
       operation_type: {
         label: "操作類型",
         options: {

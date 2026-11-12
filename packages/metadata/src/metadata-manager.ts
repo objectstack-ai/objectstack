@@ -76,7 +76,7 @@ import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
-import { DatabaseLoader } from './loaders/database-loader.js';
+import { DatabaseLoader, type MetadataHistoryAddress } from './loaders/database-loader.js';
 import { isAmbiguousMetadataStemError } from './loaders/ambiguous-metadata-stem.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isPackageCaller,
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
@@ -100,6 +101,7 @@ import {
   storeRemovalKeys,
   storeSlotKey,
   storeWriteKey,
+  environmentStoreKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -189,6 +191,18 @@ function isPackageMember(item: unknown, packageId: string): boolean {
  */
 function isRemovalTarget(loader: MetadataLoader): boolean {
   if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
+  return isNodeLocalRemovalTarget(loader);
+}
+
+/**
+ * [#32499] The node-local half of {@link isRemovalTarget}: the `memory:`
+ * loader that can delete (the artifact door's store), which every node of a
+ * cluster holds on its own. A cluster peer applies a removal it hears of
+ * here and nowhere else ({@link MetadataManager.attachClusterPubSub}): the
+ * shared `datasource:` store is the origin's to delete from, and a second
+ * delete by the peer could take out a row re-written in between.
+ */
+function isNodeLocalRemovalTarget(loader: MetadataLoader): boolean {
   return loader.contract.protocol === 'memory:' && typeof loader.delete === 'function';
 }
 
@@ -362,6 +376,11 @@ function generateEventUuid(): string {
  * `metadata:changed` payload that this shape was said to align with; it never
  * did, and that schema was retired (ADR-0087 entry
  * `metadata-changed-event-payload-retired`).
+ *
+ * [#32499] `removal` is the one addition, and it is an address too: it marks
+ * the `deleted` event of {@link MetadataManager.unregister} and carries the
+ * package that removal named, so a peer deletes its own in-memory copy of the
+ * item by the same key the origin deleted its copy by.
  */
 export interface ClusterMetadataChangedPayload {
   /** Origin nodeId — used for loopback suppression. */
@@ -370,6 +389,37 @@ export interface ClusterMetadataChangedPayload {
   type: string;
   /** The legacy watch event replayed verbatim on peer nodes. */
   event: MetadataWatchEvent;
+  /**
+   * [#32499] Present only on the `deleted` event `unregister()` announces: the
+   * origin removed `(type, event.name)` — one package's item of a type stored
+   * per `(package, name)` when `packageId` is set — and deleted its in-memory
+   * loaders' copy (the artifact door's store). A peer deletes its own
+   * in-memory copy by the same key, so the item stops answering on every
+   * node. Absent on every other event (a create or an update, a file or
+   * repository event, an origin that predates this field): there the peer
+   * keeps its in-memory copy, which no loader could restore once dropped.
+   */
+  removal?: ClusterMetadataRemoval;
+}
+
+/** [#32499] What {@link ClusterMetadataChangedPayload.removal} carries. */
+interface ClusterMetadataRemoval {
+  /** The package whose item the origin removed; absent for a removal by name. */
+  packageId?: string;
+}
+
+/**
+ * [#32499] The removal a received payload carries, or `undefined` when it
+ * carries none or carries one this node cannot read (a `packageId` that is
+ * not a string): a removal read wrongly would delete by name, wider than the
+ * origin did, so a malformed one is dropped, as a malformed payload is.
+ */
+function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
+  const removal: unknown = payload.removal;
+  if (removal === null || typeof removal !== 'object') return undefined;
+  const { packageId } = removal as { packageId?: unknown };
+  if (packageId === undefined) return {};
+  return typeof packageId === 'string' ? { packageId } : undefined;
 }
 
 /**
@@ -663,7 +713,8 @@ export class MetadataManager implements IMetadataService {
   //     can invalidate their caches.
   //   • A subscribed remote event first invalidates THIS node's caches
   //     (registry entry + listCache, via `invalidateForForeignWrite` —
-  //     #5109) and is then replayed into the local watch hub, so existing
+  //     #5109; a peer's removal also deletes THIS node's in-memory copy,
+  //     #32499) and is then replayed into the local watch hub, so existing
   //     consumers (ObjectQLPlugin, Studio HMR, …) see uniform behavior
   //     regardless of which node initiated the change — including when
   //     they answer the event by re-reading through `list()`.
@@ -1036,9 +1087,9 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` the item's package slot), dropping any key the write
    * replaces. Whether an item was replaced — the `added` / `changed` split.
    */
-  private writeRegistryEntry(type: string, name: string, data: unknown): boolean {
+  private writeRegistryEntry(type: string, name: string, data: unknown, slot?: string): boolean {
     let typeStore = this.registry.get(type);
-    const { key, replaces } = storeWriteKey(typeStore, type, name, data);
+    const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
@@ -1741,12 +1792,23 @@ export class MetadataManager implements IMetadataService {
    *    slot and the precedence above decides between them, as the bare-name
    *    map did;
    *  - an item that carries none, under a name no package holds, is the
-   *    environment's own (D1 bucket 4) and fills the environment's slot.
+   *    environment's own (D1 bucket 4) and fills the environment's slot;
+   *  - [#31700] an item that carries none, under a name TWO or more packages
+   *    hold here (packages of different namespaces, since the API narrowed to
+   *    one holder per namespace), is a customization of no one holder: none is
+   *    picked, so it fills the environment's slot. The store's write rule
+   *    puts the same row there ({@link storeWriteKey}: a package-less write of
+   *    a name two packages hold lands in the bare slot), so the index and the
+   *    store agree on what that row is.
    *
-   * While phase 1 keeps one package holder per `api` name, every slot holds
-   * what the bare-name map held, so the index answers what it answered. No
-   * name is resolved here: a request carries no caller package, and the
-   * matcher keys its routes by METHOD + path (bucket 1).
+   * Each holder keeps its own slot, so two namespaces' same-named APIs are
+   * both indexed. They cannot claim one route between them: the publish gate
+   * requires each path under `/api/v1/apps/<namespace>/`, so their paths
+   * differ by namespace. Only the environment's row can share a holder's
+   * METHOD + path, and the matcher's duplicate-claim rule decides that,
+   * announced at `error`. No name is resolved here: a request carries no
+   * caller package, and the matcher keys its routes by METHOD + path
+   * (bucket 1).
    */
   private async listForPackageScopedIndex(type: string): Promise<unknown[]> {
     // [#32246] Every item a loader stores, each with the package the loader
@@ -1861,9 +1923,12 @@ export class MetadataManager implements IMetadataService {
    * the `409` naming every holder, where the storage loop would have caught
    * each loader's own refusal as a failed delete and announced a removal that
    * never happened. Every loader's holders of the name are within this view,
-   * so a loader the removal deletes from does not refuse once it has passed —
-   * ⛔ except an object-bound action's slots, which the holder count does not
-   * read (the registry's own rule; a separate card).
+   * so a loader the removal deletes from does not refuse once it has passed.
+   * [#32352] That includes an action's object-bound slots: holders are counted
+   * by package over every slot of the name, as `DatabaseLoader`'s row key
+   * `(package, name)` counts them, so a name two packages hold on one object
+   * or on two is refused here rather than by the loader's `delete` after the
+   * registry had already dropped it and announced `deleted`.
    *
    * @throws {PackageScopedNameRefusedError} no package named, two or more
    *   packages holding the name in the registry or the loaders.
@@ -1941,6 +2006,8 @@ export class MetadataManager implements IMetadataService {
     });
 
     // Announce last, once the removal has landed everywhere (see register()).
+    // [#32499] The cluster fan-out marks it a removal, with the package it
+    // named, so each peer deletes its own in-memory copy by the same key.
     if (options?.notify !== false) {
       this.notifyWatchers(type, {
         type: 'deleted',
@@ -1949,7 +2016,7 @@ export class MetadataManager implements IMetadataService {
         path: '',
         data: undefined,
         timestamp: new Date().toISOString(),
-      });
+      }, packageId === undefined ? {} : { packageId });
     }
   }
 
@@ -3789,7 +3856,11 @@ export class MetadataManager implements IMetadataService {
     this.notifyWatchers(type, legacyEvent);
   }
 
-  protected notifyWatchers(type: string, event: MetadataWatchEvent) {
+  /**
+   * Wake this node's watchers, then fan the event out to cluster peers.
+   * `removal` is {@link unregister}'s alone ({@link ClusterMetadataChangedPayload.removal}).
+   */
+  protected notifyWatchers(type: string, event: MetadataWatchEvent, removal?: ClusterMetadataRemoval) {
     this.notifyWatchersLocal(type, event);
 
     // Cluster fan-out (`content/docs/kernel/cluster.mdx` §6.2, lane 1).
@@ -3799,6 +3870,7 @@ export class MetadataManager implements IMetadataService {
         originNode: this.clusterNodeId,
         type,
         event,
+        ...(removal ? { removal } : {}),
       };
       const key = `${type}:${(event as { name?: string }).name ?? ''}`;
       void this.clusterPubSub
@@ -3882,6 +3954,15 @@ export class MetadataManager implements IMetadataService {
         //     to defer for, while deferring it would leave a window between
         //     receipt and the next tick in which reads still answer stale.
         //     Any `await` in a request handler is enough to lose that race.
+        //
+        // [#32499] A removal deletes this node's in-memory copy first, as
+        // `unregister()` deletes from storage before it drops the registry:
+        // otherwise the dropped entry hands every read to that copy, and this
+        // node keeps serving what the origin removed. Started here, so an
+        // in-memory delete that runs no `await` (`MemoryLoader`) has landed
+        // before the invalidation below.
+        const removal = receivedRemovalOf(p);
+        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal.packageId);
         try {
           this.invalidateForForeignWrite(p.type, p.event.name);
         } catch (err) {
@@ -3910,6 +3991,37 @@ export class MetadataManager implements IMetadataService {
       channel: MetadataManager.CLUSTER_CHANNEL,
     });
     return () => this.detachClusterPubSub();
+  }
+
+  /**
+   * [#32499] The peer half of {@link unregister}'s storage step: delete a
+   * removal a cluster peer announced from this node's in-memory loaders
+   * ({@link isNodeLocalRemovalTarget}), by the key the origin deleted by
+   * ({@link deleteMetaItemFromLoader}). The shared `datasource:` store is
+   * left alone: the origin already deleted from it.
+   *
+   * The list cache is dropped again once every delete has settled, for a
+   * loader whose delete is really asynchronous and so lands after the
+   * receipt's own invalidation.
+   */
+  private async removeNodeLocalCopies(type: string, name: string, packageId?: string): Promise<void> {
+    let removed = false;
+    for (const loader of this.loaders.values()) {
+      if (!isNodeLocalRemovalTarget(loader)) continue;
+      removed = true;
+      try {
+        await this.deleteMetaItemFromLoader(loader, type, name, packageId);
+      } catch (error) {
+        this.logger.error(
+          `[MetadataManager] Loader \`${loader.contract.name}\` could NOT delete \`${type}/${name}\` that a cluster peer ` +
+            `removed — this node keeps serving the item from that loader while the node that removed it answers nothing. ` +
+            `Nothing looks broken on either node. Fix: re-issue the removal of \`${type}/${name}\` on this node.`,
+          error instanceof Error ? error : undefined,
+          { loader: loader.contract.name, type, name, packageId, error },
+        );
+      }
+    }
+    if (removed) this.invalidateListCache(type);
   }
 
   /**
@@ -3971,11 +4083,17 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get version history for a metadata item.
    * Returns a timeline of all changes made to the item.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` reads that package's versions only (`null`: the
+   * environment's, recorded under no package); naming none, a
+   * name more than one row slot holds is refused 409 naming every holder
+   * (`PackageScopedNameRefusedError`), and one holder answers as before.
    */
   async getHistory(
     type: string,
     name: string,
-    options?: MetadataHistoryQueryOptions
+    options?: MetadataHistoryQueryOptions & MetadataHistoryAddress
   ): Promise<MetadataHistoryQueryResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -3989,12 +4107,20 @@ export class MetadataManager implements IMetadataService {
       limit: options?.limit,
       offset: options?.offset,
       includeMetadata: options?.includeMetadata,
+      packageId: options?.packageId,
     });
   }
 
   /**
    * Rollback a metadata item to a specific version.
    * Restores the metadata definition from the history snapshot.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` names whose row is restored, and the version must be
+   * that package's ("not found" otherwise). Naming none, the name's one row is
+   * restored; several are refused 409 naming every holder, and so is a version
+   * of a package that holds no row of the name (`not-held-by-qualifier`) —
+   * ⛔ never written into another package's row.
    */
   async rollback(
     type: string,
@@ -4003,7 +4129,7 @@ export class MetadataManager implements IMetadataService {
     options?: {
       changeNote?: string;
       recordedBy?: string;
-    }
+    } & MetadataHistoryAddress
   ): Promise<unknown> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4011,10 +4137,15 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the target version snapshot directly from the history table
-    const targetVersion = await dbLoader.getHistoryRecord(type, name, version);
+    const address = historyAddressOf(options);
+    const targetVersion = await dbLoader.getHistoryRecord(type, name, version, address);
 
     if (!targetVersion) {
-      throw new Error(`Version ${version} not found in history for ${type}/${name}`);
+      // [#32351 F1] An addressed read leaves out a version attributed to no
+      // package; on a name several row slots hold it is refused naming every
+      // holder, not answered "not found".
+      if (address !== undefined) await dbLoader.refuseUnattributedVersion(type, name, version);
+      throw new Error(`Version ${version} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!targetVersion.metadata) {
@@ -4030,11 +4161,24 @@ export class MetadataManager implements IMetadataService {
       restoredMetadata,
       version,
       options?.changeNote,
-      options?.recordedBy
+      options?.recordedBy,
+      address,
     );
 
-    // Update in-memory registry with the restored metadata
-    this.writeRegistryEntry(type, name, restoredMetadata);
+    // Update in-memory registry with the restored metadata. [#32351] A
+    // package's restored version that names no package itself (a package-less
+    // customization of that package's row) is filed under that package's slot,
+    // as the row it was written to is. [S4] One restored by the environment
+    // address is filed under the bare slot, as its row is, even when one
+    // package holds the name (the write rule would file it under that package's).
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (slotted && isPackageCaller(address?.packageId)) {
+      this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
+    } else if (slotted && address !== undefined) {
+      this.writeRegistryEntry(type, name, restoredMetadata, environmentStoreKey(type, name, restoredMetadata));
+    } else {
+      this.writeRegistryEntry(type, name, restoredMetadata);
+    }
 
     return restoredMetadata;
   }
@@ -4042,12 +4186,18 @@ export class MetadataManager implements IMetadataService {
   /**
    * Compare two versions of a metadata item.
    * Returns a diff showing what changed between versions.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` compares two of that package's versions ("not found"
+   * for another's); naming none, a name more than one row slot holds is
+   * refused 409 naming every holder.
    */
   async diff(
     type: string,
     name: string,
     version1: number,
-    version2: number
+    version2: number,
+    options?: MetadataHistoryAddress
   ): Promise<MetadataDiffResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4055,15 +4205,16 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the two version snapshots directly from the history table
-    const v1 = await dbLoader.getHistoryRecord(type, name, version1);
-    const v2 = await dbLoader.getHistoryRecord(type, name, version2);
+    const address = historyAddressOf(options);
+    const v1 = await dbLoader.getHistoryRecord(type, name, version1, address);
+    const v2 = await dbLoader.getHistoryRecord(type, name, version2, address);
 
     if (!v1) {
-      throw new Error(`Version ${version1} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version1} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v2) {
-      throw new Error(`Version ${version2} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version2} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v1.metadata || !v2.metadata) {
@@ -4087,6 +4238,21 @@ export class MetadataManager implements IMetadataService {
       summary,
     };
   }
+}
+
+/**
+ * [#32351] The package address a history door forwards to the database
+ * loader: only `packageId`, so the loader's answer never depends on what else
+ * the caller's options carry; `undefined` when none is named.
+ */
+function historyAddressOf(options?: MetadataHistoryAddress): MetadataHistoryAddress | undefined {
+  return options?.packageId === undefined ? undefined : { packageId: options.packageId };
+}
+
+/** [#32351] The "not found" message's address, for a by-package type read by address; empty otherwise. */
+function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): string {
+  if (address?.packageId === undefined || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return '';
+  return isPackageCaller(address.packageId) ? ` (package ${address.packageId})` : ' (environment)';
 }
 
 /**
