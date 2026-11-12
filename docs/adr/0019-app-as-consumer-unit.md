@@ -109,9 +109,9 @@ as a wrapper that surfaces N apps.
 >
 > - Reversed: the heading's "Suites fold into a single App" and the struck sentence. A vertical
 >   solution is no longer folded into one app.
-> - The first sentence stands, per package: one package that holds N apps is still the removed
->   shape. That sentence calls the shape a suite. The suite of the table below is several
->   packages, each with at most one app.
+> - The first sentence stands, per package: a package of a suite that holds N apps is still the
+>   removed shape. That sentence calls the shape a suite. The suite of the table below is
+>   several packages, each with at most one app.
 > - The last sentence stands: the iWork route.
 > - D1 (the consumer listing is an app listing) and D2 (only `type: app` is consumer-installable)
 >   are unchanged: one marketplace listing still installs one app package. A suite is no second
@@ -125,8 +125,8 @@ as a wrapper that surfaces N apps.
 > 1. **The Console addresses an app by its package id.**
 >    [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1 makes the package id the route
 >    key (`/apps/<packageId>`), on its one-app-per-package invariant. The Console links to an app
->    by that id and answers the first app that carries it, so apps that share a package id leave
->    all but the first reachable only by name:
+>    by that id and resolves the id back to the first app that carries it, so apps that share a
+>    package id leave all but the first reachable only by name:
 >    `ui/packages/app-shell/src/utils/appRoute.ts#appRouteSegment`, `#matchAppBySegment`, `#appAddressSegment`.
 >    The server reads the key the same way. Read by its package id, a package that holds more than
 >    one app answers as absent:
@@ -272,8 +272,8 @@ D1–D4:
   *Reversed 2026-11-12 (D3 amendment note).* A suite that surfaces several apps
   houses each one in a different package: HotCRM's sales, service and marketing
   apps sit in its app package, its service module and its marketing module
-  (hotcrm#2417). A package that defines two apps still folds them into one or
-  moves one to a package of its own.
+  (hotcrm#2417). A package of a suite that defines two apps still folds them
+  into one or moves one to a package of its own.
 - "Publish a standalone consumer plugin" is no longer a consumer path; plugins
   ship inside an App or are operator-provisioned.
 
@@ -293,8 +293,8 @@ D1–D4:
    as A, B′ and C for HotCRM's menu split. B′ was ruled (「改成 Salesforce 模式」)
    and is D3 as amended. A is D3 as accepted. C is not ruled, and the three
    reasons under D3 contradict it. This narrows alternative 1's rejection: one
-   install may surface several apps, and one package still may not. Alternative
-   2 stands: a suite is no second consumer unit.
+   install may surface several apps, and one package of it still may not.
+   Alternative 2 stands: a suite is no second consumer unit.
 
 ---
 
