@@ -1,0 +1,7 @@
+{
+  "file": "packages/plugins/plugin-security/src/platform-baseline-sets.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "A platform service's own baseline set joins the composed member baseline every signed-in member holds through the everyone anchor (ADR-0090 D5), never the body of member_default (D9). Admitted only during boot, only read and create, only on objects the contributing package registered itself, one set per contributor, no wildcard and no row policy; every admission and refusal is logged, and a refusal leaves the object refused."
+}
