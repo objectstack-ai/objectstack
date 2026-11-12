@@ -78,6 +78,8 @@ import {
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
 import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
+import { captureStoredExpressionChange, fillStoredExpressionChange, type StoredExpressionFillCapture } from './protocol-stored-expression-fill.js';
+import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 import { compareAuditInstants, isoFromValidDate } from './protocol-version-tokens.js';
 import {
     clientFacingFailureCode,
@@ -1174,7 +1176,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#revertCommit`; the method's docblock there is its contract. */
-    static async revertCommit(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'isArtifactBacked' | 'namedBaseOverlayWriteRefusal' | 'parseCommitItems' | 'readRevertableCommit' | 'recordPackageCommit' | 'refuseOrganizationScopedWrite' | 'restoreArtifactRegistryView' | 'restoreWriteFor' | 'runMutationProjector'>, request: {
+    static async revertCommit(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'isArtifactBacked' | 'namedBaseOverlayWriteRefusal' | 'parseCommitItems' | 'readRevertableCommit' | 'recordPackageCommit' | 'refuseOrganizationScopedWrite' | 'restoreArtifactRegistryView' | 'restoreWriteFor' | 'runMutationProjector'>, request: {
             commitId: string;
             /**
              * The package the commit must belong to (ADR-0067): a commit of any
@@ -1190,6 +1192,7 @@ export class ProtocolPackageCommitsFacet {
             reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }>;
             failed: Array<{ type: string; name: string; error: string; code?: string }>;
             revertCommitId?: string;
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [ADR-0131 D6] FIRST: an organization-scoped revert is refused.
         host.refuseOrganizationScopedWrite(
@@ -1209,6 +1212,14 @@ export class ProtocolPackageCommitsFacet {
         // [#22877] The members of what `reverted` reports, in its order, for
         // the revert's own plan below; the response keeps its declared keys.
         const revertedMembers: Array<string | undefined> = [];
+        // [#32700] Each object whose stored computed fields a restore changes,
+        // captured as served BEFORE the revert's first write-through of it, and
+        // filled once after the loop (one walk an object, as the package
+        // publish door fills its batch); the objects whose storage sync was
+        // refused; and what the answer reports on `advisories`.
+        const storedExpressions = new Map<string, StoredExpressionFillCapture>();
+        const storageRefusedObjects = new Set<string>();
+        const advisories: RuntimeAuthoringIssue[] = [];
 
         // Reverse apply order so artifacts that depend on others (e.g. a view on
         // a new object) are removed before the thing they reference.
@@ -1615,6 +1626,10 @@ export class ProtocolPackageCommitsFacet {
                     // the repo-facing reads above keep `it.type`, which is the
                     // spelling the row is stored with. Two different keys, on
                     // purpose.
+                    // [#32700] The capture the fill after the loop diffs against,
+                    // taken before this object's first write-through.
+                    const capture = captureStoredExpressionChange(host.engine, PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
+                    if (capture && !storedExpressions.has(capture.object)) storedExpressions.set(capture.object, capture);
                     await host.applyRegistryWriteThrough({
                         type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
                         name: it.name,
@@ -1629,6 +1644,15 @@ export class ProtocolPackageCommitsFacet {
                         // org; the resolution above is what makes the comment true.
                         organizationId: null,
                     });
+                    // [#32700] …and its storage synced, as the save and publish
+                    // doors sync it: a restored body that brings a field back
+                    // needs its column. A refusal rides `advisories`; the item
+                    // still reverts (its row is written, registered and served).
+                    const storageRefused = await host.ensureObjectStorage(PLURAL_TO_SINGULAR[it.type] ?? it.type, it.name);
+                    if (storageRefused) {
+                        advisories.push(storageRefused);
+                        if (capture) storageRefusedObjects.add(capture.object);
+                    }
                     // [ADR-0094] Awaited projection BEFORE the
                     // fire-and-forget emit below — the order `saveMetaItem`'s
                     // comment establishes. This limb restores an existing
@@ -1697,6 +1721,16 @@ export class ProtocolPackageCommitsFacet {
             }
         }
 
+        // [#32700] A stored computed field a restore added back, turned from a
+        // formula, or gave another expression is filled over the object's
+        // existing rows, as the save and publish doors fill it after #32527
+        // (`protocol-stored-expression-fill.ts`, the one fill path), and
+        // reported per field on the omitted-when-empty `advisories`. After every
+        // item's write-through, storage sync and event; before the answer.
+        for (const capture of storedExpressions.values()) {
+            advisories.push(...await fillStoredExpressionChange(capture, { storageRefused: storageRefusedObjects.has(capture.object) }));
+        }
+
         // Record the revert as its own commit (append-only history),
         // environment-wide like the commit it reverts (ADR-0131 D6/D7).
         const revertCommit = await host.recordPackageCommit({
@@ -1721,6 +1755,9 @@ export class ProtocolPackageCommitsFacet {
             reverted,
             failed,
             ...(revertCommit ? { revertCommitId: revertCommit.commitId } : {}),
+            // Omitted, never `[]`, when there is nothing to report: a clean
+            // revert's answer bytes are unchanged.
+            ...(advisories.length > 0 ? { advisories } : {}),
         };
     }
 
@@ -1738,6 +1775,7 @@ export class ProtocolPackageCommitsFacet {
             success: boolean;
             revertedCommits: string[];
             failed: Array<{ commitId: string; error: string }>;
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [ADR-0131 D6] FIRST: an organization-scoped rollback is refused.
         host.refuseOrganizationScopedWrite(
@@ -1764,6 +1802,10 @@ export class ProtocolPackageCommitsFacet {
         );
         const revertedCommits: string[] = [];
         const failed: Array<{ commitId: string; error: string }> = [];
+        // [#32700] Every step's `advisories` (the fill each revert ran, a
+        // refused storage sync), in step order: dropped here, a fill a step
+        // could not finish would be told to nobody.
+        const advisories: RuntimeAuthoringIssue[] = [];
         for (const c of toRevert) {
             try {
                 const step = await host.revertCommit({
@@ -1771,6 +1813,7 @@ export class ProtocolPackageCommitsFacet {
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
                 revertedCommits.push(c.id);
+                if (step.advisories) advisories.push(...step.advisories);
                 // An item the step refused is returned, never thrown; its
                 // `error` is already client-facing (P11).
                 for (const item of step.failed) {
@@ -1800,7 +1843,8 @@ export class ProtocolPackageCommitsFacet {
                 );
             }
         }
-        return { success: failed.length === 0, revertedCommits, failed };
+        // Omitted, never `[]`, when no step had anything to report.
+        return { success: failed.length === 0, revertedCommits, failed, ...(advisories.length > 0 ? { advisories } : {}) };
     }
 
     /** The body of `ObjectStackProtocolImplementation#rollbackMetaItem`; the method's docblock there is its contract. */
@@ -1810,6 +1854,7 @@ export class ProtocolPackageCommitsFacet {
             seq: number;
             restoredFromVersion: number;
             message?: string;
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [#28355] A refusal that carries no row of its own leaves its `denied` row here.
         return withRefusalAudit((entry) => host.recordMetadataAudit(entry), {
@@ -1819,12 +1864,13 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** [#28355] The body of {@link rollbackMetaItem} before its refusal audit; that method's docblock is the contract. */
-    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
+    static async rollbackMetaItemUnaudited(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'assertLockAllowsWrite' | 'emitMetadataMutation' | 'engine' | 'ensureObjectStorage' | 'ensureOverlayIndex' | 'findServedOverlayRow' | 'getOverlayRepo' | 'isArtifactBacked' | 'isOverlayAllowed' | 'isRuntimeCreateAllowed' | 'metadataConflictRefusal' | 'namedBaseOverlayWriteRefusal' | 'packagelessOverlayWriteRefusal' | 'packagelessReadAddress' | 'receiptVersion' | 'recordMetadataAudit' | 'recordOptimisticConflictAudit' | 'refuseOrganizationScopedWrite' | 'resolveOverlayPackageBinding' | 'restoreWriteFor' | 'runMutationProjector'>, request: RollbackMetaItemRequest): Promise<{
             success: boolean;
             version: string;
             seq: number;
             restoredFromVersion: number;
             message?: string;
+            advisories?: RuntimeAuthoringIssue[];
         }> {
         // [ADR-0131 D6] FIRST: an organization-scoped rollback is refused.
         // See {@link organizationScopedWriteRefusal}.
@@ -2031,6 +2077,11 @@ export class ProtocolPackageCommitsFacet {
             // `already owned by package "app.<slug>"` into the best-effort
             // `console.warn` — a rollback that reported success while the
             // registry kept serving the body it was supposed to revert.
+            //
+            // [#32700] The object's stored computed fields as served BEFORE the
+            // restored body goes live: what the fill below diffs against, as
+            // the save door captures before its own write-through.
+            const storedExpressions = captureStoredExpressionChange(host.engine, singularType, request.name);
             await host.applyRegistryWriteThrough({
                 type: singularType,
                 name: request.name,
@@ -2040,6 +2091,13 @@ export class ProtocolPackageCommitsFacet {
                 // org-scoped restore must not graft the body process-wide.
                 organizationId: null,
             });
+            // [#32700] …and its storage synced, as the save door syncs it: a
+            // restored body that brings a field back needs its column. A refused
+            // sync is told to the caller on `advisories` and fails nothing (the
+            // row is written, registered and served).
+            const advisories: RuntimeAuthoringIssue[] = [];
+            const storageRefused = await host.ensureObjectStorage(singularType, request.name);
+            if (storageRefused) advisories.push(storageRefused);
             // [#7748] ADR-0010 — success audit (best-effort). Same position as
             // `saveMetaItem`'s: persistence committed, registry write-through
             // done, before the receipt. A rollback reached `recordMetadataAudit`
@@ -2092,6 +2150,13 @@ export class ProtocolPackageCommitsFacet {
                 // [#32451] The binding of the row the rollback restored.
                 ...mutationEventPackage(rollbackPackageId),
             });
+            // [#32700] A stored computed field the restored body adds, turns
+            // from a formula, or gives another expression is filled over the
+            // object's existing rows, as the save door fills it after #32527
+            // (`protocol-stored-expression-fill.ts`, the one fill path), and
+            // reported per field on the same omitted-when-empty `advisories`.
+            // After the event, before the answer, as the save door orders it.
+            advisories.push(...await fillStoredExpressionChange(storedExpressions, { storageRefused: storageRefused !== undefined }));
             return {
                 success: true,
                 // [#21207] Keyed, never the stored content hash (`receiptVersion`).
@@ -2099,6 +2164,9 @@ export class ProtocolPackageCommitsFacet {
                 seq: result.seq,
                 restoredFromVersion: request.toVersion,
                 message: `Reverted to version ${request.toVersion} — type=${request.type}, name=${request.name} [seq=${result.seq}]`,
+                // Omitted, never `[]`, when there is nothing to report: a clean
+                // rollback's answer bytes are unchanged.
+                ...(advisories.length > 0 ? { advisories } : {}),
             };
         } catch (err: any) {
             if (err instanceof ConflictError) {

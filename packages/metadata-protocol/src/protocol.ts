@@ -10819,6 +10819,8 @@ export class ObjectStackProtocolImplementation implements
         reverted: Array<{ type: string; name: string; action: 'removed' | 'restored' }>;
         failed: Array<{ type: string; name: string; error: string; code?: string }>;
         revertCommitId?: string;
+        /** [#32700] What the revert did to the rows of an object it restored; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.revertCommit(protocolHost(this), request);
@@ -10851,6 +10853,8 @@ export class ObjectStackProtocolImplementation implements
         success: boolean;
         revertedCommits: string[];
         failed: Array<{ commitId: string; error: string }>;
+        /** [#32700] Every step's `advisories`, in step order; omitted when none has any. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackToPackageCommit(protocolHost(this), request);
@@ -10873,6 +10877,8 @@ export class ObjectStackProtocolImplementation implements
         seq: number;
         restoredFromVersion: number;
         message?: string;
+        /** [#32700] A refused storage sync and the stored-expression fill of the restored object; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackMetaItem(protocolHost(this), request);
@@ -10885,6 +10891,8 @@ export class ObjectStackProtocolImplementation implements
         seq: number;
         restoredFromVersion: number;
         message?: string;
+        /** [#32700] A refused storage sync and the stored-expression fill of the restored object; omitted when nothing to report. */
+        advisories?: RuntimeAuthoringIssue[];
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.rollbackMetaItemUnaudited(protocolHost(this), request);

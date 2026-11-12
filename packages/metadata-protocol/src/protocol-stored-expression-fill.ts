@@ -21,16 +21,20 @@
  *   which registers the batch's objects before its per-item side effects, so
  *   it captures before that registration.
  *
+ * [#32700] …and the history doors that make a restored definition live
+ * (`protocol-package-commits.ts`) fill it the same way, after the storage
+ * sync they now run as the save door does:
+ *
+ * - `rollbackMetaItem` (`POST /api/v1/meta/:type/:name/rollback`);
+ * - `revertCommit` (`POST /api/v1/packages/:id/commits/:commitId/revert`),
+ *   which captures each object before its first restore and fills it once
+ *   after the loop; and `rollbackToPackageCommit`
+ *   (`POST /api/v1/packages/:id/rollback`), a loop of `revertCommit`, whose
+ *   answer carries every step's notices.
+ *
  * A draft save makes nothing live and fills nothing. A peer applying another
  * node's mutation (`applyRemoteMetadataMutation`) fills nothing either: the
  * node whose door took the change filled the shared rows once.
- *
- * ⚠️ Two doors make a changed definition live WITHOUT a fill: `rollbackMetaItem`
- * and `revertCommit` (`protocol-package-commits.ts`) write the restored body
- * through to the registry and run no storage sync and no fill, so a rollback
- * or revert that changes a stored computed field leaves the rows on what the
- * definition it moved away from computed. Not covered here; the command
- * (`os migrate stored-expressions --changed --apply`) fills them.
  *
  * ## The fill and its report
  *
