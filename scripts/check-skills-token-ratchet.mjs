@@ -864,9 +864,39 @@ export const CEILINGS = new Map([
   // 3207 -> 3199 (#30824): RE-LOCK at the landed count. The formula row now also says
   // a formula is no dataset or cube dimension (group key), paid by the Formula example's
   // remaining `// see the Calculated table` pointer; 12794 bytes -> 3199 tokens, zero headroom.
-  ['skills/objectstack-data/rules/field-types.md', 3199],
+  // 3199 -> 3250 (#31957, 2026-11-11): § Currency teaches a line amount following its
+  // `master_detail` parent's code (`currencyField: '<master_detail>.<parent code>'`), one
+  // invoice / line-item example with the roll-up declaration, and the parent-code lock.
+  // +263 tokens (12795 -> 13847 bytes). PAID DOWN FIRST by two same-file restatement cuts,
+  // 848 bytes (232 + 616), 212 tokens: the dataset-measure `currency` sentence, cut to a
+  // pointer (home: objectstack-ui rules/dashboards.md, the money-measure paragraph; the
+  // refusal code stays in the pointer), and the autonumber "Incorrect vs Correct" pair
+  // with its TOC line (home: § Autonumber rules 1 and 2). `wc -c` = 12999 bytes ->
+  // ceil(12999 / 4) = 3250 tokens, zero headroom, ceiling +51, pinned AT the measurement.
+  // Standing ruling (2026-10-27, tap A, verbatim and untranslated):
+  // 「A:先削重复,余额按实测提高」; recognised path per ruling record 6513306068; seat
+  // widening record 6784270263.
+  // 3250 -> 3208 (#31957, same PR, contract review): the `user` row's `deleteBehavior`
+  // parenthetical is cut to a pointer (-168 bytes; home: rules/relationships.md § Delete
+  // Behaviors, every fact). `wc -c` = 12831 bytes -> ceil(12831 / 4) = 3208 tokens: RE-LOCK
+  // down at the landed count, zero headroom.
+  ['skills/objectstack-data/rules/field-types.md', 3208],
   ['skills/objectstack-data/rules/indexing.md', 3241],
-  ['skills/objectstack-data/rules/lifecycle.md', 1590],
+  // 1590 -> 1909 (#32364, 2026-11-11): § Sealing (`seal`) teaches `lifecycle.seal`
+  // (+1574 B). PAID DOWN FIRST by three same-file restatements (-296 B): the ❌
+  // `class: 'record'` + retention example (home: the Lifecycle Classes `record` row,
+  // "policies FORBIDDEN"), the ❌ `'2 weeks'` duration example (home: the "Duration
+  // literals" line), and the intro clause "this page covers the rows' retention,
+  // rotation and archival" (home: the first sentence). 6358 + 1574 - 296 = 7636 bytes
+  // -> 1909 tokens, zero headroom, ceiling +319, pinned AT the measurement. Standing
+  // ruling (2026-10-27, tap A, verbatim and untranslated): 「A:先削重复,余额按实测提高」;
+  // recognised path per ruling record 6513306068.
+  // 1909 -> 1931 (#32364 contract-review should-fix, 2026-11-11, same amendment): the
+  // section names its second limit, that no verifier reads the checkpoints back yet
+  // (+85 B, net of the expiry sentence it now shares). No same-file restatement was
+  // left to cut. 7636 + 85 = 7721 bytes -> 1931 tokens, zero headroom, pinned AT the
+  // measurement.
+  ['skills/objectstack-data/rules/lifecycle.md', 1931],
   ['skills/objectstack-data/rules/naming.md', 773],
   // 3778 -> 3676: RE-LOCK at the landed count (#19715, card item 4). A 5-line
   // table of contents (+154 tokens) landed inside the row's 256 tokens of

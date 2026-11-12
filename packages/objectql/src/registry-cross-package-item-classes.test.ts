@@ -372,6 +372,7 @@ describe('#14454 item 1 — classes REFUSED at the authoring gate (module cannot
 // ────────────────────────────────────────────────────────────────────────────
 
 describe('#14454 item 1 — classes ACCEPTED (unenforced): no object cross-reference check at either gate', () => {
+  const PLACED = [{ name: 'main', components: [{ type: 'record:details' }] }];
   /**
    * ⚠️ "ACCEPTED (unenforced)" is not "ACCEPTED". These classes register and
    * resolve across the boundary — which is what a module split needs — but they
@@ -390,8 +391,9 @@ describe('#14454 item 1 — classes ACCEPTED (unenforced): no object cross-refer
   }> = [
     {
       label: 'page record `object`',
-      item: { pages: [{ name: 'acct_billing', label: 'Account Billing', type: 'record', object: CROSS }] },
-      dangling: { pages: [{ name: 'acct_billing', label: 'Account Billing', type: 'record', object: 'crm_nowhere' }] },
+      // A record page places a component: one that places none is refused at parse.
+      item: { pages: [{ name: 'acct_billing', label: 'Account Billing', type: 'record', object: CROSS, regions: PLACED }] },
+      dangling: { pages: [{ name: 'acct_billing', label: 'Account Billing', type: 'record', object: 'crm_nowhere', regions: PLACED }] },
       type: 'page',
       itemName: 'acct_billing',
       readRef: (i) => i.object,
