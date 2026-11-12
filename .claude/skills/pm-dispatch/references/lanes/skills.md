@@ -10,7 +10,7 @@
 - 契约复核归派发席席内、决裁勤务归总监席(`director.md`);本席保留 skill 与治理文本。
 - 发布技能 `skills/**` 走子卡:修复改了作者或 agent 被教的内容 ⇒ 分诊首触即立本域子卡。
 - 子卡带 `Blocked-by:` 产品卡,技能只记已落地的行为;产品 PR 正文点名该子卡。
-- 必跑门禁红产品 PR 则反序,照退役 playbook §4,不另抄:子卡只删键或改成现值,不记未落地。
+- 退役时必跑门禁红产品 PR 则反序(spec-property-retirement §4):子卡只删键或改值,不记未落地。
 - 产品车道 PR ⛔ 不改 `skills/**`;触了即把该 hunk 移入子卡,同 `spec.md` 的 `protocol:*` 兜底。
 - 内部规则(`.claude/skills/**`、`AGENTS.md`、`CLAUDE.md`、`scripts/pm/**`)⛔ 永不搭产品 PR。
 - 改规则(归属、门禁、上限、车道边界)先立决策卡,裁后本域写;新增门禁默认否照旧。
