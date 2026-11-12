@@ -1988,6 +1988,9 @@ function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: s
  * `_packageId` stamp naming the package `row` is already bound to: the stamp
  * `MetadataManager.loadMany` puts on a body its row binds by the `package_id`
  * column alone. Such a save writes nothing new, so it is no change.
+ * [#32458] For every type stored per `(package, name)`: a bundled type's
+ * member row, and an unbundled type's (`api`, `agent`, `skill`, `action`,
+ * `permission`) one row per slot.
  */
 function onlyBoundStampAdded(row: Record<string, unknown>, type: string, data: unknown, packageId: string | undefined): boolean {
   if (packageId === undefined || storedRowPackageId(row) !== packageId) return false;

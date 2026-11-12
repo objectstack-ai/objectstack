@@ -7,6 +7,8 @@ import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { FilesystemLoader } from './filesystem-loader.js';
+import { JSONSerializer } from '../serializers/json-serializer.js';
 // Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
 import '@objectstack/metadata-fs';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -2063,6 +2065,34 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
 
   beforeEach(() => {
     driver = createMockDriver();
+  });
+
+  it('every body loadMany answered is kept: a file-system body its keyed read cannot name, and a row whose name column is empty (BEFORE this PR\'s first head: both dropped)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'i32458-'));
+    try {
+      for (const type of UNBUNDLED) {
+        mkdirSync(join(rootDir, type, 'crm'), { recursive: true });
+        writeFileSync(join(rootDir, type, 'flat.json'), JSON.stringify({ name: 'flat', label: 'flat' }));
+        writeFileSync(join(rootDir, type, 'crm', 'nested.json'), JSON.stringify({ label: 'nested nameless' }));
+        writeFileSync(join(rootDir, type, 'extensionless'), JSON.stringify({ label: 'extension-less nameless' }));
+        await driver.create('sys_metadata', {
+          id: `${type}_unnamed`, type, name: null, state: 'active', version: 1, checksum: `${type}_unnamed`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ label: 'empty name column' }),
+        });
+        await seed(type, BETA, 2);
+        const m = new MetadataManager({ formats: ['json'], loaders: [] });
+        m.registerLoader(new FilesystemLoader(rootDir, new Map([['json', new JSONSerializer()]]) as never));
+        m.registerLoader(new DatabaseLoader({ driver }));
+        const labels = ((await m.loadMany(type)) as Array<{ label: string; _packageId?: string }>)
+          .map((item) => [item._packageId ?? null, item.label]);
+        expect(labels).toEqual(expect.arrayContaining([
+          [null, 'flat'], [null, 'nested nameless'], [null, 'extension-less nameless'], [null, 'empty name column'], [BETA, BETA],
+        ]));
+        expect(labels).toHaveLength(5);
+      }
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 
   it('the types are taken from the tree', () => {
