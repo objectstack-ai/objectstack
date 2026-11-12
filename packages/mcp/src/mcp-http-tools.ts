@@ -46,9 +46,7 @@ import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
-// [#32757] `ErrorCode` is also read as a value: the ledger's spelling of
-// `FLOW_FAILED`, the arm whose run artefacts carry the relay sentence.
-import { ErrorCode, StandardErrorCode } from '@objectstack/spec/api';
+import { StandardErrorCode, type ErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
@@ -686,11 +684,18 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // context on a fault.
   const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
   const result = codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
-  const relay = answer.code === ErrorCode.enum.FLOW_FAILED ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
+  const relay = answer.code === FLOW_FAILED ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
   return relay === undefined
     ? result
     : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
 }
+
+/**
+ * [#32757] The code a flow run that RAN and failed answers with (the ledger's
+ * `FLOW_FAILED`), the one arm whose `details` are the run's artefacts. Typed as
+ * the registered vocabulary, so a misspelling fails to compile.
+ */
+const FLOW_FAILED: ErrorCode = 'FLOW_FAILED';
 
 /**
  * [#32757] The lead of the plain sentence a failed flow run's tool error
