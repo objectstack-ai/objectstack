@@ -28,7 +28,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import React, { useEffect } from 'react';
 import { render, cleanup, waitFor, screen, fireEvent, act, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { MemoryRouter, Routes, Route, useNavigate, useLocation, type NavigateFunction } from 'react-router-dom';
 import { registerAllFields } from '@object-ui/fields';
 // The console's draft bar loads the linter lazily: pay that load while the file
 // is collected, never inside a case's timeout (`check:test-source-alias`).
@@ -41,6 +41,10 @@ const probe = vi.hoisted(() => ({
   events: [] as string[],
   /** The list suspends once before it draws (a lazy chunk the route still loads). */
   suspend: null as null | { promise: Promise<void>; done: boolean },
+  /** On a phone the list answers its drawer link with the record page, as `ObjectView` does (objectstack#32750). */
+  phoneRedirect: false,
+  /** The location as of the latest render. */
+  where: '',
 }));
 
 vi.mock('@object-ui/plugin-form', async (importOriginal) => {
@@ -80,6 +84,9 @@ vi.mock('../../chrome/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: ()
 vi.mock('../../views/RecordFormPage', () => ({
   RecordFormPage: () => <div data-testid="record-form-page" />,
 }));
+vi.mock('../../views/RecordDetailView', () => ({
+  RecordDetailView: () => <div data-testid="record-page" />,
+}));
 
 // The list's record drawer, as `ObjectView` mounts it
 // (`objectViewRecordOverlay.tsx`): the real stack and drawer over the list,
@@ -91,6 +98,31 @@ vi.mock('../../views/ObjectView', async () => {
   const { useSearchParams } = await import('react-router-dom');
   const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
   const { usePhoneViewport } = await import('../../hooks/usePhoneViewport');
+  const { useNavigate: useRouterNavigate, useLocation } = await import('react-router-dom');
+  const { useObjectViewRecordNavigation } = await import('../../views/objectViewRecordNavigation');
+  // The list's own navigation hook, as `ObjectView` calls it on a phone.
+  const PhoneRedirect = ({ objectDef }: { objectDef: unknown }) => {
+    const [searchParams, setSearchParams] = useSearchParams();
+    useObjectViewRecordNavigation({
+      activeView: { id: 'all', name: 'all', label: 'All accounts' } as never,
+      objectDef: objectDef as never,
+      objects: [] as never,
+      appName: 'crm',
+      viewId: undefined,
+      searchParams,
+      setSearchParams,
+      location: useLocation(),
+      navigate: useRouterNavigate(),
+      routerRootHref: '/',
+      servedViews: { views: [], objects: [] } as never,
+      viewLabel: (_object: string, _view: string, fallback: string) => fallback,
+      unlabelledViewText: 'Untitled view',
+      language: 'en',
+      recordOpenPreference: 'object' as never,
+      phone: true,
+    });
+    return null;
+  };
   return {
     ObjectView: ({ objects }: { objects: ReadonlyArray<unknown> }) => {
       if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
@@ -105,7 +137,14 @@ vi.mock('../../views/ObjectView', async () => {
       }, [recordId]);
       const stack = useRecordDrawerStack({ root });
       const phone = usePhoneViewport();
-      if (phone) return <div data-testid="list" />;
+      if (phone) {
+        return (
+          <>
+            {probe.phoneRedirect ? <PhoneRedirect objectDef={objects[0]} /> : null}
+            <div data-testid="list" />
+          </>
+        );
+      }
       return (
         <RecordStackDrawer
           stack={stack}
@@ -192,9 +231,11 @@ import { AppContent } from '../AppContent';
 const nav: { current: NavigateFunction | null } = { current: null };
 function NavProbe() {
   const navigate = useNavigate();
+  const location = useLocation();
   useEffect(() => {
     nav.current = navigate;
   });
+  probe.where = `${location.pathname}${location.search}`;
   return null;
 }
 
@@ -230,6 +271,7 @@ const RELATED_NEW = 'form=new&formObject=crm_contact&formLink=account%3Aa1';
 beforeEach(() => {
   probe.events.length = 0;
   probe.suspend = null;
+  probe.phoneRedirect = false;
   vi.clearAllMocks();
 });
 afterEach(cleanup);
@@ -289,5 +331,48 @@ describe('#32685 — a related-record form the URL opens over a record drawer is
     mountAt('/apps/crm/crm_contact?form=new');
     await waitFor(() => expect(document.querySelector('[data-testid="modal-form-footer"]')).not.toBeNull(), { timeout: 5000 });
     expect(screen.queryByTestId('record-body')).toBeNull();
+  });
+});
+
+/**
+ * objectstack#32750 — on a phone the list answers the drawer link with the
+ * record's page (objectstack#27058), and the related-record form the link
+ * carries goes with it: the form opens over the record page and stays open,
+ * as the same link opens it over the drawer on a desktop.
+ * CONTROL: a drawer link with no form lands on the record page with no form.
+ */
+describe('#32750 — on a phone the drawer link\'s related-record form stays open over the record page', () => {
+  const width = window.innerWidth;
+  beforeEach(() => {
+    probe.phoneRedirect = true;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+  });
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+  });
+
+  it('the record page carries the form, and the form is still open after the redirect settles', async () => {
+    mountAt(`/apps/crm/crm_account?recordId=a1&${RELATED_NEW}`);
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    expect(probe.where).toBe(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
+    const footer = await waitFor(() => {
+      const found = document.querySelector('[data-testid="modal-form-footer"]');
+      expect(found).not.toBeNull();
+      return found!;
+    }, { timeout: 5000 });
+    // The card measured the form closing about half a second after it opened.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 800)));
+    expect(footer.isConnected).toBe(true);
+    expect(probe.events).not.toContain('form:false');
+    expect(within(footer.closest('[role="dialog"]') as HTMLElement).getByRole('button', { name: 'Create' })).toBeEnabled();
+    expect(probe.where).toBe(`/apps/crm/crm_account/record/a1?${RELATED_NEW}`);
+  });
+
+  it('CONTROL: a drawer link with no form lands on the record page with no search and no form', async () => {
+    mountAt('/apps/crm/crm_account?recordId=a1');
+    await screen.findByTestId('record-page', {}, { timeout: 5000 });
+    expect(probe.where).toBe('/apps/crm/crm_account/record/a1');
+    await act(() => new Promise((resolve) => setTimeout(resolve, 300)));
+    expect(document.querySelector('[data-testid="modal-form-footer"]')).toBeNull();
   });
 });

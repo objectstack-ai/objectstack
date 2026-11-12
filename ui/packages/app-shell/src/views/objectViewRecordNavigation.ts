@@ -20,7 +20,9 @@
  * `viewport: 'mobile'` answers `page`), a row tap navigates to the record
  * route with the list as its origin, and the pane is never mounted, so the
  * reader's Open records preference and the drawer's `?recordId=` state do not
- * apply: a `?recordId=` link opened on a phone lands on that record's page.
+ * apply: a `?recordId=` link opened on a phone lands on that record's page,
+ * and the record form the link carries (`?form=`, `?formObject=`,
+ * `?formLink=`) opens over that page (objectstack#32750).
  */
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
