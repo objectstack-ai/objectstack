@@ -2780,7 +2780,7 @@ const zhHant = {
         invalidCredentials: '郵箱或密碼錯誤。多次失敗後，登入將暫停一段時間。忘記密碼？重置密碼後即可立即登入。',
         invalidCredentialsNoMail: '郵箱或密碼錯誤。多次失敗後，登入將暫停一段時間。忘記密碼？請聯絡管理員為你重置。',
         emailNotVerified: '請先驗證您的郵箱後再登入。',
-        accountDeactivated: "你的賬號已被所屬組織停用。請聯絡管理員。",
+        accountDeactivated: "你的賬號已被所在組織停用。請聯絡管理員。",
         oauthCallbackFailed: '單點登入未能完成——登入連結已過期或已被使用，請重新發起登入。',
         ssoAccountNotInvited: "你的賬號尚未在本系統中開通。請聯絡管理員邀請你。",
         ssoAccountNotLinked: "本系統中已有使用你郵箱的賬號，但它尚未關聯單點登入。請改用其他方式登入，或請管理員為你關聯。",
