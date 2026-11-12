@@ -33,6 +33,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ActionActivationProjection, ObjectStoreActionActivationStore } from '@objectstack/objectql';
+import { MemoryLoader, MetadataManager } from '@objectstack/metadata';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
@@ -322,7 +323,6 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
     });
 
     async function bootWithDoor(objectsOf: readonly [string | undefined, string | undefined]): Promise<Harness> {
-        const { MetadataManager, MemoryLoader } = await import('@objectstack/metadata');
         const door = new MemoryLoader();
         await door.save('action', 'shared_ping', shipped('com.acme.alpha', objectsOf[0]));
         await door.save('action', 'shared_ping', shipped('com.acme.beta', objectsOf[1]));
@@ -360,7 +360,6 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
     });
 
     it('CONTROL — one package\'s action on one object: the flip writes its row (unchanged)', async () => {
-        const { MetadataManager, MemoryLoader } = await import('@objectstack/metadata');
         const door = new MemoryLoader();
         await door.save('action', 'shared_ping', shipped('com.acme.alpha', OTHER));
         const manager = new MetadataManager({ formats: ['json'], loaders: [door] });
