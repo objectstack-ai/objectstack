@@ -120,10 +120,17 @@ export const HttpDelivery = ObjectSchema.create({
             description: "Provenance domain, e.g. 'webhook' | 'flow'. UNIQUE(source, dedup_key).",
         }),
 
+        // [#31699] 384 = `declared:` (9) + the longest package id the metadata
+        // store holds (255, `sys_metadata.package_id`) + `/` + the longest
+        // webhook name whose `declared:NAME` fitted the old 128 (119): a
+        // declared webhook's reference names its package (`declared:PKG/NAME`),
+        // and every name that delivered before still fits. Widening a keyed
+        // varchar is the `safe` drift op (`os migrate apply`; dev reconciles
+        // it at boot); no stored row changes.
         ref_id: Field.text({
             label: 'Ref ID',
             required: true,
-            maxLength: 128,
+            maxLength: 384,
             description: 'Partition/ordering anchor within source (webhook id, flow id, …)',
         }),
 
