@@ -29,8 +29,10 @@ import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } f
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   isBundledStoreType,
+  isPackageCaller,
   namedRowColumnOf,
   refuseSeveralSlots,
+  refuseSlotNotHeld,
   slotPackageOf,
   STORED_MEMBER_MAX_LENGTH,
   storedItemPackageId,
@@ -237,6 +239,71 @@ export interface DatabaseLoaderCacheOptions {
  * which handles datasource mapping automatically — no manual driver
  * resolution needed. Schema sync is also skipped (the engine handles it).
  */
+/**
+ * [ADR-0150 D3/D4, #32351] Which package's history a history read or a
+ * rollback of a type stored per `(package, name)` addresses
+ * (`PACKAGE_SLOTTED_STORE_TYPES`). Ignored for every other type.
+ */
+export interface MetadataHistoryAddress {
+  /**
+   * The package whose versions are read, or whose row a rollback writes.
+   * `null` addresses the environment: the name's package-less row and the
+   * versions recorded of it (never a version attributed to none, F1). `''` and the `sys_metadata` sentinel
+   * name no package either, so they address the environment too (the store's
+   * own rule, `isPackageCaller`). Absent: no address.
+   */
+  packageId?: string | null;
+}
+
+/**
+ * [#32351] The package a history address names: the package, `null` for the
+ * environment (`null`, `''` or the `sys_metadata` sentinel — the store's
+ * `isPackageCaller` rule, the same one `storeRowKey` keys rows by), or
+ * `undefined` when no address is given.
+ */
+function addressedPackage(address?: MetadataHistoryAddress): string | null | undefined {
+  if (address?.packageId === undefined) return undefined;
+  return isPackageCaller(address.packageId) ? address.packageId : null;
+}
+
+/**
+ * [#32351 F1, ruling A as amended 6818953020] The history `package_id` of a
+ * snapshot of the environment's (package-less) row of a by-package type: the
+ * explicit `sys_metadata` sentinel. NULL in that column means "not
+ * attributed" (a row written before the column, or one `SysMetadataRepository`
+ * wrote), never the environment.
+ */
+const ENVIRONMENT_HISTORY_MARK = 'sys_metadata';
+
+/**
+ * [#32351] The `package_id` a by-package type's snapshot of `slot`'s row is
+ * recorded with: the slot's package, or {@link ENVIRONMENT_HISTORY_MARK} for
+ * the package-less row. `undefined` (the column left NULL) for every other
+ * type, which has no slot.
+ */
+function historySnapshotPackage(slot: { packageId?: string } | undefined): string | undefined {
+  return slot ? (slot.packageId ?? ENVIRONMENT_HISTORY_MARK) : undefined;
+}
+
+/**
+ * [#32351 F1] Whose version a history row records: a package (the
+ * `package_id` column, else, for a row written before it, the package its
+ * stored body names — {@link storedRowPackageId}), `null` for the
+ * environment (the column holds {@link ENVIRONMENT_HISTORY_MARK}), or
+ * `undefined` when it is attributed to none. An addressed read never answers
+ * an unattributed version, and a rollback lands one only on a name a single
+ * row slot holds.
+ */
+function historyRowAttribution(row: Record<string, unknown>): string | null | undefined {
+  if (row.package_id === ENVIRONMENT_HISTORY_MARK) return null;
+  return storedRowPackageId(row);
+}
+
+/** [#32351] A version's owner in a sentence: `package "p"`, or the environment. */
+function ownerPhrase(owner: string | null): string {
+  return owner === null ? 'the environment' : `package "${owner}"`;
+}
+
 export interface DatabaseLoaderOptions {
   /** The IDataDriver instance to use for database operations */
   driver?: IDataDriver;
@@ -804,6 +871,11 @@ export class DatabaseLoader implements MetadataLoader {
    * @param previousChecksum - The parent row's stamp before this write (if any)
    * @param changeNote - Optional change description
    * @param recordedBy - Optional user who made the change
+   * @param packageId - [ADR-0150 D3/D4, #32351] For a by-package type, the
+   *   package whose row this snapshot was taken of, or the `sys_metadata`
+   *   sentinel for the package-less row ({@link historySnapshotPackage}),
+   *   stored in the history row's `package_id` column; `undefined` for every
+   *   other type, whose history row stays as it was.
    */
   private async createHistoryRecord(
     type: string,
@@ -814,7 +886,8 @@ export class DatabaseLoader implements MetadataLoader {
     checksum: string,
     previousChecksum?: string,
     changeNote?: string,
-    recordedBy?: string
+    recordedBy?: string,
+    packageId?: string,
   ): Promise<void> {
     if (!this.trackHistory) return;
 
@@ -905,6 +978,7 @@ export class DatabaseLoader implements MetadataLoader {
         recorded_by: historyRecord.recordedBy,
         recorded_at: historyRecord.recordedAt,
         source: 'database-loader',
+        ...(packageId !== undefined ? { package_id: packageId } : {}),
       });
     } catch (error) {
       // Log error but don't fail the main operation
@@ -1408,13 +1482,22 @@ export class DatabaseLoader implements MetadataLoader {
   /**
    * Fetch a single history snapshot by (type, name, version).
    * Returns null when the record does not exist.
+   *
+   * [ADR-0150 D3/D4, #32351] For a by-package type, `options.packageId` names
+   * whose version it is (`null`: the environment's, recorded under no
+   * package): a version of another package answers null. With no address, a
+   * name more than one row slot holds is refused before the row is read
+   * ({@link historyPackageAddress}); one holder answers as before.
    */
   async getHistoryRecord(
     type: string,
     name: string,
-    version: number
+    version: number,
+    options?: MetadataHistoryAddress,
   ): Promise<MetadataHistoryRecord | null> {
     if (!this.trackHistory) return null;
+
+    const packageId = await this.historyPackageAddress(type, name, options);
 
     await this.ensureHistorySchema();
 
@@ -1427,6 +1510,7 @@ export class DatabaseLoader implements MetadataLoader {
       where: filter,
     });
     if (!row) return null;
+    if (packageId !== undefined && historyRowAttribution(row) !== packageId) return null;
 
     return {
       id: row.id as string,
@@ -1472,13 +1556,14 @@ export class DatabaseLoader implements MetadataLoader {
       limit?: number;
       offset?: number;
       includeMetadata?: boolean;
-    }
+    } & MetadataHistoryAddress
   ): Promise<{ records: any[]; total: number; hasMore: boolean }> {
     if (!this.trackHistory) {
       return { records: [], total: 0, hasMore: false };
     }
 
     await this.ensureSchema();
+    const packageId = await this.historyPackageAddress(type, name, options);
     await this.ensureHistorySchema();
 
     // Build history query directly against (type, name); no parent
@@ -1511,19 +1596,30 @@ export class DatabaseLoader implements MetadataLoader {
     const limit = options?.limit ?? 50;
     const offset = options?.offset ?? 0;
 
-    const historyRecords = await this._find(this.historyTableName, {
-      where,
-      orderBy: [
-        { field: 'recorded_at', order: 'desc' as const },
-        { field: 'version', order: 'desc' as const },
-      ],
-      limit: limit + 1,
-      offset,
-    });
+    const orderBy = [
+      { field: 'recorded_at', order: 'desc' as const },
+      { field: 'version', order: 'desc' as const },
+    ];
+    // [#32351] One package's versions of a by-package type: the name's rows in
+    // the same order, those attributed ({@link historyRowAttribution}: the
+    // `package_id` column, the sentinel for the environment's, else the
+    // package a row written before the column names in its body) to the one
+    // addressed, then paged — so `total` and `hasMore` count that package's
+    // versions, not the name's. An unattributed version is in no address's.
+    let historyRecords: Array<Record<string, unknown>>;
+    let total: number;
+    if (packageId !== undefined) {
+      const own = (await this._find(this.historyTableName, { where, orderBy }))
+        .filter((row) => historyRowAttribution(row) === packageId);
+      historyRecords = own.slice(offset, offset + limit + 1);
+      total = own.length;
+    } else {
+      historyRecords = await this._find(this.historyTableName, { where, orderBy, limit: limit + 1, offset });
+      total = await this._count(this.historyTableName, { where });
+    }
 
     const hasMore = historyRecords.length > limit;
     const records = historyRecords.slice(0, limit);
-    const total = await this._count(this.historyTableName, { where });
 
     const includeMetadata = options?.includeMetadata !== false;
     const result = records.map((row: Record<string, unknown>) => {
@@ -1555,11 +1651,43 @@ export class DatabaseLoader implements MetadataLoader {
   }
 
   /**
+   * [ADR-0150 D3, #32351] The package a history read of `(type, name)`
+   * addresses: for a by-package type the address's package, or `null` for the
+   * environment ({@link addressedPackage}), else `undefined` (the name's whole
+   * history, as before). A by-package name read with no
+   * package while more than one row slot holds it — two packages', or a
+   * package's beside the package-less row — is refused naming every holder
+   * (`refuseSeveralSlots`, the rollback's refusal): its versions are several
+   * packages' and nothing picks one. Every other type is not read here.
+   */
+  private async historyPackageAddress(
+    type: string,
+    name: string,
+    options?: MetadataHistoryAddress,
+  ): Promise<string | null | undefined> {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
+    const packageId = addressedPackage(options);
+    if (packageId !== undefined) return packageId;
+    await this.ensureSchema();
+    refuseSeveralSlots(await this.rowSlots(type, name), type, name);
+    return undefined;
+  }
+
+  /**
    * Perform a rollback: persist `restoredData` as the new current state and record a
    * single 'revert' history entry (instead of the usual 'update' entry that `save()`
    * would produce). This avoids the duplicate-version problem that arises when
    * `register()` → `save()` writes an 'update' entry followed by an additional
    * 'revert' entry for the same version number.
+   *
+   * [ADR-0150 D3/D4, #32351] For a by-package type the rollback writes one row
+   * slot ({@link rollbackSlot}): the one `options.packageId` addresses (`null`:
+   * the environment's package-less row), refused (`not-held-by-qualifier`)
+   * when it holds no row of the name, or, addressing none, the name's one row
+   * slot (several are refused naming every holder, before any write). The
+   * version restored must be that slot's package's: another package's version
+   * is refused, ⛔ never written into the remaining holder's row (S8a). Every
+   * other type restores its name's row, as before.
    */
   async registerRollback(
     type: string,
@@ -1567,35 +1695,32 @@ export class DatabaseLoader implements MetadataLoader {
     restoredData: unknown,
     targetVersion: number,
     changeNote?: string,
-    recordedBy?: string
+    recordedBy?: string,
+    options?: MetadataHistoryAddress,
   ): Promise<void> {
     await this.ensureSchema();
-
-    // [ADR-0150 D3, #32246 R1/R1b] A by-package type keeps a row per
-    // `(package, name)`. With more than one row slot of the name — two
-    // packages', or a package's beside the name's package-less row — a
-    // rollback by name cannot tell whose row it restores: the first row the
-    // driver returned would be overwritten with a body that may be another
-    // holder's. It is refused naming every holder (`refuseSeveralSlots`),
-    // before any write or history row. Rollback by package is a follow-up card.
-    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
-      refuseSeveralSlots(await this.rowSlots(type, name), type, name);
-    }
 
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(restoredData);
     // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
     const newChecksum = contentHash(metadataJson, type);
 
+    // [ADR-0150 D3, #32246 R1/R1b, #32351] The rows a by-package rollback may
+    // write: one slot's, picked as the doc above says.
+    const slot = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? await this.rollbackSlot(type, name, targetVersion, restoredData, addressedPackage(options))
+      : undefined;
+
     // [#31699 R3-B] A bundled type's one slot holds a row per member: the
     // rollback restores the row of the member the restored body declares,
     // never the first row the driver returns (another member's). [#32540] So
     // does an action's: its member is the object the restored body is bound
-    // to, never another binding's row.
-    const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, restoredData) : undefined;
-    const rowsOfName = member === undefined ? [] : await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    // to, never another binding's row. [#32351] Both within the one row slot
+    // picked above, never another holder's rows.
+    const member = slot ? storedRowMemberOf(type, restoredData) : undefined;
+    const rowsOfName = slot && member !== undefined ? slot.rows : [];
     const existing = member === undefined
-      ? await this._findOne(this.tableName, { where: this.baseFilter(type, name) })
+      ? (slot ? slot.rows[0] ?? null : await this._findOne(this.tableName, { where: this.baseFilter(type, name) }))
       : rowsOfName.find((row) => (storedRowMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
     // [#32540 C9] The restored body may be bound to an object the slot holds no
     // row of (a row written before held one binding and was later re-bound
@@ -1620,8 +1745,8 @@ export class DatabaseLoader implements MetadataLoader {
 
     const previousChecksum = existing?.checksum as string | undefined;
     // [#32246] A by-package type numbers versions per name (see the class
-    // doc); the name has one row slot here (refused above).
-    const newVersion = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+    // doc); the rollback writes one row slot (picked above).
+    const newVersion = slot
       ? await this.nextNameVersion(type, name)
       : ((existing?.version as number) ?? 0) + 1;
 
@@ -1667,8 +1792,102 @@ export class DatabaseLoader implements MetadataLoader {
       newChecksum,
       previousChecksum,
       changeNote ?? `Rolled back to version ${targetVersion}`,
-      recordedBy
+      recordedBy,
+      historySnapshotPackage(slot),
     );
+  }
+
+  /**
+   * [ADR-0150 D3/D4, #32351] The row slot of `name`, a by-package type, that a
+   * rollback to `targetVersion` writes, and that slot's rows and package:
+   *  - no row of the name at all: no slot (the caller's "not found"), whatever
+   *    is addressed — the miss answers itself, as the exact-qualifier door's;
+   *  - `packageId` addressed (a package, or `null` for the environment's
+   *    package-less row): that slot, refused (`not-held-by-qualifier`) when it
+   *    holds no row of the name;
+   *  - none: the name's one slot, several refused naming every holder
+   *    (`refuseSeveralSlots`);
+   *  - either way, the version's owner — its history row's attribution
+   *    ({@link historyRowAttribution}: a package, or the environment), else
+   *    the package the restored body names — must be the slot's. Another
+   *    owner's version is refused: naming that owner's row when it still
+   *    holds one (the version is that owner's), and `not-held-by-qualifier`
+   *    naming that owner when it holds none (one since removed, S8a). The
+   *    environment's own version of a name one row slot holds lands in that
+   *    row, as before (M1): a package took over the package-less row, or
+   *    saved after it was removed;
+   *  - a version attributed to none (F1: a row written before the column, or
+   *    by `SysMetadataRepository`) lands in the slot picked only when the
+   *    name has one row slot, as before; with several it is refused naming
+   *    every holder (`refuseSeveralSlots`), addressed or not, since nothing
+   *    says whose it is.
+   */
+  private async rollbackSlot(
+    type: string,
+    name: string,
+    targetVersion: number,
+    restoredData: unknown,
+    packageId: string | null | undefined,
+  ): Promise<{ rows: Array<Record<string, unknown>>; packageId?: string } | undefined> {
+    const bySlot = await this.rowSlots(type, name);
+    if (bySlot.size === 0) return { rows: [] };
+    let key: string;
+    if (packageId !== undefined) {
+      key = storeRowKey(name, packageId);
+      if (!bySlot.has(key)) refuseSlotNotHeld(bySlot, type, name, packageId);
+    } else {
+      refuseSeveralSlots(bySlot, type, name);
+      key = bySlot.keys().next().value as string;
+    }
+    const slotPackage = slotPackageOf(key);
+    const recorded = await this.historyVersionAttribution(type, name, targetVersion);
+    const versionOwner = recorded !== undefined ? recorded : storedItemPackageId(restoredData);
+    if (versionOwner === undefined || (versionOwner === null && bySlot.size === 1)) {
+      // Attributed to none, or (M1) the environment's own version of a name
+      // one row slot holds — a package took over the package-less row, or it
+      // was removed and a package saved since: it lands in that one row, as
+      // before. With several row slots it is refused naming every holder.
+      refuseSeveralSlots(bySlot, type, name);
+    } else if (versionOwner !== (slotPackage ?? null)) {
+      if (bySlot.has(storeRowKey(name, versionOwner))) {
+        throw new Error(
+          `Version ${targetVersion} of ${type}/${name} is ${ownerPhrase(versionOwner)}'s, not ` +
+            `${ownerPhrase(slotPackage ?? null)}'s: roll it back addressing ${ownerPhrase(versionOwner)}, whose row it restores.`,
+        );
+      }
+      refuseSlotNotHeld(bySlot, type, name, versionOwner);
+    }
+    return { rows: bySlot.get(key) ?? [], packageId: slotPackage };
+  }
+
+  /**
+   * [#32351] Whose version the history row of `(type, name, version)` records
+   * ({@link historyRowAttribution}): a package, `null` for the environment;
+   * `undefined` when history is not tracked, the row is absent or it is
+   * attributed to none.
+   */
+  private async historyVersionAttribution(type: string, name: string, version: number): Promise<string | null | undefined> {
+    if (!this.trackHistory) return undefined;
+    await this.ensureHistorySchema();
+    const row = await this._findOne(this.historyTableName, { where: { type, name, version } });
+    return row ? historyRowAttribution(row) : undefined;
+  }
+
+  /**
+   * [#32351 F1] Refuses, naming every holder (`refuseSeveralSlots`, `409`), a
+   * version of a by-package name that more than one row slot holds when its
+   * history row is attributed to none. An addressed read leaves such a
+   * version out, so `MetadataManager.rollback` asks here before answering its
+   * miss "not found": the version exists, and nothing says whose it is. A
+   * name one row slot holds, an absent row and every other type pass.
+   */
+  async refuseUnattributedVersion(type: string, name: string, version: number): Promise<void> {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || !this.trackHistory) return;
+    await this.ensureHistorySchema();
+    const row = await this._findOne(this.historyTableName, { where: { type, name, version } });
+    if (!row || historyRowAttribution(row) !== undefined) return;
+    await this.ensureSchema();
+    refuseSeveralSlots(await this.rowSlots(type, name), type, name);
   }
 
   /**
@@ -1906,7 +2125,10 @@ export class DatabaseLoader implements MetadataLoader {
           data,
           'update',
           newChecksum,
-          previousChecksum
+          previousChecksum,
+          undefined,
+          undefined,
+          historySnapshotPackage(slot),
         );
 
         return {
@@ -1949,7 +2171,11 @@ export class DatabaseLoader implements MetadataLoader {
           version,
           data,
           'create',
-          newChecksum
+          newChecksum,
+          undefined,
+          undefined,
+          undefined,
+          historySnapshotPackage(slot),
         );
 
         return {
@@ -1982,15 +2208,19 @@ export class DatabaseLoader implements MetadataLoader {
    * the rows of the slots the store's removal rule picks (`storeRemovalKeys`):
    * that package's row with `options.packageId`; with none, every row of the
    * name while at most one package holds it, and refused
-   * (`PackageScopedNameRefusedError`) when two or more do. Every other type
-   * deletes its name's row, as before.
+   * (`PackageScopedNameRefusedError`) when two or more do. [#32560] With
+   * `options.packagelessOnly` (and no `packageId`), the name's package-less
+   * rows only: the manager judged the removal over every store. Every other
+   * type deletes its name's row, as before.
    */
   async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     await this.ensureSchema();
 
     if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
       const bySlot = await this.rowSlots(type, name);
-      const { keys } = storeRemovalKeys(bySlot, type, name, options?.packageId);
+      const keys = options?.packageId === undefined && options?.packagelessOnly === true
+        ? [...bySlot.keys()].filter((key) => slotPackageOf(key) === undefined)
+        : storeRemovalKeys(bySlot, type, name, options?.packageId).keys;
       for (const key of keys) {
         for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
       }

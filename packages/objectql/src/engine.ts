@@ -361,6 +361,7 @@ import { ObjectRepositoryFacet } from './engine-object-repository.js';
 import { ScopedContextFacet } from './engine-scoped-context.js';
 // [#30052 codemod] The scoped facets' hosts, one per instance, which each class's static block builds.
 import { objectRepositoryHost, scopedContextHost } from './engine-scoped-hosts.js';
+import { captureStoredExpressions, type StoredExpressionCapture } from './stored-expression-backfill.js';
 
 // [#29986 codemod] The statics of `ObjectQL` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -1716,6 +1717,20 @@ export class ObjectQL implements IObjectQLEngine {
     onFault?: (field: string, message: string) => void,
   ): Promise<Array<Record<string, unknown>>> {
     return SecurityResolversFacet.computeStoredExpressionsOver.call(securityResolversHost.of(this), object, rows, context, onFault);
+  }
+
+  /**
+   * [#32527] Capture `object`'s stored computed fields before a metadata door
+   * makes a change to it live, and hand back the fill that change owes:
+   * {@link StoredExpressionCapture.fillChanged}, called once the change is
+   * served, fills every stored row of each stored computed field that now
+   * computes something new (added, turned from a formula, its expression
+   * changed) with the write's own computation — `stored-expression-backfill.ts`
+   * carries the contract. The metadata protocol reaches it through its host
+   * engine, which cannot import this package.
+   */
+  captureStoredExpressions(object: string): StoredExpressionCapture {
+    return captureStoredExpressions(this, this.logger, object);
   }
 
   private formulaOptionLabels(

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { LookupField } from './widgets/LookupField';
@@ -7,6 +7,8 @@ import { FieldEditWidget } from './FieldEditWidget';
 import { MasterDetailField } from './widgets/MasterDetailField';
 import { GridField } from './widgets/GridField';
 import { FileField, FileCell } from './widgets/FileField';
+import { UploadProvider } from './widgets/UploadProvider';
+import type { UploadAdapter, UploadResult } from '@object-ui/types';
 import type { FieldWidgetComponentProps } from './widgets/types';
 
 // ------------- Mocks & Setup -------------
@@ -968,5 +970,115 @@ describe('Complex & Relationship Widgets', () => {
             render(<FileField {...baseProps} value={null} />);
             expect(screen.queryByTestId('file-field-camera-button')).not.toBeInTheDocument();
         });
+    });
+});
+
+/**
+ * objectstack#32684 — a file outside the field's `accept` list is refused in
+ * the widget with a hint naming it, on every way a file reaches it, instead
+ * of uploading silently (a pick past the picker's filter) or vanishing without
+ * a word (a drop), only for the save to be refused later. The widget has no
+ * paste path; a pick and a drop are the two doors.
+ */
+describe('FileField and FileCell — a type outside `accept` is refused with a hint', () => {
+    const ACCEPT = ['.pdf', '.ofd', '.png', '.jpg', '.jpeg'];
+    const HINT = /^"not-an-invoice\.txt" is not an accepted file type \(\.pdf, \.ofd, \.png, \.jpg, \.jpeg\)$/;
+    const txt = () => new File(['x'], 'not-an-invoice.txt', { type: 'text/plain' });
+    const pdf = () => new File(['x'], 'invoice.pdf', { type: 'application/pdf' });
+
+    function spyUpload() {
+        const upload = vi.fn(async (f: File | Blob): Promise<UploadResult> => ({
+            url: `https://cdn.example/${(f as File).name}`,
+            name: (f as File).name,
+            size: f.size,
+            mimeType: f.type,
+            meta: { fileId: 'f0e1d2c3b4a5968778695a4b3c2d1e0f' },
+        }));
+        const adapter: UploadAdapter = { name: 'spy', upload };
+        return { adapter, upload };
+    }
+
+    /** `null` renders the field with no `accept` at all. */
+    function renderField(accept: string[] | null = ACCEPT) {
+        const { adapter, upload } = spyUpload();
+        const onChange = vi.fn();
+        render(
+            <UploadProvider adapter={adapter}>
+                <FileField
+                    field={{ name: 'invoice_file', label: 'Invoice', type: 'file', accept: accept ?? undefined } as any}
+                    value={undefined}
+                    onChange={onChange}
+                />
+            </UploadProvider>,
+        );
+        return { upload, onChange };
+    }
+
+    const input = () => document.querySelector('input[type="file"]') as HTMLInputElement;
+    const dropzone = () => screen.getByRole('button', { name: /Drag & drop files here/ });
+
+    it('pick: a .txt is refused with the hint, never uploaded, never handed over', async () => {
+        const { upload, onChange } = renderField();
+        fireEvent.change(input(), { target: { files: [txt()] } });
+        expect(await screen.findByText(HINT)).toBeInTheDocument();
+        expect(upload).not.toHaveBeenCalled();
+        expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('drop: a .txt is refused with the same hint instead of vanishing', async () => {
+        const { upload, onChange } = renderField();
+        fireEvent.drop(dropzone(), { dataTransfer: { files: [txt()] } });
+        expect(await screen.findByText(HINT)).toBeInTheDocument();
+        expect(upload).not.toHaveBeenCalled();
+        expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('drop of an accepted and a refused file: the accepted one uploads, the other is named', async () => {
+        const { upload, onChange } = renderField();
+        fireEvent.drop(dropzone(), { dataTransfer: { files: [pdf(), txt()] } });
+        expect(await screen.findByText(HINT)).toBeInTheDocument();
+        await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect((upload.mock.calls[0][0] as File).name).toBe('invoice.pdf');
+    });
+
+    it('CONTROL: an accepted file, by extension or by MIME wildcard, shows no hint and uploads', async () => {
+        const { upload, onChange } = renderField();
+        fireEvent.change(input(), { target: { files: [pdf()] } });
+        await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+        expect(upload).toHaveBeenCalledTimes(1);
+        expect(screen.queryByText(/is not an accepted file type/)).toBeNull();
+        cleanup();
+
+        const second = renderField(['image/*']);
+        fireEvent.change(input(), { target: { files: [new File(['x'], 'scan.heic', { type: 'image/heic' })] } });
+        await waitFor(() => expect(second.onChange).toHaveBeenCalledTimes(1));
+        expect(screen.queryByText(/is not an accepted file type/)).toBeNull();
+    });
+
+    it('CONTROL: no `accept` admits every file, and a pick reporting no type is not judged on a MIME entry', async () => {
+        const { onChange } = renderField(null);
+        fireEvent.change(input(), { target: { files: [txt()] } });
+        await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+        cleanup();
+
+        const second = renderField(['application/pdf']);
+        fireEvent.change(input(), { target: { files: [new File(['x'], 'unknown.bin', { type: '' })] } });
+        await waitFor(() => expect(second.onChange).toHaveBeenCalledTimes(1));
+        expect(screen.queryByText(/is not an accepted file type/)).toBeNull();
+    });
+
+    it('FileCell: the same pipeline refuses the same pick', async () => {
+        const { adapter, upload } = spyUpload();
+        const onChange = vi.fn();
+        render(
+            <UploadProvider adapter={adapter}>
+                <FileCell value={null} onChange={onChange} accept={ACCEPT.join(',')} aria-label="Invoice" />
+            </UploadProvider>,
+        );
+        fireEvent.change(input(), { target: { files: [txt()] } });
+        expect(await screen.findByText(HINT)).toBeInTheDocument();
+        expect(upload).not.toHaveBeenCalled();
+        expect(onChange).not.toHaveBeenCalled();
     });
 });

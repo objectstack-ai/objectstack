@@ -77,6 +77,7 @@ import {
     mutationEventMember,
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import { compareAuditInstants, isoFromValidDate } from './protocol-version-tokens.js';
 import {
     clientFacingFailureCode,
@@ -1488,6 +1489,8 @@ export class ProtocolPackageCommitsFacet {
                             state: 'deleted',
                             organizationId: null,
                             ...mutationEventMember(it.type, member),
+                            // [#32451] The commit's package: the row this revert removed.
+                            ...mutationEventPackage(commitPackageId),
                         });
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
@@ -1649,6 +1652,8 @@ export class ProtocolPackageCommitsFacet {
                         state: 'active',
                         organizationId: null,
                         ...mutationEventMember(it.type, member),
+                        // [#32451] The commit's package: the row this revert restored.
+                        ...mutationEventPackage(commitPackageId),
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                     revertedMembers.push(member);
@@ -2078,6 +2083,8 @@ export class ProtocolPackageCommitsFacet {
                 state: 'active',
                 organizationId: null,
                 ...mutationEventMember(singularType, member),
+                // [#32451] The binding of the row the rollback restored.
+                ...mutationEventPackage(rollbackPackageId),
             });
             return {
                 success: true,
