@@ -2437,20 +2437,30 @@ describe('[#32521] the boot priming pass primes every holder of a name', () => {
     });
 
     for (const order of ['first', 'between the two', 'last'] as const) {
-      it(`${type}, two holders and a package-less row saved ${order}: after the pass a bare read is refused naming both, a read naming a package answers its own item and list keeps the package-less one, as without it (BEFORE: the row saved last)`, async () => {
-        const writes = [(version: number) => seed(type, ALPHA, version), (version: number) => seed(type, BETA, version)];
-        writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless(type, version));
-        for (const [at, write] of writes.entries()) await write(at + 1);
-        const m = await bootPass();
-        for (const packageId of [undefined, ALPHA, BETA]) {
-          expect(await answer(m, type, 'helper', packageId)).toEqual(await answer(cold(), type, 'helper', packageId));
+      it(`${type}, two holders and a package-less row saved ${order}: after the pass a bare read is refused naming both, a read naming a package answers its own item (nothing for a package that holds none) and list keeps the package-less one, as without it, on a host declaring no package, one of the holders, or another (BEFORE: the row saved last)`, async () => {
+        for (const hostPackage of [undefined, ALPHA, BETA, HOST]) {
+          driver = createMockDriver();
+          const writes = [(version: number) => seed(type, ALPHA, version), (version: number) => seed(type, BETA, version)];
+          writes.splice(order === 'first' ? 0 : order === 'last' ? 2 : 1, 0, (version: number) => seedPackageless(type, version));
+          for (const [at, write] of writes.entries()) await write(at + 1);
+          const m = await bootPass(hostPackage);
+          for (const packageId of [undefined, ALPHA, BETA, HOST]) {
+            expect(await answer(m, type, 'helper', packageId)).toEqual(await answer(cold(), type, 'helper', packageId));
+          }
+          // [contract review F1] The host's package stamp is kept off the
+          // package-less row: stamped, it took ALPHA's slot on a host
+          // declaring ALPHA (a read naming ALPHA answered 'env' and list
+          // dropped ALPHA's item), and HOST's slot on a host declaring HOST
+          // (the bare refusal named three packages and a read naming HOST
+          // answered 'env').
+          expect([hostPackage, await answer(m, type, 'helper')]).toEqual([hostPackage, REFUSED]);
+          expect([hostPackage, await answer(m, type, 'helper', ALPHA)]).toEqual([hostPackage, ALPHA]);
+          expect([hostPackage, await answer(m, type, 'helper', BETA)]).toEqual([hostPackage, BETA]);
+          expect([hostPackage, await answer(m, type, 'helper', HOST)]).toEqual([hostPackage, undefined]);
+          expect([hostPackage, labels(await m.list(type))]).toEqual([hostPackage, labels(await cold().list(type))]);
+          expect([hostPackage, labels(await m.list(type))]).toEqual([hostPackage, [ALPHA, BETA, 'env']]);
+          expect([hostPackage, registryKeys(m, type)]).toEqual([hostPackage, [`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']]);
         }
-        expect(await answer(m, type, 'helper')).toEqual(REFUSED);
-        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
-        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
-        expect(labels(await m.list(type))).toEqual(labels(await cold().list(type)));
-        expect(labels(await m.list(type))).toEqual([ALPHA, BETA, 'env']);
-        expect(registryKeys(m, type)).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`, 'helper']);
       });
     }
   }

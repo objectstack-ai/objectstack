@@ -14,7 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, namesSeveralPackagesHold, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -1665,6 +1665,7 @@ export class MetadataPlugin implements Plugin {
                     // the earlier loader's item keeps the entry — the file over its
                     // own stale seed. One loader's own items never shadow each other.
                     const primedBy = new Map<string, string | undefined>();
+                    const contested = contestedNames(entry.type, items);
                     for (const item of primingOrder(entry.type, items)) {
                         const meta = item as any;
                         if (meta?.name) {
@@ -1674,8 +1675,13 @@ export class MetadataPlugin implements Plugin {
                             // uses, so both load paths produce identical
                             // _packageId/_provenance state. No-op when the
                             // option is unset or the item is already stamped.
+                            // [#32521] Not a package-less item of a name two
+                            // packages hold: it stays the environment's own
+                            // item (`contestedNames`).
                             applyProtection(meta, {
-                                packageId: this.options.packageId,
+                                packageId: storedItemPackageId(meta) === undefined && contested.has(meta.name)
+                                    ? undefined
+                                    : this.options.packageId,
                             });
                             const identity = bundleEntryKey(entry.type, meta.name, meta);
                             if (identity !== undefined) {
@@ -1710,6 +1716,28 @@ export class MetadataPlugin implements Plugin {
 }
 
 /**
+ * [#32521; epic #31527 red lines 2 and 3, contract review F1] The names two or
+ * more packages hold among a type's items, for an unbundled type stored per
+ * `(package, name)`. The boot priming pass does not stamp a package-less item
+ * of such a name with the host's declared package: ADR-0150 D4 makes a
+ * package-less item a holder's customization only under a name ONE package
+ * holds, so under a name two hold it is the environment's own item, and that
+ * is what a read without the pass answers. Stamped, the store would file it
+ * into the host's slot — over that holder's own item when the host is one of
+ * the holders (a read naming it would answer the package-less body and `list`
+ * would drop its item), or as a third holder when it is not. A name one
+ * package holds is not here, so its package-less item is stamped as before.
+ * Every other type: none.
+ */
+function contestedNames(type: string, items: unknown[]): ReadonlySet<string> {
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return new Set();
+    return namesSeveralPackagesHold(items.map((item) => ({
+        name: typeof (item as any)?.name === 'string' ? (item as any).name : null,
+        packageId: storedItemPackageId(item),
+    })));
+}
+
+/**
  * [#32521; epic #31527 red line 2] The order the boot priming pass registers a
  * type's items in. `MetadataManager.loadMany` hands on every holder of a name
  * two or more packages hold, of a type stored per `(package, name)`, and one
@@ -1721,8 +1749,10 @@ export class MetadataPlugin implements Plugin {
  * package-less item would be filed into the first one's slot as its
  * customization and answer a read naming that package; registered before
  * them, the first one's item would take its bare slot over and `list` would
- * drop it. So the registry holds what a read without the pass answers,
- * whatever order the loaders handed the items in. A name one package holds
+ * drop it. With the host's package stamp kept off such an item
+ * (`contestedNames`), the registry holds what a read without the pass
+ * answers, whatever order the loaders handed the items in and whatever
+ * package the host declares. A name one package holds
  * hands on one item, whose order does not move. Every other type: as handed.
  */
 function primingOrder(type: string, items: unknown[]): unknown[] {
