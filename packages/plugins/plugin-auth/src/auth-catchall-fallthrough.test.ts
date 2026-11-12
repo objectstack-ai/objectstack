@@ -74,7 +74,10 @@ async function mountCatchAll(owned: Record<string, () => Response>) {
     // the file keeps meaning exactly what its title says: the paths better-auth
     // does not own are the ones that get yielded.
     const ownsRoute = async (req: Request) => Object.hasOwn(owned, new URL(req.url).pathname);
-    (plugin as any).authManager = { handleRequest, ownsRoute };
+    // [#32637] The catch-all reaches better-auth through the manager's VENDOR
+    // entry and its vendor-only ownership walk (`handleRequest` answers through
+    // the private route table), so those are the two seams stood in for.
+    (plugin as any).authManager = { handleVendorRequest: handleRequest, ownsVendorRoute: ownsRoute };
 
     const httpServer: any = { getRawApp: () => app, getPort: () => 0 };
     (plugin as any).registerAuthRoutes(httpServer, ctx);
