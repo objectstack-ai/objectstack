@@ -5,7 +5,7 @@
 
 fix(metadata-protocol, cli)!: a package-less item of a name two packages hold is refused at both exact addresses for every narrowed type, and the layered read judges its exact address (ADR-0150 D4)
 
-Clause-②: no (narrowing) — reads that served now refuse: `?package=X` of an `action` whose environment item is package-less and whose name two packages hold, and `?layers=true&package=X` of a package-less stored row of a name two packages hold, go from 200 to 409 naming every holder.
+Clause-②: yes (narrowing) — `@objectstack/metadata-protocol` exports `judgesPackageLessRows` (a widened public surface), and reads that served now refuse: `?package=X` of an `action` whose environment item is package-less and whose name two packages hold, and `?layers=true&package=X` of a package-less stored row of a name two packages hold, go from 200 to 409 naming every holder.
 Metadata-protocol: none
 Skills-docs: none — `skills/**` and `content/docs/**` teach no exact or layered read of a package-less item of a name two packages hold; the prescription ships in the refusal text and the FROM → TO below.
 
