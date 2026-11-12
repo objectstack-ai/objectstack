@@ -875,6 +875,20 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             }
         });
 
+        it('[#32560] the disabled B\'s customization (a package-less body the service keeps in B\'s slot) and no slot of the enabled A in the service: both reads answer A\'s (BASE: B\'s customization)', async () => {
+            const manager = await withService();
+            install(B);
+            install(A);
+            ship(B, 'contact');
+            ship(A, 'account');
+            engine.registry.disablePackage(B);
+            manager.registerInMemory('action', 'approve', item(B, 'beta', 'contact'));
+            manager.registerInMemory('action', 'approve', item(undefined, 'beta-custom', 'contact'));
+            expect((await read()).item).toMatchObject({ label: 'alpha', objectName: 'account' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'alpha', objectName: 'account' });
+        });
+
         it('[#32560] CONTROL — the service\'s refusal naming a disabled package and the environment\'s item alone: the environment\'s item answers', async () => {
             const manager = await withService();
             install(B);

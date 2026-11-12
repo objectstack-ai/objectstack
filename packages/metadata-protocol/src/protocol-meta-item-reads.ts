@@ -316,6 +316,42 @@ export function serviceAnswerFitsBareAction(judged: { item: unknown }, data: unk
 }
 
 /**
+ * [ADR-0150 D3, #32560] Is the MetadataService's package-less answer to a bare
+ * action read a DISABLED package's customization? The store keeps a
+ * package-less body written under a name one package holds in that package's
+ * slot (D4), so a service holding no enabled holder's slot answers the
+ * disabled package's customization, which {@link serviceAnswerFitsBareAction}
+ * cannot tell from the environment's own item by its body. It is that
+ * package's when the service, asked at a disabled holder the registry names,
+ * answers the same item. A disabled package holds nothing to a by-name action
+ * read (#25308), so such an answer is not this read's.
+ */
+export async function servedFromDisabledHolder(
+    host: Pick<ProtocolHost, 'engine' | 'readItemFromMetadataService'>,
+    name: string,
+    data: unknown,
+): Promise<boolean> {
+    if (storedItemPackageId(data) !== undefined) return false;
+    const registry = actionHolderRegistry(host);
+    const disabled = (registry?.packageScopedHoldersOf('action', name) ?? []).filter((id) => isDisabledHolder(registry, id));
+    for (const packageId of disabled) {
+        const atHolder = (await host.readItemFromMetadataService('action', name, packageId)).data;
+        if (atHolder !== undefined && atHolder !== null && sameStoredItem(atHolder, data)) return true;
+    }
+    return false;
+}
+
+/** The same item: one object, or (a loader's fresh copy) the same JSON. */
+function sameStoredItem(left: unknown, right: unknown): boolean {
+    if (left === right) return true;
+    try {
+        return JSON.stringify(left) === JSON.stringify(right);
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Does the environment's store hold an active package-less row of the action
  * that binds its name to `object` (`undefined`: none)? Such a row is the
  * environment's own item; a package-less registry entry with none behind it
@@ -971,9 +1007,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 request.packageId,
             );
             // [#32365] …unless a bare action read's judged answer says it is
-            // another holder's ({@link serviceAnswerFitsBareAction}).
+            // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
+            // or it is a disabled package's customization
+            // ({@link servedFromDisabledHolder}).
             if (fromService.data !== undefined && fromService.data !== null
-                && !(bareActionAnswer && !serviceAnswerFitsBareAction(bareActionAnswer, fromService.data))) {
+                && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
+                    || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and

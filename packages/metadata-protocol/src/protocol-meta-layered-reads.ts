@@ -56,7 +56,13 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { judgeBareActionRead, judgeDroppedServiceRefusal, rethrowPackageScopedRefusal, serviceAnswerFitsBareAction } from './protocol-meta-item-reads.js';
+import {
+    judgeBareActionRead,
+    judgeDroppedServiceRefusal,
+    rethrowPackageScopedRefusal,
+    servedFromDisabledHolder,
+    serviceAnswerFitsBareAction,
+} from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -188,10 +194,12 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             request.packageId,
         );
         // [#32365] …unless a bare action read's judged answer says it is
-        // another holder's ({@link serviceAnswerFitsBareAction}), as in
-        // {@link getMetaItem}.
+        // another holder's ({@link serviceAnswerFitsBareAction}), [#32560]
+        // or a disabled package's customization ({@link servedFromDisabledHolder}),
+        // as in {@link getMetaItem}.
         if (fromService.data !== undefined && fromService.data !== null
-            && !(bareActionAnswer && !serviceAnswerFitsBareAction(bareActionAnswer, fromService.data))) {
+            && !(bareActionAnswer && (!serviceAnswerFitsBareAction(bareActionAnswer, fromService.data)
+                || await servedFromDisabledHolder(host, request.name, fromService.data)))) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it
