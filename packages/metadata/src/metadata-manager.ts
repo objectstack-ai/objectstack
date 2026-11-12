@@ -175,15 +175,20 @@ function isPackageMember(item: unknown, packageId: string): boolean {
 }
 
 /**
- * [#5276, #32246] Whether {@link MetadataManager.unregister}'s storage half
- * deletes from `loader`: a `datasource:` loader that declares write
- * capability, for every type; and for a type stored per `(package, name)`,
- * also a `memory:` loader that can delete (the artifact door's store). ⛔ Not
- * the `memory:` loaders for any other type: their residue is a separate card.
+ * [#5276, #32246, #32353] Whether {@link MetadataManager.unregister}'s storage
+ * half deletes from `loader`: a `datasource:` loader that declares write
+ * capability, and a `memory:` loader that can delete (the artifact door's
+ * store), for every type. A `memory:` loader's copy of a removed item would
+ * otherwise keep answering every read once the registry's entry is gone, and
+ * a customization removed over a door item would bring the door's body back:
+ * a removal removes the item, and the artifact's next load (a reload or a
+ * restart) is what restores a door item. For a type stored per
+ * `(package, name)` the loader deletes by that key, for every other type by
+ * name.
  */
-function isRemovalTarget(loader: MetadataLoader, type: string): boolean {
+function isRemovalTarget(loader: MetadataLoader): boolean {
   if (loader.contract.protocol === 'datasource:') return Boolean(loader.contract.capabilities.write);
-  return loader.contract.protocol === 'memory:' && PACKAGE_SLOTTED_STORE_TYPES.has(type) && typeof loader.delete === 'function';
+  return loader.contract.protocol === 'memory:' && typeof loader.delete === 'function';
 }
 
 /**
@@ -278,12 +283,14 @@ export function buildWritableLoaderMissingMethodsMessage(
  * same shape one direction over — and leaving it open meant one declaration was
  * binding at one end of an item's life and decorative at the other.
  *
- * Scope is deliberately exactly the combination `register()`/`unregister()` act
- * on. Other protocols (`file:`, `memory:`, `http:`, `s3:`) are never written to
- * by the manager at runtime — both loops filter on `datasource:` too — so they
- * have neither a write nor a deletion of their own to lose and are not gated. A
- * `datasource:` loader with `capabilities.write: false` is likewise untouched by
- * both paths.
+ * Scope is deliberately exactly the combination `register()` writes to. Other
+ * protocols (`file:`, `memory:`, `http:`, `s3:`) are never saved to by the
+ * manager at runtime — `register()`'s loop filters on `datasource:` — so they
+ * have no write of their own to lose and are not gated. `unregister()` also
+ * deletes from a `memory:` loader that implements `delete()`, for every type
+ * ({@link isRemovalTarget}, #32246, #32353); one without `delete()` is
+ * skipped, which loses nothing the manager wrote. A `datasource:` loader with
+ * `capabilities.write: false` is untouched by both paths.
  */
 function assertWritableLoaderContract(loader: MetadataLoader): void {
   const { name, protocol, capabilities } = loader.contract;
@@ -1894,13 +1901,12 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     const { keys, packageId } = removal ?? (await this.removalOf(type, name, options?.packageId));
     // ── 1. Storage first ────────────────────────────────────────────────
-    // Delete only from database-backed loaders that declare write capability.
-    // [ADR-0150 D4, #32246] For a type stored per `(package, name)`, also from
-    // the in-memory loaders (the artifact door's store): its copy of the
-    // removed item would otherwise keep answering every read once the
-    // registry's slots are gone.
+    // Delete from database-backed loaders that declare write capability, and
+    // [ADR-0150 D4, #32246, #32353] from the in-memory loaders (the artifact
+    // door's store), for every type: their copy of the removed item would
+    // otherwise keep answering every read once the registry's entry is gone.
     for (const loader of this.loaders.values()) {
-      if (!isRemovalTarget(loader, type)) continue;
+      if (!isRemovalTarget(loader)) continue;
       // [#5276] Defensive only — unreachable for a registered loader. This exact
       // combination (`datasource:` + `capabilities.write`, no `delete`) is
       // rejected by `registerLoader()`, the sole writer of `this.loaders`, so
