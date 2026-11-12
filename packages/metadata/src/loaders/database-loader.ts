@@ -1251,7 +1251,10 @@ export class DatabaseLoader implements MetadataLoader {
     const entries = await this.unscopedTypeRows(type);
     // [#31699 R3-B] A bundled type's entries carry the package each row holds,
     // so a merge above this loader keeps two packages' same member apart.
-    const withPackage = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    // [#32458] Every type stored per `(package, name)` does: a row bound to its
+    // package by the `package_id` column alone names none in its body, and the
+    // boot priming pass registers what it is handed.
+    const withPackage = PACKAGE_SLOTTED_STORE_TYPES.has(type);
     const keyed: MetadataKeyedItem<T>[] = [];
     for (const entry of entries) {
       if (entry.name === null) continue;
@@ -1716,7 +1719,7 @@ export class DatabaseLoader implements MetadataLoader {
         // Skip the write when the stored CONTENT is identical (prevents phantom
         // version bumps). [#21828] Content, not stamps: see `storedBodyUnchanged`.
         const previousChecksum = existing.checksum as string | undefined;
-        if (storedBodyUnchanged(existing, type, newChecksum) || (slot?.member !== undefined && onlyBoundStampAdded(existing, type, data, slot.packageId))) {
+        if (storedBodyUnchanged(existing, type, newChecksum) || (slot !== undefined && onlyBoundStampAdded(existing, type, data, slot.packageId))) {
           // No DB write, but make sure the cached payload reflects the latest
           // call (prior cached `null` would otherwise mask a freshly-saved
           // record). [#32246] An unchanged row written before this loader
@@ -1990,6 +1993,9 @@ function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: s
  * `_packageId` stamp naming the package `row` is already bound to: the stamp
  * `MetadataManager.loadMany` puts on a body its row binds by the `package_id`
  * column alone. Such a save writes nothing new, so it is no change.
+ * [#32458] For every type stored per `(package, name)`: a bundled type's
+ * member row, and an unbundled type's (`api`, `agent`, `skill`, `action`,
+ * `permission`) one row per slot.
  */
 function onlyBoundStampAdded(row: Record<string, unknown>, type: string, data: unknown, packageId: string | undefined): boolean {
   if (packageId === undefined || storedRowPackageId(row) !== packageId) return false;
