@@ -9692,6 +9692,8 @@ export class ObjectStackProtocolImplementation implements
         result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
         /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
         promotedDraft?: { body: unknown; hash: string };
+        /** [#32369] What a judge-only call judged: the draft body and the package it would go live in. */
+        judged?: { body: unknown; packageId: string | null };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
