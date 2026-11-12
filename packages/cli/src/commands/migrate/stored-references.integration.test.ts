@@ -473,7 +473,10 @@ async function columnsOf(dbFile: string, table: string): Promise<string[]> {
 /**
  * [#32095] The database as the release before D8 (18.3.0) left it: a copy of
  * the template with every D8 package column dropped, and each index naming one
- * (that release declared neither). Returns the file and the `TABLE.COLUMN`s
+ * (that release declared neither), in its key or in a partial index's `WHERE`:
+ * the template's write boot builds `sys_user_permission_set`'s package-less
+ * guard (#32164), whose `WHERE permission_set_package IS NULL` SQLite will not
+ * let the column go from under. Returns the file and the `TABLE.COLUMN`s
  * dropped.
  */
 async function unbootedDb(): Promise<{ db: string; dropped: string[] }> {
@@ -485,8 +488,9 @@ async function unbootedDb(): Promise<{ db: string; dropped: string[] }> {
     for (const { table, packageColumn } of STORED_PACKAGE_REFERENCES) {
       if (!packageColumn || !(await knex.schema.hasTable(table)) || !(await knex.schema.hasColumn(table, packageColumn))) continue;
       const indexes: Array<{ name: string }> = await knex.raw(
-        'SELECT DISTINCT il.name AS name FROM pragma_index_list(?) AS il, pragma_index_info(il.name) AS ii WHERE ii.name = ?',
-        [table, packageColumn],
+        'SELECT DISTINCT il.name AS name FROM pragma_index_list(?) AS il, pragma_index_info(il.name) AS ii WHERE ii.name = ? ' +
+          "UNION SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND instr(sql, ?) > 0",
+        [table, packageColumn, table, packageColumn],
       );
       for (const { name } of indexes) await knex.raw('DROP INDEX ??', [name]);
       await knex.raw('ALTER TABLE ?? DROP COLUMN ??', [table, packageColumn]);
