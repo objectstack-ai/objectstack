@@ -35,6 +35,9 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
 }));
 
 import { DraftChangesPanel } from '../DraftChangesPanel';
+// Warmed at module scope: the sheet's security lint loads it with a dynamic
+// import, and that first transform must not be paid inside a `waitFor` window.
+import '@objectstack/lint';
 
 type Body = Record<string, unknown>;
 
