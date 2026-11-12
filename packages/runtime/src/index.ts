@@ -340,6 +340,13 @@ export {
 export { loadArtifactBundle, mergeRuntimeModule, isHttpUrl, readArtifactSource } from './load-artifact-bundle.js';
 export type { LoadArtifactBundleOptions } from './load-artifact-bundle.js';
 
+// The reader of every collection of a composed suite (#32827): a
+// `composeStacks(stacks, { manifest: 'preserve' })` artifact keeps each
+// collection in its package's body, and this is the one merge across the
+// flattened top level and every `packages[]` body (ADR-0130 D4) — the same one
+// the boot paths read. Exported so an app reads its suite without copying it.
+export { resolveArtifactCollections } from './artifact-collections.js';
+
 // Artifact-pinned boot (#8368) — `OS_ARTIFACT_URL`, the SRI-style `#sha256=`
 // fragment pin, and the verified local materialisation the boot reads.
 export {
