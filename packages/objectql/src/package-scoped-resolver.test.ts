@@ -522,6 +522,55 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
       .toThrow(`already held by package "${APP}"`);
   });
 
+  // [contract review F2] A package of another namespace on X, shipping only
+  // the locale a row of the App's pair stores, while the App holds no item of
+  // the name. Each door is read, and the cold boot's seal over the same state.
+  const W = 'com.other.wolf';
+  const WOLF_DE = { ...body('email_template', 'welcome', 'wolf'), locale: 'de-DE' };
+  const arrive = (door: 'item door' | 'package door' | 'cold boot'): { refusal?: string; conflicts?: unknown[] } => {
+    if (door !== 'cold boot') registry.sealBareNameHolders();
+    try {
+      if (door === 'package door') {
+        registry.installPackage({ ...(manifest(W, [X]) as object), type: 'module', emailTemplates: [WOLF_DE] } as never, 'code');
+        // The engine then registers the declared item; the door's claim holds the name.
+        registry.registerItem('email_template', WOLF_DE, 'name' as never, W);
+      } else {
+        registry.installPackage({ ...(manifest(W, [X]) as object), type: 'module' } as never, 'code');
+        registry.registerItem('email_template', WOLF_DE, 'name' as never, W);
+      }
+    } catch (err) {
+      return { refusal: (err as Error).message };
+    }
+    return door === 'cold boot' ? { conflicts: registry.sealBareNameHolders() } : {};
+  };
+
+  for (const door of ['item door', 'package door', 'cold boot'] as const) {
+    it(`WIDENING (contract review F2), ${door} — a row of the App's pair declaring X makes its locale X's, so a package of another namespace on X shipping only that locale holds the name beside X (BASE: refused, or reported at the cold boot, as an addition to X)`, () => {
+      ship('email_template', 'welcome', X);
+      pairRow('email_template', 'welcome', 'pair', X, 'de-DE');
+      const answer = arrive(door);
+      expect(answer.refusal).toBeUndefined();
+      if (door === 'cold boot') expect(answer.conflicts).toEqual([]);
+      expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X, W]);
+      expect(templateOf(X, 'de-DE')).toBe('pair template');
+    });
+
+    it(`UNCHANGED at the door (contract review F2), ${door} — an undeclared row of the App's pair, X its one owner, of the very locale the arriving package on X ships: the arrival is counted as the seal counts it (it would co-own the row, which then binds to no package), so it is an addition to X, refused or reported as before, and X keeps the row`, () => {
+      ship('email_template', 'welcome', X);
+      pairRow('email_template', 'welcome', 'pair', undefined, 'de-DE');
+      const answer = arrive(door);
+      if (door === 'cold boot') {
+        expect(answer.conflicts).toEqual([expect.objectContaining({
+          type: 'email_template', name: 'welcome', incomingPackageId: W, existingHolder: { kind: 'package', packageId: X },
+        })]);
+      } else {
+        expect(answer.refusal).toContain(`already held by package "${X}"`);
+        expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([X]);
+        expect(templateOf(X, 'de-DE')).toBe('pair template');
+      }
+    });
+  }
+
   it('unbound with two packages of the App holding the name → neither, and the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
     ship('page', 'home', X);
     ship('page', 'home', Y);
