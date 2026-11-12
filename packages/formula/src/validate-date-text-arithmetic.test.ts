@@ -193,8 +193,10 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     return [...r.errors, ...r.warnings].map((e) => e.code);
   }
   /** What the evaluator answers over `row`: the value, or `fault`. */
+  /** A fixed evaluation clock, so a row reading `today()` does not read the wall clock. */
+  const NOW = new Date('2026-11-12T09:00:00.000Z');
   function evaluated(source: string, row: Record<string, unknown> = ROW_2026): unknown {
-    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row });
+    const r = celEngine.evaluate({ dialect: 'cel', source }, { record: row, now: NOW });
     // Only an overload fault (a call or an operator the bound text cannot
     // take) reads as 'fault'; any other fault (an unbound name, a typo) is
     // returned as itself and fails the row.
@@ -242,8 +244,10 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
     ['predicate', "record.start_day < record.title + 'x'", 'fail-closed', ['type-mismatch-fail-closed'], true],
     ['predicate', 'record.start_day < upper(record.title)', 'fail-closed', ['type-mismatch-fail-closed'], true],
     ['predicate', 'record.start_day < string(record.amount)', 'fail-closed', ['type-mismatch-fail-closed'], true],
-    ['predicate', 'record.start_day < isoDate(today())', 'fail-closed', ['type-mismatch-fail-closed'],
-      ROW_2026.start_day < new Date().toISOString().slice(0, 10)],
+    // '2026-11-16' against today() on the fixed clock, '2026-11-12': string-lex, false.
+    ['predicate', 'record.start_day < isoDate(today())', 'fail-closed', ['type-mismatch-fail-closed'], false],
+    // A macro-bound variable proves nothing on its own: the comparison keeps its verdict.
+    ['predicate', '[record.title].exists(x, record.start_day < x)', 'fail-closed', ['type-mismatch-fail-closed'], true],
   ];
 
   for (const [role, source, outcome, codes, reads] of ROWS) {
@@ -330,6 +334,10 @@ describe('a date field\'s text handed to a call, concatenated or ordered against
       error: { message: expect.stringContaining("no matching overload for 'isoDate(string)'") },
     });
     expect(validateExpression('predicate', '"Due: " + start_time != ""', flattened).warnings).toEqual([]);
+    // A macro-bound variable is `dyn` here: it still proves nothing, so the comparison keeps its verdict.
+    const withTitle: ExprSchemaHint = { fields: ['title', 'start_time'], fieldTypes: { title: 'text', start_time: 'datetime' } };
+    expect(validateExpression('predicate', '[title].exists(x, start_time < x)', withTitle).warnings.map((e) => e.code))
+      .toEqual(['type-mismatch-run-may-fail']);
   });
 
   it('without field types the check does not run, as before', () => {

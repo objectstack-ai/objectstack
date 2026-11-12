@@ -1003,10 +1003,13 @@ const DATE_TEXT_COMPARISON_OPS: ReadonlySet<string> = new Set([...ORDERING_OPS, 
  * named by none of them, so the comparison keeps the type-mismatch verdict
  * the Timestamp typing gave it. Each operand's type is read off `env` (the
  * date-text typing the caller confirmed against) by checking that operand on
- * its own; an operand that does not check on its own (it reads a
- * comprehension variable) proves nothing and keeps the verdict too. A `dyn`
- * counterpart is not judged here: the Timestamp typing never faulted on it.
- * Unparseable ⇒ `true`: keep what the check said.
+ * its own; an operand that reads a variable an enclosing macro binds
+ * (`all`, `exists`, `exists_one`, `map`, `filter`) proves nothing on its own
+ * — in a flattened condition it checks as `dyn`, in record scope not at all —
+ * so a comparison with one keeps the verdict too, in both scopes. A `dyn`
+ * counterpart that is not such a variable (a flow variable) is not judged
+ * here: the Timestamp typing never faulted on it. Unparseable ⇒ `true`: keep
+ * what the check said.
  */
 function comparesDateTextAgainstUndeclared(source: string, env: Environment): boolean {
   let ast: unknown;
@@ -1032,24 +1035,46 @@ function comparesDateTextAgainstUndeclared(source: string, env: Environment): bo
   const declared = (node: unknown, type: string | undefined): boolean =>
     type === DATE_TEXT_CEL_TYPE || type === 'google.protobuf.Timestamp' || type === 'dyn'
     || isTextLiteral(node) || isNullLiteral(node);
+  /** Whether `node` reads one of the macro-bound variable names in `bound`. */
+  const readsBound = (node: unknown, bound: ReadonlySet<string>): boolean => {
+    if (bound.size === 0) return false;
+    if (Array.isArray(node)) return node.some((child) => readsBound(child, bound));
+    if (!isCelNode(node)) return false;
+    if (node.op === 'id') return typeof node.args === 'string' && bound.has(node.args);
+    return readsBound(node.args, bound);
+  };
   let found = false;
-  const visit = (v: unknown): void => {
+  const visit = (v: unknown, bound: ReadonlySet<string>): void => {
     if (found) return;
-    if (Array.isArray(v)) { for (const child of v) visit(child); return; }
+    if (Array.isArray(v)) { for (const child of v) visit(child, bound); return; }
     if (!isCelNode(v)) return;
     if (DATE_TEXT_COMPARISON_OPS.has(v.op) && Array.isArray(v.args) && v.args.length === 2) {
       const [a, b] = v.args as unknown[];
+      if (readsBound(a, bound) || readsBound(b, bound)) { found = true; return; }
       const [ta, tb] = [typeOf(a), typeOf(b)];
       if ((ta === DATE_TEXT_CEL_TYPE && !declared(b, tb)) || (tb === DATE_TEXT_CEL_TYPE && !declared(a, ta))) {
         found = true;
         return;
       }
     }
-    visit(v.args);
+    // A macro (`list.exists(x, …)`): `rcall` [name, receiver, [variable, …body]].
+    const args = v.args;
+    if (v.op === 'rcall' && Array.isArray(args) && args.length === 3 && Array.isArray(args[2])
+      && MACRO_NAMES.has(String(args[0]))) {
+      const [variable, ...body] = args[2] as unknown[];
+      const name = isCelNode(variable) && variable.op === 'id' && typeof variable.args === 'string' ? variable.args : null;
+      visit(args[1], bound);
+      visit(body, name ? new Set([...bound, name]) : bound);
+      return;
+    }
+    visit(args, bound);
   };
-  visit(ast);
+  visit(ast, new Set());
   return found;
 }
+
+/** The CEL macros that bind a variable over a list's items (`list.exists(x, …)`). */
+const MACRO_NAMES: ReadonlySet<string> = new Set(['all', 'exists', 'exists_one', 'map', 'filter']);
 
 /**
  * A typed environment for the soundness check. Each field carries a concrete
