@@ -94,6 +94,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// save and delete doors reach it dynamically.
+import '@objectstack/lint';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';

@@ -213,6 +213,9 @@
  */
 
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// save and delete doors reach it dynamically.
+import '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { META_OVERLAY_CACHE_DEFAULT_TTL_MS } from './meta-overlay-cache.js';
 import {
