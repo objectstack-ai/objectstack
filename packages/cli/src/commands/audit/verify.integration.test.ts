@@ -18,12 +18,18 @@
  *      the run exits 1;
  *   3. a usage error, a declared archive this boot cannot reach, and a run
  *      with no data key to open the stored checkpoints, exit 2 with no verdict;
- *   4. a project that seals nothing exits 0 and says so.
+ *   4. a project that seals nothing exits 0 and says so;
+ *   5. `--out` writes the proof bundle, with no stored value and no wrapped
+ *      secret in it, and `--bundle` re-judges it with no boot, from an empty
+ *      directory with no data key: the right `--trusted-key` exits 0, a wrong
+ *      one 1, the tampered ledger's bundle reads tampered (1), and the flag
+ *      rules (`--bundle` needs `--trusted-key`, takes no `--out`;
+ *      `--trusted-key` needs `--bundle`) exit 2.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -160,12 +166,13 @@ function seal(project: string, db: string, archive: string): { checkpoints: numb
 
 /** One `os audit verify <extra…> --database-url file:<db>` run, in `project`. */
 function verify(project: string, db: string, extra: string[], env: Record<string, string | undefined> = {}): Promise<Run> {
+  return run(project, [...extra, '--database-url', `file:${db}`], { OS_ARTIFACT_PATH: join(project, 'dist', 'objectstack.json'), ...env });
+}
+
+/** One `os audit verify <args…>` run in `cwd`. */
+function run(cwd: string, args: string[], env: Record<string, string | undefined>): Promise<Run> {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(
-      process.execPath,
-      [CLI, 'audit', 'verify', ...extra, '--database-url', `file:${db}`],
-      { cwd: project, env: childEnv({ OS_ARTIFACT_PATH: join(project, 'dist', 'objectstack.json'), ...env }), stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const child = spawn(process.execPath, [CLI, 'audit', 'verify', ...args], { cwd, env: childEnv(env), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (c) => { stdout += String(c); });
@@ -184,7 +191,13 @@ let mainDb: string;
 let archiveDb: string;
 let sealed: { checkpoints: number; archived: number | null };
 let archivedIds: string[];
-const runs: Record<'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'noKey' | 'unreachable' | 'nothing', Run> = {} as never;
+type RunName = 'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'noKey' | 'unreachable' | 'nothing';
+type BundleRunName = 'right' | 'rightHuman' | 'wrong' | 'tampered' | 'noTrustedKey' | 'keyWithoutBundle' | 'withOut';
+const runs: Record<RunName, Run> = {} as never;
+const bundleRuns: Record<BundleRunName, Run> = {} as never;
+let cleanBundle: string;
+let tamperedBundle: string;
+let secretCiphertexts: string[];
 const dirs: string[] = [];
 
 beforeAll(async () => {
@@ -203,7 +216,9 @@ beforeAll(async () => {
     cold.close();
   }
 
-  runs.clean = await verify(dir, mainDb, ['--json']);
+  cleanBundle = join(dir, 'clean.proof.json');
+  tamperedBundle = join(dir, 'tampered.proof.json');
+  runs.clean = await verify(dir, mainDb, ['--json', '--out', cleanBundle]);
   runs.cleanHuman = await verify(dir, mainDb, []);
   runs.badDate = await verify(dir, mainDb, ['--from', 'yesterday', '--json']);
   runs.reversed = await verify(dir, mainDb, ['--from', '2026-11-02', '--to', '2026-11-01', '--json']);
@@ -221,7 +236,26 @@ beforeAll(async () => {
   } finally {
     hot.close();
   }
-  runs.tampered = await verify(dir, mainDb, ['--json']);
+  runs.tampered = await verify(dir, mainDb, ['--json', '--out', tamperedBundle]);
+  const stored = new Database(mainDb, { readonly: true });
+  try {
+    secretCiphertexts = (stored.prepare('SELECT ciphertext FROM sys_secret').all() as Array<{ ciphertext: string }>).map((r) => r.ciphertext);
+  } finally {
+    stored.close();
+  }
+
+  // Offline: an empty directory (no project, no database) and no data key.
+  const auditor = mkdtempSync(join(tmpdir(), 'os-31908-auditor-'));
+  dirs.push(auditor);
+  const offline = (args: string[]) => run(auditor, args, { OS_SECRET_KEY: undefined, HOME: auditor });
+  const fingerprint = String(doc(runs.clean).report?.keys?.trusted?.[0]);
+  bundleRuns.right = await offline(['--bundle', cleanBundle, '--trusted-key', fingerprint, '--json']);
+  bundleRuns.rightHuman = await offline(['--bundle', cleanBundle, '--trusted-key', fingerprint]);
+  bundleRuns.wrong = await offline(['--bundle', cleanBundle, '--trusted-key', 'f'.repeat(64), '--json']);
+  bundleRuns.tampered = await offline(['--bundle', tamperedBundle, '--trusted-key', fingerprint, '--json']);
+  bundleRuns.noTrustedKey = await offline(['--bundle', cleanBundle, '--json']);
+  bundleRuns.keyWithoutBundle = await verify(dir, mainDb, ['--trusted-key', fingerprint, '--json']);
+  bundleRuns.withOut = await offline(['--bundle', cleanBundle, '--out', join(auditor, 'again.json'), '--trusted-key', fingerprint, '--json']);
 
   // A declared archive this boot cannot reach: a Postgres server on a port
   // nothing listens on (an unopenable SQLite file steps down to in-memory
@@ -307,5 +341,50 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     const run = runs.nothing;
     expect(run.code, run.stderr.slice(-2000)).toBe(0);
     expect(doc(run).report).toMatchObject({ ok: true, sealed: false, objects: [] });
+  });
+});
+
+describe('os audit verify --out / --bundle: the proof bundle, judged offline (ADR-0154 D9)', () => {
+  it('5. --out writes the bundle beside the verdict: the trusted key, the checkpoints, and no stored value or wrapped secret', () => {
+    expect(doc(runs.clean).out).toBe(cleanBundle);
+    const text = readFileSync(cleanBundle, 'utf8');
+    const bundle = JSON.parse(text);
+    expect(bundle.format).toBe('objectstack.audit.proof-bundle.v1');
+    expect(bundle.keys.map((k: { fingerprint: string }) => k.fingerprint)).toEqual(doc(runs.clean).report.keys.trusted);
+    expect(bundle.objects[0].checkpoints).toHaveLength(3);
+    expect(secretCiphertexts.length).toBeGreaterThanOrEqual(4); // three seeds and the signing key's private half
+    for (const needle of ['{\\"from\\":1}', '"gone"', '"kept"', '"x"', '"archived"', ...secretCiphertexts]) {
+      expect(text.includes(needle), `the bundle carries ${needle}`).toBe(false);
+    }
+  });
+
+  it('6. offline, with no boot and no data key, the right fingerprint verifies the bundle (exit 0); a wrong one does not (exit 1)', () => {
+    const right = bundleRuns.right;
+    expect(right.code, right.stderr.slice(-2000)).toBe(0);
+    expect(doc(right).report).toMatchObject({ ok: true, faults: [], rows: [] });
+    expect(doc(right).report.totals).toEqual(doc(runs.clean).report.totals);
+    expect(bundleRuns.rightHuman.code, bundleRuns.rightHuman.stderr.slice(-2000)).toBe(0);
+    expect(bundleRuns.rightHuman.stdout).toContain('The sealed ledger verifies');
+    const wrong = bundleRuns.wrong;
+    expect(wrong.code, wrong.stderr.slice(-2000)).toBe(1);
+    expect(doc(wrong).report.keys).toEqual({ trusted: [], untrusted: doc(runs.clean).report.keys.trusted });
+  });
+
+  it('6b. the tampered ledger\'s bundle reads offline as it did live: modified and missing, exit 1', () => {
+    const run = bundleRuns.tampered;
+    expect(run.code, run.stderr.slice(-2000)).toBe(1);
+    expect(verdicts(run)).toEqual({ v1: 'modified', v2: 'missing' });
+  });
+
+  it('7. --bundle without --trusted-key, --trusted-key without --bundle, and --bundle with --out exit 2', () => {
+    for (const [run, message] of [
+      [bundleRuns.noTrustedKey, /--bundle requires at least one --trusted-key FINGERPRINT/],
+      [bundleRuns.keyWithoutBundle, /--trusted-key applies to --bundle only/],
+      [bundleRuns.withOut, /it cannot also write one \(--out\)/],
+    ] as const) {
+      expect(run.code, run.stderr.slice(-2000)).toBe(2);
+      expect(doc(run)).toMatchObject({ error: 'usage' });
+      expect(doc(run).message).toMatch(message);
+    }
   });
 });

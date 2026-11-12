@@ -4,7 +4,7 @@ import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import { parseLifecycleDuration } from '@objectstack/objectql';
 import type { IAuditCheckpointSigner, ICryptoProvider } from '@objectstack/spec/contracts';
 import { isMissingTableError } from '@objectstack/types';
-import { canonicalDatetime, canonicalValue, commitValue, leafHash, leafInput, rowIdOf, type ColumnSaltOf, type SealedFieldTypes } from './canonical.js';
+import { canonicalDatetime, leafHash, leafInput, rowIdOf, type SealedFieldTypes } from './canonical.js';
 import { AUDIT_AMENDMENT_OBJECT, AUDIT_CHECKPOINT_OBJECT, AUDIT_SIGNING_KEY_OBJECT, checkpointSeedContext, columnSaltsOf, decodeCheckpointSeed } from './seed.js';
 import { AUDIT_SEAL_WINDOW_MS } from './sealer.js';
 import {
@@ -56,6 +56,11 @@ const SECRET_OBJECT = 'sys_secret';
  * The report passes ({@link AuditVerifyReport.ok}) when no chain fault was
  * found and no row is `modified`, `missing` or `late` unsealed. Nothing here
  * writes; every read is a driver read, below the hooks.
+ *
+ * The verdict machine — signatures under the trusted keys, the links, the D7
+ * and D8 acceptance rules, each listed row against its leaf hash — is shared
+ * with the offline check of a proof bundle (`bundle.ts`, `--bundle`): only
+ * where the records, the leaf inputs and the trusted keys come from differs.
  */
 
 /** The six verdicts of D9, closed. */
@@ -149,6 +154,54 @@ export interface AuditVerifyReport {
   readonly dangling: readonly AuditDanglingRedaction[];
 }
 
+/** The format of the proof bundle `os audit verify --out` writes (D9). */
+export const AUDIT_PROOF_BUNDLE_FORMAT = 'objectstack.audit.proof-bundle.v1';
+
+/**
+ * One row a checkpoint lists, as the live check read it: its leaf input (the
+ * clear columns' canonical values, the value columns' salted commitments —
+ * never a value, a salt or a seed), `null` when neither store holds the row,
+ * `'unreadable'` when one of its values has no canonical spelling.
+ */
+export type AuditProofBundleLeaf = Readonly<Record<string, unknown>> | null | 'unreadable';
+
+/**
+ * A stored checkpoint (its signed body, `id`, `chain_key`, `signature`,
+ * `leaf_hashes`), with `leaves` — one per `row_ids` entry, in that order —
+ * when the live check judged its rows: in scope, in range, held, its seed open.
+ */
+export interface AuditProofBundleCheckpoint {
+  readonly [column: string]: unknown;
+  readonly leaves?: readonly AuditProofBundleLeaf[];
+}
+
+export interface AuditProofBundleObject {
+  readonly object: string;
+  /** Every in-scope checkpoint the object stores, whatever the window range: the links are checked whole. */
+  readonly checkpoints: readonly AuditProofBundleCheckpoint[];
+  /** Every in-scope amendment (signed body, `id`, `chain_key`, `signature`). */
+  readonly amendments: ReadonlyArray<Readonly<Record<string, unknown>>>;
+  /** Rows of a sealed window the live check found that no trusted checkpoint holds: `late` and unsealed. */
+  readonly unsealed: ReadonlyArray<{ readonly chain: string; readonly row: string }>;
+}
+
+/**
+ * The proof bundle of D9 (`--out`): what an auditor needs to re-judge a live
+ * run offline — public keys, checkpoints, amendments and per-row leaf inputs.
+ * It carries no value, salt or seed, and its keys are candidates only: the
+ * offline check trusts a key only through a fingerprint it is given.
+ */
+export interface AuditProofBundle {
+  readonly format: typeof AUDIT_PROOF_BUNDLE_FORMAT;
+  /** When the live run that wrote it checked. */
+  readonly checked_at: string;
+  /** The live run's scope; the offline check judges the same. */
+  readonly scope: AuditVerifyReport['scope'];
+  /** The public halves (raw 32 bytes, base64) of the keys the live run's anchor vouched for. */
+  readonly keys: ReadonlyArray<{ readonly fingerprint: string; readonly public_key: string }>;
+  readonly objects: readonly AuditProofBundleObject[];
+}
+
 /** The engine surface the verifier reads: the registry, a driver per object, the archive datasource. */
 export interface AuditVerifierEngine extends SealStorageReader {
   registry: { getAllObjects(): ReadonlyArray<{ name: string; fields?: unknown; lifecycle?: unknown }> };
@@ -175,10 +228,20 @@ export interface AuditVerifyOptions {
    * archived row would read `missing`.
    */
   archive?: (datasource: string, object: string) => SealStorageDriver | 'none' | undefined;
+  /** Receives the run's proof bundle (D9 `--out`) once the check finished. Absent, none is built. */
+  onProofBundle?: (bundle: AuditProofBundle) => void;
   now?: () => number;
 }
 
 type Row = Record<string, unknown>;
+
+/** One object's part of a proof bundle, while the live check copies it. */
+interface BundleDraft {
+  readonly object: string;
+  readonly checkpoints: Row[];
+  readonly amendments: Row[];
+  readonly unsealed: Array<{ chain: string; row: string }>;
+}
 
 const PAGE_SIZE = 500;
 const iso = (ms: number): string => new Date(ms).toISOString();
@@ -187,8 +250,8 @@ const tenantOf = (row: Row): string | null => (typeof row.tenant_id === 'string'
 const zero = (): AuditVerdictCounts => ({ unmodified: 0, modified: 0, missing: 0, late: 0, redacted: 0, expired: 0, unsealed: 0 });
 const messageOf = (err: unknown): string => String((err as Error)?.message ?? err);
 
-/** A checkpoint as the link pass keeps it: its signed coordinates, not its row lists. */
-interface CheckpointHead {
+/** @internal A checkpoint as the link pass keeps it: its signed coordinates, not its row lists. */
+export interface CheckpointHead {
   readonly id: string;
   readonly chain: string;
   readonly sequence: number;
@@ -208,37 +271,36 @@ export async function verifyAuditLedger(options: AuditVerifyOptions): Promise<Au
   return new LedgerCheck(options).run();
 }
 
-class LedgerCheck {
-  private readonly now: number;
+/**
+ * @internal What a check gathers — chain faults, row verdicts, counts per
+ * chain — and the trust it checks signatures under. The live check vouches
+ * for a key through the deployment's anchor; the offline check through the
+ * fingerprints it is given.
+ */
+export abstract class VerdictLedger {
+  protected readonly now: number;
   private readonly orgs: ReadonlySet<string> | null;
   private readonly rangeLo: number;
   private readonly rangeHi: number;
-  private readonly keys = new Map<string, KeyObject | null>();
+  /** Each key a record named: its public half when trusted, `null` when not. */
+  protected readonly keys = new Map<string, { key: KeyObject; publicKey: string } | null>();
   private readonly faults: AuditChainFault[] = [];
   private readonly findings: AuditRowFinding[] = [];
   private readonly dangling: AuditDanglingRedaction[] = [];
   private readonly chains = new Map<string, { object: string; chain: string; checkpoints: number; counts: AuditVerdictCounts }>();
 
-  constructor(private readonly options: AuditVerifyOptions) {
-    this.now = (options.now ?? Date.now)();
-    this.orgs = options.orgs ? new Set(options.orgs) : null;
+  constructor(private readonly scope: { readonly orgs?: readonly string[]; readonly from?: Date; readonly to?: Date }, now: number) {
+    this.now = now;
+    this.orgs = scope.orgs ? new Set(scope.orgs) : null;
     // The windows `[from, to)` overlaps, as whole windows.
-    this.rangeLo = options.from ? windowOf(options.from.getTime()) : Number.NEGATIVE_INFINITY;
-    this.rangeHi = options.to ? windowOf(options.to.getTime() - 1) + AUDIT_SEAL_WINDOW_MS : Number.POSITIVE_INFINITY;
+    this.rangeLo = scope.from ? windowOf(scope.from.getTime()) : Number.NEGATIVE_INFINITY;
+    this.rangeHi = scope.to ? windowOf(scope.to.getTime() - 1) + AUDIT_SEAL_WINDOW_MS : Number.POSITIVE_INFINITY;
   }
 
-  async run(): Promise<AuditVerifyReport> {
-    const objects = this.options.engine.registry.getAllObjects();
-    const amendmentsRegistered = objects.some((o) => o.name === AUDIT_AMENDMENT_OBJECT);
-    const sealed: string[] = [];
-    for (const object of objects) {
-      const declares = Boolean((object.lifecycle as { seal?: unknown } | undefined)?.seal);
-      if (declares || (await this.hasCheckpoints(object.name))) sealed.push(object.name);
-    }
-    for (const name of sealed) {
-      const object = objects.find((o) => o.name === name)!;
-      await new ObjectCheck(this, object, amendmentsRegistered).run();
-    }
+  /** The public half (raw 32 bytes, base64) of signing key `keyId` when this check trusts it, else `null`. */
+  protected abstract publicKeyOf(keyId: string): Promise<string | null>;
+
+  protected report(objects: readonly string[]): AuditVerifyReport {
     const chains = [...this.chains.values()].sort((a, b) => (a.object === b.object ? cmp(a.chain, b.chain) : cmp(a.object, b.object)));
     const totals = zero();
     for (const chain of chains) for (const k of Object.keys(totals) as Array<keyof AuditVerdictCounts>) totals[k] += chain.counts[k];
@@ -246,14 +308,14 @@ class LedgerCheck {
     const untrusted = [...this.keys].filter(([, key]) => key === null).map(([id]) => id).sort();
     return {
       ok: this.faults.length === 0 && totals.modified === 0 && totals.missing === 0 && totals.unsealed === 0,
-      sealed: sealed.length > 0,
+      sealed: objects.length > 0,
       checked_at: iso(this.now),
       scope: {
-        orgs: this.options.orgs ? [...this.options.orgs] : null,
-        from: this.options.from ? this.options.from.toISOString() : null,
-        to: this.options.to ? this.options.to.toISOString() : null,
+        orgs: this.scope.orgs ? [...this.scope.orgs] : null,
+        from: this.scope.from ? this.scope.from.toISOString() : null,
+        to: this.scope.to ? this.scope.to.toISOString() : null,
       },
-      objects: sealed,
+      objects: [...objects],
       keys: { trusted, untrusted },
       totals,
       chains,
@@ -263,36 +325,8 @@ class LedgerCheck {
     };
   }
 
-  // ── shared by every object ────────────────────────────────────────────────
-
-  get engine(): AuditVerifierEngine {
-    return this.options.engine;
-  }
-
-  get crypto(): ICryptoProvider {
-    return this.options.crypto;
-  }
-
   get checkTime(): number {
     return this.now;
-  }
-
-  /** The archive store of `object`, `null` when there is none to read; throws when one exists out of reach. */
-  archiveOf(datasource: string, object: string): SealStorageDriver | null {
-    let resolved: SealStorageDriver | 'none' | undefined;
-    try {
-      resolved = this.options.archive ? this.options.archive(datasource, object) : this.options.engine.datasource?.(datasource);
-    } catch {
-      resolved = undefined;
-    }
-    if (resolved === 'none') return null;
-    if (!resolved) {
-      throw new Error(
-        `'${object}' archives to datasource '${datasource}', which this boot did not connect: its archived rows cannot be read, ` +
-          'so no verdict is given (each would read missing). Connect that datasource and run the check again.',
-      );
-    }
-    return resolved;
   }
 
   inScope(chain: string): boolean {
@@ -338,23 +372,101 @@ class LedgerCheck {
     this.dangling.push(entry);
   }
 
-  /** Whether `signature` over `bytes` verifies under signing key `keyId`, as the trust anchor vouches for it. */
+  /** Whether `signature` over `bytes` verifies under signing key `keyId`, as this check trusts it. */
   async signature(keyId: string, bytes: Uint8Array, signature: unknown): Promise<SignatureVerdict> {
-    const key = await this.trustedKey(keyId);
-    if (!key) return 'untrusted_key';
+    const trusted = await this.trustedKey(keyId);
+    if (!trusted) return 'untrusted_key';
     if (typeof signature !== 'string' || signature === '') return 'signature';
     try {
-      return verify(null, bytes, key, Buffer.from(signature, 'base64')) ? 'ok' : 'signature';
+      return verify(null, bytes, trusted.key, Buffer.from(signature, 'base64')) ? 'ok' : 'signature';
     } catch {
       return 'signature';
     }
   }
 
-  private async trustedKey(keyId: string): Promise<KeyObject | null> {
+  private async trustedKey(keyId: string): Promise<{ key: KeyObject; publicKey: string } | null> {
     if (this.keys.has(keyId)) return this.keys.get(keyId)!;
-    let publicKey: string | null;
+    const publicKey = await this.publicKeyOf(keyId);
+    let trusted: { key: KeyObject; publicKey: string } | null = null;
+    if (publicKey !== null) {
+      try {
+        const x = Buffer.from(publicKey, 'base64').toString('base64url');
+        trusted = { key: createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x }, format: 'jwk' }), publicKey };
+      } catch {
+        trusted = null;
+      }
+    }
+    this.keys.set(keyId, trusted);
+    return trusted;
+  }
+}
+
+/** The live check: the ledger read from the hot store and the archive, keys vouched for by the anchor. */
+class LedgerCheck extends VerdictLedger {
+  constructor(private readonly options: AuditVerifyOptions) {
+    super(options, (options.now ?? Date.now)());
+  }
+
+  async run(): Promise<AuditVerifyReport> {
+    const objects = this.options.engine.registry.getAllObjects();
+    const amendmentsRegistered = objects.some((o) => o.name === AUDIT_AMENDMENT_OBJECT);
+    const sealed: string[] = [];
+    for (const object of objects) {
+      const declares = Boolean((object.lifecycle as { seal?: unknown } | undefined)?.seal);
+      if (declares || (await this.hasCheckpoints(object.name))) sealed.push(object.name);
+    }
+    const bundled: AuditProofBundleObject[] = [];
+    for (const name of sealed) {
+      const object = objects.find((o) => o.name === name)!;
+      const bundle: BundleDraft | null = this.options.onProofBundle ? { object: name, checkpoints: [], amendments: [], unsealed: [] } : null;
+      await new ObjectCheck(this, object, amendmentsRegistered, bundle).run();
+      if (bundle) bundled.push(bundle as AuditProofBundleObject);
+    }
+    const report = this.report(sealed);
+    this.options.onProofBundle?.({
+      format: AUDIT_PROOF_BUNDLE_FORMAT,
+      checked_at: report.checked_at,
+      scope: report.scope,
+      keys: [...this.keys]
+        .filter((entry): entry is [string, { key: KeyObject; publicKey: string }] => entry[1] !== null)
+        .map(([fingerprint, { publicKey }]) => ({ fingerprint, public_key: publicKey }))
+        .sort((a, b) => cmp(a.fingerprint, b.fingerprint)),
+      objects: bundled,
+    });
+    return report;
+  }
+
+  // ── what only the live check reads ────────────────────────────────────────
+
+  get engine(): AuditVerifierEngine {
+    return this.options.engine;
+  }
+
+  get crypto(): ICryptoProvider {
+    return this.options.crypto;
+  }
+
+  /** The archive store of `object`, `null` when there is none to read; throws when one exists out of reach. */
+  archiveOf(datasource: string, object: string): SealStorageDriver | null {
+    let resolved: SealStorageDriver | 'none' | undefined;
     try {
-      publicKey = this.options.trust
+      resolved = this.options.archive ? this.options.archive(datasource, object) : this.options.engine.datasource?.(datasource);
+    } catch {
+      resolved = undefined;
+    }
+    if (resolved === 'none') return null;
+    if (!resolved) {
+      throw new Error(
+        `'${object}' archives to datasource '${datasource}', which this boot did not connect: its archived rows cannot be read, ` +
+          'so no verdict is given (each would read missing). Connect that datasource and run the check again.',
+      );
+    }
+    return resolved;
+  }
+
+  protected async publicKeyOf(keyId: string): Promise<string | null> {
+    try {
+      return this.options.trust
         ? await this.options.trust.trustedPublicKey(keyId)
         : await trustedSigningKey(this.options.engine, this.options.crypto, keyId);
     } catch (err) {
@@ -363,18 +475,8 @@ class LedgerCheck {
       // no key; any other read fault stops the run rather than reading as
       // tampering.
       if (!isMissingTableError(err, AUDIT_SIGNING_KEY_OBJECT) && !isMissingTableError(err, SECRET_OBJECT)) throw err;
-      publicKey = null;
+      return null;
     }
-    let key: KeyObject | null = null;
-    if (publicKey !== null) {
-      try {
-        key = createPublicKey({ key: { kty: 'OKP', crv: 'Ed25519', x: Buffer.from(publicKey, 'base64').toString('base64url') }, format: 'jwk' });
-      } catch {
-        key = null;
-      }
-    }
-    this.keys.set(keyId, key);
-    return key;
   }
 
   private async hasCheckpoints(object: string): Promise<boolean> {
@@ -392,6 +494,10 @@ class LedgerCheck {
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const kindOrder = (kind: CheckpointSignedBody['kind']): number => (kind === 'window' ? 0 : 1);
 
+/** @internal The order checkpoints are judged in: by window, window checkpoints before late ones, each chain in sequence order. */
+export const judgingOrder = (a: CheckpointHead, b: CheckpointHead): number =>
+  windowOf(a.windowStart) - windowOf(b.windowStart) || kindOrder(a.kind) - kindOrder(b.kind) || cmp(a.chain, b.chain) || a.sequence - b.sequence;
+
 /** Every row of `object` a driver holds that `where` matches, in id order, page by page. */
 async function readAll(driver: SealStorageDriver, object: string, where: Row): Promise<Row[]> {
   const rows: Row[] = [];
@@ -407,132 +513,89 @@ async function readAll(driver: SealStorageDriver, object: string, where: Row): P
   }
 }
 
-/** One sealed object's chains and rows. */
-class ObjectCheck {
-  private readonly name: string;
-  private readonly types: SealedFieldTypes;
-  private readonly hot: SealStorageDriver;
-  private readonly archive: SealStorageDriver | undefined;
-  private readonly heads = new Map<string, CheckpointHead>();
+/**
+ * @internal One sealed object's chains, judged from its stored records: the
+ * signatures, the links with the D8 acceptance rule, and each listed row
+ * against its leaf hash with the D7 rule. Where the records and the leaf
+ * inputs come from is the subclass's.
+ */
+export abstract class ChainCheck<C extends VerdictLedger = VerdictLedger> {
+  protected readonly heads = new Map<string, CheckpointHead>();
   /** Honoured expiries by chain, in sequence order (D8). */
   private readonly honoured = new Map<string, ExpiryAmendmentBody[]>();
   /** Trusted redactions by chain, checkpoint sequence and row (D7). */
   private readonly redactions = new Map<string, Array<RedactionAmendmentBody & { id: string }>>();
-  /** The object's highest trusted `sealed_through`, and the windows a trusted `window` checkpoint names. */
-  private watermark = Number.NEGATIVE_INFINITY;
-  private readonly sealedWindows = new Set<number>();
-  /** Rows a checkpoint holds, and rows only a checkpoint holding nothing lists. */
-  private readonly held = new Set<string>();
-  private readonly listedByFaulted = new Set<string>();
-  private readonly unheld = new Map<string, { chain: string; windowStart: number }>();
+  /** Rows a checkpoint holds. */
+  protected readonly held = new Set<string>();
 
-  constructor(
-    private readonly check: LedgerCheck,
-    object: { name: string; fields?: unknown; lifecycle?: unknown },
-    private readonly amendmentsRegistered: boolean,
-  ) {
-    this.name = object.name;
-    this.types = (object.fields ?? {}) as SealedFieldTypes;
-    const { engine } = check;
-    const hot = engine.getDriverForObject(object.name);
-    if (!hot) throw new Error(`no driver resolves for '${object.name}'`);
-    this.hot = hot;
-    const to = (object.lifecycle as { archive?: { to?: unknown } } | undefined)?.archive?.to;
-    const archive = typeof to === 'string' && to !== '' ? check.archiveOf(to, object.name) : null;
-    this.archive = archive && archive !== hot ? archive : undefined;
-  }
+  constructor(protected readonly check: C, protected readonly name: string) {}
 
   private key(chain: string, sequence: number): string {
     return `${chain}\u0000${sequence}`;
   }
 
-  async run(): Promise<void> {
-    await this.readCheckpoints();
-    await this.readAmendments();
-    this.checkLinks();
-    await this.judgeRows();
-  }
+  /** The rows `body` lists, now that it holds nothing: the subclass reads the present ones as `late` and unsealed. */
+  protected abstract holdsNothing(head: CheckpointHead, body: CheckpointSignedBody): void;
 
   // ── chains: signatures and links ──────────────────────────────────────────
 
-  private checkpointDriver(): SealStorageDriver | undefined {
-    return this.check.engine.getDriverForObject(AUDIT_CHECKPOINT_OBJECT);
+  /**
+   * Admit one stored checkpoint: its faults, and its head and body when it is
+   * a signed body. `signed` is whether its signature verified, before a twin
+   * at its sequence took its hold away. `taken` spans one object's rows.
+   */
+  protected async admitCheckpoint(
+    row: Row,
+    taken: Map<string, CheckpointHead>,
+  ): Promise<{ head: CheckpointHead; body: CheckpointSignedBody; signed: boolean } | null> {
+    let body: CheckpointSignedBody;
+    try {
+      body = checkpointBodyFromRow(row);
+    } catch (err) {
+      this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), kind: 'malformed', message: `checkpoint ${String(row.id)}: ${messageOf(err)}` });
+      return null;
+    }
+    const chain = chainKeyOf(body.tenant_id);
+    if (this.check.inScope(chain)) this.check.chain(this.name, chain).checkpoints += 1;
+    if (row.chain_key !== chain) {
+      this.check.fault({
+        object: this.name, chain, kind: 'chain_key', sequence: body.sequence,
+        message: `checkpoint ${body.sequence}: stored under chain '${String(row.chain_key)}', but its signed organization is chain '${chain}'`,
+      });
+    }
+    const signed = await this.check.signature(body.signing_key_id, signedBodyBytes(body), row.signature);
+    if (signed !== 'ok') {
+      this.check.fault({
+        object: this.name, chain, kind: signed, sequence: body.sequence,
+        message: signed === 'untrusted_key'
+          ? `checkpoint ${body.sequence}: signed under key ${body.signing_key_id}, which no trusted key matches — it holds nothing`
+          : `checkpoint ${body.sequence}: its signature does not verify under key ${body.signing_key_id} — it holds nothing`,
+      });
+    }
+    const head: CheckpointHead = {
+      id: String(row.id),
+      chain,
+      sequence: body.sequence,
+      kind: body.kind,
+      windowStart: Date.parse(body.window_start),
+      digest: checkpointDigest(body),
+      previousDigest: body.previous_digest,
+      holds: signed === 'ok',
+    };
+    const twin = taken.get(this.key(chain, body.sequence));
+    if (twin) {
+      twin.holds = false;
+      head.holds = false;
+      this.check.fault({ object: this.name, chain, kind: 'duplicate', sequence: body.sequence, message: `checkpoint ${body.sequence}: two checkpoints take this sequence — neither holds anything` });
+    } else {
+      taken.set(this.key(chain, body.sequence), head);
+    }
+    this.heads.set(head.id, head);
+    return { head, body, signed: signed === 'ok' };
   }
 
-  private async readCheckpoints(): Promise<void> {
-    const driver = this.checkpointDriver();
-    if (!driver) return;
-    let rows: Row[];
-    try {
-      rows = await readAll(driver, AUDIT_CHECKPOINT_OBJECT, { sealed_object: this.name });
-    } catch (err) {
-      if (isMissingTableError(err, AUDIT_CHECKPOINT_OBJECT)) return;
-      throw err;
-    }
-    const taken = new Map<string, CheckpointHead>();
-    for (const row of rows) {
-      let body: CheckpointSignedBody;
-      try {
-        body = checkpointBodyFromRow(row);
-      } catch (err) {
-        this.check.fault({ object: this.name, chain: String(row.chain_key ?? '?'), kind: 'malformed', message: `checkpoint ${String(row.id)}: ${messageOf(err)}` });
-        continue;
-      }
-      const chain = chainKeyOf(body.tenant_id);
-      if (this.check.inScope(chain)) this.check.chain(this.name, chain).checkpoints += 1;
-      if (row.chain_key !== chain) {
-        this.check.fault({
-          object: this.name, chain, kind: 'chain_key', sequence: body.sequence,
-          message: `checkpoint ${body.sequence}: stored under chain '${String(row.chain_key)}', but its signed organization is chain '${chain}'`,
-        });
-      }
-      const signed = await this.check.signature(body.signing_key_id, signedBodyBytes(body), row.signature);
-      if (signed !== 'ok') {
-        this.check.fault({
-          object: this.name, chain, kind: signed, sequence: body.sequence,
-          message: signed === 'untrusted_key'
-            ? `checkpoint ${body.sequence}: signed under key ${body.signing_key_id}, which no trusted key matches — it holds nothing`
-            : `checkpoint ${body.sequence}: its signature does not verify under key ${body.signing_key_id} — it holds nothing`,
-        });
-      }
-      const head: CheckpointHead = {
-        id: String(row.id),
-        chain,
-        sequence: body.sequence,
-        kind: body.kind,
-        windowStart: Date.parse(body.window_start),
-        digest: checkpointDigest(body),
-        previousDigest: body.previous_digest,
-        holds: signed === 'ok',
-      };
-      const twin = taken.get(this.key(chain, body.sequence));
-      if (twin) {
-        twin.holds = false;
-        head.holds = false;
-        this.check.fault({ object: this.name, chain, kind: 'duplicate', sequence: body.sequence, message: `checkpoint ${body.sequence}: two checkpoints take this sequence — neither holds anything` });
-      } else {
-        taken.set(this.key(chain, body.sequence), head);
-      }
-      this.heads.set(head.id, head);
-      if (signed === 'ok') {
-        this.watermark = Math.max(this.watermark, Date.parse(body.sealed_through));
-        if (body.kind === 'window') this.sealedWindows.add(head.windowStart);
-      }
-    }
-  }
-
-  private async readAmendments(): Promise<void> {
-    // [P3] `sys_audit_amendment` is registered with its writers; until then there is none to read.
-    if (!this.amendmentsRegistered) return;
-    const driver = this.check.engine.getDriverForObject(AUDIT_AMENDMENT_OBJECT);
-    if (!driver) return;
-    let rows: Row[];
-    try {
-      rows = await readAll(driver, AUDIT_AMENDMENT_OBJECT, { sealed_object: this.name });
-    } catch (err) {
-      if (isMissingTableError(err, AUDIT_AMENDMENT_OBJECT)) return;
-      throw err;
-    }
+  /** Admit the object's stored amendments: the trusted redactions kept, the expiries judged (D8). */
+  protected async admitAmendments(rows: readonly Row[]): Promise<void> {
     const expiries = new Map<string, ExpiryAmendmentBody[]>();
     for (const row of rows) {
       let body;
@@ -597,7 +660,7 @@ class ObjectCheck {
     return this.honoured.get(chain)?.find((e) => sequence >= e.first_sequence && sequence <= e.last_sequence);
   }
 
-  private checkLinks(): void {
+  protected checkLinks(): void {
     const byChain = new Map<string, Map<number, CheckpointHead>>();
     for (const head of this.heads.values()) {
       if (!byChain.has(head.chain)) byChain.set(head.chain, new Map());
@@ -633,6 +696,217 @@ class ObjectCheck {
         }
       }
     }
+  }
+
+  // ── rows ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Judge the rows checkpoint `row` lists. `leavesOf` gives each listed row's
+   * leaf input, in `row_ids` order, or why there are none (the checkpoint
+   * then holds nothing).
+   */
+  protected async judgeCheckpoint(
+    row: Row,
+    head: CheckpointHead,
+    leavesOf: (body: CheckpointSignedBody) => Promise<readonly AuditProofBundleLeaf[] | string>,
+  ): Promise<void> {
+    const body = checkpointBodyFromRow(row);
+    const at = { object: this.name, chain: head.chain };
+    if (this.expiryCovering(head.chain, head.sequence)) {
+      // D8: a row a checkpoint inside an honoured range lists is expired, gone or not yet gone.
+      for (const id of body.row_ids) {
+        this.held.add(id);
+        this.check.judge({ ...at, row: id, verdict: 'expired', sealed: true, sequence: body.sequence });
+      }
+      return;
+    }
+    if (!head.holds) {
+      this.holdsNothing(head, body);
+      return;
+    }
+    let hashes: string[];
+    try {
+      hashes = checkpointLeafHashesFromRow(row, body);
+    } catch (err) {
+      this.check.fault({ ...at, kind: 'leaf_hashes', sequence: body.sequence, message: `checkpoint ${body.sequence}: ${messageOf(err)} — it holds nothing` });
+      this.holdsNothing(head, body);
+      return;
+    }
+    const leaves = await leavesOf(body);
+    if (typeof leaves === 'string') {
+      this.check.fault({ ...at, kind: 'seed', sequence: body.sequence, message: `checkpoint ${body.sequence}: ${leaves} — it holds nothing` });
+      this.holdsNothing(head, body);
+      return;
+    }
+    const redactions = this.redactions.get(this.key(head.chain, body.sequence)) ?? [];
+    for (const [i, id] of body.row_ids.entries()) {
+      this.held.add(id);
+      const leaf = leaves[i];
+      if (leaf === null) {
+        this.check.judge({ ...at, row: id, verdict: 'missing', sealed: true, sequence: body.sequence });
+        continue;
+      }
+      // A row's current commitment of a value column is its leaf's entry for it.
+      const overrides: Record<string, string> = {};
+      for (const amendment of leaf === 'unreadable' ? [] : redactions) {
+        if (amendment.row_id !== id || !body.columns.committed.includes(amendment.column_name)) continue;
+        const current = (leaf as Row)[amendment.column_name];
+        if (current === amendment.rewritten_commitment) overrides[amendment.column_name] = amendment.sealed_commitment;
+        else if (current === amendment.sealed_commitment) {
+          this.check.danglingRedaction({ ...at, amendment: amendment.id, row: id, column: amendment.column_name, sequence: body.sequence });
+        }
+      }
+      let hash: string | null = null;
+      try {
+        if (leaf !== 'unreadable') hash = leafHash({ ...leaf, ...overrides }).toString('hex');
+      } catch {
+        hash = null; // a value with no canonical spelling is not the value sealed
+      }
+      if (hash !== hashes[i]) {
+        this.check.judge({ ...at, row: id, verdict: 'modified', sealed: true, sequence: body.sequence });
+      } else if (Object.keys(overrides).length > 0) {
+        this.check.judge({ ...at, row: id, verdict: 'redacted', sealed: true, sequence: body.sequence });
+      } else if (body.kind === 'late') {
+        this.check.judge({ ...at, row: id, verdict: 'late', sealed: true, sequence: body.sequence });
+      } else {
+        this.check.judge({ ...at, verdict: 'unmodified' });
+      }
+    }
+  }
+}
+
+/** The columns of a stored checkpoint and amendment a proof bundle copies of a row that is not a signed body. */
+const CHECKPOINT_COLUMNS = [
+  'id', 'chain_key', 'signature', 'leaf_hashes', 'sealed_object', 'tenant_id', 'sequence', 'kind', 'window_start', 'window_end',
+  'sealed_through', 'leaf_count', 'row_ids', 'root', 'previous_digest', 'columns', 'canon_version', 'seed_handle', 'fencing_token',
+  'sealed_at', 'signing_key_id',
+];
+const AMENDMENT_COLUMNS = [
+  'id', 'chain_key', 'signature', 'sealed_object', 'tenant_id', 'amended_at', 'signing_key_id', 'kind', 'checkpoint_sequence',
+  'row_id', 'column_name', 'sealed_commitment', 'rewritten_commitment', 'rewritten_by', 'first_sequence', 'last_sequence',
+  'covered_from', 'covered_to', 'last_removed_digest', 'policy', 'policy_value',
+];
+
+/** `row`'s named columns, as JSON carries them. */
+function copyOf(row: Row, columns: readonly string[]): Row {
+  const copy: Row = {};
+  for (const column of columns) {
+    const value = row[column];
+    if (value === undefined) continue;
+    copy[column] = value instanceof Date ? value.toISOString() : typeof value === 'bigint' ? value.toString() : value;
+  }
+  return copy;
+}
+
+/** A JSON column as a bundle carries it: parsed when it parses, as stored when it does not. */
+function jsonColumn(value: unknown): unknown {
+  if (typeof value !== 'string') return value ?? null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+/** One sealed object's chains and rows, read live. */
+class ObjectCheck extends ChainCheck<LedgerCheck> {
+  private readonly types: SealedFieldTypes;
+  private readonly hot: SealStorageDriver;
+  private readonly archive: SealStorageDriver | undefined;
+  /** The object's highest trusted `sealed_through`, and the windows a trusted `window` checkpoint names. */
+  private watermark = Number.NEGATIVE_INFINITY;
+  private readonly sealedWindows = new Set<number>();
+  /** Rows only a checkpoint holding nothing lists, and rows of a sealed window nothing holds. */
+  private readonly listedByFaulted = new Set<string>();
+  private readonly unheld = new Map<string, { chain: string; windowStart: number }>();
+  /** The bundle entry of each checkpoint copied, by id: its `leaves` are added when its rows are read. */
+  private readonly bundled = new Map<string, Row>();
+
+  constructor(
+    check: LedgerCheck,
+    object: { name: string; fields?: unknown; lifecycle?: unknown },
+    private readonly amendmentsRegistered: boolean,
+    /** Where this object's part of the proof bundle is copied; `null` when none is built. */
+    private readonly bundle: BundleDraft | null,
+  ) {
+    super(check, object.name);
+    this.types = (object.fields ?? {}) as SealedFieldTypes;
+    const { engine } = check;
+    const hot = engine.getDriverForObject(object.name);
+    if (!hot) throw new Error(`no driver resolves for '${object.name}'`);
+    this.hot = hot;
+    const to = (object.lifecycle as { archive?: { to?: unknown } } | undefined)?.archive?.to;
+    const archive = typeof to === 'string' && to !== '' ? check.archiveOf(to, object.name) : null;
+    this.archive = archive && archive !== hot ? archive : undefined;
+  }
+
+  async run(): Promise<void> {
+    await this.readCheckpoints();
+    await this.readAmendments();
+    this.checkLinks();
+    await this.judgeRows();
+  }
+
+  private checkpointDriver(): SealStorageDriver | undefined {
+    return this.check.engine.getDriverForObject(AUDIT_CHECKPOINT_OBJECT);
+  }
+
+  private async readCheckpoints(): Promise<void> {
+    const driver = this.checkpointDriver();
+    if (!driver) return;
+    let rows: Row[];
+    try {
+      rows = await readAll(driver, AUDIT_CHECKPOINT_OBJECT, { sealed_object: this.name });
+    } catch (err) {
+      if (isMissingTableError(err, AUDIT_CHECKPOINT_OBJECT)) return;
+      throw err;
+    }
+    const taken = new Map<string, CheckpointHead>();
+    for (const row of rows) {
+      const admitted = await this.admitCheckpoint(row, taken);
+      if (admitted?.signed) {
+        this.watermark = Math.max(this.watermark, Date.parse(admitted.body.sealed_through));
+        if (admitted.body.kind === 'window') this.sealedWindows.add(admitted.head.windowStart);
+      }
+      if (this.bundle && this.check.inScope(admitted ? admitted.head.chain : String(row.chain_key ?? '?'))) {
+        const entry: Row = admitted
+          ? { ...admitted.body, id: admitted.head.id, chain_key: row.chain_key ?? null, signature: row.signature ?? null, leaf_hashes: jsonColumn(row.leaf_hashes) }
+          : copyOf(row, CHECKPOINT_COLUMNS);
+        this.bundle.checkpoints.push(entry);
+        if (admitted) this.bundled.set(admitted.head.id, entry);
+      }
+    }
+  }
+
+  private async readAmendments(): Promise<void> {
+    // [P3] `sys_audit_amendment` is registered with its writers; until then there is none to read.
+    if (!this.amendmentsRegistered) return;
+    const driver = this.check.engine.getDriverForObject(AUDIT_AMENDMENT_OBJECT);
+    if (!driver) return;
+    let rows: Row[];
+    try {
+      rows = await readAll(driver, AUDIT_AMENDMENT_OBJECT, { sealed_object: this.name });
+    } catch (err) {
+      if (isMissingTableError(err, AUDIT_AMENDMENT_OBJECT)) return;
+      throw err;
+    }
+    if (this.bundle) {
+      for (const row of rows) {
+        let body;
+        try {
+          body = amendmentBodyFromRow(row);
+        } catch {
+          body = null;
+        }
+        if (!this.check.inScope(body ? chainKeyOf(body.tenant_id) : String(row.chain_key ?? '?'))) continue;
+        this.bundle.amendments.push(body ? { ...body, id: String(row.id), chain_key: row.chain_key ?? null, signature: row.signature ?? null } : copyOf(row, AMENDMENT_COLUMNS));
+      }
+    }
+    await this.admitAmendments(rows);
+  }
+
+  protected holdsNothing(_head: CheckpointHead, body: CheckpointSignedBody): void {
+    for (const id of body.row_ids) this.listedByFaulted.add(id);
   }
 
   // ── rows ──────────────────────────────────────────────────────────────────
@@ -729,6 +1003,7 @@ class ObjectCheck {
     for (const [id, { chain }] of this.unheld) {
       if (this.held.has(id)) continue; // listed by a checkpoint of another window (its created_at moved)
       this.check.judge({ object: this.name, chain, row: id, verdict: 'late', sealed: false, sequence: null });
+      this.bundle?.unsealed.push({ chain, row: id });
     }
   }
 
@@ -745,12 +1020,11 @@ class ObjectCheck {
         if (!isMissingTableError(err, AUDIT_CHECKPOINT_OBJECT)) throw err;
       }
     }
-    // Window checkpoints before late ones, each chain in sequence order.
     const ordered = checkpoints
       .map((row) => ({ row, head: this.heads.get(String(row.id)) }))
       .filter((c): c is { row: Row; head: CheckpointHead } => c.head !== undefined && this.check.inScope(c.head.chain))
-      .sort((a, b) => kindOrder(a.head.kind) - kindOrder(b.head.kind) || cmp(a.head.chain, b.head.chain) || a.head.sequence - b.head.sequence);
-    for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, rows);
+      .sort((a, b) => judgingOrder(a.head, b.head));
+    for (const { row, head } of ordered) await this.judgeCheckpoint(row, head, (body) => this.readLeaves(body, head, rows));
     const sealedWindow = start + AUDIT_SEAL_WINDOW_MS <= this.watermark || this.sealedWindows.has(start);
     for (const [id, row] of rows) {
       const chain = chainKeyOf(tenantOf(row));
@@ -759,80 +1033,27 @@ class ObjectCheck {
     }
   }
 
-  private async judgeCheckpoint(row: Row, head: CheckpointHead, rows: Map<string, Row>): Promise<void> {
-    const body = checkpointBodyFromRow(row);
-    const at = { object: this.name, chain: head.chain };
-    if (this.expiryCovering(head.chain, head.sequence)) {
-      // D8: a row a checkpoint inside an honoured range lists is expired, gone or not yet gone.
-      for (const id of body.row_ids) {
-        this.held.add(id);
-        this.check.judge({ ...at, row: id, verdict: 'expired', sealed: true, sequence: body.sequence });
-      }
-      return;
-    }
-    if (!head.holds) {
-      for (const id of body.row_ids) this.listedByFaulted.add(id);
-      return;
-    }
-    let hashes: string[];
-    let saltOf: ColumnSaltOf;
-    try {
-      hashes = checkpointLeafHashesFromRow(row, body);
-    } catch (err) {
-      this.check.fault({ ...at, kind: 'leaf_hashes', sequence: body.sequence, message: `checkpoint ${body.sequence}: ${messageOf(err)} — it holds nothing` });
-      for (const id of body.row_ids) this.listedByFaulted.add(id);
-      return;
-    }
+  /** The leaf input of each row `body` lists, as the stores hold it now, under the checkpoint's own seed. */
+  private async readLeaves(body: CheckpointSignedBody, head: CheckpointHead, rows: Map<string, Row>): Promise<AuditProofBundleLeaf[] | string> {
     const seed = await this.openSeed(body);
-    if (typeof seed === 'string') {
-      this.check.fault({ ...at, kind: 'seed', sequence: body.sequence, message: `checkpoint ${body.sequence}: its seed ${seed} — it holds nothing` });
-      for (const id of body.row_ids) this.listedByFaulted.add(id);
-      return;
-    }
-    saltOf = columnSaltsOf(seed, this.name);
-    const redactions = this.redactions.get(this.key(head.chain, body.sequence)) ?? [];
-    for (const [i, id] of body.row_ids.entries()) {
-      this.held.add(id);
+    if (typeof seed === 'string') return `its seed ${seed}`;
+    const saltOf = columnSaltsOf(seed, this.name);
+    const leaves: AuditProofBundleLeaf[] = [];
+    for (const id of body.row_ids) {
       const stored = rows.get(id) ?? (await this.rowById(id));
-      if (!stored) {
-        this.check.judge({ ...at, row: id, verdict: 'missing', sealed: true, sequence: body.sequence });
-        continue;
-      }
-      const overrides: Record<string, string> = {};
-      for (const amendment of redactions) {
-        if (amendment.row_id !== id || !body.columns.committed.includes(amendment.column_name)) continue;
-        const current = this.commitment(stored, amendment.column_name, saltOf);
-        if (current === amendment.rewritten_commitment) overrides[amendment.column_name] = amendment.sealed_commitment;
-        else if (current === amendment.sealed_commitment) {
-          this.check.danglingRedaction({ ...at, amendment: amendment.id, row: id, column: amendment.column_name, sequence: body.sequence });
+      let leaf: AuditProofBundleLeaf = null;
+      if (stored) {
+        try {
+          leaf = leafInput(stored, body.columns, this.types, saltOf);
+        } catch {
+          leaf = 'unreadable';
         }
       }
-      let leaf: string | null;
-      try {
-        leaf = leafHash(leafInput(stored, body.columns, this.types, saltOf, overrides)).toString('hex');
-      } catch {
-        leaf = null; // a value with no canonical spelling is not the value sealed
-      }
-      if (leaf !== hashes[i]) {
-        this.check.judge({ ...at, row: id, verdict: 'modified', sealed: true, sequence: body.sequence });
-      } else if (Object.keys(overrides).length > 0) {
-        this.check.judge({ ...at, row: id, verdict: 'redacted', sealed: true, sequence: body.sequence });
-      } else if (body.kind === 'late') {
-        this.check.judge({ ...at, row: id, verdict: 'late', sealed: true, sequence: body.sequence });
-      } else {
-        this.check.judge({ ...at, verdict: 'unmodified' });
-      }
+      leaves.push(leaf);
     }
-  }
-
-  /** A row's current commitment of `column`, under its checkpoint's salt; `null` when the value has no canonical spelling. */
-  private commitment(row: Row, column: string, saltOf: ColumnSaltOf): string | null {
-    const id = rowIdOf(row);
-    try {
-      return commitValue(saltOf(id, column), canonicalValue(row[column], this.types[column], `${id}.${column}`), `${id}.${column}`);
-    } catch {
-      return null;
-    }
+    const entry = this.bundled.get(head.id);
+    if (entry) entry.leaves = leaves;
+    return leaves;
   }
 
   /**
