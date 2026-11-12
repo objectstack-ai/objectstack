@@ -509,12 +509,11 @@ const HELD_CHATTER_CAP = 200;
  */
 class HostFollowingLogger implements Logger {
   private target: Logger;
-  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined;
+  private held: Array<{ level: 'debug' | 'info'; message: string; meta?: Record<string, any> }> | undefined = [];
   private overflowed = 0;
 
-  constructor(initial: Logger, holdChatter: boolean) {
+  constructor(initial: Logger) {
     this.target = initial;
-    this.held = holdChatter ? [] : undefined;
   }
 
   /** Send every later line to `host`, after replaying the held chatter through it. */
@@ -604,8 +603,8 @@ export class MetadataManager implements IMetadataService {
   // Protected so subclasses can access serializers if needed
   protected serializers: Map<MetadataFormat, MetadataSerializer>;
   protected logger: Logger;
-  /** [#32154] The object {@link logger} is built as; {@link useHostLogger} switches its target. */
-  private readonly hostFollowingLogger: HostFollowingLogger;
+  /** [#32154] Under `awaitHostLogger`, the object {@link logger} is built as; {@link useHostLogger} switches its target. */
+  private readonly hostFollowingLogger: HostFollowingLogger | undefined;
   protected watchCallbacks = new Map<string, Set<WatchCallback>>();
   protected config: MetadataManagerOptions;
 
@@ -831,13 +830,12 @@ export class MetadataManager implements IMetadataService {
 
   constructor(config: MetadataManagerOptions) {
     this.config = config;
-    // [#32154] Its own `info` logger until a host hands it one (see
-    // `HostFollowingLogger`, `useHostLogger`).
-    this.hostFollowingLogger = new HostFollowingLogger(
-      createLogger({ level: 'info', format: 'pretty' }),
-      config.awaitHostLogger === true,
-    );
-    this.logger = this.hostFollowingLogger;
+    const ownLogger = createLogger({ level: 'info', format: 'pretty' });
+    // [#32154] Under `awaitHostLogger`, a logger that holds the chatter until
+    // the host hands over its own (see `HostFollowingLogger`,
+    // `useHostLogger`); otherwise its own `info` logger, exactly as before.
+    this.hostFollowingLogger = config.awaitHostLogger === true ? new HostFollowingLogger(ownLogger) : undefined;
+    this.logger = this.hostFollowingLogger ?? ownLogger;
 
     // [#5089] Endpoint index (see `matchEndpoint`). Two invalidation seams,
     // covering overlapping but non-identical event sets — both are kept:
@@ -1050,9 +1048,15 @@ export class MetadataManager implements IMetadataService {
    * under {@link MetadataManagerOptions.awaitHostLogger} are replayed through
    * it first, in order. `MetadataPlugin.init()` calls it with the kernel's
    * logger.
+   *
+   * On a manager built WITHOUT that option, the manager's own later lines go
+   * to `logger`, but a loader or the endpoint matcher handed the earlier
+   * logger at construction keeps it: a host that wants those to follow too
+   * sets `awaitHostLogger`.
    */
   useHostLogger(logger: Logger): void {
-    this.hostFollowingLogger.adopt(logger);
+    if (this.hostFollowingLogger) this.hostFollowingLogger.adopt(logger);
+    else this.logger = logger;
   }
 
   // ==========================================

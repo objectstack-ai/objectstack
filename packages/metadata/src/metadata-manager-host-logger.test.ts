@@ -55,6 +55,14 @@ describe('[#32154] MetadataManager follows the host logger level', () => {
     expect(lines.filter((l) => / INFO /.test(l) && l.includes(REGISTERED))).toHaveLength(1);
   });
 
+  it('without awaitHostLogger, useHostLogger sends the manager`s later lines to the host', () => {
+    const manager = new MetadataManager({ formats: ['json'] });
+    const host = recordingLogger();
+    manager.useHostLogger(host.logger as any);
+    captureStreams(() => manager.registerLoader(new MemoryLoader()));
+    expect(host.lines).toEqual([{ level: 'info', message: REGISTERED }]);
+  });
+
   it('with awaitHostLogger, a loader registered before the host arrives prints nothing yet', () => {
     const lines = captureStreams(() => {
       new MetadataManager({ formats: ['json'], awaitHostLogger: true }).registerLoader(new MemoryLoader());
