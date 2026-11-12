@@ -2392,6 +2392,11 @@ export class AutomationServicePlugin implements Plugin {
                         // the user, so `sys_user_org_members` resolves for the
                         // run as it does for the user's own request.
                         org_user_ids: grants.org_user_ids,
+                        // [ADR-0093 D8.1, as amended] The membership set the
+                        // request path carries from this same resolution, so
+                        // the organization wall judges the run as it judges
+                        // the user's own request.
+                        accessible_org_ids: grants.accessible_org_ids,
                         // The email the request path seeds through this same
                         // resolver (the user's `sys_user` email), so a row
                         // policy reading `current_user.email` resolves for the

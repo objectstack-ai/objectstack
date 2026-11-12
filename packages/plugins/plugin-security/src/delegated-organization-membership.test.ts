@@ -38,8 +38,15 @@
  *   or changed.
  * - UNCHANGED: a delegated context in `org_a`; the same caller in `org_d`
  *   without the delegation link; a delegated context with no active
- *   organization (it keeps ADR-0123 D2's refusal); a system context; and the
- *   `single` posture, which has no wall.
+ *   organization (it keeps ADR-0123 D2's refusal); and a system context.
+ * - [ADR-0093 D8.1, as amended] The `single` posture answers the same rule: a
+ *   delegated operation needs the delegator's current membership in the
+ *   organization under every posture. Pinned in both context shapes the walled
+ *   postures are: every verb in `org_d` above, and, with NO active
+ *   organization, a write made for a person who holds no current membership in
+ *   any organization — refused naming the delegating principal, whatever the
+ *   live principal's own standing — while a read on that person's behalf
+ *   resolves to nothing.
  *
  * ## The raw-SQL read scope answers the same rule [#25106 · ADR-0021 D-C]
  *
@@ -85,6 +92,13 @@ const ORG_A = 'org_a';
 const ORG_C = 'org_c';
 const ORG_D = 'org_d';
 const DELEGATOR = 'usr_delegator';
+/**
+ * [ADR-0093 D8.1, as amended] A person who holds no current membership in any
+ * organization — the membership that backed them ended, and its row is gone.
+ * The member baseline still grants them create on the public object, so only
+ * the membership rule can refuse a write made on their behalf.
+ */
+const FORMER = 'usr_former_member';
 
 const FIELDS = {
   id: { name: 'id', type: 'text', primaryKey: true },
@@ -145,7 +159,7 @@ const SETS = [MEMBER, PLATFORM_ADMIN, VAULT_WRITER, LEDGER_READER, QA_CEILING];
 const SYS_CTX = { isSystem: true, userId: 'usr_system', tenantId: ORG_A };
 
 /** The caller: a platform operator, walled on the public object and crossing on the private one. */
-function operator(activeOrganization: string | undefined, delegated = true) {
+function operator(activeOrganization: string | undefined, delegated = true, delegator: string = DELEGATOR) {
   return {
     userId: 'usr_operator',
     ...(activeOrganization ? { tenantId: activeOrganization } : {}),
@@ -153,7 +167,7 @@ function operator(activeOrganization: string | undefined, delegated = true) {
     positions: [],
     permissions: ['admin_full_access'],
     posture: 'PLATFORM_ADMIN',
-    ...(delegated ? { onBehalfOf: { userId: DELEGATOR } } : {}),
+    ...(delegated ? { onBehalfOf: { userId: delegator } } : {}),
   };
 }
 
@@ -213,6 +227,8 @@ async function boot(posture: Posture, options: { sharing?: Record<string, unknow
     await engine.insert('sys_organization', { id, name: id, slug: id }, { context: SYS_CTX } as never);
   }
   await engine.insert('sys_user', { id: DELEGATOR, name: DELEGATOR, email: 'delegator@example.test' }, { context: SYS_CTX } as never);
+  // [ADR-0093 D8.1, as amended] A person with no `sys_member` row at all.
+  await engine.insert('sys_user', { id: FORMER, name: FORMER, email: 'former@example.test' }, { context: SYS_CTX } as never);
   for (const org of [ORG_A, ORG_C]) {
     await engine.insert('sys_member', { id: `mem_${org}`, user_id: DELEGATOR, organization_id: org, role: 'member' }, { context: SYS_CTX } as never);
   }
@@ -335,7 +351,10 @@ const expectMembershipRefusal = (outcome: Outcome) => {
 const SEEDED = (object: string) => [{ id: `${object}_in_d`, name: 'seeded', organization_id: ORG_D }];
 
 describe('[#25063 · ADR-0090 D10] a delegated operation in an organization the delegator is not a member of is refused', () => {
-  for (const posture of ['group', 'isolated'] as const) {
+  // [ADR-0093 D8.1, as amended] `single` answers the same rule in this context
+  // shape: a delegated operation needs the delegator's current membership in
+  // the organization under every posture.
+  for (const posture of ['group', 'isolated', 'single'] as const) {
     describe(`\`${posture}\``, () => {
       for (const object of ['qa_account', 'qa_vault']) {
         it(`${object}: a single insert is refused, and nothing is stored`, async () => {
@@ -409,11 +428,64 @@ describe('[#25063] what the rule leaves alone', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated insert in `org_d` is stored as before', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): a delegated insert and read in `org_d` are refused, and nothing is stored', async () => {
     const b = await boot('single');
-    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(ORG_D) } as never));
+    expectMembershipRefusal(await attempt(() => b.engine.insert('qa_account', { id: 'r1', name: 'one' }, { context: operator(ORG_D) } as never)));
+    expectMembershipRefusal(await attempt(() => b.engine.find('qa_account', { context: operator(ORG_D) } as never)));
+    expect(await b.stored('qa_account')).toEqual(SEEDED('qa_account'));
+    // CONTROL — in an organization the delegator belongs to, the same insert is stored there.
+    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r2', name: 'two' }, { context: operator(ORG_A) } as never));
     expect(outcome.ok, outcome.message).toBe(true);
-    expect((await b.stored('qa_account')).find((r) => r.id === 'r1')).toEqual({ id: 'r1', name: 'one', organization_id: ORG_D });
+    expect((await b.stored('qa_account')).find((r) => r.id === 'r2')).toEqual({ id: 'r2', name: 'two', organization_id: ORG_A });
+  });
+});
+
+/** The membership rule's write refusal under `single`, naming the principal that holds no membership. */
+const expectOutsideEveryOrganizationRefusal = (outcome: Outcome, principal: 'the delegating principal' | 'this session') => {
+  expect(outcome.ok, 'expected the write to be refused').toBe(false);
+  expect(outcome.code).toBe('PERMISSION_DENIED');
+  expect(outcome.status).toBe(403);
+  expect(outcome.developerMessage?.startsWith('[ADR-0093 D8.1]'), JSON.stringify(outcome)).toBe(true);
+  expect(outcome.message).toContain(principal);
+};
+
+describe('[ADR-0093 D8.1, as amended] `single`: a delegated write for a person outside every organization is refused, in both context shapes', () => {
+  it('the live context carries NO active organization: the insert is refused naming the delegating principal, and nothing is stored', async () => {
+    // Its own stack: a regression would land the row, and the shared stacks
+    // must not carry it into other cases.
+    const b = await boot('single');
+    expectOutsideEveryOrganizationRefusal(
+      await attempt(() => b.engine.insert('qa_account', { id: 'r_former', name: 'for a former member' }, { context: operator(undefined, true, FORMER) } as never)),
+      'the delegating principal',
+    );
+    expect(await b.stored('qa_account')).toEqual(SEEDED('qa_account'));
+  });
+
+  it('the live context carries NO active organization: a read on that person\'s behalf resolves to nothing', async () => {
+    const b = await shared('single', true);
+    const read = await attempt(() => b.engine.find('qa_account', { context: operator(undefined, true, FORMER) } as never));
+    expect(read.ok, read.message).toBe(true);
+    expect(read.value).toEqual([]);
+  });
+
+  it('the live context carries an active organization: the delegated insert is refused, and nothing is stored', async () => {
+    const b = await boot('single');
+    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r_former', name: 'for a former member' }, { context: operator(ORG_A, true, FORMER) } as never));
+    expect(outcome.ok, 'expected the delegated insert to be refused').toBe(false);
+    expect(outcome.code).toBe('PERMISSION_DENIED');
+    expect(outcome.status).toBe(403);
+    expect(outcome.message).toContain(`'${FORMER}'`);
+    expect(await b.stored('qa_account')).toEqual(SEEDED('qa_account'));
+  });
+
+  it('CONTROL — the same live contexts on behalf of a current member are not this rule\'s: the read is served, and the insert in an organization the member belongs to is stored', async () => {
+    const b = await boot('single');
+    const read = await attempt(() => b.engine.find('qa_account', { context: operator(undefined) } as never));
+    expect(read.ok, read.message).toBe(true);
+    expect((read.value as Array<{ id: string }>).map((r) => r.id)).toEqual(['qa_account_in_d']);
+    const outcome = await attempt(() => b.engine.insert('qa_account', { id: 'r_member', name: 'for a member' }, { context: operator(ORG_A) } as never));
+    expect(outcome.ok, outcome.message).toBe(true);
+    expect((await b.stored('qa_account')).find((r) => r.id === 'r_member')).toEqual({ id: 'r_member', name: 'for a member', organization_id: ORG_A });
   });
 });
 
@@ -504,11 +576,13 @@ describe('[#25106] what the rule leaves alone in the read scope', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated context in `org_d` keeps its scope', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): a delegated context in `org_d` answers RLS_DENY_FILTER itself', async () => {
     const b = await shared('single', true);
-    expect(await scopeRows(b, 'qa_account', operator(ORG_D))).toEqual(['qa_account_in_a', 'qa_account_in_c', 'qa_account_in_d']);
-    expect(await scopeRows(b, 'qa_vault', operator(ORG_D))).toEqual(['qa_vault_in_a', 'qa_vault_in_c', 'qa_vault_in_d']);
-    expect(await scopeRows(b, 'qa_catalog', operator(ORG_D))).toEqual(['qa_catalog_1', 'qa_catalog_2']);
+    for (const object of PROVIDER_OBJECTS) {
+      expect(await b.plugin.getReadFilter(object, operator(ORG_D)), object).toBe(RLS_DENY_FILTER);
+      // CONTROL — in an organization the delegator belongs to, a scope.
+      expect(await b.plugin.getReadFilter(object, operator(ORG_A)), object).not.toBe(RLS_DENY_FILTER);
+    }
   });
 });
 
@@ -670,10 +744,21 @@ describe('[#25107] what the rule leaves alone in the probes', () => {
     });
   }
 
-  it('`single`: there is no wall, so a delegated context in `org_d` is admitted by every probe and its narrowing is reported', async () => {
+  it('`single` answers the same rule (ADR-0093 D8.1, as amended): no probe admits a delegated context in `org_d`, and no narrowing is reported for it', async () => {
     const b = await shared('single');
-    for (const object of PROVIDER_OBJECTS) expectAdmitted(await probeAnswers(b, object, operator(ORG_D)), object);
-    expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).narrowed).toBe(true);
+    for (const object of PROVIDER_OBJECTS) {
+      const answers = await probeAnswers(b, object, operator(ORG_D));
+      expect(answers.canReadObject, object).toBe(false);
+      expect(answers.canWriteInsert, object).toBe(false);
+      expect(answers.canWriteUpdate, object).toBe(false);
+      expect(answers.canExport, object).toBe(false);
+      for (const projection of FIELD_PROJECTIONS) expect(answers.fields[projection], `${object}: ${projection}`).toEqual([]);
+      expect(answers.explained.allowed, object).toBe(false);
+      // CONTROL — in an organization the delegator belongs to, every probe admits.
+      expectAdmitted(await probeAnswers(b, object, operator(ORG_A)), object);
+    }
+    expect(await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_D))).toEqual({ narrowed: false });
+    expect((await b.security().describeDelegationNarrowing('qa_ledger', agent(ORG_A))).narrowed).toBe(true);
   });
 });
 
