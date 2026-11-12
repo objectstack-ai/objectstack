@@ -13,6 +13,10 @@ import type {
 } from '@objectstack/spec/contracts';
 import { RAW_FILE_VALUES_CONTEXT_KEY, seedFile } from '@objectstack/spec/data';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import { ObjectStackProtocolImplementation } from './protocol.js';
+// `protocol.ts` reaches `@objectstack/lint` lazily; pay its first load during collection, never inside a case's clock.
+import '@objectstack/lint';
 
 /**
  * [#25779] A seed record writes `seedFile(path)` into a file field; `os build`
@@ -583,5 +587,45 @@ describe('seedLoadPartialWrites: the rows a thrown load had written', () => {
   it('an error that did not come out of a load carries no reading', () => {
     expect(seedLoadPartialWrites(new Error('elsewhere'))).toBeUndefined();
     expect(seedLoadPartialWrites('a string')).toBeUndefined();
+  });
+});
+
+describe('a published seed stores its files as the boot seed does (#25779)', () => {
+  /**
+   * The publish doors apply a package's seed bodies through
+   * `ObjectStackProtocolImplementation#applySeedBodies`, which hands the loader
+   * the `field-files` service it reads from the kernel's registry. Without it
+   * the loader refuses every file reference, so a published seed would land no
+   * file the boot seed lands.
+   */
+  async function publishSeed(registry: Map<string, unknown>) {
+    const { engine, store } = createEngine();
+    const metadata = createMetadata();
+    const protocol = new ObjectStackProtocolImplementation(engine, () => registry as Map<string, any>) as any;
+    protocol.getMetaItem = async ({ name }: { name: string }) => ({ item: await metadata.getObject(name) });
+    // A published seed carries no caller organization (ADR-0131 D12): the record names its owner.
+    const receipt = await protocol.applySeedBodies([dataset([{ code: 'V1', organization_id: 'org-1', file: seedFile('fixtures/v1.pdf') }])]);
+    return { receipt, store };
+  }
+
+  it('stores the bundled bytes through the service the registry holds and writes the file id into the field', async () => {
+    const { service, stored, claims } = createFieldFiles();
+    const { receipt, store } = await publishSeed(new Map([[FIELD_FILE_SERVICE, service]]));
+
+    expect(receipt).toMatchObject({ success: true, inserted: 1, updated: 0 });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ organizationId: 'org-1', filename: 'v1.pdf', mimeType: 'application/pdf', metadata: { seedFile: 'fixtures/v1.pdf' } });
+    expect(store.clm_version[0].file).toBe('file-1');
+    expect(claims).toEqual([{ slot: { object: 'clm_version', recordId: store.clm_version[0].id, field: 'file' }, fileIds: ['file-1'], organizationId: 'org-1' }]);
+  });
+
+  it('with no service registered, the file reference is refused and no row is written (the control)', async () => {
+    const { receipt, store } = await publishSeed(new Map());
+
+    expect(receipt.success).toBe(false);
+    expect(receipt.inserted).toBe(0);
+    // Refused at the file field itself, for the file reference it cannot store.
+    expect(receipt.errors).toMatchObject([{ sourceObject: 'clm_version', field: 'file', attemptedValue: seedFile('fixtures/v1.pdf') }]);
+    expect(store.clm_version ?? []).toEqual([]);
   });
 });

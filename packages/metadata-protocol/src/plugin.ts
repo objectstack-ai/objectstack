@@ -46,6 +46,7 @@ import {
     ensureActivationLedgerPackagelessIndex,
     resolveActivationLedgerIndexSeam,
 } from './migrations/activation-ledger-packageless-index.js';
+import { createUserPermissionSetGuardAtSchemaSync } from './migrations/user-permission-set-packageless-index.js';
 import { createRecordedBySentinelPlan } from './migrations/recorded-by-sentinel.js';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import type { MetadataAuthoringChannel } from './protocol.js';
@@ -259,6 +260,38 @@ export function assembleMetadataProtocol(
             ctx.registerService('protocol', protocolShim);
             ctx.logger.info('Protocol service registered (MetadataProtocolPlugin)');
 
+            // [#32164, epic ruling MF6] `sys_user_permission_set`'s
+            // package-less guard is built at SCHEMA SYNC, and on EVERY kernel
+            // whose schema sync performs DDL, outside the gate below: the
+            // three-column key it stands in for stood wherever the table's DDL
+            // ran, as every declared index does, so the guard must too (MF6's
+            // review, must-fix 1: "on every host"). The gate's two reasons do
+            // not transfer. The table belongs to `plugin-security`, not to the
+            // metadata-storage tables a per-project kernel leaves to the control
+            // plane, and that kernel's own schema sync creates it; and a
+            // no-write one-shot boot holds its DDL back, which the ensurer reads
+            // and answers by building nothing (`'held-back'`), while the CLI
+            // triggers the event again after `os migrate apply` performs what
+            // was held back. A write mode's one-shot boot syncs plainly and
+            // builds it.
+            //
+            // Before any later plugin's `start()` writes a grant, and on a
+            // `bootPhaseHooks: false` host too, which withholds `kernel:ready`.
+            // `objectql:schema-synced` is what `ObjectQLPlugin` triggers when a
+            // sync pass's DDL is done (objectql's `OBJECTQL_SCHEMA_SYNCED_HOOK`,
+            // spelled as the literal because `@objectstack/objectql` depends on
+            // this package; plugin-security's
+            // `user-permission-set-guard-at-schema-sync.test.ts` boots both and
+            // goes red if the two ever differ). Re-checked after every pass,
+            // since a SQLite table rebuild drops it: a catalog read, and DDL
+            // only when it is missing, so a standing guard costs a re-sync no
+            // table lock. A refusal is reported once per boot
+            // (`createUserPermissionSetGuardAtSchemaSync`).
+            const ensureGrantGuard = createUserPermissionSetGuardAtSchemaSync(ql, ctx.logger);
+            (ctx as any)?.hook?.('objectql:schema-synced', async () => {
+                await ensureGrantGuard();
+            });
+
             // The `kernel:ready` platform-table repairs this assembly arms: #8629
             // (`sys_setting`'s row identity) and #8686 (the seed/API tenancy
             // backfill). They ride THIS assembly because it is the one seam both
@@ -381,6 +414,15 @@ export function assembleMetadataProtocol(
                             { error: e instanceof Error ? e.message : String(e) },
                         );
                     }
+                    // `sys_user_permission_set`'s package-less guard (ADR-0150
+                    // D4, #32164), a repair beside the schema-sync build above,
+                    // gated like its siblings: a no-op where a pass built it,
+                    // and the build for a database whose table this boot's
+                    // schema sync did not create, a `skipSchemaSync` boot's
+                    // (which triggers no pass). The table belongs to
+                    // `plugin-security`, so it may be absent here (a silent
+                    // no-op).
+                    await ensureGrantGuard();
                 });
             }
 

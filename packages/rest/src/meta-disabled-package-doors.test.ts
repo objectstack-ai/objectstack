@@ -181,10 +181,13 @@ function setup(objectQLProvider?: () => Promise<unknown>, caller: Record<string,
     };
     return {
         ...h,
+        rest,
         snapshot,
         published: (type: string, name: string) => get('/:type/:name/published', `/${type}/${name}/published`, { type, name }),
         state: (name: string) => get('/object/:name/state/:field', `/object/${name}/state/status`, { name, field: 'status' }, { from: 'open' }),
         plain: (type: string, name: string) => get('/:type/:name', `/${type}/${name}`, { type, name }),
+        plainWith: (type: string, name: string, query: Record<string, string>) =>
+            get('/:type/:name', `/${type}/${name}`, { type, name }, query),
         // [#24210] The layered view's two spellings, with every header each answer carries.
         layers: (type: string, name: string, query: Record<string, string> = {}) =>
             call('/:type/:name/layers', `/${type}/${name}/layers`, { type, name }, query),
@@ -420,5 +423,74 @@ describe('[#24210] RestServer: the layered view of a disabled package\'s item, b
         // No engine to ask, so nothing is withheld: the doors' answer before #24210.
         expect(await absent.layers('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
         expect(await absent.layersFlag('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
+    }, 60_000);
+});
+
+/**
+ * [ruling record 6787890900] An object the caller may not read is answered on
+ * every object door exactly as a name with nothing behind it — decided BEFORE
+ * the store is read, so no store answer about that object (the protocol's own
+ * refusal of a disabled package's object among them) reaches the caller.
+ */
+describe('[ruling record 6787890900] RestServer: an object the caller may not read is answered as a missing name before any store read', () => {
+    /**
+     * A security service that admits `healthy_gadget` alone — as the real one
+     * answers: an object the caller holds no read grant on, and a name with no
+     * object behind it, are both not admitted.
+     */
+    const hidingDemo = () => ({
+        getMetadataReadableFields: async () => ['name'],
+        canReadObject: async (object: string) => object === 'healthy_gadget',
+    });
+    /** The answer, with the requested name written out of it (a `Link` header echoes the path it was asked on). */
+    const answerOf = (r: { status: number; body: unknown; headers?: Record<string, string> }, name: string) =>
+        JSON.stringify({ status: r.status, body: r.body, headers: r.headers ?? {} }).split(name).join('NAME');
+
+    for (const disabledPackage of [false, true]) {
+        it(`the plain read, /layers, ?layers=true and /state answer exactly as for a missing name${disabledPackage ? ' — its package disabled' : ''}`, async () => {
+            const host = setup();
+            await seed(host.protocol, host.registry);
+            (host.rest as any).securityServiceProvider = async () => hidingDemo();
+            if (disabledPackage) host.registry.disablePackage(PKG);
+            const layered = vi.spyOn(host.protocol as any, 'getMetaItemLayered');
+            const byName = vi.spyOn(host.protocol as any, 'getMetaItem');
+            const cached = vi.spyOn(host.protocol as any, 'getMetaItemCached');
+            const doors = {
+                plain: (name: string) => host.plain('object', name),
+                // A NAMED member: decided before the store, exactly as without one.
+                plainMember: (name: string) => host.plainWith('object', name, { member: 'en' }),
+                layers: (name: string) => host.layers('object', name),
+                layersFlag: (name: string) => host.layersFlag('object', name),
+                state: (name: string) => host.state(name),
+            };
+            for (const [door, read] of Object.entries(doors)) {
+                const missing = await read('no_such_gadget');
+                expect(missing.status, door).toBe(404);
+                layered.mockClear();
+                byName.mockClear();
+                cached.mockClear();
+                expect(answerOf(await read('demo_gadget'), 'demo_gadget'), door).toBe(answerOf(missing, 'no_such_gadget'));
+                expect(cached.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+                // Decided before the store: neither read is ever asked about it.
+                expect(layered.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+                expect(byName.mock.calls.filter(([request]: any[]) => request?.name === 'demo_gadget'), door).toEqual([]);
+            }
+            // Control: the readable object, same caller and service, is served on every door.
+            expect((await doors.plain('healthy_gadget')).status).toBe(200);
+            expect((await doors.layers('healthy_gadget')).status).toBe(200);
+            expect((await doors.state('healthy_gadget')).status).toBe(200);
+        }, 60_000);
+    }
+
+    it('/state: an object read that cannot be evaluated is the field-visibility fault, never the state answer', async () => {
+        const host = setup();
+        await seed(host.protocol, host.registry);
+        (host.rest as any).securityServiceProvider = async () => ({
+            getMetadataReadableFields: async () => ['name'],
+            canReadObject: async () => { throw new Error('security service unhealthy (test)'); },
+        });
+        const answer = await host.state('healthy_gadget');
+        expect({ status: answer.status, code: answer.body?.error?.code ?? answer.body?.code })
+            .toEqual({ status: 503, code: 'FIELD_VISIBILITY_UNRESOLVED' });
     }, 60_000);
 });

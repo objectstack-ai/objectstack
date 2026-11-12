@@ -5,6 +5,15 @@ import { DatabaseLoader } from './database-loader.js';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
+import { MetadataPlugin } from '../plugin.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { FilesystemLoader } from './filesystem-loader.js';
+import { JSONSerializer } from '../serializers/json-serializer.js';
+// Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
+import '@objectstack/metadata-fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // Suppress logger output during tests. Stable object (not a fresh one per
 // `createLogger()` call) so the #5108 block can assert on what `list()` says
@@ -1693,4 +1702,528 @@ describe('#13997 — stat() emits canonical ISO text whatever the dialect materi
     // Idempotent: the dialect that was already correct must not be reshaped.
     expect(stats!.mtime).toBe(canonical);
   });
+});
+
+/**
+ * [#31699 R3-B, epic ruling 6796068023] `email_template` is stored per
+ * `(package, name)` and is the one BUNDLED type: one `(package, name)` holds a
+ * row per locale, the canonical member (`en-US`) stored as `bundle_member`
+ * NULL (`overlayMemberValue`). The loaders' unscoped reads keep one row per
+ * `(package, name, member)`, so no member of any slot is dropped.
+ *
+ * BASE (measured at 460df4af, `email_template` out of
+ * `PACKAGE_SLOTTED_STORE_TYPES`): `loadMany` answered every row. At 460df4af
+ * (in the set, collapsed one row per name): one alpha bundle answered only
+ * `fr-FR`; two packages' bundles answered 1 row of 4.
+ *
+ * The bundles below are seeded as the store writes them; the save's own
+ * member-awareness is pinned in the R4-A describe after this one.
+ */
+describe('[#31699 R3-B] a bundled type keeps every member of every slot', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+  let loader: DatabaseLoader;
+
+  const body = (locale: string, packageId: string | null) =>
+    ({ name: 'welcome', locale, subject: `${packageId ?? 'env'} ${locale}`, bodyHtml: '<p/>' });
+  const seed = (id: string, packageId: string | null, locale: string, version: number) =>
+    driver.create('sys_metadata', {
+      id, type: 'email_template', name: 'welcome', state: 'active', version, checksum: id,
+      package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify(body(locale, packageId)),
+    });
+  const bundle = async (packageId: string, from: number) => {
+    await seed(`${packageId}_en`, packageId, 'en-US', from);
+    await seed(`${packageId}_fr`, packageId, 'fr-FR', from + 1);
+  };
+  const subjects = (items: Array<{ subject?: unknown }>) => items.map((item) => item.subject).sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+    loader = new DatabaseLoader({ driver });
+  });
+
+  it('one two-locale bundle: loadMany and loadManyKeyed keep both locales (460df4af: only fr-FR)', async () => {
+    await bundle(ALPHA, 1);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+    const keyed = await loader.loadManyKeyed('email_template');
+    expect(keyed.map((entry) => entry.name)).toEqual(['welcome', 'welcome']);
+    expect(subjects(keyed.map((entry) => entry.data))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+  });
+
+  it('two packages\' bundles: all four rows are kept (460df4af: 1 of 4)', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    const all = [`${ALPHA} en-US`, `${ALPHA} fr-FR`, `${BETA} en-US`, `${BETA} fr-FR`];
+    expect(subjects(await loader.loadMany('email_template'))).toEqual(all);
+    expect(subjects((await loader.loadManyKeyed('email_template')).map((entry) => entry.data))).toEqual(all);
+  });
+
+  it('CONTROL: one row per (package, name, member) — a member\'s older row is not a second member', async () => {
+    await bundle(ALPHA, 1);
+    await seed('alpha_fr_old', ALPHA, 'fr-FR', 0);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${ALPHA} fr-FR`]);
+  });
+
+  it('a rollback by name with two holders is refused 409 naming both, before any write', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    const err = await loader.registerRollback('email_template', 'welcome', body('en-US', ALPHA), 1)
+      .then(() => undefined, (e: any) => e);
+    expect([err?.code, err?.status, err?.refusal?.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+    expect(err.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA },
+      { kind: 'package', packageId: BETA },
+    ]);
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
+  it('a rollback by name of one slot restores the row of the member its body declares, never another member\'s', async () => {
+    await bundle(ALPHA, 1);
+    await loader.registerRollback('email_template', 'welcome', { ...body('fr-FR', ALPHA), subject: 'restored fr' }, 1);
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, 'restored fr']);
+  });
+
+  it('a delete by name with two holders is refused 409; a delete naming a package takes that package\'s rows only', async () => {
+    await bundle(ALPHA, 1);
+    await bundle(BETA, 3);
+    await expect(loader.delete('email_template', 'welcome')).rejects.toMatchObject({ code: 'RESOURCE_CONFLICT', status: 409 });
+    expect(await loader.loadManySlots('email_template')).toHaveLength(4);
+    await loader.delete('email_template', 'welcome', { packageId: ALPHA });
+    expect(subjects(await loader.loadMany('email_template'))).toEqual([`${BETA} en-US`, `${BETA} fr-FR`]);
+  });
+
+  it('a save fills package_id', async () => {
+    await loader.save('email_template', 'welcome', { ...body('en-US', ALPHA), _packageId: ALPHA });
+    const rows = await driver.find('sys_metadata', { where: { type: 'email_template' } } as never) as Array<Record<string, unknown>>;
+    expect(rows.map((row) => row.package_id)).toEqual([ALPHA]);
+  });
+
+  it('MemoryLoader: two packages\' templates of one name are both answered by loadMany and loadManyKeyed', async () => {
+    const memory = new MemoryLoader();
+    await memory.save('email_template', 'welcome', { ...body('en-US', ALPHA), _packageId: ALPHA });
+    await memory.save('email_template', 'welcome', { ...body('en-US', BETA), _packageId: BETA });
+    expect(subjects(await memory.loadMany('email_template'))).toEqual([`${ALPHA} en-US`, `${BETA} en-US`]);
+    expect((await memory.loadManyKeyed('email_template')).map((entry) => entry.name)).toEqual(['welcome', 'welcome']);
+  });
+});
+
+/**
+ * [#31699 R4-A / R4-B, #32422; epic ruling 6799056319] The save of a bundled
+ * type stored per `(package, name)` writes the row of the member the body
+ * declares, and inserts a member that has no row: never another member's row.
+ *
+ * BEFORE (measured at f9f589da, same fixtures): the boot priming pass
+ * (`MetadataManager.loadMany` then `register` each, as
+ * `MetadataPlugin._loadFromFileSystem` does) on a slot holding `en-US` and
+ * `fr-FR` replaced the `en-US` row's body with `fr-FR`'s (version 3, a history
+ * row); with two packages' rows bound by `package_id` alone, `loadMany`
+ * answered alpha's two and the pass inserted a package-less row; a direct save
+ * of `fr-FR` into a slot holding `en-US` overwrote the `en-US` row.
+ */
+describe('[#31699 R4-A] the save of a bundled type writes its own member\'s row', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  let driver: IDataDriver;
+
+  const body = (locale: string, packageId: string, stamped: boolean) => ({
+    name: 'welcome', locale, subject: `${packageId} ${locale}`, bodyHtml: '<p/>',
+    ...(stamped ? { _packageId: packageId } : {}),
+  });
+  // Bound by the `package_id` column; the body stamped or not (the protocol writes none).
+  const seed = (packageId: string, locale: string, version: number, stamped: boolean) =>
+    driver.create('sys_metadata', {
+      id: `${packageId}_${locale}`, type: 'email_template', name: 'welcome', state: 'active', version,
+      checksum: `${packageId}_${locale}`, package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify(body(locale, packageId, stamped)),
+    });
+  const stored = async (type = 'email_template') =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).subject ?? JSON.parse(row.metadata).label])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  const manager = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  /** Each `loadMany` item registered back WITHOUT the R5-A source skip: the pass as it ran before, or any other caller. */
+  const prime = async (m: MetadataManager) => {
+    for (const item of (await m.loadMany('email_template')) as Array<{ name?: string }>) {
+      if (item?.name) await m.register('email_template', item.name, item, { notify: false });
+    }
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const stamped of [true, false]) {
+    it(`the priming pass leaves a two-member slot's rows unchanged (bodies ${stamped ? 'stamped' : 'bound by the column only'}; BEFORE: en-US overwritten by fr-FR)`, async () => {
+      await seed(ALPHA, 'en-US', 1, stamped);
+      await seed(ALPHA, 'fr-FR', 2, stamped);
+      const before = await stored();
+      await prime(manager());
+      expect(await stored()).toEqual(before);
+      expect(driver.update).not.toHaveBeenCalled();
+      expect(driver.create).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it('R4-B: rows bound by the column only — `loadMany` keeps two packages\' same member apart, and the priming pass writes nothing (BEFORE: alpha\'s two only, and a package-less row inserted)', async () => {
+    await seed(ALPHA, 'en-US', 1, false);
+    await seed(ALPHA, 'fr-FR', 2, false);
+    await seed(BETA, 'en-US', 3, false);
+    await seed(BETA, 'fr-FR', 4, false);
+    const m = manager();
+    const items = (await m.loadMany('email_template')) as Array<{ subject: string; _packageId?: string }>;
+    expect(items.map((item) => [item._packageId, item.subject]).sort()).toEqual([
+      [ALPHA, `${ALPHA} en-US`], [ALPHA, `${ALPHA} fr-FR`], [BETA, `${BETA} en-US`], [BETA, `${BETA} fr-FR`],
+    ]);
+    const before = await stored();
+    await prime(m);
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(4);
+  });
+
+  it('a direct save of fr-FR into a slot holding en-US inserts the fr-FR row; the en-US row is untouched; a second fr-FR save updates its own row (BEFORE: the en-US row overwritten)', async () => {
+    await seed(ALPHA, 'en-US', 1, true);
+    const loader = new DatabaseLoader({ driver });
+    await loader.save('email_template', 'welcome', body('fr-FR', ALPHA, true));
+    expect(await stored()).toEqual([[ALPHA, null, `${ALPHA} en-US`], [ALPHA, 'fr-FR', `${ALPHA} fr-FR`]]);
+    await loader.save('email_template', 'welcome', { ...body('fr-FR', ALPHA, true), subject: 'fr again' });
+    expect(await stored()).toEqual([[ALPHA, null, `${ALPHA} en-US`], [ALPHA, 'fr-FR', 'fr again']]);
+  });
+
+  it('CONTROL: an unbundled slotted type (agent) still saves to its one row per slot', async () => {
+    const loader = new DatabaseLoader({ driver });
+    await loader.save('agent', 'helper', { name: 'helper', label: 'v1', _packageId: ALPHA });
+    await loader.save('agent', 'helper', { name: 'helper', label: 'v2', _packageId: ALPHA });
+    expect(await stored('agent')).toEqual([[ALPHA, null, 'v2']]);
+  });
+});
+
+/**
+ * [#31699 R5-A; epic ruling 6801410166] The boot priming pass
+ * (`MetadataPlugin._loadFromFileSystem`, run for real here over a
+ * `DatabaseLoader`) never writes an item back into the loader it read it from;
+ * an item read from another loader still seeds the database loader.
+ *
+ * BEFORE (measured at cfb8f300, same fixtures): a package's `en-US` row beside
+ * a package-less `en-US` row was overwritten with the package-less body
+ * (version 3, one update); beside a package-less `fr-FR` row, a package-bound
+ * copy of it was inserted; a file-system item seeded one row (the same with
+ * the source skip ablated, and after it).
+ */
+describe('[#31699 R5-A] the priming pass never writes back a row it read from the same loader', () => {
+  const ALPHA = 'com.alpha.app';
+  let driver: IDataDriver;
+  const seed = (id: string, packageId: string | null, locale: string, subject: string) =>
+    driver.create('sys_metadata', {
+      id, type: 'email_template', name: 'welcome', state: 'active', version: 1, checksum: id,
+      package_id: packageId, bundle_member: locale === 'en-US' ? null : locale,
+      metadata: JSON.stringify({ name: 'welcome', locale, subject, bodyHtml: '<p/>' }),
+    });
+  const stored = async () =>
+    ((await driver.find('sys_metadata', { where: { type: 'email_template' } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, row.bundle_member ?? null, JSON.parse(row.metadata).subject])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  /** The real pass over `loaders`; the plugin's own file-system loader is kept only with a `rootDir`. */
+  const bootPass = async (loaders: DatabaseLoader[], options: { rootDir?: string; packageId?: string } = {}) => {
+    const plugin = new MetadataPlugin({ ...options, watch: false, config: { bootstrap: 'eager' } });
+    const manager = (plugin as any).manager as MetadataManager;
+    const fileSystem = options.rootDir ? [...(manager as any).loaders.values()] : [];
+    (manager as any).loaders.clear();
+    for (const loader of [...fileSystem, ...loaders]) manager.registerLoader(loader);
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return manager;
+  };
+  /** What the manager's registry holds for `type`. */
+  const registered = (manager: MetadataManager, type: string) => [...((manager as any).registry.get(type)?.values() ?? [])];
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('a package\'s en-US row beside a package-less en-US row: both unchanged, no update, no insert (BEFORE: the package\'s row overwritten)', async () => {
+    await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
+    await seed('env_en', null, 'en-US', 'env older');
+    const before = await stored();
+    await bootPass([new DatabaseLoader({ driver })]);
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('the member-absent neighbour: a package\'s en-US row beside a package-less fr-FR row inserts nothing (BEFORE: a package-bound fr-FR copy inserted)', async () => {
+    await seed('alpha_en', ALPHA, 'en-US', 'alpha own');
+    await seed('env_fr', null, 'fr-FR', 'env fr');
+    const before = await stored();
+    await bootPass([new DatabaseLoader({ driver })]);
+    expect(await stored()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('CONTROL: a file-system item still seeds the database loader', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'r5a-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      writeFileSync(join(rootDir, 'email_template', 'welcome.email-template.json'), JSON.stringify({ name: 'welcome', locale: 'en-US', subject: 'from file', bodyHtml: '<p/>' }));
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      expect(await stored()).toEqual([[ALPHA, null, 'from file']]);
+      expect(vi.mocked(driver.create).mock.calls.map(([table]) => table)).toEqual(['sys_metadata', 'sys_metadata_history']);
+      expect(driver.update).not.toHaveBeenCalled();
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  // [R7-A; epic ruling 6809488921] The one write the skip still lets reach the source loader.
+  const seedAgent = (body: Record<string, unknown>) =>
+    driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'database',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', ...body }),
+    });
+  const agentRow = async () => (await driver.findOne('sys_metadata', { where: { type: 'agent' } } as never)) as Record<string, any>;
+
+  it('[R7-A] an agent legacy row (empty column, stamped body): the column is bound, body, version and history unchanged', async () => {
+    await seedAgent({ _packageId: ALPHA });
+    const before = await agentRow();
+    const manager = await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual({ ...before, package_id: ALPHA });
+    expect(vi.mocked(driver.update).mock.calls).toEqual([['sys_metadata', 'legacy', { package_id: ALPHA }]]);
+    expect(driver.create).toHaveBeenCalledTimes(1);
+    expect(registered(manager, 'agent')).toEqual([{ name: 'helper', label: 'Helper', _packageId: ALPHA, _provenance: 'package' }]);
+  });
+
+  it('[R7-A, R7-B] a package-less row on a host with a packageId stays package-less, no update; the loader\'s cache keeps it unstamped', async () => {
+    await seedAgent({});
+    const before = await agentRow();
+    const loader = new DatabaseLoader({ driver });
+    await bootPass([loader], { packageId: ALPHA });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+    expect(driver.create).toHaveBeenCalledTimes(1);
+    expect(await loader.loadMany('agent')).toEqual([{ name: 'helper', label: 'Helper' }]);
+  });
+
+  // [#32488 item 3, R8-A; contract record 6811135944] The bind takes the loader's own rows only.
+  it('[#32488 item 3] another writer\'s row (source other than database, empty column, copied stamp): never bound (BEFORE: bound to the copied package)', async () => {
+    await driver.create('sys_metadata', {
+      id: 'legacy', type: 'agent', name: 'helper', state: 'active', version: 1, checksum: 'legacy', source: 'api',
+      package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'Helper', _packageId: ALPHA }),
+    });
+    const before = await agentRow();
+    await bootPass([new DatabaseLoader({ driver })], { packageId: 'com.host.app' });
+    expect(await agentRow()).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
+  });
+
+  /**
+   * [#32488 R7-C; epic ruling 6809488921] A file item and the row it seeded
+   * under the host's package: the boot after a file edit registers the file's
+   * body. BEFORE (measured at 27abd458, same fixture): the second boot's
+   * registry held `v1` while the row held `v2` (version 2); the third held `v2`.
+   */
+  it('[#32488 R7-C] a file edited from v1 to v2: the next boot registers v2, and the row it seeded holds v2 (BEFORE: v1 registered)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'r7c-'));
+    try {
+      mkdirSync(join(rootDir, 'email_template'));
+      const file = join(rootDir, 'email_template', 'welcome.email-template.json');
+      const write = (subject: string) => writeFileSync(file, JSON.stringify({ name: 'welcome', locale: 'en-US', subject, bodyHtml: '<p/>' }));
+      write('v1');
+      await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      write('v2');
+      const manager = await bootPass([new DatabaseLoader({ driver })], { rootDir, packageId: ALPHA });
+      expect(registered(manager, 'email_template').map((item) => item.subject)).toEqual(['v2']);
+      expect(((await manager.get('email_template', 'welcome')) as { subject?: string }).subject).toBe('v2');
+      expect(await stored()).toEqual([[ALPHA, null, 'v2']]);
+      const row = (await driver.findOne('sys_metadata', { where: { type: 'email_template' } } as never)) as Record<string, any>;
+      expect(row.version).toBe(2);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * [#32458; #31699 R4-B's shape, epic ruling 6799056319] Every unbundled type
+ * stored per `(package, name)` (`PACKAGE_SLOTTED_STORE_TYPES` less the bundled
+ * ones): `MetadataManager.loadMany` hands a row bound to its package by the
+ * `package_id` column alone on stamped with that package, and a save of a body
+ * that differs from its row only by that stamp writes nothing.
+ *
+ * BEFORE (measured at 27abd458, same fixtures, all five types alike): with two
+ * packages' rows of one name, `loadMany` answered the row saved last unstamped;
+ * registered back without the R5-A source skip, its save inserted a
+ * package-less row (version 3). The real boot pass wrote nothing (R5-A) but
+ * registered that body into the name's package-less slot, or on a host that
+ * declares a `packageId` into the host's slot, so `get(type, name, ALPHA)`
+ * served beta's body, and a read naming a package that holds nothing (the
+ * host's, or any other) served it too.
+ */
+describe('[#32458] an unbundled slotted type\'s rows bound by the column only', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const HOST = 'com.host.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  let driver: IDataDriver;
+
+  // Bound by the `package_id` column; the body names no package (the protocol writes none).
+  const seed = (type: string, packageId: string, version: number) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${packageId}`, type, name: 'helper', state: 'active', version, checksum: `${type}_${packageId}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId }),
+    });
+  const stored = async (type: string) =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, JSON.parse(row.metadata).label, row.version])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  const manager = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  /** The real pass (`MetadataPlugin._loadFromFileSystem`) over one database loader. */
+  const bootPass = async (packageId?: string) => {
+    const plugin = new MetadataPlugin({ ...(packageId ? { packageId } : {}), watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** The package stamp and label a read answers; `undefined` for none. */
+  const read = async (m: MetadataManager, type: string, packageId?: string) => {
+    const item = (await m.get(type, 'helper', packageId)) as { _packageId?: string; label?: string } | undefined;
+    return item && [item._packageId ?? null, item.label];
+  };
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  it('every body loadMany answered is kept: a file-system body its keyed read cannot name, and a row whose name column is empty (BEFORE this PR\'s first head: both dropped)', async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'i32458-'));
+    try {
+      for (const type of UNBUNDLED) {
+        mkdirSync(join(rootDir, type, 'crm'), { recursive: true });
+        writeFileSync(join(rootDir, type, 'flat.json'), JSON.stringify({ name: 'flat', label: 'flat' }));
+        writeFileSync(join(rootDir, type, 'crm', 'nested.json'), JSON.stringify({ label: 'nested nameless' }));
+        writeFileSync(join(rootDir, type, 'extensionless'), JSON.stringify({ label: 'extension-less nameless' }));
+        await driver.create('sys_metadata', {
+          id: `${type}_unnamed`, type, name: null, state: 'active', version: 1, checksum: `${type}_unnamed`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ label: 'empty name column' }),
+        });
+        await seed(type, BETA, 2);
+        const m = new MetadataManager({ formats: ['json'], loaders: [] });
+        m.registerLoader(new FilesystemLoader(rootDir, new Map([['json', new JSONSerializer()]]) as never));
+        m.registerLoader(new DatabaseLoader({ driver }));
+        const labels = ((await m.loadMany(type)) as Array<{ label: string; _packageId?: string }>)
+          .map((item) => [item._packageId ?? null, item.label]);
+        expect(labels).toEqual(expect.arrayContaining([
+          [null, 'flat'], [null, 'nested nameless'], [null, 'extension-less nameless'], [null, 'empty name column'], [BETA, BETA],
+        ]));
+        expect(labels).toHaveLength(5);
+      }
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('the types are taken from the tree', () => {
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission']));
+    expect(UNBUNDLED).not.toContain('email_template');
+  });
+
+  it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
+    for (const type of UNBUNDLED) {
+      for (const strayPackage of [BETA, null]) {
+        driver = createMockDriver();
+        // Row keyed `b` whose body says `name: 'a'` — storable through `save`, which does not refuse a
+        // name that disagrees with its key — beside row `a` bound to ALPHA by the column alone.
+        await driver.create('sys_metadata', {
+          id: `${type}_stray`, type, name: 'b', state: 'active', version: 1, checksum: `${type}_stray`,
+          source: 'database', package_id: strayPackage, metadata: JSON.stringify({ name: 'a', label: 'stray' }),
+        });
+        await driver.create('sys_metadata', {
+          id: `${type}_alpha`, type, name: 'a', state: 'active', version: 2, checksum: `${type}_alpha`,
+          source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'a', label: ALPHA }),
+        });
+        // Main's answer for the name: the body `loadMany` keeps first, unstamped.
+        expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        const m = await bootPass();
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
+      }
+      // Row `a` bound to ALPHA whose own body says `name: 'z'`, beside a row whose `name` column is
+      // empty and whose body says `name: 'a'`: neither body is ALPHA's row's by its name.
+      driver = createMockDriver();
+      await driver.create('sys_metadata', {
+        id: `${type}_alpha`, type, name: 'a', state: 'active', version: 1, checksum: `${type}_alpha`,
+        source: 'database', package_id: ALPHA, metadata: JSON.stringify({ name: 'z', label: ALPHA }),
+      });
+      await driver.create('sys_metadata', {
+        id: `${type}_unkeyed`, type, name: null, state: 'active', version: 2, checksum: `${type}_unkeyed`,
+        source: 'database', package_id: null, metadata: JSON.stringify({ name: 'a', label: 'unkeyed' }),
+      });
+      const items = (await manager().loadMany(type)) as Array<{ label: string; _packageId?: string }>;
+      expect(items.map((item) => [item._packageId ?? null, item.label]))
+        .toEqual(expect.arrayContaining([[null, ALPHA], [null, 'unkeyed']]));
+      expect(items).toHaveLength(2);
+    }
+  });
+
+  for (const type of UNBUNDLED) {
+    it(`${type}: two holders — loadMany stamps the row's package, and registering it back leaves every row unchanged (BEFORE: unstamped, a package-less row inserted)`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      const before = await stored(type);
+      const m = manager();
+      const items = (await m.loadMany(type)) as Array<{ name: string; label: string; _packageId?: string }>;
+      expect(items.map((item) => [item._packageId, item.label])).toEqual([[BETA, BETA]]);
+      for (const item of items) await m.register(type, item.name, item, { notify: false });
+      expect(await stored(type)).toEqual(before);
+      expect((await stored(type)).filter(([packageId]) => packageId === null)).toEqual([]);
+      expect(driver.create).toHaveBeenCalledTimes(2);
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+
+    it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      const before = await stored(type);
+      for (const host of [undefined, HOST]) {
+        const m = await bootPass(host);
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual([`${BETA}\u0000helper`]);
+        expect(await read(m, type, ALPHA)).toEqual([null, ALPHA]);
+        expect(await read(m, type, BETA)).toEqual([BETA, BETA]);
+        expect(await read(m, type, HOST)).toBeUndefined();
+      }
+      expect(await stored(type)).toEqual(before);
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+
+    it(`${type}: a save whose body is its row's plus that row's own package stamp writes nothing`, async () => {
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      const before = await stored(type);
+      await new DatabaseLoader({ driver }).save(type, 'helper', { name: 'helper', label: ALPHA, _packageId: ALPHA });
+      expect(await stored(type)).toEqual(before);
+      expect(driver.update).not.toHaveBeenCalled();
+      expect(driver.create).toHaveBeenCalledTimes(2);
+    });
+
+    it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
+      await seed(type, ALPHA, 1);
+      const before = await stored(type);
+      const m = await bootPass();
+      expect(await read(m, type)).toEqual([ALPHA, ALPHA]);
+      expect(await read(m, type, ALPHA)).toEqual([ALPHA, ALPHA]);
+      expect(await read(m, type, 'com.gamma.app')).toBeUndefined();
+      expect(await stored(type)).toEqual(before);
+      expect(driver.update).not.toHaveBeenCalled();
+    });
+  }
 });

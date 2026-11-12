@@ -48,6 +48,20 @@ import {
     manifestIdRefusal,
 } from '@objectstack/spec/kernel';
 import { planNamespaceRename } from './package-namespace-rename.js';
+import {
+    BatchRowHealError,
+    canJudgeBatchObjects,
+    isBatchObjectType,
+    judgeBatchObjectRegistrations,
+    readActiveBatchRow,
+    registerAdmittedBatchRows,
+    settleBatchObjectRows,
+    syncAdmittedBatchStorage,
+    undoBatchRowWrite,
+    undoOutcomeForLog,
+    type BatchObjectRow,
+    type WrittenBatchRow,
+} from './batch-object-registration.js';
 import { extensionFieldSuffixRefusalError, judgeExtensionFieldSuffix } from './protocol-extension-field-suffix.js';
 import { customizationPairManifestRefusal } from './protocol-customization-package.js';
 import {
@@ -138,7 +152,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#duplicatePackage`; the method's docblock there is its contract. */
-    static async duplicatePackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'installPackage' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'saveMetaItem'>, request: {
+    static async duplicatePackage(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'classifyObjectContribution' | 'convertStoredItem' | 'engine' | 'ensureObjectStorage' | 'findEnvironmentRow' | 'findEnvironmentRows' | 'getOverlayRepo' | 'installPackage' | 'isArtifactBacked' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'restoreArtifactRegistryView' | 'saveMetaItem'>, request: {
             sourcePackageId: string;
             targetPackageId: string;
             targetName?: string;
@@ -387,6 +401,10 @@ export class ProtocolPackageCommitsFacet {
 
         const copied: Array<{ type: string; name: string }> = [];
         const failed: Array<{ type: string; name: string; error: string }> = [];
+        // [#32369] The object rows this copy wrote, judged as one unit once the
+        // loop is done (see the settle below the loop).
+        const writtenObjects: Array<WrittenBatchRow & { source: { type: string; name: string } }> = [];
+        const judging = canJudgeBatchObjects(host);
         // Resolved once for the whole copy: every flow row in this package needs
         // the same engine, and a package with fifty flows should not walk the
         // service table fifty times.
@@ -485,6 +503,12 @@ export class ProtocolPackageCommitsFacet {
                 }
             }
             try {
+                // [#32369] The copy's own address before it writes there: what an
+                // undo puts back if the registry refuses the row (a duplicate
+                // again writes over its earlier copy).
+                const before = judging && isBatchObjectType(singular)
+                    ? await readActiveBatchRow(host, { type: singular, name: newName, packageId: request.targetPackageId })
+                    : null;
                 await host.saveMetaItem({
                     type: row.type,
                     name: newName,
@@ -510,6 +534,27 @@ export class ProtocolPackageCommitsFacet {
                     ...(singular === 'permission' ? { inheritedGrantObjects: storedGrantObjectKeys(body) } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
+                // [#32369] Read back BEFORE the row is answered copied: a read
+                // that fails lands the row in `failed[]` alone (the `catch`
+                // below), never in both lists.
+                if (judging && isBatchObjectType(singular)) {
+                    const stored = await readActiveBatchRow(host, { type: singular, name: newName, packageId: request.targetPackageId });
+                    const address = {
+                        type: singular, name: newName, packageId: request.targetPackageId,
+                        prevVersion: before?.version ?? null,
+                        // The stamp this copy wrote: an undo of a row it created locks on it.
+                        writtenHash: stored?.hash ?? null,
+                    };
+                    writtenObjects.push({
+                        type: singular, name: newName, body: stored?.body ?? rewritten, packageId: request.targetPackageId,
+                        source: { type: row.type, name: row.name },
+                        undo: () => undoBatchRowWrite(host, address, {
+                            ...(request.actor ? { actor: request.actor } : {}),
+                            source: 'protocol.duplicatePackage',
+                            message: `undo the copy of ${row.type}/${row.name}: the registry refuses it (ADR-0144 D2 and D6)`,
+                        }),
+                    });
+                }
                 copied.push({ type: row.type, name: newName });
             } catch (e: any) {
                 // [#8333 · P10] `failed[].error` is copy-response DATA.
@@ -540,6 +585,38 @@ export class ProtocolPackageCommitsFacet {
                 );
             }
         }
+        // [#32369, ADR-0144 D2 and D6] The copied objects as ONE unit, after the
+        // copy's own registrations: a row whose pair the registry refuses — at
+        // its registration (D6's roll-up door, only logged at the write-through)
+        // or once the whole copy is in (the follow door, which no registration
+        // asks) — is taken back out of the copy, its address put back as it was,
+        // and reported here in `failed[]` with the registry's own refusal, never
+        // in `copied[]`. Judged after the loop, not per row, so a row whose pair
+        // a later sibling of this copy completes is copied (#29673). See
+        // `batch-object-registration.ts`.
+        for (const out of await settleBatchObjectRows(host, writtenObjects)) {
+            const at = copied.findIndex((c) => c.name === out.row.name && c.type === out.row.source.type);
+            if (at !== -1) copied.splice(at, 1);
+            const refusal = clientFacingFailureText(out.refusal, 'copy failed');
+            failed.push({
+                type: out.row.source.type,
+                name: out.row.source.name,
+                error: out.undoError === undefined
+                    ? refusal
+                    : out.undoError instanceof BatchRowHealError
+                        ? `${refusal} The copy '${out.row.name}' was taken back, but the registry could not be put back `
+                            + `(${clientFacingFailureText(out.undoError.healError, 'heal failed')}) and may serve it until the server restarts.`
+                        : `${refusal} The copy '${out.row.name}' could not be taken back `
+                            + `(${clientFacingFailureText(out.undoError, 'undo failed')}): it is stored although the registry refuses it; `
+                            + 'delete it, then copy the corrected source again.',
+            });
+            console.warn(
+                `[protocol.duplicatePackage] the copy of ${out.row.source.type}/${out.row.source.name} → `
+                + `'${request.targetPackageId}' was refused by the registry and `
+                + `${undoOutcomeForLog(out.undoError)}: `
+                + `${out.refusal.message}`,
+            );
+        }
         return {
             success: failed.length === 0 && copied.length > 0,
             copiedCount: copied.length,
@@ -551,7 +628,7 @@ export class ProtocolPackageCommitsFacet {
     }
 
     /** The body of `ObjectStackProtocolImplementation#importUnmanagedPackage`; the method's docblock there is its contract. */
-    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'convertStoredItem' | 'engine' | 'installPackage' | 'isRuntimeCreateAllowed' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },): Promise<ImportUnmanagedPackageAnswer> {
+    static async importUnmanagedPackage(host: Pick<ProtocolHost, 'applyRegistryWriteThrough' | 'classifyObjectContribution' | 'convertStoredItem' | 'engine' | 'ensureObjectStorage' | 'findEnvironmentRow' | 'installPackage' | 'isRuntimeCreateAllowed' | 'objectRegistrationRefusal' | 'overlayPackageMismatchError' | 'refuseOrganizationScopedWrite' | 'resolveFlowCanonicalizer' | 'rollBackUnmanagedImport' | 'saveMetaItem' | 'unmanagedImportCollisions'>, request: ImportUnmanagedPackageRequest & { actor?: string; seedData?: boolean },): Promise<ImportUnmanagedPackageAnswer> {
         const rawSourceId = (request as { manifest?: { id?: unknown } } | undefined)?.manifest?.id;
         const sourceLabel = typeof rawSourceId === 'string' && rawSourceId !== '' ? rawSourceId : '(unnamed)';
         // 1. FIRST, as on every package write verb.
@@ -724,6 +801,38 @@ export class ProtocolPackageCommitsFacet {
                 });
             }
         }
+
+        // [#32369, ADR-0144 D2 and D6] The copied objects as ONE unit, once all
+        // of them are in: a row whose pair the registry refuses — at its
+        // registration (D6's roll-up door, only logged at the write-through) or
+        // once the whole copy is in (the follow door, which no registration
+        // asks) — fails the import as a write refusal of that row does, and the
+        // same rollback removes the base, so nothing of the package remains
+        // stored unregistered. Judged after the loop, so a row whose pair a
+        // later item of the package completes installs (#29673). The rows that
+        // pass are registered again in package order, so a row the write-through
+        // refused only because its sibling was not in yet is served.
+        const objectRows: BatchObjectRow[] = [];
+        for (const item of canJudgeBatchObjects(host) ? prepared : []) {
+            const type = PLURAL_TO_SINGULAR[item.type] ?? item.type;
+            if (!isBatchObjectType(type)) continue;
+            const stored = await readActiveBatchRow(host, { type, name: item.name, packageId: targetPackageId });
+            objectRows.push({ type, name: item.name, body: stored?.body ?? item.item, packageId: targetPackageId });
+        }
+        const verdict = judgeBatchObjectRegistrations(host, objectRows);
+        const [refusedAt, refusal] = [...verdict.refused][0] ?? [];
+        if (refusedAt !== undefined && refusal !== undefined) {
+            const failedRow = objectRows[refusedAt]!;
+            throw await host.rollBackUnmanagedImport(refusal, {
+                sourcePackageId,
+                targetPackageId,
+                failed: prepared.find((p) => p.name === failedRow.name && (PLURAL_TO_SINGULAR[p.type] ?? p.type) === failedRow.type) ?? failedRow,
+                copiedCount: copied.length,
+                actor,
+            });
+        }
+        await registerAdmittedBatchRows(host, objectRows, verdict.order);
+        await syncAdmittedBatchStorage(host, objectRows, verdict.order);
 
         return {
             sourcePackageId,

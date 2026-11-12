@@ -28,15 +28,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "通知イベント",
-        help: "外部キー → sys_notification(この行が具現化する L2 イベント)"
+        help: "このメッセージが配信する通知です。メッセージを既読にすると、この通知に対して既読が記録されます。"
       },
       delivery_id: {
         label: "配信レコード",
-        help: "外部キー → sys_notification_delivery(アウトボックス行);P1 までは null"
+        help: "このメッセージの配信記録です。アプリ内メッセージでは入力されません。"
       },
       actor_id: {
-        label: "操作者",
-        help: "イベントを引き起こしたユーザー(メンション者、担当者)。sys_notification.actor_id と同じ意味です。クライアントはローカルな比較だけで自分が発生させた通知を抑制できます。ダイジェスト行は構造上 null:まとめられたグループに単一の操作者は存在しません。"
+        label: "トリガー元",
+        help: "この通知を発生させた操作を行った人です (例: 受信者をメンションまたは割り当てた人)。複数の通知をまとめたメッセージでは空になります。"
       },
       topic: {
         label: "トピック"
@@ -86,11 +86,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "この受領記録が状態を記録している通知です。"
       },
       delivery_id: {
         label: "Delivery",
-        help: "FK → sys_notification_delivery (outbox row); null until P1"
+        help: "この受領記録が属する配信記録です。現在は入力されません。"
       },
       user_id: {
         label: "Recipient User"
@@ -131,7 +131,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       notification_id: {
         label: "Notification Event",
-        help: "FK → sys_notification (L2 event)"
+        help: "この配信が送信する通知です。"
       },
       recipient_id: {
         label: "Recipient",
