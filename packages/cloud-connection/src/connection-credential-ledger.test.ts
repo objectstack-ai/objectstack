@@ -248,6 +248,8 @@ describe('[#31554] the plugin chooses the shared row only for declared replicas 
         const credPath = join(dir, 'cc.json');
         const { ql, raw } = await database({ key: null });
         const grants: Record<string, any[]> = {
+            // A current membership in the organization the session acts in (ADR-0093 D8.1, as amended).
+            sys_member: [{ id: 'mem_1', user_id: 'admin', organization_id: 'o1', role: 'member' }],
             sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'platform_admin', organization_id: 'o1' }],
             sys_permission_set: [{ id: 'ps_1', name: 'platform_admin', system_permissions: ['setup.access', 'manage_platform_settings'] }],
         };
@@ -398,6 +400,7 @@ const REPLICA_SCRIPT = [
     'await ql.syncSchemas();',
     'ql.setCryptoProvider(new LocalCryptoProvider({ key: Buffer.from(keyHex, "hex") }));',
     'const GRANTS = {',
+    '  sys_member: [{ id: "mem_1", user_id: "admin", organization_id: "o1", role: "member" }],',
     '  sys_user_permission_set: [{ id: "ups_1", user_id: "admin", permission_set_id: "ps_1", permission_set: "platform_admin", organization_id: "o1" }],',
     '  sys_permission_set: [{ id: "ps_1", name: "platform_admin", system_permissions: ["setup.access", "manage_platform_settings"] }],',
     '};',

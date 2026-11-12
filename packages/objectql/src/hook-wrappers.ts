@@ -23,7 +23,7 @@ import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutco
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
 import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
-import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, type HookRunAs } from './hook-run-as.js';
+import { hookRunAs, deriveHookApi, deriveAppAuthoredHookApi, seedHookUserGrants, seedHookUnreadMembership, type HookRunAs } from './hook-run-as.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -587,9 +587,10 @@ function installRunAsApi(
   // (#24639), seeded through the resolver the request path uses
   // (`ScopedContext[SEED_USER_GRANTS]`, `hook-run-as.ts`). Cost: one
   // `resolveUserAuthzGrants` per dispatch whose triggering context carries no
-  // `permissions`, no `org_user_ids` or no `email` — the hand-built system
-  // contexts; a request-resolved context carries all three and resolves
-  // nothing (unless its user stores no email: then every such dispatch resolves).
+  // `permissions`, no `org_user_ids`, no `accessible_org_ids` (ADR-0093 D8.1,
+  // as amended) or no `email` — the hand-built system contexts; a
+  // request-resolved context carries all four and resolves nothing (unless
+  // its user stores no email: then every such dispatch resolves).
   return seedHookUserGrants(derived).then(install, (err: unknown) => {
     // Fail-safe, never fail-open — the flow run setup's posture: the hook keeps
     // the unseeded pin, so its data ops run on the context's own grants (the
@@ -598,13 +599,19 @@ function installRunAsApi(
     // (`current_user.org_user_ids`, `current_user.email`) drops out. It sees
     // less, never more. FUNCTIONAL, so `warn`: nothing claimed-persisted
     // failed to land, and the symptom is the hook's own narrower reads.
+    //
+    // [ADR-0093 D8.1, as amended] A membership the hook could not read is
+    // not a current one: a context that carries no membership set takes an
+    // empty one, so the organization wall judges the hook's data ops as it
+    // judges a person who holds none, under every posture.
     logger.warn(
       `[hook] runAs 'user': the triggering user's grants could not be resolved, so this hook's data ops run ` +
         `on the triggering context's own grants (not elevated), and every row policy reading a value that ` +
-        `context does not carry (current_user.email, current_user.org_user_ids) drops out`,
+        `context does not carry (current_user.email, current_user.org_user_ids) drops out; without a ` +
+        `membership it could read, the organization wall refuses its organization-scoped data ops`,
       { hook: hookName, object: ctx.object, event: ctx.event, error: (err as any)?.message },
     );
-    return install(derived);
+    return seedHookUnreadMembership(derived).then(install);
   });
 }
 

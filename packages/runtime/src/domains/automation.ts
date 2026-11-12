@@ -231,6 +231,14 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [ADR-0093 D8.1, as amended] The caller's membership set, already
+    // resolved for this request — forwarded, never re-derived, and forwarded
+    // EMPTY too: an empty set is the answer "no current membership", which the
+    // organization wall reads under every posture. So the run's data operations
+    // are judged by the membership rule as this request is.
+    // `SeededRunContext.accessible_org_ids` (`@objectstack/service-automation`)
+    // names its readers.
+    if (Array.isArray(ec?.accessible_org_ids)) automationContext.accessible_org_ids = [...ec.accessible_org_ids];
     // [#28099] The caller's posture rung, already resolved beside the grants
     // above — forwarded, never re-derived or raised, absent when the request
     // carries none. The run carries those grants, so its setup does not

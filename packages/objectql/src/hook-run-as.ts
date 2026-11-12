@@ -227,7 +227,7 @@ export const SEED_USER_GRANTS: unique symbol = Symbol('objectstack.objectql.hook
  * the refusing {@link UnscopedHookApi} does not, and needs nothing seeded.
  */
 interface UserGrantsSeedableApi {
-  [SEED_USER_GRANTS](): Promise<IScopedContext>;
+  [SEED_USER_GRANTS](opts?: { membershipUnread?: true }): Promise<IScopedContext>;
 }
 
 /**
@@ -241,6 +241,20 @@ export async function seedHookUserGrants(api: unknown): Promise<unknown> {
   const seedable = api as Partial<UserGrantsSeedableApi> | undefined;
   if (!seedable || typeof seedable[SEED_USER_GRANTS] !== 'function') return api;
   return seedable[SEED_USER_GRANTS]();
+}
+
+/**
+ * [ADR-0093 D8.1, as amended] The api a `runAs: 'user'` derivation produced,
+ * after {@link seedHookUserGrants} could not read the user's grants: nothing
+ * is resolved, and a context that carries no membership set takes an empty
+ * one, so the organization wall judges the hook as it judges a person who
+ * holds no current membership. Narrower, never wider. An api that cannot seed
+ * is returned as is.
+ */
+export async function seedHookUnreadMembership(api: unknown): Promise<unknown> {
+  const seedable = api as Partial<UserGrantsSeedableApi> | undefined;
+  if (!seedable || typeof seedable[SEED_USER_GRANTS] !== 'function') return api;
+  return seedable[SEED_USER_GRANTS]({ membershipUnread: true });
 }
 
 /**
