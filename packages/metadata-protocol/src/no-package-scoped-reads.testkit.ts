@@ -21,14 +21,14 @@
  *
  * [#31696] `flow` is the one narrowed type `SchemaRegistry` reads by package
  * (`readsByPackage`): its bare read goes through `resolveItem`, which here is
- * the double's own `getItem` read, as the registry's resolver answers a name
- * one holder (or none) holds.
+ * the double's own `getItem` read (nothing, for a double with none), as the
+ * registry's resolver answers a name one holder (or none) holds.
  */
 export const NO_PACKAGE_SCOPED_READS = Object.freeze({
     readsByPackage: (type: string): boolean => type === 'flow',
-    resolveItem(this: { getItem(type: string, name: string, packageId?: string, member?: string): unknown },
+    resolveItem(this: { getItem?(type: string, name: string, packageId?: string, member?: string): unknown },
         type: string, name: string, callerPackageId?: string | null, member?: string): unknown {
-        return this.getItem(type, name, callerPackageId ?? undefined, member);
+        return typeof this.getItem === 'function' ? this.getItem(type, name, callerPackageId ?? undefined, member) : undefined;
     },
     packageScopedHoldersOf: (_type: string, _name: string): string[] => [],
     getEnvironmentScopedItem: (_type: string, _name: string, _member?: string): unknown => undefined,
