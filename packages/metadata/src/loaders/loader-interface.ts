@@ -238,8 +238,11 @@ export interface MetadataLoader {
    * `register()` — see the note on `save?` above.
    *
    * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
-   * gated: `MetadataManager` never writes to them at runtime, so it never has a
-   * deletion of its own to take back.
+   * gated: `MetadataManager` never saves to them at runtime. `unregister()`
+   * also deletes from a `memory:` loader that implements `delete()` (the
+   * artifact door's store), for every type (#32246, #32353), so that a
+   * removed item stops answering; a `memory:` loader without `delete()` is
+   * skipped, and the `file:`, `http:` and `s3:` loaders are never deleted from.
    *
    * [ADR-0150 D4, #32198] `options.packageId` is passed only when one package's
    * item of a type stored per `(package, name)` is removed while another
