@@ -1,0 +1,24 @@
+---
+'@objectstack/objectql': minor
+---
+
+fix(objectql)!: every reader of the registry's overlay slot binds a row of an App's customization pair to the holder the exact read serves it to (ADR-0150 D4)
+
+Clause-②: yes (narrowing) — one refusal where a registration was admitted before: with the bare-name holders sealed, a package whose only members of an email template's name are locales the App ships none of, while the App's pair stores a row of that locale declaring another package of the App as its base (`overrides.package`), is refused `422 NAMESPACE_CONFLICT` naming the App as an addition to the App's template (#28802), where it was admitted because the pair's row counted as the App's own member. First-party packages in that position: 0.
+Metadata-protocol: narrowed
+
+<!-- adr-0087: not-required (no-migration-prescription) no key of any schema is added, removed, renamed or re-shaped and no stored row changes shape: what moves is which holder a stored pair row binds to in the registry; the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
+
+**BREAKING** for one registration. A package that ships only a locale of an email template the App does not ship, while the App's pair overrides that locale for another package of the App, is now refused as an addition to the App's template: ship a locale the App ships too, or rename the template. Nothing in the workspace is in that position.
+
+`SchemaRegistry`'s per-package overlay slot (`overlaySlotBinding`) read a row stored in a customization pair (`<app>.custom`) by the pair's per-package base only, never by the App whose pair it is (ADR-0146 D3: one pair per App, shared by every package of the App) and never by the base the row declares (`overrides.package`, ADR-0146 D2). The exact read (`?package=`, `pairRowOnAddress` in `@objectstack/metadata-protocol`) has read both since the epic's ruling on #31699 F2; its other readers now bind the row the same way: the holder the row declares, when the pair customizes it; else the App whose own pair it is (#28390 ruling A); else the one package of the App holding the name; else, with two or more, no package. A declaration naming a package the pair does not customize, or one that holds no item of the name, binds it to no package. A row of a pair no holder of the name is customized by keeps its per-package reading.
+
+Moved answers, FROM → TO, with a package X of App A holding the name and a row of `A.custom`:
+
+- `SchemaRegistry#packageScopedHoldersOf`: FROM the pair counted as a holder of its own when the App holds no item of the name TO the pair never a holder. A bare read (`GET /meta/TYPE/NAME`, `resolvePackageScopedName`) of a name one package of the App holds moves FROM `409 RESOURCE_CONFLICT` (`ambiguous-in-environment`, naming X and the pair) TO the row, X's customization (widening); with two packages of the App holding it, the bare read and `?package=A` still refuse `409`, now naming the two packages without the pair.
+- `SchemaRegistry#getPackageScopedItem` naming X: FROM X's own shipped item (none, for an added locale) TO the row, when the row declares X or X is the one package of the App holding the name — what `?package=X` already served. Naming the pair: FROM the row TO none (the pair is no holder; `?package=A.custom` serves the row as before).
+- A holder's bundle members (`bundleMembersHeldBy`, read by the bundle-addition rule of the bare read and of the bare-name gate): FROM the row's locale counted as the App's when the row declares X, and as the pair's when the App holds no item of the name, TO counted as X's (declared, or the one package holding it) or as no holder's (two). The refusal above is this move at the gate.
+- A row declaring a package the pair's holders do not include (one that holds no item of the name, or one the pair does not customize): FROM bound to the App (or to the pair, when the App holds no item of the name) TO no package. `?package=A` moves FROM the row TO the App's own item: the exact read had already judged the row no member of A's address and fallen back to A's registry item, which was the row again. A bare read of a name one package of the App holds moves FROM `409` naming that package and the pair TO that package's own item.
+- `SchemaRegistry#getEnvironmentScopedItem`: unchanged. A pair's row is never the environment's item, before or after (measured on every case above).
+
+Unchanged: apart from the `?package=A` move above, the exact read of every address (`?package=X`, `?package=Y`, `?package=A`, `?package=A.custom`) serves or refuses as before, measured on the protocol for the same cases; the App's own address keeps an undeclared row of its pair (#28390 ruling A); a row stored under a package that holds the name in its own slot, or under a pair whose holders include none it customizes, binds as before.

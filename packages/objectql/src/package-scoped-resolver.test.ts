@@ -511,6 +511,17 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
   });
 
+  it('NARROWING — a later package whose only locale is the one the App\'s pair overrides for X is an addition to the App\'s template, refused naming the App (BASE: admitted, the pair\'s locale counted as the App\'s)', () => {
+    ship('email_template', 'welcome', APP);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitex'), locale: 'fr-FR' }, 'name' as never, X);
+    pairRow('email_template', 'welcome', 'pair', X, 'fr-FR');
+    registry.sealBareNameHolders();
+    const Z = 'com.acme.zeta';
+    registry.installPackage({ ...(manifest(Z, [APP]) as object), type: 'module' } as never, 'code');
+    expect(() => registry.registerItem('email_template', { ...body('email_template', 'welcome', 'zeta'), locale: 'fr-FR' }, 'name' as never, Z))
+      .toThrow(`already held by package "${APP}"`);
+  });
+
   it('unbound with two packages of the App holding the name → neither, and the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
     ship('page', 'home', X);
     ship('page', 'home', Y);
@@ -538,6 +549,15 @@ describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exa
     expect(templateOf(X, 'fr-FR')).toBe('pair template');
     expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X]);
     expect(label(resolve('page', 'home'))).toBe('pair page');
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('a row declaring a package that holds no item of the name binds to no package: the App keeps its own item, X its own (BASE: the App\'s address served the row)', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair', Y);
+    expect([pageOf(APP), pageOf(X), pageOf(Y)]).toEqual(['suite page', 'suitex page', undefined]);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
     expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
   });
 
