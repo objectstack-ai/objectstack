@@ -28,6 +28,8 @@
 // cause is refusing calls no author ever asked to gate — which is what the
 // heuristic cases below exist to catch.
 
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { describe, it, expect, vi } from 'vitest';
 
 import { AI_ACTION_CONFIRMATION_MEMBER } from '@objectstack/spec/contracts';
