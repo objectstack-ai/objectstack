@@ -523,7 +523,12 @@ describe('[#21002] the published door follows the layered read for a shipped flo
             // A registry that reads no type by package (ADR-0150): every by-name read stays
             // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
             // package-scoped type, since it cannot tell how this registry reads it.
-            readsByPackage: () => false,
+            // [#31696] Except the flow, which `SchemaRegistry` reads by package (its
+            // name is scoped to the namespace): a bare read of it resolves through the
+            // package-scoped resolver, here this double's own item.
+            readsByPackage: (type: string) => type === 'flow',
+            resolveItem: (type: string, name: string) =>
+                (type === 'flow' || type === 'flows') && name === SHIPPED ? loaderEntry : undefined,
             registerItem: () => {},
             registerObject: () => {},
             getPackage: installedPackage,
