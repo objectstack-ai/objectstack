@@ -404,6 +404,9 @@ describe('SmtpTransport — a host connect policy', () => {
     connectionTimeout: 20_000,
     greetingTimeout: 20_000,
     socketTimeout: 20_000,
+    // Always on, policy or not: the transport reads no file and fetches no URL for a message.
+    disableFileAccess: true,
+    disableUrlAccess: true,
   };
 
   it('CONTROL: without a policy, nodemailer receives exactly the options it always did', async () => {
