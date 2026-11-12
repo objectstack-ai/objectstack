@@ -414,6 +414,9 @@ const es = {
       tomorrow: "Mañana",
       clear: "Borrar fecha",
       openCalendar: "Abrir calendario",
+      time: "Hora",
+      hour: "Horas",
+      minute: "Minutos",
       invalid:
         "No guardado: «{{value}}» no es una fecha. Escríbela como {{format}} o elígela en el calendario.",
     },

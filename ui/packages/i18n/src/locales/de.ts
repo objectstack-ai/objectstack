@@ -406,6 +406,9 @@ const de = {
       tomorrow: "Morgen",
       clear: "Datum löschen",
       openCalendar: "Kalender öffnen",
+      time: "Uhrzeit",
+      hour: "Stunde",
+      minute: "Minute",
       invalid:
         "Nicht gespeichert: „{{value}}“ ist kein Datum. Geben Sie es als {{format}} ein oder wählen Sie es im Kalender aus.",
     },

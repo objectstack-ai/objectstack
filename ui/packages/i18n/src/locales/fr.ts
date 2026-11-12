@@ -409,6 +409,9 @@ const fr = {
       tomorrow: "Demain",
       clear: "Effacer la date",
       openCalendar: "Ouvrir le calendrier",
+      time: "Heure",
+      hour: "Heures",
+      minute: "Minutes",
       invalid:
         "Non enregistré : « {{value}} » n’est pas une date. Saisissez-la au format {{format}} ou choisissez-la dans le calendrier.",
     },

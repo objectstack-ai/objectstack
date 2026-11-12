@@ -406,6 +406,9 @@ const ja = {
       tomorrow: "明日",
       clear: "日付をクリア",
       openCalendar: "カレンダーを開く",
+      time: "時刻",
+      hour: "時",
+      minute: "分",
       invalid:
         "保存されていません：「{{value}}」は日付ではありません。{{format}} の形式で入力するか、カレンダーから選択してください。",
     },
