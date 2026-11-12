@@ -4460,6 +4460,9 @@ const STUDIO_EN: Record<string, string> = {
   'engine.appNav.empty': 'Empty — click “Add nav item” to start',
   'engine.appNav.emptyReadonly': 'No top-level nav items yet',
   'engine.appNav.item': 'Item {n}',
+  'engine.appNav.incomplete': 'Incomplete',
+  'engine.appNav.incompleteHint':
+    'No target chosen yet. This browser keeps the item here, and the saved navigation leaves it out until a target is chosen.',
   'engine.appNav.itemOne': 'item',
   'engine.appNav.itemOther': 'items',
   // The translation preview, the designer table's last family: held out of S6

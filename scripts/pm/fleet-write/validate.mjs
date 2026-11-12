@@ -135,7 +135,10 @@
  * line, `permission_repository_advisories=write` for a stroke carrying one of
  * them and empty for every other — and `permission_repository_advisories=read`
  * for an `advisory_read` or `advisory_list` stroke, the two rows whose `grant`
- * is lower than `PERMISSIONS` holds. The
+ * is lower than `PERMISSIONS` holds. One more line marks an `advisory_note`
+ * stroke, `advisory_note=yes`, and is empty for every other: the execute step
+ * reads it to carry the relay's note key for that stroke alone (`ops.mjs`,
+ * "The one row that APPENDS to an advisory"). The
  * workflow reads those outputs and never the payload, and `--self-test` pins
  * the list to ONE name for every other op, two for a transfer, the grant to
  * those two rows alone, and the workflow lines that read both.
@@ -272,6 +275,26 @@ import {
   advisoryListProjection,
   advisorySealAad,
   advisoryReadAad,
+  ADVISORY_DESCRIPTION_MAX_CHARS,
+  ADVISORY_NOTE_KEY_ENV,
+  ADVISORY_NOTE_KEY_SECRET,
+  ADVISORY_NOTE_MAX_SEALED_CHARS,
+  ADVISORY_NOTE_MIN_SEALED_CHARS,
+  ADVISORY_NOTE_OPEN_FAILED,
+  ADVISORY_NOTE_OUTPUT,
+  ADVISORY_NOTE_RELAY_PUBLIC_KEY,
+  ADVISORY_NOTE_SEPARATOR,
+  ADVISORY_NOTE_STATES,
+  MAX_ADVISORY_NOTE_BYTES,
+  advisoryNoteDescription,
+  advisoryNoteDigest,
+  advisoryNoteFenceFailures,
+  advisoryNoteKeyFailure,
+  advisoryNoteLandedText,
+  advisoryNoteReadBack,
+  advisoryNoteSealedFailure,
+  openAdvisoryNote,
+  sealAdvisoryNote,
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
@@ -414,6 +437,12 @@ export function validateField(name, value, spec, where) {
     if (why) return `${at} must be one X25519 public key, base64 SPKI DER of exactly ${ADVISORY_READ_PUBLIC_KEY_CHARS} characters — got ${describeQuietly(value)} that ${why}; it is refused here, before any request, and never echoed`;
     return null;
   }
+  if (spec.kind === 'sealed') {
+    // ⛔ Never echoed, and never opened: the validator holds no key — a note's plaintext is not in the payload to judge.
+    const why = advisoryNoteSealedFailure(value);
+    if (why) return `${at} must be one note sealed to the relay's key, base64url of ${ADVISORY_NOTE_MIN_SEALED_CHARS} to ${ADVISORY_NOTE_MAX_SEALED_CHARS} characters — got ${describeQuietly(value)} that ${why}; it is refused here, before any request, and never echoed`;
+    return null;
+  }
   if (spec.kind === 'versions') {
     // ⛔ Never echoed (`FIELDS`' `quiet`): before the publish a package and its versions are the unpublished advisory's.
     if (!Array.isArray(value)) return `${at} must be an array of version entries, got ${describeQuietly(value)}`;
@@ -530,7 +559,7 @@ export function closedInputsErrors(action, declared, where) {
  * such a stroke carries that op alone, names ONE second repository, never
  * `repo` itself, and each card once. The ones whose token carries a grant no
  * other row spends (`alone`, `workflow_dispatch`'s and `run_rerun_failed`'s,
- * the two that spend `actions: write`, and the seven advisory rows', which
+ * the two that spend `actions: write`, and the eight advisory rows', which
  * spend `repository-advisories`): such a stroke carries exactly that one
  * action. Runs only over actions that passed
  * `validateAction`. Pure.
@@ -733,13 +762,17 @@ export function readPayloadSource(opts, { env = process.env, read = (p) => readF
  * The `$GITHUB_OUTPUT` lines the workflow's later steps read. Values are
  * single-line by construction of the validator. One `permission_<name>=` line
  * per stroke-scoped grant: its level when this stroke spends it, EMPTY
- * otherwise — the mint action skips an empty `permission-*` input.
+ * otherwise — the mint action skips an empty `permission-*` input. Then
+ * `advisory_note=yes` for a note's stroke and `advisory_note=` for every other:
+ * the one output the execute step's env reads, to carry the relay's note key.
  */
 export function githubOutputLines(payload) {
   const repositories = tokenRepositoriesOf(payload).map((r) => r.split('/')[1]).join(',');
   const grants = tokenPermissionsOf(payload);
   const scoped = STROKE_SCOPED_PERMISSIONS.map((name) => `permission_${name.replace(/-/g, '_')}=${grants[name] ?? ''}`);
-  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped].join('\n') + '\n';
+  // The note's stroke alone is marked, so the workflow hands the relay's note key to that execute step and no other (header).
+  const note = `${ADVISORY_NOTE_OUTPUT}=${payload.actions.some((a) => a.op === 'advisory_note') ? 'yes' : ''}`;
+  return [`repositories=${repositories}`, `request_id=${payload.request_id}`, `action_count=${payload.actions.length}`, `session=${payload.session}`, ...scoped, note].join('\n') + '\n';
 }
 
 const USAGE = [
@@ -1088,12 +1121,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add, advisory_versions and advisory_state — closed keys, a malformed id, package or versions entry refused before any request, a refusal that names the key and the byte count and never echoes a value, published reached by advisory_state alone, from draft alone and through the versions fence; one request each, the draft's and the versions' bodies naming no state and the two other PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the five read-backs, printing nothing of an answer but the id, the state, the logins and counts": 77,
   "advisory_read: ghsa_id and public_key alone — the key its own kind, an X25519 key in base64 SPKI DER; a malformed key or id refused before any request and never echoed; ONE GET of one advisory; a stroke of its own whose token alone carries repository-advisories READ; the seal opening byte for byte for its own read and key alone, the parts inside the runner's caps, the sender gate's one setting with every other closed, and the fences, printing no id, state or field": 28,
   "advisory_list: public_key alone — no state, page, cursor or query the caller can pass; a stroke of its own whose token alone carries repository-advisories READ under the read's sender gate; the listing page's one path shape per listed state; the next cursor taken only from one rel=next link on this API's collection and this state, in its closed shape; each page fenced; each advisory projected to five fields before the seal; the JSON padded to one constant sealed size, ten parts, whatever the count, and one more advisory than fits refused; the shared associated data, advisory_read's byte for byte; and no id, count, state or cursor in any sentence": 21,
+  "advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text": 22,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery, 15 → 16 with advisory_read's, 16 → 17 with mailbox_branch_delete's,
 // 17 → 18 with advisory_list's, 18 → 19 with pr_enqueue_front's: one battery, one row; 19 → 20 with the workflow
-// table's repository key.
-const SELF_TEST_BATTERY_FLOOR = 20;
+// table's repository key; 20 → 21 with advisory_note's.
+const SELF_TEST_BATTERY_FLOOR = 21;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1148,6 +1182,10 @@ export async function selfTest() {
     return { publicKey: k.publicKey, privateKey: k.privateKey, spki: k.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
   };
   const READER = keyPair();
+  /** A synthetic relay note key pair — ⛔ never the committed one, which only the maintainer makes — and one note sealed to it. */
+  const RELAY = keyPair();
+  const NOTE_TEXT = 'NOTE MARKER: a synthetic analysis line, never to be logged';
+  const NOTE_SEALED = sealAdvisoryNote({ section: NOTE_TEXT, digestKey: Buffer.alloc(32, 7), publicKey: RELAY.spki, aad: advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA }) });
   /** One `$GITHUB_OUTPUT` line of a judged payload, by its name — the scoped grants are two lines, so none is read by position. */
   const outputLine = (payload, name) => githubOutputLines(payload).split('\n').find((l) => l.startsWith(`${name}=`)) ?? null;
 
@@ -1252,6 +1290,7 @@ export async function selfTest() {
       advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     t('every op in the table has a minimal shape this validator accepts', OP_NAMES.filter((op) => !validatePayload(one({ op, ...minimal[op] })).ok), []);
     t('…and the minimal-shape ledger names every op, no more and no less', Object.keys(minimal).sort(), [...OP_NAMES].sort());
@@ -1400,7 +1439,7 @@ export async function selfTest() {
     for (const f of ['missing.json', 'notjson.json', 'event-no-payload.json', 'event-list.json']) unfit.push((await drive(['--from-event'], { [EVENT_PATH_ENV]: f })).code);
     t('--from-event on an unreadable event file, one that is not JSON, one with no client_payload and one whose client_payload is not an object: each exit 3', unfit, [EXIT_PREREQUISITE, EXIT_PREREQUISITE, EXIT_PREREQUISITE, EXIT_PREREQUISITE]);
     const env = await drive(['--from-event', '--github-output'], { [EVENT_PATH_ENV]: 'event.json', GITHUB_OUTPUT: '/out.txt' });
-    t('--from-event --github-output judges the event file\'s client_payload and writes repositories, request_id, action_count, session and an EMPTY permission_actions, permission_repository_advisories and permission_merge_queues to $GITHUB_OUTPUT for a comment', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\npermission_actions=\npermission_repository_advisories=\npermission_merge_queues=\n']);
+    t('--from-event --github-output judges the event file\'s client_payload and writes repositories, request_id, action_count, session and an EMPTY permission_actions, permission_repository_advisories, permission_merge_queues and advisory_note to $GITHUB_OUTPUT for a comment', [env.code, env.appended[0]?.file, env.appended[0]?.text], [EXIT_OK, '/out.txt', 'repositories=objectstack\nrequest_id=fw-20260922T090000Z-abc123\naction_count=1\nsession=session_01ABCDEFGHJKMNPQRSTVWXYZ\npermission_actions=\npermission_repository_advisories=\npermission_merge_queues=\nadvisory_note=\n']);
     t('--github-output without GITHUB_OUTPUT is exit 3', (await drive(['--from-event', '--github-output'], { [EVENT_PATH_ENV]: 'event.json' })).code, EXIT_PREREQUISITE);
     t('⛔ --from-env, the old route through a step\'s logged env, is gone: an unknown flag, usage, nothing judged', [(await drive(['--from-env'], { FLEET_WRITE_PAYLOAD: good })).code, KNOWN_FLAGS.includes('--from-env')], [EXIT_REFUSED, false]);
     t('--json prints the normalised payload as one line after the OK line', JSON.parse((await drive(['--file', 'good.json', '--json'])).out.split('\n')[1]).request_id, 'fw-20260922T090000Z-abc123');
@@ -1445,6 +1484,7 @@ export async function selfTest() {
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1487,7 +1527,7 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: pr_enqueue_front, workflow_dispatch, run_rerun_failed and the seven advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list'], ['transfer']]);
+    t('the only rows that travel alone or widen the token: pr_enqueue_front, workflow_dispatch, run_rerun_failed and the eight advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['pr_enqueue_front', 'workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'], ['transfer']]);
     t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
@@ -1651,6 +1691,7 @@ export async function selfTest() {
       advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_versions: { ghsa_id: GHSA, versions: [VERSION] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
       advisory_read: { ghsa_id: GHSA, public_key: READER.spki },
       advisory_list: { public_key: READER.spki },
+      advisory_note: { ghsa_id: GHSA, sealed_note: NOTE_SEALED },
     };
     const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
     t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
@@ -1848,7 +1889,7 @@ export async function selfTest() {
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
     // The seven rows spending repository-advisories: the five that write, then the two that read (their own batteries below).
-    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list'];
+    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_versions', 'advisory_state', 'advisory_read', 'advisory_list', 'advisory_note'];
     const report = (extra = {}) => ({ op: 'advisory_report', summary: 'A short summary.', description: 'What, where, how to reproduce.', ...extra });
     const draft = (extra = {}) => ({ op: 'advisory_create', summary: 'A short summary.', description: 'What, where, how to reproduce.', packages: ['@objectstack/rest'], ...extra });
     const add = (extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'], ...extra });
@@ -1861,7 +1902,7 @@ export async function selfTest() {
     /** A second release line of the same package — a package may take one entry per line it was fixed on. */
     const LINE_17 = Object.freeze({ package: '@objectstack/rest', vulnerable_version_range: '>= 17.0.0, < 17.9.4', patched_versions: '17.9.4' });
     // The rows and their requests.
-    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions or advisory_state, the read ghsa_id with public_key, and the listing public_key alone; all seven spend repository-advisories alone — the five that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null]]);
+    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other three take ghsa_id with collaborators, versions or advisory_state, the read ghsa_id with public_key, the listing public_key alone, and the note ghsa_id with sealed_note; all eight spend repository-advisories alone — the six that write at write, the two that read at read — travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].grant ?? null, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'versions'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, null, true, null, null], [['ghsa_id', 'public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['public_key'], [], 'repository-advisories', 'read', null, true, null, null], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, null, true, null, null]]);
     t('the fields: summary and description byte-capped strings — 1024 and the body cap; severity GitHub\'s four, quiet; cwe_ids a quiet capped list of CWE ids; ghsa_id its own kind; collaborators a quiet login list capped like assignees; advisory_state a quiet enum of draft, closed and published — by the maintainer\'s ruling no state is refused by name any more', [FIELDS.summary, FIELDS.description.max === FIELDS.body.max, [...FIELDS.severity.values], FIELDS.severity.quiet, [FIELDS.cwe_ids.kind, FIELDS.cwe_ids.max, FIELDS.cwe_ids.shape === CWE_ID_SHAPE, FIELDS.cwe_ids.quiet], FIELDS.ghsa_id, [FIELDS.collaborators.max === FIELDS.assignees.max, FIELDS.collaborators.itemMax === FIELDS.assignees.itemMax, FIELDS.collaborators.shape === LOGIN_SHAPE, FIELDS.collaborators.quiet], [[...FIELDS.advisory_state.values], FIELDS.advisory_state.quiet, Object.keys(FIELDS.advisory_state.named)]], [{ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }, true, ['critical', 'high', 'medium', 'low'], true, ['list', 10, true, true], { kind: 'ghsa' }, [true, true, true, true], [['draft', 'closed', 'published'], true, []]]);
     const filed = OPS.advisory_report.requests(report(), REPO);
     const filedFull = OPS.advisory_report.requests(report({ severity: 'high', cwe_ids: ['CWE-79', 'CWE-352'] }), REPO);
@@ -1976,7 +2017,7 @@ export async function selfTest() {
       return v.ok ? [outputLine(v.payload, 'permission_repository_advisories'), tokenPermissionsOf(v.payload)['repository-advisories'] ?? null] : `refused: ${v.errors.join(' | ')}`;
     };
     t('⛔ fence grant, refused side: every other op — each alone in its stroke, the actions strokes among them, and the stroke of all that share one token — writes an EMPTY permission_repository_advisories and mints no such grant', [others.filter((op) => JSON.stringify(advisoryLine([{ op, ...minimalOf[op] }])) !== JSON.stringify(['permission_repository_advisories=', null])), advisoryLine(others.filter((op) => !OPS[op].secondRepo && !OPS[op].alone).map((op) => ({ op, ...minimalOf[op] })))], [[], ['permission_repository_advisories=', null]]);
-    t('repository-advisories is spent by the seven rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
+    t('repository-advisories is spent by the eight rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-repository-advisories:\s*\$\{\{\s*steps\.validate\.outputs\.permission_repository_advisories\s*\}\}\s*$/gm)].length;
@@ -1986,7 +2027,7 @@ export async function selfTest() {
     const refusedTails = ['/', '?state=draft', '?per_page=100', '?state=published&per_page=100', '?state=withdrawn&per_page=100', '?state=draft&per_page=30', '?state=draft&per_page=100&page=2', '?per_page=100&state=draft', '?state=draft&per_page=100&sort=updated', '?state=draft&per_page=100&direction=asc', '?state=draft&per_page=100&before=abc', '?state=draft&per_page=100&after=', '?state=draft&per_page=100&after=a+b', '?state=draft&per_page=100&after=a/b', '?state=draft&per_page=100&after=a&after=b', `?state=draft&per_page=100&after=${'a'.repeat(ADVISORY_LIST_CURSOR_MAX_CHARS + 1)}`, '?state=draft&per_page=100&state=published', '?state=Draft&per_page=100', '?state=draft&per_page=100#x', '/x', `/${GHSA}/cve`, `/${GHSA}/forks`, `/${GHSA}/`, `/${GHSA.toUpperCase()}`, '/GHSA-abcd-2345', `/${GHSA}x`, '/reports/', '/reportsx', `/reports/${GHSA}`, '/reports/x/cve', 'x'];
     t('⛔ every other security-advisories path is caught by a refused family: the collection with a trailing slash or any query but the listing page\'s own — another state, another page size, a page number, the parameters reordered, sort, direction, before, an empty, raw, repeated or over-long cursor, a second state, a fragment — anything after it but one advisory or the reports endpoint, the CVE request, the temporary fork, anything after the reports endpoint, and any id that is not exactly one advisory\'s', refusedTails.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))), []);
     t('…while the paths a row reaches are caught by none: the bare collection, the reports endpoint, one advisory\'s, and the listing\'s page for each listed state, first and with a cursor', ['', '/reports', `/${GHSA}`].filter((tail) => REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))).concat(ADVISORY_LIST_STATES.flatMap((st) => [advisoryListPagePath(REPO, st), advisoryListPagePath(REPO, st, 'Y3Vyc29y+djI6/A==')]).filter((path) => REFUSED_PATH_FAMILIES.some((re) => re.test(path)))), []);
-    const fillWith = { ...draft({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...setv(), ...move('closed'), public_key: READER.spki };
+    const fillWith = { ...draft({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...setv(), ...move('closed'), public_key: READER.spki, sealed_note: NOTE_SEALED };
     const every = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) {
@@ -1995,7 +2036,7 @@ export async function selfTest() {
       }
       return OPS[op].requests(a, REPO).map((r) => ({ op, ...r }));
     });
-    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the three PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`]);
+    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection, the four PATCHes of one advisory, the read\'s GET of that one advisory and the listing\'s GET of the collection — whose pages the executor spells, in the listing shape alone', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_versions PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_read GET /repos/${REPO}/security-advisories/${GHSA}`, `advisory_list GET /repos/${REPO}/security-advisories`, `advisory_note PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
     // ⛔ published: reachable by no row — not as a value, not through any body.
     const everyValue = OP_NAMES.flatMap((op) =>
       [...OPS[op].required, ...OPS[op].optional]
@@ -2280,6 +2321,101 @@ export async function selfTest() {
     t('⛔ every sentence a listing prints names no id, no state word, no severity, no digit but its own caps and statuses, and no marker — the landed row says it landed and nothing more', [sentences.filter((x) => /GHSA|\b(?:triage|draft|closed|published|critical|high|medium|low)\b|ADVISORY LIST MARKER/.test(x)), ADVISORY_LIST_LANDED, sentences.flatMap((x) => x.match(/\d+/g) ?? []).filter((d) => !['3', '29939', '10', '200', '404', '403'].includes(d))], [[], "sealed the listing to the seat's one-time key, padded to the run's full notice size so its length says nothing — only that seat's process opens it", []]);
   }
 
+  // ── advisory_note: the one row that appends to an advisory, sealed inbound ─────────────
+  battery("advisory_note: ghsa_id and sealed_note alone — the note its own kind, ciphertext of a capped length in canonical base64url, refused before any request and never echoed or opened here; ONE PATCH of one advisory whose body is the executor's; a stroke of its own minting repository-advisories write and marked advisory_note=yes, EMPTY for every other; the workflow handing the relay's note key to the execute step for that stroke alone, and no artifact; the seal opening for its own request, action, advisory and key alone and never as a read; the key judged against the committed half; the fences, the description, the read-back and the keyed digest, printing no byte of either text");
+  {
+    const { createHash, createHmac } = await import('node:crypto');
+    const REPO = `${TARGET_OWNER}/objectstack`;
+    const MARKER = 'NOTE MARKER';
+    const note = (extra = {}) => ({ op: 'advisory_note', ghsa_id: GHSA, sealed_note: NOTE_SEALED, ...extra });
+    const one = (action) => fixturePayload({ actions: [action] });
+    const aad = (over = {}) => advisorySealAad({ requestId: 'fw-test-1', action: 1, op: 'advisory_note', ghsaId: GHSA, ...over });
+    const opens = (sealed, { key = RELAY.privateKey, ...over } = {}) => {
+      try {
+        return openAdvisoryNote({ sealed, privateKey: key, aad: aad(over) }).section;
+      } catch (e) {
+        return e.message === ADVISORY_NOTE_OPEN_FAILED ? 'refused' : `threw: ${e.message}`;
+      }
+    };
+    // The row and the field.
+    t('the row: ghsa_id and sealed_note, nothing optional; repository-advisories at write (no grant of its own), alone, no gate of its own (the stroke\'s target-write), no second repository, nothing else spent; sealed_note is its own kind', [OPS.advisory_note.required, OPS.advisory_note.optional, OPS.advisory_note.permission, OPS.advisory_note.grant ?? null, OPS.advisory_note.alone, OPS.advisory_note.senderGate ?? null, OPS.advisory_note.secondRepo ?? null, OPS.advisory_note.alsoSpends ?? null, FIELDS.sealed_note], [['ghsa_id', 'sealed_note'], [], 'repository-advisories', null, true, null, null, null, { kind: 'sealed' }]);
+    const req = OPS.advisory_note.requests(note(), REPO);
+    t('its ONE request is a PATCH of that one advisory carrying the id and the ciphertext to the executor — and NO body: the description is the executor\'s, spelled after its reads', [req.length, req[0].verb, req[0].path, req[0].advisoryNote, 'body' in req[0]], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, { ghsaId: GHSA, sealedNote: NOTE_SEALED }, false]);
+    // The caps.
+    const maxSeal = sealAdvisoryNote({ section: 'x'.repeat(MAX_ADVISORY_NOTE_BYTES), digestKey: Buffer.alloc(32, 1), publicKey: RELAY.spki, aad: aad() });
+    const maxPayload = validatePayload(one(note({ sealed_note: maxSeal })));
+    t("the caps: a section of at most 30,000 bytes, sealed to 126..40,124 characters — the largest note's seal is exactly the cap, accepted, and its whole payload stays under the platform's 64 KiB", [MAX_ADVISORY_NOTE_BYTES, ADVISORY_NOTE_MIN_SEALED_CHARS, ADVISORY_NOTE_MAX_SEALED_CHARS, maxSeal.length, maxPayload.ok, Buffer.byteLength(JSON.stringify(maxPayload.payload ?? {}), 'utf8') < CLIENT_PAYLOAD_MAX_BYTES], [30_000, 126, 40_124, ADVISORY_NOTE_MAX_SEALED_CHARS, true, true]);
+    const accepted = validatePayload(one(note()));
+    t('⭐ accepted: the id and a seal — the normalised payload carries the ciphertext unchanged and nothing else of the note', [accepted.ok, accepted.payload?.actions?.[0], NOTE_SEALED.includes('NOTE'), JSON.stringify(accepted.payload).includes(NOTE_TEXT)], [true, note(), false, false]);
+    // ⛔ Refused before the dispatch, never echoed.
+    const flipped = `${NOTE_SEALED.slice(0, -1)}${NOTE_SEALED.endsWith('A') ? 'B' : 'A'}`;
+    const offVersion = Buffer.from(NOTE_SEALED, 'base64url');
+    offVersion[0] = 2;
+    const refusedShapes = [
+      [`${MARKER} ${'the plaintext note, put in the wrong key '.repeat(4)}`, 'is not base64url'],
+      ['AAAA', 'is not 126 to 40124 characters long'],
+      [`${NOTE_SEALED}${'A'.repeat(ADVISORY_NOTE_MAX_SEALED_CHARS)}`, 'is not 126 to 40124 characters long'],
+      [`${NOTE_SEALED.slice(0, -2)}==`, 'is not base64url'],
+      [offVersion.toString('base64url'), 'does not open with the seal version'],
+      [7, 'is not a string'],
+    ];
+    const refusals = refusedShapes.map(([value, why]) => {
+      const v = validatePayload(one(note({ sealed_note: value })));
+      return [v.ok, v.errors.some((e) => e.includes('actions[0].sealed_note must be one note sealed to the relay') && e.includes(why)), v.errors.some((e) => e.includes(MARKER) || (typeof value === 'string' && value.length > 8 && e.includes(value)))];
+    });
+    t('⛔ refused before any request, the value NEVER echoed: plaintext put in the key, too short, too long, padded, another version, a number — each naming what it failed to be', refusals, refusedShapes.map(() => [false, true, false]));
+    t('…a tampered seal of the right shape passes HERE — the validator holds no key and opens nothing — and is the executor\'s to refuse at the open', [advisoryNoteSealedFailure(flipped) === null || advisoryNoteSealedFailure(flipped) === 'is not canonical base64url', opens(flipped)], [true, 'refused']);
+    t('⛔ the actions file\'s own keys never reach the payload: note_file, a plaintext note or a public key beside the seal are refused as keys the row does not take', ['note_file', 'note', 'body', 'public_key'].map((k) => validatePayload(one(note({ [k]: k === 'public_key' ? READER.spki : 'x' }))).errors.some((e) => e.includes(`actions[0].${k} is not a key \`advisory_note\` takes`))), [true, true, true, true]);
+    t('⛔ alone: a note beside a comment, and two notes, are each refused — one note per stroke', [refuses(fixturePayload({ actions: [note(), { op: 'comment', issue: 1, body: 'x' }] }), 'a stroke carries exactly ONE `advisory_note` and nothing else'), refuses(fixturePayload({ actions: [note(), note()] }), 'a stroke carries exactly ONE `advisory_note` and nothing else')], [true, true]);
+    // The grant and the mark.
+    const p = accepted.payload;
+    t('⭐ the grant and the mark: its stroke mints the five literal grants plus repository-advisories WRITE for ONE repository, and the GitHub output marks it advisory_note=yes — and EMPTY for a comment, a read and a state move', [tokenPermissionsOf(p), tokenRepositoriesOf(p), outputLine(p, 'permission_repository_advisories'), outputLine(p, ADVISORY_NOTE_OUTPUT), [one({ op: 'comment', issue: 1, body: 'b' }), one({ op: 'advisory_read', ghsa_id: GHSA, public_key: READER.spki }), one({ op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' })].map((x) => outputLine(validatePayload(x).payload, ADVISORY_NOTE_OUTPUT))], [{ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'repository-advisories': 'write' }, [REPO], 'permission_repository_advisories=write', 'advisory_note=yes', ['advisory_note=', 'advisory_note=', 'advisory_note=']]);
+    // The workflow: the key for the note's stroke alone, in the execute step alone, and nothing uploaded.
+    const workflowText = readFileSync(resolve(SELF_PATH, '../../../..', '.github/workflows/fleet-write.yml'), 'utf8');
+    const live = workflowText.split('\n').filter((l) => !/^\s*#/.test(l));
+    const naming = live.filter((l) => l.includes(ADVISORY_NOTE_KEY_SECRET) || l.includes(ADVISORY_NOTE_KEY_ENV));
+    const steps = workflowText.split(/\n\s+- name: /).slice(1);
+    const holders = steps.filter((st) => st.includes(ADVISORY_NOTE_KEY_SECRET)).map((st) => st.split('\n')[0]);
+    t("⭐ the workflow: ONE live line names the relay's note key — the execute step's env, the secret behind the validator's advisory_note=yes and an EMPTY value for every other stroke — in that step alone, which runs the executor", [naming.map((l) => l.trim()), holders, steps.find((st) => st.includes(ADVISORY_NOTE_KEY_SECRET))?.includes('run: node scripts/pm/fleet-write/execute.mjs')], [[`${ADVISORY_NOTE_KEY_ENV}: \${{ steps.validate.outputs.${ADVISORY_NOTE_OUTPUT} == 'yes' && secrets.${ADVISORY_NOTE_KEY_SECRET} || '' }}`], ['Execute the actions as the fleet (sender gate first, stop at the first failure)'], true]);
+    t('⛔ …and the run keeps nothing a reader could fetch later: no artifact upload and no cache step, and still no client_payload in any step env', [/upload-artifact|actions\/cache/.test(live.join('\n')), payloadInStepEnv(workflowText)], [false, []]);
+    // The seal.
+    const opened = openAdvisoryNote({ sealed: NOTE_SEALED, privateKey: RELAY.privateKey, aad: aad() });
+    t('⭐ the seal opens with the relay\'s key to the section BYTE FOR BYTE and the seat\'s digest key — and the ciphertext alone carries no byte of the note, as characters or decoded, while the opened text does (the positive control)', [opened.section === NOTE_TEXT, opened.digestKey.equals(Buffer.alloc(32, 7)), NOTE_SEALED.includes('MARKER'), Buffer.from(NOTE_SEALED, 'base64url').includes(Buffer.from('NOTE MARKER')), opened.section.includes('NOTE MARKER')], [true, true, false, false, true]);
+    t('⛔ it opens for ITS request, action, advisory and key alone: another key, request, action or id is refused, and so is the read\'s own open under the same key and data — the two directions never cross', [opens(NOTE_SEALED, { key: READER.privateKey }), opens(NOTE_SEALED, { requestId: 'fw-test-2' }), opens(NOTE_SEALED, { action: 2 }), opens(NOTE_SEALED, { ghsaId: 'GHSA-wxyz-2345-abcd' }), (() => {
+      try {
+        openAdvisoryRead({ sealed: NOTE_SEALED, privateKey: RELAY.privateKey, aad: aad() });
+        return 'opened';
+      } catch {
+        return 'refused';
+      }
+    })(), opens(sealAdvisoryRead({ plaintext: `${'k'.repeat(32)}${NOTE_TEXT}`, publicKey: RELAY.spki, aad: aad() }))], ['refused', 'refused', 'refused', 'refused', 'refused', 'refused']);
+    t("the associated data: the note's own label, the request, the action, the op and the id — and the read's and the listing's unchanged beside it", [aad().toString('utf8'), advisorySealAad({ requestId: 'r', action: 1, op: 'advisory_read', ghsaId: GHSA }).equals(advisoryReadAad({ requestId: 'r', action: 1, ghsaId: GHSA }))], [`fleet-write:advisory_note:v1 request=fw-test-1 action=1 op=advisory_note ghsa_id=${GHSA}`, true]);
+    // The key.
+    const RELAY_TEXT = RELAY.privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64');
+    const keyWhys = [advisoryNoteKeyFailure(RELAY_TEXT, null), advisoryNoteKeyFailure(RELAY_TEXT, RELAY.spki), advisoryNoteKeyFailure(RELAY_TEXT, READER.spki), advisoryNoteKeyFailure('', RELAY.spki), advisoryNoteKeyFailure(`${MARKER} not a key`, RELAY.spki), advisoryNoteKeyFailure(RELAY_TEXT, 'x')];
+    t("the key: a pair made as one passes; a null committed half, the other seat's half, no secret, prose and a committed half that is no key are each named — and no reason carries either key", [keyWhys.map((w) => w === null), keyWhys[0]?.includes('is not committed'), keyWhys[2]?.includes("public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY"), keyWhys.some((w) => w && (w.includes(RELAY_TEXT) || w.includes(MARKER) || w.includes(RELAY.spki)))], [[false, true, false, false, false, false], true, true, false]);
+    t("⛔ the committed half is the maintainer's one X25519 public key in its one spelling — never null or anything else — and it is the judge's default: a synthetic secret is refused as another pair's, never as a missing half", [typeof ADVISORY_NOTE_RELAY_PUBLIC_KEY === 'string' && advisoryReadKeyFailure(ADVISORY_NOTE_RELAY_PUBLIC_KEY) === null, advisoryNoteKeyFailure(RELAY_TEXT)?.includes('public half is not the committed ADVISORY_NOTE_RELAY_PUBLIC_KEY')], [true, true]);
+    // The fences.
+    const answer = (json, status = 200) => ({ status, json: { ghsa_id: GHSA, state: 'draft', description: `${MARKER} the finder's text`, ...json } });
+    const fence = (a) => advisoryNoteFenceFailures({ ghsaId: GHSA, answer: a, from: ADVISORY_NOTE_STATES }).map((f) => f.fence);
+    t('the fences: triage, draft and closed pass, a null description too; published and withdrawn fail the state fence, another advisory the advisory fence, a 404 every fence after the read, a description that is not text its own', [['triage', 'draft', 'closed'].map((state) => fence(answer({ state }))), fence(answer({ description: null })), fence(answer({ state: 'published' })), fence(answer({ state: 'withdrawn' })), fence(answer({ ghsa_id: 'GHSA-wxyz-2345-abcd' })), fence({ status: 404, json: { message: 'Not Found' } }), fence(answer({ description: { x: 1 } }))], [[[], [], []], [], ['state'], ['state'], ['advisory'], ['read', 'advisory', 'state', 'description'], ['description']]);
+    t("…the state fence names what a note never touches, and the other rows' sentence is unchanged", [advisoryFenceText(advisoryNoteFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }), from: ADVISORY_NOTE_STATES })), advisoryFenceFailures({ ghsaId: GHSA, answer: answer({ state: 'published' }) })[0]?.wants], ['fence `state`: the advisory reads state published, and the relay writes only to an unpublished advisory — state triage or draft or closed; never published or withdrawn', 'an unpublished advisory — state triage or draft; never published, closed or withdrawn']);
+    // The description and the read-back.
+    const SECTION = `domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ\n2026-11-12T04:00:00Z\n\n${MARKER} the analysis`;
+    const EXISTING = `${MARKER} the finder's text\n`;
+    const sent = advisoryNoteDescription(EXISTING, SECTION);
+    t('APPEND ONLY: the description sent is the text read, byte for byte, then the separator and the section — or the section alone on an empty one', [sent.startsWith(EXISTING), sent === `${EXISTING}${ADVISORY_NOTE_SEPARATOR}${SECTION}`, advisoryNoteDescription('', SECTION) === SECTION, ADVISORY_NOTE_SEPARATOR, ADVISORY_DESCRIPTION_MAX_CHARS], [true, true, true, '\n\n---\n\n', 65_535]);
+    const back = (description, status = 200, extra = {}) => advisoryNoteReadBack({ ghsaId: GHSA, expected: sent, section: SECTION, answer: { status, json: { ghsa_id: GHSA, state: 'draft', description, ...extra } } });
+    const backs = [back(sent), back(`${EXISTING}x${ADVISORY_NOTE_SEPARATOR}${SECTION}`), back(`${sent} `), back(EXISTING), back(sent, 422), back(sent, 200, { ghsa_id: 'GHSA-wxyz-2345-abcd' })];
+    t('the read-back: exactly the description sent lands; other text before the section is a raced write; a byte after it or no section is not stored as sent; a refusal or another advisory is no read-back — and no reason carries a byte of either text', [backs.map((b) => b.ok), backs[1].why.includes('another write raced this one'), backs[2].why.includes('does not end with the section'), backs.some((b) => b.why.includes(MARKER))], [[true, false, false, false, false, false], true, true, false]);
+    // The digest and the row.
+    const KEY = Buffer.alloc(32, 9);
+    const digest = advisoryNoteDigest({ digestKey: KEY, section: SECTION });
+    t("the keyed digest: HMAC-SHA256 of the section under the seat's digest key, 64 hex — never the bare SHA-256 a reader could test a guess against, and another key's differs", [digest === createHmac('sha256', KEY).update(SECTION, 'utf8').digest('hex'), /^[0-9a-f]{64}$/.test(digest), digest === createHash('sha256').update(SECTION, 'utf8').digest('hex'), digest === advisoryNoteDigest({ digestKey: Buffer.alloc(32, 8), section: SECTION })], [true, true, false, false]);
+    const landed = advisoryNoteLandedText({ ghsaId: GHSA, state: 'draft', existingBytes: 30, sectionBytes: 90, storedBytes: 127, digest });
+    t('⛔ the landed row: the id, the state, three byte counts and the keyed digest — no byte of the note or the description', [landed, landed.includes(MARKER)], [`${GHSA} · state draft · appended a 90-byte note to a 30-byte description — 127 bytes stored, read back byte for byte · keyed digest ${digest}`, false]);
+  }
+
   // ── the floor, BEFORE the verdict ─────────────────────────────────────────
   const declared = Object.keys(SELF_TEST_BATTERIES);
   const floor = [];
@@ -2319,7 +2455,9 @@ export async function selfTest() {
       'repository-advisories write minted for that one stroke, the bare collection reached by the draft\'s POST alone, and no other advisory path; ' +
       'and one that reads — advisory_read, alone in its stroke, its token at repository-advisories READ, the seat\'s one-time key judged before any request ' +
       'and never echoed, its answer sealed to that key and opening for that read alone; and one that lists — advisory_list, public_key alone, ' +
-      'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way.',
+      'three states walked on the platform\'s own cursor under a page cap, five fields each, padded to one sealed size and sealed the same way; ' +
+      'and one that appends — advisory_note, its note sealed to the relay\'s own key, judged by shape and never opened or echoed here, ' +
+      'the key reaching the execute step for that stroke alone.',
   );
   selfTestReachedVerdict = true;
   return 0;

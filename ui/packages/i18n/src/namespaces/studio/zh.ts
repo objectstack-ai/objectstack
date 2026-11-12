@@ -4005,6 +4005,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.appNav.empty': '还没有导航项 — 点「添加导航项」开始',
   'engine.appNav.emptyReadonly': '还没有顶层导航项',
   'engine.appNav.item': '导航项 {n}',
+  'engine.appNav.incomplete': '未完成',
+  'engine.appNav.incompleteHint': '尚未选择目标。当前浏览器会保留此项，选定目标前它不会写入已保存的导航。',
   'engine.appNav.itemOne': '项',
   'engine.appNav.itemOther': '项',
   // The translation preview, the designer table's last family: held out of S6

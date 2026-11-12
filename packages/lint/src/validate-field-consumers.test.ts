@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { CubeSchema } from '@objectstack/spec/data';
 import { DatasetSchema } from '@objectstack/spec/ui';
+import { PermissionSetSchema } from '@objectstack/spec/security';
 import {
   CARRIER_ROOTS,
   CONSUMER_ROOTS,
@@ -1669,6 +1670,67 @@ describe('[#32256] validateFieldConsumers — an inline grid reads its line-posi
     (s.objects as AnyRec[])[0].fields = { name: { type: 'text' }, position: { type: 'number' } };
     expect(reported(s)).toEqual(['sort_order']);
     expect(reported(s, 'ord')).toEqual(['position']);
+  });
+});
+
+describe('[#32282] validateFieldConsumers — a field permission\'s row condition reads the fields it names', () => {
+  /** `status` is what the conditions below read; `region` is the field each entry grants on. */
+  const stack = (fields: AnyRec, permissions?: unknown): AnyRec => ({
+    objects: [
+      { name: 'inv', fields: { name: { type: 'text' }, status: { type: 'text' }, owner: { type: 'text' }, region: { type: 'text' } } },
+      { name: 'other', fields: { name: { type: 'text' }, status: { type: 'text' } } },
+    ],
+    views: [{ list: { data: { object: 'inv' }, columns: [] } }, { list: { data: { object: 'other' }, columns: [] } }],
+    permissions: permissions ?? [{ name: 'approver', objects: { inv: { allowRead: true, allowEdit: true } }, fields }],
+  });
+  const LOCKED = { editable: true, when: "status in ['draft', 'submitted']" };
+
+  /** The `object.field` of every finding, sorted. */
+  const reported = (s: AnyRec): string[] =>
+    validateFieldConsumers(s).map((f) => `${f.object}.${f.field}`).sort();
+
+  it('the fixture is a field permission the spec accepts, `when` and all', () => {
+    const set = (stack({ 'inv.region': LOCKED }).permissions as AnyRec[])[0];
+    expect(PermissionSetSchema.safeParse(set).success).toBe(true);
+  });
+
+  it('baseline: with no condition, `status` is reported', () => {
+    expect(reported(stack({ 'inv.region': { editable: true } }))).toEqual(
+      ['inv.owner', 'inv.region', 'inv.status', 'other.status'],
+    );
+  });
+
+  it('a field read only by a `when` is not reported', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).not.toContain('inv.status');
+  });
+
+  it('⛔ a field named only as the grant target still is', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).toEqual(['inv.owner', 'inv.region', 'other.status']);
+  });
+
+  it('every field a compound condition names is read', () => {
+    const both = { editable: true, when: "status == 'draft' && owner == current_user.email" };
+    expect(reported(stack({ 'inv.region': both }))).toEqual(['inv.region', 'other.status']);
+  });
+
+  it('a name-keyed permission set map reads the same way', () => {
+    const s = stack({}, { approver: { name: 'approver', objects: { inv: { allowRead: true } }, fields: { 'inv.region': LOCKED } } });
+    expect(reported(s)).toEqual(['inv.owner', 'inv.region', 'other.status']);
+  });
+
+  it('a condition that names its own grant target reads it', () => {
+    expect(reported(stack({ 'inv.status': { editable: true, when: "status == 'draft'" } }))).toEqual(
+      ['inv.owner', 'inv.region', 'other.status'],
+    );
+  });
+
+  it('⛔ a condition credits only the object its key names, never another declaring the same name', () => {
+    expect(reported(stack({ 'inv.region': LOCKED }))).toContain('other.status');
+  });
+
+  it('⛔ an unqualified key names no object, so its condition is read against none', () => {
+    // `getFieldPermissions` keeps only `"<object>.<field>"` keys, so this entry votes nowhere.
+    expect(reported(stack({ region: LOCKED }))).toContain('inv.status');
   });
 });
 
