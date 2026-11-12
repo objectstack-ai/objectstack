@@ -444,8 +444,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
       + '(Deactivate on the position and permission-set pages), which calls the platform API directly; adding a client method '
       + 'reclassifies this row to `sdk`. Pinned in `domains/catalog-activation-door.test.ts` and '
       + '`qa/dogfood/test/catalog-activation-door.dogfood.test.ts`' },
+  // #31699 PR 2: the namespace address of a declared webhook's activation door.
   { route: 'POST /security/_activation/webhook/:ns/:name', domain: '/security', disposition: 'server-only',
-    note: '[ADR-0150 D5, #31699 PR 2] The row above, for ONE namespace\'s declared webhook: two packages of two namespaces may '
+    note: '[ADR-0150 D5] The row above, for ONE namespace\'s declared webhook: two packages of two namespaces may '
       + 'declare a webhook of one name, and the bare `webhook/:name` refuses that name 409 naming both. `:ns` names the holder '
       + 'among the packages of that namespace (the registry\'s `getNamespaceOwners`); two co-owners holding the name are 409 '
       + '`ambiguous-in-namespace`, none is 409 `not-held-by-qualifier` naming the holders, or 404 when nothing declares it. '
