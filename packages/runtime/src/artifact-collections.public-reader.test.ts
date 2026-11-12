@@ -84,7 +84,7 @@ describe('resolveArtifactCollections — the public reader of a composed suite (
         // The flat baseline, taken where the single-app rule leaves it alone
         // (see the header): the same inputs without their apps.
         const flat = composeStacks(suite(false).map(define)) as Record<string, any[]>;
-        const byName = (entries: any[]) => [...entries].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+        const byName = (entries: any[] | undefined) => [...(entries ?? [])].sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
         for (const key of ['objects', 'flows', 'hooks'] as const) {
             expect(byName(read[key]), key).toEqual(byName(flat[key]));
