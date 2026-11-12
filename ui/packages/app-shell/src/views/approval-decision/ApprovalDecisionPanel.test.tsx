@@ -32,7 +32,7 @@
 
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 
 const barProps: Array<Record<string, unknown>> = [];
 vi.mock('../DeclaredActionsBar.js', () => ({
@@ -335,7 +335,9 @@ describe('names who the pending step waits on (objectui#12482)', () => {
     expect(screen.queryByTestId('approval-decision-pending-approvers')).toBeNull();
     expect(within(screen.getByTestId('approval-decision-panel')).queryByText(/Dev Admin/)).toBeNull();
     expect(ensureType).not.toHaveBeenCalled();
-    expect(adapter.find).not.toHaveBeenCalled();
+    // No directory read: the one read a decided request makes is its own
+    // thread, for the decision comment (objectstack#32667).
+    expect(adapter.find.mock.calls.map(([objectName]: [string]) => objectName)).toEqual(['sys_approval_action']);
   });
 
   it('a first_response node, which carries no tally, still names who it waits on', () => {
@@ -351,31 +353,32 @@ describe('names who the pending step waits on (objectui#12482)', () => {
 });
 
 describe("a decided request's own decision comment is on the panel the reader lands on (objectstack#32667)", () => {
-  const fetchStub = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>();
-  beforeEach(() => {
-    fetchStub.mockReset();
-    vi.stubGlobal('fetch', fetchStub);
-  });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  const find = vi.fn<(objectName: string, params?: Record<string, unknown>) => Promise<{ data: unknown[] }>>();
+  beforeEach(() => find.mockReset());
 
-  /** `GET /approvals/requests/:id/actions` answers `rows`, oldest first, as the route serves them. */
+  /** The page's data source answers the request's thread `rows`, newest first, as the Timeline tab reads it. */
   function timeline(rows: Array<Record<string, unknown>>) {
-    fetchStub.mockImplementation(async () =>
-      new Response(JSON.stringify({ data: rows }), { status: 200, headers: { 'content-type': 'application/json' } }),
-    );
+    find.mockImplementation(async () => ({ data: rows }));
   }
-  const actionReads = () =>
-    fetchStub.mock.calls.map(([input]) => String(input)).filter((url) => url.endsWith(`/approvals/requests/${REQUEST.id}/actions`));
+  const threadReads = () => find.mock.calls.filter(([objectName]) => objectName === 'sys_approval_action');
   const mountDecided = (status: string) =>
-    mountOn('sys_approval_request', { ...REQUEST, status, decision_progress: undefined, pending_approvers: [] });
+    render(
+      <AdapterCtx.Provider value={{ find } as never}>
+        <RecordContextProvider
+          objectName="sys_approval_request"
+          recordId={REQUEST.id}
+          data={{ ...REQUEST, status, decision_progress: undefined, pending_approvers: [] }}
+        >
+          <ApprovalDecisionRenderer />
+        </RecordContextProvider>
+      </AdapterCtx.Provider>,
+    );
 
-  it('a rejected request shows the rejection comment, and who rejected it, above the tabs', async () => {
+  it("a rejected request shows the rejection comment, and who rejected it, read from the request's own thread", async () => {
     timeline([
-      { id: 'a1', request_id: REQUEST.id, action: 'submit', actor_id: 'u9', comment: 'Please approve', created_at: '2026-11-01T09:00:00Z' },
-      { id: 'a2', request_id: REQUEST.id, action: 'comment', actor_id: 'u1', comment: 'Looking into it', created_at: '2026-11-01T10:00:00Z' },
       { id: 'a3', request_id: REQUEST.id, action: 'reject', actor_id: 'u1', actor_name: 'Ada Approver', comment: 'Missing the receipt', created_at: '2026-11-01T11:00:00Z' },
+      { id: 'a2', request_id: REQUEST.id, action: 'comment', actor_id: 'u1', comment: 'Looking into it', created_at: '2026-11-01T10:00:00Z' },
+      { id: 'a1', request_id: REQUEST.id, action: 'submit', actor_id: 'u9', comment: 'Please approve', created_at: '2026-11-01T09:00:00Z' },
     ]);
     mountDecided('rejected');
     const comment = await screen.findByTestId('approval-decision-comment');
@@ -383,7 +386,11 @@ describe("a decided request's own decision comment is on the panel the reader la
     expect(comment.textContent).toContain('Missing the receipt');
     expect(comment.textContent).toContain('Ada Approver');
     expect(comment.textContent).not.toContain('Looking into it');
-    expect(actionReads()).toHaveLength(1);
+    expect(threadReads()).toHaveLength(1);
+    expect(threadReads()[0][1]).toEqual({
+      $filter: { request_id: REQUEST.id },
+      $orderby: [{ field: 'created_at', order: 'desc' }],
+    });
   });
 
   it('a request returned for revision shows the comment it was sent back with', async () => {
@@ -396,18 +403,28 @@ describe("a decided request's own decision comment is on the panel the reader la
     expect(comment.textContent).toContain('Split the claim by month');
   });
 
-  it('CONTROL: a pending request reads no timeline and shows no decision comment', async () => {
+  it('CONTROL: a pending request reads no thread and shows no decision comment', () => {
     timeline([{ id: 'a1', request_id: REQUEST.id, action: 'comment', actor_id: 'u1', comment: 'Looking into it' }]);
-    mountOn('sys_approval_request', REQUEST);
-    await waitFor(() => expect(screen.getByTestId('approval-decision-panel')).toBeTruthy());
-    expect(actionReads()).toHaveLength(0);
+    render(
+      <AdapterCtx.Provider value={{ find } as never}>
+        <RecordContextProvider objectName="sys_approval_request" recordId={REQUEST.id} data={REQUEST}>
+          <ApprovalDecisionRenderer />
+        </RecordContextProvider>
+      </AdapterCtx.Provider>,
+    );
+    expect(screen.getByTestId('approval-decision-panel')).toBeTruthy();
+    expect(threadReads()).toHaveLength(0);
     expect(screen.queryByTestId('approval-decision-comment')).toBeNull();
   });
 
   it('CONTROL: a rejection recorded without a comment draws nothing', async () => {
     timeline([{ id: 'a1', request_id: REQUEST.id, action: 'reject', actor_id: 'u1', comment: '   ' }]);
     mountDecided('rejected');
-    await waitFor(() => expect(actionReads()).toHaveLength(1));
+    await waitFor(() => expect(threadReads()).toHaveLength(1));
+    // Let the answered read settle into the panel before reading its absence.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
     expect(screen.queryByTestId('approval-decision-comment')).toBeNull();
   });
 });
