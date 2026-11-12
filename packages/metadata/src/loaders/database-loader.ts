@@ -1188,7 +1188,9 @@ export class DatabaseLoader implements MetadataLoader {
    * row's own stored body names: the column only — no body, no version, no
    * history row, no insert (#32347's column-only update). ⛔ Never from
    * `item`'s stamp as it stands now, never a row the read did not hand out,
-   * and never into a slot another row of the name holds. `MetadataManager.register`
+   * [#32488] never another writer's row (`source` other than `'database'`, as
+   * the operator migration reads it), and never into a slot another row of the
+   * name holds. `MetadataManager.register`
    * calls it in place of the write-through it skips (`skipSourceLoader`).
    */
   async bindReadRowPackage(type: string, name: string, item: object): Promise<void> {
@@ -1197,6 +1199,9 @@ export class DatabaseLoader implements MetadataLoader {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const row = rows.find((candidate) => String(candidate.id) === read.id);
     if (!row || row.package_id === read.packageId || storedRowPackageId(row) !== read.packageId) return;
+    // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
+    // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
+    if (row.source !== 'database') return;
     const memberOf = (of: Record<string, unknown>) => storedBundleMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
     if (rows.some((other) => other !== row && other.package_id === read.packageId && memberOf(other) === memberOf(row))) return;
     await this._update(this.tableName, read.id, { package_id: read.packageId });

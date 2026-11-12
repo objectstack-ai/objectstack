@@ -126,6 +126,11 @@ function keyRowOf(row: Record<string, unknown> | undefined): SigningKeyRow | nul
 async function openPrivateHalf(engine: SealStorageReader, crypto: ICryptoProvider, key: SigningKeyRow): Promise<KeyObject> {
   const handle = await readAuditSealSecret(engine, key.private_handle);
   if (!handle) throw new Error(`audit signing key ${key.fingerprint}: its wrapped private half is missing`);
+  return unwrapPrivateHalf(crypto, key, handle);
+}
+
+/** {@link openPrivateHalf} once the wrapped half is read: it decrypts and derives, and reads nothing. */
+async function unwrapPrivateHalf(crypto: ICryptoProvider, key: SigningKeyRow, handle: CryptoHandle): Promise<KeyObject> {
   const pkcs8 = await crypto.decrypt(handle, signingKeyContext(key.fingerprint));
   const privateKey = createPrivateKey({ key: Buffer.from(pkcs8, 'base64'), format: 'der', type: 'pkcs8' });
   if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error(`audit signing key ${key.fingerprint}: not an Ed25519 key`);
@@ -142,6 +147,11 @@ async function openPrivateHalf(engine: SealStorageReader, crypto: ICryptoProvide
  * open under the key's own fingerprint, or derives another key (D6). What
  * `LocalCheckpointSigner#trustedPublicKey` answers, and what `os audit verify`
  * trusts: never a public key because a row carries it.
+ *
+ * A fault reading either row — the key's, or the `sys_secret` row of its
+ * wrapped half — is thrown, never answered `null`: a store that did not answer
+ * says nothing about the key, and a caller that read it as untrusted would
+ * report every checkpoint the key signed as holding nothing.
  */
 export async function trustedSigningKey(engine: SealStorageReader, crypto: ICryptoProvider, keyId: string): Promise<string | null> {
   const rows = await driverFor(engine, AUDIT_SIGNING_KEY_OBJECT).find(AUDIT_SIGNING_KEY_OBJECT, {
@@ -151,8 +161,10 @@ export async function trustedSigningKey(engine: SealStorageReader, crypto: ICryp
   });
   const key = keyRowOf(rows[0]);
   if (!key || key.fingerprint !== keyId) return null;
+  const handle = await readAuditSealSecret(engine, key.private_handle);
+  if (!handle) return null;
   try {
-    await openPrivateHalf(engine, crypto, key);
+    await unwrapPrivateHalf(crypto, key, handle);
     return key.public_key;
   } catch {
     return null;

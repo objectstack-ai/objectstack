@@ -3,7 +3,9 @@
 import { createHash, generateKeyPairSync, sign } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
+  AUDIT_PROOF_BUNDLE_FORMAT,
   AUDIT_ROW_VERDICTS,
+  AuditProofBundleError,
   amendmentRow,
   canonicalJson,
   canonicalValue,
@@ -15,7 +17,9 @@ import {
   decodeCheckpointSeed,
   signedBodyBytes,
   verifyAuditLedger,
+  verifyAuditProofBundle,
   type AmendmentSignedBody,
+  type AuditProofBundle,
   type AuditVerifyReport,
   type CheckpointSignedBody,
   type ExpiryAmendmentBody,
@@ -30,6 +34,11 @@ import { LocalCheckpointSigner, readAuditSealSecret } from './signer.js';
  * verdicts against each checkpoint's leaf hashes, the trusted keys only, the
  * links of each chain, the scope flags, and the D7 / D8 acceptance rules over
  * hand-built amendments (their writers come with P3 and P4).
+ *
+ * Every live run here also writes its proof bundle (`--out`), and
+ * `verifyNow` holds that the bundle, re-judged offline (`--bundle`) under the
+ * deployment's fingerprint, gives the same report: each scenario below is
+ * also a pin of the offline check.
  */
 
 const H = 60 * 60 * 1000;
@@ -60,8 +69,20 @@ async function sealedLedger(options: { objects?: unknown[] } = {}) {
   await sealer.runPass();
   const checkpoints = () => store.hot.table('sys_audit_checkpoint');
   const checkpoint = (chain: string, sequence: number) => checkpoints().find((r) => r.chain_key === chain && r.sequence === sequence)!;
-  const verifyNow = (extra: { orgs?: string[]; from?: Date; to?: Date } = {}) =>
-    verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now, ...extra });
+  /** The live check, and its proof bundle re-judged offline: the same report, fault texts aside. */
+  const verifyNow = async (extra: { orgs?: string[]; from?: Date; to?: Date } = {}) => {
+    let bundle: AuditProofBundle | undefined;
+    const report = await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now, ...extra, onProofBundle: (b) => { bundle = b; } });
+    const offline = await verifyAuditProofBundle(JSON.parse(JSON.stringify(bundle)), { trustedKeys: [keyId], now: () => clock.now });
+    expect(comparable(offline)).toEqual(comparable(report));
+    return report;
+  };
+  /** The live check's proof bundle, as a file carries it. */
+  const bundleNow = async (): Promise<AuditProofBundle> => {
+    let bundle: AuditProofBundle | undefined;
+    await verifyAuditLedger({ engine: store.engine, crypto, now: () => clock.now, onProofBundle: (b) => { bundle = b; } });
+    return JSON.parse(JSON.stringify(bundle));
+  };
   const keyId = (await signer.activeKeyId())!;
   /** A trusted amendment row, signed by the deployment's key. */
   const amend = async (body: Omit<RedactionAmendmentBody, 'signing_key_id'> | Omit<ExpiryAmendmentBody, 'signing_key_id'>, id = `am_${store.hot.table('sys_audit_amendment').length}`) => {
@@ -77,8 +98,15 @@ async function sealedLedger(options: { objects?: unknown[] } = {}) {
     const seed = decodeCheckpointSeed(await crypto.decrypt(handle!, checkpointSeedContext(body.sealed_object, body.tenant_id, body.sequence)));
     return commitValue(columnSaltsOf(seed, 'ledger_probe')(rowId, column), canonicalValue(value, { type: 'text' }));
   };
-  return { ...store, crypto, signer, sealer, clock, ledger, checkpoints, checkpoint, verifyNow, keyId, amend, commitmentOf };
+  return { ...store, crypto, signer, sealer, clock, ledger, checkpoints, checkpoint, verifyNow, bundleNow, keyId, amend, commitmentOf };
 }
+
+/** A report as the live and the offline check must agree on it: the fault texts and the check's time aside. */
+const comparable = (report: AuditVerifyReport) => ({
+  ...report,
+  checked_at: undefined,
+  faults: report.faults.map(({ message: _message, ...fault }) => fault),
+});
 
 /** Each row that is not unmodified, as `id: verdict` (`late!` for an unsealed late row). */
 const verdicts = (report: AuditVerifyReport) =>
@@ -456,5 +484,140 @@ describe('the archive is read or the check does not run', () => {
     const report = await verifyAuditLedger({ engine, crypto: s.crypto, now: () => s.clock.now, archive: () => 'none' });
     expect(report.ok).toBe(true);
     expect(report.totals.unmodified).toBe(5);
+  });
+});
+
+describe('the proof bundle: written by the live check (--out), judged offline (--bundle)', () => {
+  type Bundle = { keys: Array<{ fingerprint: string; public_key: string }>; objects: Array<{ checkpoints: Array<Record<string, any>>; amendments: Array<Record<string, any>>; unsealed: unknown[] }> };
+  const offline = (bundle: unknown, trustedKeys: string[], now?: number) =>
+    verifyAuditProofBundle(bundle, { trustedKeys, ...(now === undefined ? {} : { now: () => now }) });
+  const cpOf = (bundle: Bundle, chain: string, sequence: number) =>
+    bundle.objects[0].checkpoints.find((c) => c.chain_key === chain && c.sequence === sequence)!;
+
+  it('carries the trusted public key, every checkpoint and each judged row\'s leaf input — and no value, salt or seed', async () => {
+    const s = await sealedLedger();
+    const bundle = (await s.bundleNow()) as unknown as Bundle & AuditProofBundle;
+    expect(bundle.format).toBe(AUDIT_PROOF_BUNDLE_FORMAT);
+    expect(bundle.keys).toEqual([{ fingerprint: s.keyId, public_key: s.hot.table('sys_audit_signing_key')[0].public_key }]);
+    expect(bundle.objects[0].checkpoints).toHaveLength(4);
+    expect(cpOf(bundle, 'org:org_a', 0).leaves.map((l: Record<string, unknown>) => Object.keys(l).sort())).toEqual([
+      ['action', 'created_at', 'id', 'payload', 'tenant_id'],
+      ['action', 'created_at', 'id', 'payload', 'tenant_id'],
+    ]);
+    // Scan the bytes: no stored value of a value column, no seed (wrapped or open), no column salt, no private half.
+    const text = JSON.stringify(bundle);
+    const needles: string[] = s.ledger.map((r) => JSON.stringify(String(r.payload)).slice(1, -1));
+    for (const secret of s.hot.table('sys_secret')) needles.push(String(secret.ciphertext));
+    for (const cp of s.checkpoints()) {
+      const body = checkpointBodyFromRow(cp);
+      const handle = await readAuditSealSecret(s.engine, body.seed_handle);
+      const opened = await s.crypto.decrypt(handle!, checkpointSeedContext(body.sealed_object, body.tenant_id, body.sequence));
+      const seed = decodeCheckpointSeed(opened);
+      needles.push(opened, seed.toString('hex'), seed.toString('base64'));
+      for (const id of body.row_ids) {
+        for (const column of ['payload', 'action']) {
+          const salt = Buffer.from(columnSaltsOf(seed, 'ledger_probe')(id, column));
+          needles.push(salt.toString('hex'), salt.toString('base64'));
+        }
+      }
+    }
+    for (const needle of needles) expect(text.includes(needle), `the bundle carries ${needle}`).toBe(false);
+  });
+
+  it('verifies offline under the right fingerprint (ok), and fails under a wrong one: the bundle\'s own key is never trusted', async () => {
+    const s = await sealedLedger();
+    const bundle = await s.bundleNow();
+    const right = await offline(bundle, [s.keyId]);
+    expect(right.ok).toBe(true);
+    expect(right.totals.unmodified).toBe(5);
+    const wrong = await offline(bundle, ['f'.repeat(64)]);
+    expect(wrong.ok).toBe(false);
+    expect(wrong.keys).toEqual({ trusted: [], untrusted: [s.keyId] });
+    expect(new Set(wrong.faults.map((f) => f.kind))).toEqual(new Set(['untrusted_key']));
+    // A checkpoint that holds nothing holds none of its present rows: each reads late and unsealed.
+    expect(wrong.totals).toMatchObject({ unmodified: 0, late: 5, unsealed: 5 });
+  });
+
+  it('refuses a bundle with no trusted fingerprint, a fingerprint that is not one, or another format: no verdict', async () => {
+    const s = await sealedLedger();
+    const bundle = await s.bundleNow();
+    await expect(offline(bundle, [])).rejects.toThrow(AuditProofBundleError);
+    await expect(offline(bundle, ['not-a-key'])).rejects.toThrow(/is not a signing key fingerprint/);
+    await expect(offline({ ...bundle, format: 'objectstack.audit.proof-bundle.v0' }, [s.keyId])).rejects.toThrow(/not a proof bundle: format/);
+    await expect(offline({ ...bundle, objects: [{ object: 'ledger_probe', checkpoints: 'x' }] }, [s.keyId])).rejects.toThrow(AuditProofBundleError);
+    const short = JSON.parse(JSON.stringify(bundle)) as Bundle;
+    cpOf(short, 'org:org_a', 0).leaves.pop();
+    await expect(offline(short, [s.keyId])).rejects.toThrow(/carries 1 leaf input\(s\) for 2 row id\(s\)/);
+  });
+
+  it('trusts a key the bundle carries only when it hashes to the fingerprint given', async () => {
+    const s = await sealedLedger();
+    const planted = plantKey(s);
+    const bundle = (await s.bundleNow()) as unknown as Bundle;
+    bundle.keys[0].public_key = s.hot.table('sys_audit_signing_key').find((k) => k.id === 'planted')!.public_key as string;
+    const report = await offline(bundle, [s.keyId, planted.fingerprint]);
+    expect(report.keys).toEqual({ trusted: [], untrusted: [s.keyId] });
+    expect(report.ok).toBe(false);
+  });
+
+  it('reads a tampered bundle as tampered: a changed leaf modified, a dropped checkpoint a gap, dropped leaf inputs a seed fault', async () => {
+    const s = await sealedLedger();
+    const bundle = (await s.bundleNow()) as unknown as Bundle;
+    const leaf = cpOf(bundle, 'org:org_a', 1).leaves[0];
+    leaf.payload = await s.commitmentOf(s.checkpoint('org:org_a', 1), 'r4', '{"v":"forged"}');
+    delete cpOf(bundle, 'org:org_b', 0).leaves;
+    bundle.objects[0].checkpoints.splice(bundle.objects[0].checkpoints.indexOf(cpOf(bundle, 'org:org_a', 0)), 1);
+    const report = await offline(bundle, [s.keyId]);
+    expect(verdicts(report)).toEqual({ r4: 'modified' });
+    expect(faultKinds(report)).toEqual(['org:org_a#0:gap', 'org:org_b#0:seed']);
+    expect(report.faults.find((f) => f.kind === 'seed')!.message).toMatch(/the bundle carries no leaf inputs for it/);
+    expect(report.ok).toBe(false);
+  });
+
+  it('judges an expiry offline by the policy value its own signature carries, at the offline check\'s time (D8)', async () => {
+    const s = await sealedLedger();
+    s.clock.now = DAY0 + 30 * 24 * H;
+    const cp = s.checkpoint('org:org_a', 0);
+    const body = checkpointBodyFromRow(cp);
+    await s.amend({
+      kind: 'expiry', sealed_object: 'ledger_probe', tenant_id: 'org_a', amended_at: new Date(s.clock.now).toISOString(),
+      first_sequence: 0, last_sequence: 0, covered_from: body.window_start, covered_to: body.window_end,
+      last_removed_digest: checkpointDigest(body), policy: 'archive.keep', policy_value: '7d',
+    });
+    for (const id of body.row_ids) s.ledger.splice(s.ledger.findIndex((r) => r.id === id), 1);
+    s.checkpoints().splice(s.checkpoints().indexOf(cp), 1);
+    const bundle = (await s.bundleNow()) as unknown as Bundle;
+    expect((await offline(bundle, [s.keyId], s.clock.now)).ok).toBe(true);
+    // Too early for its own keep: not honoured, so the expired range is a gap.
+    expect(faultKinds(await offline(bundle, [s.keyId], DAY0 + 2 * 24 * H))).toEqual(['org:org_a#-:expiry', 'org:org_a#0:gap']);
+    // A policy value changed in the bundle is no longer what was signed: the amendment is ignored.
+    bundle.objects[0].amendments[0].policy_value = '1d';
+    expect(faultKinds(await offline(bundle, [s.keyId], s.clock.now))).toEqual(['org:org_a#-:signature', 'org:org_a#0:gap']);
+  });
+});
+
+describe('the anchor tells a store that did not answer from a key that does not open (D6)', () => {
+  it('stops the run when the sys_secret row of a key\'s wrapped half cannot be read: no verdict, not an untrusted key', async () => {
+    const s = await sealedLedger();
+    const handle = String(s.hot.table('sys_audit_signing_key')[0].private_handle);
+    const find = s.hot.find.bind(s.hot);
+    s.hot.find = async (object, query) => {
+      if (object === 'sys_secret' && (query.where as { id?: unknown } | undefined)?.id === handle) throw new Error('connection reset by peer');
+      return find(object, query);
+    };
+    await expect(verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now })).rejects.toThrow(/connection reset by peer/);
+  });
+
+  it('reads a key whose wrapped half does not open as untrusted: the run finishes, and fails', async () => {
+    const s = await sealedLedger();
+    const handle = s.hot.table('sys_audit_signing_key')[0].private_handle;
+    const secret = s.hot.table('sys_secret').find((r) => r.id === handle)!;
+    const blob = Buffer.from(String(secret.ciphertext), 'base64');
+    blob[blob.length - 1] ^= 0xff;
+    secret.ciphertext = blob.toString('base64');
+    const report = await verifyAuditLedger({ engine: s.engine, crypto: s.crypto, now: () => s.clock.now });
+    expect(report.keys).toEqual({ trusted: [], untrusted: [s.keyId] });
+    expect(new Set(report.faults.map((f) => f.kind))).toEqual(new Set(['untrusted_key']));
+    expect(report.ok).toBe(false);
   });
 });
