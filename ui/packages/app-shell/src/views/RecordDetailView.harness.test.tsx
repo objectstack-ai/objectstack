@@ -53,6 +53,7 @@ import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, LocalizationProvider, createI18n } from '@object-ui/i18n';
 import { PermissionProvider, MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { MetadataCtx } from '@object-ui/react';
+import { PageSchema as SpecPageSchema } from '@objectstack/spec/ui';
 import { appSegmentOf } from '../console/home/appLastOpened';
 import { recentItemObject } from '../console/home/recentItemTypeLabel';
 import { NavigationProvider, useNavigationContext } from '../context/NavigationContext';
@@ -308,7 +309,9 @@ describe('RecordDetailView.appScopedPage-29592', () => {
 
   /**
    * A full record page of the user object. Its accessible name (`aria.ariaLabel`,
-   * stamped on the page root) names the page, so the drawn page is readable.
+   * stamped on the page root) names the page, so the drawn page is readable. It
+   * places a component: one that places none is explained instead of drawn
+   * (objectstack#32478's block below).
    */
   function userPage(name: string, extra: Record<string, unknown> = {}) {
     return {
@@ -318,7 +321,7 @@ describe('RecordDetailView.appScopedPage-29592', () => {
       object: OBJECT,
       aria: { ariaLabel: name },
       ...extra,
-      regions: [{ name: 'main', components: [] }],
+      regions: [{ name: 'main', components: [{ type: 'text', properties: { content: name } }] }],
     };
   }
 
@@ -2544,5 +2547,154 @@ describe('RecordDetailView.recordTabRowUrl-27524', () => {
       expect(window.history.length).toBe(start);
       expect(window.location.pathname).toBe(`/app/demo/${PARENT}/${RECORD_ID}`);
     });
+  });
+});
+
+// ── RecordDetailView.recordPagePlacesNoComponent-32478 ──────────────────────
+
+/**
+ * A record page that places no component is explained where its body would
+ * be: never drawn blank, and never swapped for the object's default record
+ * page (objectstack#32478).
+ *
+ * The spec refuses a `full` record page whose regions place nothing at every
+ * save door (`checkPageRecordPlacesComponent`, `@objectstack/spec/ui`), but a
+ * row stored before that refusal, or a page a package registers flat, still
+ * reaches the record view, which drew it as authored: the breadcrumb and an
+ * empty panel, for every record of its object. Pins:
+ *
+ *   - the premise, re-read live: the spec refuses each such page at `regions`;
+ *   - a `full` page whose region places nothing, and one with no `regions`,
+ *     draw the explanation naming the page, and no page body at all;
+ *   - the record drawer draws the same explanation;
+ *   - CONTROLS: the same page placing a component draws that page; a `slotted`
+ *     page with no slots, and no assigned page, draw the default record page.
+ */
+
+describe('RecordDetailView.recordPagePlacesNoComponent-32478', () => {
+  restoreAfterBlock();
+
+  const OBJECT = 'invoice_32478';
+  const REC = 'inv1';
+  const PAGE = 'invoice_blank_page';
+
+  const objectDef = {
+    name: OBJECT,
+    label: 'Invoice',
+    fields: { id: { label: 'Id', type: 'text' }, name: { label: 'Number', type: 'text' } },
+  };
+
+  function makeDataSource() {
+    return {
+      find: vi.fn(async () => ({ data: [], total: 0, hasMore: false, pageSize: 50 })),
+      findOne: vi.fn(async () => ({ id: REC, name: 'INV-0001' })),
+      create: vi.fn(async (_o: string, row: unknown) => row),
+      update: vi.fn(async () => ({})),
+      delete: vi.fn(async () => ({})),
+      getObjectSchema: async () => objectDef,
+    };
+  }
+
+  function makeMetadata(pages: unknown[]) {
+    return {
+      objects: [], pages, loading: false, error: null,
+      refresh: async () => {}, invalidate: () => {},
+      ensureType: async () => pages, getItem: async () => null,
+      getItemsByType: () => pages,
+    } as never;
+  }
+
+  /** The object's default record page, authored; its accessible name names it on the page root. */
+  function invoicePage(extra: Record<string, unknown>) {
+    return { name: PAGE, label: 'Invoice', type: 'record', object: OBJECT, isDefault: true, aria: { ariaLabel: PAGE }, ...extra };
+  }
+  const PLACES_NOTHING = invoicePage({ regions: [{ name: 'main', components: [] }] });
+  const NO_REGIONS = invoicePage({});
+  const PLACES_TEXT = invoicePage({ regions: [{ name: 'main', components: [{ type: 'text', properties: { content: 'INVOICE BODY' } }] }] });
+
+  /** Mount the record route (or, with `drawer`, the list route with the record drawer) over `pages`. */
+  async function mount(pages: unknown[], drawer = false) {
+    const ds = makeDataSource();
+    const view = drawer ? (
+      <RecordDetailView dataSource={ds as never} objects={[objectDef] as never} onEdit={() => {}}
+        objectNameOverride={OBJECT} recordIdOverride={REC} embedded />
+    ) : (
+      <RecordDetailView dataSource={ds as never} objects={[objectDef] as never} onEdit={() => {}} />
+    );
+    const utils = render(
+      <MemoryRouter initialEntries={[drawer ? `/apps/crm/${OBJECT}` : `/apps/crm/${OBJECT}/record/${REC}`]}>
+        <MetadataCtx.Provider value={makeMetadata(pages)}>
+          <NavigationProvider>
+            <Routes>
+              <Route path={drawer ? '/apps/:appName/:objectName' : '/apps/:appName/:objectName/record/:recordId'} element={view} />
+            </Routes>
+          </NavigationProvider>
+        </MetadataCtx.Provider>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
+    return utils;
+  }
+
+  beforeAll(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  });
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ allowed: true, data: [] }),
+      text: async () => '{}',
+    })) as never);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('the premise, re-read live: the spec refuses both pages at `regions`, and accepts the one placing a component', () => {
+    for (const page of [PLACES_NOTHING, NO_REGIONS]) {
+      const r = SpecPageSchema.safeParse(page);
+      expect(r.success).toBe(false);
+      expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.') }))).toContainEqual({ code: 'custom', path: 'regions' });
+    }
+    const placed = SpecPageSchema.safeParse(PLACES_TEXT);
+    expect(placed.success, JSON.stringify(placed.error?.issues)).toBe(true);
+  });
+
+  it.each([
+    ['a `full` page whose region places nothing', PLACES_NOTHING],
+    ['a `full` page with no `regions`', NO_REGIONS],
+  ])('%s: the record view explains it, naming the page, and draws no page body', async (_label, page) => {
+    const { container } = await mount([page]);
+    const panel = await screen.findByTestId('record-page-places-no-component');
+    expect(panel.textContent).toContain(PAGE);
+    expect(container.querySelector('[data-page-type]')).toBeNull();
+  });
+
+  it('the record drawer explains it the same way', async () => {
+    const { container } = await mount([PLACES_NOTHING], true);
+    expect((await screen.findByTestId('record-page-places-no-component')).textContent).toContain(PAGE);
+    expect(container.querySelector('[data-page-type]')).toBeNull();
+  });
+
+  it('CONTROL: the same page placing a component draws that page, and no explanation', async () => {
+    const { container } = await mount([PLACES_TEXT]);
+    await waitFor(() => expect(container.querySelector(`[data-page-type="record"][aria-label="${PAGE}"]`)).not.toBeNull());
+    expect(await screen.findByText('INVOICE BODY')).toBeTruthy();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
+  });
+
+  it.each([
+    ['a `slotted` page with no slots', [invoicePage({ kind: 'slotted', regions: [] })]],
+    ['no assigned page', []],
+  ])('CONTROL: %s draws the default record page, and no explanation', async (_label, pages) => {
+    const { container } = await mount(pages);
+    await waitFor(() => expect(container.querySelector('[data-page-type="record"]')).not.toBeNull());
+    expect(container.querySelector(`[aria-label="${PAGE}"]`)).toBeNull();
+    expect(screen.queryByTestId('record-page-places-no-component')).toBeNull();
   });
 });
