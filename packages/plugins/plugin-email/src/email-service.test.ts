@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
+import { Readable } from 'node:stream';
 import {
   EmailService,
   LogTransport,
@@ -562,4 +563,74 @@ describe('sys_email organization stamping (#11741)', () => {
     expect(res.status).toBe('sent');
     expect(rows.get(res.id)).not.toHaveProperty('organization_id');
   });
+});
+
+describe('an attachment\'s content is a string or a Buffer', () => {
+  const BASE = { to: 'a@b.com', subject: 'Hi', text: 'x' };
+  const FILE_REF = 'attachment-fixture/never-read.txt';
+  const URL_REF = 'http://127.0.0.1:9/never-fetched';
+
+  /** Every refused shape an in-process caller can pass, with the kind the refusal names. */
+  const REFUSED: Array<[string, unknown, RegExp]> = [
+    ['an object', [{ filename: 'a', content: { a: 1 } }], /^VALIDATION_FAILED: `attachments\[0\]\.content` must be a string or a Buffer, not an object$/],
+    ['a `{ path }` object', [{ filename: 'a', content: { path: FILE_REF } }], /`attachments\[0\]\.content` must be a string or a Buffer, not an object$/],
+    ['an `{ href }` object', [{ filename: 'a', content: { href: URL_REF } }], /`attachments\[0\]\.content` must be a string or a Buffer, not an object$/],
+    ['a stream', [{ filename: 'a', content: Readable.from(['x']) }], /`attachments\[0\]\.content` must be a string or a Buffer, not a stream$/],
+    ['a typed array', [{ filename: 'a', content: new Uint8Array([1, 2]) }], /`attachments\[0\]\.content` must be a string or a Buffer, not a typed array$/],
+    ['an ArrayBuffer', [{ filename: 'a', content: new ArrayBuffer(2) }], /`attachments\[0\]\.content` must be a string or a Buffer, not an ArrayBuffer$/],
+    ['a number', [{ filename: 'a', content: 42 }], /`attachments\[0\]\.content` must be a string or a Buffer, not a number$/],
+    ['`null` content', [{ filename: 'a', content: null }], /`attachments\[0\]\.content` must be a string or a Buffer, not null$/],
+    ['absent content', [{ filename: 'a' }], /`attachments\[0\]\.content` must be a string or a Buffer, not undefined$/],
+    ['a second attachment', [{ filename: 'a', content: 'ok' }, { filename: 'b', content: { path: FILE_REF } }], /`attachments\[1\]\.content` must be/],
+    ['a non-array `attachments`', { filename: 'a', content: 'x' }, /^VALIDATION_FAILED: `attachments` must be an array, not an object$/],
+    ['a string `attachments`', 'a.txt', /^VALIDATION_FAILED: `attachments` must be an array, not a string$/],
+    ['a `null` element', [null], /^VALIDATION_FAILED: `attachments\[0\]` must be a plain object, not null$/],
+    ['a class-instance element', [new (class Att { filename = 'a'; content = 'x'; })()], /^VALIDATION_FAILED: `attachments\[0\]` must be a plain object, not a class instance$/],
+  ];
+
+  for (const [what, attachments, refusal] of REFUSED) {
+    it(`normalizeMessage refuses ${what}, naming the position and the kind and never the value`, () => {
+      let thrown: unknown;
+      try { normalizeMessage({ ...BASE, attachments } as any, 'no@reply.com'); } catch (err) { thrown = err; }
+      expect(thrown).toBeInstanceOf(Error);
+      const message = (thrown as Error).message;
+      expect(message).toMatch(refusal);
+      expect(message).not.toContain(FILE_REF);
+      expect(message).not.toContain(URL_REF);
+    });
+  }
+
+  it('accepts a string, a Buffer, an empty list and an absent or null `attachments`', () => {
+    const png = Buffer.from([0x89, 0x50]);
+    const msg = normalizeMessage({
+      ...BASE,
+      attachments: [{ filename: 't.txt', content: 'hi' }, { filename: 'p.png', content: png, cid: 'p' }],
+    }, 'no@reply.com');
+    expect(msg.attachments).toHaveLength(2);
+    expect(msg.attachments![1]!.content).toBe(png);
+    expect(normalizeMessage({ ...BASE, attachments: [] }, 'no@reply.com').attachments).toBeUndefined();
+    expect(normalizeMessage({ ...BASE }, 'no@reply.com').attachments).toBeUndefined();
+    expect(normalizeMessage({ ...BASE, attachments: null } as any, 'no@reply.com').attachments).toBeUndefined();
+  });
+
+  for (const persist of [true, false]) {
+    it(`send (persistence ${persist ? 'on' : 'off'}) refuses before a non-SMTP transport is called and writes no queued row`, async () => {
+      const transport = { send: vi.fn(async () => ({ messageId: '<never@x>' })) };
+      const rows: Array<Record<string, any>> = [];
+      const persistence: EmailPersistence = {
+        async insert(row) { rows.push({ ...row }); return { id: row.id }; },
+        async update() { /* noop */ },
+      };
+      const svc = new EmailService({ transport, defaultFrom: 'no@reply.com', ...(persist ? { persistence } : {}) });
+
+      for (const content of [{ path: FILE_REF }, Readable.from(['x']), new Uint8Array([1])]) {
+        await expect(svc.send({ ...BASE, attachments: [{ filename: 'a', content: content as never }] }))
+          .rejects.toThrow(/^VALIDATION_FAILED: `attachments\[0\]\.content` must be a string or a Buffer/);
+      }
+
+      expect(transport.send).not.toHaveBeenCalled();
+      expect(rows.filter((r) => r.status === 'queued')).toEqual([]);
+      if (persist) expect(rows.map((r) => r.status)).toEqual(['failed', 'failed', 'failed']);
+    });
+  }
 });
