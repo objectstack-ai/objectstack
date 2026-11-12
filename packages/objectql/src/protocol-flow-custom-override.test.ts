@@ -470,8 +470,6 @@ describe('[#32613] two packages ship one name, each with its declared override: 
             const byName = async (pkg: string) =>
                 `${pkg}:${(await p.getMetaItem({ type: 'action', name: SHARED_ACTION, packageId: pkg })).item.label}`;
             const expected = [await byName(ALPHA), await byName(BETA)].sort();
-            // Each holder's override is served in its own slot only (the
-            // second holder's is read by the by-name door #32552 settles).
             expect(expected).toContain(`${order[0]}:${order[0] === ALPHA ? 'OVR-A' : 'OVR-B'}`);
             for (const face of ['served', 'execution'] as const) {
                 expect(await entries(protocol, 'action', face), face).toEqual(expected);
