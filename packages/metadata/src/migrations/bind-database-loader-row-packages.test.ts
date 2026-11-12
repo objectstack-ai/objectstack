@@ -11,9 +11,12 @@ import { describe, expect, it } from 'vitest';
 import type { IDataDriver } from '@objectstack/spec/contracts';
 import { migrateDatabaseLoaderRowPackages } from './index.js';
 import { DatabaseLoader } from '../loaders/database-loader.js';
-import { PACKAGE_SLOTTED_STORE_TYPES } from '../package-slotted-store.js';
+import { ITEM_KEY_DISCRIMINATORS } from '@objectstack/metadata-core';
+import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
 
 const SLOTTED = [...PACKAGE_SLOTTED_STORE_TYPES];
+const BUNDLED = SLOTTED.filter(isBundledStoreType);
+const UNBUNDLED = SLOTTED.find((type) => !isBundledStoreType(type))!;
 const CONTROL_TYPE = ['view', 'object'].find((type) => !PACKAGE_SLOTTED_STORE_TYPES.has(type))!;
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
@@ -112,5 +115,64 @@ describe('migrateDatabaseLoaderRowPackages (ADR-0150 D4, #32246)', () => {
     await loader.save(type, `shared_${type}`, { name: `shared_${type}`, label: 'new', _packageId: A });
     expect(packageOf('legacy')).toBe(A);
     expect(await loader.loadSlots(type, `shared_${type}`)).toHaveLength(1);
+  });
+});
+
+/**
+ * [#32489, ADR-0150 D4] A bundled type (`email_template`, keyed by `locale`)
+ * holds a row per member in one `(package, name)` slot, as `DatabaseLoader.save`
+ * writes it (#31699 R4-A). The migration's slot-taken test keys by the member
+ * too — the row's `bundle_member` column first, else the member its body
+ * declares — so another member's bound row never leaves a free member unbound;
+ * a member whose own slot is taken is still left `slot-taken`, never bound
+ * over it.
+ */
+describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per member (#32489)', () => {
+  it('derives at least one bundled by-package type, and one that is not', () => {
+    expect(BUNDLED.length).toBeGreaterThan(0);
+    expect(UNBUNDLED).toBeDefined();
+  });
+
+  it.each(BUNDLED)('%s: an unbound member binds beside another member\'s column-bound row of the same name — by its body, or by its `bundle_member` column', async (type) => {
+    const { field, canonical } = ITEM_KEY_DISCRIMINATORS[type]!;
+    const { store, packageOf } = rowStore([
+      row('canonical', type, { name: 'x', [field]: canonical, _packageId: A }, { package_id: A }),
+      row('by-body', type, { name: 'x', [field]: 'fr-FR', _packageId: A }),
+      row('by-column', type, { name: 'x', _packageId: A }, { bundle_member: 'de-DE' }),
+    ]);
+    const result = await migrateDatabaseLoaderRowPackages(store);
+    expect([packageOf('by-body'), packageOf('by-column')]).toEqual([A, A]);
+    expect(result.bound.map((bound) => [bound.id, bound.packageId])).toEqual([['by-body', A], ['by-column', A]]);
+    expect(result.left).toEqual([]);
+  });
+
+  it.each(BUNDLED)('%s: a member whose own slot is taken is still left `slot-taken` — the canonical one spelled by value or by omission, and a member bound earlier in the same run', async (type) => {
+    const { field, canonical } = ITEM_KEY_DISCRIMINATORS[type]!;
+    const { store, packageOf } = rowStore([
+      row('canonical-bound', type, { name: 'x', _packageId: A }, { package_id: A }),
+      row('canonical-legacy', type, { name: 'x', [field]: canonical, _packageId: A }),
+      row('fr-bound', type, { name: 'x', [field]: 'fr-FR', _packageId: A }, { package_id: A, bundle_member: 'fr-FR' }),
+      row('fr-legacy', type, { name: 'x', [field]: 'fr-FR', _packageId: A }),
+      row('de-first', type, { name: 'x', [field]: 'de-DE', _packageId: A }),
+      row('de-second', type, { name: 'x', _packageId: A }, { bundle_member: 'de-DE' }),
+    ]);
+    const result = await migrateDatabaseLoaderRowPackages(store);
+    expect([packageOf('canonical-legacy'), packageOf('fr-legacy'), packageOf('de-first'), packageOf('de-second')]).toEqual([null, null, A, null]);
+    expect(result.bound.map((bound) => bound.id)).toEqual(['de-first']);
+    expect(result.left.map((left) => [left.id, left.reason])).toEqual([
+      ['canonical-legacy', 'slot-taken'],
+      ['fr-legacy', 'slot-taken'],
+      ['de-second', 'slot-taken'],
+    ]);
+  });
+
+  it(`a type that declares no member keeps one row per slot, whatever its body carries (${UNBUNDLED})`, async () => {
+    const { store, packageOf } = rowStore([
+      row('bound', UNBUNDLED, { name: 'x', locale: 'en-US', _packageId: A }, { package_id: A }),
+      row('legacy', UNBUNDLED, { name: 'x', locale: 'fr-FR', _packageId: A }, { bundle_member: 'fr-FR' }),
+    ]);
+    const result = await migrateDatabaseLoaderRowPackages(store);
+    expect(packageOf('legacy')).toBeNull();
+    expect(result.left.map((left) => [left.id, left.reason])).toEqual([['legacy', 'slot-taken']]);
   });
 });
