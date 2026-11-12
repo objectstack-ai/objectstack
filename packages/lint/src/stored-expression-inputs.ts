@@ -1,0 +1,101 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * The inputs of a STORED computed field's `expression` that the write cannot
+ * keep current.
+ *
+ * A field that is not a `formula` and declares an `expression` is a stored
+ * computed field (`packages/spec/src/data/field.zod.ts`, the `expression`
+ * describe): the engine computes the expression from the row the write stores
+ * and stores the result, on every insert and every update by id
+ * (`planStoredExpressions` / `computeStoredExpressions` in
+ * `packages/objectql/src/engine-top-level.ts`). It evaluates through the same
+ * formula plan a `formula` read uses (`applyFormulaPlan`), so it reads what a
+ * formula reads, the record and ONE hop through a reference field among them.
+ * The hop is not a fact of the row, and the stored value keeps what it was at
+ * the write:
+ *
+ *  - **A read of another record** (`record.employee.daily_hours`), the one hop
+ *    the plan preloads. When that record changes, nothing computes this row
+ *    again, so the stored value goes stale with no signal. Refused (`error`,
+ *    {@link STORED_EXPRESSION_CROSS_RECORD_INPUT}): the direction ruled on the
+ *    card is to refuse at authoring and to name `summary` or a flow on the
+ *    related object, never to build a cross-record recompute engine. A read of
+ *    the hop's `id` is the reference this row stores, so it is not one.
+ *
+ * Judged on the stored field only; a `formula` field reading the same inputs is
+ * computed on every read and is not reported. The reasoning an author needs
+ * once lives in `os explain` (`rule-explanations.ts`), not in the finding.
+ */
+import { analyzeRelationshipTraversals } from '@objectstack/formula';
+import { referenceTargetOf } from '@objectstack/spec/data';
+
+/** A stored field's `expression` reads another record through a reference: refused. */
+export const STORED_EXPRESSION_CROSS_RECORD_INPUT = 'stored-expression-cross-record-input';
+
+/** One finding of this member, in the shape `validate-expressions.ts` collects. */
+export interface StoredExpressionInputIssue {
+  rule: typeof STORED_EXPRESSION_CROSS_RECORD_INPUT;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listed(items: readonly string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Judge one field's `expression` for the inputs a stored value cannot keep
+ * current. Answers nothing for a `formula` field (computed on every read), for
+ * a field with no `expression`, and for a source that is not CEL or does not
+ * parse (the expression pass owns that verdict).
+ *
+ * `fieldDefOf` resolves a field of the same object by name, so a hop is judged
+ * through the declaration the engine plans it by (`referenceTargetOf`, the
+ * spec's one arbiter of "what does this field point at").
+ */
+export function storedExpressionInputIssues(
+  fieldName: string,
+  def: Record<string, unknown>,
+  source: string | undefined,
+  fieldDefOf: (name: string) => unknown,
+): StoredExpressionInputIssue[] {
+  // The engine's own test (`planStoredExpressions`): every field that is not a
+  // `formula` and declares an `expression`.
+  if (def.type === 'formula' || !def.expression || !source) return [];
+  const issues: StoredExpressionInputIssue[] = [];
+  const typeLabel = typeof def.type === 'string' ? ` (a \`${def.type}\`, not a \`formula\`)` : '';
+  const stored = `\`${fieldName}\` is a stored field${typeLabel}, so its \`expression\` is computed when the record is written and the result is stored`;
+
+  const analysis = analyzeRelationshipTraversals(source, 'record');
+  if (!analysis) return [];
+  const traversals = analysis.traversals;
+  const reads: string[] = [];
+  const targets: string[] = [];
+  for (const [field, columns] of traversals) {
+    const target = referenceTargetOf(fieldDefOf(field))?.trim();
+    if (!target) continue;
+    // The hop's `id` is the reference this row stores, not another record's value.
+    const related = [...columns].filter((c) => c !== 'id').sort();
+    if (related.length === 0) continue;
+    reads.push(`${listed(related.map((c) => `\`record.${field}.${c}\``))} (on '${target}', through \`record.${field}\`)`);
+    if (!targets.includes(target)) targets.push(target);
+  }
+  if (reads.length > 0) {
+    const where = targets.length === 1 ? `'${targets[0]}'` : 'the related object';
+    issues.push({
+      rule: STORED_EXPRESSION_CROSS_RECORD_INPUT,
+      severity: 'error',
+      message: `${stored}. It reads ${listed(reads)}, a value of another record, and a change to that record `
+        + 'does not compute this one again, so the stored value goes stale with nothing to say so. Keep a stored '
+        + `\`expression\` to its own record's fields. To show the related value, make \`${fieldName}\` a `
+        + '`formula` field (computed on every read; a `formula` cannot be totalled). To total it, compute it on '
+        + `${where}: a \`summary\` field there rolls up this object's own stored values. To keep a copy here, `
+        + `write it with a flow on ${where} that runs when the value changes.`,
+    });
+  }
+
+  return issues;
+}

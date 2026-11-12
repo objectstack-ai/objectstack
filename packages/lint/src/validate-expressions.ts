@@ -159,6 +159,7 @@ import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumns
 import { findUnguardedNullableOperands, nullGuardMessage, provenNonNullKeys } from './validate-null-guards.js';
 import type { NullGuardOptions, NullGuardOutcome } from './validate-null-guards.js';
 import { objectsAsServed, objectsWithoutTiedFields, recordsOf } from './object-graph.js';
+import { storedExpressionInputIssues } from './stored-expression-inputs.js';
 export interface ExprIssue {
   where: string;
   message: string;
@@ -182,6 +183,14 @@ export interface ExprIssue {
    * located by `where` alone.
    */
   path?: string;
+  /**
+   * The rule id the finding is reported under, when it is not the pass's
+   * own `expression-invalid`: set only by the stored-expression input member
+   * (`stored-expression-inputs.ts`), whose findings carry an id of their own
+   * so `os explain` can name them. Absent, the finding is
+   * `expression-invalid`.
+   */
+  rule?: string;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -3573,6 +3582,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * walk it always ran at — so the build's findings and their order are
      * unchanged.
      */
+    /** This object's fields by name — what a stored expression's hop is judged through. */
+    const fieldDefs = new Map<string, AnyRec>(fieldList);
     const judgeFieldFormula = (fname: string, f: AnyRec): void => {
       if (f.expression) {
         // `expression` is the key `FieldSchema` declares for a computed field —
@@ -3639,6 +3650,13 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
+        // [#32529] A STORED field's `expression` (any field but a `formula`)
+        // is computed at the write and kept: a read of another record is
+        // refused. A `formula` answers nothing here.
+        const storedSource = celSourceOf(f.expression);
+        for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name))) {
+          issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });
+        }
       }
     };
 

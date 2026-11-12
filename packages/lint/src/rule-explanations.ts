@@ -6016,6 +6016,35 @@ const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
+  rule: 'stored-expression-cross-record-input',
+  covers: 'why a stored expression reads only its own record',
+  paragraphs: [
+    'A field that is not a `formula` and declares an `expression` is a stored computed field: the engine ' +
+      'computes the expression from the row each write stores, on every insert and every update by id, and ' +
+      'stores the result in the column, which is what lets a `summary`, a dataset or a report total it. A ' +
+      '`formula` field is the other kind: it has no column and is computed on every read.',
+    'A stored expression may read one relationship hop, `record.employee.daily_hours`, and the write reads ' +
+      'that value from the related record when it computes. Nothing computes the row again when the related ' +
+      'record changes: there is no list of the rows that read it, and the platform does not recompute rows ' +
+      'across records. The stored value keeps the old input and every total over it drifts, with no fault and ' +
+      'no log. So the hop is refused where the expression is written, by `os validate`, `os build` and the ' +
+      'object save door.',
+    'Counted: a read through a `lookup`, `master_detail`, `user` or `tree` field of the same object, at one hop ' +
+      'or more, by any spelling the engine resolves (`record.a.b`, `record.a.?b`, `record[\'a\'].b`). Not ' +
+      'counted: a read of the reference itself (`record.employee`) or of its `id` (`record.employee.id`), ' +
+      'which is the value this row stores, and a read through a field that is not a reference (an object or ' +
+      'JSON value is part of this row). A `formula` field reading the same hop is not judged: it is computed ' +
+      'on every read, so it never goes stale.',
+    'Three ways to write it instead. To show the related value, make the field a `formula`: it is current on ' +
+      'every read, but a `formula` cannot be totalled. To total it, compute it on the related object: a ' +
+      '`summary` field there rolls up this object\'s own stored values (for example the leave days), and a ' +
+      '`formula` beside it combines that total with the related object\'s own field (the daily hours). To keep ' +
+      'a copy on this record, write it with a flow on the related object that runs when the value changes and ' +
+      'updates the records that point at it.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -6246,6 +6275,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: REPORT_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
   [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
+  [STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION.rule]: STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */
