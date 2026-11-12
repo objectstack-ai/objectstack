@@ -19,6 +19,7 @@ import {
   NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
   PackageScopedNameRefusedError,
+  describePackageScopedHolder,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
   isNamespaceScopedBareNameType,
   isPackageScopedType,
@@ -26,6 +27,7 @@ import {
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
+  type PackageScopedHolder,
   type PackageScopedResolvableType,
 } from './package-scoped-resolution.js';
 
@@ -238,7 +240,9 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
       expect(isPackageScopedType(type), type).toBe(true);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
-    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    // [#31696] The flow has narrowed (it is in the set above); a webhook has not.
+    expect(isNamespaceScopedBareNameType('flow')).toBe(true);
+    expect(isNamespaceScopedBareNameType('webhook')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
   });
 });
@@ -260,5 +264,13 @@ describe('[#32244, review 6781770671 N1] packageScopedActionOwnersSentence', () 
     expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['account']]]))).toBe(
       `Package "${A}" binds it to object "account"; package "${B}" binds it to object "account".`,
     );
+  });
+});
+
+describe('[#32412] a stack\'s residual as a holder (ADR-0130 D4): named as the top level outside every package body', () => {
+  it('describes the residual by its owner id, never as a package', () => {
+    const holder: PackageScopedHolder = { kind: 'residual', ownerId: 'com.example.top' };
+    expect(describePackageScopedHolder(holder)).toBe('the top level of stack "com.example.top" outside every package body (its residual)');
+    expect(describePackageScopedHolder(holder)).not.toContain('package "com.example.top"');
   });
 });
