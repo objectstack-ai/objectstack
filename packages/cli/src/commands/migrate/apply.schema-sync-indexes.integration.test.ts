@@ -55,7 +55,7 @@ vi.mock('node:readline', async (importOriginal) => {
   return {
     ...actual,
     createInterface: () => ({
-      question: (q: string, answer: (a: string) => void) => { said.push(PROMPT_MARK + q); answer(ANSWER); },
+      question: (q: string, answer: (a: string) => void) => { said.push(PROMPT_MARK + stripVTControlCharacters(q).trim()); answer(ANSWER); },
       close: () => {},
     }),
   };
@@ -195,6 +195,8 @@ beforeAll(() => {
   process.env.NODE_ENV = 'production';
   process.env.OS_TELEMETRY_DB = '0';
   process.env.OS_HOME = join(dir, 'home');
+  // The grant table is plugin-security's, composed behind the auth gate as `os serve` composes it.
+  process.env.OS_AUTH_SECRET = 'm32653'.repeat(11);
 });
 
 afterAll(() => {
