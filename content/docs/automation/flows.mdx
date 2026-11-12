@@ -339,7 +339,15 @@ form, which still reads `collection` as a bare variable name, unjudged.
 **A `notify` node's recipients: a list adds each recipient.** `recipients`
 holds one recipient — a user id, or an audience selector such as `team:ID` — or
 a list of them, each a string or an envelope:
-`recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }]`. An
+`recipients: ['team:ops', { dialect: 'cel', source: 'record.assignee' }]`. To
+reach a whole organization, write `org:members`: every member of the
+notification's organization, whatever their organization membership level, a
+member recorded with none included. The organization is the run's, else that
+of the record the notification is about — never one written in the string:
+where there is none, `org:members` reaches nobody, and any other `org:` value
+is no selector and reaches nobody either, each with a warning in the server
+log. A selector that names a group of members (`org:members`, `team:ID`) reads
+every member, however many there are. An
 envelope may evaluate to a recipient; to a list of them — a multi-user field, a
 list variable — whose every recipient is added; or to `null` or a blank string,
 which adds none, as the template dropped a token that resolved to nothing. A
@@ -371,6 +379,26 @@ run that carries none, that of the record it links to, else the trigger record �
 and no key on the node chooses another. A selector that expands over
 organization membership reads that organization's members only; another
 organization's flows notify its own.
+
+**A `notify` node's `channels` must name channels the deployment registers.**
+A channel is code: the messaging service registers `inbox`, and `email`, `sms`
+and `push` (each sends once its transport service is configured), and a plugin
+can register more. The `/automation` write doors (`POST /`, `PUT /:name` and the
+copy door `POST /:name/clone`) refuse a flow whose `notify` node, at any depth,
+names any other channel: `400 VALIDATION_FAILED`, naming the node and the channel
+at `nodes.N.config.channels`, with a did-you-mean, and listing the channels the
+deployment registers. Nothing is registered or stored. A channel whose transport
+is not configured yet is listed and accepted, because it starts sending once
+the transport is configured, with no flow edit. With no messaging service
+installed, a `notify` node delivers nothing whatever it names, and its channels
+are not judged. The check is the save's: a flow a package ships, and a flow
+stored through the metadata door, register as before, and a delivery on a
+channel nothing registers fails at run time with `channel 'NAME' not
+registered` and a step warning. **Positions and queues are not checked when a
+flow is saved.** An approval node's `position` or `queue` names runtime data
+an administrator adds and removes, so a name nobody holds yet saves, and it is
+resolved when the run reaches the node
+([who an entry that resolves to nobody leaves on the slate](/docs/automation/approvals)).
 
 **A `notify` node mails a person who is not a user through an email field.**
 An applicant who came in through a public form has no account, so no user id

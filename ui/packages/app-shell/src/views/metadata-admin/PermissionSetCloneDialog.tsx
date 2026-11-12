@@ -6,6 +6,12 @@
  * {@link clonePermissionSet} (the server's clone door — see
  * `permission-set-clone.ts` for the door and what it decides), and shows a
  * refusal in the server's own words.
+ *
+ * objectstack#32537 — a name more than one package holds is cloned from the
+ * `sourcePackage` the host holds; a host that holds none is refused naming
+ * every holder, and the dialog shows that refusal as a pick
+ * (`PermissionSetHolderPick.tsx`): choosing a holder sends the clone again
+ * from that holder's set. ⛔ Nothing is chosen by order.
  */
 
 import * as React from 'react';
@@ -23,10 +29,22 @@ import {
 } from '@object-ui/components';
 import { t as translate, tFormat } from './i18n.js';
 import { clonePermissionSet, type PermissionSetCloned } from './permission-set-clone.js';
+import {
+  candidatePackage,
+  PermissionSetHolderConflict,
+  type PermissionSetHolderCandidate,
+} from './permission-set-holder.js';
+import { PermissionSetHolderPick } from './PermissionSetHolderPick.js';
 
 export interface PermissionSetCloneDialogProps {
   /** Machine name of the set being copied. */
   source: string;
+  /**
+   * The package whose set of that name is copied, where the host holds one and
+   * the name alone does not address it (`permission-set-holder.ts`). Absent:
+   * the name alone, as before.
+   */
+  sourcePackage?: string;
   locale: string;
   /** Closes the dialog (Cancel, Escape, the overlay). */
   onClose: () => void;
@@ -39,29 +57,39 @@ export interface PermissionSetCloneDialogProps {
  * fields are required; the name rule itself is the server's (its `400` names
  * it), never a second copy of it here.
  */
-export function PermissionSetCloneDialog({ source, locale, onClose, onCloned }: PermissionSetCloneDialogProps) {
+export function PermissionSetCloneDialog({ source, sourcePackage, locale, onClose, onCloned }: PermissionSetCloneDialogProps) {
   const t = (k: string) => translate(k, locale);
   const [name, setName] = React.useState('');
   const [label, setLabel] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   /** The server's refusal, verbatim. */
   const [refusal, setRefusal] = React.useState<string | null>(null);
+  /** A refusal naming the name's holders, shown as a pick in place of {@link refusal}. */
+  const [conflict, setConflict] = React.useState<PermissionSetHolderConflict | null>(null);
   const ready = name.trim() !== '' && label.trim() !== '';
 
-  async function submit() {
+  /** Send the clone of `fromPackage`'s set — none names the set by its name alone. */
+  async function submit(fromPackage: string | undefined) {
     if (!ready || busy) return;
     setBusy(true);
     setRefusal(null);
+    setConflict(null);
     try {
-      const cloned = await clonePermissionSet(source, { name: name.trim(), label: label.trim() }, (status) =>
-        tFormat('perm.clone.failedHttp', locale, { status }),
+      const cloned = await clonePermissionSet(
+        source,
+        { name: name.trim(), label: label.trim() },
+        (status) => tFormat('perm.clone.failedHttp', locale, { status }),
+        fromPackage,
       );
       onCloned(cloned);
     } catch (err: unknown) {
-      setRefusal(err instanceof Error && err.message ? err.message : t('perm.clone.failed'));
+      if (err instanceof PermissionSetHolderConflict) setConflict(err);
+      else setRefusal(err instanceof Error && err.message ? err.message : t('perm.clone.failed'));
       setBusy(false);
     }
   }
+
+  const pick = (candidate: PermissionSetHolderCandidate) => void submit(candidatePackage(candidate));
 
   return (
     <Dialog open onOpenChange={(open: boolean) => !open && !busy && onClose()}>
@@ -74,7 +102,7 @@ export function PermissionSetCloneDialog({ source, locale, onClose, onCloned }: 
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            void submit();
+            void submit(sourcePackage);
           }}
         >
           <div className="space-y-1">
@@ -86,6 +114,7 @@ export function PermissionSetCloneDialog({ source, locale, onClose, onCloned }: 
               onChange={(e) => {
                 setName(e.target.value);
                 setRefusal(null);
+                setConflict(null);
               }}
             />
           </div>
@@ -98,6 +127,7 @@ export function PermissionSetCloneDialog({ source, locale, onClose, onCloned }: 
               onChange={(e) => {
                 setLabel(e.target.value);
                 setRefusal(null);
+                setConflict(null);
               }}
             />
           </div>
@@ -106,6 +136,7 @@ export function PermissionSetCloneDialog({ source, locale, onClose, onCloned }: 
               {refusal}
             </p>
           )}
+          {conflict !== null && <PermissionSetHolderPick conflict={conflict} locale={locale} busy={busy} onPick={pick} />}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>
               {t('engine.cancel')}
