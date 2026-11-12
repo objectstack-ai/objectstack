@@ -59,7 +59,7 @@ it anew.
 
 ### Flow Node Types
 
-Flows are built from **built-in node types** (plugins register more):
+Built-in (plugins register more):
 
 #### Control Flow
 
@@ -92,9 +92,9 @@ Flows are built from **built-in node types** (plugins register more):
 | Node | Purpose |
 |:-----|:--------|
 | `http` | Call an external HTTP API — always set `timeoutMs` (unset = no timeout). `url` and `headers` are served as written with the definition to every member who can read flows — only `signingSecret` and a start node's `secret` are withheld — so never a credential there: a credential means a declared connector called via `connector_action` |
-| `notify` | Send a notification through the messaging service |
+| `notify` | Send a notification (below) |
 | `connector_action` | Dispatch an action of a declared connector (§ *Integrations are declared, not coded*) or a plugin's. `connectorConfig.input` is a value-slot map like `subflow` `input`. Once evaluated, it is judged against the action's `inputSchema` (`required`, `type`, `properties`, `items`) before dispatch: a breach fails the step `VALIDATION_ERROR` (`fault`-routable), nothing sent; `os validate` does not judge the `inputSchema` fit yet |
-| `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
+| `script` | Call a **registered** function (*Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only). `config.fields[]`: `{ name, label, type, required, options, defaultValue }`, `type` an open widget hint; `'file'` renders the upload widget and resumes with the `sys_file` id bound to `name` — a later `create_record` / `update_record` writes it into a `file` field, which claims the file: collect first, write after the last screen. `'record_link'` (never `'record'`, an object field type) takes no input — it shows the `reference` record whose id `defaultValue` evaluates to, by display name, as a link to its record page: the result screen of a flow that created records, `{ name: 'account_link', type: 'record_link', reference: 'crm_account', defaultValue: { dialect: 'cel', source: 'account.id' } }` over a `create_record` `outputVariable: 'account'`. Both keys required; `required` / `options` / `placeholder` / `min` / `max` refused; a resume value under its name refused (`400 INVALID_SCREEN_INPUT`). A completed `end` `message` is refused and a markdown link in a screen `description` renders literally. Next / Submit and "Step N of M" are not authored: the engine reads the graph when the screen pauses and serves `progress` (`nextScreen: 'none' | 'possible' | 'certain'`; `step` / `stepCount` only when every path agrees), which alone labels the button and draws the counter. A `decision`, `fault` edge, loop back, non-screen pause (`approval`, `wait`) or `subflow` after a screen answers `possible` — "Next", no count. `progress` in a node `config` is refused |
 
 #### Human Decision
@@ -127,6 +127,12 @@ const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owne
 } };
 ```
 
+A recipient string, written or evaluated, may be an audience selector:
+
+- `team:ID` — that team's members.
+- `owner_of:OBJECT:ID` — that record's owner.
+- `org:members` — every member of the run's organization, else that of the record the notification is about; any other `org:` value reaches nobody, with a warning.
+
 An option label in a notice: `{{ stage | option:opportunity.stage }}` in the mail
 `template` (each recipient's language; mail-only, refused in inline `title` /
 `message`) — never `label()` in `templateData`, evaluated once per run, before
@@ -143,8 +149,8 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 ### Failure routing & `runAs`
 
 > **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
-> routes a failed node to a handler instead of ending the run. **`type: 'fault'`
-> is what routes — a `label: 'error'` alone does nothing:** an ordinary edge
+> routes a failed node to a handler instead of ending the run. **A
+> `label: 'error'` alone does nothing:** an ordinary edge
 > traverses on SUCCESS (`objectstack validate` reports `flow-error-label-not-fault`).
 > A handled failure does not consume a flow-level `errorHandling.retry`, which
 > replays from the start — prefer a fault edge for a local failure. The handler
@@ -155,11 +161,11 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 |:--|:--|
 | 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null` or a non-value; graph past the nesting ceiling; unscoped run |
 
-> **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
+> **Writing a `readonly` field? Set `runAs: 'system'`** (approval stamps, SLA
+> markers, rollups). Under the default
 > `runAs: 'user'` the engine **strips** it from `create_record` / `update_record`
 > — the step succeeds, the value never lands, the drop is named in the step's
-> warnings — so a flow maintaining one (approval stamps, SLA markers, rollups)
-> runs `runAs: 'system'`; `os validate` / `os build` fail a `runAs:'user'`
+> warnings; `os validate` / `os build` fail a `runAs:'user'`
 > `update_record` writing one (`readonlyWhen`: a warning).
 
 > **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
@@ -194,12 +200,11 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 > sandboxed `body` alike. A `'user'` hook whose trigger resolved no user has
 > nothing to scope to: its `ctx.api` data operations are refused
 > (`HOOK_UNSCOPED_DATA_ACCESS`, 403) rather than run unscoped — declare
-> `runAs: 'system'` when the elevation is intended. `sudo` is not a hook key.
+> `runAs: 'system'` when the elevation is intended.
 
 ### Filter operands (`config.filter`)
 
-- **Each operand is a value slot** — a literal or a CEL envelope evaluated
-  before the query.
+- **Each operand is a value slot**, evaluated before the query.
   A whole-string **query placeholder** (`{current_user_id}`, `{today}`,
   `{current_year_start}`) passes through verbatim for the query engine; a flow
   variable never shadows it, and only `filter` gets this hand-off.
@@ -300,8 +305,7 @@ Legal metadata authors get wrong; most are caught by `objectstack build`:
    The request speaks the label ("Lost"); the row stores the `value` (`lost`).
    `condition: "record.status == 'Lost'"` parses, matches no row: the flow
    stages clean and never fires; `fields: { status: 'Lost' }` / a `filter`
-   fails the run (`invalid_option`). Read the field's `options`; write the
-   `value` in the `condition` AND every `fields` / `filter` entry.
+   fails the run (`invalid_option`). Read the field's `options`.
 
 ---
 
