@@ -819,7 +819,62 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             manager.registerInMemory('action', 'approve', item(B, 'beta', 'contact'));
             manager.registerInMemory('action', 'approve', item(undefined, 'env', 'lead'));
             engine.registry.disablePackage(B);
-            expect((await read()).item).toBeDefined();
+            // [contract review F5] The registry holds A only; the service's
+            // environment item on `lead` is not in the registry, so the judge
+            // sees one enabled holder and A answers. D3 would serve the
+            // environment's item first: the follow-up card carries it.
+            expect((await read()).item).toMatchObject({ label: 'alpha', objectName: 'account' });
+        });
+
+        /**
+         * [contract review F3] The service is read before the registry and
+         * holds its own copies, so its bare answer can be another holder's
+         * than the rule's. The plain read and the layered read's code layer
+         * serve it only when it is package-less or the judged holder's own;
+         * otherwise the judged answer. Code and overlay asserted apart.
+         */
+        it('[contract review F3] case 1 — the service holds A\'s item only, the registry and the store the environment\'s on `contact`: both reads answer the environment\'s, code layer included', async () => {
+            const manager = await withService();
+            install(A);
+            ship(A, 'account');
+            shipPackageless('env', 'contact');
+            storeEnvironmentRow('contact');
+            manager.registerInMemory('action', 'approve', item(A, 'alpha', 'account'));
+            expect((await read()).item).toMatchObject({ label: 'env', objectName: 'contact' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'env', objectName: 'contact' });
+            expect(layers.overlay, 'overlay').toBeNull();
+            expect(layers.effective).toMatchObject({ label: 'env' });
+        });
+
+        it('[contract review F3] case 3 — the service holds the disabled B\'s item only, registered before A\'s: both reads answer A\'s, code layer included', async () => {
+            const manager = await withService();
+            install(B);
+            install(A);
+            ship(B, 'contact');
+            ship(A, 'account');
+            engine.registry.disablePackage(B);
+            manager.registerInMemory('action', 'approve', item(B, 'beta', 'contact'));
+            expect((await read()).item).toMatchObject({ label: 'alpha', objectName: 'account' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'alpha', objectName: 'account' });
+            expect(layers.overlay, 'overlay').toBeNull();
+            expect(layers.effective).toMatchObject({ label: 'alpha' });
+        });
+
+        it('[contract review F3] case 3 — the service holds both, the disabled B\'s first: both reads answer A\'s', async () => {
+            const manager = await withService();
+            install(B);
+            install(A);
+            ship(B, 'contact');
+            ship(A, 'account');
+            engine.registry.disablePackage(B);
+            manager.registerInMemory('action', 'approve', item(B, 'beta', 'contact'));
+            manager.registerInMemory('action', 'approve', item(A, 'alpha', 'account'));
+            expect((await read()).item).toMatchObject({ label: 'alpha' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'alpha' });
+            expect(layers.overlay, 'overlay').toBeNull();
         });
 
         /**

@@ -559,8 +559,8 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => 
 });
 
 /**
- * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name` and its `/layers`,
- * judged over every holder, on this transport too: a package-less item the
+ * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name`, its `/layers` and
+ * its `/published`, judged over every holder, on this transport too: a package-less item the
  * environment's store holds no row of (the platform's) beside a package's is
  * refused naming both, and beside two packages' it is named with them; one
  * enabled holder answers though a disabled package registered first.
@@ -575,8 +575,10 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
     }, 'name' as never, packageId);
     const pkg = (packageId: string) => ({ kind: 'package', packageId });
     const LAYERS = '/api/v1/meta/:type/:name/layers';
+    const PUBLISHED = '/api/v1/meta/:type/:name/published';
+    const PLATFORM = 'the platform (registered by a plugin or the host, owned by no package)';
 
-    it('the platform\'s item on `contact` beside A\'s on `account`: 409 naming A and the platform, on both doors', async () => {
+    it('the platform\'s item on `contact` beside A\'s on `account`: 409 naming A and the platform, on the item read, `/layers` and `/published`', async () => {
         shipAction(A, 'account');
         shipAction(undefined, 'contact');
         const answer = await drive(ITEM, { type: 'action', name: 'approve' });
@@ -585,6 +587,11 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         expect(messageOf(answer)).toContain('The platform\'s item binds it to object "contact"');
         const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
         expect([layers.status, codeOf(layers)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        // `/layers` and `/published` carry the refusal's text, not its candidates.
+        const published = await drive(PUBLISHED, { type: 'action', name: 'approve' });
+        expect([published.status, codeOf(published)], JSON.stringify(published.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(messageOf(published)).toContain(`package "${A}"`);
+        expect(messageOf(published)).toContain(PLATFORM);
     });
 
     it('beside two packages\' on two objects: 409 naming both packages and the package-less holder', async () => {
@@ -594,6 +601,11 @@ describe('#32365 — the bare action read weighs the package-less holder and ser
         const answer = await drive(ITEM, { type: 'action', name: 'approve' });
         expect([answer.status, answer.body?.details?.candidates], JSON.stringify(answer.body))
             .toEqual([409, [pkg(A), pkg(B), { kind: 'platform' }]]);
+        for (const door of [LAYERS, PUBLISHED]) {
+            const refused = await drive(door, { type: 'action', name: 'approve' });
+            expect([refused.status, codeOf(refused)], `${door} ${JSON.stringify(refused.body)}`).toEqual([409, 'RESOURCE_CONFLICT']);
+            for (const holder of [`package "${A}"`, `package "${B}"`, PLATFORM]) expect(messageOf(refused), door).toContain(holder);
+        }
     });
 
     it('a disabled package registered before the one enabled holder: both doors answer the enabled holder', async () => {

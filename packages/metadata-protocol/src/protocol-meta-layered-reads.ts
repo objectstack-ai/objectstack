@@ -56,7 +56,7 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { judgeBareActionRead, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
+import { judgeBareActionRead, rethrowPackageScopedRefusal, serviceAnswerFitsBareAction } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -161,10 +161,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // packages hold on any object key is refused naming each with its object
     // ({@link refuseActionHeldByPackages}).
     // [ADR-0150 D3, #32365] …judged over every holder, the package-less item
-    // included, as the plain read judges it ({@link judgeBareActionRead}):
-    // the item it answers is this read's code layer below, never the
-    // registry's first composite (a disabled package's, when it registered
-    // first) nor a package's artifact beside the environment's own item.
+    // included, as the plain read judges it ({@link judgeBareActionRead}).
+    // The code layer below follows the judged answer: the MetadataService's
+    // copy when it is package-less or the judged holder's own, else the one
+    // enabled holder's artifact (looked up at that holder) or the
+    // environment's runtime item — never the registry's first composite (a
+    // disabled package's, when it registered first), nor a package's item
+    // beside the environment's own.
     const bareActionAnswer = !request.packageId && request.type === 'action'
         ? await judgeBareActionRead(host, request.name)
         : undefined;
@@ -184,7 +187,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             request.name,
             request.packageId,
         );
-        if (fromService.data !== undefined && fromService.data !== null) {
+        // [#32365] …unless a bare action read's judged answer says it is
+        // another holder's ({@link serviceAnswerFitsBareAction}), as in
+        // {@link getMetaItem}.
+        if (fromService.data !== undefined && fromService.data !== null
+            && !(bareActionAnswer && !serviceAnswerFitsBareAction(bareActionAnswer, fromService.data))) {
             // [#26699] …when it is the member this read addresses, as in
             // {@link getMetaItem}: the service keys a type's items by name
             // alone, so for a bundle it holds whichever member it

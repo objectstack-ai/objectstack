@@ -288,6 +288,30 @@ export async function judgeBareActionRead(
     return undefined;
 }
 
+/** The package an action item carries (its `_packageId` stamp, else an envelope's `packageId`); `undefined` for none or the sentinel. */
+function actionItemPackageOf(item: unknown): string | undefined {
+    const carried = item as { _packageId?: unknown; packageId?: unknown } | null | undefined;
+    for (const candidate of [carried?._packageId, carried?.packageId]) {
+        if (typeof candidate === 'string' && candidate !== '' && candidate !== 'sys_metadata') return candidate;
+    }
+    return undefined;
+}
+
+/**
+ * [ADR-0150 D3, #32365] Does the MetadataService's answer to a bare action
+ * read agree with the judged answer ({@link judgeBareActionRead})? The
+ * service is read before the registry, and holds its own copies, so its bare
+ * answer may be another package's item (a disabled package's, or the one
+ * package's beside the environment's own item) where the rule answers
+ * otherwise. It is served only when it is package-less (the environment's
+ * own item, which answers first) or the judged holder's own; anything else is
+ * not this read's answer, and the judged answer is served in its place.
+ */
+export function serviceAnswerFitsBareAction(judged: { item: unknown }, data: unknown): boolean {
+    const served = actionItemPackageOf(data);
+    return served === undefined || served === actionItemPackageOf(judged.item);
+}
+
 /**
  * Does the environment's store hold an active package-less row of the action
  * that binds its name to `object` (`undefined`: none)? Such a row is the
@@ -880,7 +904,10 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 request.name,
                 request.packageId,
             );
-            if (fromService.data !== undefined && fromService.data !== null) {
+            // [#32365] …unless a bare action read's judged answer says it is
+            // another holder's ({@link serviceAnswerFitsBareAction}).
+            if (fromService.data !== undefined && fromService.data !== null
+                && !(bareActionAnswer && !serviceAnswerFitsBareAction(bareActionAnswer, fromService.data))) {
                 // [#22877] …when it is the member this read addresses. The
                 // service keys a type's items by name alone, so for a
                 // bundle it holds whichever member it registered last, and
