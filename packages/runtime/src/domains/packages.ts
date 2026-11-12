@@ -181,6 +181,8 @@ import {
 // [#28640 ruling ③A] The export names each connector map the served read
 // withheld: the declaration of that list, and the redactor that decided it.
 import { PackageExportManifestSchema, type PackageExportManifest } from '@objectstack/spec/api';
+// [#32455] The declared `outcome` vocabulary the publish-drafts flip is gated on.
+import type { PublishPackageDraftsResponse } from '@objectstack/spec/api';
 import { getMetadataTypeRedactor } from '@objectstack/spec/kernel';
 // [#30379 ruling A] The disable door's dependent-rule scan reads a rule's
 // fields with the platform's one member reader, the reader the rule validator
@@ -637,6 +639,28 @@ function packageIsUnknown(registry: unknown, id: string): boolean {
     if (typeof reg?.getPackage !== 'function') return false;
     return !reg.getPackage(id);
 }
+
+/**
+ * [#32455] The `publishPackageDrafts` outcomes the ADR-0045 §3 visibility flip
+ * of `POST /packages/:id/publish-drafts` may follow: the answers that say
+ * nothing was refused. ADR-0067 D2 leaves no room for a flip after a refusal
+ * ("no partial visibility flip"), and the flip is a metadata write riding on
+ * someone else's success, so it runs only on a success the producer NAMES.
+ *
+ * - `published` — the drafts landed; the package is live and becomes visible.
+ * - `nothing_to_publish` — kept on purpose: for a materialized (additive)
+ *   build there are no drafts, and this flip IS the publish (ADR-0045 §3).
+ *
+ * ⛔ An allow-list, never "anything but `refused`". A refused batch, an
+ * `outcome` the declaration does not name, and an answer with no `outcome` at
+ * all flip nothing: an app that should have been unhidden stays hidden and a
+ * re-run of the idempotent door fixes it, while an app unhidden after a
+ * refusal is in every user's launcher at once.
+ */
+const PUBLISH_OUTCOMES_THAT_FLIP: ReadonlySet<unknown> = new Set<PublishPackageDraftsResponse['outcome']>([
+    'published',
+    'nothing_to_publish',
+]);
 
 /**
  * [ADR-0146 D2/D3/D11] The customization remedy both read-only refusals below
@@ -3126,9 +3150,20 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // instead of on the row cold boot hydrates. Read scope and
                     // write scope now answer one question through one registry
                     // flag; ⛔ never "restore" the organization to this read.
+                    //
+                    // [#32455, ADR-0067 D2] …and only after a publish that
+                    // refused nothing: see `PUBLISH_OUTCOMES_THAT_FLIP`. A
+                    // refused batch (a pre-flight violation, or a rollback at
+                    // a later draft) answered this 200 too, and the flip then
+                    // unhid an app the operator kept hidden and announced it.
+                    // Skipped, nothing is read or written, `unhiddenApps`
+                    // stays absent, and the announce below has nothing of the
+                    // flip's to send; the caller already reads the refusal
+                    // from `outcome` and `failed[]`, so no log either.
                     const flipped: string[] = [];
                     try {
                         if (
+                            PUBLISH_OUTCOMES_THAT_FLIP.has((result as any)?.outcome) &&
                             typeof protocol.getMetaItems === 'function' &&
                             typeof protocol.saveMetaItem === 'function'
                         ) {
