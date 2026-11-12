@@ -182,16 +182,18 @@ describe('runUniqueScopeProofs — a single-posture boot (the untenanted install
     }
   });
 
-  it('reads the refusal it credits: the unique code at each door, the field named only for a bare-column index', () => {
+  it('reads the refusal it credits: the unique code at each door, and the field it names', () => {
     const at = (object: string, field: string, door: string, operation: string) =>
       resultFor(report, object, field).probes.find((p) => p.door === door && p.operation === operation)!;
-    // A per-organization index is an expression index: no field, so the twin attributes it.
+    // A per-organization index is the composite (organization_id, name); its
+    // organization part is the implied scope, so the refusal names the field
+    // (#32711) and no twin is needed.
     expect(at('uqs_account', 'name', 'rest', 'insert')).toMatchObject({
-      answer: { kind: 'refused', code: 'UNIQUE_VIOLATION', status: 409, object: 'uqs_account' },
-      twin: 'written',
+      answer: { kind: 'refused', code: 'UNIQUE_VIOLATION', status: 409, object: 'uqs_account', field: 'name' },
     });
-    expect(at('uqs_account', 'name', 'rest', 'insert').answer!.field).toBeUndefined();
-    expect(at('uqs_account', 'name', 'system', 'insert')).toMatchObject({ answer: { kind: 'refused', code: 'DUPLICATE_RECORD', status: 409 }, twin: 'written' });
+    expect(at('uqs_account', 'name', 'rest', 'insert').twin).toBeUndefined();
+    expect(at('uqs_account', 'name', 'system', 'insert')).toMatchObject({ answer: { kind: 'refused', code: 'DUPLICATE_RECORD', status: 409, field: 'name' } });
+    expect(at('uqs_account', 'name', 'system', 'insert').twin).toBeUndefined();
     // A global index, or no organization column: the column is named, no twin needed.
     expect(at('uqs_account', 'ext_id', 'rest', 'insert')).toMatchObject({ answer: { code: 'UNIQUE_VIOLATION', field: 'ext_id' } });
     expect(at('uqs_account', 'ext_id', 'rest', 'insert').twin).toBeUndefined();
@@ -416,7 +418,12 @@ describe('runUniqueScopeProofs — NEGATIVE CONTROL, across: a per-organization 
  * the app's own code before the engine writes (an app's dedupe, the shape
  * hotcrm's contact hook has); `uqa_tagged`'s hook stamps one `code` on every
  * record, so every record after the first meets `code`'s constraint, and so
- * does the twin of any probe of `label`.
+ * does the twin of any probe of `label`. That constraint is a unique
+ * `indexes[]` entry over two authored columns, `(code, kind)`, both stamped by
+ * the hook: a key of two authored columns names no field (#32711 names the
+ * field only where the organization part is the one other column), so the
+ * refusal is field-less and the twin decides. The entry does not cover
+ * `label`, so the covering-entry rule does not decide it first.
  */
 const attributionApp = {
   manifest: { id: 'com.example.unique-scope-attribution', namespace: 'uqa', version: '0.0.1', type: 'app', name: 'Attribution Control' },
@@ -425,7 +432,12 @@ const attributionApp = {
     {
       name: 'uqa_tagged',
       label: 'Tagged',
-      fields: { label: { type: 'text', label: 'Label', unique: true }, code: { type: 'text', label: 'Code', unique: true } },
+      fields: {
+        label: { type: 'text', label: 'Label', unique: true },
+        code: { type: 'text', label: 'Code' },
+        kind: { type: 'text', label: 'Kind' },
+      },
+      indexes: [{ fields: ['code', 'kind'], unique: true }],
     },
   ],
   hooks: [
@@ -446,8 +458,9 @@ const attributionApp = {
       name: 'uqa_tagged_stamps_one_code',
       object: 'uqa_tagged',
       events: ['beforeInsert'],
-      handler: async (ctx: { input: { code?: unknown } }) => {
+      handler: async (ctx: { input: { code?: unknown; kind?: unknown } }) => {
         ctx.input.code = 'one code for every record';
+        ctx.input.kind = 'one kind for every record';
       },
     },
   ],

@@ -1,6 +1,7 @@
 ---
 '@objectstack/types': patch
 '@objectstack/objectql': patch
+'@objectstack/verify': patch
 ---
 
 fix(types): a duplicate value in an organization-scoped unique field now names the field

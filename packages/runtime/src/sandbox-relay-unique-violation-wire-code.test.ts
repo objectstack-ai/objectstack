@@ -159,8 +159,10 @@ function expectUniqueViolation(response: { status: number; body: any }) {
     const error = response.body?.error;
     expect(error?.code).toBe('UNIQUE_VIOLATION');
     expect(error?.httpStatus).toBe(409);
-    // The index is the tenancy-scoped composite, so the driver names no single column.
-    expect(Object.keys(error?.details ?? {}).sort()).toEqual(['developerMessage', 'object']);
+    // The index is the tenancy-scoped composite `(organization_id, email)`; its
+    // organization part is the implied scope, so the refusal names `email`.
+    expect(Object.keys(error?.details ?? {}).sort()).toEqual(['developerMessage', 'field', 'object']);
+    expect(error.details.field).toBe('email');
     expect(error.details.object).toBe('udoc');
     expect(error).not.toHaveProperty('declaredCode');
     // The in-process spelling does not cross, nor the relay's class-name prefix, nor the driver's text.
