@@ -238,6 +238,18 @@ function useCopy() {
 }
 
 /**
+ * objectstack#32807 — a grant row's own id, or `null` when the row was read
+ * with none (a field-trimmed read, a host's fake): such a row has nothing for
+ * Remove to delete, so it is shown without one — ⛔ never keyed or deleted as
+ * the string `"undefined"`.
+ */
+function grantIdOf(grant: { id?: unknown } | null | undefined): string | null {
+  const id = grant?.id;
+  if (typeof id === 'number' && Number.isFinite(id)) return String(id);
+  return typeof id === 'string' && id.trim() !== '' ? id : null;
+}
+
+/**
  * The rows of a `find()` answer, read as `QueryResult` declares them.
  *
  * `QueryResult` (`@object-ui/types`) declares exactly one rows member: `data`.
@@ -501,11 +513,14 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
         : [];
 
       const viaByUser = new Map<string, AssignedRow['via']>();
-      const grantIdByUser = new Map<string, string>();
+      const grantIdByUser = new Map<string, string | null>();
       for (const g of grants) {
         if (!g?.user_id) continue;
         const uid = String(g.user_id);
-        grantIdByUser.set(uid, String(g.id));
+        // objectstack#32807 — a grant read with no `id` has no row to delete:
+        // it never displaces a removable grant of the same user.
+        const id = grantIdOf(g);
+        if (id !== null || !grantIdByUser.has(uid)) grantIdByUser.set(uid, id);
         viaByUser.set(uid, [...(viaByUser.get(uid) ?? []), { kind: 'direct' as const }]);
       }
       for (const a of assignments) {
@@ -548,7 +563,7 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
             const uid = String(g.user_id);
             const u = byId.get(uid);
             return {
-              grantId: String(g.id),
+              grantId: grantIdOf(g),
               userId: uid,
               name: u ? personLabel(u) : uid,
               email: u?.email ?? '',
@@ -821,7 +836,9 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
                     <X className="h-4 w-4" />
                   </Button>
                 )
-              ) : (
+              ) : r.via.some((v) => v.kind === 'direct') ? null : (
+                // Held only through positions. A direct grant read with no
+                // `id` (objectstack#32807) gets neither a Remove nor this hint.
                 <span className="shrink-0 text-[10px] text-muted-foreground/70" title={c.positionHeldHint}>
                   —
                 </span>
@@ -847,7 +864,8 @@ export function AssignedUsersSection({ permissionSetName, onHoldersRead, holding
                     <div className="text-xs text-muted-foreground truncate">{r.email}</div>
                   )}
                 </div>
-                {canRemove && (
+                {/* objectstack#32807 — a grant read with no `id` has no row to delete: no Remove. */}
+                {canRemove && r.grantId && (
                   <Button
                     variant="ghost"
                     size="sm"
