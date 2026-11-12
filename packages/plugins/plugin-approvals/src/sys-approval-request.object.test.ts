@@ -173,8 +173,9 @@ describe('sys_approval_request declared actions', () => {
     // tool description exists — and must be its own text, never the question.
     for (const name of ['approval_reject', 'approval_recall']) {
       const a = byName(name);
-      expect(typeof a.description, `${name}.description`).toBe('string');
-      expect(a.ai?.description, `${name}.ai.description`).not.toBe(a.description);
+      const question = templateSlotSource(a.description);
+      expect(question, `${name}.description`).toMatch(/\?/);
+      expect(a.ai?.description ?? '', `${name}.ai.description`).not.toContain(question);
     }
     expect(byName('approval_recall').ai?.description).toBeUndefined();
   });
