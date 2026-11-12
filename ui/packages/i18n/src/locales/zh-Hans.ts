@@ -416,6 +416,9 @@ const zh = {
       tomorrow: '明天',
       clear: '清除日期',
       openCalendar: '打开日历',
+      time: '时间',
+      hour: '小时',
+      minute: '分钟',
       invalid:
         '未保存：“{{value}}”不是有效日期。请按 {{format}} 格式输入，或从日历中选择。',
     },
@@ -947,6 +950,8 @@ const zh = {
     addGroup: '添加分组字段',
     collapsedByDefault: '默认折叠',
     removeGroup: '删除',
+    groupingUnstoredNotice: '无法按 {{fields}} 分组：它的值在显示时计算，并未存储。列表已暂不按它分组显示。',
+    groupingUnstoredRemove: '从分组中移除',
     inlineEditShort: '行内编辑',
     inlineEditLabel: '行内编辑记录(点击单元格进行编辑)',
   },
