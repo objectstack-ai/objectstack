@@ -971,18 +971,18 @@ export async function dispatchActionRequest(
     }
     // [#32658] THE FORWARD'S ROUTING IDENTITY. A same-origin `type: 'api'`
     // action forwards into the host's raw app, which places the forwarded
-    // request as it places any request it receives. A REST request carries
-    // what placed it (its `Host`, its `X-Environment-Id`) into its forward, so
-    // the forward lands in the environment the call ran in. This door's request
-    // carries neither: on a multi-kernel host its forward reached the raw app as
-    // `Host: localhost`, which places it in no environment, and the target
-    // answered the caller 401. The environment the host's resolver placed the
-    // call in is written as the declared environment header, so the forward is
-    // placed where the call ran. It is the resolver's answer, never the
-    // caller's: it replaces any spelling the credential headers carried. Read
-    // before the no-resolver fallbacks below write an environment, so a host
-    // that placed nothing (a single kernel) routes nothing; `platform` is the
-    // control plane, not an environment.
+    // request as it places any request it receives. A REST request placed by
+    // its hostname or its `X-Environment-Id` carries that signal into its
+    // forward, so the forward lands in the environment the call ran in. This
+    // door's request carries neither: on a multi-kernel host its forward
+    // reached the raw app as `Host: localhost`, which places it in no
+    // environment, and the target answered the caller 401. The environment the
+    // host's resolver placed the call in is written as the declared
+    // environment header, so the forward is placed where the call ran. It is
+    // the resolver's answer, never the caller's: it replaces any spelling the
+    // credential headers carried. Read before the no-resolver fallbacks below
+    // write an environment, so a host that placed nothing (a single kernel)
+    // routes nothing; `platform` is the control plane, not an environment.
     const placedEnvironment = context.environmentId;
     if (typeof placedEnvironment === 'string' && placedEnvironment !== '' && placedEnvironment !== 'platform') {
         headers[FORWARD_ENVIRONMENT_HEADER] = placedEnvironment;
