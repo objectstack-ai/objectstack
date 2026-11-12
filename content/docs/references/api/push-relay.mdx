@@ -95,7 +95,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **code** | `'UNAUTHENTICATED'` | ✅ | The server binding credential was not accepted |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `401` | ✅ | HTTP status code |
@@ -140,7 +140,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **code** | `'RATE_LIMIT_EXCEEDED'` | ✅ | The server sent the relay too many requests |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |
@@ -179,7 +179,7 @@ This schema accepts one of the following structures:
 | :--- | :--- | :--- | :--- |
 | **code** | `'QUOTA_EXCEEDED'` | ✅ | The push quota of the server plan is used up |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| 'rate_limit' \| 'server' \| 'external' \| 'maintenance'>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |
@@ -231,7 +231,7 @@ The push relay error response: the house error envelope, for 401 (bad or revoked
 | :--- | :--- | :--- | :--- |
 | **code** | `'UNAUTHENTICATED'` | ✅ | The server binding credential was not accepted |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `401` | ✅ | HTTP status code |
@@ -254,7 +254,7 @@ The push relay error response: the house error envelope, for 401 (bad or revoked
 | :--- | :--- | :--- | :--- |
 | **code** | `'RATE_LIMIT_EXCEEDED'` | ✅ | The server sent the relay too many requests |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |
@@ -277,7 +277,7 @@ The push relay error response: the house error envelope, for 401 (bad or revoked
 | :--- | :--- | :--- | :--- |
 | **code** | `'QUOTA_EXCEEDED'` | ✅ | The push quota of the server plan is used up |
 | **message** | `string` | ✅ | Human-readable error message |
-| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
+| **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, in the request's locale (platform-composed text falls back to the workspace default locale, then `en`; an app-authored refusal to its declared wording) — see ApiErrorSchema.userMessage. Present only when the producer opted in at throw time; unmarked errors keep the generic consumer substitution. |
 | **refusal** | `true` | optional | Producer-declared deliberate refusal — see ApiErrorSchema.refusal. Present only when the producer declared it at throw time; a declared 5xx without it is a fault whose `message` is withheld. Until the withhold arms read the declaration, a declared refusal is still withheld. |
 | **category** | `Enum<'validation' \| 'authentication' \| 'authorization' \| 'not_found' \| 'conflict' \| …>` | optional | Error category |
 | **httpStatus** | `429` | ✅ | HTTP status code |

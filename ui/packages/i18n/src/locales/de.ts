@@ -4000,6 +4000,7 @@ const de = {
       get_authoring_rules: "Die Erstellungsregeln nachlesen",
       get_metadata_schema: "Das Metadatenformat nachlesen",
       get_package: "Das Paket ansehen",
+      get_record_history: "Den Verlauf des Datensatzes lesen",
       list_metadata: "Vorhandene Metadaten auflisten",
       list_objects: "Vorhandene Objekte auflisten",
       list_packages: "Vorhandene Pakete auflisten",
