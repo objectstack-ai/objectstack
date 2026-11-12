@@ -319,6 +319,12 @@ export default class MigratePlan extends Command {
       // DDL): `pending` below was not examined, so it cannot read as "none".
       const schemaSyncSkipped = stack.schemaSync === 'skipped';
 
+      // The stack's `objectql` service, asked at most once and only by a read
+      // that needs it: the drop gates below, and the runtime-owned indexes.
+      const kernel = stack.kernel as { getService?: (n: string) => unknown };
+      let engine: { value: unknown } | undefined;
+      const objectql = (): unknown => (engine ??= { value: kernel.getService?.call(kernel, 'objectql') }).value;
+
       // [#32460] The runtime-owned indexes `apply` builds beside the DDL it
       // performs: today the permission-set grant's package-less guard. Read
       // only, through the build's own statements; `[]` when it already stands,
@@ -327,7 +333,7 @@ export default class MigratePlan extends Command {
         schemaSync: stack.schemaSync,
         applyPerformsWork: drift.length > 0 || pending.length > 0,
         pending,
-        engine: (stack.kernel as { getService?: (n: string) => unknown }).getService?.('objectql'),
+        engine: objectql,
       });
 
       if (flags.json) {
@@ -511,8 +517,7 @@ export default class MigratePlan extends Command {
       // preconditions hold. Read through the gates' own predicates and reads,
       // never a second list. Empty when nothing is held, and then everything
       // below reads as it always has.
-      const kernel = stack.kernel as { getService?: (n: string) => unknown };
-      const held = await readHeldDrops(new DropGateReads(), () => kernel.getService?.call(kernel, 'objectql'), drift);
+      const held = await readHeldDrops(new DropGateReads(), objectql, drift);
 
       await renderPendingSchemaWork(pending);
       // [#32460] Between the two, as `apply` performs them: its flush runs the

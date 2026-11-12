@@ -183,7 +183,7 @@ describe('[#32460] os migrate plan lists the guard os migrate apply builds, and 
           schemaSync: stack.schemaSync,
           applyPerformsWork,
           pending: stack.pendingSchemaWork,
-          engine: stack.kernel.getService('objectql'),
+          engine: () => stack.kernel.getService('objectql'),
         }),
       };
     } finally {

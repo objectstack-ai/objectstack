@@ -42,7 +42,7 @@ let driver: SqlDriver;
 let knex: any;
 
 /** The engine surface the guard's seam resolution walks: the driver behind the grant table. */
-const engineOf = (d: unknown) => ({ getDriverForObject: () => d });
+const engineOf = (d: unknown) => () => ({ getDriverForObject: () => d });
 
 function input(extra: Partial<CollectSchemaSyncIndexesInput> = {}): CollectSchemaSyncIndexesInput {
   return { schemaSync: 'deferred', applyPerformsWork: true, pending: [], engine: engineOf(driver), ...extra };

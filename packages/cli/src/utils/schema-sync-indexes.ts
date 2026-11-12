@@ -110,8 +110,12 @@ export interface CollectSchemaSyncIndexesInput {
   applyPerformsWork: boolean;
   /** The work the boot held back: a `create_table` here is a table the same apply creates. */
   pending: readonly PendingSchemaWork[];
-  /** The ObjectQL engine, through which each index's seam is resolved. */
-  engine: unknown;
+  /**
+   * The ObjectQL engine, through which each index's seam is resolved: asked
+   * only when a step depends on the database, so a plan whose apply would
+   * build nothing never reads the service.
+   */
+  engine: () => unknown;
 }
 
 /**
@@ -127,8 +131,7 @@ export async function collectSchemaSyncIndexes(input: CollectSchemaSyncIndexesIn
 
   const steps: SchemaSyncIndexStep[] = [];
   for (const [migration, owner] of Object.entries(SCHEMA_SYNC_INDEX_OWNERS)) {
-    const seam = owner.seam(mp, input.engine);
-    const probe = mp.runtimeIndexProbes({ client: seam?.client }).find((p) => p.migration === migration);
+    const probe = mp.runtimeIndexProbes().find((p) => p.migration === migration);
     if (!probe) {
       throw new Error(
         `The runtime-index preflight describes no index built by ${migration}, so this plan cannot say what ` +
@@ -143,7 +146,15 @@ export async function collectSchemaSyncIndexes(input: CollectSchemaSyncIndexesIn
       steps.push({ ...step, status: 'build', onCreatedTable: true });
       continue;
     }
+    let engine: unknown;
+    try {
+      engine = input.engine();
+    } catch (error) {
+      steps.push({ ...step, status: 'unreadable', detail: operatorFacingErrorText(error) });
+      continue;
+    }
     // No raw-SQL driver behind the table: the build has no seam either and builds nothing.
+    const seam = owner.seam(mp, engine);
     if (!seam) continue;
 
     const [preflight] = (await mp.collectRuntimeIndexPreflight(seam.exec, { client: seam.client }))
