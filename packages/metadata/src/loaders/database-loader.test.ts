@@ -2122,3 +2122,133 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
     });
   }
 });
+
+/**
+ * [#32521; epic #31527 red line 2, epic seat ruling 2026-11-12] The boot
+ * priming pass primes every holder of a name: one item per `(package, slot
+ * identity)` of every type stored per `(package, name)`, so after the pass a
+ * bare read of a name two packages hold is refused `409
+ * ambiguous-in-environment` naming both, the same as without the pass, and an
+ * unfiltered `list` keeps both.
+ *
+ * BEFORE (measured at efd4ea3a, #32458's head, same fixtures, all five
+ * unbundled types alike): `DatabaseLoader.loadMany` / `loadManyKeyed` kept one
+ * row per name (the highest version) and `MetadataManager.loadMany` one item
+ * per `body.name`, so the pass registered BETA's row alone and a bare read
+ * answered BETA's body. `email_template` (bundled) already kept every row.
+ */
+describe('[#32521] the boot priming pass primes every holder of a name', () => {
+  const ALPHA = 'com.alpha.app';
+  const BETA = 'com.beta.app';
+  const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  let driver: IDataDriver;
+
+  /** A row of `helper` bound to `packageId` by the column; `stamped` also names it in the body. */
+  const seed = (type: string, packageId: string, version: number, body: Record<string, unknown> = {}) =>
+    driver.create('sys_metadata', {
+      id: `${type}_${packageId}_${version}`, type, name: 'helper', state: 'active', version, checksum: `${type}_${packageId}_${version}`,
+      source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'helper', label: packageId, ...body }),
+    });
+  const stored = async (type: string) =>
+    ((await driver.find('sys_metadata', { where: { type } } as never)) as Array<Record<string, any>>)
+      .map((row) => [row.package_id ?? null, JSON.parse(row.metadata).label, row.version])
+      .sort((a, b) => String(a).localeCompare(String(b)));
+  const cold = () => {
+    const m = new MetadataManager({ formats: ['json'], loaders: [] });
+    m.registerLoader(new DatabaseLoader({ driver }));
+    return m;
+  };
+  /** The real pass (`MetadataPlugin._loadFromFileSystem`) over one database loader. */
+  const bootPass = async () => {
+    const plugin = new MetadataPlugin({ watch: false, config: { bootstrap: 'eager' } });
+    const m = (plugin as any).manager as MetadataManager;
+    (m as any).loaders.clear();
+    m.registerLoader(new DatabaseLoader({ driver }));
+    await (plugin as any)._loadFromFileSystem({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } });
+    return m;
+  };
+  /** What a read answers: the refusal's code, status, reason and holders, or the body's label. */
+  const answer = async (m: MetadataManager, type: string, name: string, packageId?: string) => {
+    try {
+      const item = (await m.get(type, name, packageId)) as { label?: string } | undefined;
+      return item?.label;
+    } catch (e: any) {
+      return [e?.code, e?.status, e?.refusal?.reason, ...(e?.refusal?.candidates ?? []).map((c: any) => c.packageId).sort()];
+    }
+  };
+  const REFUSED = ['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment', ALPHA, BETA];
+  const labels = (items: unknown[]) => (items as Array<{ label?: string }>).map((item) => item.label).sort();
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  for (const type of UNBUNDLED) {
+    for (const [shape, body] of [['bound by the column only', {}], ['stamped in the body too', { _packageId: true }]] as const) {
+      it(`${type}, ${shape}: two holders — after the pass a bare read is refused 409 naming both, as without it, and list keeps both (BEFORE: BETA's body, list [BETA])`, async () => {
+        await seed(type, ALPHA, 1, body._packageId ? { _packageId: ALPHA } : {});
+        await seed(type, BETA, 2, body._packageId ? { _packageId: BETA } : {});
+        const before = await stored(type);
+        expect(await answer(cold(), type, 'helper')).toEqual(REFUSED);
+        const m = await bootPass();
+        expect([...((m as any).registry.get(type)?.keys() ?? [])].sort()).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`]);
+        expect(await answer(m, type, 'helper')).toEqual(REFUSED);
+        expect(await answer(m, type, 'helper', ALPHA)).toBe(ALPHA);
+        expect(await answer(m, type, 'helper', BETA)).toBe(BETA);
+        expect(labels(await m.list(type))).toEqual([ALPHA, BETA]);
+        expect(await stored(type)).toEqual(before);
+        expect(driver.update).not.toHaveBeenCalled();
+      });
+    }
+
+    it(`${type}: one holder — after the pass a bare read answers it`, async () => {
+      await seed(type, ALPHA, 1);
+      const m = await bootPass();
+      expect(await answer(m, type, 'helper')).toBe(ALPHA);
+      expect(labels(await m.list(type))).toEqual([ALPHA]);
+    });
+
+    it(`${type}: the loaders-only plural reads keep one item per (package, name), the row saved last of each (BEFORE: one per name, BETA's)`, async () => {
+      // A legacy row (empty column, body naming ALPHA) is an older row of ALPHA's slot, never a third holder.
+      await driver.create('sys_metadata', {
+        id: `${type}_legacy`, type, name: 'helper', state: 'active', version: 0, checksum: `${type}_legacy`,
+        source: 'database', package_id: null, metadata: JSON.stringify({ name: 'helper', label: 'alpha older', _packageId: ALPHA }),
+      });
+      await seed(type, ALPHA, 1);
+      await seed(type, BETA, 2);
+      const loader = new DatabaseLoader({ driver });
+      expect(labels(await loader.loadMany(type))).toEqual([ALPHA, BETA]);
+      expect((await loader.loadManyKeyed(type)).map((entry) => [entry.name, entry.packageId, (entry.data as any).label]))
+        .toEqual([['helper', ALPHA, ALPHA], ['helper', BETA, BETA]]);
+      const m = cold();
+      expect((await m.loadMany(type) as Array<Record<string, unknown>>).map((item) => [item._packageId, item.label]))
+        .toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
+      expect((await m.loadManyKeyed(type)).map((entry) => [entry.name, (entry.data as any).label]))
+        .toEqual([['helper', ALPHA], ['helper', BETA]]);
+    });
+  }
+
+  it('action, each package binding the name to its own object: after the pass a bare read is refused 409 naming both, as without it (BEFORE: BETA\'s action)', async () => {
+    await seed('action', ALPHA, 1, { objectName: 'account' });
+    await seed('action', BETA, 2, { objectName: 'contact' });
+    expect((await answer(cold(), 'action', 'helper')).slice(0, 5)).toEqual(REFUSED);
+    const m = await bootPass();
+    expect((await answer(m, 'action', 'helper')).slice(0, 5)).toEqual(REFUSED);
+    expect(await answer(m, 'action', 'helper', ALPHA)).toBe(ALPHA);
+    expect(labels(await m.list('action'))).toEqual([ALPHA, BETA]);
+  });
+
+  it('CONTROL email_template (bundled): every row was already primed — a bare read is refused naming both, list keeps both', async () => {
+    for (const [packageId, version] of [[ALPHA, 1], [BETA, 2]] as const) {
+      await driver.create('sys_metadata', {
+        id: `et_${packageId}`, type: 'email_template', name: 'welcome', state: 'active', version, checksum: `et_${packageId}`,
+        source: 'database', package_id: packageId, metadata: JSON.stringify({ name: 'welcome', locale: 'en-US', subject: packageId, bodyHtml: '<p/>', label: packageId }),
+      });
+    }
+    expect(await answer(cold(), 'email_template', 'welcome')).toEqual(REFUSED);
+    const m = await bootPass();
+    expect(await answer(m, 'email_template', 'welcome')).toEqual(REFUSED);
+    expect(labels(await m.list('email_template'))).toEqual([ALPHA, BETA]);
+    expect((await new DatabaseLoader({ driver }).loadManyKeyed('email_template')).map((entry) => entry.packageId)).toEqual([ALPHA, BETA]);
+  });
+});
