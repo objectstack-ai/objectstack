@@ -1,13 +1,14 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { SEARCH_VIRTUAL_TYPES, COMPUTED_VALUE_TYPES } from '@objectstack/spec/data';
+import { SEARCH_VIRTUAL_TYPES, COMPUTED_VALUE_TYPES, VIRTUAL_FIELD_AGGREGATE_REMEDY } from '@objectstack/spec/data';
 import {
   validateSortableFields as validateSortableFieldsUnrecorded,
   checkSortDeclaration as checkSortDeclarationUnrecorded,
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  GRID_AGGREGATION_FIELD_TYPE_REFUSED,
   PAGE_BLOCK_SORT_OBJECT_PROP,
   indexObjectSortability,
 } from './validate-sortable-fields.js';
@@ -1072,6 +1073,131 @@ describe('PAGE_BLOCK_SORT_OBJECT_PROP — pinned against ComponentPropsMap (#300
   });
 });
 
+// [#32144] An `object-grid` block's `aggregations` — `sum` / `avg` over a field
+// the aggregate × field-type table refuses is refused at authoring, by the
+// table's own predicate (the one the engine's `aggregate` door refuses by).
+const gridTaskFields = {
+  title: { type: 'text', label: 'Title' },
+  notes: { type: 'textarea', label: 'Notes' },
+  due_on: { type: 'date', label: 'Due' },
+  closed_at: { type: 'datetime', label: 'Closed' },
+  stage: { type: 'select', label: 'Stage', options: [{ label: 'Open', value: 'open' }] },
+  account: { type: 'lookup', label: 'Account', reference: 'crm_opportunity' },
+  done: { type: 'boolean', label: 'Done' },
+  pinned: { type: 'toggle', label: 'Pinned' },
+  hours: { type: 'number', label: 'Hours' },
+  cost: { type: 'currency', label: 'Cost' },
+  rate: { type: 'percent', label: 'Rate' },
+  score: { type: 'formula', label: 'Score', expression: 'hours * 2', returnType: 'number' },
+  labels: { type: 'tags', label: 'Labels' },
+  legacy_count: { type: 'integer', label: 'Legacy count' },
+};
+const gridStack = (aggregations: unknown, extra: Record<string, unknown> = {}) => ({
+  objects: [{ name: 'grid_task', fields: gridTaskFields }, { name: 'crm_opportunity', fields: opportunityFields }],
+  pages: [{
+    name: 'board',
+    type: 'app',
+    regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'grid_task', aggregations, ...extra } }] }],
+  }],
+});
+const gridFindings = (aggregations: unknown, extra?: Record<string, unknown>) =>
+  validateSortableFields(gridStack(aggregations, extra)).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED);
+
+describe('validateSortableFields — object-grid aggregations over a refused field type (#32144)', () => {
+  it.each([
+    ['text', 'sum', 'title'],
+    ['text', 'avg', 'notes'],
+    ['date', 'sum', 'due_on'],
+    ['datetime', 'avg', 'closed_at'],
+    ['date (a registry-injected column)', 'sum', 'created_at'],
+    ['option', 'sum', 'stage'],
+    ['reference', 'avg', 'account'],
+    ['multi-option (JSON-stored)', 'sum', 'labels'],
+  ])('refuses `%s` family: %s over "%s", at `error`, at the entry\'s path', (_family, type, field) => {
+    const findings = gridFindings([{ field: 'hours', type: 'sum' }, { field, type }]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: GRID_AGGREGATION_FIELD_TYPE_REFUSED,
+      where: 'page "board" · object-grid',
+      path: 'pages[0].regions[0].components[0].properties.aggregations[1]',
+    });
+    expect(findings[0].message).toContain(`"${type}" over "${field}"`);
+    expect(findings[0].message).toContain('400 INVALID_FIELD on the server');
+  });
+
+  it('names the aggregates the field\'s type accepts, read off the table', () => {
+    const [onDate] = gridFindings([{ field: 'due_on', type: 'avg' }]);
+    expect(onDate.hint).toBe('Point "avg" at a numeric field, or aggregate "due_on" with one its `date` type accepts: count, count_distinct, min, max.');
+    const [onText] = gridFindings([{ field: 'title', type: 'sum' }]);
+    expect(onText.hint.endsWith('accepts: count, count_distinct.')).toBe(true);
+  });
+
+  it('refuses a `formula` (virtual) field with the spec\'s one remedy, and `sum` over a `percent` (a rate does not add)', () => {
+    const [onFormula] = gridFindings([{ field: 'score', type: 'sum' }]);
+    expect(onFormula.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    expect(gridFindings([{ field: 'rate', type: 'sum' }]).map((f) => f.path)).toEqual([
+      'pages[0].regions[0].components[0].properties.aggregations[0]',
+    ]);
+  });
+
+  it('passes what the table accepts: numeric sum / avg, `avg` over a percent, and booleans (ruled: they aggregate as numbers)', () => {
+    expect(gridFindings([
+      { field: 'hours', type: 'sum' },
+      { field: 'cost', type: 'avg' },
+      { field: 'rate', type: 'avg' },
+      { field: 'done', type: 'sum' },
+      { field: 'done', type: 'avg' },
+      { field: 'pinned', type: 'avg' },
+    ])).toEqual([]);
+  });
+
+  it('`count` over any field passes; `count_distinct` / `min` / `max` are not judged by this rule', () => {
+    expect(gridFindings([
+      { field: 'title', type: 'count' },
+      { field: 'score', type: 'count' },
+      { field: 'due_on', type: 'min' },
+      { field: 'closed_at', type: 'max' },
+      { field: 'title', type: 'count_distinct' },
+    ])).toEqual([]);
+  });
+
+  it('skips what it cannot judge: an unknown field, a dotted path, an object the stack does not define, no binding', () => {
+    expect(gridFindings([{ field: 'nope', type: 'sum' }, { field: 'account.amount', type: 'avg' }])).toEqual([]);
+    expect(gridFindings([{ field: 'title', type: 'sum' }], { objectName: 'elsewhere_object' })).toEqual([]);
+    expect(gridFindings([{ field: 'title', type: 'sum' }], { objectName: undefined })).toEqual([]);
+  });
+
+  it('skips a field with no declared type (`id`) and a type outside `FieldType`, as the door does', () => {
+    expect(gridFindings([{ field: 'id', type: 'sum' }, { field: 'legacy_count', type: 'avg' }])).toEqual([]);
+  });
+
+  it('judges a field an `objectExtensions` entry adds, and leaves a field two packages tie on unjudged', () => {
+    const ext = (label: string) => ({ manifest: { objectExtensions: [{ extend: 'grid_task', priority: 200, fields: { remark: { type: 'text', label } } }] } });
+    const once = { ...gridStack([{ field: 'remark', type: 'sum' }]), packages: [ext('A')] };
+    expect(validateSortableFields(once).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED).map((f) => f.path))
+      .toEqual(['pages[0].regions[0].components[0].properties.aggregations[0]']);
+    const tied = { ...gridStack([{ field: 'remark', type: 'sum' }]), packages: [ext('A'), ext('B')] };
+    expect(validateSortableFields(tied).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED)).toEqual([]);
+  });
+
+  it('binds the block by its `dataSource.object` first, then `properties.objectName`', () => {
+    const stack = gridStack([{ field: 'name', type: 'sum' }]);
+    const grid = (stack.pages[0].regions[0].components[0] as Record<string, unknown>);
+    // `name` is a text field on crm_opportunity and does not exist on grid_task.
+    expect(validateSortableFields(stack).filter((f) => f.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED)).toEqual([]);
+    grid.dataSource = { object: 'crm_opportunity' };
+    expect(validateSortableFields(stack).map((f) => f.rule)).toEqual([GRID_AGGREGATION_FIELD_TYPE_REFUSED]);
+  });
+
+  it('`os explain` carries the reasoning the verdict leaves out', () => {
+    const text = explanationOf(GRID_AGGREGATION_FIELD_TYPE_REFUSED);
+    for (const fact of ['`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'STORED']) {
+      expect(text, fact).toContain(fact);
+    }
+  });
+});
+
 describe('[#22161] one-line verdicts — the three sort ids', () => {
   it('every verdict the cases above fired is one line of at most 200 characters', () => {
     // The coverage control first: each id fired at least once, so the shape
@@ -1079,8 +1205,10 @@ describe('[#22161] one-line verdicts — the three sort ids', () => {
     // [#30093] Page sort slots answer existence and provenance under the page
     // family's ids, so those fire from this module too and are held to the
     // same one-line shape.
+    // [#32144] The grid-aggregation verdict rides the same member and is held
+    // to the same shape.
     expect([...new Set(fired.map((f) => f.rule))].sort()).toEqual(
-      [...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED].sort(),
+      [...SORT_IDS, PAGE_FIELD_UNKNOWN, PAGE_FIELD_UNPROVISIONED, GRID_AGGREGATION_FIELD_TYPE_REFUSED].sort(),
     );
     for (const f of fired) {
       expect(f.message, f.rule).not.toContain('\n');

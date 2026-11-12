@@ -39,7 +39,7 @@ import type { DataTableSchema, DependsOnInput, ListViewSchema, ObjectMapConfig }
 import { detectStatusField, isSystemManagedField } from '@object-ui/types';
 import { usePullToRefresh } from '@object-ui/mobile';
 import { type ListViewVisualization, resolveConditionalFormatting, buildExpandFields, buildExportFileName, resolveAffordance, type SchemaLike, partitionRowsByPredicate, normalizeListViewSchema, isListViewVisualization, rowHeightToDensityMode, mergeFilterNodes, FilterOperatorError, columnIdentity, collectPredicateFieldRefs, collectGroupingFieldRefs, listViewPredicates, PLATFORM_RECORD_COLUMNS, EXPANDABLE_FIELD_TYPES, UNMATERIALIZED_FIELD_TYPES, readObjectSortability, isPlatformSortableField, leadWithNameField, filterPlatformSortableSort, applyNonGridRowCeiling, type NonGridCeilingResult, resolveNameField, declaredNameField, resolveDependsOnFields, GANTT_CONFIG_SPELLING, kanbanDeclaredLanes } from '@object-ui/core';
-import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField } from '@object-ui/i18n';
+import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLocale, pickLocalized, recordCurrencyField, recordCurrencyReadField } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
 // `resolveI18nLabel`: it resolves the INLINE per-locale map
@@ -3080,6 +3080,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // where every route into the expand list — columns, view bindings and this
     // grouping union alike — passes through it exactly once.
     for (const f of collectGroupingFieldRefs(groupingConfig)) collected.add(f);
+    // [ADR-0144 D2] A shown amount that follows its parent's currency reads the
+    // parent's code off its `master_detail`, so that relation is expanded even
+    // when no column shows it (`shownRecordCurrencyReads`).
+    for (const read of shownRecordCurrencyReads(schema.columns, objectDef?.fields)) {
+      if (read.expand) collected.add(read.field);
+    }
     const augmented = collected.size > 0 ? Array.from(collected) : undefined;
     const expandable = buildExpandFields(objectDef?.fields, augmented);
     // [objectui#7215] FIELD-LEVEL SECURITY ON `$expand`, the half objectui#6898
@@ -3583,6 +3589,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             if (PLATFORM_RECORD_COLUMNS.has(f)) required.add(f);
             else addSpeculative(f);
           };
+
+          // [ADR-0144 D2] A shown record-mode amount's sibling code field: the
+          // cell reads the row's code off it (`resolveFieldCurrency`), so a
+          // list not showing the code drew the amount with no symbol. Through
+          // the speculative gate: a declared field this user may read. A parent
+          // path's `master_detail` arrives with the expand roots above.
+          for (const read of shownRecordCurrencyReads(schema.columns, objectDef?.fields)) {
+            if (!read.expand) addSpeculative(read.field);
+          }
 
           // View-specific runtime fields. Each non-grid view binds to one
           // or more record fields (groupBy for kanban, dates for calendar/
@@ -7758,3 +7773,25 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 });
 
 ListView.displayName = 'ListView';
+
+/**
+ * What each shown record-mode amount column needs on its row for its currency
+ * (ADR-0144 D2), through `recordCurrencyReadField`: the sibling code field, or
+ * the `master_detail` a parent path starts with (`expand: true`). A column
+ * whose field the principal may not read is dropped where its own name is, and
+ * the field it pulls passes the projection's own gates.
+ */
+function shownRecordCurrencyReads(
+  columns: unknown,
+  fields: Readonly<Record<string, unknown>> | null | undefined,
+): { field: string; expand: boolean }[] {
+  if (!Array.isArray(columns) || !fields || typeof fields !== 'object') return [];
+  const out: { field: string; expand: boolean }[] = [];
+  for (const entry of columns) {
+    if (entry && typeof entry === 'object' && (entry as { hidden?: unknown }).hidden === true) continue;
+    const name = columnIdentity(entry);
+    const read = name ? recordCurrencyReadField(fields[name] as Parameters<typeof recordCurrencyReadField>[0]) : undefined;
+    if (read) out.push({ field: read.field, expand: read.expand });
+  }
+  return out;
+}

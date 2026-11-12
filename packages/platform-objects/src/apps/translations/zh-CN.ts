@@ -95,7 +95,7 @@ export const zhCN: TranslationData = {
         nav_settings_auth: { label: '认证' },
         nav_settings_access_policy: { label: '访问策略' },
         nav_settings_storage: { label: '文件存储' },
-        nav_settings_ai: { label: 'AI 与 Embedder' },
+        nav_settings_ai: { label: 'AI 与向量化' },
         nav_settings_knowledge: { label: '知识库' },
         nav_settings_lifecycle: { label: '数据生命周期' },
         nav_recycle_bin: { label: '回收站' },

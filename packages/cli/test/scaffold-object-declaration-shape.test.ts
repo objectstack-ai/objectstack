@@ -36,6 +36,10 @@
  *     and the emitted module would throw on its first evaluation;
  *   - each top-level declaration: whether it carries a type annotation, and
  *     what its initializer is;
+ *   - (#32393, parity only) whether that declaration is exported by name, and
+ *     how the `fields` entries are written — `Field.*` builders or raw
+ *     `{ type }` literals. Neither is part of the ruled shape, so neither is a
+ *     finding on its own; both are in the signature the doors must share;
  *   - what the file default-exports. Both barrels (`os init`'s
  *     `src/objects/index.ts` and the line `os generate` appends) re-export
  *     `default`, so the default export must stay the declared binding.
@@ -59,8 +63,13 @@ const SPEC_DATA = '@objectstack/spec/data';
 interface DeclarationShape {
   /** `ObjectSchema` from `@objectstack/spec/data`: a value import, a type-only one, or none. */
   factoryImport: 'value' | 'type-only' | 'absent';
-  /** Every top-level `const`/`let`/`var` declarator, in source order. */
-  declarations: Array<{ binding: string; annotated: boolean; initializer: string }>;
+  /**
+   * Every top-level `const`/`let`/`var` declarator, in source order: whether
+   * the statement exports it by name, and (#32393) how the `fields` entries of
+   * an `ObjectSchema.create({ … })` argument are written — `Field.*` for a
+   * builder call, else the node kind — each spelling once, sorted.
+   */
+  declarations: Array<{ binding: string; annotated: boolean; initializer: string; exported: boolean; fields: string[] }>;
   /** What `export default` names: `binding` when it is the declared binding, else the node kind. */
   defaultExport: string | null;
 }
@@ -81,15 +90,37 @@ function readShape(source: string): DeclarationShape {
       if (!named) continue;
       factoryImport = stmt.importClause!.isTypeOnly || named.isTypeOnly ? 'type-only' : 'value';
     } else if (ts.isVariableStatement(stmt)) {
+      const exported = ts.getModifiers(stmt)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
       for (const decl of stmt.declarationList.declarations) {
         const init = decl.initializer;
         let initializer = init ? ts.SyntaxKind[init.kind] : 'none';
+        const fields = new Set<string>();
         if (init && ts.isCallExpression(init)) {
           const callee = init.expression.getText(file).replace(/\s+/g, '');
           const arg = init.arguments.length === 1 && ts.isObjectLiteralExpression(init.arguments[0]);
           initializer = `${callee}(${arg ? '{…}' : '?'})`;
+          const fieldsProp = arg
+            ? (init.arguments[0] as ts.ObjectLiteralExpression).properties.find(
+              (p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText(file) === 'fields')
+            : undefined;
+          if (fieldsProp && ts.isObjectLiteralExpression(fieldsProp.initializer)) {
+            for (const p of fieldsProp.initializer.properties) {
+              const value = ts.isPropertyAssignment(p) ? p.initializer : undefined;
+              fields.add(
+                value && ts.isCallExpression(value) && /^Field\.\w+$/.test(value.expression.getText(file))
+                  ? 'Field.*'
+                  : ts.SyntaxKind[(value ?? p).kind],
+              );
+            }
+          }
         }
-        declarations.push({ binding: decl.name.getText(file), annotated: decl.type !== undefined, initializer });
+        declarations.push({
+          binding: decl.name.getText(file),
+          annotated: decl.type !== undefined,
+          initializer,
+          exported,
+          fields: [...fields].sort(),
+        });
       }
     } else if (ts.isExportAssignment(stmt) && !stmt.isExportEquals) {
       defaultName = ts.isIdentifier(stmt.expression) ? stmt.expression.text : null;
@@ -121,11 +152,19 @@ function shapeFindings(shape: DeclarationShape): string[] {
   return findings;
 }
 
-/** The shape with binding names dropped, so two doors compare on shape alone. */
+/**
+ * The shape with binding names dropped, so two doors compare on shape alone.
+ * Whether the binding is exported by name and how its fields are written are
+ * part of it (#32393): `os generate object` moved to `Field.*` builders and a
+ * named export while the `os init` templates kept raw `{ type }` literals and
+ * a default-only export, and a signature without those two read the doors as
+ * one shape throughout.
+ */
 function signature(shape: DeclarationShape): string {
   return JSON.stringify({
     factoryImport: shape.factoryImport,
-    declarations: shape.declarations.map(({ annotated, initializer }) => ({ annotated, initializer })),
+    declarations: shape.declarations.map(({ annotated, initializer, exported, fields }) =>
+      ({ annotated, initializer, exported, fields })),
     defaultExport: shape.defaultExport,
   });
 }
@@ -200,5 +239,31 @@ describe('controls — the reader can refuse each half', () => {
     expect(shapeFindings(readShape(typeOnly))).toEqual([
       '`ObjectSchema` is not value-imported from \'@objectstack/spec/data\' (type-only)',
     ]);
+  });
+
+  it('[#32393] the signature tells a raw `{ type }` field and a default-only export apart, each alone', () => {
+    const generated = signature(readShape(GENERATE_DOORS[0].source));
+    const objectFile = (opts: { named: boolean; builder: boolean }) => [
+      `import { ObjectSchema${opts.builder ? ', Field' : ''} } from '@objectstack/spec/data';`,
+      '',
+      `${opts.named ? 'export ' : ''}const myAppItem = ObjectSchema.create({`,
+      "  name: 'my_app_item',",
+      `  fields: { name: ${opts.builder ? "Field.text({ label: 'Name' })" : "{ type: 'text', label: 'Name' }"} },`,
+      "  sharingModel: 'private',",
+      '});',
+      '',
+      'export default myAppItem;',
+      '',
+    ].join('\n');
+    // Every variant is the ruled shape; only the parity signature tells them apart.
+    for (const named of [false, true]) {
+      for (const builder of [false, true]) {
+        expect(shapeFindings(readShape(objectFile({ named, builder })))).toEqual([]);
+      }
+    }
+    expect(signature(readShape(objectFile({ named: false, builder: false })))).not.toBe(generated);
+    expect(signature(readShape(objectFile({ named: true, builder: false })))).not.toBe(generated);
+    expect(signature(readShape(objectFile({ named: false, builder: true })))).not.toBe(generated);
+    expect(signature(readShape(objectFile({ named: true, builder: true })))).toBe(generated);
   });
 });

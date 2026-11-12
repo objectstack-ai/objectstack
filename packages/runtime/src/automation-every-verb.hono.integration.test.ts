@@ -44,6 +44,9 @@ const ROWS = [
     ['/automation/trigger/send_digest', 'GET', 'POST'],
 ] as const;
 
+/** Every flow name the automation double was asked to run. */
+const executed: string[] = [];
+
 function fakeAuthPlugin(): Plugin {
     return {
         name: 'com.objectstack.test.fake-auth-automation-every-verb',
@@ -55,8 +58,15 @@ function fakeAuthPlugin(): Plugin {
                         (headers?.get?.(SESSION_HEADER) ? { user: { id: 'u_automation_verb' } } : undefined),
                 },
             });
-            // The domain's 405 sits behind its service probe; nothing below runs a flow.
-            ctx.registerService('automation', { handlerReady: true });
+            // The domain's 405 sits behind its service probe. `execute` records
+            // every run, so the legacy trigger's bound can pin that nothing ran.
+            ctx.registerService('automation', {
+                handlerReady: true,
+                execute: async (name: string) => {
+                    executed.push(name);
+                    return { success: true, output: {} };
+                },
+            });
         },
     };
 }
@@ -154,6 +164,31 @@ describe('every verb on a two-segment /api/v1/automation path reaches the automa
 
             expect([status, allow]).toEqual([404, null]);
             expect(body?.error?.code).toBe('ROUTE_NOT_FOUND');
+        });
+
+        // ── the legacy trigger past its bound: a deep `POST` mount routes it here, and nothing runs ──
+        // `/automation/:name/runs/:runId/cancel` (`:name` = `trigger`) and the
+        // addressed `/automation/:ns/:name/runs/:runId/resume` (`:ns` = `trigger`)
+        // match by their parameters. Before the bound the domain ran the flow
+        // `runs` / `crm` off them and ignored the tail.
+        for (const shape of ['/automation/trigger/runs/r1/cancel', '/automation/trigger/crm/runs/r1/resume']) {
+            it(`signed-in POST ${prefix}${shape} → the dispatcher's no-route 404 ROUTE_NOT_FOUND, no flow run`, async () => {
+                executed.length = 0;
+                const { status, allow, body } = await call('POST', `${prefix}${shape}`, true);
+
+                expect([status, allow]).toEqual([404, null]);
+                expect(body?.error?.code).toBe('ROUTE_NOT_FOUND');
+                expect(body?.error?.httpStatus).toBe(404);
+                expect(executed).toEqual([]);
+            });
+        }
+
+        it(`CONTROL — signed-in POST ${prefix}/automation/trigger/send_digest runs the flow`, async () => {
+            executed.length = 0;
+            const { status, body } = await call('POST', `${prefix}/automation/trigger/send_digest`, true);
+
+            expect(status, JSON.stringify(body)).toBe(200);
+            expect(executed).toEqual(['send_digest']);
         });
     }
 

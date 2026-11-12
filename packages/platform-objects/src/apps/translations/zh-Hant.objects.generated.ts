@@ -2160,7 +2160,15 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "發現文件 URL",
-            helpText: "可選。OIDC 發現文件 URL。留空則推導為 `<issuer>/.well-known/openid-configuration`。"
+            helpText: "可選。OIDC 發現文件 URL（https）。留空則推導為 `<issuer>/.well-known/openid-configuration`。在此填寫的端點會被此提供者信任。"
+          },
+          userInfoEndpoint: {
+            label: "Userinfo 端點 URL",
+            helpText: "可選。OIDC userinfo 端點 URL（https），取代發現文件中列出的端點。在此填寫的端點會被此提供者信任：當註冊因發現文件列出的 userinfo 主機不受伺服器信任而被拒絕時，請在此填寫。"
+          },
+          skipUserInfo: {
+            label: "僅從 ID 權杖讀取宣告",
+            helpText: "可選。僅從已驗證的 ID 權杖讀取使用者的宣告，從不呼叫 userinfo 端點。Microsoft Entra ID：開啟此項才能對應「preferred_username」，其 userinfo 端點不會傳回該宣告。"
           },
           scopes: {
             label: "授權範圍",
@@ -2169,7 +2177,7 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "對應：電子郵件 claim",
-            helpText: "可選。對應到電子郵件的 claim。預設為「email」。",
+            helpText: "可選。對應到電子郵件的 claim。預設為「email」。Microsoft Entra ID（簽發者位於 login.microsoftonline.com）：沒有信箱的使用者不帶「email」claim，請對應「preferred_username」（或「upn」），並開啟「僅從 ID 權杖讀取宣告」。",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "刪除 SSO 提供方",
-        description: "刪除該 SSO 提供方嗎？其網域下的使用者將無法再透過它登入。",
-        successMessage: "SSO 提供方已刪除"
+        description: "刪除此 SSO 提供方嗎？關聯到它的每個使用者都會被解除關聯，包括沒有關聯其他登入方式（沒有密碼，也沒有其他提供方）的使用者。它的 IdP 群組對應以及由這些對應授予的權限集也會一併移除。此操作無法復原。",
+        resultDialog: {
+          title: "SSO 提供方已刪除",
+          acknowledge: "完成",
+          fields: {
+            message: "已移除"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "此次刪除將移除的內容",
+            linkedUsers: "被解除關聯的使用者",
+            usersWithoutOtherSignIn: "沒有關聯其他登入方式的使用者"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "編輯登入選項",
         successMessage: "登入選項已儲存"
+      },
+      edit_saml_provider: {
+        label: "編輯 SAML 設定",
+        params: {
+          issuer: {
+            label: "IdP 實體 ID",
+            helpText: "IdP 的 SAML EntityID。僅在沒有使用者關聯到該提供方時才能修改。"
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "IdP 的單一登入端點。留空則保留已儲存的值。僅在沒有使用者關聯到該提供方時才能修改。"
+          },
+          cert: {
+            label: "新的 IdP 簽章憑證",
+            helpText: "IdP 的新 X.509 簽章憑證（PEM）。留空則保留已儲存的憑證。"
+          },
+          keepCurrentCert: {
+            label: "繼續信任目前的憑證",
+            helpText: "在 IdP 切換期間，接受由任一憑證簽署的斷言。之後不勾選此項再編輯一次，即可移除舊憑證。"
+          }
+        },
+        resultDialog: {
+          title: "SAML 設定已儲存",
+          acknowledge: "完成",
+          fields: {
+            message: "已修改"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "編輯 OIDC 設定",
+        params: {
+          clientId: {
+            label: "用戶端 ID",
+            helpText: "IdP 簽發的 OAuth 用戶端 ID。留空則保留已儲存的值。僅在沒有使用者關聯到該提供方時才能修改。"
+          },
+          clientSecret: {
+            label: "新的用戶端金鑰",
+            helpText: "留空則保留已儲存的金鑰。已儲存的金鑰永遠不會顯示。"
+          },
+          scopes: {
+            label: "授權範圍",
+            helpText: "以空格或逗號分隔的 OAuth 授權範圍，將取代已儲存的清單。留空則保留。",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC 設定已儲存",
+          acknowledge: "完成",
+          fields: {
+            message: "已修改"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "檢視群組 claim",

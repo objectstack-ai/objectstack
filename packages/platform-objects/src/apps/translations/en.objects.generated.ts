@@ -117,7 +117,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       source: {
         label: "Identity Source",
-        help: "How this identity was created — idp_provisioned (federated SSO JIT) or env_native (local signup / app end-user). System-managed; do not edit.",
+        help: "How this identity was created — idp_provisioned (federated SSO JIT or SCIM directory provisioning) or env_native (local signup, a local password, or an app end-user). System-managed; do not edit.",
         options: {
           idp_provisioned: "IdP-Provisioned",
           env_native: "Local Account"
@@ -2160,7 +2160,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "Discovery URL",
-            helpText: "Optional. OIDC discovery document URL. Leave blank to derive `<issuer>/.well-known/openid-configuration`."
+            helpText: "Optional. OIDC discovery document URL (https). Leave blank to derive `<issuer>/.well-known/openid-configuration`. An endpoint named here is trusted for this provider."
+          },
+          userInfoEndpoint: {
+            label: "Userinfo URL",
+            helpText: "Optional. OIDC userinfo endpoint URL (https), kept instead of the one the discovery document names. An endpoint named here is trusted for this provider: name it when registration is refused because the discovery document names a userinfo host the server does not trust."
+          },
+          skipUserInfo: {
+            label: "Read Claims From the ID Token Only",
+            helpText: "Optional. Read the user’s claims from the verified ID token only and never call the userinfo endpoint. Microsoft Entra ID: turn this on to map \"preferred_username\", which its userinfo endpoint does not return."
           },
           scopes: {
             label: "Scopes",
@@ -2169,7 +2177,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Map: Email claim",
-            helpText: "Optional. Claim mapped to email. Defaults to \"email\".",
+            helpText: "Optional. Claim mapped to email. Defaults to \"email\". Microsoft Entra ID (issuer on login.microsoftonline.com): users without a mailbox carry no \"email\" claim, so map \"preferred_username\" (or \"upn\") and turn on Read Claims From the ID Token Only.",
             placeholder: "email"
           },
           mapName: {
@@ -2258,12 +2266,78 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Delete SSO Provider",
-        description: "Delete this SSO provider? Users from its domain will no longer be able to sign in through it.",
-        successMessage: "SSO provider deleted"
+        description: "Delete this SSO provider? Every user linked to it is unlinked, including users with no other sign-in method linked (no password, no other provider). Its IdP group mappings and the permission-set grants they gave are removed with it. This cannot be undone.",
+        resultDialog: {
+          title: "SSO provider deleted",
+          acknowledge: "Done",
+          fields: {
+            message: "Removed"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "What this delete removes",
+            linkedUsers: "Users unlinked",
+            usersWithoutOtherSignIn: "Users with no other sign-in method linked"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Edit Sign-In Options",
         successMessage: "Sign-in options saved"
+      },
+      edit_saml_provider: {
+        label: "Edit SAML Settings",
+        params: {
+          issuer: {
+            label: "IdP Entity ID",
+            helpText: "The IdP’s SAML EntityID. Changes only while no user is linked to the provider."
+          },
+          entryPoint: {
+            label: "IdP SSO URL",
+            helpText: "The IdP’s single sign-on endpoint. Leave blank to keep the stored one. Changes only while no user is linked to the provider."
+          },
+          cert: {
+            label: "New IdP Signing Certificate",
+            helpText: "The IdP’s new X.509 signing certificate (PEM). Leave blank to keep the stored certificate."
+          },
+          keepCurrentCert: {
+            label: "Keep trusting the current certificate",
+            helpText: "While the IdP switches over, accept assertions signed by either certificate. Edit again without this to drop the old one."
+          }
+        },
+        resultDialog: {
+          title: "SAML settings saved",
+          acknowledge: "Done",
+          fields: {
+            message: "Changed"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Edit OIDC Settings",
+        params: {
+          clientId: {
+            label: "Client ID",
+            helpText: "OAuth client ID issued by the IdP. Leave blank to keep the stored one. Changes only while no user is linked to the provider."
+          },
+          clientSecret: {
+            label: "New Client Secret",
+            helpText: "Leave blank to keep the stored secret. The stored secret is never shown."
+          },
+          scopes: {
+            label: "Scopes",
+            helpText: "Space- or comma-separated OAuth scopes, replacing the stored list. Leave blank to keep it.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "OIDC settings saved",
+          acknowledge: "Done",
+          fields: {
+            message: "Changed"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Show Groups Claim",

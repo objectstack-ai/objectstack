@@ -1523,10 +1523,12 @@ export async function supersede({ workflow, dryRun = false, env = process.env, h
  * each version commit's push run by `head_sha`, since the filter was measured
  * omitting a waiting run) and the in-flight runs through `collectPublishRuns`
  * (`in_progress` and `queued`), merged by id with the jobs each read. Throws
- * on anything unread -- a `TransientReadFailure` after the retries, or any
- * other failed read -- which the caller reports NOT MEASURED, never "clear".
+ * on anything unread -- a `TransientReadFailure` after the retries, a status
+ * filter whose count stays above its page after the re-reads `budget` allows
+ * (the run's one `boardReadBudget`, the one `http` retries on), or any other
+ * failed read -- which the caller reports NOT MEASURED, never "clear".
  */
-export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits }) {
+export async function readStableLane({ http, repo, workflow, currentRunId, versionCommits, budget }) {
   // The walk is a generator (one `git show` per version commit): the newest
   // version commit's tips are taken off the front and the rest is handed on
   // unwalked, so the sweep's own bounds (its read-back and cap) still apply.
@@ -1537,7 +1539,7 @@ export async function readStableLane({ http, repo, workflow, currentRunId, versi
     yield* iter;
   };
   const waiting = await collectWaitingRuns({ http, repo, workflow, versionCommits: rest(), currentRunId });
-  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId });
+  const inFlight = await collectPublishRuns({ http, repo, workflow, tips: first.done ? [] : first.value.tips, currentRunId, budget });
   const byId = new Map();
   for (const run of [...waiting.runs, ...inFlight.runs]) {
     const id = String(run.id);
@@ -1567,8 +1569,11 @@ export async function stableLane({ workflow, env = process.env, http = null, sle
   const currentRunId = env.GITHUB_RUN_ID || '';
   if (!http && !env.GITHUB_TOKEN) throw new Error('GITHUB_TOKEN is required');
   const raw = http ?? githubHttp({ apiUrl: env.GITHUB_API_URL || 'https://api.github.com', token: env.GITHUB_TOKEN, dryRun: true });
-  const reads = retryingReads(raw, boardReadBudget({ sleep }));
-  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
+  // ONE retry budget for the whole read: the transient retries and the
+  // in-flight listing's re-reads spend it alike.
+  const budget = boardReadBudget({ sleep });
+  const reads = retryingReads(raw, budget);
+  const read = await readStableLane({ http: reads, repo, workflow, currentRunId, budget, versionCommits: versionCommits ?? versionCommitsOf({ cwd: root, head: mainRef }) });
   return { ...judgeStableLane({ runs: read.runs, currentRunId }), read };
 }
 
@@ -1588,7 +1593,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the registry read: 404 is never published, anything unread is never guessed': 5,
   'verify: next names the snapshot, latest never moves to it': 4,
   'the same-commit check: next records the commit it was cut from, read back from npm': 10,
-  'the stable lane: a waiting stable prompt or a running stable publish refuses, read as the sweep reads': 10,
+  'the stable lane: a waiting stable prompt or a running stable publish refuses, read as the sweep reads': 13,
   'the quiet skip: each expected kind skips on the schedule and refuses loudly on a dispatch; the unexpected stay red': 13,
   'record-commit: gitHead into every manifest, read back by the guard': 4,
   'dry-run: every early return records its reason': 3,
@@ -1870,16 +1875,23 @@ export async function selfTest() {
     return r.refusals.length === 0 && r.unread.length === 1 && /not read/.test(r.unread[0]);
   });
   // The live path, with the stable sweep's readers over a stubbed Actions API.
-  const laneHttp = ({ waiting = [], inProgress = [], queued = [], pushes = {}, runs = {}, fail = null }) => {
+  // `counts[status]` is that filter's `total_count`, read by read, its last
+  // value repeating; absent, the count is what the page lists.
+  const laneHttp = ({ waiting = [], inProgress = [], queued = [], pushes = {}, runs = {}, fail = null, counts = {} }) => {
     const seen = [];
+    const reads = {};
     const http = async (method, path) => {
       seen.push({ method, path });
       if (method !== 'GET') throw new Error(`the stable lane must never ${method}`);
       if (fail && fail.test(path)) return { status: 502, body: 'bad gateway' };
-      const list = (ids) => ({ status: 200, body: { total_count: ids.length, workflow_runs: ids.map((id) => ({ id, event: runs[id]?.event ?? 'push', created_at: '2026-11-05T00:00:00Z' })) } });
+      const list = (ids, status = null) => {
+        const n = status ? (reads[status] = (reads[status] ?? 0) + 1) : 0;
+        const total = status && counts[status] ? counts[status][Math.min(n, counts[status].length) - 1] : ids.length;
+        return { status: 200, body: { total_count: total, workflow_runs: ids.map((id) => ({ id, event: runs[id]?.event ?? 'push', created_at: '2026-11-05T00:00:00Z' })) } };
+      };
       if (/\/runs\?status=waiting/.test(path)) return list(waiting);
-      if (/\/runs\?status=in_progress/.test(path)) return list(inProgress);
-      if (/\/runs\?status=queued/.test(path)) return list(queued);
+      if (/\/runs\?status=in_progress/.test(path)) return list(inProgress, 'in_progress');
+      if (/\/runs\?status=queued/.test(path)) return list(queued, 'queued');
       const sha = /\/runs\?head_sha=([0-9a-f]+)/.exec(path);
       if (sha) return list(pushes[sha[1]] ?? []);
       const m = /\/actions\/runs\/(\d+)(\/jobs|\/pending_deployments)?/.exec(path);
@@ -1889,7 +1901,7 @@ export async function selfTest() {
       if (m[2] === '/pending_deployments') return { status: 200, body: (r.environments ?? []).map((name) => ({ environment: { name } })) };
       return { status: 200, body: { id: Number(m[1]), event: r.event, status: r.status, head_sha: r.headSha ?? C1 } };
     };
-    return { seen, http };
+    return { seen, http, reads };
   };
   const laneEnv = { GITHUB_REPOSITORY: 'o/r', GITHUB_RUN_ID: '200', GITHUB_TOKEN: 't' };
   const walk = [{ versionCommit: C1, version: '18.4.0', tips: [C1, C2] }];
@@ -1917,6 +1929,31 @@ export async function selfTest() {
       return false;
     } catch (err) {
       return err instanceof TransientReadFailure;
+    }
+  });
+  // Run 42938356503 at 01:24Z: `?status=in_progress` counted 2 over a page
+  // listing the calling run alone, the only release.yml run in progress.
+  await t('⭐ live: the 01:24Z reading -- the in_progress count above a page listing the calling run alone, whole on the re-read -> a pass, read twice', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2, 1] }, runs: { 200: current } });
+    const r = await lane(s);
+    return r.refusals.length === 0 && r.unread.length === 0 && s.reads.in_progress === 2;
+  });
+  await t('⛔ live: a count still above the page after every re-read the run allows THROWS (NOT MEASURED) -- never "clear"', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: [2] }, runs: { 200: current } });
+    try {
+      await lane(s);
+      return false;
+    } catch (err) {
+      return !(err instanceof TransientReadFailure) && s.reads.in_progress === 3;
+    }
+  });
+  await t('⛔ live: a total_count that is no number THROWS (NOT MEASURED) on the first read, never re-read', async () => {
+    const s = laneHttp({ inProgress: [200], counts: { in_progress: ['1'] }, runs: { 200: current } });
+    try {
+      await lane(s);
+      return false;
+    } catch (err) {
+      return !(err instanceof TransientReadFailure) && s.reads.in_progress === 1;
     }
   });
 

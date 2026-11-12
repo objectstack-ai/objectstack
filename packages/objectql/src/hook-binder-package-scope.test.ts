@@ -193,3 +193,90 @@ describe('a hook handler name resolves inside its own package only', () => {
     expect(ran).toEqual(['a:shared_stamp']);
   });
 });
+
+/**
+ * [#32073, ADR-0150 D3 step 1] The engine read resolves from the hook's OWN
+ * holding (`ObjectQL#functionHoldersOf`), not from the bare map's one
+ * last-registered entry per name. Declared a WIDENING: a package's own
+ * function, once ANOTHER package registers the same name, goes FROM refused
+ * (`400 INVALID_REFERENCE`, the bare map named the other package) TO served.
+ * The own-package-only rule is unchanged: every other holder is still refused
+ * with the declared shape. The one-holder CONTROL is the last case of the
+ * describe above (one holder, its own later bind binds and runs).
+ */
+describe('a hook handler name resolves from its own package\'s holding when two packages register it (#32073)', () => {
+  /** A then B register `shared_stamp` through their own binds, so the bare map's entry is B's. */
+  function registerBoth(engine: ObjectQL, ran: string[]) {
+    registerPackageA(engine, ran);
+    bindHooksToEngine(engine, [], {
+      packageId: 'app:com.example.b',
+      functions: { shared_stamp: async () => { ran.push('b:shared_stamp'); } },
+    });
+  }
+
+  it('widening: package A\'s later hook naming its own function binds and runs A\'s, though B registered the name last', async () => {
+    const { engine } = makeEngine();
+    const ran: string[] = [];
+    registerBoth(engine, ran);
+    expect(engine.resolveFunctionEntry('shared_stamp')?.packageId, 'the bare map holds the last registration').toBe('app:com.example.b');
+
+    const result = bindHooksToEngine(engine, [hookNaming('a_own_two_holders', 'shared_stamp')], {
+      packageId: 'app:com.example.a',
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.registered).toBe(1);
+
+    await engine.triggerHooks('beforeInsert', ctxFor());
+    expect(ran, "B's function ran on A's hook").toEqual(['a:shared_stamp']);
+  });
+
+  it('package B\'s later hook binds B\'s own, never A\'s', async () => {
+    const { engine } = makeEngine();
+    const ran: string[] = [];
+    registerBoth(engine, ran);
+
+    const result = bindHooksToEngine(engine, [hookNaming('b_own_two_holders', 'shared_stamp')], {
+      packageId: 'app:com.example.b',
+    });
+    expect(result.registered).toBe(1);
+
+    await engine.triggerHooks('beforeInsert', ctxFor());
+    expect(ran).toEqual(['b:shared_stamp']);
+  });
+
+  it('a package holding none is refused with the declared shape, and neither holder\'s function runs', async () => {
+    const { engine } = makeEngine();
+    const ran: string[] = [];
+    registerBoth(engine, ran);
+
+    const result = bindHooksToEngine(engine, [hookNaming('c_cross_two_holders', 'shared_stamp')], {
+      packageId: 'app:com.example.c',
+    });
+    expect(result.registered).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toMatchObject({
+      hook: 'c_cross_two_holders',
+      code: HOOK_HANDLER_NOT_IN_PACKAGE_CODE,
+      status: HOOK_HANDLER_NOT_IN_PACKAGE_STATUS,
+    });
+
+    await engine.triggerHooks('beforeInsert', ctxFor());
+    expect(ran).toEqual([]);
+  });
+
+  it('the platform\'s owner-less function is not a package\'s own: refused with the declared shape', async () => {
+    const { engine } = makeEngine();
+    const ran: string[] = [];
+    engine.registerFunction('shared_stamp', async () => { ran.push('platform:shared_stamp'); });
+    registerPackageA(engine, ran);
+
+    const result = bindHooksToEngine(engine, [hookNaming('c_platform', 'shared_stamp')], {
+      packageId: 'app:com.example.c',
+    });
+    expect(result.registered).toBe(0);
+    expect(result.errors[0]).toMatchObject({ code: 'INVALID_REFERENCE', status: 400 });
+
+    await engine.triggerHooks('beforeInsert', ctxFor());
+    expect(ran).toEqual([]);
+  });
+});

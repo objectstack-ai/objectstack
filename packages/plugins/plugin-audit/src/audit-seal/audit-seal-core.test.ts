@@ -17,6 +17,7 @@ import {
   chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
+  checkpointLeafHashesFromRow,
   checkpointRow,
   checkpointSeedContext,
   columnSalt,
@@ -74,7 +75,11 @@ describe('RFC 8785 canonical JSON', () => {
 });
 
 describe('canonical form of a sealed row (D1)', () => {
-  const types = { created_at: { type: 'datetime' }, flag: { type: 'boolean' }, day: { type: 'date' } };
+  // Every column a leaf reads is typed: a column with no rule has no canonical form.
+  const types = {
+    id: { type: 'text' }, created_at: { type: 'datetime' }, flag: { type: 'boolean' }, day: { type: 'date' },
+    body: { type: 'text' }, a: { type: 'text' }, b: { type: 'text' },
+  };
 
   it('spells one instant one way, whatever the driver handed back', () => {
     const expected = '2026-11-10T05:06:07.089Z';
@@ -238,6 +243,10 @@ describe('the Merkle tree (D1, RFC 6962 domain separation)', () => {
   });
 });
 
+/** Leaf hashes for a stored checkpoint row: one per listed row (their root is not checked on store). */
+const ONE_LEAF = ['1'.repeat(64)];
+const TWO_LEAVES = ['1'.repeat(64), '2'.repeat(64)];
+
 describe('signed bodies (D4, D7, D8)', () => {
   const body: CheckpointSignedBody = {
     sealed_object: 'sys_audit_log',
@@ -260,7 +269,7 @@ describe('signed bodies (D4, D7, D8)', () => {
   };
 
   it('stores a checkpoint with a non-null chain key and reads the same body back from driver spellings', () => {
-    const row = checkpointRow(body, { id: 'cp1', signature: 'sig' });
+    const row = checkpointRow(body, { id: 'cp1', signature: 'sig', leafHashes: TWO_LEAVES });
     expect(row).toMatchObject({ id: 'cp1', chain_key: 'org:org_1', signature: 'sig', row_ids: '["r1","r2"]' });
     const driverRow = {
       ...row,
@@ -283,7 +292,7 @@ describe('signed bodies (D4, D7, D8)', () => {
     expect(chainKeyOf(null)).toBe('deployment');
     expect(chainKeyOf('deployment')).toBe('org:deployment');
     const first = { ...body, tenant_id: null, sequence: 0, previous_digest: null };
-    expect(checkpointRow(first, { id: 'cp0', signature: 's' })).toMatchObject({ chain_key: 'deployment', tenant_id: null });
+    expect(checkpointRow(first, { id: 'cp0', signature: 's', leafHashes: TWO_LEAVES })).toMatchObject({ chain_key: 'deployment', tenant_id: null });
   });
 
   it('digests the signed bytes, so a change to any signed field moves the digest', () => {
@@ -365,7 +374,7 @@ describe('a refusal never echoes the value it refused (D2: value columns stay on
     try { fn(); } catch (err) { return (err as Error).message; }
     throw new Error('expected a refusal');
   };
-  const types = { created_at: { type: 'datetime' }, flag: { type: 'boolean' }, when: { type: 'datetime' } };
+  const types = { id: { type: 'text' }, created_at: { type: 'datetime' }, flag: { type: 'boolean' }, when: { type: 'datetime' } };
   const cols = (committed: string[]) => ({ clear: ['created_at', 'id'], committed });
   const row = (extra: Record<string, unknown>) => ({ id: 'r', created_at: '2026-01-01T00:00:00.000Z', ...extra });
   const salt = () => Buffer.alloc(32);
@@ -406,7 +415,7 @@ describe('the deployment chain signs a NULL organization (D5)', () => {
       signing_key_id: 'c'.repeat(64),
     };
     // Read back from the stored row, as a verifier does.
-    const stored = checkpointRow(body, { id: 'cp0', signature: 's' });
+    const stored = checkpointRow(body, { id: 'cp0', signature: 's', leafHashes: ONE_LEAF });
     const text = signedBodyBytes(checkpointBodyFromRow(stored)).toString('utf8');
     expect(text).toContain('"tenant_id":null');
     // The stored-only key never enters the signed bytes.
@@ -465,7 +474,7 @@ describe('a redaction names its checkpoint by the signed sequence (D7)', () => {
       canon_version: AUDIT_SEAL_CANON_VERSION, seed_handle: 'sec_0', fencing_token: '1',
       sealed_at: '2026-11-10T05:10:00.000Z', signing_key_id: 'c'.repeat(64),
     };
-    const stored = Object.keys(checkpointRow(body, { id: 'cp0', signature: 's' })).sort();
+    const stored = Object.keys(checkpointRow(body, { id: 'cp0', signature: 's', leafHashes: ONE_LEAF })).sort();
     expect(Object.keys(SysAuditCheckpoint.fields).sort()).toEqual(stored);
     expect(SysAuditCheckpoint.fields.sequence?.type).toBe('number');
   });
@@ -494,13 +503,13 @@ describe('NULL names the deployment chain only when it is stated (D5)', () => {
   };
 
   it('reads a stored NULL tenant_id as the deployment chain', () => {
-    const stored = checkpointRow(checkpoint, { id: 'cp0', signature: 's' });
+    const stored = checkpointRow(checkpoint, { id: 'cp0', signature: 's', leafHashes: ONE_LEAF });
     expect(checkpointBodyFromRow(stored).tenant_id).toBeNull();
     expect(amendmentBodyFromRow(amendmentRow(expiry, { id: 'a1', signature: 's' })).tenant_id).toBeNull();
   });
 
   it('refuses a row with no tenant_id at all, as a projection that dropped the column hands back', () => {
-    const storedCheckpoint = checkpointRow(checkpoint, { id: 'cp0', signature: 's' });
+    const storedCheckpoint = checkpointRow(checkpoint, { id: 'cp0', signature: 's', leafHashes: ONE_LEAF });
     const storedAmendment = amendmentRow(expiry, { id: 'a1', signature: 's' });
     for (const [label, read] of [
       ['checkpoint', () => checkpointBodyFromRow(without(storedCheckpoint, 'tenant_id'))],
@@ -509,6 +518,63 @@ describe('NULL names the deployment chain only when it is stated (D5)', () => {
     ] as const) {
       expect(read, label).toThrow(SignedBodyError);
       expect(read, label).toThrow(/tenant_id/);
+    }
+  });
+});
+
+describe('the leaf hashes beside a checkpoint are trusted only through its signed root (D9)', () => {
+  const leaves = [sha(Buffer.from('row one')), sha(Buffer.from('row two')), sha(Buffer.from('row three'))];
+  const hex = leaves.map((l) => l.toString('hex'));
+  const body: CheckpointSignedBody = {
+    sealed_object: 'sys_audit_log',
+    tenant_id: 'org_1',
+    sequence: 0,
+    kind: 'window',
+    window_start: '2026-11-10T04:00:00.000Z',
+    window_end: '2026-11-10T05:00:00.000Z',
+    sealed_through: '2026-11-10T05:00:00.000Z',
+    leaf_count: 3,
+    row_ids: ['r1', 'r2', 'r3'],
+    root: merkleRoot(leaves),
+    previous_digest: null,
+    columns: { clear: ['created_at', 'id'], committed: [] },
+    canon_version: AUDIT_SEAL_CANON_VERSION,
+    seed_handle: 'sec_0123',
+    fencing_token: '1',
+    sealed_at: '2026-11-10T05:10:00.000Z',
+    signing_key_id: 'c'.repeat(64),
+  };
+  const stored = checkpointRow(body, { id: 'cp0', signature: 's', leafHashes: hex });
+
+  it('reads back the list the sealer hashed, in the order of the row ids', () => {
+    expect(stored.leaf_hashes).toBe(canonicalJson(hex));
+    expect(checkpointLeafHashesFromRow(stored, checkpointBodyFromRow(stored))).toEqual(hex);
+  });
+
+  it('refuses a list that does not rebuild the signed root: one hash changed, or two swapped', () => {
+    const changed = [...hex];
+    changed[1] = sha(Buffer.from('forged')).toString('hex');
+    const swapped = [hex[1], hex[0], hex[2]];
+    for (const [label, list] of [['changed', changed], ['swapped', swapped]] as const) {
+      const read = () => checkpointLeafHashesFromRow({ ...stored, leaf_hashes: canonicalJson(list) }, body);
+      expect(read, label).toThrow(SignedBodyError);
+      expect(read, label).toThrow(/do not rebuild the signed root/);
+    }
+  });
+
+  it('refuses a list whose length disagrees with the row ids and the leaf count, before any root is built', () => {
+    expect(() => checkpointRow(body, { id: 'cp0', signature: 's', leafHashes: hex.slice(0, 2) })).toThrow(/3 row id\(s\)/);
+    for (const list of [hex.slice(0, 2), [...hex, hex[0]]]) {
+      const read = () => checkpointLeafHashesFromRow({ ...stored, leaf_hashes: canonicalJson(list) }, body);
+      expect(read).toThrow(SignedBodyError);
+      expect(read).toThrow(new RegExp(`leaf_hashes: ${list.length} hash\\(es\\) for 3 row id\\(s\\) and a leaf count of 3`));
+    }
+  });
+
+  it('refuses a list that is not lowercase hex digests', () => {
+    for (const list of [[hex[0], hex[1], hex[2].toUpperCase()], [hex[0], hex[1], 7], 'not a list']) {
+      const read = () => checkpointLeafHashesFromRow({ ...stored, leaf_hashes: typeof list === 'string' ? list : JSON.stringify(list) }, body);
+      expect(read).toThrow(SignedBodyError);
     }
   });
 });

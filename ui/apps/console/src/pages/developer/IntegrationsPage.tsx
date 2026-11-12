@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ConsolePageHeader } from '@object-ui/app-shell';
+import { ConsolePageHeader, DeveloperNamespaceGate } from '@object-ui/app-shell';
 import { useObjectTranslation } from '@object-ui/i18n';
 import {
   Card,
@@ -70,7 +70,19 @@ function CopyButton({ value, ariaLabel }: { value: string; ariaLabel: string }) 
   );
 }
 
+/**
+ * Its strings are the lazy `developer` i18n namespace's, so the page body
+ * renders under `DeveloperNamespaceGate` (objectstack#32225).
+ */
 export function IntegrationsPage() {
+  return (
+    <DeveloperNamespaceGate>
+      <IntegrationsPageBody />
+    </DeveloperNamespaceGate>
+  );
+}
+
+function IntegrationsPageBody() {
   // objectui#13460 — the page's copy reads `console.developer.integrations.*`;
   // each inline `defaultValue` is the `en` pack's value, held byte-identical to
   // it by `pnpm check:i18n-keys`, so a provider-less mount still reads English.

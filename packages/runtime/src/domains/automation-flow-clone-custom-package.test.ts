@@ -88,7 +88,7 @@ const LOCAL = 'local_digest';
 const AUTHOR = { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata'] };
 
 const flowOf = (name: string, extra: Record<string, unknown> = {}) => ({
-    name, label: `Flow ${name}`, type: 'autolaunched', status: 'active', nodes: [], edges: [], ...extra,
+    name, label: `Flow ${name}`, type: 'autolaunched', status: 'active', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [], ...extra,
 });
 
 const liveEngines: ObjectQL[] = [];

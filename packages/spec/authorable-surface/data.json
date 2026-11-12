@@ -522,6 +522,7 @@
     "data/Lifecycle:class",
     "data/Lifecycle:reclaim",
     "data/Lifecycle:retention",
+    "data/Lifecycle:seal",
     "data/Lifecycle:storage",
     "data/Lifecycle:ttl",
     "data/LocalStoragePersistenceConfig:key",

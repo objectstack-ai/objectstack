@@ -86,6 +86,7 @@ import {
     metaItemLayersDeprecationHeaders,
     metaItemPackageBinding,
     metaItemQueryRefusal,
+    metaCallerPackageQuery,
     metaListNames,
     metaListQueryRefusal,
     metaMemberSelector,
@@ -446,11 +447,30 @@ export async function resolveObjectMasker(
 }
 
 /**
+ * A masker that asks its posture once per object name for the life of one
+ * request — for a door that reads the posture before its store read and
+ * again to project what it serves, so the posture (and its D6 notices) is
+ * resolved once. A rejection is kept too: the same request, the same answer.
+ */
+function onePosturePerName(
+    masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
+): (objectName: string) => Promise<ObjectSchemaMaskPosture> {
+    const asked = new Map<string, Promise<ObjectSchemaMaskPosture>>();
+    return (objectName) => {
+        let posture = asked.get(objectName);
+        if (!posture) asked.set(objectName, (posture = masker(objectName)));
+        return posture;
+    };
+}
+
+/**
  * Project one served object schema, or report the D6 tier-3 fault.
  *
  * `'fault'` covers both the throw tier and the empty-projection case — see
  * `applyObjectSchemaMask`'s `emptied` for why an empty-fields 200 is not an
- * option the ADR leaves open.
+ * option the ADR leaves open. [ruling record 6787890900] `ok: false` with
+ * `hidden` is not a fault: the caller may not read the object, and the exit
+ * answers as for a name that names no object.
  *
  * [#20408] The projection is the shared `projectMetaObjectSchema`, so the
  * answer carries the `Cache-Control` an undetermined posture owes (ADR-0106 D6
@@ -462,7 +482,7 @@ export async function maskObjectSchema(
     masker: (objectName: string) => Promise<ObjectSchemaMaskPosture>,
     objectName: string,
     document: any,
-): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false }> {
+): Promise<{ ok: true; document: any; cacheControl?: string } | { ok: false; hidden?: true }> {
     let posture: ObjectSchemaMaskPosture;
     try {
         posture = await masker(objectName);
@@ -939,6 +959,10 @@ async function answerMetaLayered(
     headers: Readonly<Record<string, string | undefined>> = {},
 ): Promise<HttpDispatcherResult> {
     const { type, name, packageId, maskPosture, memberSelector = {} } = request;
+    // [ruling record 6787890900] An object the caller may not read is the
+    // layered chain's absence, answered BEFORE the store is read, so no store
+    // answer about it (a disabled package's refusal among them) reaches them.
+    if (maskPosture.kind === 'hidden') return withHeaders(deps.error('Not found', 404), headers);
     const mayWriteItem = saveVerdict().allowed;
     // [#29814] The pending draft layer, asked for only when this caller may
     // read pending drafts ({@link mayReadPendingDrafts}, admitted in its own
@@ -1125,6 +1149,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             throw e;
         }
         if (address) {
+            // [ADR-0150 D3, #32310] A qualified address is already exact, so
+            // the caller arm beside it names a second address: refused like
+            // `?package=`, naming both, as `RestServer` refuses it.
+            if (query?.callerPackage !== undefined) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `The path names its ${address.kind === 'environment' ? 'environment' : `namespace '${parts[1]}'`} `
+                        + 'as the exact qualifier, so `?callerPackage=` cannot resolve the name from another package. Send one '
+                        + 'of the two: the bare path with `?callerPackage=`, or the qualified path (ADR-0150 D3, D5).',
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
             // Two qualifiers on one read name two addresses; neither is picked.
             if (query?.package !== undefined) {
                 return {
@@ -1264,6 +1303,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         const arity = metaQueryArityRefusal('state', query);
         if (arity) return queryRefusalAnswer(deps, arity);
         const from = query?.from !== undefined ? String(query.from) : undefined;
+        // [ruling record 6787890900] This door reads an object's schema, so it
+        // resolves the caller's posture first: an object the caller may not read
+        // is this door's answer for no object, before the registry is read.
+        let statePosture: ObjectSchemaMaskPosture;
+        try {
+            statePosture = await (await resolveObjectMasker(deps, _context, 'object'))(name);
+        } catch (maskError) {
+            if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+            throw maskError;
+        }
+        if (statePosture.kind === 'hidden') return { handled: true, response: deps.error('Object not found', 404) };
         const qlService = await deps.getObjectQL(_context);
         // [#7557, #24210] An API door reading the registry, a resolution
         // reader: an object of a disabled package gets the item read's answer.
@@ -1444,7 +1494,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // serving must be answered as itself — never fall through to the
         // snapshot as though no overlay existed.
         const publishedType = pluralToSingular(type);
-        const publishedMasker = publishedType === 'object' ? await resolveObjectMasker(deps, _context, publishedType) : undefined;
+        // Asked once per name for the whole request: the early verdict below and
+        // the projection in `servePublished` read the same posture.
+        const publishedMasker = publishedType === 'object'
+            ? onePosturePerName(await resolveObjectMasker(deps, _context, publishedType))
+            : undefined;
         const servePublished = async (document: any): Promise<HttpDispatcherResult> => {
             const gated = await gateMetaItemDocument(deps, _context, protocol, publishedType, name, document);
             if (!gated.ok) return { handled: true, response: gated.response };
@@ -1452,6 +1506,9 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             let cacheControl: string | undefined;
             if (publishedMasker) {
                 const masked = await maskObjectSchema(publishedMasker, name, served);
+                // [ruling record 6787890900] An object the caller may not read
+                // is this door's answer for a name with nothing published.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, name);
                 served = masked.document;
                 // [#20408] ADR-0106 D6 tier 2 — as `RestServer`'s `/published`.
@@ -1472,6 +1529,21 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             }
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
+
+        // [ruling record 6787890900] An object the caller may not read is this
+        // door's answer for a name with nothing published behind it, BEFORE any
+        // store is read, so no store answer about it (a disabled package's
+        // refusal among them) reaches the caller.
+        if (publishedMasker) {
+            let earlyPosture: ObjectSchemaMaskPosture;
+            try {
+                earlyPosture = await publishedMasker(name);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, name);
+                throw maskError;
+            }
+            if (earlyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
+        }
 
         // [#7557, #24210] A disabled package's item is answered as a name with
         // nothing behind it (every exit below ends in this same `404`), as
@@ -1903,8 +1975,33 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         // third (a member on the layered view) is answered where the layered
         // view is chosen, below. This branch declared no set, so `?member=` and
         // every misspelling were dropped and answered with the canonical item.
-        const queryRefusal = metaItemQueryRefusal('item', query);
+        // [ADR-0150 D3, #32310] …its fourth rule, the caller arm's, reads the type.
+        const queryRefusal = metaItemQueryRefusal('item', query, { type });
         if (queryRefusal && queryRefusal.rule !== 'layered-member') return queryRefusalAnswer(deps, queryRefusal);
+        // [ADR-0150 D3, #32310] The caller arm (`?callerPackage=P`), read ONCE,
+        // here, by `RestServer`'s reading (`metaCallerPackageQuery` in
+        // `@objectstack/rest`): the name resolves FROM P by D3, and this read
+        // then reads the resolved holder at its exact qualifier (`?package=`),
+        // so every branch below answers as that address answers; a refusal is
+        // the `409` naming the candidates, answered like the item read's.
+        if (query?.callerPackage !== undefined) {
+            try {
+                const callerQuery = metaCallerPackageQuery(
+                    await resolveProtocol(deps, _context), { type, name, ...metaMemberSelector(query) }, query,
+                );
+                if (callerQuery) query = callerQuery;
+            } catch (e) {
+                if (isPackageScopedRefusal(e)) return { handled: true, response: packageScopedRefusalAnswer(deps, e) };
+                // The arm's fail-closed refusal (a protocol or registry that
+                // cannot resolve by caller): its own `503`, answered here as
+                // `RestServer` answers it, never left to an outer catch.
+                if ((e as { code?: unknown; status?: unknown })?.code === 'SERVICE_UNAVAILABLE'
+                    && (e as { status?: unknown }).status === 503) {
+                    return { handled: true, response: deps.errorFromThrown(e, 503) };
+                }
+                throw e;
+            }
+        }
         const packageId = packageBinding();
         // [#23072] …and the member it names (`metaMemberSelector`, the one
         // reading `RestServer`'s doors read), handed to EVERY protocol read
@@ -2022,6 +2119,15 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
 
             // Try specific calls based on type
             if (type === 'objects' || type === 'object') {
+                // [ruling record 6787890900] An object the caller may not read
+                // is this branch's answer for a name with nothing behind it,
+                // BEFORE any store is read, so no store answer about it (a
+                // disabled package's refusal among them) reaches the caller —
+                // whether or not a member is named, as `RestServer`'s plain read
+                // answers it.
+                if (maskPosture.kind === 'hidden') {
+                    return { handled: true, response: deps.error('Not found', 404) };
+                }
                 // Check whether the kernel is project-scoped. When it is,
                 // the process-wide SchemaRegistry is unsafe to query
                 // directly — it would return objects that other projects
@@ -2520,6 +2626,19 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `book`) serves an object SCHEMA. An anonymous caller never reaches
             // a schema — the deny it skipped is answered here instead.
             if (anonymous) return anonymousDeny();
+            // [ruling record 6787890900] An object the caller may not read is
+            // this exit's answer for a name that names nothing (below), BEFORE
+            // the registry is asked about it.
+            // Asked once for the whole request: the projection below reads it too.
+            const legacyMasker = onePosturePerName(await resolveObjectMasker(deps, _context, 'object'));
+            let legacyPosture: ObjectSchemaMaskPosture;
+            try {
+                legacyPosture = await legacyMasker(typeOrName);
+            } catch (maskError) {
+                if (maskError instanceof ObjectSchemaMaskEvaluationError) return fieldVisibilityFault(deps, typeOrName);
+                throw maskError;
+            }
+            if (legacyPosture.kind === 'hidden') return { handled: true, response: deps.error('Not found', 404) };
             // [#7557, #24210] The registry keeps serving a disabled package's
             // object (a resolution reader), so this exit answers it as the item
             // read does.
@@ -2540,8 +2659,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 );
                 if (!gated.ok) return { handled: true, response: gated.response };
                 const masked = await maskObjectSchema(
-                    await resolveObjectMasker(deps, _context, 'object'), typeOrName, gated.document,
+                    legacyMasker, typeOrName, gated.document,
                 );
+                // [ruling record 6787890900] An object the caller may not read
+                // is the answer below for a name that names nothing.
+                if (!masked.ok && masked.hidden) return { handled: true, response: deps.error('Not found', 404) };
                 if (!masked.ok) return fieldVisibilityFault(deps, typeOrName);
                 // [#20408] ADR-0106 D6 tier 2's `private, no-store`, as every
                 // other object exit here serves it.

@@ -12,6 +12,7 @@ import {
     USER_PERMISSION_SET_TABLE,
     buildUserPermissionSetOldKeySql,
     buildUserPermissionSetPackagelessDuplicateProbeSql,
+    buildUserPermissionSetPackagelessIndexPresenceSql,
     buildUserPermissionSetPackagelessIndexSql,
     buildUserPermissionSetPackagelessMariaDbKeySql,
     buildUserPermissionSetPackagelessMariaDbSql,
@@ -19,6 +20,18 @@ import {
     ensureUserPermissionSetPackagelessIndex,
 } from './user-permission-set-packageless-index.js';
 import type { IndexExec } from './partial-index-probe.js';
+
+/**
+ * The guard's own catalog read (`buildUserPermissionSetPackagelessIndexPresenceSql`),
+ * told apart from the table-presence read the recording fixtures below answer
+ * "present": only the guard's read names the index. Those fixtures answer it
+ * with no row, so the build they exercise still runs.
+ */
+const isGuardPresenceRead = (sql: string): boolean =>
+    /^SELECT 1 FROM /.test(sql) && sql.includes(`'${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`);
+
+/** A statement that changes the schema, as opposed to a read. */
+const isDdl = (sql: string): boolean => /^\s*(CREATE|ALTER|DROP)\b/i.test(sql);
 
 /**
  * `sys_user_permission_set` — one grant per `(user_id, permission_set,
@@ -253,6 +266,35 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
             expect(log.warn).not.toHaveBeenCalled();
         });
 
+        it('a later pass over a table the guard stands on reads the catalog and issues no DDL (a metadata:reloaded re-sync locks nothing)', async () => {
+            const statements: string[] = [];
+            const driver = { ...sqliteDriver(), execute: (sql: string) => (statements.push(sql), exec(sql)) };
+            const log = logger();
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(driver), log);
+
+            expect(await ensure()).toBe('created');
+            expect(statements.filter(isDdl)).toEqual([buildUserPermissionSetPackagelessIndexSql('better-sqlite3')]);
+
+            statements.length = 0;
+            expect(await ensure()).toBe('created');
+            expect(statements.filter(isDdl)).toEqual([]);
+            expect(statements).toContain(buildUserPermissionSetPackagelessIndexPresenceSql('better-sqlite3'));
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+            expect(log.error).not.toHaveBeenCalled();
+            expect(log.warn).not.toHaveBeenCalled();
+        });
+
+        it('a refused catalog read never skips the build: the pass builds as it did without the read', async () => {
+            const driver = {
+                ...sqliteDriver(),
+                execute: (sql: string) => (isGuardPresenceRead(sql) ? Promise.reject(new Error('no such table: sqlite_master')) : exec(sql)),
+            };
+            const ensure = createUserPermissionSetGuardAtSchemaSync(engineOver(driver), logger());
+
+            expect(await ensure()).toBe('created');
+            expect(indexDdl(USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME)).toBeDefined();
+        });
+
         it('a refusal latches: reported once, and a later pass in the same boot neither tries again nor says it twice', async () => {
             insert('a', null);
             insert('b', null);
@@ -282,9 +324,51 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
 
 describe('the MySQL-family arms (statement and verdict)', () => {
     const presentTable: IndexExec = async (sql: string) => {
+        if (isGuardPresenceRead(sql)) return [[], []];
         if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
         throw new Error('unexpected');
     };
+
+    it('the guard read per dialect: an index of its name on this table, in the schema the unqualified DDL resolves; no arm for an unknown client', () => {
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('better-sqlite3')).toBe(
+            `SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}' ` +
+                `AND tbl_name = '${USER_PERMISSION_SET_TABLE}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('pg')).toBe(
+            'SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid ' +
+                `WHERE i.indrelid = to_regclass('"${USER_PERMISSION_SET_TABLE}"') AND c.relname = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('mysql2')).toBe(
+            'SELECT 1 FROM information_schema.statistics ' +
+                `WHERE table_schema = DATABASE() AND table_name = '${USER_PERMISSION_SET_TABLE}' ` +
+                `AND index_name = '${USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME}'`,
+        );
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql('oracledb')).toBeUndefined();
+        expect(buildUserPermissionSetPackagelessIndexPresenceSql(undefined)).toBeUndefined();
+    });
+
+    it('a guard the catalog names is left alone: no version read, no CREATE, no ALTER', async () => {
+        const seen: string[] = [];
+        const exec: IndexExec = async (sql) => {
+            seen.push(sql);
+            if (isGuardPresenceRead(sql)) return [[{ 1: 1 }], []];
+            return presentTable(sql);
+        };
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'mysql2' }))
+            .toEqual({ status: 'created' });
+        expect(seen.filter(isDdl)).toEqual([]);
+        expect(seen.some((q) => /VERSION\(\)/.test(q))).toBe(false);
+    });
+
+    it('a client with no catalog arm builds as before (the read never guesses a spelling)', async () => {
+        const seen: string[] = [];
+        // The table's fallback probe answers a result set (present); every statement succeeds.
+        const exec: IndexExec = async (sql) => (seen.push(sql), []);
+        expect(await ensureUserPermissionSetPackagelessIndex(exec, { warn: vi.fn(), error: vi.fn() }, { client: 'oracledb' }))
+            .toEqual({ status: 'created' });
+        expect(seen.filter(isDdl)).toEqual([buildUserPermissionSetPackagelessIndexSql('oracledb')]);
+        expect(seen.some(isGuardPresenceRead)).toBe(false);
+    });
 
     it("MySQL takes a functional key part over the driver's own digest, NULL for a packaged grant", () => {
         expect(buildUserPermissionSetPackagelessIndexSql('mysql2')).toBe(
@@ -371,10 +455,12 @@ describe('the MySQL-family arms (statement and verdict)', () => {
 });
 
 /**
- * [#21418] The one `operatorFacingErrorText()` site in this migration (the
- * CREATE's failure detail) and the presence read's detail it also reports: a
- * value bound into a refused raw statement reaches neither the returned result
- * nor the `error` line. The fixture is the raw terminal's envelope, as
+ * [#21418] The three `operatorFacingErrorText()` sites in this migration — the
+ * CREATE's failure detail, the old key's failure detail where the guard has no
+ * form (`oldKeyDetail`), and the schema-sync ensurer's own catch — and the
+ * presence read's detail it also reports: a value bound into a refused raw
+ * statement reaches neither the returned result nor the `error` line. The
+ * fixture is the raw terminal's envelope, as
  * `raw-exec-operator-detail-16657.test.ts` builds it for the sibling migrations.
  */
 describe('[#21418] a bound sentinel reaches no carrier this migration writes', () => {
@@ -401,6 +487,7 @@ describe('[#21418] a bound sentinel reaches no carrier this migration writes', (
         [inspect(result, { depth: 8 }), ...[...log.error.mock.calls, ...log.warn.mock.calls].map((c) => inspect(c, { depth: 8 }))].join('\n');
 
     const presentTable = async (sql: string) => {
+        if (isGuardPresenceRead(sql)) return [];
         if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
         return [];
     };
@@ -423,8 +510,32 @@ describe('[#21418] a bound sentinel reaches no carrier this migration writes', (
         const result = await ensureUserPermissionSetPackagelessIndex(exec, log, { client: 'better-sqlite3' });
         expect(result.status).toBe(status);
         expect(result.detail).toContain(diagnostic);
+        // On `unsupported` the old key's CREATE is refused the same way: its own detail, the second site.
+        if (status === 'unsupported') expect(result.oldKeyDetail).toContain(diagnostic);
         expect(log.error).toHaveBeenCalled();
         expect(carriers(result, log)).not.toContain(SENTINEL);
+    });
+
+    it("the schema-sync ensurer's own catch (a throw no collaborator is meant to raise): its error line carries the dialect text, never the bound value", async () => {
+        const fault = rawStatementFault(knexDump('select ? as v', [SENTINEL], 'no such column: v'));
+        // A driver whose raw-SQL surface cannot even be read: the seam lookup,
+        // the first thing a pass asks, throws straight into the ensurer's backstop.
+        const driver = {
+            get execute(): never {
+                throw fault;
+            },
+        };
+        const engine = { getDriverForObject: (table: string) => (table === USER_PERMISSION_SET_TABLE ? driver : undefined) };
+        const log = { error: vi.fn(), warn: vi.fn() };
+
+        const outcome = await createUserPermissionSetGuardAtSchemaSync(engine, log)();
+
+        // Reached the catch, not some other branch: its own line, its own outcome.
+        expect(outcome).toBe('failed');
+        expect(log.error).toHaveBeenCalledTimes(1);
+        expect(String(log.error.mock.calls[0]?.[0] ?? '')).toContain('permission-set grant index migration skipped');
+        expect((log.error.mock.calls[0]?.[1] as Error | undefined)?.message).toContain('no such column: v');
+        expect(carriers(outcome, log)).not.toContain(SENTINEL);
     });
 
     it('the presence read refused: the failed result and its error line carry no bound value', async () => {
@@ -444,6 +555,7 @@ describe('the MariaDB arm (INVISIBLE generated carrier + UNIQUE key)', () => {
         const seen: string[] = [];
         const exec: IndexExec = async (sql: string) => {
             seen.push(sql);
+            if (isGuardPresenceRead(sql)) return [[], []];
             if (/information_schema|sqlite_master|to_regclass|WHERE 1 = 0/i.test(sql)) return [[{ present: 1 }]];
             if (/^SELECT VERSION\(\)/.test(sql)) return [[{ version: '11.8.9-MariaDB-ubu2404' }]];
             return onDdl(sql);

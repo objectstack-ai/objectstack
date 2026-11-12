@@ -27,6 +27,7 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 
 import { DeploymentNotice } from '../DeploymentNotice';
 import { HIDDEN_KEY_PREFIX, deploymentVariablesText, parseDeploymentNotice } from '../deploymentNotice';
+import { useHomeItemClaimed } from '../../home/homeItemClaims';
 
 const NOTICE = {
   production: true,
@@ -185,6 +186,99 @@ describe('DeploymentNotice (objectstack#30120)', () => {
     await settle();
     expect(screen.queryByTestId('deployment-notice')).toBeNull();
     expect(screen.queryByTestId('deployment-notice-hidden')).toBeNull();
+  });
+});
+
+/** What the first-run checklist reads before it draws its Email delivery row. */
+function MailClaimed() {
+  return <span data-testid="mail-claimed">{String(useHomeItemClaimed('mail'))}</span>;
+}
+
+describe('DeploymentNotice — owns the email line on Home (objectstack#32021 item 3)', () => {
+  const claimed = () => screen.getByTestId('mail-claimed').textContent;
+
+  beforeEach(() => {
+    adminStatus = admin;
+    localStorage.clear();
+    fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/api/settings/deployment/notice/hide') && init?.method === 'POST') {
+        return json(200, envelope({ hidden: true, fingerprint: NOTICE.fingerprint }));
+      }
+      return json(200, envelope(NOTICE));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  it('while it draws "no email service" on Home, it claims the item; hiding it gives the item back', async () => {
+    render(
+      <>
+        <MailClaimed />
+        <DeploymentNotice placement="home" />
+      </>,
+    );
+    await settle();
+    expect(screen.getByTestId('deployment-notice').querySelector('[data-finding="email_not_configured"]')).not.toBeNull();
+    expect(claimed()).toBe('true');
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('deployment-notice-hide'));
+    });
+    await settle();
+    expect(screen.queryByTestId('deployment-notice')).toBeNull();
+    expect(claimed()).toBe('false');
+  });
+
+  it('what the notice says is untouched: every finding is still drawn, the email line included', async () => {
+    render(<DeploymentNotice placement="home" />);
+    await settle();
+    const ids = [...screen.getByTestId('deployment-notice').querySelectorAll('[data-finding]')].map((li) =>
+      li.getAttribute('data-finding'),
+    );
+    expect(ids).toEqual(NOTICE.findings.map((f) => f.id));
+  });
+
+  it('CONTROL: a notice with no email finding claims nothing', async () => {
+    const findings = NOTICE.findings.filter((f) => f.id !== 'email_not_configured');
+    fetchMock.mockResolvedValue(json(200, envelope({ ...NOTICE, findings, fingerprint: 'x' })));
+    render(
+      <>
+        <MailClaimed />
+        <DeploymentNotice placement="home" />
+      </>,
+    );
+    await settle();
+    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
+    expect(claimed()).toBe('false');
+  });
+
+  it('CONTROL: System Overview is not Home, and claims nothing there', async () => {
+    render(
+      <>
+        <MailClaimed />
+        <DeploymentNotice placement="system-overview" />
+      </>,
+    );
+    await settle();
+    expect(screen.getByTestId('deployment-notice')).toBeInTheDocument();
+    expect(claimed()).toBe('false');
+  });
+
+  it('CONTROL: a member draws nothing and claims nothing', async () => {
+    adminStatus = { isAdmin: false, isResolved: true };
+    render(
+      <>
+        <MailClaimed />
+        <DeploymentNotice placement="home" />
+      </>,
+    );
+    await settle();
+    expect(claimed()).toBe('false');
   });
 });
 

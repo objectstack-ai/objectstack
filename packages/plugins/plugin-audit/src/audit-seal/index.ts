@@ -2,24 +2,37 @@
 
 /**
  * ADR-0154 — the audit ledger's tamper evidence: the pure core (canonical
- * form, commitments, seed salts, Merkle tree, signed bodies). Nothing here
- * reads or writes storage; the sealer and the verifier build on it.
+ * form, commitments, seed salts, Merkle tree, signed bodies), which reads and
+ * writes no storage, and the live verifier built on it (`verifier.ts`, D9),
+ * which only reads. The sealer (`sealer.ts`) and the default signer
+ * (`signer.ts`) stay inside the package and are not re-exported here.
  */
 
 export { canonicalJson, canonicalJsonBytes, CanonicalJsonError } from './jcs.js';
+export type { CanonicalJsonOptions } from './jcs.js';
 export {
   AUDIT_SEAL_CANON_VERSION,
+  AUDIT_SEAL_TYPE_RULES,
   canonicalDatetime,
   canonicalValue,
   CanonicalFormError,
+  canonRuleOf,
   commitValue,
   inLeafOrder,
   leafHash,
   leafInput,
   rowIdOf,
   sealedColumnSet,
+  unsealableColumns,
 } from './canonical.js';
-export type { ColumnSaltOf, SealedColumnSet, SealedFieldTypes } from './canonical.js';
+export type {
+  AuditSealCanonRule,
+  ColumnSaltOf,
+  SealedColumnSet,
+  SealedFieldType,
+  SealedFieldTypes,
+  UnsealableColumn,
+} from './canonical.js';
 export {
   AUDIT_AMENDMENT_OBJECT,
   AUDIT_CHECKPOINT_OBJECT,
@@ -34,6 +47,7 @@ export {
   encodeCheckpointSeed,
   generateCheckpointSeed,
   isAuditSealSecretCoordinate,
+  SecretCoordinateBoundError,
   signingKeyContext,
 } from './seed.js';
 export { merkleRoot, nodeHash } from './merkle.js';
@@ -45,6 +59,7 @@ export {
   chainKeyOf,
   checkpointBodyFromRow,
   checkpointDigest,
+  checkpointLeafHashesFromRow,
   checkpointRow,
   DEPLOYMENT_CHAIN_KEY,
   signedBodyBytes,
@@ -58,3 +73,16 @@ export type {
   ExpiryAmendmentBody,
   RedactionAmendmentBody,
 } from './signed-body.js';
+export { AUDIT_ROW_VERDICTS, verifyAuditLedger } from './verifier.js';
+export type {
+  AuditChainFault,
+  AuditChainFaultKind,
+  AuditChainReport,
+  AuditDanglingRedaction,
+  AuditRowFinding,
+  AuditRowVerdict,
+  AuditVerdictCounts,
+  AuditVerifierEngine,
+  AuditVerifyOptions,
+  AuditVerifyReport,
+} from './verifier.js';

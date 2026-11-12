@@ -12,7 +12,10 @@
  *  - `useConnectedAccess` answered that the person has connected nothing: no
  *    authorized assistant and no API key that still works. While that read is
  *    out, or when it cannot be read, the card stays away rather than offering
- *    a connection the person may already have.
+ *    a connection the person may already have;
+ *  - no other Home card is drawing the same item: an administrator's first-run
+ *    checklist claims `connect_assistant` while its row for it is not done
+ *    (`homeItemClaims`), and the row says it once, with its done state.
  *
  * Once the person connects one it is gone on the next read, and it does not
  * come back after a dismissal.
@@ -28,6 +31,7 @@ import { useMetadata } from '../../providers/MetadataProvider.js';
 import { connectAssistantPath } from '../connect/connectAssistantPath.js';
 import { useConnectedAccess } from '../connect/connectedAccess.js';
 import { cardStorage, markCardDismissed, wasCardDismissed } from './connectAssistantCardGate.js';
+import { useHomeItemClaimed } from './homeItemClaims.js';
 
 export function ConnectAssistantCard() {
   const { t } = useObjectTranslation();
@@ -40,8 +44,9 @@ export function ConnectAssistantCard() {
   const [hiddenFor, setHiddenFor] = useState<string | null>(null);
   const dismissed = userId !== null && (hiddenFor === userId || wasCardDismissed(cardStorage(), userId));
   const access = useConnectedAccess({ enabled: Boolean(path && userId && !dismissed) });
+  const saidElsewhere = useHomeItemClaimed('connect_assistant');
 
-  if (!path || !userId || dismissed) return null;
+  if (!path || !userId || dismissed || saidElsewhere) return null;
   if (access.state !== 'ready' || access.connected) return null;
 
   const dismiss = () => {

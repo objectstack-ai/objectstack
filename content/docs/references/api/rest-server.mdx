@@ -54,8 +54,11 @@ moves it.
 `normalizeConfig` folds the environment into the effective value of
 `metadata.maskObjectFields` — `OS_ALLOW_UNMASKED_OBJECT_METADATA` turns the
 ADR-0106 D8 mask OFF for a deployment that cannot otherwise reach the key.
-That env var is the only thing outside an embedder's argument that changes
-any value here. See `maskObjectFields` below.
+The mask governs object visibility as well as fields (ADR-0106, amended
+2026-11-11): with it off, every caller is served every object, including
+objects they may not read. That env var is the only thing outside an
+embedder's argument that changes any value here. See `maskObjectFields`
+below.
 
 This is the recorded posture, not a gap awaiting a fix: the keys keep their
 runtime reads and their embedder consumer, and the reachability answer

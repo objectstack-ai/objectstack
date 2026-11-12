@@ -43,7 +43,8 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
           package_uninstall: "Désinstallation de package",
           package_unmanaged_import: "Package Unmanaged Import",
           credential_use: "Credential Use",
-          scim_refused: "SCIM Refused"
+          scim_refused: "SCIM Refused",
+          audit_signing_key_change: "Audit Signing Key Change"
         }
       },
       user_id: {
@@ -340,6 +341,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       row_ids: {
         label: "Row IDs",
         help: "JSON array of the sealed row ids"
+      },
+      leaf_hashes: {
+        label: "Leaf Hashes",
+        help: "JSON array of each sealed row's leaf hash, in the order of the row ids; checked against the signed root"
       },
       root: {
         label: "Merkle Root"

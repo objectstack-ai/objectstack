@@ -59,6 +59,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
   useAdapter: () => SHELL.adapter,
 }));
 
+import { useHomeItemClaim, useHomeItemClaimed, type HomeItem } from '@object-ui/app-shell';
 import { FirstRunChecklist } from '../FirstRunChecklist';
 import { __resetBootPainted } from '../../../loadLocales';
 import type { Specifier } from '../types';
@@ -391,6 +392,22 @@ describe('the browser pre-fills; only Confirm writes (objectui#11693 B2, objects
     expect(await screen.findByText('完成初始设置')).toBeTruthy();
     expect(await screen.findByText('尚未设置，金额暂不显示币种。')).toBeTruthy();
   });
+
+  it('zh: the current language and country are named in Chinese, not by their English labels (objectstack#32021)', async () => {
+    renderChecklist(ADMIN, 'zh');
+    const r = await screen.findByTestId('first-run-checklist-row-language_country');
+    expect(r.textContent).toContain('美国');
+    expect(r.textContent).toContain('英语');
+    expect(r.textContent).not.toContain('English');
+    expect(r.textContent).not.toContain('United States');
+  });
+
+  it('CONTROL en: the same row names them in English', async () => {
+    renderChecklist(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-language_country');
+    expect(r.textContent).toContain('United States');
+    expect(r.textContent).toContain('English');
+  });
 });
 
 describe('the reads wait for the first paint (objectui#12980)', () => {
@@ -446,7 +463,13 @@ describe('Connect an AI assistant: done from a real record, never from a click',
     renderChecklist(ADMIN);
     const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
     expect(r.getAttribute('data-done')).toBe('false');
-    expect(within(r).getByText('Work in this system from Claude, Doubao and similar assistants, as yourself.')).toBeTruthy();
+    // objectstack#32021 item 4 — said as an EXTERNAL assistant over MCP, apart from the built-in AI.
+    expect(within(r).getByText('Connect an external AI assistant')).toBeTruthy();
+    expect(
+      within(r).getByText(
+        'Work in this system as yourself from Claude, Doubao and similar assistants, over MCP. The built-in AI is set up separately, in Setup → AI & Embedder.',
+      ),
+    ).toBeTruthy();
     expect(screen.getByTestId('first-run-checklist-link-connect_assistant').getAttribute('href')).toBe(
       '/apps/account/page/connect_agent',
     );
@@ -501,5 +524,85 @@ describe('Connect an AI assistant: done from a real record, never from a click',
     await settle();
     expect(list).not.toHaveBeenCalled();
     expect(find).not.toHaveBeenCalled();
+  });
+});
+
+/** Another Home card saying it draws `item` (the deployment notice, for `mail`). */
+function Claim({ item }: { item: HomeItem }) {
+  useHomeItemClaim(item, true);
+  return null;
+}
+
+/** What Home's other cards read: whether some card draws `item`. */
+function Claimed({ item }: { item: HomeItem }) {
+  return <span data-testid={`claimed-${item}`}>{String(useHomeItemClaimed(item))}</span>;
+}
+
+describe('one Home card per item (objectstack#32021 item 3)', () => {
+  it('while the deployment notice draws its email line, the checklist leaves the mail row out', async () => {
+    const notice = render(<Claim item="mail" />);
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(screen.queryByTestId('first-run-checklist-row-mail')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 5 done');
+
+    // The notice hidden (or gone): the row comes back.
+    notice.unmount();
+    expect(await screen.findByTestId('first-run-checklist-row-mail')).toBeTruthy();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
+  });
+
+  it('CONTROL: with no notice drawing it, the mail row is on the list', async () => {
+    render(<Claimed item="mail" />);
+    renderChecklist(ADMIN);
+    expect(await screen.findByTestId('first-run-checklist-row-mail')).toBeTruthy();
+    expect(screen.getByTestId('claimed-mail').textContent).toBe('false');
+  });
+
+  describe('the assistant row, while open, is what Home says about connecting one', () => {
+    const ACCOUNT_APP = {
+      name: 'account',
+      navigation: [{ type: 'group', id: 'grp', children: [{ type: 'page', id: 'nav_connect_agent', pageName: 'connect_agent' }] }],
+    };
+    let granted: unknown[];
+
+    beforeEach(() => {
+      granted = [];
+      SHELL.apps = [ACCOUNT_APP];
+      SHELL.adapter = {
+        getClient: () => ({ oauth: { authorizedClients: { list: async () => ({ clients: granted, truncated: false }) } } }),
+        find: async () => ({ data: [] }),
+      };
+    });
+
+    it('not done: the checklist claims it, so Home\'s Connect an AI Assistant card stands aside', async () => {
+      render(<Claimed item="connect_assistant" />);
+      renderChecklist(ADMIN);
+      await screen.findByTestId('first-run-checklist-row-connect_assistant');
+      await waitFor(() => expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('true'));
+
+      // Hiding the checklist releases it.
+      cleanup();
+      render(<Claimed item="connect_assistant" />);
+      expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('false');
+    });
+
+    it('CONTROL: once an assistant is connected the row is done, and the card is not held back', async () => {
+      granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
+      render(<Claimed item="connect_assistant" />);
+      renderChecklist(ADMIN);
+      const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
+      expect(r.getAttribute('data-done')).toBe('true');
+      await settle();
+      expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('false');
+    });
+
+    it('CONTROL: a member draws no checklist and claims nothing', async () => {
+      render(<Claimed item="connect_assistant" />);
+      renderChecklist(MEMBER);
+      await settle();
+      expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('false');
+    });
   });
 });

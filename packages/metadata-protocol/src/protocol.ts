@@ -79,8 +79,7 @@ import { PLURAL_TO_SINGULAR, unrecognisedMetaTypeRefusal } from '@objectstack/sp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
-import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import type { IPubSub } from '@objectstack/spec/contracts';
 import type { ConversionNotice, ConversionTodoNotice } from '@objectstack/spec';
 import { type I18nLabel } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
@@ -321,7 +320,7 @@ import {
     judgeExtensionFieldSuffix,
 } from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
-import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
+import { applySeedBodiesOnHost, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
 import { artifactLockLayerAt, lookupArtifactItem, shippedArtifactsOf, shippingPackagesOf } from './protocol-artifact-lookup.js';
 // [#25467 cut 16] The stored-overlay row reads: a type's active rows, their parsed entries, the names with a row of their own, and one item's rows.
@@ -593,7 +592,10 @@ import {
 } from './protocol-meta-list-reads.js';
 // [#25467 E2 cut 1b] The metadata item reads and the layered reads.
 import { getMetaItem, getMetaItemForExecution, readMetaItem } from './protocol-meta-item-reads.js';
-import { admitEnvironmentQualifier, resolveMetaItemAddress, type MetaItemAddress } from './protocol-exact-qualifier.js';
+import {
+    admitEnvironmentQualifier, resolveCallerPackageAddress, resolveMetaItemAddress,
+    type CallerPackageAddress, type MetaItemAddress,
+} from './protocol-exact-qualifier.js';
 import { getMetaItemLayered, packagelessLayeredReadRefusal } from './protocol-meta-layered-reads.js';
 // [#25467 E2 section 3] The single-record data writes.
 import { createData, deleteData, updateData, validateData } from './protocol-data-writes.js';
@@ -615,6 +617,7 @@ import { ProtocolRegistryHydrationFacet } from './protocol-registry-hydration.js
 import { ProtocolSaveFacet } from './protocol-save.js';
 // [#29985 codemod] History, publish, drafts, publish backfill: the members below delegate to its facet, `ProtocolHistoryAndPublishFacet`.
 import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.js';
+import type { RegistryQuestion } from './registry-question.js';
 // [#29985 codemod] Package revert, duplicate, import, orphans, commits, revertCommit, rollback: the members below delegate to its facet, `ProtocolPackageCommitsFacet`.
 import { ProtocolPackageCommitsFacet } from './protocol-package-commits.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the members below delegate to its facet, `ProtocolDiffDeleteLoadFacet`.
@@ -3150,9 +3153,10 @@ export class ObjectStackProtocolImplementation implements
     private objectRegistrationRefusal(
         body: unknown,
         layer: ReturnType<ObjectStackProtocolImplementation['classifyObjectContribution']>,
+        options: { againstRegistry?: boolean } = {},
     ): Error | null {
         // [#29985 codemod] The body moved to `protocol-discovery-and-bases.ts`; it reaches this class through `protocol-host.ts`.
-        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer);
+        return ProtocolDiscoveryAndBasesFacet.objectRegistrationRefusal(protocolHost(this), body, layer, options);
     }
 
     /** Docblock and body: {@link ProtocolDiscoveryAndBasesFacet.restoreTranslatedObjectEchoes} in `protocol-discovery-and-bases.ts` [#29985 codemod]. */
@@ -4021,6 +4025,21 @@ export class ObjectStackProtocolImplementation implements
      */
     admitEnvironmentQualifier(request: { type: string; name: string; member?: string }): void {
         return admitEnvironmentQualifier(protocolHost(this), request);
+    }
+
+    /**
+     * [ADR-0150 D3, #32310] Where a by-name read made FROM a package
+     * (`?callerPackage=`, on the dataset query door and `GET /meta/dataset/:name`)
+     * is read: the holder the caller package resolves to by D3 — its own item,
+     * else the unique holder in its declared closure plus `sys` — at that
+     * holder's exact address, or a refusal naming the candidates. Both `/meta`
+     * transports and the query door ask it, then read the address through
+     * {@link getMetaItem}. See {@link resolveCallerPackageAddress}.
+     *
+     * @throws {PackageScopedNameRefusedError} `409 RESOURCE_CONFLICT`.
+     */
+    resolveCallerPackageAddress(request: { type: string; name: string; callerPackageId: string; member?: string }): CallerPackageAddress {
+        return resolveCallerPackageAddress(protocolHost(this), request);
     }
 
     /**
@@ -8835,7 +8854,9 @@ export class ObjectStackProtocolImplementation implements
      * unknown object at `objects.<name>`, naming it. [#29279] `door` names
      * what the finding says was looked for: a save counts an object saved
      * here, a draft's publish (`'publish'`) only a published object or an
-     * object draft of its batch.
+     * object draft of its batch. [#32162] `savingPackage` is the package the
+     * write lands in: the set's already-held grants are read from that
+     * package's own item (ADR-0150 D3), never another holder's of the name.
      */
     private unknownGrantObjectSaveRefusal(
         singularType: string,
@@ -8845,6 +8866,7 @@ export class ObjectStackProtocolImplementation implements
         writeFace?: MetadataWriteFace,
         door?: 'save' | 'publish',
         inherited?: readonly string[],
+        savingPackage?: string | null,
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -8852,7 +8874,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door, inherited, savingPackage);
     }
 
     /**
@@ -9648,6 +9670,10 @@ export class ObjectStackProtocolImplementation implements
          * all address it, so the body judged is the body that goes live.
          */
         member?: string;
+        /** The registry question this promotion asks (`registry-question.ts`). */
+        registryQuestion: RegistryQuestion;
+        /** [#32396] Judge every refusal, write nothing: the answer then carries no `result`. */
+        judgeOnly?: boolean;
     }): Promise<{
         singularType: string;
         /**
@@ -9662,7 +9688,10 @@ export class ObjectStackProtocolImplementation implements
          * discipline — per the maintainer's ruling, no parallel top-level map.
          */
         advisories: RuntimeAuthoringIssue[];
-        result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** What the promotion wrote. Absent exactly when `judgeOnly` was stated. */
+        result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+        /** [#32396] The draft row the promotion consumed. Absent when nothing was written. */
+        promotedDraft?: { body: unknown; hash: string };
     }> {
         // [#29985 codemod] The body moved to `protocol-history-and-publish.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolHistoryAndPublishFacet.promoteDraftForPublish(protocolHost(this), request);
@@ -9701,16 +9730,8 @@ export class ObjectStackProtocolImplementation implements
         issues?: Array<{ path: string; message: string; code?: string | undefined }>;
         landed?: SeedAppliedLandedParsed[];
     }> {
-        // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
-        const readEngine = () => this.engine;
-        const host: ThisParameterType<typeof applySeedBodies> = {
-            get engine() { return readEngine(); },
-            getMetaItem: (...a) => this.getMetaItem(...a),
-            // [#25779] The `field-files` service, so a published seed's files
-            // are stored as the boot seed's are.
-            getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
-        };
-        return applySeedBodies.call(host, bodies);
+        // [#30020 codemod] The body moved to `protocol-publish-batch.ts`; it runs on this class's host (`protocol-host.ts`) as `this`.
+        return applySeedBodiesOnHost.call(protocolHost(this), bodies);
     }
 
     /**
@@ -9932,8 +9953,13 @@ export class ObjectStackProtocolImplementation implements
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
      * lock guards and refreshes the runtime registry), so this needs NO
      * `metadata` service (unlike `MetadataService.publishPackage`, which reads
-     * the in-memory registry and 503s when that service is absent). Per-item
-     * failures are collected and do NOT abort the rest.
+     * the in-memory registry and 503s when that service is absent).
+     *
+     * All-or-nothing (ADR-0067 D2): a refusal of any draft refuses the whole
+     * batch, and nothing it promoted stays live. [#32396] That holds on a
+     * runtime that cannot roll a transaction back too — there the whole batch
+     * is judged before any draft is promoted, and a failure only the writes
+     * meet undoes the promotions already made — see the body's Phase 0.
      *
      * [#9406] The wire face of this return is DECLARED:
      * `PublishPackageDraftsResponseSchema` in `@objectstack/spec/api` (the

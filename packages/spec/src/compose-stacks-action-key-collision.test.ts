@@ -365,3 +365,232 @@ describe('composeStacks - what stays accepted', () => {
     });
   });
 });
+
+/**
+ * [ADR-0150 D2/D4] Under `manifest: 'preserve'`, two packages of two namespaces
+ * may each declare one object-less action of a name, as installing them one
+ * by one admits (the install gate's rule, whose namespace half is
+ * `namespacedHoldersMeet` in `kernel/namespace-prefix.ts`, read by both). Each
+ * body stays under its own package; the boot registers each under that
+ * package (pinned in `@objectstack/runtime`,
+ * `src/domains/composed-object-less-action-pair.test.ts`).
+ */
+describe('composeStacks - two packages\' object-less action of one name, held per namespace', () => {
+  const COLLISION = 'STACK_COMPOSE_ACTION_KEY_COLLISION';
+  const PRESERVE_SENTENCE =
+    "To keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's body " +
+    'under its own package, so two packages of two namespaces may each declare one object-less action of a ' +
+    "name, called at '/actions/NAMESPACE/global/NAME'.";
+  const pkg = (id: string, namespace: string | undefined, actions: ReturnType<typeof act>[], objectName?: string) =>
+    defineStack({
+      manifest: { ...mf(id), ...(namespace ? { namespace } : {}) },
+      ...(objectName ? { objects: [obj(objectName)] } : {}),
+      actions,
+    });
+  const alpha = () => pkg('com.example.alpha', 'alpha', [act('send_note', { label: 'alpha note' })], 'alpha_item');
+  const beta = () => pkg('com.example.beta', 'beta', [act('send_note', { label: 'beta note' })], 'beta_item');
+  const codeOf = (fn: () => unknown): string | undefined => {
+    try {
+      fn();
+      return undefined;
+    } catch (e) {
+      return (e as { code?: string }).code;
+    }
+  };
+
+  it("composes two namespaces' send_note under 'preserve', each body under its own package", () => {
+    const out = composeStacks([alpha(), beta()], { manifest: 'preserve' });
+    const bodies = (out.packages ?? []).map((p) => p.manifest as unknown as ObjectStackDefinition);
+    expect(bodies.map((b) => [(b as { id?: string }).id, (b.actions ?? []).map((a) => `${a.name}/${a.label}`)])).toEqual([
+      ['com.example.alpha', ['send_note/alpha note']],
+      ['com.example.beta', ['send_note/beta note']],
+    ]);
+    expect(out.actions, 'no flattened copy: each definition once, under its package').toBeUndefined();
+  });
+
+  it('composes three namespaces each holding the name', () => {
+    const gamma = pkg('com.example.gamma', 'gamma', [act('send_note')]);
+    expect(() => composeStacks([alpha(), beta(), gamma], { manifest: 'preserve' })).not.toThrow();
+  });
+
+  it("CONTROL — two packages of ONE namespace are still refused under 'preserve', naming both", () => {
+    const a = pkg('com.example.crm1', 'crm', [act('send_note')]);
+    const b = pkg('com.example.crm2', 'crm', [act('send_note')]);
+    expect(codeOf(() => composeStacks([a, b], { manifest: 'preserve' }))).toBe(COLLISION);
+    const msg = refusal(() => composeStacks([a, b], { manifest: 'preserve' }));
+    expect(msg).toContain(
+      "  ✗ Action key 'global:send_note' is declared by 2 stacks: " +
+        "'com.example.crm1' (stack #0) at stack.actions[0] and 'com.example.crm2' (stack #1) at stack.actions[0].",
+    );
+    expect(msg).not.toContain(PRESERVE_SENTENCE);
+  });
+
+  it("refuses the two-namespace pair under the default (flattening) manifest, and the refusal names 'preserve'", () => {
+    for (const manifest of [undefined, 'first', 'last', 0] as const) {
+      const msg = refusal(() => composeStacks([alpha(), beta()], manifest === undefined ? undefined : { manifest }));
+      expect(msg, String(manifest)).toContain(
+        "  ✗ Action key 'global:send_note' is declared by 2 stacks: " +
+          "'com.example.alpha' (stack #0) at stack.actions[0] and 'com.example.beta' (stack #1) at stack.actions[0].",
+      );
+      expect(msg, String(manifest)).toBe(
+        `${ENVELOPE_ONE}\n\n` +
+          "  ✗ Action key 'global:send_note' is declared by 2 stacks: " +
+          "'com.example.alpha' (stack #0) at stack.actions[0] and 'com.example.beta' (stack #1) at stack.actions[0].\n\n" +
+          `${WHY}\n${FIX}\n${PRESERVE_SENTENCE}`,
+      );
+    }
+    expect(codeOf(() => composeStacks([alpha(), beta()]))).toBe(COLLISION);
+  });
+
+  it("names 'preserve' only when it would admit EVERY refused key: not beside a key it refuses too", () => {
+    const alphaMore = pkg('com.example.alpha', 'alpha', [act('send_note'), act('archive_note', { objectName: 'alpha_item' })], 'alpha_item');
+    const betaMore = defineStack(
+      { manifest: { ...mf('com.example.beta'), namespace: 'beta' }, actions: [act('send_note'), act('archive_note', { objectName: 'alpha_item' })] },
+      { strict: false },
+    );
+    const msg = refusal(() => composeStacks([alphaMore, betaMore]));
+    expect(msg).toContain("Action key 'global:send_note'");
+    expect(msg).toContain("Action key 'alpha_item:archive_note'");
+    expect(msg).not.toContain(PRESERVE_SENTENCE);
+    const gamma = pkg('com.example.gamma', 'gamma', [act('send_note')]);
+    expect(refusal(() => composeStacks([alpha(), beta(), gamma]))).toContain(PRESERVE_SENTENCE);
+  });
+
+  it("refuses two bodies of ONE package under 'preserve', even of two namespaces", () => {
+    const a = pkg('com.example.same', 'alpha', [act('send_note')]);
+    const b = pkg('com.example.same', 'beta', [act('send_note')]);
+    expect(codeOf(() => composeStacks([a, b], { manifest: 'preserve' }))).toBe(COLLISION);
+  });
+
+  it("refuses a package with no namespace beside a namespaced one under 'preserve'", () => {
+    const bare = pkg('com.example.bare', undefined, [act('send_note')]);
+    expect(codeOf(() => composeStacks([alpha(), bare], { manifest: 'preserve' }))).toBe(COLLISION);
+    expect(refusal(() => composeStacks([alpha(), bare]))).not.toContain(PRESERVE_SENTENCE);
+  });
+
+  it("refuses a third package of an already-present namespace under 'preserve': the pair it meets is named", () => {
+    const alpha2 = pkg('com.example.alpha2', 'alpha', [act('send_note')]);
+    expect(codeOf(() => composeStacks([alpha(), beta(), alpha2], { manifest: 'preserve' }))).toBe(COLLISION);
+  });
+
+  it("keeps the one-holder rule for an object-bound key under 'preserve': two namespaces, one object", () => {
+    const withEmbedded = defineStack({
+      manifest: { ...mf('com.example.core'), namespace: 'core' },
+      objects: [obj('core_item', [act('approve')])],
+    });
+    const addon = defineStack(
+      { manifest: { ...mf('com.example.addon'), namespace: 'addon' }, actions: [act('approve', { objectName: 'core_item' })] },
+      { strict: false },
+    );
+    expect(codeOf(() => composeStacks([withEmbedded, addon], { manifest: 'preserve' }))).toBe(COLLISION);
+  });
+});
+
+/**
+ * [ADR-0150 D4 · #32335] A NESTED artifact — one `composeStacks` built under
+ * `manifest: 'preserve'`, composed again — keeps its declarations in its
+ * package bodies and carries no flattened copy, so step 6 reads those bodies:
+ * compose refuses the pairs installing the same packages one by one refuses.
+ *
+ * Measured on `main` @ 14754c70 before this read existed (A = alpha + beta
+ * under 'preserve'; a third package declaring alpha's object-less `send_note`):
+ *
+ * ```
+ * A + alpha2 (namespace alpha), 'preserve' : ACCEPTED — install refuses alpha2 (NAMESPACE_CONFLICT 422);
+ *                                            the boot answers 409 at the bare AND the alpha address
+ * A + alpha2, default manifest              : ACCEPTED — the boot runs alpha2's body at both addresses
+ * A + gamma  (namespace gamma), 'preserve'  : ACCEPTED — stays accepted (two namespaces)
+ * A + gamma, default manifest               : ACCEPTED — now refused naming 'preserve', as the flat pair is
+ * ```
+ */
+describe('composeStacks - a nested artifact\'s package bodies are read for action key collisions', () => {
+  const COLLISION = 'STACK_COMPOSE_ACTION_KEY_COLLISION';
+  const PRESERVE_HINT = "To keep each package's object-less action, compose with { manifest: 'preserve' }";
+  const pkg = (id: string, namespace: string, actions: ReturnType<typeof act>[], objects?: ReturnType<typeof obj>[]) =>
+    defineStack({ manifest: { ...mf(id), namespace }, ...(objects ? { objects } : {}), actions });
+  /** A: alpha (holds `send_note`) and beta (holds `archive_note`), composed under 'preserve'. */
+  const nested = () =>
+    composeStacks(
+      [
+        pkg('com.example.alpha', 'alpha', [act('send_note', { label: 'alpha note' })], [obj('alpha_item', [act('approve')])]),
+        pkg('com.example.beta', 'beta', [act('archive_note')], [obj('beta_item')]),
+      ],
+      { manifest: 'preserve' },
+    );
+  const alpha2 = () => pkg('com.example.alpha2', 'alpha', [act('send_note')]);
+  const gamma = () => pkg('com.example.gamma', 'gamma', [act('send_note')]);
+  const thrown = (fn: () => unknown): { code?: string; status?: number; issues?: unknown; message: string } | undefined => {
+    try {
+      fn();
+      return undefined;
+    } catch (e) {
+      return e as { code?: string; status?: number; issues?: unknown; message: string };
+    }
+  };
+  const ISSUE_ALPHA2 =
+    "Action key 'global:send_note' is declared by 2 stacks: " +
+    "'com.example.beta' (stack #0) at packages[0].actions[0] and 'com.example.alpha2' (stack #1) at stack.actions[0].";
+
+  it('the nested input carries its actions only in its bodies (the shape the read exists for)', () => {
+    const a = nested();
+    expect(a.actions).toBeUndefined();
+    expect((a.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual(['com.example.alpha', 'com.example.beta']);
+  });
+
+  it("refuses the nested artifact beside a third package of one body's namespace under 'preserve', naming the body", () => {
+    const err = thrown(() => composeStacks([nested(), alpha2()], { manifest: 'preserve' }));
+    expect([err?.code, err?.status]).toEqual([COLLISION, 422]);
+    expect(err?.issues).toEqual([ISSUE_ALPHA2]);
+    expect(err?.message).not.toContain(PRESERVE_HINT);
+  });
+
+  it('refuses the same pair under the default (flattening) manifest, without naming preserve', () => {
+    const err = thrown(() => composeStacks([nested(), alpha2()]));
+    expect([err?.code, err?.status]).toEqual([COLLISION, 422]);
+    expect(err?.issues).toEqual([ISSUE_ALPHA2]);
+    expect(err?.message).not.toContain(PRESERVE_HINT);
+  });
+
+  it("CONTROL — composes the nested artifact beside a package of another namespace under 'preserve', each body kept", () => {
+    const out = composeStacks([nested(), gamma()], { manifest: 'preserve' });
+    expect((out.packages ?? []).map((p) => (p.manifest as { id?: string }).id)).toEqual([
+      'com.example.alpha',
+      'com.example.beta',
+      'com.example.gamma',
+    ]);
+  });
+
+  it("refuses that two-namespace pair under the default manifest, naming 'preserve', as the flat pair is", () => {
+    const err = thrown(() => composeStacks([nested(), gamma()]));
+    expect([err?.code, err?.status]).toEqual([COLLISION, 422]);
+    expect(err?.issues).toEqual([
+      "Action key 'global:send_note' is declared by 2 stacks: " +
+        "'com.example.beta' (stack #0) at packages[0].actions[0] and 'com.example.gamma' (stack #1) at stack.actions[0].",
+    ]);
+    expect(err?.message).toContain(PRESERVE_HINT);
+  });
+
+  it("keeps the one-holder rule for an object-bound key a body embeds, under 'preserve'", () => {
+    const addon = defineStack(
+      { manifest: { ...mf('com.example.addon'), namespace: 'addon' }, actions: [act('approve', { objectName: 'alpha_item' })] },
+      { strict: false },
+    );
+    const err = thrown(() => composeStacks([nested(), addon], { manifest: 'preserve' }));
+    expect([err?.code, err?.status]).toEqual([COLLISION, 422]);
+    expect(err?.issues).toEqual([
+      "Action key 'alpha_item:approve' is declared by 2 stacks: " +
+        "'com.example.beta' (stack #0) at packages[0].objects['alpha_item'].actions[0] and 'com.example.addon' (stack #1) at stack.actions[0].",
+    ]);
+  });
+
+  it('CONTROL — flat inputs are judged as before: one namespace refused at its top-level sites, two namespaces composed', () => {
+    const alpha = pkg('com.example.alpha', 'alpha', [act('send_note')]);
+    const err = thrown(() => composeStacks([alpha, alpha2()], { manifest: 'preserve' }));
+    expect([err?.code, err?.status]).toEqual([COLLISION, 422]);
+    expect(err?.issues).toEqual([
+      "Action key 'global:send_note' is declared by 2 stacks: " +
+        "'com.example.alpha' (stack #0) at stack.actions[0] and 'com.example.alpha2' (stack #1) at stack.actions[0].",
+    ]);
+    expect(() => composeStacks([alpha, gamma()], { manifest: 'preserve' })).not.toThrow();
+  });
+});

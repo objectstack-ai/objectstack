@@ -8,7 +8,7 @@
 
 import React, { useContext, useEffect, useState } from 'react';
 import { SchemaRendererContext, classifyLoadError } from '@object-ui/react';
-import { useLocalization, useDisplayLocale, formatDisplayNumber, type FieldCurrencyConfig } from '@object-ui/i18n';
+import { useLocalization, useDisplayLocale, formatDisplayNumber, resolveFieldCurrency, type FieldCurrencyConfig } from '@object-ui/i18n';
 import { formatDate } from '@object-ui/core';
 import { toScaledDecimal, divideToPlaces, formatScaledDecimal, documentDateOf } from '@objectstack/formula';
 import { CURRENCY_FRACTION_DIGITS } from '@objectstack/spec/data';
@@ -103,7 +103,9 @@ export function useHomeAmountPreview(
   const home = config?.currencyMode === 'record' ? config.homeAmount : undefined;
 
   const amount = home && !blank(amountValue) ? toScaledDecimal(amountValue) : undefined;
-  const codeValue = home && typeof config?.currencyField === 'string' ? record?.[config.currencyField] : undefined;
+  // The amount's own resolver reads the code: a sibling field, or the parent's
+  // code field through the `master_detail` (ADR-0144 D2 as amended).
+  const codeValue = home ? resolveFieldCurrency(field, undefined, record) : undefined;
   const code = typeof codeValue === 'string' ? codeValue.trim() : '';
   const homeCode = typeof homeSetting === 'string' ? homeSetting.trim() : '';
   const live = amount !== undefined && isIsoCurrency(code) && isIsoCurrency(homeCode);
