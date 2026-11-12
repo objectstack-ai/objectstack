@@ -89,6 +89,21 @@ describe('[#32164] driver-memory and the grant key that gained its package colum
     expect(await now.count('sys_user_permission_set')).toBe(2);
   });
 
+  // [#32164, red-line review E2] The driver alone, and every driver alike:
+  // a packaged grant beside a package-less one of the same set, user and
+  // organization is admitted, where the old key refused it. The engine's write
+  // seam refuses that row above the driver (`plugin-security`'s
+  // `stored-permission-set-package-stamp.ts`); this pin names the driver's own
+  // answer, so a later guard turns it red.
+  it('the driver alone admits a packaged grant beside a package-less one, where the old key refused it', async () => {
+    expect(await lands(old, { id: 'n', permission_set_package: null, organization_id: 'org_1' })).toBe(true);
+    expect(await lands(old, { id: 'm', permission_set_package: 'com.acme.crm', organization_id: 'org_1' })).toBe(false);
+
+    expect(await lands(now, { id: 'n', permission_set_package: null, organization_id: 'org_1' })).toBe(true);
+    expect(await lands(now, { id: 'm', permission_set_package: 'com.acme.crm', organization_id: 'org_1' })).toBe(true);
+    expect(await now.count('sys_user_permission_set')).toBe(2);
+  });
+
   it('CONTROL — a NULL organization was exempt under the old key too', async () => {
     expect(await lands(old, { id: 'z1', permission_set_package: null, organization_id: null })).toBe(true);
     expect(await lands(old, { id: 'z2', permission_set_package: null, organization_id: null })).toBe(true);

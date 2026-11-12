@@ -245,6 +245,17 @@ export interface ApprovalResumeSurface {
    */
   armedFlowPackage?(name: string): string | undefined;
   /**
+   * [ADR-0150 D4, D8 row R7, #31696] A flow name's slots, each slot's key and
+   * body, and the body filed under a run's key: how a request reads its flow
+   * once two packages hold the name ({@link ApprovalService.requestFlow}).
+   * ⚠️ Methods `AutomationEngine` implements publicly. Optional: absent, every
+   * flow is read by its bare name.
+   */
+  getFlowSlots?(name: string): ReadonlyArray<{ packageId: string | null }>;
+  flowSlotKey?(packageId: string | null, name: string): string | undefined;
+  getFlowSlot?(packageId: string | null, name: string): any | null;
+  getRunFlow?(run: { flowName: string }): any | null;
+  /**
    * Terminally cancel a suspended run (ADR-0044). Used when a recall lands
    * during a revision window — the run is paused at the revise-window node,
    * which has no reject edge to resume down.
@@ -262,7 +273,7 @@ export interface ApprovalResumeSurface {
    * `null` — unknown run, evicted log, no durable store, no automation engine —
    * as "still alive".
    */
-  getRun?(runId: string): Promise<{ status?: string } | null>;
+  getRun?(runId: string): Promise<{ status?: string; flowName?: string } | null>;
   /**
    * Whether a suspension still exists for `runId` — the pre-flight that keeps
    * a decision from being recorded against a run that can never advance
@@ -3683,12 +3694,63 @@ export class ApprovalService implements IApprovalService {
    * its own body, and `null` for an environment-authored override of it, a
    * flow authored in this deployment, a request with no flow, and an engine
    * that cannot say. ⛔ Not `packagedFlowOwner`: it names the package that
-   * ships the NAME, whichever body is armed under it.
+   * ships the NAME, whichever body is armed under it. [#31696] Asked by the
+   * key the request's flow is filed under ({@link requestFlowSlot}), the
+   * name itself while it is its one slot's key.
    */
-  private flowPackageOf(flowName: string | null | undefined): string | null {
-    if (!flowName || typeof this.automation?.armedFlowPackage !== 'function') return null;
-    const owner = this.automation.armedFlowPackage(flowName);
+  private flowPackageOf(flowKey: string | null | undefined): string | null {
+    if (!flowKey || typeof this.automation?.armedFlowPackage !== 'function') return null;
+    const owner = this.automation.armedFlowPackage(flowKey);
     return typeof owner === 'string' && owner !== '' ? owner : null;
+  }
+
+  /**
+   * [ADR-0150 D4, D8 row R7, #31696] The engine slot of a request's flow
+   * `name`: by the package stamped when the request opened
+   * (`process_package`), else by its run's key (`runKey`, or read from
+   * `runId`: its suspension, else its record), the run doors' lookup: the
+   * one slot filed under that key. `undefined` when the engine cannot say,
+   * or nothing names exactly one slot: the bare name is all a reader has,
+   * and the bare read refuses a name two packages hold, naming every holder.
+   * ⛔ Never a pick between holders.
+   */
+  private async requestFlowSlot(
+    name: string,
+    request: { packageId?: unknown; runId?: unknown; runKey?: string },
+  ): Promise<{ packageId: string | null; key: string } | undefined> {
+    const automation = this.automation;
+    if (typeof automation?.getFlowSlots !== 'function' || typeof automation.flowSlotKey !== 'function') return undefined;
+    const slots = automation.getFlowSlots(name)
+      .map(({ packageId }) => ({ packageId, key: automation.flowSlotKey!(packageId, name) ?? '' }));
+    const own = slots.find((slot) => slot.packageId !== null && slot.packageId === request.packageId);
+    if (own) return own;
+    let key = request.runKey;
+    if (key === undefined && typeof request.runId === 'string' && request.runId !== '') {
+      try {
+        key = (await automation.suspensionOf?.(request.runId))?.flowName ?? (await automation.getRun?.(request.runId))?.flowName;
+      } catch { /* unread: the bare name decides */ }
+    }
+    const filed = slots.filter((slot) => slot.key === key);
+    return filed.length === 1 ? filed[0] : undefined;
+  }
+
+  /**
+   * [ADR-0150 D4, D8 row R7, #31696] The flow body the request `raw` belongs
+   * to: its own slot's ({@link requestFlowSlot}), else the bare read of
+   * `name`, which answers a one-holder name as before and refuses a name two
+   * packages hold, naming every holder. The caller has checked `getFlow`.
+   */
+  private async requestFlow(raw: any, name: string): Promise<any | null> {
+    const slot = await this.requestFlowSlot(name, { packageId: raw?.process_package, runId: raw?.flow_run_id });
+    if (slot && typeof this.automation?.getFlowSlot === 'function') return this.automation.getFlowSlot(slot.packageId, name);
+    return this.automation!.getFlow!(name);
+  }
+
+  /** [#31696] The key the request `raw`'s flow is filed under ({@link requestFlowSlot}), else its name; `null` for none. */
+  private async requestFlowKey(raw: any): Promise<string | null> {
+    const name = typeof raw?.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : '';
+    if (!name) return null;
+    return (await this.requestFlowSlot(name, { packageId: raw.process_package, runId: raw.flow_run_id }))?.key ?? name;
   }
 
   /**
@@ -4416,6 +4478,12 @@ export class ApprovalService implements IApprovalService {
       nodeId: string;
       config: ApprovalNodeConfig;
       flowName?: string;
+      /**
+       * [#31696] The key the run's flow is filed under (the engine's
+       * `flowKeyOfRun`), which names the run's own slot once two packages
+       * hold `flowName`.
+       */
+      flowKey?: string;
       /** Authored flow label, snapshotted for inbox display. */
       flowLabel?: string;
       /** Authored node label, snapshotted for inbox display. */
@@ -4496,8 +4564,10 @@ export class ApprovalService implements IApprovalService {
     const resolvedFrom: Record<string, unknown> = {};
     const exprCtx = { trigger: input.record ?? null, vars: input.variables ?? null };
     // [ADR-0150 D3] The package this step is declared in — its flow's — which
-    // every slate below reads a `queue` approver's name from.
-    const callerPackageId = this.flowPackageOf(input.flowName);
+    // every slate below reads a `queue` approver's name from. [#31696] Read
+    // from the run's own slot, whose package the request records (D8 R7).
+    const flowSlot = input.flowName ? await this.requestFlowSlot(input.flowName, { runKey: input.flowKey, runId: input.runId }) : undefined;
+    const callerPackageId = this.flowPackageOf(flowSlot?.key ?? input.flowName);
     const submitterId = input.submitterId !== undefined ? input.submitterId : (context.userId ?? null);
     // [#25573] `excludeSubmitter: true` (ruling 6377888641, letter B): the
     // submitter is taken off every slate this request can open on. It runs on
@@ -4781,6 +4851,7 @@ export class ApprovalService implements IApprovalService {
     const row: any = {
       id,
       process_name: processName,
+      ...(flowSlot?.packageId ? { process_package: flowSlot.packageId } : {}),
       object_name: input.object,
       record_id: input.recordId,
       submitter_id: submitterId,
@@ -5341,10 +5412,9 @@ export class ApprovalService implements IApprovalService {
           { approvers: config.approvers }, parseJson(raw.payload_json, undefined), org,
           {
             onDirectoryFailure: 'literal',
-            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process.
-            callerPackageId: this.flowPackageOf(
-              typeof raw.process_name === 'string' && raw.process_name.startsWith('flow:') ? raw.process_name.slice('flow:'.length) : null,
-            ),
+            // [ADR-0150 D3] The step's flow is the row's `flow:<name>` process,
+            // [#31696] read from the request's own slot.
+            callerPackageId: this.flowPackageOf(await this.requestFlowKey(raw)),
           },
         );
         groupMap = {};
@@ -6203,7 +6273,10 @@ export class ApprovalService implements IApprovalService {
       const parent = batch.parent;
       if (!parent) return {};
       if (typeof this.automation?.getFlow !== 'function') return {};
-      const flow: any = await this.automation.getFlow(parent.flowName);
+      // [#31696] The parent's flow name is its slot key: read the body filed under it.
+      const flow: any = typeof this.automation.getRunFlow === 'function'
+        ? this.automation.getRunFlow({ flowName: parent.flowName })
+        : await this.automation.getFlow(parent.flowName);
       const node = Array.isArray(flow?.nodes) ? flow.nodes.find((n: any) => n?.id === parent.nodeId) : undefined;
       if (node?.type !== 'map') return {};
       batchRunId = parent.runId;
@@ -6647,7 +6720,7 @@ export class ApprovalService implements IApprovalService {
     if (!flowName || !nodeId || typeof this.automation?.getFlow !== 'function') {
       throw new Error('VALIDATION_FAILED: send-back requires the owning flow definition (automation engine unavailable)');
     }
-    const flow: any = await this.automation.getFlow(flowName);
+    const flow: any = await this.requestFlow(raw, flowName);
     const reviseEdges = Array.isArray(flow?.edges)
       ? flow.edges.filter((e: any) => e?.source === nodeId && e?.label === APPROVAL_BRANCH_LABELS.revise)
       : [];
@@ -7967,7 +8040,7 @@ export class ApprovalService implements IApprovalService {
         `advances a step nobody decided`,
       );
     }
-    const flow: any = await this.automation.getFlow(flowName);
+    const flow: any = await this.requestFlow(raw, flowName);
     const nodeTypeById = new Map<string, string>(
       (Array.isArray(flow?.nodes) ? flow.nodes : [])
         .filter((n: any) => typeof n?.id === 'string')
@@ -10008,7 +10081,7 @@ export class ApprovalService implements IApprovalService {
     await this.enrichRows([row], served, context);
     const labels = this.readerLabels(context);
     if (labels) localizeRequestLabels(row, labels);
-    await this.attachFlowSteps(row, labels);
+    await this.attachFlowSteps(row, labels, raw);
     await this.attachDecisionProgress(row, raw);
     this.attachViewers([row], context, caller);
     return row;
@@ -10127,11 +10200,11 @@ export class ApprovalService implements IApprovalService {
    * else by the node's authored label. So the progress strip and the request's
    * `current_step_label` name the current step alike.
    */
-  private async attachFlowSteps(row: ApprovalRequestRow, labels: ReaderLabels | undefined): Promise<void> {
+  private async attachFlowSteps(row: ApprovalRequestRow, labels: ReaderLabels | undefined, raw: any): Promise<void> {
     try {
       const flowName = row.process_name?.startsWith('flow:') ? row.process_name.slice(5) : undefined;
       if (!flowName || typeof this.automation?.getFlow !== 'function') return;
-      const flow: any = await this.automation.getFlow(flowName);
+      const flow: any = await this.requestFlow(raw, flowName);
       if (!flow?.nodes?.length) return;
       const nodesById = new Map<string, any>(flow.nodes.map((n: any) => [n.id, n]));
       await this.attachFlowRoute(row, flowName, flow, nodesById, labels);

@@ -130,11 +130,17 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
     });
 
     /**
-     * Epic condition 1: nothing the old key refused is admitted. Measured side by
-     * side over the same rows, with a null and a non-null organization: the old
+     * Epic condition 1, measured side by side over the same rows, with a null
+     * and a non-null organization: among grants that name no package, the old
      * three-column key and the new key plus this index answer every row alike.
+     *
+     * [#32164, red-line review E2] What the store alone admits that the old key
+     * refused: a grant naming a package beside one naming none, for one user,
+     * set and organization. The engine's write seam refuses that row above the
+     * store (`plugin-security`'s `stored-permission-set-package-stamp.ts`);
+     * this pin names the store's own answer, so a later guard turns it red.
      */
-    it('admits nothing the old key refused, with a non-null and a null organization (epic condition 1)', async () => {
+    it('among package-less grants admits nothing the old key refused, with a non-null and a null organization (epic condition 1); the store alone admits a packaged grant beside a package-less one', async () => {
         const old = new DatabaseSync(':memory:');
         try {
             createTable(old, OLD_INDEX_DDL);
@@ -146,6 +152,8 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
                 ['n2', null, 'org_1'], // a second package-less grant in one organization
                 ['z1', null, null],
                 ['z2', null, null], // a second package-less platform-wide grant
+                ['m1', 'com.acme.crm', 'org_1'], // a packaged grant beside n1
+                ['m2', 'com.acme.crm', 'org_1'], // that package twice
             ];
             const answers = rows.map(([id, pkg, org]) => ({ id, old: insertOld(id, pkg, org), now: insert(id, pkg, org) }));
 
@@ -156,6 +164,9 @@ describe('sys_user_permission_set: one package-less grant per (user_id, permissi
                 // the second platform-wide grant, and so does this index — no new admission.
                 { id: 'z1', old: true, now: true },
                 { id: 'z2', old: true, now: true },
+                // The store alone: admitted beside n1, where the old key refused it.
+                { id: 'm1', old: false, now: true },
+                { id: 'm2', old: false, now: false },
             ]);
         } finally {
             old.close();

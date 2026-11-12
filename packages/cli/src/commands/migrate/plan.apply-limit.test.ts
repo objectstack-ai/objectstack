@@ -25,8 +25,9 @@
  *     database can apply, and names how many listed entries it cannot.
  *  3. CONTROL: a driver that declares nothing reads exactly as before.
  *  4. The `--json` document is the report, unchanged: the same keys (the
- *     ADR-0131 D1 `nullableTenantColumns` advisory among them, which these
- *     limits do not move), and each entry's message as the differ wrote it.
+ *     ADR-0131 D1 `nullableTenantColumns` advisory and the runtime-owned
+ *     `schemaSyncIndexes` among them, which these limits do not move), and
+ *     each entry's message as the differ wrote it.
  *
  * `bootSchemaStack` is stubbed, so this runs without a database; the same
  * cases run against a real `sqld` in `apply.remote-face.integration.test.ts`.
@@ -246,7 +247,7 @@ describe('a driver that declares what its apply door cannot perform', () => {
     const { payload, exitCode } = await run(['--json']);
     expect(exitCode).toBe(0);
     expect(Object.keys(payload).sort()).toEqual(
-      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'schemaSync', 'total', 'unmanagedTables'],
+      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'schemaSync', 'schemaSyncIndexes', 'total', 'unmanagedTables'],
     );
     expect(payload.changes.map((c: Entry) => c.message)).toEqual([DROP.message, TIGHTEN.message, RELAX.message]);
   }, CASE_TIMEOUT_MS);
@@ -426,15 +427,18 @@ describe('#24925 — a database the organization-ownership ceremony has not veri
   }, CASE_TIMEOUT_MS);
 
   it('--json: the document is the report, unchanged — each message as the differ wrote it, and no marker is read', async () => {
-    const { stack, getService } = ceremonyStackWith([INDEX, ORG_JOB, LEGACY], engineAnswering(null));
+    const engine = engineAnswering(null);
+    const { stack } = ceremonyStackWith([INDEX, ORG_JOB, LEGACY], engine);
     boot.mockResolvedValueOnce(stack);
     const { payload, exitCode } = await run(['--json']);
     expect(exitCode).toBe(0);
     expect(Object.keys(payload).sort()).toEqual(
-      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'total', 'unmanagedTables'],
+      ['changes', 'database', 'databaseSource', 'duration', 'managedTables', 'nullableTenantColumns', 'pending', 'schemaSyncIndexes', 'total', 'unmanagedTables'],
     );
     expect(payload.changes.map((c: Entry) => c.message)).toEqual([INDEX.message, ORG_JOB.message, LEGACY.message]);
-    expect(getService).not.toHaveBeenCalled();
+    // [#32460] The `objectql` service is asked for the runtime-owned indexes
+    // `apply` builds; the ceremony's marker is still never read.
+    expect(engine.findOne).not.toHaveBeenCalled();
   }, CASE_TIMEOUT_MS);
 });
 
@@ -460,11 +464,13 @@ describe('#24925 CONTROL: the plan as it always was', () => {
   }, CASE_TIMEOUT_MS);
 
   it('no organization_id drop: the plan is the one it always was, and the marker is never read', async () => {
-    const { stack, getService } = ceremonyStackWith([INDEX, LEGACY], engineAnswering(null));
+    const engine = engineAnswering(null);
+    const { stack } = ceremonyStackWith([INDEX, LEGACY], engine);
     boot.mockResolvedValueOnce(stack);
     const { lines, exitCode } = await run([]);
     expect(exitCode, lines.join('\n')).toBe(0);
-    expect(getService).not.toHaveBeenCalled();
+    // [#32460] As in the --json face: the service is asked, the marker is not read.
+    expect(engine.findOne).not.toHaveBeenCalled();
     expectTodaysPlan(lines, [INDEX, LEGACY]);
   }, CASE_TIMEOUT_MS);
 });
