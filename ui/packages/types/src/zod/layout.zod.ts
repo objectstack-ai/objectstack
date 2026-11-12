@@ -1462,7 +1462,12 @@ const { type: _pageNodeTypeLiteral, ...PAGE_NODE_MEMBERS } = PageNodeSchema.shap
  * union at every depth, as on `page`.
  *
  * ⛔ Which spelling of a page is canonical — `type: 'page'` + `pageType`, or
- * the spec's `type: KIND` — is not decided here. Both validate, as both render.
+ * the spec's `type: KIND` — is not decided here. Both validate, as both render,
+ * with one exception: a `full` `record` page that places no component in its
+ * `regions` but carries `children` validates only as `type: 'page'`. As
+ * `type: 'record'` it is refused at `regions`, as the spec refuses it (the
+ * spec's page declares no `children`), and the record view shows its
+ * explanation in place of the page instead of drawing those `children`.
  */
 export const PageKindNodeSchema: PageKindNodeSchemaType = BaseSchema.extend({
   ...PAGE_NODE_MEMBERS,
