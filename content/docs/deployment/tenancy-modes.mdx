@@ -133,6 +133,11 @@ wall is enforced (ADR-0131 D11). Three rules decide where a fact lives
 3. **A table with no organization column is deployment-level or code-level.**
    Permissions protect it, not the wall.
 
+In-app notifications follow rule 2: a notification, its inbox rows and its read
+receipts carry the organization it was emitted in — for a flow,
+[the run's own](/docs/automation/flows#the-acting-organization) — and nothing an
+organization's admin or flow author sets sends one into another organization.
+
 Under `single` a write into a table with an organization column takes the
 Default Organization, the only one there is. A system write that names no
 organization is stamped with it, or refused loudly when the deployment holds

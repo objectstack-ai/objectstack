@@ -116,6 +116,7 @@ const notify: FlowNode = { id: 'tell_owner', type: 'notify', label: 'Notify Owne
     recipients: { dialect: 'cel', source: 'record.assignee' }, // REQUIRED — id, list, or envelope; a CSV is ONE id.
     // 4th form `{ emailField: 'applicant_email' }`: an `email` field of the trigger record, for a non-user —
     // then `channels: 'email'` alone. An envelope must yield USER ids: an address no user holds fails the node
+    // No key names an organization: the run's own owns the notice; `role:NAME` reaches that one's members only
     title: 'Done: {{ record.title }}', // inline; XOR `template` (RAW, localizable)
     message: 'Closed {{ record.closed_at | date:long }}', // body; only with inline `title`
     topic: 'task',                     // RAW; default 'notify'

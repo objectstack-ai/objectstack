@@ -365,6 +365,12 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A `notify` node names no organization.** The notification and its inbox rows
+belong to [the organization the run acts as](#the-acting-organization) — for a
+run that carries none, that of the record it links to, else the trigger record —
+and no key on the node chooses another. A `role:NAME` selector reaches that
+organization's members only; another organization's flows notify its own.
+
 **A `notify` node mails a person who is not a user through an email field.**
 An applicant who came in through a public form has no account, so no user id
 reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
