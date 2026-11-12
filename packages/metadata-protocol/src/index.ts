@@ -82,6 +82,27 @@ export type {
     EnsureActivationLedgerPackagelessIndexStatus,
 } from './migrations/activation-ledger-packageless-index.js';
 
+// [ADR-0150 D4, #32164] `sys_user_permission_set`'s one grant per (user_id,
+// permission_set, organization_id) among the grants that name no package — a
+// runtime index ADDED beside the grant's declared key, which ADR-0150 D4 widens
+// with the NULL-distinct `permission_set_package`.
+export {
+    ensureUserPermissionSetPackagelessIndex,
+    createUserPermissionSetGuardAtSchemaSync,
+    buildUserPermissionSetPackagelessIndexSql,
+    buildUserPermissionSetPackagelessDuplicateProbeSql,
+    resolveUserPermissionSetIndexSeam,
+    buildUserPermissionSetOldKeySql,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_NAME,
+    USER_PERMISSION_SET_PACKAGELESS_INDEX_COLUMNS,
+    USER_PERMISSION_SET_OLD_KEY_INDEX_NAME,
+} from './migrations/user-permission-set-packageless-index.js';
+export type {
+    EnsureUserPermissionSetPackagelessIndexResult,
+    EnsureUserPermissionSetPackagelessIndexStatus,
+    UserPermissionSetGuardPassOutcome,
+} from './migrations/user-permission-set-packageless-index.js';
+
 // [#8629] `sys_setting`'s declared ROW IDENTITY, delivered as a runtime
 // NULL-safe UNIQUE migration — the `ensureOverlayIndex` paradigm again, for the
 // object whose `user_id` key part is NULL on every tenant- and global-scope row

@@ -261,7 +261,7 @@ describe('#8928 os migrate duplicates — the report document', () => {
     });
   });
 
-  it('names the five kernel:ready indexes, and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
+  it('names the six runtime-managed indexes (five built at kernel:ready, the grant guard at schema sync), and the migration behind each — none for the retired sys_view_definition (ADR-0131 D13)', async () => {
     const report = await collect();
     expect(
       report.runtimeIndexPreflight.map((p) => `${p.migration}:${p.table}:${p.index}`),
@@ -275,6 +275,9 @@ describe('#8928 os migrate duplicates — the report document', () => {
       // One package-less activation row per (metadata_type, name), ADR-0150 D4:
       // an index added beside the ledger's declared key, under its own name.
       'ensureActivationLedgerPackagelessIndex:sys_metadata_activation:uniq_sys_metadata_activation_packageless',
+      // One package-less grant per (user_id, permission_set, organization_id),
+      // ADR-0150 D4 (#32164): the grant key gained its package column.
+      'ensureUserPermissionSetPackagelessIndex:sys_user_permission_set:uniq_sys_user_permission_set_packageless',
     ]);
   });
 
