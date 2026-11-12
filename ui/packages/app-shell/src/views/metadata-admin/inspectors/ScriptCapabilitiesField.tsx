@@ -40,6 +40,8 @@ const CAPABILITY_CALLS: Partial<Record<HookBodyCapability, string>> = {
   'api.transaction': 'ctx.api.transaction(async () => { … })',
   'crypto.uuid': 'ctx.crypto.randomUUID()',
   log: 'ctx.log.debug / info / warn / error',
+  'email.send': 'ctx.email.send({ to, subject, text })',
+  'activity.append': 'ctx.activity.append({ object, recordId, type, summary })',
 };
 
 export interface ScriptCapabilitiesFieldProps {

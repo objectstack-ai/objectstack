@@ -252,6 +252,11 @@ export interface AppArtifactHandlerBindingOptions {
      * with its declared message.
      */
     i18n?: HookRefusalI18nSource;
+    /**
+     * Kernel service lookup for the platform doors a hook or action body
+     * reaches (`ctx.email.send`, `ctx.activity.append`), read at call time.
+     */
+    getService?: (name: string) => unknown;
 }
 
 /** What one {@link bindAppArtifactHandlers} call bound. */
@@ -396,7 +401,7 @@ export function bindAppArtifactHandlers(
         const bindable = hookGroups.filter((group) => group.hooks.length > 0 || Object.keys(group.functions).length > 0);
         if (bindable.length > 0) {
             if (typeof ql.bindHooks === 'function') {
-                const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n });
+                const bodyRunner = hookBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, i18n: options.i18n, getService: options.getService });
                 // One `bindHooks` per owner: the binder replaces an owner's hook
                 // set on each call, so an owner is never bound twice.
                 for (const group of bindable) {
@@ -443,7 +448,7 @@ export function bindAppArtifactHandlers(
     try {
         const total = actionGroups.reduce((sum, group) => sum + group.actions.length, 0);
         if (total > 0 && typeof ql.registerAction === 'function') {
-            const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId });
+            const actionBodyRunner = actionBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, getService: options.getService });
             for (const { owner: actionOwner, actions } of actionGroups) for (const action of actions) {
                 const handler = actionBodyRunner(action);
                 if (!handler) continue;
@@ -1760,7 +1765,7 @@ export async function scheduleAppArtifactJobs(
     // D4, #15005). Identical reference on every bundle that carries no
     // `packages[]`.
     const collections = resolveArtifactCollections(bundle);
-    const bodyRunner = jobBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId });
+    const bodyRunner = jobBodyRunnerFactory(new QuickJSScriptRunner(), { ql, logger, appId, getService: (name) => ctx.getService(name) });
     const metrics = resolveMetrics(ctx);
     // [#20281 stage ③] Jobs armed with NO organization on a posture whose
     // writes need one (`group`): legal, and refused at their first

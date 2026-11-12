@@ -916,6 +916,7 @@ export class AppPlugin implements Plugin {
             logger: ctx.logger,
             appId: 'runtime-authored',
             i18n: hookRefusalI18nReader(ctx),
+            getService: (name) => ctx.getService(name),
         }));
         if (installed !== false) {
             ctx.logger.info('[AppPlugin] Installed default hook body runner (runtime-authored hooks can execute)');
@@ -956,6 +957,7 @@ export class AppPlugin implements Plugin {
             ql,
             logger: ctx.logger,
             appId: 'runtime-authored',
+            getService: (name) => ctx.getService(name),
         }));
         if (installed !== false) {
             ctx.logger.info('[AppPlugin] Installed default action body runner (runtime-authored actions can execute)');
@@ -1867,6 +1869,8 @@ export class AppPlugin implements Plugin {
             // [#26170] A hook's declared refusal is answered in the caller's
             // language, through the i18n service read at refusal time.
             i18n: hookRefusalI18nReader(ctx),
+            // The platform doors a body reaches, read at call time.
+            getService: (name) => ctx.getService(name),
         });
 
         // [ADR-0110 D5] The action-governance inventory used to hang off a

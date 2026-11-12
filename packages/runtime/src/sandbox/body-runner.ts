@@ -77,6 +77,7 @@ import {
 import { mapDataError } from '@objectstack/types';
 import { resolveHookRefusal, type HookRefusalI18nSource } from './hook-refusal-catalogue.js';
 import { isRelayedSandboxRefusal } from './quickjs-runner.js';
+import { buildBodyDoors, callerScopeOf, type BodyDoorCaller } from './body-doors.js';
 
 interface FactoryOptions {
   ql: any;
@@ -88,6 +89,12 @@ interface FactoryOptions {
    * declared refusal is answered with its declared message.
    */
   i18n?: HookRefusalI18nSource;
+  /**
+   * Kernel service lookup for the two platform doors a body reaches
+   * (`ctx.email.send`, `ctx.activity.append`; `body-doors.ts`), read at call
+   * time. Absent, a body that calls either door is told it is unavailable.
+   */
+  getService?: (name: string) => unknown;
 }
 
 /**
@@ -479,6 +486,7 @@ export function hookBodyRunnerFactory(
         buildBodyLogSurface(opts, { kind: 'hook', name: hook.name }),
         buildTitleSurface(engineCtx, opts.ql, { kind: 'hook', name: hook.name }),
       );
+      installBodyDoors(sandboxCtx, opts, { kind: 'hook', name: hook.name }, hookDoorCaller(engineCtx));
       try {
         opts.logger?.debug?.('[BodyRunner] hook fired', { appId: opts.appId, hook: hook.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -590,6 +598,7 @@ export function actionBodyRunnerFactory(
         opts.ql,
         buildBodyLogSurface(opts, { kind: 'action', name: action.name }),
       );
+      installBodyDoors(sandboxCtx, opts, { kind: 'action', name: action.name }, actionDoorCaller(actionCtx));
       try {
         opts.logger?.debug?.('[BodyRunner] action fired', {
           appId: opts.appId,
@@ -756,6 +765,7 @@ export function jobBodyRunnerFactory(
         buildBodyLogSurface(opts, { kind: 'job', name: job.name }),
         job.organization,
       );
+      installBodyDoors(sandboxCtx, opts, { kind: 'job', name: job.name }, jobDoorCaller(job.organization));
       try {
         opts.logger?.debug?.('[BodyRunner] job fired', { appId: opts.appId, job: job.name });
         const result = await runner.run(body, sandboxCtx, {
@@ -1168,6 +1178,68 @@ function buildEngineRepoFacade(ql: any, objectName: string, context?: any) {
  * ({@link refuseBodyPermanentDeletes}): app-authored code cannot purge, so its
  * deletes enter the recycle bin, whatever envelope the body runs under.
  */
+/**
+ * Install the two platform doors (`body-doors.ts`) on a body's sandbox
+ * context, built with the caller the HOST resolved for this invocation.
+ */
+function installBodyDoors(
+  sandboxCtx: ScriptContext,
+  opts: FactoryOptions,
+  origin: { kind: 'hook' | 'action' | 'job'; name: string },
+  caller: BodyDoorCaller,
+): void {
+  const doors = buildBodyDoors({ ql: opts.ql, getService: opts.getService, packageId: opts.appId, origin, caller });
+  sandboxCtx.email = doors.email;
+  sandboxCtx.activity = doors.activity;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/**
+ * A hook body's caller: the session of the write that fired it, and the scope
+ * that write ran in ({@link executionContextFromHook}). A hook fired by a
+ * write with no caller reads as the system.
+ */
+function hookDoorCaller(engineCtx: any): BodyDoorCaller {
+  const session = engineCtx?.session;
+  return {
+    userId: nonEmptyString(session?.userId),
+    organizationId: nonEmptyString(session?.organizationId),
+    readContext: executionContextFromHook(engineCtx) ?? { isSystem: true },
+  };
+}
+
+/**
+ * An action body's caller: the action door's caller envelope, which the body's
+ * own engine context carries elevated (`buildActionExecutionContext`), with the
+ * elevation taken off ({@link callerScopeOf}). An action called from host code
+ * with no caller reads as the system.
+ */
+function actionDoorCaller(actionCtx: any): BodyDoorCaller {
+  const ec = actionCtx?.executionContext;
+  const userId = nonEmptyString(ec?.userId) ?? nonEmptyString(actionCtx?.user?.id);
+  const organizationId = nonEmptyString(ec?.tenantId) ?? nonEmptyString(actionCtx?.session?.organizationId);
+  const readContext =
+    ec && typeof ec === 'object'
+      ? callerScopeOf(ec)
+      : userId
+        ? { userId, ...(organizationId ? { tenantId: organizationId } : {}) }
+        : { isSystem: true };
+  return { userId, organizationId, readContext };
+}
+
+/** A job body has no calling user: it acts in its declared organization. */
+function jobDoorCaller(organization: string | undefined): BodyDoorCaller {
+  const organizationId = nonEmptyString(organization);
+  return {
+    userId: undefined,
+    organizationId,
+    readContext: { isSystem: true, ...(organizationId ? { tenantId: organizationId } : {}) },
+  };
+}
+
 function buildSandboxApi(engineCtx: any, ql: any, errLabel: string) {
   return refuseBodyPermanentDeletes(
     refuseStoredMetadataBodyWrites(

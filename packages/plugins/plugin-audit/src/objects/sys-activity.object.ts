@@ -374,6 +374,21 @@ export const SysActivity = ObjectSchema.create({
       group: 'Context',
     }),
 
+    // The activity door (`app-activity-door.ts`) stamps the app code that wrote
+    // an entry here; the platform's own writers leave it empty, so a reader
+    // tells an app's entry from a recorded one.
+    origin: Field.text({
+      label: 'Origin',
+      required: false,
+      readonly: true,
+      searchable: true,
+      maxLength: 500,
+      description:
+        'The app code that added this entry through the activity door, as "<package>/<kind>:<name>" '
+        + '(for example "com.acme.crm/action:send_email"). Empty on an entry the platform recorded.',
+      group: 'Context',
+    }),
+
     // ── Writer-stamped read-rule columns (ADR-0139 D4, E6) ───────────
     // Stamped at write time by ONE derivation (`activity-changed-fields.ts`):
     // the CRUD mirror, a before-insert hook for every other writer, and the

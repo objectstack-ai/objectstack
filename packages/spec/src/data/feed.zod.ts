@@ -113,3 +113,25 @@ export const SYS_ACTIVITY_BUILTIN_TYPES = [
  * the known-built-in narrowing only.
  */
 export type SysActivityBuiltinType = (typeof SYS_ACTIVITY_BUILTIN_TYPES)[number];
+
+/**
+ * The `sys_activity.type` values only the platform records: what happened to a
+ * record (`created` / `updated` / `deleted`), the collaboration events the
+ * platform writes (`commented` / `mentioned` / `shared` / `assigned`), sign-in
+ * events and `system`. An app adds timeline entries through the activity door
+ * (`ctx.activity.append`), which refuses these values, so an entry an app wrote
+ * cannot read as one the platform recorded. Every other value, built-in
+ * (`completed`, `scheduled`) or author-contributed, stays open to apps.
+ */
+export const SYS_ACTIVITY_PLATFORM_TYPES = [
+  'created',
+  'updated',
+  'deleted',
+  'commented',
+  'mentioned',
+  'shared',
+  'assigned',
+  'login',
+  'logout',
+  'system',
+] as const satisfies readonly SysActivityBuiltinType[];

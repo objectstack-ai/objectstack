@@ -704,3 +704,15 @@ export {
   type AuthzGrantsCacheTtlReading,
   type AuthzPostureSink,
 } from './authz-cache-posture.js';
+
+// The bounds a caller's message passes before the mail service sends it, shared
+// by the HTTP send door (rest) and the script-body door (runtime).
+export {
+  boundCallerMail,
+  mailAddressOf,
+  isPlainMailObject,
+  SENDER_HEADER_NAMES,
+  type CallerMailIdentity,
+  type CallerMailSenderSource,
+  type CallerMailBoundsResult,
+} from './caller-mail-bounds.js';

@@ -47,6 +47,7 @@ import {
   emailLogObjectOfJob,
   isEmailLogObject,
 } from './email-log-objects.js';
+import { installOutboxSenderBound } from './outbox-sender-bound.js';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -1142,6 +1143,9 @@ export class EmailServicePlugin implements Plugin {
           },
           { packageId: DRAIN_PKG },
         );
+        // An outbox row the service did not write is sent as the configured
+        // sender, whatever its `from_address` says (`outbox-sender-bound.ts`).
+        installOutboxSenderBound(engine as any, svc, DRAIN_PKG);
         ctx.logger.info('EmailServicePlugin: sys_email / sys_identity_email outbox drain hook installed');
       }
 

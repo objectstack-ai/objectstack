@@ -872,6 +872,64 @@ export class QuickJSScriptRunner implements ScriptRunner {
     vm.setProp(ctxObj, 'crypto', cryptoObj);
     cryptoObj.dispose();
 
+    // ── The two platform doors: `ctx.email.send` and `ctx.activity.append` ──
+    //
+    // Each behind its own token, checked before anything else. The host seam
+    // (`body-doors.ts`) is built with the caller the HOST resolved, so a body
+    // cannot name another user or organization by editing its copy of
+    // `ctx.user`. Installed on every body, like `log` and `crypto`: a body that
+    // declared the token on a host built without kernel services is told the
+    // door is unavailable, never handed `undefined is not a function`. Settled
+    // through the same deferred-promise pump every other host call uses.
+    const installDoor = (
+      member: 'email' | 'activity',
+      fnName: 'send' | 'append',
+      token: 'email.send' | 'activity.append',
+    ): void => {
+      const doorObj = vm.newObject();
+      const doorFn = vm.newFunction(fnName, (inputH) => {
+        if (!caps.has(token)) {
+          throwCapabilityDenial(
+            vm,
+            origin,
+            token,
+            `capability '${token}' not granted to ${origin.kind} '${origin.name}' (called ctx.${member}.${fnName})`,
+          );
+        }
+        const input = inputH === undefined ? undefined : vm.dump(inputH);
+        const deferred = vm.newPromise();
+        deferreds.add(deferred);
+        void (async () => {
+          try {
+            const seam = (ctx[member] as Record<string, ((i: unknown) => Promise<unknown>) | undefined> | undefined)?.[fnName];
+            if (typeof seam !== 'function') {
+              throw Object.assign(
+                new Error(`ctx.${member}.${fnName} is not available here: the host provides no ${member} door.`),
+                { code: 'NOT_IMPLEMENTED', status: 501, statusCode: 501 },
+              );
+            }
+            const value = await seam(input);
+            if (!vm.alive) return;
+            const h = jsonToHandle(vm, value ?? null);
+            deferred.resolve(h);
+            h.dispose();
+          } catch (err) {
+            if (!vm.alive) return;
+            const errH = hostErrorToVm(vm, err);
+            deferred.reject(errH);
+            errH.dispose();
+          }
+        })();
+        return deferred.handle;
+      });
+      vm.setProp(doorObj, fnName, doorFn);
+      doorFn.dispose();
+      vm.setProp(ctxObj, member, doorObj);
+      doorObj.dispose();
+    };
+    installDoor('email', 'send', 'email.send');
+    installDoor('activity', 'append', 'activity.append');
+
     // ── [#11293] `ctx.title(field?)` — "what is this record called?" ────────
     //
     // Installed only when the host built the seam (hook bodies; the action face

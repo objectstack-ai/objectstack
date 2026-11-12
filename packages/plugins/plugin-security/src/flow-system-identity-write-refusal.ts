@@ -275,6 +275,48 @@ export function assertAppAutomationAppendOnlyWriteAllowed(
   );
 }
 
+/** The elevations and objects already told about, so each is said once per process. */
+const appendOnlyInsertWarned = new Set<string>();
+
+/**
+ * The notice for an insert into an append-only object from app-authored
+ * automation's system elevation (the elevation {@link elevationSource} names):
+ * accepted for now, and to be refused when the insert half of the rule lands.
+ * Said once per elevation kind and object per process, at `warn`: the write
+ * still lands, so nothing is lost today, and the line names the doors that
+ * replace the insert. Answers the line it logged, or `undefined`.
+ */
+export function warnAppAutomationAppendOnlyInsert(
+  opCtx: {
+    object?: unknown;
+    operation?: unknown;
+    context?: { isSystem?: unknown; flowRunId?: unknown } | null;
+  },
+  schemaOf: (object: string) => { managedBy?: unknown } | null | undefined,
+  warn: (message: string) => void,
+): string | undefined {
+  const source = elevationSource(opCtx?.context);
+  if (!source) return undefined;
+  if (opCtx.operation !== 'insert') return undefined;
+  const object = typeof opCtx.object === 'string' ? opCtx.object : '';
+  if (!object || schemaOf(object)?.managedBy !== APPEND_ONLY_BUCKET) return undefined;
+  const key = `${source}:${object}`;
+  if (appendOnlyInsertWarned.has(key)) return undefined;
+  appendOnlyInsertWarned.add(key);
+  const line =
+    `[Security] Deprecated: an insert into '${object}' from ${SUBJECT[source]} is accepted now and will be ` +
+    `refused in a coming release — '${object}' is append-only, written by the platform service that owns it. ` +
+    'Send mail with ctx.email.send (capability email.send) and add timeline entries with ctx.activity.append ' +
+    '(capability activity.append) instead.';
+  warn(line);
+  return line;
+}
+
+/** Forget which elevations were told (tests). */
+export function resetAppAutomationAppendOnlyInsertWarnings(): void {
+  appendOnlyInsertWarned.clear();
+}
+
 /** The rule's reach, stated in every answer it gives. */
 const APPEND_ONLY_SCOPE =
   'This check covers the update, transfer, delete, purge and restore of an append-only object; an insert is not judged by it.';
