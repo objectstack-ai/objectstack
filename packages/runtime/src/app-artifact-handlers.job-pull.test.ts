@@ -771,7 +771,7 @@ describe('[#32071] a pull job names the package that declares it', () => {
     });
 });
 
-// Fixtures shared by the [#32355] and [#32411] suites: the build's own composition, read back from JSON.
+// The #32355 / #32411 / #32412 fixtures: package bodies, a manifest-less input (the residual) and the artifact a build emits.
 
 /** The two real job services the binder schedules on in a test: both key a job by its name and replace on a second schedule. */
 type RealJobService = CronJobAdapter | IntervalJobAdapter;
@@ -867,7 +867,8 @@ describe('[#32355] a job name a package body declares and the residual carries i
         // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
         expect(pulls).toEqual([]);
         expect(answers).toEqual([]);
-        // Every job of the name, by name: the refusal, with both packages its candidates.
+        // Every job of the name, by name: the refusal, with the body and the residual its candidates —
+        // [#32412] the residual by its own kind, not as `com.example.beta`, whose body declares no `sync`.
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
             expect(of(job)).toMatchObject({
@@ -875,13 +876,14 @@ describe('[#32355] a job name a package body declares and the residual carries i
                 reason: 'ambiguous-in-environment',
                 type: 'job',
                 name: 'sync',
-                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'package', packageId: 'com.example.beta' }],
+                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.beta' }],
             });
         }
-        // A residual whose owner is no package (no body carries the top-level id): named all the same.
+        // A residual whose owner is no package (no body carries the top-level id): named all the same —
+        // [#32412] as a candidate too, never a one-candidate "ambiguous" refusal.
         const noPackage = jobDeclaringPackages(bundle, 'com.example.top')(bundle.jobs[1]) as { status?: string; candidates?: unknown; message?: string };
         expect(noPackage.status).toBe('refused');
-        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }]);
+        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.top' }]);
         expect(noPackage.message).toContain('names no package');
     });
 
@@ -999,6 +1001,11 @@ describe('[#32411] two enabled jobs of one name in one artifact are refused at b
                 expect(refusals[0].message).toContain('"alpha_map"');
                 expect(refusals[0].message).toContain('"host_map"');
                 expect(refusals[0].message).toContain('top level');
+                // [#32412] The holders as candidates, each by its own kind: the declaring body, then the residual.
+                expect(refusals[0].refusal?.candidates).toEqual([
+                    { kind: 'package', packageId: 'com.example.alpha' },
+                    { kind: 'residual', ownerId: appId },
+                ]);
             });
 
             it(`${adapterName}, ${arrangement}: CONTROL — one job of each name binds and runs as today`, async () => {
@@ -1080,5 +1087,99 @@ describe('[#32411] two enabled jobs of one name in one artifact are refused at b
         } finally {
             await adapter.destroy();
         }
+    });
+});
+
+/**
+ * [#32412, ADR-0150 D3, ADR-0130 D4] The residual-twin refusal names BOTH holders in `candidates`, each by
+ * its own kind: every declaring body as a `package`, and the residual — the artifact's top level outside
+ * every package body — as `{ kind: 'residual', ownerId }`, the artifact's id. Never a one-candidate
+ * "ambiguous" refusal (no body carries the id), and never the body carrying the id as a plain `package`
+ * holder, whose body declares no such job. The one-holder answer (the residual's owner IS the one
+ * declaring body) is unchanged.
+ */
+describe('[#32412] the residual-twin job refusal names the residual as a holder of its own kind', () => {
+    withPosture(undefined);
+
+    const ALPHA = { kind: 'package', packageId: 'com.example.alpha' } as const;
+    const betaWith = (jobs: unknown[]) => defineStack({
+        manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app' },
+        objects: [{ ...SYNCED, name: 'beta_record', label: 'Beta record' }],
+        mappings: [{ ...mappingOf('beta_map', 'beta_api'), targetObject: 'beta_record' }],
+        jobs,
+    } as never);
+    const twin = () => jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+
+    it('no body carries the artifact\'s id: two candidates — the declaring body and the residual — never one', () => {
+        const bundle = twin();
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        for (const job of bundle.jobs) {
+            const refusal = of(job) as { status?: string; reason?: string; candidates?: unknown; message?: string };
+            expect(refusal).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment', type: 'job', name: 'sync' });
+            expect(refusal.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+            expect(refusal.message).toContain('names no package');
+        }
+    });
+
+    it('a body that declares no such job carries the artifact\'s id: the residual is named as the residual, not as that package', () => {
+        const bundle = twin();
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        for (const job of bundle.jobs) {
+            const refusal = of(job) as { candidates?: unknown; message?: string };
+            expect(refusal.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.beta' }]);
+            // Where it runs stays in the sentence: as the body that carries the artifact's id.
+            expect(refusal.message).toContain('runs as package "com.example.beta"');
+        }
+    });
+
+    it('the residual\'s owner is one of several declaring bodies: every body, then the residual', () => {
+        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        expect(bundle.manifest.id).toBe('com.example.beta');
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        for (const job of bundle.jobs) {
+            expect((of(job) as { candidates?: unknown }).candidates)
+                .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }, { kind: 'residual', ownerId: 'com.example.beta' }]);
+        }
+    });
+
+    it('on a real job service: both twins enabled, the bind refusal names the residual; one twin disabled, the run\'s refusal reaches the job run record naming it', async () => {
+        // [#32411] Both enabled: neither is scheduled, and the bind refusal carries both holders.
+        const both = await scheduleAndRun(twin(), 'com.example.top');
+        expect(both.out.refused).toEqual(['sync', 'sync']);
+        expect(both.answers).toEqual([]);
+        const bound = both.logger.error.mock.calls.find(([, err]) => err instanceof Error)?.[1] as { refusal?: { candidates?: unknown } } | undefined;
+        expect(bound?.refusal?.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+        // The body's twin disabled: the residual's job is scheduled, and its run is refused naming both holders.
+        const off = jsonLoaded([alpha([{ ...pullJob('sync', 'alpha_map'), enabled: false }]), host([pullJob('sync', 'host_map')]), beta]);
+        const h = harness();
+        const adapter = new CronJobAdapter();
+        let thrown: { refusal?: { candidates?: unknown } } | undefined;
+        const schedule = adapter.schedule.bind(adapter);
+        adapter.schedule = (key, when, run, options) => schedule(key, when, async (c) => {
+            try { return await run(c); } catch (e) { thrown = e as typeof thrown; throw e; }
+        }, options);
+        h.services.job = adapter;
+        try {
+            await scheduleAppArtifactJobs(
+                { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+                off,
+                { appId: 'com.example.top', ql: undefined, source: 'Test' },
+            );
+            await adapter.trigger('sync');
+            expect((await adapter.getExecutions('sync')).at(-1)?.status).toBe('failed');
+            expect(thrown?.refusal?.candidates).toEqual([ALPHA, { kind: 'residual', ownerId: 'com.example.top' }]);
+            expect(h.pulls).toEqual([]);
+        } finally {
+            await adapter.destroy();
+        }
+    });
+
+    it('controls: the one holder (the residual\'s owner IS the one declaring body) and two bodies with no residual twin keep their answers', () => {
+        const owned = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
+        for (const job of owned.jobs) expect(jobDeclaringPackages(owned, 'com.example.alpha')(job)).toBe('com.example.alpha');
+        const twoBodies = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), betaWith([pullJob('sync', 'beta_map')])]);
+        // No residual job: met by name, the #32071 refusal names the two bodies and nothing else.
+        expect((jobDeclaringPackages(twoBodies, 'com.example.beta')(pullJob('sync', 'alpha_map')) as { candidates?: unknown }).candidates)
+            .toEqual([ALPHA, { kind: 'package', packageId: 'com.example.beta' }]);
     });
 });

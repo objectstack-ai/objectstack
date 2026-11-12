@@ -170,6 +170,7 @@ import {
     PackageScopedNameRefusedError,
     artifactPackageId,
     describePackageScopedHolder,
+    type PackageScopedHolder,
     resolveArtifactPackageOrder,
     type PackageScopedRefusal,
 } from '@objectstack/core';
@@ -1132,8 +1133,9 @@ export function judgeJobPull(
  * genuine copy need not stay equal to the body it was copied from. Such a name
  * answers the one holder when the body and the residual's owner are one
  * package, and otherwise a refusal naming the declaring bodies and the
- * residual. A job a body's own array holds still answers that body by
- * identity, as above.
+ * residual — [#32412] each by its own kind: every body a `package`, the
+ * residual `{ kind: 'residual', ownerId: appId }`. A job a body's own array
+ * holds still answers that body by identity, as above.
  */
 export function jobDeclaringPackages(
     bundle: unknown,
@@ -1159,7 +1161,7 @@ export function jobDeclaringPackages(
         if (residualCarries.has(name as string)) {
             // One holder only when the residual's owner IS the one declaring body.
             if (declarers.length === 1 && declarers[0] === residual) return residual;
-            return jobNameRefusal(name as string, declarers, { packageId: residual });
+            return jobNameRefusal(name as string, declarers, { ownerId: appId, packageId: residual });
         }
         return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
     };
@@ -1230,7 +1232,9 @@ function describeJobRunForm(job: unknown): string {
  * The holders the refusal names are every body declaring the name, and — when the artifact holds more jobs
  * of the name than its bodies declare (the residual's own, `composeStacks(…, { manifest: 'preserve' })` with
  * an input that has no `manifest`) — the artifact's top level outside every package body, as
- * {@link jobNameRefusal} names it; an artifact without `packages[]` is its app's alone. Each job is named by
+ * {@link jobNameRefusal} names it; an artifact without `packages[]` is its app's alone. The refusal's
+ * `candidates` are every declaring body as a `package`, then the residual as `{ kind: 'residual', ownerId }`
+ * (the artifact's id), or the app itself for an artifact without `packages[]`. Each job is named by
  * its run form. Counted by name, never by content: a conversion replays a body under its own version window.
  *
  * A disabled job is scheduled by nothing, so it collides with nothing and is not counted: its enabled twin
@@ -1255,18 +1259,19 @@ function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknow
     for (const [name, named] of shared) {
         const describe = (packageId: string) => describePackageScopedHolder({ kind: 'package', packageId });
         let holders: string[];
-        let packageIds: string[];
+        let candidates: PackageScopedHolder[];
         if (declarations === undefined) {
             holders = [`${describe(appId)}, the app itself`];
-            packageIds = [appId];
+            candidates = [{ kind: 'package', packageId: appId }];
         } else {
             const declarers = declarations.byName.get(name) ?? [];
-            packageIds = [...declarers];
+            candidates = declarers.map((packageId) => ({ kind: 'package' as const, packageId }));
             holders = declarers.map(describe);
             const residualJobs = (boundCount.get(name) ?? 0) - (declarations.declaredCount.get(name) ?? 0);
             if (residualJobs > 0) {
+                // [#32412] The residual by its own kind, after every declaring body, as `jobNameRefusal` names it.
+                candidates.push({ kind: 'residual', ownerId: appId });
                 const owner = declarations.residual;
-                if (owner !== undefined && !packageIds.includes(owner)) packageIds.push(owner);
                 holders.push(`this artifact's top level outside every package body (its residual, ${owner === undefined
                     ? 'which names no package'
                     : `which runs as ${describe(owner)}, the body that carries the artifact's id`})`);
@@ -1278,7 +1283,7 @@ function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknow
             type: 'job',
             name,
             callerPackageId: null,
-            candidates: packageIds.map((packageId) => ({ kind: 'package' as const, packageId })),
+            candidates,
             message: `The artifact holds ${named.length} enabled jobs named "${name}", declared by ${holders.join('; and by ')} `
                 + `— one that ${named.map(describeJobRunForm).join(', and one that ')}. The job service keys a job by its name `
                 + 'and keeps only the last one scheduled under it, so the others would never run: none of them is scheduled. '
@@ -1290,14 +1295,15 @@ function jobNameCollisions(bundle: unknown, appId: string, jobs: readonly unknow
 
 /**
  * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
- * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too — as
- * its owning package when a body carries the artifact's id (then also a candidate), else as the
- * top level that names no package, which no holder kind spells, so the message alone names it.
+ * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too.
+ * [#32412] As a candidate of its own kind, after every declaring body: `{ kind: 'residual',
+ * ownerId }`, the artifact's id — never as a `package`, whether or not a body carries that id
+ * (`packageId`, the package it runs as, which the message names).
  */
 function jobNameRefusal(
     name: string,
     packageIds: readonly string[],
-    residual?: { readonly packageId: string | undefined },
+    residual?: { readonly ownerId: string; readonly packageId: string | undefined },
 ): PackageScopedRefusal {
     const bodies = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
     if (residual === undefined) {
@@ -1314,9 +1320,7 @@ function jobNameRefusal(
         };
     }
     const owner = residual.packageId;
-    const candidates = owner === undefined || packageIds.includes(owner)
-        ? bodies
-        : [...bodies, { kind: 'package' as const, packageId: owner }];
+    const candidates = [...bodies, { kind: 'residual' as const, ownerId: residual.ownerId }];
     const residualHolder = owner === undefined
         ? 'which names no package'
         : `which runs as ${describePackageScopedHolder({ kind: 'package', packageId: owner })}, the body that carries the artifact's id`;
