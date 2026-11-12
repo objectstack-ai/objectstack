@@ -3360,6 +3360,9 @@ const en = {
         // The same refusal where no mail leaves the deployment (`features.emailDelivery: false`).
         invalidCredentialsNoMail: 'Invalid email or password. After several failed attempts, sign-in is paused for a while. Forgot your password? Ask your administrator to reset it.',
         emailNotVerified: 'Please verify your email address before signing in.',
+        // objectstack#32432 — `BANNED_USER` with `details.cause: 'scim_deactivated'`:
+        // the identity provider deactivated the account. An administrator's ban keeps the server's wording.
+        accountDeactivated: "Your account has been deactivated by your organization. Contact your administrator.",
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
         // objectstack#32087 — a refused single sign-on, by the code it lands
         // with (`ssoCallbackRefusal.ts` in the console). `oauthCallbackFailed`
