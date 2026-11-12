@@ -5,7 +5,6 @@
 '@objectstack/runtime': minor
 '@objectstack/service-automation': patch
 '@objectstack/plugin-approvals': patch
-'@objectstack/spec': patch
 ---
 
 feat(objectql)!: two packages of two namespaces may each ship a flow of the same name; each namespace's `/automation` address, and each package's own flow action and flow endpoint, run that package's flow (ADR-0150 child B)
