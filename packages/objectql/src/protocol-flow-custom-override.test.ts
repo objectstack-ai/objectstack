@@ -562,3 +562,149 @@ describe('[#30065] a declared .custom action override is the packaged action, at
         expect(refusal!.message).not.toMatch(/not yet available/);
     });
 });
+
+/**
+ * [#32552, ADR-0150 D4, epic #31527 red line 2] Two namespaces' packages each
+ * ship a flow of one name (the flow's one-holder rule is per namespace since
+ * #31696), and each package's paired `.custom` declares its own override. The
+ * removal `?package=<B>.custom` removes B's override and leaves A's, whichever
+ * package registered first.
+ *
+ * The removal's pair-row verdict (`isPairRowRemoval`) read the base from the
+ * bare-name artifact lookup, which answers the first package registered: the
+ * second package's pair was judged against the first package, was no pair of
+ * it, and its removal was refused `403 NOT_OVERRIDABLE` "sealed against
+ * removal", so B's override could not be undone. It is judged against every
+ * package that ships the name now, as the served read judges the row.
+ *
+ * The same bare-name judgement, swept on the same class: a commit revert into
+ * the second holder's pair was refused `403 NOT_OVERRIDABLE` (`restoreWriteFor`,
+ * which the per-item rollback shares), and the boot census named the second
+ * holder's live override as an unserved row to delete. Each is judged against
+ * every shipper now (`someShipperOf`).
+ *
+ * CONTROLS: removing a stored row of a package that depends on both holders
+ * and is the pair of neither keeps the refusal it had, and the census still
+ * names such a row, in both orders. The one-holder answers are pinned above.
+ */
+describe('[#32552] a pair\'s row of a name two namespaces hold is judged against its own base', () => {
+    const ALPHA = 'com.example.alpha';
+    const BETA = 'com.example.beta';
+    const STRANGER = 'com.example.stranger';
+    const holderManifest = (id: string, ns: string) => ({
+        id, name: ns, version: '1.0.0', namespace: ns, type: 'app',
+        objects: [{ name: `${ns}_task`, label: 'Task', sharingModel: 'private', fields: { title: { name: 'title', label: 'title', type: 'text' } } }],
+        flows: [flowBody(`SHIPPED-${ns}`)],
+    });
+    const nsOf = (id: string) => id.split('.').pop()!;
+
+    async function bootTwo(first: string) {
+        const engine = new ObjectQL();
+        const { driver, stores } = makeMemoryDriver();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        engine.registry.registerObject(sysMetadataObject, 'test-package');
+        for (const o of [SysMetadataHistoryObject, SysMetadataAuditObject, SysMetadataCommitObject]) {
+            engine.registry.registerObject(o as any, 'test-package');
+        }
+        for (const id of first === ALPHA ? [ALPHA, BETA] : [BETA, ALPHA]) engine.registerApp(holderManifest(id, nsOf(id)));
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+        for (const base of [ALPHA, BETA]) {
+            await (protocol as any).installPackage({
+                manifest: {
+                    id: `${base}.custom`, name: `${nsOf(base)}-custom`, version: '0.1.0', type: 'app',
+                    namespace: `${nsOf(base)}_custom`, dependencies: { [base]: '^1' },
+                },
+            });
+        }
+        // A package that depends on both holders and is the pair of neither.
+        await (protocol as any).installPackage({
+            manifest: { id: STRANGER, name: 'stranger', version: '0.1.0', type: 'app', dependencies: { [ALPHA]: '*', [BETA]: '*' } },
+        });
+        // Each holder's pair declares its own override, through the save door.
+        for (const base of [ALPHA, BETA]) {
+            await protocol.saveMetaItem({
+                type: 'flow', name: FLOW, item: flowBody(`OVERRIDE-${nsOf(base)}`, { overrides: { package: base, basedOn: '1.0.0' } }),
+                mode: 'draft', packageId: `${base}.custom`,
+            } as any);
+            await protocol.publishMetaItem({ type: 'flow', name: FLOW, packageId: `${base}.custom` } as any);
+        }
+        const active = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === 'flow' && r.name === FLOW && r.state === 'active')
+            .map((r) => r.package_id).sort();
+        const labelAt = async (packageId: string) => (await read(protocol, packageId)).label;
+        return { engine, protocol, active, labelAt };
+    }
+
+    for (const first of [ALPHA, BETA]) {
+        for (const target of [ALPHA, BETA]) {
+            const other = target === ALPHA ? BETA : ALPHA;
+            it(`${nsOf(first)} registered first: ?package=${nsOf(target)}.custom removes ${nsOf(target)}'s override, never ${nsOf(other)}'s`, async () => {
+                const { protocol, active, labelAt } = await bootTwo(first);
+                expect(active()).toEqual([`${ALPHA}.custom`, `${BETA}.custom`]);
+                expect(await labelAt(target)).toBe(`OVERRIDE-${nsOf(target)}`);
+
+                const removed: any = await protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: `${target}.custom` } as any);
+
+                expect(removed.success).toBe(true);
+                expect(active()).toEqual([`${other}.custom`]);
+                expect(await labelAt(target)).toBe(`SHIPPED-${nsOf(target)}`);
+                expect(await labelAt(other)).toBe(`OVERRIDE-${nsOf(other)}`);
+            });
+        }
+
+        it(`CONTROL, ${nsOf(first)} registered first: removing a row of a package that is neither holder's pair keeps its refusal`, async () => {
+            const { engine, protocol, active } = await bootTwo(first);
+            // Laid down by the store's own write, as before the save gate.
+            await engine.insert('sys_metadata', {
+                type: 'flow', name: FLOW, organization_id: null, package_id: STRANGER,
+                metadata: JSON.stringify(flowBody('STRANGER', { overrides: { package: ALPHA, basedOn: '1.0.0' } })), state: 'active', version: 1,
+            }, { context: { isSystem: true } });
+            await expect(protocol.deleteMetaItem({ type: 'flow', name: FLOW, packageId: STRANGER } as any))
+                .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(active()).toEqual([`${ALPHA}.custom`, `${BETA}.custom`, STRANGER]);
+        });
+
+        it(`${nsOf(first)} registered first: each holder's commit into its own pair reverts`, async () => {
+            for (const target of [ALPHA, BETA]) {
+                const { protocol, labelAt } = await bootTwo(first);
+                await protocol.saveMetaItem({
+                    type: 'flow', name: FLOW, item: flowBody('EDITED', { overrides: { package: target, basedOn: '1.0.0' } }),
+                    mode: 'draft', packageId: `${target}.custom`,
+                } as any);
+                const commit: any = await protocol.publishPackageDrafts({ packageId: `${target}.custom` } as any);
+                expect(commit.commitId, nsOf(target)).toBeDefined();
+                expect(await labelAt(target)).toBe('EDITED');
+
+                const reverted: any = await (protocol as any).revertCommit({ commitId: commit.commitId, packageId: `${target}.custom` });
+
+                expect({ target: nsOf(target), success: reverted.success, failed: reverted.failed ?? [] })
+                    .toEqual({ target: nsOf(target), success: true, failed: [] });
+                expect(await labelAt(target)).toBe(`OVERRIDE-${nsOf(target)}`);
+            }
+        });
+
+        it(`${nsOf(first)} registered first: the boot census names no holder's declared override as unserved, and still names a stranger's row`, async () => {
+            const { engine, protocol } = await bootTwo(first);
+            const census = async () => {
+                const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+                try {
+                    await (protocol as any).loadMetaFromDb();
+                    return warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('metadata_sealed_overlay_unserved'));
+                } finally {
+                    warn.mockRestore();
+                }
+            };
+            expect(await census()).toEqual([]);
+            // CONTROL: a row of a package that is neither holder's pair is named.
+            await engine.insert('sys_metadata', {
+                type: 'flow', name: FLOW, organization_id: null, package_id: STRANGER,
+                metadata: JSON.stringify(flowBody('STRANGER', { overrides: { package: ALPHA, basedOn: '1.0.0' } })), state: 'active', version: 1,
+            }, { context: { isSystem: true } });
+            const named = await census();
+            expect(named).toHaveLength(1);
+            expect(named[0]).toContain(`flow×1 (${FLOW})`);
+        });
+
+    }
+});

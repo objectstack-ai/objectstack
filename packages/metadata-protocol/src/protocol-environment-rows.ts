@@ -265,6 +265,33 @@ export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<str
 }
 
 /**
+ * [ADR-0150 D4, #32552] Whether `judge` holds for SOME code package that ships
+ * `(type, name)`: the package the bare-name artifact lookup answers first (the
+ * one-holder answer, read alone while it holds), then every shipper
+ * ({@link shippingPackageIds} over `shippedArtifactsOf`).
+ *
+ * The question a pair's row asks of its base — is this row a declared
+ * override of the item, may this removal or restore treat it as one — when two
+ * namespaces' packages each ship the name (ADR-0150 D9): each holder has its
+ * own pair, so a row is judged against its own base, never against whichever
+ * shipper registered first. No shipper is picked: the row judged is the one
+ * its own `package_id` names. A name one package ships answers exactly as the
+ * bare lookup alone did.
+ */
+export function someShipperOf(
+    host: {
+        packagedArtifactOwner(request: { type: string; name: string }): string | undefined;
+        shippedArtifactsOf(type: string, name: string): unknown[];
+    },
+    type: string,
+    name: string,
+    judge: (basePackageId: string | undefined) => boolean,
+): boolean {
+    if (judge(host.packagedArtifactOwner({ type, name }))) return true;
+    return [...shippingPackageIds(host.shippedArtifactsOf(type, name))].some((shipper) => judge(shipper));
+}
+
+/**
  * [ADR-0146 D11] The READ-ONLY code packages that ship a name, sorted: the
  * {@link shippingPackageIds} of `shipped` less every package
  * `isWritablePackage` answers for — a writable package's item is edited in

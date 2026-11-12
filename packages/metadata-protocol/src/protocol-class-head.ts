@@ -41,6 +41,7 @@ import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { isPairOf } from '@objectstack/metadata-core';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { someShipperOf } from './protocol-environment-rows.js';
 import { overrideWriteRefusalError } from './protocol-packaged-base-refusal.js';
 import { OBJECT_EXTENSION_TYPE, registrableObjectExtension } from './protocol-object-extension-item.js';
 import type { ObjectExtensionRegistry } from './protocol-object-extension-item.js';
@@ -198,13 +199,17 @@ export class ProtocolClassHeadFacet {
      * caller's `artifactBacked` decides the intent, and the body writer is
      * {@link restoredBodyWriter}'s alone.
      */
-    static restoreWriteFor(host: Pick<ProtocolHost, 'engine' | 'overrideWriteVerdict' | 'packagedArtifactOwner' | 'restoredBodyWriter'>, singularType: string,
+    static restoreWriteFor(host: Pick<ProtocolHost, 'engine' | 'overrideWriteVerdict' | 'packagedArtifactOwner' | 'restoredBodyWriter' | 'shippedArtifactsOf'>, singularType: string,
             name: string,
             binding: string | null,
             artifactBacked: boolean,
             source: string,): { intent: 'override-artifact' | 'runtime-only'; deriveRestoredBody: (historyBody: unknown) => Promise<unknown> } {
-        const owner = artifactBacked ? host.packagedArtifactOwner({ type: singularType, name }) : undefined;
-        const pairRow = owner !== undefined && isPairOf(binding, owner, installedManifestsOfEngine(host.engine));
+        // [ADR-0150 D4, #32552] The binding is judged against every package
+        // that ships the name ({@link someShipperOf}): each namespace's holder
+        // has its own pair, never only the shipper registered first.
+        const installed = installedManifestsOfEngine(host.engine);
+        const pairRow = artifactBacked && someShipperOf(host, singularType, name,
+            (owner) => owner !== undefined && isPairOf(binding, owner, installed));
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRow ? 'override-artifact' : 'runtime-only';
         const writeRestored = host.restoredBodyWriter(singularType, name, binding, source);
         const deriveRestoredBody = pairRow
