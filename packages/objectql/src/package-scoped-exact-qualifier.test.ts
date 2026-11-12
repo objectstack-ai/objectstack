@@ -26,7 +26,7 @@ import { declaredRefusalMessage, resolveThrownHttpError } from '@objectstack/typ
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { SchemaRegistry } from './registry.js';
 import { PACKAGE_SCOPED_READ_TYPES, PackageScopedNameRefusedError } from './package-scoped-read.js';
-import { NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
+import { ENGINE_FUNCTION_TYPE, NAMESPACE_SCOPED_BARE_NAME_TYPES, PACKAGE_SCOPED_TYPES } from '@objectstack/core';
 
 /** ADR-0150's covered types whose by-name readers no child of the epic has wired yet. */
 const UNWIRED_COVERED_TYPES = PACKAGE_SCOPED_TYPES.filter(
@@ -454,7 +454,9 @@ describe('a covered type the registry reads through `getItem` (seat rulings (a),
       readsNothingByPackage = new ObjectStackProtocolImplementation({ ...engine, registry: view } as never);
     });
 
-    it.each([...NAMESPACE_SCOPED_BARE_NAME_TYPES])('%s: 501 naming the missing resolver, even for one holder (BASE: served it)', async (type) => {
+    // [#31700] Every narrowed metadata type: the engine's `function` is
+    // narrowed too, but is no metadata type and has no `/meta` read.
+    it.each(NAMESPACE_SCOPED_BARE_NAME_TYPES.filter((type) => type !== ENGINE_FUNCTION_TYPE))('%s: 501 naming the missing resolver, even for one holder (BASE: served it)', async (type) => {
       shipValid(type, 'solo', A);
       let thrown: (Error & { status?: number; code?: string; refusal?: unknown }) | undefined;
       try {
