@@ -35,6 +35,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// The dispatcher's reach loads this dependency in a function body; paid here,
+// at collection, not inside the first case's clocked window.
+import '@objectstack/metadata';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SchemaRegistry } from '@objectstack/objectql';
 
