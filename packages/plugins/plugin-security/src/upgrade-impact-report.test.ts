@@ -396,6 +396,49 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
     expect(errorLines(r).some((m) => m.includes('the declared webhook is withheld for the whole deployment'))).toBe(true);
   });
 
+  // [#31699] A webhook is addressed by (package, name): two packages of two
+  // namespaces may each declare one name, and a row holding it withholds both.
+  it('[FROM one TO each] two packages declaring the name: one finding per withheld holder, and the remedy names the namespace address', async () => {
+    const d = deployment({
+      webhooks: [{ id: 'wh_1', name: 'acme_deal_won', organization_id: 'org_tenant' }],
+      registry: { items: [
+        { type: 'webhook', name: 'acme_deal_won', packageId: OTHER_VENDOR },
+        { type: 'webhook', name: 'acme_deal_won', packageId: VENDOR },
+      ] },
+    });
+    const r = await boot(d, 'walled');
+    expect(r.report.withheldWebhooks).toEqual([
+      { name: 'acme_deal_won', packageId: OTHER_VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
+      { name: 'acme_deal_won', packageId: VENDOR, rowId: 'wh_1', organizationId: 'org_tenant' },
+    ]);
+    expect(errorLines(r).some((m) => m.includes('POST /api/v1/security/_activation/webhook/<namespace>/<name> with'))).toBe(true);
+  });
+
+  it('[FROM no finding TO orphan] a webhook switch naming a package that no longer ships the name is an orphan, whichever other package does; its rename is a suspected re-enablement', async () => {
+    const d = deployment({
+      ledger: [switchedOff('webhook', 'acme_deal_won', VENDOR), switchedOff('webhook', 'acme_deal_won', OTHER_VENDOR)],
+      registry: { items: [
+        { type: 'webhook', name: 'acme_deal_won', packageId: OTHER_VENDOR },
+        { type: 'webhook', name: 'acme_deal_closed', packageId: VENDOR },
+      ] },
+    });
+    const report = await collectUpgradeImpactFindings(d.engine, d);
+    expect(report.orphans.map((o) => [o.type, o.name, o.packageId])).toEqual([['webhook', 'acme_deal_won', VENDOR]]);
+    expect(report.reEnablements.map((r) => [r.name, r.packageId, r.candidates])).toEqual([['acme_deal_won', VENDOR, ['acme_deal_closed']]]);
+  });
+
+  it('CONTROL — one holder: its switch is no orphan, a switch of another package\'s name it now ships is no candidate', async () => {
+    const d = deployment({
+      ledger: [switchedOff('webhook', 'acme_deal_won', VENDOR), switchedOff('webhook', 'acme_deal_closed', null)],
+      registry: { items: [
+        { type: 'webhook', name: 'acme_deal_won', packageId: VENDOR },
+        { type: 'webhook', name: 'acme_deal_closed', packageId: VENDOR },
+      ] },
+    });
+    const report = await collectUpgradeImpactFindings(d.engine, d);
+    expect([report.orphans, report.reEnablements]).toEqual([[], []]);
+  });
+
   it('CONTROL: no package declares the row\'s name — no finding', async () => {
     const d = deployment({ webhooks: [{ id: 'wh_2', name: 'tenant_own_hook', organization_id: 'org_tenant' }] });
     expect((await collectUpgradeImpactFindings(d.engine, d)).withheldWebhooks).toEqual([]);

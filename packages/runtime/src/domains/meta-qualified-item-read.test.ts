@@ -583,3 +583,31 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         expect(labelOf(await read('/dataset/pipeline', { package: A }))).toBe('alpha dataset');
     });
 });
+
+/**
+ * [#31699 PR 2, narrowing row (1)] A webhook name two packages of two
+ * namespaces hold: the bare item read and the published read
+ * (`GET /meta/webhook/NAME/published`, which asks the protocol's bare item read
+ * for the item's package) both answer `409 RESOURCE_CONFLICT` naming both,
+ * never the first registered package's. Measured the same over this registry
+ * on main; what the install door narrows is that the state is reachable.
+ */
+describe('#31699 — a webhook name two packages hold: the item read and the published read answer 409', () => {
+    it('bare `GET /meta/webhook/NAME` and `GET /meta/webhook/NAME/published`: 409 naming both; the namespace address reads one', async () => {
+        ship('webhook', 'task_changed', A);
+        ship('webhook', 'task_changed', B);
+        for (const path of ['/webhook/task_changed', '/webhook/task_changed/published']) {
+            const answer = await read(path);
+            expect([answer.status, answer.body?.error?.code], path).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect(answer.body?.error?.message, path).toContain(`package "${A}"`);
+            expect(answer.body?.error?.message, path).toContain(`package "${B}"`);
+        }
+        expect(labelOf(await read('/webhook/alpha/task_changed'))).toBe('alpha webhook');
+    });
+
+    it('CONTROL — one holder: the item read serves it, and the published read answers as before (nothing published: 404)', async () => {
+        ship('webhook', 'solo_hook', A);
+        expect(labelOf(await read('/webhook/solo_hook'))).toBe('alpha webhook');
+        expect((await read('/webhook/solo_hook/published')).status).toBe(404);
+    });
+});
