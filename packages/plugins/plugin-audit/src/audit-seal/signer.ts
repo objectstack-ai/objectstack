@@ -43,7 +43,10 @@ export interface SealStorageEngine {
   getDriverForObject(object: string): SealStorageDriver | undefined;
 }
 
-function driverFor(engine: SealStorageEngine, object: string): SealStorageDriver {
+/** What reading the seal's storage needs: a driver per object. The verifier reads through no more. */
+export type SealStorageReader = Pick<SealStorageEngine, 'getDriverForObject'>;
+
+function driverFor(engine: SealStorageReader, object: string): SealStorageDriver {
   const driver = engine.getDriverForObject(object);
   if (!driver) throw new Error(`no driver resolves for '${object}'`);
   return driver;
@@ -77,7 +80,7 @@ export async function dropAuditSealSecret(engine: SealStorageEngine, id: string)
 }
 
 /** The handle of a `sys_secret` row, or `null` when there is no such row. */
-export async function readAuditSealSecret(engine: SealStorageEngine, id: string): Promise<CryptoHandle | null> {
+export async function readAuditSealSecret(engine: SealStorageReader, id: string): Promise<CryptoHandle | null> {
   const [row] = await driverFor(engine, 'sys_secret').find('sys_secret', { where: { id }, limit: 1 });
   if (!row) return null;
   return {
@@ -114,6 +117,48 @@ function keyRowOf(row: Record<string, unknown> | undefined): SigningKeyRow | nul
   return { fingerprint, public_key, private_handle };
 }
 
+/**
+ * The private half of `key`, opened under the key's own fingerprint, and only
+ * when it derives exactly the row's public half and fingerprint. The one route
+ * to trusting a key: the signer signs only with what this opens, and
+ * {@link trustedSigningKey} vouches only for what it opens.
+ */
+async function openPrivateHalf(engine: SealStorageReader, crypto: ICryptoProvider, key: SigningKeyRow): Promise<KeyObject> {
+  const handle = await readAuditSealSecret(engine, key.private_handle);
+  if (!handle) throw new Error(`audit signing key ${key.fingerprint}: its wrapped private half is missing`);
+  const pkcs8 = await crypto.decrypt(handle, signingKeyContext(key.fingerprint));
+  const privateKey = createPrivateKey({ key: Buffer.from(pkcs8, 'base64'), format: 'der', type: 'pkcs8' });
+  if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error(`audit signing key ${key.fingerprint}: not an Ed25519 key`);
+  const raw = rawPublicKeyOf(createPublicKey(privateKey));
+  if (raw.toString('base64') !== key.public_key || signingKeyFingerprint(raw) !== key.fingerprint) {
+    throw new Error(`audit signing key ${key.fingerprint}: its private half derives another public key`);
+  }
+  return privateKey;
+}
+
+/**
+ * The public key (raw 32 bytes, base64) of signing key `keyId`, or `null` when
+ * there is no such key row or its wrapped private half is missing, will not
+ * open under the key's own fingerprint, or derives another key (D6). What
+ * `LocalCheckpointSigner#trustedPublicKey` answers, and what `os audit verify`
+ * trusts: never a public key because a row carries it.
+ */
+export async function trustedSigningKey(engine: SealStorageReader, crypto: ICryptoProvider, keyId: string): Promise<string | null> {
+  const rows = await driverFor(engine, AUDIT_SIGNING_KEY_OBJECT).find(AUDIT_SIGNING_KEY_OBJECT, {
+    where: { fingerprint: keyId },
+    orderBy: [{ field: 'id', order: 'asc' }],
+    limit: 1,
+  });
+  const key = keyRowOf(rows[0]);
+  if (!key || key.fingerprint !== keyId) return null;
+  try {
+    await openPrivateHalf(engine, crypto, key);
+    return key.public_key;
+  } catch {
+    return null;
+  }
+}
+
 export interface LocalCheckpointSignerOptions {
   engine: SealStorageEngine;
   crypto: ICryptoProvider;
@@ -140,23 +185,6 @@ export class LocalCheckpointSigner implements IAuditCheckpointSigner {
       limit: 1,
     });
     return keyRowOf(rows[0]);
-  }
-
-  /**
-   * The private half of `key`, opened under the key's own fingerprint, and
-   * only when it derives exactly the row's public half and fingerprint.
-   */
-  private async openPrivateHalf(key: SigningKeyRow): Promise<KeyObject> {
-    const handle = await readAuditSealSecret(this.options.engine, key.private_handle);
-    if (!handle) throw new Error(`audit signing key ${key.fingerprint}: its wrapped private half is missing`);
-    const pkcs8 = await this.options.crypto.decrypt(handle, signingKeyContext(key.fingerprint));
-    const privateKey = createPrivateKey({ key: Buffer.from(pkcs8, 'base64'), format: 'der', type: 'pkcs8' });
-    if (privateKey.asymmetricKeyType !== 'ed25519') throw new Error(`audit signing key ${key.fingerprint}: not an Ed25519 key`);
-    const raw = rawPublicKeyOf(createPublicKey(privateKey));
-    if (raw.toString('base64') !== key.public_key || signingKeyFingerprint(raw) !== key.fingerprint) {
-      throw new Error(`audit signing key ${key.fingerprint}: its private half derives another public key`);
-    }
-    return privateKey;
   }
 
   /** Create the deployment's key: sealed private half, the ledger row, then the key row. */
@@ -195,19 +223,11 @@ export class LocalCheckpointSigner implements IAuditCheckpointSigner {
 
   async sign(bytes: Uint8Array): Promise<AuditCheckpointSignature> {
     const key = (await this.activeKey()) ?? (await this.createKey());
-    const privateKey = await this.openPrivateHalf(key);
+    const privateKey = await openPrivateHalf(this.options.engine, this.options.crypto, key);
     return { keyId: key.fingerprint, signature: sign(null, bytes, privateKey).toString('base64') };
   }
 
   async trustedPublicKey(keyId: string): Promise<string | null> {
-    const rows = await this.keys().find(AUDIT_SIGNING_KEY_OBJECT, { where: { fingerprint: keyId }, limit: 1 });
-    const key = keyRowOf(rows[0]);
-    if (!key) return null;
-    try {
-      await this.openPrivateHalf(key);
-      return key.public_key;
-    } catch {
-      return null;
-    }
+    return trustedSigningKey(this.options.engine, this.options.crypto, keyId);
   }
 }
