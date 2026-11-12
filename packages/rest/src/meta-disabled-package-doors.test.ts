@@ -537,7 +537,7 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
     it.each(ORDERS.flatMap(([order, packages]) => [
         [`${order}, the disabled row saved first`, packages, [PKG, OTHER_PKG]],
         [`${order}, the enabled row saved first`, packages, [OTHER_PKG, PKG]],
-    ] as const))('%s: no package ships the name; the plain read and /layers serve the enabled row', async (_label, packages, saved) => {
+    ] as const))('%s: no package ships the name; the plain read, /layers and /published serve the enabled row', async (_label, packages, saved) => {
         const host = setup();
         for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
         for (const pkg of saved) await save(host, 'rows_only_dash', pkg);
@@ -547,9 +547,11 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         const layers = await host.layers('dashboard', 'rows_only_dash');
         expect([layers.status, layers.body?.overlay?.label, layers.body?.effective?.label], JSON.stringify(layers.body))
             .toEqual([200, 'healthy row', 'healthy row']);
+        const published = await host.published('dashboard', 'rows_only_dash');
+        expect([published.status, published.body?.label], JSON.stringify(published.body)).toEqual([200, 'healthy row']);
         const exact = await host.plainWith('dashboard', 'rows_only_dash', { package: PKG });
         expect(exact.status, JSON.stringify(exact.body)).toBe(404);
-        noDisabledTrace([read, layers, exact]);
+        noDisabledTrace([read, layers, published, exact]);
         // Re-enabled: two holders again, and /layers refuses naming both.
         host.registry.enablePackage(PKG);
         const again = await host.layers('dashboard', 'rows_only_dash');
