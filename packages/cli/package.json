@@ -57,6 +57,9 @@
     },
     "topicSeparator": " ",
     "topics": {
+      "audit": {
+        "description": "Verify the sealed audit ledger: recompute its signed checkpoints and report each row"
+      },
       "cloud": {
         "description": "Sign in to ObjectOS Cloud, and show or clear the stored identity"
       },

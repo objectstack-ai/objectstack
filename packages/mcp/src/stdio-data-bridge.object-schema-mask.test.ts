@@ -107,6 +107,9 @@ async function answersUnder(testCase: ObjectSchemaMaskCase | undefined) {
         described: await session.call('describe_object', { objectName: OBJECT }),
         listed: await session.call('list_objects', {}),
         validated: await session.call('validate_expression', { objectName: OBJECT, expression: 'record.name' }),
+        // The same principal's answers for a name nothing declares.
+        unknownDescribed: await session.call('describe_object', { objectName: 'no_such_object' }),
+        unknownValidated: await session.call('validate_expression', { objectName: 'no_such_object', expression: 'record.name' }),
       };
     } finally {
       await session.close();
@@ -142,8 +145,18 @@ describe('[ADR-0106] stdio describe_object / list_objects / validate_expression 
 
   for (const testCase of OBJECT_SCHEMA_MASK_CASES) {
     it(testCase.id, async () => {
-      const { described, listed, validated } = await answersUnder(testCase);
+      const { described, listed, validated, unknownDescribed, unknownValidated } = await answersUnder(testCase);
       const expected = testCase.expect;
+      if (expected.kind === 'absent') {
+        // [ruling record 6787890900] Answered exactly as a name nothing
+        // declares — the object's own name aside — and left out of the listing.
+        const asUnknown = (text: string) => text.split(OBJECT).join('no_such_object');
+        expect(described.isError).toBe(unknownDescribed.isError);
+        expect(asUnknown(described.text)).toBe(unknownDescribed.text);
+        expect(asUnknown(validated.text)).toBe(unknownValidated.text);
+        expect(listed.json.objects.map((o: any) => o.name)).not.toContain(OBJECT);
+        return;
+      }
       if (expected.kind === 'fault') {
         for (const answer of [described, listed, validated]) {
           expect(answer.isError, `${testCase.id}: refused, never served`).toBe(true);

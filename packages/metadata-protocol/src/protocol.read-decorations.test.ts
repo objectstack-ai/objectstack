@@ -544,7 +544,12 @@ describe('draft preview diagnostics do not judge the injected `_draft` badge (#7
  */
 describe('[#20101] a page saved without `type` stores and serves the declared default', () => {
     const DECLARED = (getMetadataTypeSchema('page') as any).shape.type.parse(undefined);
-    const typelessPage = (name: string) => ({ name, label: 'Invoice', object: 'crm_invoice' });
+    // It places a component: a record page (the declared default) that
+    // places none is refused at parse.
+    const typelessPage = (name: string) => ({
+        name, label: 'Invoice', object: 'crm_invoice',
+        regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
+    });
     const rowOf = (rows: Map<string, Row>, name: string, state = 'active') =>
         Array.from(rows.values()).find((r) => r.name === name && r.state === state)!;
 

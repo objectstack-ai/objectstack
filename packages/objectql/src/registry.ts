@@ -90,6 +90,9 @@ import {
   BARE_NAME_ONE_HOLDER_TYPES,
   bareNameHoldersMeet,
   declaredBareNames,
+  declaredBundleMembers,
+  isBundleAdditionPair,
+  type BundleHolding,
   declaredBuiltInBoundActions,
   describeBareNameHolder,
   handlerOwnerPackageId,
@@ -4991,13 +4994,19 @@ export class SchemaRegistry {
    * security catalog reads its own. A package holder counts only when it
    * meets the incoming package under {@link bareNameHoldersMeet}: for a type
    * narrowed to the namespace, a holder of another namespace does not
-   * (`incomingNamespace`, the namespace the incoming package declares).
+   * (`incomingNamespace`, the namespace the incoming package declares) —
+   * unless one holding is an addition to the other's bundle
+   * ({@link bareNameBundleAdditionMeets}; `incomingHolding`, read only then).
    */
   private bareNameHoldersOtherThan(
     type: BareNameOneHolderType,
     name: string,
     incomingPackageId: string,
-    opts: { builtIns: boolean; incomingNamespace: string | undefined },
+    opts: {
+      builtIns: boolean;
+      incomingNamespace: string | undefined;
+      incomingHolding?: () => BundleHolding | undefined;
+    },
   ): BareNameHolder[] {
     if (!this.bareNameHoldersSealed) return [];
     const packages = this.bareNamePackageHolders(type, name);
@@ -5005,11 +5014,66 @@ export class SchemaRegistry {
     const found = new Map<string, BareNameHolder>();
     if (opts.builtIns && BUILT_IN_BARE_NAMES[type].has(name)) found.set(bareNameHolderKey({ kind: 'built-in' }), { kind: 'built-in' });
     for (const packageId of packages) {
-      if (!bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId))) continue;
+      if (
+        !bareNameHoldersMeet(type, opts.incomingNamespace, this.bareNameHolderNamespace(packageId), name)
+        && !this.bareNameBundleAdditionMeets(type, name, opts.incomingHolding, packageId)
+      ) continue;
       const holder: BareNameHolder = { kind: 'package', packageId };
       found.set(bareNameHolderKey(holder), holder);
     }
     return [...found.values()];
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] `packageId`'s holding of the bundled `(type, name)`
+   * as the registry holds it — the members its composite group and its bound
+   * overlays hold ({@link bundleMembersHeldBy}) and its declared dependency
+   * closure — or `undefined` for a type that is no bundle.
+   */
+  private registeredBundleHolding(type: BareNameOneHolderType, name: string, packageId: string): BundleHolding | undefined {
+    const disc = ITEM_KEY_DISCRIMINATORS[type];
+    if (!disc || !isBareNameRegistryType(type)) return undefined;
+    const collection = this.metadata.get(type) ?? new Map<string, any>();
+    const members = this.bundleMembersHeldBy(type, collection, name, packageId, new Set(this.compositeHoldersOf(collection, name)), disc);
+    return { packageId, members, reach: new Set(packageDependencyClosure(packageId, this)?.dependencies ?? []) };
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] Do two package holders of a bundled name meet
+   * because one holding is an ADDITION to the other's bundle
+   * ({@link isBundleAdditionPair}) — whatever their namespaces, so a type
+   * narrowed to the namespace keeps refusing a dependent's added member as
+   * it did? `false` for a type that is no bundle, or when the incoming
+   * holding cannot be read.
+   */
+  private bareNameBundleAdditionMeets(
+    type: BareNameOneHolderType,
+    name: string,
+    incomingHolding: (() => BundleHolding | undefined) | undefined,
+    holderPackageId: string,
+  ): boolean {
+    if (!ITEM_KEY_DISCRIMINATORS[type] || !incomingHolding) return false;
+    const incoming = incomingHolding();
+    const holder = this.registeredBundleHolding(type, name, holderPackageId);
+    return incoming !== undefined && holder !== undefined && isBundleAdditionPair(incoming, holder);
+  }
+
+  /**
+   * [ADR-0150 D9, #31699] The holding of the bundled `(type, name)` a manifest
+   * brings to the package door: the members it declares
+   * ({@link declaredBundleMembers}), and the closure its declared dependencies
+   * reach — each one and its own declared closure, read from the registry, as
+   * the walk would read the package once installed.
+   */
+  private declaredBundleHolding(manifest: ObjectStackManifest, packageId: string, type: BareNameOneHolderType, name: string): BundleHolding | undefined {
+    if (!ITEM_KEY_DISCRIMINATORS[type] || !isBareNameRegistryType(type)) return undefined;
+    const reach = new Set<string>();
+    for (const dep of declaredDependencyIds(manifest)) {
+      reach.add(dep);
+      for (const transitive of packageDependencyClosure(dep, this)?.dependencies ?? []) reach.add(transitive);
+    }
+    reach.delete(packageId);
+    return { packageId, members: declaredBundleMembers(manifest, type, name), reach };
   }
 
   /**
@@ -5033,7 +5097,11 @@ export class SchemaRegistry {
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, { builtIns: true, incomingNamespace })) {
+      for (const existingHolder of this.bareNameHoldersOtherThan(type, name, selfId, {
+        builtIns: true,
+        incomingNamespace,
+        incomingHolding: () => this.declaredBundleHolding(manifest, selfId, type, name),
+      })) {
         conflicts.push({
           type,
           name,
@@ -5176,7 +5244,9 @@ export class SchemaRegistry {
           const namespace = this.bareNameHolderNamespace(packageId);
           const first = packages
             .slice(0, index)
-            .find((earlier) => bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier)));
+            .find((earlier) =>
+              bareNameHoldersMeet(type, namespace, this.bareNameHolderNamespace(earlier), name)
+              || this.bareNameBundleAdditionMeets(type, name, () => this.registeredBundleHolding(type, name, packageId), earlier));
           if (first === undefined) return;
           conflicts.push({
             type, name, incomingPackageId: packageId, existingHolder: { kind: 'package', packageId: first },
@@ -8063,6 +8133,14 @@ export class SchemaRegistry {
       const holders = this.bareNameHoldersOtherThan(type, baseName, packageId, {
         builtIns: false,
         incomingNamespace: this.bareNameHolderNamespace(packageId),
+        // [#31699] The incoming holding: what the package already holds of the
+        // bundle, and the member this registration adds.
+        incomingHolding: () => {
+          const held = this.registeredBundleHolding(type, baseName, packageId);
+          const disc = ITEM_KEY_DISCRIMINATORS[type];
+          if (!held || !disc) return held;
+          return { ...held, members: new Set([...held.members, discriminatorValue(item, disc.field) || disc.canonical]) };
+        },
       });
       if (holders.length > 0) {
         const rename = this.bareNameRenameFor(packageId, baseName);
@@ -8756,6 +8834,11 @@ export class SchemaRegistry {
    * one package's item never shadows another package's same-named item, which
    * is the one difference from {@link getItem}'s bare-slot-first answer.
    *
+   * A paired `<base>.custom` row that declares another holder as the base it
+   * customizes (`overrides.package`, ADR-0146 D2; the App's pair shared by
+   * every package of the App) is that holder's, never the App's: the App's
+   * address skips it and falls to the App's own item (#31699, epic ruling).
+   *
    * @param member - As on {@link getItem}: one bundle member, for a type whose
    *   identity is a pair; omitted, the canonical member first.
    */
@@ -8764,7 +8847,8 @@ export class SchemaRegistry {
     if (!collection) return undefined;
     const holders = new Set(this.compositeHoldersOf(collection, name));
     const bound = this.bareSlotEntriesOf(type, collection, name)
-      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId);
+      .filter(({ item }) => this.overlaySlotBinding(item, name, collection, holders) === packageId
+        && !pairRowDeclaresAnotherHolder(item, packageId, holders));
     const disc = ITEM_KEY_DISCRIMINATORS[type];
     if (disc) {
       const { local } = collectBundle(collection, name, disc, packageId);
@@ -10663,4 +10747,19 @@ export class SchemaRegistry {
     this._objectRevision += 1;
     this.log('[Registry] Reset complete');
   }
+}
+
+/**
+ * [#31699, epic ruling on the App pair's plain slot] Whether `item`, a row of a
+ * paired `<base>.custom` package that binds to `packageId` (its base), declares
+ * another holder of the name as the base it customizes (`overrides.package`,
+ * ADR-0146 D2): that holder's member, never `packageId`'s.
+ */
+function pairRowDeclaresAnotherHolder(item: unknown, packageId: string, holders: ReadonlySet<string>): boolean {
+  const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
+  if (typeof stamped !== 'string' || customizationBasePackageId(stamped) === null) return false;
+  const declaration = (item as { overrides?: unknown }).overrides;
+  if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) return false;
+  const declared = (declaration as { package?: unknown }).package;
+  return typeof declared === 'string' && declared !== '' && declared !== packageId && holders.has(declared);
 }
