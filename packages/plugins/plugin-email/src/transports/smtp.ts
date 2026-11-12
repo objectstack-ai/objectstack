@@ -85,7 +85,8 @@ export interface SmtpTransportOptions {
    * Escape hatch: raw nodemailer SMTP options merged **last** (e.g.
    * `{ pool: true }`, `{ tls: { rejectUnauthorized: false } }`, or forcing
    * `{ secure: true }` on a non-standard port). Use sparingly — anything
-   * routinely needed belongs on this interface.
+   * routinely needed belongs on this interface. `disableFileAccess` and
+   * `disableUrlAccess` are always `true`; a value given here does not change them.
    */
   transportOptions?: Record<string, unknown>;
   /**
@@ -214,6 +215,18 @@ interface NodemailerTransporterLike {
   close?(): void;
 }
 
+/**
+ * A message's text, html and attachment content reach this transport only as
+ * a string or as bytes, so the transport never reads a server file or fetches
+ * a URL on a message's behalf. Set on every transport this class builds and
+ * on every message it hands over, after `transportOptions`, and not
+ * configurable.
+ */
+const SMTP_CONTENT_ACCESS_CLOSED = Object.freeze({
+  disableFileAccess: true,
+  disableUrlAccess: true,
+});
+
 const DEFAULT_PORT = 587;
 const IMPLICIT_TLS_PORT = 465;
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -279,6 +292,8 @@ export class SmtpTransport implements IEmailTransport {
       socketTimeout: timeout,
       ...(user ? { auth: { user, pass: this.opts.password ?? '' } } : {}),
       ...(this.opts.transportOptions ?? {}),
+      // After `transportOptions`, so the escape hatch cannot reopen them.
+      ...SMTP_CONTENT_ACCESS_CLOSED,
       // Last, so nothing above can replace the host's connect policy.
       ...(connect !== undefined
         ? { getSocket: (request: SmtpConnectRequest, callback: NodemailerSocketCallback) => admitOnlyWithSocket(connect, request, callback) }
@@ -339,6 +354,9 @@ export class SmtpTransport implements IEmailTransport {
       from: message.from,
       to: message.to,
       subject: message.subject,
+      // On the message as well as on the transport, so the rule holds
+      // whichever transport `transportOptions` selects.
+      ...SMTP_CONTENT_ACCESS_CLOSED,
     };
     if (message.text !== undefined) mail.text = message.text;
     if (message.html !== undefined) mail.html = message.html;

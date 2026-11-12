@@ -50,6 +50,7 @@ import { ConsoleLayout } from '../layout/ConsoleLayout.js';
 import { CommandPalette } from '../chrome/CommandPalette.js';
 import { ErrorBoundary } from '../chrome/ErrorBoundary.js';
 import { LoadingScreen } from '../chrome/LoadingScreen.js';
+import { BackToHomeButton, NotFoundState } from '../components/NotFoundState.js';
 import { RedirectWithSplash } from '../chrome/RedirectWithSplash.js';
 import { ObjectView } from '../views/ObjectView.js';
 // objectui#13052 — on its own line: the line above is the eager-walk control
@@ -1249,12 +1250,8 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // The way home itself is shared with the app-missing screen below
   // (objectui#13122): that screen returns above `ConsoleLayout` too, so a Retry
   // alone left a stale bookmark or an uninstalled app's link a full-screen dead
-  // end. One button, one copy key, one navigation for every screen that owes it.
-  const renderBackHomeButton = (testId: string) => (
-    <Button onClick={() => navigate(homePath)} data-testid={testId}>
-      {t('empty.appAccessDeniedHome', { defaultValue: 'Back to home' })}
-    </Button>
-  );
+  // end. One button, one copy key, one navigation for every screen that owes it:
+  // `<BackToHomeButton>`, the way home of the shared `NotFoundState` as well.
 
   // One screen for both branches that draw a `denied` verdict below.
   const renderAppAccessDenied = () => (
@@ -1269,7 +1266,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               'This app exists, but your account is not authorized to open it. Ask an administrator to grant you access.',
           })}
         </EmptyDescription>
-        <div className="mt-4">{renderBackHomeButton('app-access-denied-home')}</div>
+        <div className="mt-4"><BackToHomeButton testId="app-access-denied-home" variant="default" to={homePath} /></div>
       </Empty>
     </div>
   );
@@ -1336,18 +1333,20 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
               }),
             };
     return (
-      <div className="h-screen flex items-center justify-center">
-        <Empty data-testid={verdictScreen.testId}>
-          <EmptyTitle>{verdictScreen.title}</EmptyTitle>
-          <EmptyDescription>{verdictScreen.description}</EmptyDescription>
-          <div className="mt-4 flex items-center justify-center gap-2">
+      <NotFoundState
+        testId={verdictScreen.testId}
+        className="h-screen p-0"
+        title={verdictScreen.title}
+        description={verdictScreen.description}
+        actions={
+          <>
             <Button onClick={() => setMissingRecheckRun(null)} data-testid={`${verdictScreen.testId}-retry`}>
               {t('common.retry', { defaultValue: 'Retry' })}
             </Button>
-            {renderBackHomeButton(`${verdictScreen.testId}-home`)}
-          </div>
-        </Empty>
-      </div>
+            <BackToHomeButton testId={`${verdictScreen.testId}-home`} variant="default" to={homePath} />
+          </>
+        }
+      />
     );
   }
 
@@ -2122,26 +2121,30 @@ function ShorthandRecordRedirect() {
  * Visible "not found" fallback rendered for any unmatched URL inside the
  * console app shell. Previously these URLs produced a fully blank content
  * area with no indication that anything had gone wrong — users would think
- * the app had crashed. An explicit Empty state with a "back to app home"
- * action turns an opaque failure into a recoverable one.
+ * the app had crashed. The shared `NotFoundState` with two ways out, back in
+ * the history and to Home, turns an opaque failure into a recoverable one.
  */
 function RouteNotFound() {
   const navigate = useNavigate();
+  const homePath = useHomePath();
   const { t } = useObjectTranslation();
   return (
-    <div className="flex h-full w-full items-center justify-center p-8">
-      <Empty>
-        <EmptyTitle>{t('console.notFound.title', { defaultValue: 'Page not found' })}</EmptyTitle>
-        <EmptyDescription>
-          {t('console.notFound.description', { defaultValue: 'The URL you followed does not match any view in this app.' })}
-        </EmptyDescription>
-        <div className="mt-4">
-          <Button variant="outline" onClick={() => navigate(-1)}>
+    <NotFoundState
+      testId="route-not-found"
+      className="p-8"
+      title={t('console.notFound.title', { defaultValue: 'Page not found' })}
+      description={t('console.notFound.description', {
+        defaultValue: 'The URL you followed does not match any view in this app.',
+      })}
+      actions={
+        <>
+          <Button variant="outline" onClick={() => navigate(-1)} data-testid="route-not-found-back">
             {t('console.notFound.back', { defaultValue: 'Go back' })}
           </Button>
-        </div>
-      </Empty>
-    </div>
+          <BackToHomeButton testId="route-not-found-home" to={homePath} />
+        </>
+      }
+    />
   );
 }
 
