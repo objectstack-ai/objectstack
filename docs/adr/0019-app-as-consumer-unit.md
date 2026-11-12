@@ -67,6 +67,12 @@ word "package" is retained as an internal / developer / control-plane term (the
 ADR-0003 artifact) but is **never surfaced to consumers**. A Marketplace
 **listing is an App listing**.
 
+> *Note 2026-11-12 (D3 amendment note).* D1's rule is not amended. What a user
+> downloads and uninstalls is still exactly one App, the app package of the
+> table under D3, and a listing is still an App listing. Of D1's three verbs,
+> "opens" reads differently for a suite: a user opens an app, and a suite may
+> offer more than one.
+
 ### D2 — Only `type: app` is consumer-installable; everything else is invisible
 
 The package `type` enum is unchanged, but a semantic split is layered over it:
@@ -83,7 +89,7 @@ or installed by a consumer. The consumer Marketplace filters to `type: app` via
 
 ### D3 — ~~Suites fold into a single App~~ A suite may surface several apps, at most one per package (no aggregator above App; amended 2026-11-12)
 
-The "package contains N apps (suite)" shape is removed from the consumer model.
+The "package contains N apps ~~(suite)~~" shape is removed from the consumer model.
 ~~A vertical solution that today aggregates many plugins MUST resolve to **one
 App** whose internal plugins are invisible.~~ *Reversed 2026-11-12 — see the
 amendment note at the end of this section.* A developer who genuinely wants
@@ -110,8 +116,8 @@ as a wrapper that surfaces N apps.
 > - Reversed: the heading's "Suites fold into a single App" and the struck sentence. A vertical
 >   solution is no longer folded into one app.
 > - The first sentence stands, per package: a package of a suite that holds N apps is still the
->   removed shape. That sentence calls the shape a suite. The suite of the table below is
->   several packages, each with at most one app.
+>   removed shape. Its label "(suite)" is struck. From this amendment the word names the last row
+>   of the table below: one install of several packages, each with at most one app.
 > - The last sentence stands: the iWork route.
 > - D1 (the consumer listing is an app listing) and D2 (only `type: app` is consumer-installable)
 >   are unchanged: one marketplace listing still installs one app package. A suite is no second
@@ -119,8 +125,9 @@ as a wrapper that surfaces N apps.
 > - D4 is not amended.
 >
 > **Why one app per package**, recorded as reasons. Each was measured on 18.3.0 for #32585. On
-> `main` at `874166b6`, reasons 1 and 3 were read from the code again, and reason 2 and the
-> single-app rule were probed once, not kept as a test.
+> `main` at `8bfbc4ed`, reasons 1 and 3 were read from the code again, and reason 2 and the
+> single-app rule were probed once, not kept as a test. Reason 2 marks each of its statements
+> "(probed)" or "(read)".
 >
 > 1. **The Console addresses an app by its package id.**
 >    [ADR-0048](./0048-cross-package-metadata-collision.md) §3.1 makes the package id the route
@@ -131,16 +138,30 @@ as a wrapper that surfaces N apps.
 >    The server reads the key the same way. Read by its package id, a package that holds more than
 >    one app answers as absent:
 >    `packages/metadata-protocol/src/protocol-package-scope.ts#resolveAppPackageIdKey`.
-> 2. **An app may not name another package's object.** `defineStack` refuses an app's own
->    navigation entry whose object its package does not define, and still refuses it when a sibling
->    package of the same artifact defines that object:
+> 2. **An app may not name another package's object, where its own package defines objects.**
+>    Under the strict parse, the default, and in a package that defines at least one object,
+>    `defineStack` refuses an app's own navigation entry that names an object the package does
+>    not define. It still refuses the entry when a sibling package of the same artifact defines
+>    that object (both probed):
 >    `packages/spec/src/stack.zod.ts#validateCrossReferences`, `#DefineStackOptions.artifactObjects`.
 >    [ADR-0130](./0130-release-artifact-as-co-ownership-boundary.md) §1.5 measured the refusal and
 >    named the seam: "navigation crosses only through contributions". #32585 cites HotCRM's sales
->    app for it, `hotcrm:src/sales/apps/crm.app.ts`. An app housed apart from its objects is a
->    shell that only contributions can fill. One measured exception: an entry that declares
->    `requiresObject` is not judged by that check. The key is the capability gate that hides an
->    entry whose object the runtime has not registered (`packages/spec/src/ui/app.zod.ts#requiresObject`).
+>    app for it, `hotcrm:src/sales/apps/crm.app.ts`. So an app housed in a package that defines
+>    objects, but not the objects it shows, is a shell that only contributions, or entries gated
+>    by `requiresObject`, can fill. The build holds no more than that. Two shapes pass the check:
+>
+>    - **In a package that defines no object the check does not run** (probed).
+>      `validateCrossReferences` returns before it reads any navigation (read), so an app housed
+>      there may name any object, whether or not a package defines it, and builds. The leniency
+>      is deliberate and pinned (read): such a stack's references "may be served by a plugin that
+>      is not in this composition at all"
+>      (`packages/spec/src/stack.zod.ts#collectArtifactCrossReferenceErrors`), and
+>      `packages/spec/src/stack.test.ts` pins the early return.
+>    - **An entry that declares `requiresObject` is not judged** (probed). The key is the
+>      capability gate that hides an entry whose object the runtime has not registered
+>      (`packages/spec/src/ui/app.zod.ts#requiresObject`).
+>
+>    Outside the strict parse nothing is judged: `strict: false` skips the pass (probed).
 > 3. **Disabling a module removes the app that module owns.** A module of an installed app
 >    package is the one read-only package an administrator may switch off, and a disabled
 >    package's items leave the list read and answer as absent by name, its app among them, each
@@ -161,15 +182,18 @@ as a wrapper that surfaces N apps.
 >
 > Where this record writes "App" for the consumer unit, the thing listed, installed and
 > uninstalled (D1, D2, D4), that is the app package of this table. What a user opens is an app, and
-> a suite may offer more than one.
+> a suite may offer more than one. The text accepted before this amendment uses "suite" for one
+> package that contains several apps (Context, Out of scope, Consequences, Alternatives 1 and 2).
+> It is left as accepted, and from this amendment the word has the table's meaning.
 >
 > **Enforced today, and not yet.** `defineStack` refuses an app package that defines more than one
 > app, `STACK_SINGLE_APP_VIOLATION` (`packages/spec/src/stack.zod.ts#validateSingleApp`). That
 > function returns nothing for any other package type, so a module package that defines two apps
-> builds on `main` at `874166b6` (`packages/spec/src/stack.test.ts` pins the same answer for a
+> builds on `main` at `8bfbc4ed` (`packages/spec/src/stack.test.ts` pins the same answer for a
 > `driver` package). For modules the rule is declared and not yet enforced. The check is
 > [#32586](https://github.com/objectstack-ai/objectstack/issues/32586), which waits for this
-> amendment.
+> amendment. The build does not require an app to sit in the package of the objects it shows.
+> That placement is argued by reasons 2 and 3, not checked.
 >
 > **Not decided here.** Several apps in one `type: app` package (option C) is not ruled, and the
 > three reasons above contradict it. Per-position app visibility and a per-position default app
