@@ -24,9 +24,12 @@
  *     derived from the table as the door derives it (`rowAcceptsMultiValue`):
  *     a row that refuses any multi-option type refuses the declaration too.
  *     Today that moves `count_distinct` alone (the other value rows accept no
- *     multi-capable type, and `count` accepts every type), the same reading
- *     `validate-dataset-measure-aggregates.ts`' `acceptsDeclaration` gives a
- *     dataset measure.
+ *     multi-capable type, and `count` accepts every type).
+ *
+ * A third surface asks the same verdict: a dataset measure and an
+ * `analyticsCubes` measure (`validate-dataset-measure-aggregates.ts`,
+ * `measure-aggregate-field-type-refused`) import it and keep no copy, so a
+ * table change moves the three surfaces together.
  *
  * What neither surface judges is the door's own "cannot answer": no declared
  * type, or a type outside `FieldType` (a driver-internal alias). Callers ask
@@ -78,6 +81,11 @@ export function aggregateAcceptsDeclaration(fn: string, shape: AggregatedFieldSh
   return !(isMultiValueField({ type: shape.type, multiple: shape.multiple === true }) && !rowAcceptsMultiValue(fn));
 }
 
+/** Every table function that accepts a field declared as `shape`, in the table's order — never empty (`count` accepts every type). */
+export function aggregatesAcceptingDeclaration(shape: AggregatedFieldShape): string[] {
+  return TABLE_FUNCTIONS.filter((candidate) => aggregateAcceptsDeclaration(candidate, shape));
+}
+
 /** The declaration as the words say it: the type, and the flag when the field carries it. */
 export function declaredAs(shape: AggregatedFieldShape): string {
   return shape.multiple === true ? `\`${shape.type}\` with \`multiple: true\`` : `\`${shape.type}\``;
@@ -113,7 +121,7 @@ export function refusedAggregateRemedy(
 ): string {
   const virtual = virtualFieldAggregateRemedy(fn, shape.type);
   if (virtual !== undefined) return virtual;
-  const accepted = TABLE_FUNCTIONS.filter((candidate) => aggregateAcceptsDeclaration(candidate, shape));
+  const accepted = aggregatesAcceptingDeclaration(shape);
   const its = shape.multiple === true ? `${declaredAs(shape)} declaration` : `${declaredAs(shape)} type`;
   return `${retargetLead(fn, spell(fn))}, or aggregate "${field}" with one its ${its} accepts: `
     + `${accepted.map(spell).join(', ')}.`;

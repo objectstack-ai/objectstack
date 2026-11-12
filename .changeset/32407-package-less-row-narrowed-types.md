@@ -20,7 +20,7 @@ A package-less item (the environment's item, or a `sys_metadata` row bound to no
 3. The rule follows the narrowing: every type in `NAMESPACE_SCOPED_BARE_NAME_TYPES` (`@objectstack/core`) is judged from the change that narrows it, whether or not its readers are wired yet (`judgesPackageLessRows`, exported).
 4. `os migrate stored-references` lists the package-less rows of those types too, so the rows refused above are named with every candidate.
 
-A stored package-less row of an action a package ships is still declined at each holder's plain exact read (ADR-0126 Regime C), so the plain read keeps serving the holder's own action there.
+A stored package-less row of an action a package ships, while it is only stored (not hydrated into the registry), is still declined at each holder's plain exact read (ADR-0126 Regime C), so the plain read keeps serving the holder's own action there. Once such a row is hydrated into the registry it is the environment's item of item 1 above, and refused there.
 
 No first-party composition has two packages holding one action name, so no answer changes in this repository.
 
