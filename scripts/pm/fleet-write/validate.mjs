@@ -2312,7 +2312,7 @@ export async function selfTest() {
     `✓ fleet-write/validate self-test: ${cases.length} cases pass across ${declared.length} batteries — a closed envelope, one organization, ` +
       'closed keys per op with typed values, the platform\'s own client_payload ceilings pinned with their source, no row that can reach a refused family, ' +
       'a token list of ONE repository for every op but transfer, whose second is one governed target, and actions write reaching one dispatch call on one allowlisted file ' +
-      "with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards — or one failed-jobs re-run of a run named by its id alone, " +
+      "on the one repository that lists it, with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards, or cloud's staging deploy with apps affected alone — or one failed-jobs re-run of a run named by its id alone, " +
       'each minted for its stroke alone, every other actions path still refused, and an issue-hierarchy link named by two different issue numbers, ' +
       'fenced on its two cards and landed only when the parent\'s list reads the child back, the payload read from the event file and never a step\'s env, ' +
       'and five advisory rows — a report, a draft, an advisory\'s collaborators, its versions and its state, each alone in its stroke — nothing echoed from a refusal, versions entries closed and judged by value, published reached by advisory_state alone, ' +

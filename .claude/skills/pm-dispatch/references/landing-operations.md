@@ -62,7 +62,6 @@
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`,判定读全文 ⛔ 不 tail/head;四件套照 SKILL.md。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
 - 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
-- ready + 全绿 ≠ 已入队:队列从不主动拉 PR,入队是显式动作。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `platform-readings.md`。
 - ③ PR 碰 `.github/workflows/**`:令牌常驻 `workflows: write`(裁决评论 6104822731),仍拒即授权漂移。
@@ -71,6 +70,7 @@
 - 每次合并后重拉一次车道盘点与预期状态对账,⛔ 不留给下轮巡检。
 - 取 open 卡清单对照预期 diff:预期之外从 open 消失的,就是被闭合关键词静默误关的卡。
 - 落地后再核一次落地判据本身:队列的合并同样走 os-regen,A 的静默吞并一样能发生。
+- 验收要 staging 读数:合并后经中继派 cloud `deploy-staging.yml` 一次,同合并仅一次,卡记运行号。
 - MERGED 不是终点:发版后义务见 `release-aftercare.md`。
 - PR 开出至 MERGED,每看一眼(唤醒/巡检/报告前)同读检查与 `mergeable_state`;`unknown` 即重读。
 - `dirty` ⇒ 当即合 `origin/main` 推新提交,⛔ 不等冲突通知;未见非 `dirty` ⛔ 不报无需你做。
