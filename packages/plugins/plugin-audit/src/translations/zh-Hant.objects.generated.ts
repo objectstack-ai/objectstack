@@ -191,6 +191,10 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
         label: "中繼資料",
         help: "附加內容的 JSON 序列化結果"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "變更欄位",
         help: "所記錄變更的鍵集合：對於更新，為其記錄的舊值／新值所提及的每個欄位；其他列為空。由平台在寫入時標記；回傳時僅保留讀者可見的欄位。NULL 表示該列尚未標記（請執行 `os migrate activity-changed-fields`）。"

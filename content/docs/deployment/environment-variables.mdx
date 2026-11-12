@@ -175,6 +175,7 @@ Link previews read the same values. The console document served at `/_console/` 
 | `OS_EMAIL_SMTP_SECURE` | boolean | `true` | Require TLS. On port `465` that means implicit TLS; on any other port a **required** STARTTLS upgrade (a server that will not upgrade fails the send instead of leaking credentials in the clear). `false` connects in the clear and upgrades only when STARTTLS is offered. |
 | `OS_EMAIL_SMTP_USER` | string | — | SMTP AUTH username. Omit for servers that accept unauthenticated relay. |
 | `OS_EMAIL_SMTP_PASSWORD` | string | — | SMTP AUTH password. |
+| `OS_EMAIL_APP_SEND_HOURLY_LIMIT` | number | `200` | The most messages an organization's mail log may record in one hour before a script body's `ctx.email.send` is refused with `429 RATE_LIMIT_EXCEEDED`. A whole number, `0` or more; any other value fails the call. See [Email service](/docs/kernel/runtime-services/email-service#from-a-script-body). |
 
 > SMTP delivery ships in `@objectstack/plugin-email` (ADR-0012) and is
 > implemented with `nodemailer`, imported lazily so deployments that never

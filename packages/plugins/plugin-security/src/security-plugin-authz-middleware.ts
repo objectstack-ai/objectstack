@@ -543,8 +543,8 @@ export function registerAuthzMiddleware(
     assertAppAutomationAppendOnlyWriteAllowed(opCtx, (object) =>
       typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined,
     );
-    // The same elevation's insert into an append-only object is accepted for
-    // now and said once, naming the two doors that replace it.
+    // The same elevation's insert into an append-only object is told, once,
+    // that it is deprecated, naming the two doors that replace it.
     warnAppAutomationAppendOnlyInsert(
       opCtx,
       (object) => (typeof ql?.getSchema === 'function' ? ql.getSchema(object) : undefined),

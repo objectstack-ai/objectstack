@@ -191,6 +191,10 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
         label: "Métadonnées",
         help: "Contexte supplémentaire sérialisé en JSON"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "Champs modifiés",
         help: "L’ensemble des clés du changement enregistré : pour une mise à jour, chaque champ nommé par ses anciennes/nouvelles valeurs ; vide pour toute autre ligne. Apposé par la plateforme à l’écriture ; servi restreint aux champs servis au lecteur. NULL signifie que la ligne n’est pas encore marquée (exécutez `os migrate activity-changed-fields`)."

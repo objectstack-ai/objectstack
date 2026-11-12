@@ -28,8 +28,9 @@
  * `@objectstack/core`) stamp the sending user and the organization; the
  * sender is the configured address, with a display name naming the calling
  * user beside the organization; at most `BODY_MAIL_RECIPIENT_LIMIT` recipients
- * per message (the schema), and at most {@link appMailHourlyLimit} caller-sent
- * messages per organization per hour.
+ * per message across `to`, `cc` and `bcc` (each slot by the schema, the sum
+ * here); and no send while the organization's mail log already records
+ * {@link appMailHourlyLimit} messages in the last hour.
  *
  * Timeline: the entry is written by the activity feed's owner
  * (`appendAppActivity` on the `audit` service, `@objectstack/plugin-audit`),
@@ -38,6 +39,7 @@
  */
 
 import {
+  BODY_MAIL_RECIPIENT_LIMIT,
   BodyActivityAppendInputSchema,
   BodyMailSendInputSchema,
   type BodyActivityAppendInput,
@@ -77,8 +79,8 @@ export interface BodyDoors {
 export const DEFAULT_APP_MAIL_HOURLY_LIMIT = 200;
 
 /**
- * The most messages caller-sent mail may record per organization in one hour
- * before `ctx.email.send` refuses: `OS_EMAIL_APP_SEND_HOURLY_LIMIT`, else
+ * The most messages an organization's mail log may record in one hour before
+ * `ctx.email.send` refuses another: `OS_EMAIL_APP_SEND_HOURLY_LIMIT`, else
  * {@link DEFAULT_APP_MAIL_HOURLY_LIMIT}. Counted on the mail log, so every
  * node of a cluster sees the same count.
  */
@@ -119,6 +121,12 @@ function parseInput<T>(
     .slice(0, 5)
     .map((i) => `${i.path.length > 0 ? i.path.map(String).join('.') + ': ' : ''}${i.message}`);
   throw doorError('VALIDATION_ERROR', `${door} was called with input it does not take: ${lines.join('; ')}`);
+}
+
+/** The number of addresses one recipient slot names. */
+function recipientCount(value: unknown): number {
+  if (value === undefined) return 0;
+  return Array.isArray(value) ? value.length : 1;
 }
 
 /**
@@ -206,7 +214,6 @@ async function refuseOverHourlyLimit(ql: any, caller: BodyDoorCaller): Promise<v
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const where: Record<string, unknown> = {
     created_at: { $gte: since },
-    sent_by: { $ne: null },
     ...(caller.organizationId ? { organization_id: caller.organizationId } : {}),
   };
   if (!ql || typeof ql.count !== 'function') {
@@ -216,7 +223,7 @@ async function refuseOverHourlyLimit(ql: any, caller: BodyDoorCaller): Promise<v
   if (typeof sent === 'number' && sent >= limit) {
     throw doorError(
       'RATE_LIMIT_EXCEEDED',
-      `ctx.email.send: this organization has sent ${sent} messages in the last hour, at its limit of ${limit}. ` +
+      `ctx.email.send: this organization's mail log records ${sent} messages in the last hour, at the limit of ${limit}. ` +
         'Try again later; an operator raises the limit with OS_EMAIL_APP_SEND_HOURLY_LIMIT.',
     );
   }
@@ -231,6 +238,13 @@ export function buildBodyDoors(opts: BodyDoorOptions): BodyDoors {
     email: {
       async send(input: unknown) {
         const message = parseInput<BodyMailSendInput>(BodyMailSendInputSchema as any, input, 'ctx.email.send');
+        const recipients = recipientCount(message.to) + recipientCount(message.cc) + recipientCount(message.bcc);
+        if (recipients > BODY_MAIL_RECIPIENT_LIMIT) {
+          throw doorError(
+            'VALIDATION_ERROR',
+            `ctx.email.send: a message may name at most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across \`to\`, \`cc\` and \`bcc\`; this one names ${recipients}. Send it in smaller messages.`,
+          );
+        }
         const email = service<IEmailService>(getService, 'email');
         if (!email || typeof email.send !== 'function') {
           throw doorError('NOT_IMPLEMENTED', 'ctx.email.send: this deployment has no mail service.');

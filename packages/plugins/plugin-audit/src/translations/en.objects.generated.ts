@@ -191,6 +191,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadata",
         help: "JSON-serialized additional context"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "Changed Fields",
         help: "The key set of the recorded change: for an update, every field its recorded old/new values name; empty for every other row. Stamped by the platform at write time; served narrowed to the fields the reader is served. NULL means the row is not stamped yet (run `os migrate activity-changed-fields`)."

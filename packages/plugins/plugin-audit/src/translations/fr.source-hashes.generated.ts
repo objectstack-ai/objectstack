@@ -18,6 +18,8 @@
  */
 
 export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
+  "objects.sys_activity.fields.origin.help": "dbf1292dfdb3f413",
+  "objects.sys_activity.fields.origin.label": "f8071c8dc31952ae",
   "objects.sys_activity.fields.type.label": "901bb552898b2cab",
   "objects.sys_activity.fields.url.label": "2203b0b9f72534f7",
   "objects.sys_audit_amendment.description": "593f7118f80bd85d",

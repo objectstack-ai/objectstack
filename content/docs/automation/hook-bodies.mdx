@@ -105,6 +105,8 @@ The script sees only what the surrounding `ctx` object exposes:
 | `ctx.title('<lookup field>')` | The related record's title, through a lookup / master_detail / user / tree column. Costs one `findOne` (plus the lookups that record's own title reads through). | `api.read` |
 | `ctx.crypto.randomUUID()` | UUID generation. | `crypto.uuid` |
 | `ctx.log.{info,warn,error}` | Structured logging. | `log` |
+| `ctx.email.send({ to, subject, text })` | Sends mail through the mail service, from the configured sender, as the calling user and under the caller's organization. See [Email service](/docs/kernel/runtime-services/email-service#from-a-script-body). | `email.send` |
+| `ctx.activity.append({ object, recordId, type, summary })` | Adds an entry to a record's activity timeline. The platform stamps the calling user as the actor and the package and body as the entry's `origin`. `type` may not be one only the platform records (`SYS_ACTIVITY_PLATFORM_TYPES`), and the record must be one the caller can read. | `activity.append` |
 | `ctx.connector(name).<method>(...)` _(planned)_ | Outbound HTTP / SaaS calls. **Not yet wired into the sandbox** — ships with the separate Connector spec. | (separate Connector spec) |
 
 ### Write provenance — `ctx.provenance`

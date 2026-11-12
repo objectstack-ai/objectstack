@@ -279,12 +279,11 @@ export function assertAppAutomationAppendOnlyWriteAllowed(
 const appendOnlyInsertWarned = new Set<string>();
 
 /**
- * The notice for an insert into an append-only object from app-authored
- * automation's system elevation (the elevation {@link elevationSource} names):
- * accepted for now, and to be refused when the insert half of the rule lands.
- * Said once per elevation kind and object per process, at `warn`: the write
- * still lands, so nothing is lost today, and the line names the doors that
- * replace the insert. Answers the line it logged, or `undefined`.
+ * The deprecation notice for an insert into an append-only object from
+ * app-authored automation's system elevation (the elevation
+ * {@link elevationSource} names). Said once per elevation kind and object per
+ * process, at `warn`, naming the doors that replace the insert. Answers the
+ * line it logged, or `undefined`.
  */
 export function warnAppAutomationAppendOnlyInsert(
   opCtx: {
@@ -304,8 +303,8 @@ export function warnAppAutomationAppendOnlyInsert(
   if (appendOnlyInsertWarned.has(key)) return undefined;
   appendOnlyInsertWarned.add(key);
   const line =
-    `[Security] Deprecated: an insert into '${object}' from ${SUBJECT[source]} is accepted now and will be ` +
-    `refused in a coming release — '${object}' is append-only, written by the platform service that owns it. ` +
+    `[Security] Deprecated: inserting into '${object}' from ${SUBJECT[source]}. A coming release refuses it — ` +
+    `'${object}' is append-only, written by the platform service that owns it. ` +
     'Send mail with ctx.email.send (capability email.send) and add timeline entries with ctx.activity.append ' +
     '(capability activity.append) instead.';
   warn(line);

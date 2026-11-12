@@ -191,6 +191,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadatos",
         help: "Contexto adicional serializado en JSON."
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "Campos modificados",
         help: "El conjunto de claves del cambio registrado: para una actualización, cada campo que nombran sus valores antiguos/nuevos registrados; vacío para cualquier otra fila. La plataforma lo marca al escribir; se sirve reducido a los campos que se sirven al lector. NULL significa que la fila aún no está marcada (ejecute `os migrate activity-changed-fields`)."

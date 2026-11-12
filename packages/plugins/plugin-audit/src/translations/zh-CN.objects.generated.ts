@@ -191,6 +191,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "元数据",
         help: "附加上下文的 JSON 序列化内容"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "变更字段",
         help: "所记录变更的字段键集合:对于更新,为其记录的旧值/新值涉及的每个字段;其他行为空。由平台在写入时标记;仅返回读者有权查看的字段。NULL 表示该行尚未标记(请运行 `os migrate activity-changed-fields`)。"

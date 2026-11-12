@@ -191,6 +191,10 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadaten",
         help: "Zusätzlicher Kontext, als JSON serialisiert"
       },
+      origin: {
+        label: "Origin",
+        help: "The app code that added this entry through the activity door, as \"<package>/<kind>:<name>\" (for example \"com.acme.crm/action:send_email\"). Empty on an entry the platform recorded."
+      },
       changed_fields: {
         label: "Geänderte Felder",
         help: "Die Schlüsselmenge der erfassten Änderung: bei einer Aktualisierung jedes Feld, das die erfassten alten/neuen Werte nennen; bei jeder anderen Zeile leer. Von der Plattform beim Schreiben gesetzt; ausgeliefert nur mit den Feldern, die der Leser sehen darf. NULL bedeutet, dass die Zeile noch nicht gekennzeichnet ist (führen Sie `os migrate activity-changed-fields` aus)."

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { requiredOneOf } from '../shared/refinement-projection';
 
 /**
  * The two platform doors a sandboxed script body (a hook, action or job body)
@@ -30,13 +31,10 @@ const BodyMailAddressSchema = z.union([
   z.object({ name: z.string().optional(), address: z.string().min(1) }).strict(),
 ]);
 
-const BodyMailAddressesSchema = z.union([BodyMailAddressSchema, z.array(BodyMailAddressSchema).min(1)]);
-
-/** The number of addresses a recipient slot names. */
-function recipientCount(value: unknown): number {
-  if (value === undefined) return 0;
-  return Array.isArray(value) ? value.length : 1;
-}
+const BodyMailAddressesSchema = z.union([
+  BodyMailAddressSchema,
+  z.array(BodyMailAddressSchema).min(1).max(BODY_MAIL_RECIPIENT_LIMIT),
+]);
 
 /**
  * A record the body points at, by object name and record id. The door reads it
@@ -58,8 +56,10 @@ export type BodyDoorRecordRef = z.infer<typeof BodyDoorRecordRefSchema>;
  * The sender is the deployment's configured sender, and the door names the
  * calling user beside the organization in its display name; a reply goes to
  * `replyTo`. The message is recorded as sent by the calling user and under the
- * caller's organization. At most {@link BODY_MAIL_RECIPIENT_LIMIT} recipients
- * across `to`, `cc` and `bcc`, and at least one of `text` or `html`.
+ * caller's organization. At least one of `text` or `html`. At most
+ * {@link BODY_MAIL_RECIPIENT_LIMIT} recipients across `to`, `cc` and `bcc`
+ * together: each slot is held to that number here, and the door refuses a call
+ * whose three slots add up to more.
  */
 export const BodyMailSendInputSchema = z
   .object({
@@ -73,18 +73,9 @@ export const BodyMailSendInputSchema = z
     related: BodyDoorRecordRefSchema.optional().describe('The record the message is about'),
   })
   .strict()
-  .superRefine((value, ctx) => {
-    if (value.text === undefined && value.html === undefined) {
-      ctx.addIssue({ code: 'custom', message: 'A message needs a body: give `text`, `html`, or both.', path: ['text'] });
-    }
-    const count = recipientCount(value.to) + recipientCount(value.cc) + recipientCount(value.bcc);
-    if (count > BODY_MAIL_RECIPIENT_LIMIT) {
-      ctx.addIssue({
-        code: 'custom',
-        message: `A message may name at most ${BODY_MAIL_RECIPIENT_LIMIT} recipients across \`to\`, \`cc\` and \`bcc\`; this one names ${count}. Send it in smaller messages.`,
-        path: ['to'],
-      });
-    }
+  .refine(requiredOneOf(['text', 'html']), {
+    message: 'A message needs a body: give `text`, `html`, or both.',
+    path: ['text'],
   })
   .describe('ctx.email.send input: a message a script body hands to the mail service');
 export type BodyMailSendInput = z.infer<typeof BodyMailSendInputSchema>;
