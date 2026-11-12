@@ -2728,6 +2728,7 @@ const ko = {
         invalidCredentials: "잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 재설정하면 바로 로그인할 수 있습니다.",
         invalidCredentialsNoMail: '잘못된 이메일 또는 비밀번호입니다. 여러 번 실패하면 잠시 동안 로그인이 일시 중지됩니다. 비밀번호를 잊으셨나요? 관리자에게 재설정을 요청하세요.',
         emailNotVerified: "로그인하기 전에 이메일을 확인하세요.",
+        accountDeactivated: "소속 조직에서 계정을 비활성화했습니다. 관리자에게 문의하세요.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -3998,6 +3999,7 @@ const ko = {
       get_authoring_rules: "작성 규칙 읽기",
       get_metadata_schema: "메타데이터 형식 살펴보기",
       get_package: "패키지 정보 확인하기",
+      get_record_history: "이 레코드의 변경 기록 읽기",
       list_metadata: "기존 메타데이터 나열하기",
       list_objects: "기존 오브젝트 나열하기",
       list_packages: "기존 패키지 나열하기",

@@ -535,6 +535,15 @@ export interface PermissionStudioChrome {
   chips?: React.ReactNode;
   /** Before History in the header's actions (the pillar's Explain access). */
   actions?: React.ReactNode;
+  /**
+   * objectstack#32774 — told, for the set `name` this editor shows, the
+   * package the clone door must name to copy it (`holdingPackage` of the
+   * holding this editor read): `undefined` where the name alone addresses it
+   * (one holder, the environment's own set) or no holder was read. The pillar
+   * hosts its own clone dialog ("New similar") and passes it as
+   * `sourcePackage`.
+   */
+  onCloneSourceRead?: (name: string, sourcePackage: string | undefined) => void;
 }
 
 export interface PermissionMatrixEditPageProps {
@@ -799,6 +808,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // read, so the editor draws neither. `undefined`: one holder, by the name as
   // before.
   const [assignmentsHolding, setAssignmentsHolding] = React.useState<PermissionSetHolding | undefined | null>(undefined);
+  // objectstack#32774 — the package a clone of the set shown names: the holder
+  // this editor read, only where the name alone does not address it.
+  const cloneSourcePackage = holdingPackage(assignmentsHolding ?? undefined);
+  const onCloneSourceReadRef = React.useRef(studio?.onCloneSourceRead);
+  onCloneSourceReadRef.current = studio?.onCloneSourceRead;
+  React.useEffect(() => {
+    onCloneSourceReadRef.current?.(name, cloneSourcePackage);
+  }, [name, cloneSourcePackage]);
   // objectui#7611 — the Setup catalog (`?scope=environment`) shows who holds the
   // set under its definition; Studio's design surface does not. Nor does a set
   // the server does not hold yet: a grant names a set that exists, so Add there
@@ -946,6 +963,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // objectui#11799 — the same published read, held for the load below: a set
   // it does not list has never been published. The load runs after this
   // effect, so it reads this request rather than sending one of its own.
+  // objectstack#32774 — read again whenever the load re-reads the set (a
+  // publish, a reload), so a holder of the name that arrived while the editor
+  // was open is counted by that load, ⛔ not only after a remount.
   const publishedSetsRef = React.useRef<Promise<Array<{ name?: string; label?: unknown }>> | null>(null);
   React.useEffect(() => {
     let cancelled = false;
@@ -962,7 +982,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, publishNonce, reloadNonce]);
 
   /* ── Load draft + object catalog ───────────────────────────── */
   React.useEffect(() => {
@@ -2210,6 +2230,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
       {cloneOpen && (
         <PermissionSetCloneDialog
           source={name}
+          sourcePackage={cloneSourcePackage}
           locale={locale}
           onClose={() => setCloneOpen(false)}
           onCloned={onCloned}
