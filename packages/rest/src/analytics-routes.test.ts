@@ -852,6 +852,57 @@ describe('[#32292] POST /analytics/dataset/query — a refused name is judged ov
     expect(answer.body.object).toBe('app_item');
   });
 
+  // Q1 = A and Q2 = A, measured on the refusal the real service gives: its
+  // query gates refuse a caller not admitted to the dataset's object with
+  // `PERMISSION_DENIED` / 403, so the double throws exactly that envelope.
+  const refusing = (svc: ReturnType<typeof service>, denied: string[]) => {
+    svc.queryDataset.mockImplementation(async (dataset: any) => {
+      if (denied.includes(dataset.object)) {
+        throw Object.assign(new Error(`Permission denied: read on ${dataset.object}`), { code: 'PERMISSION_DENIED', status: 403 });
+      }
+      return { rows: [], fields: [], object: dataset.object };
+    });
+    return svc;
+  };
+
+  it('one holder the caller is not admitted to keeps queryDataset\'s 403, never moved to 404 (Q1 = A), and admission is not asked', async () => {
+    ship('sales', A);
+    const svc = refusing(service(), ['alpha_item']);
+    const answer = await send(svc);
+    expect([answer.status, answer.code], answer.text).toEqual([403, 'PERMISSION_DENIED']);
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+    expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+  });
+
+  it('the caller arm resolved to its one closure item keeps that item\'s 403 and never falls through to a holder outside the closure (Q2 = A)', async () => {
+    ship('sales', A);
+    ship('sales', C);
+    const svc = refusing(service({ admitted: ['gamma_item'] }), ['alpha_item']);
+    const answer = await send(svc, { callerPackage: P });
+    expect([answer.status, answer.code], answer.text).toEqual([403, 'PERMISSION_DENIED']);
+    expect(svc.admitDatasetCatalogEntry).not.toHaveBeenCalled();
+    expect(svc.queryDataset).toHaveBeenCalledTimes(1);
+    expect(svc.queryDataset.mock.calls[0][0].object).toBe('alpha_item');
+    expect(answer.text).not.toContain(C);
+  });
+
+  it('the caller arm: three holders in the closure, two admitted: 409 naming only those two; the hidden one is never named, nothing run', async () => {
+    const P3 = 'com.acme.suite';
+    registry.installPackage({
+      id: P3, name: P3, version: '1.0.0', type: 'app', namespace: 'suite', dependencies: { [A]: '^1.0.0', [B]: '^1.0.0', [C]: '^1.0.0' },
+    } as never, 'code');
+    ship('sales', A);
+    ship('sales', B);
+    ship('sales', C);
+    const svc = service({ admitted: ['alpha_item', 'gamma_item'] });
+    const answer = await send(svc, { callerPackage: P3 });
+    expect([answer.status, answer.code], answer.text).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(answer.message).toContain(`package "${A}"`);
+    expect(answer.message).toContain(`package "${C}"`);
+    expect(answer.text).not.toContain(B);
+    expect(svc.queryDataset).not.toHaveBeenCalled();
+  });
+
   it('a service whose admission is not the plugin-wired set is not asked: the refusal names every holder, as before', async () => {
     ship('sales', A);
     ship('sales', B);
