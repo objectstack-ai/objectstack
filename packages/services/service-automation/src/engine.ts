@@ -839,6 +839,16 @@ export interface FlowUserGrants {
    */
   org_user_ids?: string[];
   /**
+   * [ADR-0093 D8.1, as amended] Every organization the user holds a current
+   * membership in (`resolveUserAuthzGrants`' own field, under its own name):
+   * what the organization wall reads, under every posture. Run setup seeds it
+   * on the run context ({@link SeededRunContext.accessible_org_ids}); a
+   * resolution that throws seeds an empty one. A resolver that answers but
+   * omits it leaves the run without one, and the wall then judges the run as
+   * it judges any context that carries none.
+   */
+  accessible_org_ids?: string[];
+  /**
    * The user's unique email, the value RLS reads as `current_user.email`
    * (`resolveUserAuthzGrants`' own field, under its own name). Run setup
    * seeds it on the run context as {@link AutomationContext.email}. A
@@ -2821,6 +2831,12 @@ export class AutomationEngine implements IAutomationService {
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
     /**
+     * [#31696] Where each key a slot change moved off went, for a run still
+     * in flight under its start key ({@link flowKeyNow}). A key moved onto
+     * drops its own entry, so the chain never loops.
+     */
+    private readonly movedFlowKeys = new Map<string, string>();
+    /**
      * [#11997] Shadowing receipts, keyed by the flow's slot key.
      *
      * `flows` held one flow per BARE name when this receipt was written; it
@@ -3548,6 +3564,8 @@ export class AutomationEngine implements IAutomationService {
             const flowPackage = flowRunPackage(run.context);
             if (flowPackage !== undefined) run = { ...run, flowPackage };
         }
+        const filed = this.flowKeyNow(run.flowName);
+        if (filed !== run.flowName) run = { ...run, flowName: filed };
         // The body lives in ./run-resume.ts (#25222).
         const readStore = () => this.store;
         const host: ThisParameterType<typeof persistSuspendedRun> = {
@@ -4976,10 +4994,28 @@ export class AutomationEngine implements IAutomationService {
             for (const [runId, run] of this.suspendedRuns) {
                 if (run.flowName === from) this.suspendedRuns.set(runId, { ...run, flowName: to });
             }
+            // Every run the ring holds moves with it, finished runs included;
+            // a run still in flight, or a consumed pause put back later, is
+            // filed where it lands ({@link flowKeyNow}).
+            for (let i = 0; i < this.executionLogs.length; i++) {
+                const entry = this.executionLogs[i];
+                if (entry.flowName === from) this.executionLogs[i] = { ...entry, flowName: to };
+            }
+            this.movedFlowKeys.delete(to);
+            this.movedFlowKeys.set(from, to);
         }
         for (const { to } of moved) {
             if (this.flows.has(to)) this.activateFlowTrigger(to);
         }
+    }
+
+    /**
+     * [#31696] The key a run started under `key` is filed under now: `key`
+     * while a slot holds it, else where the slot changes moved it.
+     */
+    private flowKeyNow(key: string): string {
+        for (let next = this.movedFlowKeys.get(key); next !== undefined && !this.flows.has(key); next = this.movedFlowKeys.get(key)) key = next;
+        return key;
     }
 
     /**
@@ -9602,6 +9638,9 @@ export class AutomationEngine implements IAutomationService {
         context?: AutomationContext,
         consumedSuspension?: SuspendedRun,
     ): ExecutionLogEntry {
+        // [#31696] A run whose key moved in flight is recorded where it moved.
+        const filed = this.flowKeyNow(entry.flowName);
+        if (filed !== entry.flowName) entry = { ...entry, flowName: filed };
         // The body lives in ./run-history.ts (#25222).
         const readStore = () => this.store;
         const host: ThisParameterType<typeof recordLog> = {

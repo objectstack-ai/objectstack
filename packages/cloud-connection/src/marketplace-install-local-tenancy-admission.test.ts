@@ -35,6 +35,15 @@
  * it never presents an API key at all. Admission by CREDENTIAL under a tenancy
  * wall is this file.
  *
+ * ## The membership rule reads no posture
+ *
+ * [ADR-0093 D8.1, as amended] Under every tenancy posture, a person's data
+ * access requires a current membership in the organization, judged on each
+ * request. `organization_membership_ended` is that rule's refusal, so the
+ * ex-member's key is refused whatever the posture, and whether or not one can
+ * be read. `organization_required` is the refusal still keyed on the posture,
+ * so the posture discriminators below read the ORGANIZATION-LESS key.
+ *
  * ## Real registry, real classification
  *
  * The `tenancy` service is registered on a REAL `ObjectKernel`, so the
@@ -353,26 +362,40 @@ describe('#15353 — under a wall-enforcing posture the doors refuse an unbacked
 });
 
 describe('#15353 — the posture is the EFFECTIVE one, never the requested one', () => {
-    it('admits the ex-member when the service reports `single` and the ENV asks for `isolated`', async () => {
+    it('admits the organization-less key when the service reports `single` and the ENV asks for `isolated`', async () => {
         // ⭐ The discriminator. `resolveTenancyPosture()` — the value this file's
         // install-time gating reads, and the one a "reuse what is already in
         // scope" fix would carry to this seam — answers `isolated` here. The
-        // posture IN FORCE is `single`, so there is no wall to be walled out of
-        // and refusing would break working automation (ADR-0093 D4/D5).
+        // posture IN FORCE is `single`, which requires no active organization
+        // of a key (ADR-0093 D4/D5): the key is ADMITTED — never the posture
+        // `401`. Admitted is not entitled: with no active organization the
+        // `org_A` grant applies nowhere, and the Default Organization's grant
+        // carries no platform-operator rung where the REQUESTED posture is
+        // walled, so the install's capability gate answers `403`.
         process.env.OS_TENANCY_POSTURE = 'isolated';
         const m = await mount({ kind: 'service', posture: 'single' }, dir);
-        const res = await install(m, KEY(RAW_EXMEMBER_KEY));
-        expect(res.status).toBe(200);
-        expect(res.payload.success).toBe(true);
+        const res = await install(m, KEY(RAW_ORGLESS_KEY));
+        expect(res.status).toBe(403);
+        expect(res.payload).toMatchObject({ error: { code: 'FORBIDDEN' } });
+        expect(effectsOf(m)).toBe(0);
     });
 
-    it('refuses the ex-member when the service reports `isolated` and the ENV asks for nothing', async () => {
+    it('refuses the organization-less key when the service reports `isolated` and the ENV asks for nothing', async () => {
         // The same discriminator from the other side: a requested-posture fix
         // reads "no posture requested" here and admits.
         delete process.env.OS_TENANCY_POSTURE;
         const m = await mount({ kind: 'service', posture: 'isolated' }, dir);
+        const res = await install(m, KEY(RAW_ORGLESS_KEY));
+        expect(res.status).toBe(401);
+        expect(effectsOf(m)).toBe(0);
+    });
+
+    it('[ADR-0093 D8.1] the membership rule reads no posture: the ex-member is refused under `single` too, and nothing changes', async () => {
+        process.env.OS_TENANCY_POSTURE = 'isolated';
+        const m = await mount({ kind: 'service', posture: 'single' }, dir);
         const res = await install(m, KEY(RAW_EXMEMBER_KEY));
         expect(res.status).toBe(401);
+        expect(res.payload).toMatchObject({ error: { code: 'UNAUTHENTICATED' } });
         expect(effectsOf(m)).toBe(0);
     });
 });
@@ -406,16 +429,18 @@ describe('#15353 — decision 1 option A: a BROKEN tenancy service is an outage,
 });
 
 describe('#15353 — a host that registers no tenancy service keeps the quiet answer', () => {
-    it('admits the ex-member when `tenancy` was NEVER registered', async () => {
+    it('admits the organization-less key when `tenancy` was NEVER registered', async () => {
         // The supported no-tenancy composition (a lean embedding without
-        // `plugin-auth`): there is no wall, so there is nothing to be walled
-        // out of, and behaviour is exactly what it was. ⚠️ This is the half of
-        // the classification that a blanket `catch { undefined }` and a
+        // `plugin-auth`): there is no wall, so no posture-keyed refusal runs,
+        // and behaviour is exactly what it was. ⚠️ This is the half of the
+        // classification that a blanket `catch { undefined }` and a
         // fail-closed rewrite would both get wrong — in opposite directions.
         const m = await mount({ kind: 'unregistered' }, dir);
-        const res = await install(m, KEY(RAW_EXMEMBER_KEY));
+        const res = await install(m, KEY(RAW_ORGLESS_KEY));
         expect(res.status).toBe(200);
         expect(res.payload.success).toBe(true);
+        // [ADR-0093 D8.1] The membership rule reads no posture.
+        expect((await install(m, KEY(RAW_EXMEMBER_KEY))).status).toBe(401);
     });
 
     it('admits when the host exposes `getKernel()` but no async registry', async () => {
@@ -424,21 +449,25 @@ describe('#15353 — a host that registers no tenancy service keeps the quiet an
         // report. Dereferencing would raise an unbranded — therefore LOUD —
         // `TypeError` and turn a supported host shape into an outage.
         const m = await mount({ kind: 'no-async-registry' }, dir);
-        const res = await install(m, KEY(RAW_EXMEMBER_KEY));
+        const res = await install(m, KEY(RAW_ORGLESS_KEY));
         expect(res.status).toBe(200);
         expect(res.payload.success).toBe(true);
+        // [ADR-0093 D8.1] The membership rule reads no posture.
+        expect((await install(m, KEY(RAW_EXMEMBER_KEY))).status).toBe(401);
     });
 });
 
 describe('#15353 — BOUNDARY: the session path is not what this repairs', () => {
     it('does not refuse a SESSION whose active organization the caller does not belong to', async () => {
         // Measured, and pinned so nobody reads this card as having closed the
-        // session path: both posture-conditional refusals in
-        // `resolveAuthzContext` key on `keyPrincipal`, which is set only by the
-        // API-key admission. A session's `activeOrganizationId` reaches
-        // `ctx.tenantId` without passing either guard. Supplying the posture at
-        // this door changes NOTHING for a session caller — that is a separate
-        // question about a different mechanism, not a gap in this fix.
+        // session path: both API-key refusals in `resolveAuthzContext` key on
+        // `keyPrincipal`, which is set only by the API-key admission.
+        // Supplying the posture at this door changes NOTHING for a session
+        // caller. [ADR-0093 D8.1, as amended] A session's active organization
+        // is kept only while a current membership backs it, and an unbacked
+        // one is dropped rather than refused, so the session resolves with no
+        // active organization; this door gates on the capability, which the
+        // caller holds through the Default Organization's grant.
         const m = await mount({ kind: 'service', posture: 'isolated' }, dir);
         const res = await install(m, { 'x-fixture-session-user': 'u_session' });
         expect(res.status).toBe(200);
