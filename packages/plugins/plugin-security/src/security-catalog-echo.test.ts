@@ -856,8 +856,10 @@ describe('[#31698] one package\'s save never moves, drops or deletes another pac
 
   it('the boot pass echoes each stored row by its package', async () => {
     const stored = [A, B].map((packageId, i) => ({ id: `row_${i}`, type: 'permission', name: NAME, state: 'active', package_id: packageId }));
-    const engine = { ...engineDeclaring(), find: async (object: string, query: { where: Row }) =>
-      (object === 'sys_metadata' ? stored.filter((row) => matches(row, query.where)) : []) };
+    const engine = { ...engineDeclaring(), find: async (object: string, query: { where: Row; limit?: number }) => {
+      const found = object === 'sys_metadata' ? stored.filter((row) => matches(row, query.where)) : [];
+      return typeof query?.limit === 'number' ? found.slice(0, query.limit) : found;
+    } };
     const metadata = slottedMetadataService(NAME);
     expect(await echoStoredSecurityCatalogOverlays(stubProtocol(rows()), { ql: engine, metadata })).toBe(2);
     expect([...metadata.slots.keys()].sort()).toEqual([A, B]);

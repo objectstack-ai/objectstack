@@ -36,6 +36,7 @@ import {
     resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
+import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
 import { findPackageHeldSecurityCatalogNames, RESERVED_NAMESPACES, SecurityCatalogNameConflictError } from './registry.js';
@@ -397,7 +398,7 @@ describe('[#31698] a permission set is one name per namespace: one predicate, th
                 sys_member: [{ user_id: 'u1', organization_id: 'org_a', role: 'member' }],
                 sys_user_permission_set: [{ user_id: 'u1', permission_set: 'qa_reader', permission_set_package: column, organization_id: 'org_a' }],
             };
-            const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string) => rows[object]?.[0], count: async () => 0 };
+            const ql = { registry: engine.registry, find: async (object: string) => rows[object] ?? [], findOne: async (object: string, query?: any) => { assertEngineFindOnePredicate(object, query); return rows[object]?.[0]; }, count: async () => 0 };
             bindSecurityCatalogReader(ql, catalog);
             return (await resolveUserAuthzGrants(ql, 'u1', { tenantId: 'org_a' })).systemPermissions;
         };

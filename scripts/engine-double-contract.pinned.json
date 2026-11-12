@@ -3152,6 +3152,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-permission-set-name-registry-reading.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-publish-package-drafts.test.ts",
       "verb": "update",
       "pinned": 1
