@@ -67,7 +67,10 @@
  * name bound to two objects are two names that never meet (objectql's
  * `actionOwnerScopedRegistry`). So an action BOUND to an object is slotted by
  * its object and name ({@link slotIdentityOf}); an object-less action by its
- * name alone, exactly as `api`. A write's and a by-identity read's D3 refusal
+ * name alone, exactly as `api`. [#32540] `DatabaseLoader` keeps a row per
+ * such binding too: its rows of a `(package, name)` slot are told apart by
+ * `sys_metadata.bundle_member`, which holds the bound object
+ * ({@link storedRowMemberOf}). A write's and a by-identity read's D3 refusal
  * fires only among slots of one identity: two packages on the object-less
  * name, or on one object and name. A removal counts packages over every
  * identity of the name instead ({@link storeRemovalKeys}), as `DatabaseLoader`'s
@@ -96,7 +99,7 @@ import {
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
-import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
@@ -212,7 +215,9 @@ export function storeSlotKey(type: string, name: string, packageId: string | nul
 /**
  * [#32246] The key of a `DatabaseLoader` row of `name` held for `packageId`:
  * one slot per `(package, name)`, whatever object an action is bound to
- * (see {@link storeRowWriteKey}).
+ * (see {@link storeRowWriteKey}). [#32540] A slot holds a row per member
+ * ({@link storedRowMemberOf}): each object an action of the package is bound
+ * to, as each member of a bundled type.
  */
 export function storeRowKey(name: string, packageId: string | null | undefined): string {
   return isPackageCaller(packageId) ? slotKey(packageId, name) : name;
@@ -297,6 +302,52 @@ export function storedBundleMemberOf(type: string, item: unknown, column?: unkno
 }
 
 /**
+ * [#32540, ADR-0150 D4/D6] The member a stored row of `type` holds within its
+ * `(package, name)` slot, spelled as `sys_metadata.bundle_member` spells it —
+ * the store's unique key `(type, name, package_id, bundle_member)` keeps one
+ * row per member:
+ *
+ *  - a bundled type: its bundle member ({@link storedBundleMemberOf});
+ *  - `action`: the object an object-bound action is bound to, `null` for an
+ *    object-less one. One package may bind one action name to several objects
+ *    (D6), and each binding is its own item (D4: `(package, objectName,
+ *    name)`), so each keeps its own row. A non-empty `column` is read first;
+ *    else the body's object (a row written before the loader named it); the
+ *    object-less owners (`global`, `*`) read as `null` either way. ⛔ Never
+ *    through `ITEM_KEY_DISCRIMINATORS`: an action has no canonical member and
+ *    no `?member=` address (ruling on #32540, C1) — the column is shared, the
+ *    reading is this type's own;
+ *  - every other type: `undefined`, one row per slot.
+ */
+export function storedRowMemberOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  if (isBundledStoreType(type)) return storedBundleMemberOf(type, item, column);
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return undefined;
+  if (typeof column === 'string' && column.trim() !== '') {
+    const owner = column.trim();
+    return OBJECT_LESS_OWNERS.has(owner) ? null : owner;
+  }
+  return boundObjectOf(item) ?? null;
+}
+
+/** [#32540 C8] The longest member `sys_metadata.bundle_member` stores (its declared `maxLength`). */
+export const STORED_MEMBER_MAX_LENGTH = SysMetadataObject.fields.bundle_member.maxLength as number;
+
+/**
+ * [#32540 C3/C8] The `bundle_member` an action row holds once the loader has
+ * named it, as the store's unique key reads it: the object it is bound to
+ * ({@link storedRowMemberOf}) when the column can store that name, else `null`.
+ * A row written before the loader named objects, bound to an object longer
+ * than {@link STORED_MEMBER_MAX_LENGTH}, cannot be named: it keeps the
+ * object-less binding's place in its package's bucket of the key, and only a
+ * write into that place collides with it. `undefined` for every other type.
+ */
+export function namedRowColumnOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return undefined;
+  const member = storedRowMemberOf(type, item, column);
+  return typeof member === 'string' && member.length <= STORED_MEMBER_MAX_LENGTH ? member : null;
+}
+
+/**
  * [#31699 R3-B] The identity an unscoped plural read keeps one entry per, for
  * a bundled type stored per `(package, name)`: `(package, name, member)`, the
  * package being `packageId` else the one the item carries
@@ -355,7 +406,8 @@ export function storeWriteKey(
  * [#32246] {@link storeWriteKey} for a store with one slot per `(package,
  * name)` whatever object an action is bound to: `DatabaseLoader`'s rows,
  * which `sys_metadata`'s unique key `(type, name, package_id, bundle_member)`
- * holds once per package of a name.
+ * holds once per package of a name and member. [#32540] The row within the
+ * slot is the one of the written body's member ({@link storedRowMemberOf}).
  */
 export function storeRowWriteKey(
   store: ReadonlyMap<string, unknown> | undefined,

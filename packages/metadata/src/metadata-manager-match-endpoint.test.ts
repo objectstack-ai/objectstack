@@ -1456,6 +1456,249 @@ describe('[#32352] an action\'s removal: the manager\'s holder count agrees with
 });
 
 /**
+ * [#32540, ADR-0150 D4/D6] One package may bind one action name to several
+ * objects (D6, the #5510 HotCRM shape: `log_call` on five objects), and an
+ * object-bound action's identity is `(package, objectName, name)` (D4). The
+ * in-memory store keeps a slot per binding; `DatabaseLoader` keeps a row per
+ * binding too: the store's unique key `(type, name, package_id,
+ * bundle_member)` is kept, and an object-bound action row names its object in
+ * `bundle_member` (an object-less one: NULL), as a bundled type's row names its
+ * member. A row written before (`bundle_member` NULL) reads its object off its
+ * body, and is bound to it before a write could collide with it.
+ *
+ * The driver here enforces that unique key as the real index does
+ * (`COALESCE(package_id, '')`, `COALESCE(bundle_member, '')`).
+ *
+ * BASE (main 874166b6, step 0 `card-32540/step0.md`): one row per `(package,
+ * name)`; the later binding's save updated it in place, so a read of the rows
+ * served the binding saved last and every other one was gone, with no error.
+ */
+describe('[#32540] one package\'s action name bound to several objects keeps a row per binding (ADR-0150 D4/D6)', () => {
+  const A = 'com.acme.alpha';
+  const NAME = 'digest';
+  const item = (objectName: string | undefined, label = `alpha@${objectName ?? 'global'}`) => ({
+    name: NAME,
+    label,
+    type: 'script',
+    _packageId: A,
+    _provenance: 'package',
+    ...(objectName === undefined ? {} : { objectName }),
+  });
+
+  /** {@link rowDriver} with `sys_metadata`'s overlay unique key enforced. */
+  function keyedRowDriver() {
+    const base = rowDriver();
+    const keyOf = (row: Record<string, unknown>) =>
+      JSON.stringify([row.type, row.name, row.package_id ?? '', row.bundle_member ?? '']);
+    const clash = (candidate: Record<string, unknown>, id?: unknown) =>
+      base.rows(String(candidate.type)).some((row) => row.id !== id && keyOf(row) === keyOf(candidate));
+    const refused = () => new Error('rowDriver: UNIQUE constraint failed: sys_metadata.type, name, package_id, bundle_member');
+    const driver = {
+      ...base.driver,
+      create: async (table: string, data: Record<string, unknown>) => {
+        if (table === 'sys_metadata' && clash(data)) throw refused();
+        return (base.driver as any).create(table, data);
+      },
+      update: async (table: string, id: string, data: Record<string, unknown>) => {
+        if (table === 'sys_metadata') {
+          const current = base.rows('action').find((row) => row.id === id) ?? {};
+          if (clash({ ...current, ...data }, id)) throw refused();
+        }
+        return (base.driver as any).update(table, id, data);
+      },
+    } as unknown as IDataDriver;
+    return { ...base, driver };
+  }
+
+  /** The door's boot (door `MemoryLoader` saved, then `register`), with one writable `DatabaseLoader`. */
+  async function boot(bindings: ReadonlyArray<readonly [string | undefined, string?]>, seed?: (driver: IDataDriver) => Promise<unknown>) {
+    const { driver, rows, history } = keyedRowDriver();
+    await seed?.(driver);
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const loader = new DatabaseLoader({ driver, tableName: 'sys_metadata' });
+    manager.registerLoader(loader);
+    const door = new MemoryLoader();
+    for (const [objectName, label] of bindings) {
+      await door.save('action', NAME, item(objectName, label));
+      await manager.register('action', NAME, item(objectName, label), { notify: false });
+    }
+    manager.registerLoader(door);
+    const stored = () => rows('action')
+      .map((row) => `${row.package_id}|${row.bundle_member ?? '-'}:${JSON.parse(String(row.metadata)).label}`)
+      .sort();
+    /** A cold boot: a new manager over the same rows, no door. */
+    const coldServed = async () => {
+      const cold = new MetadataManager({ formats: ['json'], loaders: [] });
+      cold.registerLoader(new DatabaseLoader({ driver, tableName: 'sys_metadata' }));
+      return ((await cold.list('action')) as any[]).map((entry) => entry.label).sort();
+    };
+    return { manager, loader, driver, rows, history, stored, coldServed };
+  }
+
+  it.each([
+    ['o1 then o2', [['o1'], ['o2']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2']],
+    ['o2 then o1', [['o2'], ['o1']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2']],
+    ['bound to o1, then object-less', [['o1'], [undefined]], ['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']],
+    ['object-less, then bound to o1', [[undefined], ['o1']], ['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']],
+    ['three objects', [['o1'], ['o2'], ['o3']], ['com.acme.alpha|o1:alpha@o1', 'com.acme.alpha|o2:alpha@o2', 'com.acme.alpha|o3:alpha@o3']],
+  ] as const)('%s: a row per binding, each naming its object in `bundle_member`, and a cold read of the rows serves every binding (BASE: one row, the binding saved last)', async (_shape, bindings, expected) => {
+    const ctx = await boot(bindings as ReadonlyArray<readonly [string | undefined]>);
+    expect(ctx.stored()).toEqual(expected);
+    expect(await ctx.coldServed()).toEqual(expected.map((entry) => entry.split(':')[1]).sort());
+    // Versions stay numbered per name across the rows, so history never collides.
+    expect(ctx.history('action').map((row) => row.version)).toEqual(expected.map((_, i) => i + 1));
+  });
+
+  it('a later edit of one binding updates that binding\'s row only (BASE: it overwrote the one row, and the other binding was gone)', async () => {
+    const ctx = await boot([['o1'], ['o2'], ['o1', 'alpha@o1 v2']]);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 v2', 'com.acme.alpha|o2:alpha@o2']);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1 v2', 'alpha@o2']);
+    expect(ctx.history('action').map((row) => row.version)).toEqual([1, 2, 3]);
+  });
+
+  /** A row as main wrote it: one per `(package, name)`, `bundle_member` NULL, its body bound to `o1`. */
+  const legacyRow = (driver: IDataDriver) => driver.create('sys_metadata', {
+    id: 'legacy-o1', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o1')),
+    state: 'active', version: 1, source: 'database', checksum: 'x',
+  });
+
+  it('C3 — a row written before (`bundle_member` NULL, body on o1), then object-less, then o1, then o2: the legacy row is named o1 before the object-less save could collide with it on the unique key, the o1 save updates it in place (one binding), and a cold read serves all three bindings (BASE: one row, each save overwrote it)', async () => {
+    const ctx = await boot([[undefined]], legacyRow);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1']);
+    await ctx.manager.register('action', NAME, item('o1', 'alpha@o1 v2'), { notify: false });
+    await ctx.manager.register('action', NAME, item('o2'), { notify: false });
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global', 'com.acme.alpha|o1:alpha@o1 v2', 'com.acme.alpha|o2:alpha@o2']);
+    expect(ctx.rows('action').find((row) => row.id === 'legacy-o1')?.bundle_member, 'the legacy row is the o1 binding\'s row').toBe('o1');
+    expect(await ctx.coldServed()).toEqual(['alpha@global', 'alpha@o1 v2', 'alpha@o2']);
+  });
+
+  it('C3/C9 — a rollback is a write of the slot: a row written before is named first, and the restored body\'s binding is the row restored', async () => {
+    const ctx = await boot([], legacyRow);
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored']);
+  });
+
+  it('C9 — a rollback to a body bound to an object the slot holds no row of (a row written before, later re-bound from o1 to o2) restores that binding as its own row, and keeps the o2 binding (BASE: it overwrote the one row, moving the binding back)', async () => {
+    const ctx = await boot([], async (driver) => {
+      await driver.create('sys_metadata', {
+        id: 'legacy', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o2')),
+        state: 'active', version: 2, source: 'database', checksum: 'x',
+      });
+    });
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored', 'com.acme.alpha|o2:alpha@o2']);
+    expect(ctx.history('action').map((row) => row.version), 'one revert, numbered past every row of the name').toEqual([3]);
+    expect(await ctx.coldServed()).toEqual(['alpha@o1 restored', 'alpha@o2']);
+  });
+
+  it('C8 — an object name longer than `bundle_member` stores is refused at the write, naming the action, the object and the limit; nothing is stored and nothing truncated', async () => {
+    const ctx = await boot([['o1']]);
+    const long = `o_${'x'.repeat(99)}`;
+    await expect(ctx.loader.save('action', NAME, item(long))).rejects.toThrow(
+      new RegExp(`action "${NAME}" is bound to object "${long}" \\(101 characters\\), but sys_metadata\\.bundle_member stores at most 100`),
+    );
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
+  });
+
+  // [#32540 C3; contract record 6820015366 item 1] The plural read's column-only bind, over rows as every released writer left them.
+  it.each([
+    ['the package\'s bound row on o2', 'o2', 'o2'],
+    ['the package\'s object-less row', undefined, null],
+  ] as const)('C3 — `bindReadRowPackage` of a legacy package-less row on o1 beside %s, every `bundle_member` NULL under the unique key: bound, its object named in the same update, the package\'s row named first (main: no-op, one slot; before this fix: UNIQUE constraint failed)', async (_shape, objectName, named) => {
+    const ctx = await boot([], async (driver) => {
+      await driver.create('sys_metadata', {
+        id: 'bound', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(objectName)),
+        state: 'active', version: 1, source: 'database', checksum: 'x',
+      });
+      await driver.create('sys_metadata', {
+        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify(item('o1')),
+        state: 'active', version: 2, source: 'database', checksum: 'y',
+      });
+    });
+    const [handed] = (await ctx.loader.loadMany('action')) as object[];
+    await ctx.loader.bindReadRowPackage('action', NAME, handed!);
+    const byId = (id: string) => ctx.rows('action').find((row) => row.id === id);
+    expect([byId('legacy-o1')?.package_id, byId('legacy-o1')?.bundle_member]).toEqual([A, 'o1']);
+    expect(byId('bound')?.bundle_member ?? null).toBe(named);
+  });
+
+  describe('C8 — a row written before, bound to an object longer than `bundle_member` stores, refuses only a write into the place it holds', () => {
+    const long = `o_${'x'.repeat(99)}`;
+    const legacyLong = (driver: IDataDriver) => driver.create('sys_metadata', {
+      id: 'legacy-long', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(long)),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    });
+
+    it('a save of another object is stored beside it; the long row is left as it is, never truncated (head 17256ba20: refused)', async () => {
+      const ctx = await boot([['o2']], legacyLong);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o2:alpha@o2']);
+    });
+
+    it('a rollback restoring another object\'s binding recreates it beside the long row (head 17256ba20: refused)', async () => {
+      const ctx = await boot([], legacyLong);
+      await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o1:alpha@o1 restored']);
+    });
+
+    it('the object-less binding, saved or recreated by a rollback, is refused naming the long row, its object and the limit; nothing is written (main: it overwrote the long row)', async () => {
+      const ctx = await boot([], legacyLong);
+      const refusal = new RegExp(`action "${NAME}" of package "${A}" cannot store its object-less binding: row legacy-long, .*object "${long}" \\(101 characters\\), longer than the 100`);
+      await expect(ctx.loader.save('action', NAME, item(undefined))).rejects.toThrow(refusal);
+      await expect(ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1)).rejects.toThrow(refusal);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`]);
+      expect(ctx.history('action')).toEqual([]);
+    });
+
+    it('a rollback recreating a binding on an object longer than the column stores is refused before any write (C8 on the rollback path)', async () => {
+      const ctx = await boot([['o1']]);
+      await expect(ctx.loader.registerRollback('action', NAME, item(long), 1)).rejects.toThrow(
+        new RegExp(`action "${NAME}" is bound to object "${long}" \\(101 characters\\), but sys_metadata\\.bundle_member stores at most 100`),
+      );
+      expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
+      expect(ctx.history('action').map((row) => row.version)).toEqual([1]);
+    });
+  });
+
+  it('a package-less row on o1, then the package saves o2: the row is kept and named o1, the package\'s o2 binding is its own row (main: the o2 save took the row over)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'loose-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), _packageId: undefined, label: 'loose@o1' }),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    }));
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|o1:loose@o1']);
+  });
+
+  it('a rollback to an object-less body in a slot holding only bound rows recreates the object-less binding as its own row (main: restored over the one row)', async () => {
+    const ctx = await boot([['o1']]);
+    await ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global restored', 'com.acme.alpha|o1:alpha@o1']);
+  });
+
+  it('the naming pass names any writer\'s row of the slot, the column only: a protocol overlay row (`source` sys-metadata-repo) on o1 is named o1 when the package saves o2 (carried with the overlay write path by #32609)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'overlay-o1', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o1', 'overlay@o1')),
+      state: 'active', version: 1, source: 'sys-metadata-repo', checksum: 'x',
+    }));
+    const overlay = ctx.rows('action').find((row) => row.id === 'overlay-o1');
+    expect([overlay?.bundle_member, overlay?.source, JSON.parse(String(overlay?.metadata)).label]).toEqual(['o1', 'sys-metadata-repo', 'overlay@o1']);
+  });
+
+  it('a removal naming the package takes every binding\'s row; the name stays one holder (#32352)', async () => {
+    const ctx = await boot([['o1'], ['o2'], [undefined]]);
+    await ctx.manager.unregister('action', NAME, { packageId: A });
+    expect(ctx.stored()).toEqual([]);
+    const again = await boot([['o1'], ['o2']]);
+    await again.manager.unregister('action', NAME);
+    expect(again.stored(), 'one package on two objects is one holder: a removal naming none takes both').toEqual([]);
+  });
+
+  it('a rollback by name restores the row of the object the restored body is bound to, never another binding\'s (BASE: one row, restored over whichever binding it held)', async () => {
+    const ctx = await boot([['o1'], ['o2']]);
+    await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1 restored', 'com.acme.alpha|o2:alpha@o2']);
+  });
+});
+
+/**
  * [#32353] The non-slotted half of #32246: a removal of a type outside
  * `PACKAGE_SLOTTED_STORE_TYPES` deletes the artifact door's in-memory copy
  * too, by name, so the removed item stops answering. Pinned per first-party
