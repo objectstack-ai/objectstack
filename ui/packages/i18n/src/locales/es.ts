@@ -1406,6 +1406,7 @@ const es = {
     saving: "Guardando…",
     lockedByApproval: "Bloqueado para aprobación",
     lockedTooltip: "Este registro tiene una solicitud de aprobación pendiente; la edición está bloqueada",
+    lockedByState: "No editable en su estado actual",
     writeStrippedTitle: "Guardado, pero algunos campos no se aplicaron",
     writeWarningsTitle: "Guardado, con advertencias",
     writeStrippedReadonly: "De solo lectura, por lo que no se aplicó: {{fields}}",

@@ -1490,6 +1490,7 @@ const en = {
     editInlineHint: 'Double-click to edit',
     lockedByApproval: 'Locked for approval',
     lockedTooltip: 'This record has a pending approval request; editing is locked',
+    lockedByState: 'Not editable in its current state',
     writeStrippedTitle: 'Saved — but some fields did not take effect',
     writeWarningsTitle: 'Saved — with warnings',
     writeStrippedReadonly: 'Read-only, so it did not take effect: {{fields}}',
