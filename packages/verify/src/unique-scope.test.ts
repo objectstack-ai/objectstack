@@ -31,6 +31,11 @@ import { join } from 'node:path';
 
 import { defineStack } from '@objectstack/spec';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the harness loads them dynamically.
+import '@objectstack/service-datasource';
+import '@objectstack/service-automation';
+
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 import {

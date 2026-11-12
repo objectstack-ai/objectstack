@@ -39,6 +39,9 @@
 import { describe, it, expect } from 'vitest';
 import { isUniqueViolationError, looksLikeInternalErrorLeak } from '@objectstack/types';
 import { mapDataError } from './rest-server.js';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/objectql';
 // [#7821] The bulk path, imported only so the parity assertion can compare the
 // two paths' answers in one place. This file does not otherwise test it.
 import { sanitizeRowError } from '@objectstack/core';

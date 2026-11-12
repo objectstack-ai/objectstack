@@ -34,6 +34,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ObjectQL, bindHooksToEngine } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+// Paid at collection, not inside a case's clock (check:test-source-alias):
+// the source under test loads it dynamically.
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { actionBodyRunnerFactory, hookBodyRunnerFactory } from './sandbox/body-runner.js';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
