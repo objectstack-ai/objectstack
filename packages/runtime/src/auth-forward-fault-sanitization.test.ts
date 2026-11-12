@@ -53,6 +53,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 
+// Paid during collection, never inside a case's clocked window: the dispatcher
+// reaches a dynamic import of it (`check:test-source-alias`).
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 
