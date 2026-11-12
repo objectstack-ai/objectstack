@@ -1,5 +1,6 @@
 ---
 '@objectstack/lint': minor
+'@objectstack/spec': minor
 ---
 
 fix(lint)!: an `object-grid` page component's column summary whose function the engine's `aggregate` door refuses over the field's declaration is refused at authoring, under `list-view-summary-field-type-refused` (#32503)
