@@ -87,6 +87,16 @@
         "types": "./dist/utils/history-snapshot-body.d.cts",
         "default": "./dist/utils/history-snapshot-body.cjs"
       }
+    },
+    "./stored-item-package": {
+      "import": {
+        "types": "./dist/stored-item-package.d.ts",
+        "default": "./dist/stored-item-package.js"
+      },
+      "require": {
+        "types": "./dist/stored-item-package.d.cts",
+        "default": "./dist/stored-item-package.cjs"
+      }
     }
   },
   "files": [
