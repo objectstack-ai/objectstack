@@ -327,8 +327,10 @@
  *     (`armAdvisoryNotes`, before the packer and the dry-run exit). The action
  *     leaves with `ghsa_id` and `sealed_note` alone; ⛔ the text never enters
  *     the actions file, the payload or a line this file prints. A `sealed_note`
- *     already in the file, or a missing, unreadable or unjudged note file, is
- *     refused (exit 2); a file that passes while the committed half is null is
+ *     already in the file, a note file that resolves (`realpath`) inside any git
+ *     repository or that git cannot place (`advisoryNoteFilePlace`: the
+ *     plaintext never lives in a repository's files), or a missing, unreadable
+ *     or unjudged note file, is refused (exit 2); a file that passes while the committed half is null is
  *     a prerequisite (exit 3), nothing sent. The executor reads the stored
  *     description back byte for byte and says so in ONE notice — the section's
  *     byte count and its HMAC-SHA256 under the digest key — which this file
@@ -532,7 +534,8 @@
 
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
+import { dirname } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
@@ -1448,6 +1451,42 @@ export function advisoryNoteSection(text, stamp) {
   return why ? { refusal: why } : { section };
 }
 
+/** The variables that would steer git's repository discovery away from the directory asked about. */
+const GIT_DISCOVERY_STEERING = Object.freeze(['GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_CEILING_DIRECTORIES']);
+
+/** git's own answer on `dir`: is it inside a repository's work tree or git dir? `spawnSync`'s result. */
+function gitRevParseAt(dir) {
+  const env = { ...process.env, GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' };
+  for (const k of GIT_DISCOVERY_STEERING) delete env[k];
+  return spawnSync('git', ['rev-parse', '--is-inside-git-dir', '--is-inside-work-tree'], { cwd: dir, env, encoding: 'utf8' });
+}
+
+/**
+ * Where a note's file lies (header, "How the callers"): `{ place, real }` — `place` is `outside` when git finds no
+ * repository around the file's REAL path (`realpath`, so a symlink is judged where it points), `inside` when it finds
+ * one (a work tree or a git dir — ANY repository, not only this checkout: a note in any clone is one `git add` from a
+ * commit), `unknown` when git cannot answer (no git, or an answer this does not read), and `unreadable` (with `code`)
+ * when the path does not resolve. Discovery runs with `GIT_DISCOVERY_STEERING` removed and across filesystems. The
+ * door seals only from `outside`. Pure but for the two reads, which the self-test hands in.
+ */
+export function advisoryNoteFilePlace(path, { realpath = (p) => realpathSync(p), git = gitRevParseAt } = {}) {
+  let real;
+  try {
+    real = realpath(path);
+  } catch (e) {
+    return { place: 'unreadable', code: e?.code ?? 'unresolved', real: null };
+  }
+  let r;
+  try {
+    r = git(dirname(real));
+  } catch {
+    return { place: 'unknown', real };
+  }
+  if (!r || r.error) return { place: 'unknown', real };
+  if (r.status === 0) return { place: 'inside', real };
+  return /not a git repository/i.test(String(r.stderr ?? '')) ? { place: 'outside', real } : { place: 'unknown', real };
+}
+
 /**
  * Seal each note in THIS process (header, "How the callers"): for every `advisory_note` action, the file its
  * `note_file` names is read as UTF-8, judged and composed into its section (`advisoryNoteSection`, this door's
@@ -1455,12 +1494,13 @@ export function advisoryNoteSection(text, stamp) {
  * under the stroke's `requestId` (`sealAdvisoryNote`, `advisorySealAad`). The action leaves carrying `ghsa_id` and
  * `sealed_note` alone; the section's byte count and keyed digest stay in `notes` (action index → `{ bytes, digest }`)
  * for the read-back, and the text and the digest key die with the process. A `sealed_note` already in the file is
- * REFUSED (a seal made elsewhere), and so is a missing, unreadable or unjudged note file. A file that passes while
+ * REFUSED (a seal made elsewhere), and so is a note file `advisoryNoteFilePlace` does not place outside every git
+ * repository (`place` stands in for it), and a missing, unreadable or unjudged one. A file that passes while
  * `relayPublicKey` is null is a PREREQUISITE — nothing sealed. Returns `{ actions, notes, refused, prerequisite }`;
  * `actions` is a new array. ⛔ No line carries a byte of the note. Pure but for the file read, the clock and the digest
  * key, which the self-test hands in.
  */
-export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY, read = (path) => readFileSync(path), now = () => Date.now(), digestKey = () => randomBytes(ADVISORY_NOTE_DIGEST_KEY_BYTES) } = {}) {
+export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY, read = (path) => readFileSync(path), now = () => Date.now(), digestKey = () => randomBytes(ADVISORY_NOTE_DIGEST_KEY_BYTES), place = advisoryNoteFilePlace } = {}) {
   const notes = new Map();
   const refused = [];
   const prerequisite = [];
@@ -1477,9 +1517,24 @@ export function armAdvisoryNotes(actions, { requestId, relayPublicKey = ADVISORY
       refused.push(said(`${ADVISORY_NOTE_FILE_KEY} must name the note's file — ⛔ the note itself never goes in the actions file, which the payload is packed from`));
       return a;
     }
+    // ⛔ The note's plaintext never lives in a repository's files: a file that resolves inside any git work tree, or
+    // one git cannot place, is refused before it is read.
+    const where = place(path);
+    if (where.place === 'unreadable') {
+      refused.push(said(`${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} cannot be read as UTF-8 text (${where.code})`));
+      return a;
+    }
+    if (where.place !== 'outside') {
+      refused.push(
+        said(
+          `${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} ${where.place === 'inside' ? 'resolves inside a git repository (its work tree or git dir, after symlinks)' : 'cannot be placed: git could not say whether it lies inside a repository'} — ⛔ a note's plaintext never lives in a repository's files. Keep it outside every checkout (the session's scratchpad) and name that path.`,
+        ),
+      );
+      return a;
+    }
     let text;
     try {
-      text = strictNoteUtf8.decode(read(path));
+      text = strictNoteUtf8.decode(read(where.real));
     } catch (e) {
       refused.push(said(`${ADVISORY_NOTE_FILE_KEY} ${JSON.stringify(path)} cannot be read as UTF-8 text (${e?.code ?? 'not UTF-8'})`));
       return a;
@@ -2316,7 +2371,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "retired lane aliases at the seat's door: a domain:engine / services / cli / rest label on labels_add, issue_create or pr_create is written as domain:server and said on stderr, a dry run included; a live domain:* label, a non-lane label and labels_remove pass untouched; the rewrite never refuses": 13,
   "advisory_read at the seat: the key pair made in this process per read — its public half in the action, its private half a KeyObject never exported, written or printed, and a key from the file refused; no byte read-back, said where the read-back is decided; the run's notice parts read back exactly, reassembled 1..n once each and opened with that key byte for byte, end to end through the real executor; what does not open is UNVERIFIED (6) with nothing printed; the text reaches this process's stdout on --reveal alone, never stderr or --json": 17,
   "advisory_list at the seat: derived from the table into the sealed-read path, so its key pair is made here and a key from the file refused, with no byte read-back, said where the read-back is decided; the real executor's ten notice parts read back, reassembled and opened under the listing's own associated data — never a read's — byte for byte on the padded plaintext; what does not open is UNVERIFIED (6) with nothing printed; --reveal alone prints it, its pad trimmed for that op's display alone, never on stderr or --json": 9,
-  "advisory_note at the seat: the note read from the file note_file names, composed under the seat's signature line and this door's own stamp, judged, then sealed HERE with a one-time digest key to the relay's committed half under the stroke's request id — the payload carrying the seal alone; a seal from the file, a missing, unreadable or unjudged file refused and a null committed half a prerequisite, all before anything is sent; the run's ONE notice confirmed against the byte count and keyed digest only this process holds, anything else UNVERIFIED, exit 6 — and no byte of the note on any line the seat prints": 20,
+  "advisory_note at the seat: the note read from the file note_file names, composed under the seat's signature line and this door's own stamp, judged, then sealed HERE with a one-time digest key to the relay's committed half under the stroke's request id — the payload carrying the seal alone; a seal from the file, a file inside any git repository, and a missing, unreadable or unjudged one refused and a null committed half a prerequisite, all before anything is sent; the run's ONE notice confirmed against the byte count and keyed digest only this process holds, anything else UNVERIFIED, exit 6 — and no byte of the note on any line the seat prints": 22,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
@@ -3251,7 +3306,7 @@ export async function selfTest() {
       t('⛔ a fresh pair every time: two arms of one read never share a key, and the public half sent is the private half\'s own', [twice[0].actions[0].public_key === twice[1].actions[0].public_key, createPublicKey(key).export({ format: 'der', type: 'spki' }).toString('base64') === armed.actions[0].public_key], [false, true]);
       const own = readReal(SELF_PATH, 'utf8');
       const body = own.slice(0, own.indexOf('export async function selfTest'));
-      t("⛔ the private key is never exported, written or printed: this file's code (above its self-test) never exports a private key, its one static fs import reads alone — no write exists to reach a file — and the keys travel in a Map that is no module state", [/privateKey\s*\.\s*export\s*\(/.test(body), /^import \{ readFileSync \} from 'node:fs';$/m.test(body), /^import [^\n]*\b(writeFileSync|appendFileSync|createWriteStream)\b[^\n]*from 'node:fs'/m.test(body), /^(?:export )?(?:const|let) [A-Za-z]*[Kk]eys? = new Map/m.test(body)], [false, true, false, false]);
+      t("⛔ the private key is never exported, written or printed: this file's code (above its self-test) never exports a private key, its one static fs import reads and resolves a path alone — no write exists to reach a file — and the keys travel in a Map that is no module state", [/privateKey\s*\.\s*export\s*\(/.test(body), /^import \{ readFileSync, realpathSync \} from 'node:fs';$/m.test(body), /^import [^\n]*\b(writeFileSync|appendFileSync|createWriteStream)\b[^\n]*from 'node:fs'/m.test(body), /^(?:export )?(?:const|let) [A-Za-z]*[Kk]eys? = new Map/m.test(body)], [false, true, false, false]);
       const supplied = armAdvisoryReads([{ ...READ, public_key: MARKER }]);
       t("⛔ a public_key already in the actions file is REFUSED, never used — a key made elsewhere means a private key kept elsewhere — and the refusal never echoes it", [supplied.refused.length, supplied.keys.size, supplied.refused[0]?.includes('actions[0].public_key is set in the actions file'), supplied.refused.some((l) => l.includes('ADVISORY MARKER'))], [1, 0, true, false]);
       // Derived from the table.
@@ -3442,7 +3497,7 @@ export async function selfTest() {
     }
 
     // ── advisory_note at the seat ───────────────────────────────────────────
-    battery("advisory_note at the seat: the note read from the file note_file names, composed under the seat's signature line and this door's own stamp, judged, then sealed HERE with a one-time digest key to the relay's committed half under the stroke's request id — the payload carrying the seal alone; a seal from the file, a missing, unreadable or unjudged file refused and a null committed half a prerequisite, all before anything is sent; the run's ONE notice confirmed against the byte count and keyed digest only this process holds, anything else UNVERIFIED, exit 6 — and no byte of the note on any line the seat prints");
+    battery("advisory_note at the seat: the note read from the file note_file names, composed under the seat's signature line and this door's own stamp, judged, then sealed HERE with a one-time digest key to the relay's committed half under the stroke's request id — the payload carrying the seal alone; a seal from the file, a file inside any git repository, and a missing, unreadable or unjudged one refused and a null committed half a prerequisite, all before anything is sent; the run's ONE notice confirmed against the byte count and keyed digest only this process holds, anything else UNVERIFIED, exit 6 — and no byte of the note on any line the seat prints");
     {
       const REPO = 'objectstack-ai/objectstack';
       // A made-up id: the fixture names no real advisory.
@@ -3514,6 +3569,24 @@ export async function selfTest() {
         arm([{ op: 'advisory_note', ghsa_id: GHSA, note_file: join(dir, 'advisory-note-unsigned.md') }]),
       ];
       t('⛔ REFUSED, nothing sealed: a sealed_note already in the actions file (a seal made elsewhere), no note_file, a file that does not exist, one that is not UTF-8, and one whose first line is no signature — each naming its action, none echoing the note', refusedArms.map((r) => [r.refused.length, r.notes.size, r.refused[0]?.startsWith('fleet-write/dispatch: REFUSED — actions[0] (advisory_note): '), quiet(r)]), refusedArms.map(() => [1, 0, true, true]));
+      // ⛔ Where the file lives: never inside a repository — this checkout, a symlink into it, or any other clone.
+      const { symlinkSync, mkdirSync } = await import('node:fs');
+      const linked = join(dir, 'advisory-note-link.md');
+      symlinkSync(SELF_PATH, linked);
+      const clone = join(dir, 'some-clone');
+      mkdirSync(clone);
+      spawnSync('git', ['init', '-q', clone], { encoding: 'utf8' });
+      writeFileSync(join(clone, 'note.md'), FILE_TEXT, 'utf8');
+      const reads = [];
+      const spied = (path) => {
+        reads.push(path);
+        return readReal(path);
+      };
+      const placed = [SELF_PATH, linked, join(clone, 'note.md')].map((f) => arm([{ op: 'advisory_note', ghsa_id: GHSA, note_file: f }], { read: spied }));
+      t('⛔ a note file inside a git repository is REFUSED before it is read: this checkout, a symlink from outside into it (judged at its real path), and a file in any other clone — nothing sealed, naming the scratchpad as the place, never echoing the note', [placed.map((r) => [r.refused.length, r.notes.size, r.refused[0]?.includes('resolves inside a git repository (its work tree or git dir, after symlinks)'), r.refused[0]?.includes("the session's scratchpad"), quiet(r)]), reads], [placed.map(() => [1, 0, true, true, true]), []]);
+      const unplaced = [advisoryNoteFilePlace(noteFile, { git: () => ({ error: Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' }) }) }), advisoryNoteFilePlace(noteFile, { git: () => ({ status: 128, stderr: 'fatal: detected dubious ownership in repository' }) }), advisoryNoteFilePlace(noteFile, { git: () => { throw new Error('boom'); } })];
+      const unknownArm = arm([NOTE], { place: () => ({ place: 'unknown', real: noteFile }) });
+      t('⛔ …and one git cannot place fails CLOSED: no git, an answer this does not read, or a probe that throws is `unknown`, and the door refuses it; the note file here, in the temporary directory, is `outside` at its real path (the control every sealed case above rests on)', [unplaced.map((r) => r.place), unknownArm.refused.length, unknownArm.refused[0]?.includes('cannot be placed'), advisoryNoteFilePlace(noteFile).place, advisoryNoteFilePlace(join(dir, 'no-such-note.md')).place], [['unknown', 'unknown', 'unknown'], 1, true, 'outside', 'unreadable']);
       const unkeyed = arm([NOTE], { relayPublicKey: null });
       const unkeyedBad = arm([{ op: 'advisory_note', ghsa_id: GHSA, note_file: join(dir, 'advisory-note-unsigned.md') }], { relayPublicKey: null });
       t('⛔ a null committed half is a PREREQUISITE for a note that passes — nothing sealed — and the file is judged FIRST, so a note that fails says so while the key is still pending', [unkeyed.prerequisite.length, unkeyed.refused.length, unkeyed.notes.size, unkeyed.prerequisite[0]?.includes('ADVISORY_NOTE_RELAY_PUBLIC_KEY'), unkeyedBad.refused.length, unkeyedBad.prerequisite.length], [1, 0, 0, true, 1, 0]);

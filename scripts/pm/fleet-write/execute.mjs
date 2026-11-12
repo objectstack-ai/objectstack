@@ -367,10 +367,12 @@
  * a state in `ADVISORY_NOTE_STATES` (never published or withdrawn), a
  * description that is text or null; the open (`openAdvisoryNote`, bound to the
  * request id, the action's index, the op and the id — anything else is
- * `ADVISORY_NOTE_OPEN_FAILED`); every line of the opened section of at least
- * `ADVISORY_NOTE_MASK_MIN_CHARS` handed to the runner's `::add-mask::`
- * (`maskCommand`; the runner never echoes it); the section judged again
- * (`advisoryNoteSectionFailure` — the seat's check is never trusted alone); a
+ * `ADVISORY_NOTE_OPEN_FAILED`); the section judged again
+ * (`advisoryNoteSectionFailure` — the seat's check is never trusted alone);
+ * every line of the judged section of at least `ADVISORY_NOTE_MASK_MIN_CHARS`
+ * handed to the runner's `::add-mask::` (`maskCommand`; the runner never
+ * echoes it), save one that occurs in the note's own notice
+ * (`advisoryNoteMaskValues`: masked, it would star the line the seat reads); a
  * SECOND fenced GET immediately before the write, refused if the description
  * changed since the first — the platform offers no conditional write on it;
  * the cap, `ADVISORY_DESCRIPTION_MAX_CHARS` code points. Then ONE PATCH of
@@ -1509,19 +1511,34 @@ export async function advisoryListAction(req, { payload, index, api, t, seal = s
   return { ok: true, status, result: ADVISORY_LIST_LANDED, notes };
 }
 
+/**
+ * The values a note's mask registers with the runner (header: "The note"): each line of the judged section, trimmed,
+ * of at least `ADVISORY_NOTE_MASK_MIN_CHARS`, once — but none that occurs in `notice`, the one command this note's
+ * landing prints: that line is public by construction, and a masked value inside it would star the notice the seat
+ * parses and turn a landed note `unverified`. Pure.
+ */
+export function advisoryNoteMaskValues(section, notice = '') {
+  const values = new Set();
+  for (const line of String(section).split('\n')) {
+    const value = line.trim();
+    if (value.length >= ADVISORY_NOTE_MASK_MIN_CHARS && !String(notice).includes(value)) values.add(value);
+  }
+  return [...values];
+}
+
 /** What a note whose GET never reached the platform prints — ⛔ never the exception's message, which carries the path. */
 export const ADVISORY_NOTE_UNREACHED =
   "REFUSED, nothing sent: a read of the advisory did not reach the platform (the runner's call threw before any answer) — re-send the note, which reads it afresh";
 
 /**
- * The note (header: "The note"): the key, the advisory's GET and its fences, the open, the mask, the section judged
- * again, the concurrency read, the cap, ONE PATCH and the read-back — `ops.mjs`'s eight steps, in order. Returns
+ * The note (header: "The note"): the key, the advisory's GET and its fences, the open, the section judged again, the
+ * mask, the concurrency read, the cap, ONE PATCH and the read-back — `ops.mjs`'s eight steps, in order. Returns
  * `{ ok, status, call, result, why, note }` — `note` the notice a landing emits, its action, byte count and keyed
- * digest; `status` `not sent` for every refusal before the PATCH. `mask` receives each line of the opened section to
- * hide (the CLI prints `::add-mask::` for it, before anything else). ⛔ No string it returns carries a byte of the note
- * or of the description: fences speak through `advisoryFenceText`, a refusal's cause through `advisoryRefusalCause`
- * with both texts as prose it may never quote, a failed open through `ADVISORY_NOTE_OPEN_FAILED`, the section's own
- * judgment through `advisoryNoteSectionFailure`. `privateKey` (the step's env, as text) and `relayPublicKey` are the
+ * digest; `status` `not sent` for every refusal before the PATCH. `mask` receives each value of a judged section to
+ * hide (`advisoryNoteMaskValues`; the CLI prints `::add-mask::` for it, before anything else). ⛔ No string it returns
+ * carries a byte of the note or of the description: fences speak through `advisoryFenceText`, a refusal's cause
+ * through `advisoryPlatformText` (a listed platform message or nothing), a failed open through
+ * `ADVISORY_NOTE_OPEN_FAILED`, the section's own judgment through `advisoryNoteSectionFailure`. `privateKey` (the step's env, as text) and `relayPublicKey` are the
  * self-test's doors; the CLI passes the env's value and the committed constant. Never throws.
  */
 export async function advisoryNoteAction(req, { payload, index, api, t, privateKey = '', relayPublicKey = ADVISORY_NOTE_RELAY_PUBLIC_KEY, mask = () => {} }) {
@@ -1543,7 +1560,7 @@ export async function advisoryNoteAction(req, { payload, index, api, t, privateK
   };
   const first = await fenced('its read');
   if (first.fail) return notSent(first.fail);
-  // 3. The open, then the mask — the runner's net behind the first, that nothing below prints the text.
+  // 3. The open.
   let opened;
   try {
     opened = openAdvisoryNote({ sealed: sealedNote, privateKey: advisoryNotePrivateKey(privateKey), aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_note', ghsaId }) });
@@ -1552,10 +1569,15 @@ export async function advisoryNoteAction(req, { payload, index, api, t, privateK
   }
   const { section, digestKey } = opened;
   try {
-    for (const line of section.split('\n')) if (line.trim().length >= ADVISORY_NOTE_MASK_MIN_CHARS) mask(line.trim());
-    // 4. The section judged again: the seat's check is never trusted alone.
+    // 4. The section judged again: the seat's check is never trusted alone — before any of it reaches the runner.
     const unfit = advisoryNoteSectionFailure(section);
     if (unfit) return notSent(`REFUSED after the open, nothing sent: the note is not a seat's section — ${unfit}`);
+    // The mask — the runner's net behind the first, that nothing below prints the text — spares what this note's own
+    // notice prints, so the runner never stars the one line the seat confirms from.
+    const noteBytes = Buffer.byteLength(section, 'utf8');
+    const noteDigest = advisoryNoteDigest({ digestKey, section });
+    const notice = annotationCommand({ action: index, op: 'advisory_note', noteBytes, noteDigest });
+    for (const value of advisoryNoteMaskValues(section, notice)) mask(value);
     // 5. The concurrency read, immediately before the PATCH: the platform offers no conditional write on it.
     const second = await fenced('its second read, just before the write');
     if (second.fail) return notSent(second.fail);
@@ -1579,8 +1601,6 @@ export async function advisoryNoteAction(req, { payload, index, api, t, privateK
     const after = await rest(api, req.path, {}, t);
     const stored = advisoryNoteReadBack({ ghsaId, expected: description, section, answer: after, read: 'the GET after the PATCH' });
     if (!stored.ok) return { ok: false, status: r.status, call, why: `${stored.why} — ${ADVISORY_NOTE_NOT_RESENT}`, note: null };
-    const noteBytes = Buffer.byteLength(section, 'utf8');
-    const noteDigest = advisoryNoteDigest({ digestKey, section });
     const result = advisoryNoteLandedText({ ghsaId, state: after.json.state, existingBytes: Buffer.byteLength(existing, 'utf8'), sectionBytes: noteBytes, storedBytes: Buffer.byteLength(description, 'utf8'), digest: noteDigest });
     return { ok: true, status: r.status, call, result, why: '', note: { action: index, op: 'advisory_note', noteBytes, noteDigest } };
   } finally {
@@ -2186,7 +2206,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "an issue_create's title and body on a private repository: they reach no log line, row, step summary or annotation when the stroke lands, when the platform refuses it with a message quoting either — the row keeps the status, withholds that message and prints one that quotes nothing —, when the transport fails, or when the payload is refused for an over-cap or ill-typed body — the refusal names the key and the byte count alone": 8,
   "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — target-write by the maintainer's ruling, a sender off the advisory's collaborators sealed for, one without write refused before the GET, any other gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 18,
   "advisory_list: the row's gate before any request, then one walk per listed state on the platform's own cursor, nothing written; a short page or a full one with no next link ends a walk; a refused, unreached or off-shape page, a next link off this API's collection, a repeated advisory, the page cap and the channel's cap each FAILED with nothing emitted; each advisory projected to five fields, the JSON padded and sealed to the seat's key as exactly ten notice parts the reader parses back and opens; ⛔ the marker, every listed id, the cursor and the count reach no log line, row, step summary or annotation, and the row reads the same whatever the count": 22,
-  "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open and the mask, the section judged again, a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 23,
+  "advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output": 25,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
@@ -3811,7 +3831,7 @@ export async function selfTest() {
     }
 
     // ── advisory_note ───────────────────────────────────────────────────────
-    battery("advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open and the mask, the section judged again, a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output");
+    battery("advisory_note: the relay's key judged against the committed half before any request; the advisory's GET and its fences, the open, the section judged again and the mask (sparing the note's own notice), a second GET immediately before ONE PATCH of { description } — the text read, byte for byte, the separator and the section — then that PATCH's answer and a GET after it read back byte for byte; a key, fence, open, section, race, cap, refusal or read-back failure each FAILED with no write or no second one, and no byte of the note, the description or the key on any line, row, summary, annotation, pace line or real process's output");
     {
       const { generateKeyPairSync } = await import('node:crypto');
       // Made-up ids: the fixture names no real advisory.
@@ -3860,6 +3880,15 @@ export async function selfTest() {
       const parsedBack = notices(landed).map((l) => parseRelayAdvisoryNoteAnnotation(l.slice(l.indexOf('::', 2) + 2)));
       t("⭐ ONE notice titled `fleet-write advisory_note`, the seat's parser reading back the action, the section's byte count and the keyed digest — what the seat confirms against its own", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), landed.annotations, parsedBack], [['::notice title=fleet-write advisory_note::'], [{ action: 1, op: 'advisory_note', noteBytes: bytes(SECTION), noteDigest: digest }], [{ action: 1, op: 'advisory_note', noteBytes: bytes(SECTION), noteDigest: digest }]]);
       t('the mask: every line of the opened section of six characters or more, trimmed, is handed to the runner\'s mask — the net behind the first — and the command escapes as the toolkit does', [landed.masked, maskCommand('50% off\r\nnext')], [SECTION.split('\n').map((l) => l.trim()).filter((l) => l.length >= ADVISORY_NOTE_MASK_MIN_CHARS), '::add-mask::50%25 off%0D%0Anext']);
+      // A note whose own lines are words of its notice: masked, the runner would star the notice the seat parses.
+      const NOTICE_WORDS = ['fleet-write advisory_note', 'op=advisory_note', 'action=1', 'note_bytes='];
+      const WORDY = `${SECTION}\n${NOTICE_WORDS.join('\n')}`;
+      const wordy = await noteRun([note({ sealed_note: seal(WORDY) })], lands(EXISTING, advisoryNoteDescription(EXISTING, WORDY)));
+      const wordyLine = notices(wordy).find((l) => l.startsWith('::notice title=fleet-write advisory_note::')) ?? '';
+      const starred = (line, values) => values.reduce((l, v) => l.split(v).join('***'), line);
+      const parsedAs = (line) => parseRelayAdvisoryNoteAnnotation(line.slice(line.indexOf('::', 2) + 2));
+      t("⛔ the mask spares the note's own notice: a note whose lines are words of its notice lands, those lines are not masked, and the notice with every registered mask applied as the runner would still parses to the action, count and digest — where masking every line (the positive control) leaves nothing the seat can read", [wordy.exit, NOTICE_WORDS.filter((w) => w.length >= ADVISORY_NOTE_MASK_MIN_CHARS).some((w) => wordy.masked.includes(w)), wordy.masked.includes(MARKER), parsedAs(starred(wordyLine, wordy.masked)), parsedAs(starred(wordyLine, WORDY.split('\n').map((l) => l.trim()).filter((l) => l.length >= ADVISORY_NOTE_MASK_MIN_CHARS)))], [EXIT_OK, false, true, wordy.annotations[0] ?? 'no notice', null]);
+      t('…advisoryNoteMaskValues: each judged line of six characters or more, trimmed, once — none that occurs in the notice', [advisoryNoteMaskValues(`  ${MARKER}  \n${MARKER}\nshort\nop=advisory_note`, '::notice title=fleet-write advisory_note::fleet-write action=1 op=advisory_note'), advisoryNoteMaskValues('abcdef', '')], [[MARKER], ['abcdef']]);
       const empty = await noteRun([note()], lands(null));
       const emptyPatch = empty.seen.find((s) => s.call === A_PATCH);
       t('an advisory with no description takes the section alone — no separator in front of it — and lands from a 0-byte description', [empty.exit, emptyPatch?.body, empty.rows[0]?.result?.includes(`a ${bytes(SECTION)}-byte note to a 0-byte description`)], [EXIT_OK, { description: SECTION }, true]);
@@ -3888,7 +3917,7 @@ export async function selfTest() {
       const unsigned = await noteRun([note({ sealed_note: seal(`${MARKER}\nno signature line above`) })], lands());
       const unstamped = await noteRun([note({ sealed_note: seal(`domain:security#2 · os-dev-a · session_01ABCDEFGHJKMNPQRSTVWXYZ\n\n${MARKER}`) })], lands());
       const carriage = await noteRun([note({ sealed_note: seal(`${SECTION}\r\n${MARKER}`) })], lands());
-      t("⛔ the section judged AGAIN after the open — the seat's check is never trusted alone: no signature line, no stamp, a carriage return — each FAILED with ZERO writes, every line masked first", [unsigned, unstamped, carriage].map((r) => [...failed(r), writes(r.seen).length, r.masked.includes(MARKER), r.rows[0]?.result?.startsWith("FAILED: REFUSED after the open, nothing sent: the note is not a seat's section — ")]), [unsigned, unstamped, carriage].map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, 0, true, true]));
+      t("⛔ the section judged AGAIN after the open — the seat's check is never trusted alone: no signature line, no stamp, a carriage return — each FAILED with ZERO writes, and nothing of it handed to the runner's mask", [unsigned, unstamped, carriage].map((r) => [...failed(r), writes(r.seen).length, r.masked.length === 0, r.rows[0]?.result?.startsWith("FAILED: REFUSED after the open, nothing sent: the note is not a seat's section — ")]), [unsigned, unstamped, carriage].map(() => [EXIT_ACTION_FAILED, 1, 'not sent', 0, 0, 0, true, true]));
       // ⛔ The concurrency read.
       const raced = await noteRun([note()], { ...lands(), [A_GET]: [advisory(), advisory({ description: `${EXISTING} — edited between the reads` })] });
       const moved = await noteRun([note()], { ...lands(), [A_GET]: [advisory(), advisory({ state: 'published' })] });

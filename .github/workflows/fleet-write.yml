@@ -154,9 +154,9 @@ jobs:
           # also reaches cancel, re-run, delete, cache and artifact endpoints; the op table has no
           # row for any of them, and `validate.mjs --self-test` pins that none is reachable.
           permission-actions: ${{ steps.validate.outputs.permission_actions }}
-          # FIVE write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
-          # `advisory_create` (one draft advisory), `advisory_collaborators_add`, `advisory_versions` and
-          # `advisory_state` (one advisory's PATCH). Minted ONLY for a stroke carrying one of them, which
+          # SIX write consumers, one at a time: the advisory rows — `advisory_report` (one private report),
+          # `advisory_create` (one draft advisory), `advisory_collaborators_add`, `advisory_versions`,
+          # `advisory_state` and `advisory_note` (one advisory's PATCH). Minted ONLY for a stroke carrying one of them, which
           # travels alone, the same way as `permission-actions`: the validator writes
           # `permission_repository_advisories=write` for it and an EMPTY value for every other stroke.
           # Separately, TWO read consumers, each also alone, get a READ-ONLY mint through this same input:

@@ -18,7 +18,7 @@
 - 判定:发现 ⇒ 中继 `advisory_state` 置 `draft` 走派修;非发现 ⇒ 置 `closed`,台账记非发现。
 - 巡查:每轮中继 `advisory_list` 列 `triage`/`draft`/`closed` 比台账;缺行照接收 ②,状态不符即改。
 - 读出的公告明文只印本席进程 stdout(`--reveal`),⛔ 不进文件、日志或后台任务输出。
-- 公告的分析与依据经中继 `advisory_note` 追加进其正文:首行签名,有裁定记录即引其编号。
+- 分析经中继 `advisory_note` 追加进公告正文:文件置 git 仓外,首行签名,有裁定即引其记录。
 - 台账住座位贴,一份一行:不透明编号 · 会话 · 状态;⛔ 无细节;修复的认领只记台账。
 - 状态词表:`received` → `fixing` → `merged` → `closed`;挑中发布再 `awaiting publish` → `published`。
 
