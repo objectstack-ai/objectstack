@@ -18,6 +18,8 @@
  */
 
 import '@testing-library/jest-dom/vitest';
+// The source under test reaches `import('@objectstack/lint')`: paid here, at collection, never inside a test's clock.
+import '@objectstack/lint';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import * as React from 'react';
