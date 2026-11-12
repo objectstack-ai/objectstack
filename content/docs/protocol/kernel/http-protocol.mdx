@@ -1184,6 +1184,8 @@ Vary: Accept-Encoding
   other response written chunk by chunk.
 - Responses that already carry a `Content-Encoding`, `206 Partial Content`,
   `HEAD`, and responses marked `Cache-Control: no-transform` are sent unchanged.
+- Every response the server could encode carries `Vary: Accept-Encoding`. So do
+  the `HEAD`, `206` and `304` answers for such a response.
 - The `ETag` is the same on encoded and unencoded answers. A save sends it back
   as `If-Match`, and the server compares it strongly.
 

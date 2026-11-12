@@ -225,6 +225,8 @@ describe('HonoHttpServer response compression', () => {
         expect(head.status).toBe(200);
         expect(head.headers['content-encoding']).toBeUndefined();
         expect(head.headers['content-length']).toBe(String(Buffer.byteLength(ASSET_JS)));
+        // The header fields its GET would carry: that GET varies with Accept-Encoding.
+        expect(head.headers['vary']).toMatch(/accept-encoding/i);
     });
 
     it('keeps every Set-Cookie line of an encoded answer', async () => {

@@ -37,7 +37,10 @@
  *
  * `Vary: Accept-Encoding` goes on every response this could encode, whatever
  * the request accepted and whatever the body's size, so a shared cache never
- * hands one client's encoding to another. The `ETag` is passed through
+ * hands one client's encoding to another. It also goes on the `HEAD`, `206`
+ * and `304` answers for such a response, which are never encoded themselves:
+ * a `HEAD` carries the header fields its `GET` would, and a cache refreshes a
+ * stored answer's headers from a `304`. The `ETag` is passed through
  * unchanged: the metadata and record doors compare an `If-Match` token against
  * it strongly, so rewriting it to a weak `W/` form on encoded answers would make
  * every save that pins the version it just read fail its precondition.
@@ -109,11 +112,13 @@ export function selectResponseEncoding(acceptEncoding: string | undefined): Resp
     return br >= gzip ? 'br' : 'gzip';
 }
 
-/** Whether the response in `c` is a kind this server may encode at all. */
-function isEncodableKind(c: Context): boolean {
-    if (c.req.method === 'HEAD') return false;
+/**
+ * Whether the response in `c` is a kind whose full `GET` answer this server
+ * may encode, so that its representation varies with `Accept-Encoding`.
+ */
+function variesByEncoding(c: Context): boolean {
     const { status, headers } = c.res;
-    if (status < 200 || status === 204 || status === 206 || status === 304) return false;
+    if (status < 200 || status === 204) return false;
     if (headers.has('content-encoding') || headers.has('transfer-encoding')) return false;
     const type = headers.get('content-type');
     if (!type || EVENT_STREAM.test(type) || !COMPRESSIBLE_CONTENT_TYPE_REGEX.test(type)) return false;
@@ -196,12 +201,15 @@ export async function compressResponse(
     options: { streamed: boolean; threshold?: number },
 ): Promise<void> {
     const threshold = options.threshold ?? RESPONSE_COMPRESSION_THRESHOLD_BYTES;
-    if (options.streamed || !isEncodableKind(c)) return;
+    if (options.streamed || !variesByEncoding(c)) return;
 
     const vary = c.res.headers.get('vary');
     if (vary !== '*' && !(vary && VARY_ACCEPT_ENCODING.test(vary))) {
         c.header('Vary', vary ? `${vary}, Accept-Encoding` : 'Accept-Encoding');
     }
+    // A `HEAD`, a partial answer and a revalidation carry the `Vary` of the
+    // full answer they stand for, and are never encoded themselves.
+    if (c.req.method === 'HEAD' || c.res.status === 206 || c.res.status === 304) return;
 
     const length = declaredLength(c.res.headers);
     if (length !== undefined && length < threshold) return;
