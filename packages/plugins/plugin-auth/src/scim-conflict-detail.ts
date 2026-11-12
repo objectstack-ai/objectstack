@@ -44,7 +44,7 @@ export async function translateScimConflictDetail(response: Response): Promise<R
   }
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return response;
   const detail = (body as { detail?: unknown }).detail;
-  if (typeof detail !== 'string' || !Object.hasOwn(SCIM_CONFLICT_DETAIL_TRANSLATIONS, detail)) return response;
+  if (typeof detail !== 'string' || !Object.prototype.hasOwnProperty.call(SCIM_CONFLICT_DETAIL_TRANSLATIONS, detail)) return response;
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(JSON.stringify({ ...body, detail: SCIM_CONFLICT_DETAIL_TRANSLATIONS[detail] }), {
