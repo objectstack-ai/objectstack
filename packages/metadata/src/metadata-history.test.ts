@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MetadataManager } from './metadata-manager.js';
-import { DatabaseLoader } from './loaders/database-loader.js';
+import { DatabaseLoader, type MetadataHistoryAddress } from './loaders/database-loader.js';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
@@ -245,8 +245,8 @@ describe('history and rollback of a type stored per package (#32351)', () => {
   const rowOf = async (type: string, packageId: string) =>
     (await rowsOf(type)).find((row) => row.package_id === packageId);
   const labelOf = (row: Record<string, unknown> | undefined) => JSON.parse(String(row?.metadata)).label;
-  const versions = async (type: string, options?: { packageId?: string }) =>
-    (await manager.getHistory(type, 'x', options as never)).records.map((record) => record.version);
+  const versions = async (type: string, options?: MetadataHistoryAddress) =>
+    (await manager.getHistory(type, 'x', options)).records.map((record) => record.version);
   const refusal = (promise: Promise<unknown>) =>
     promise.then(() => undefined, (error: any) => ({
       code: error?.code,
@@ -275,7 +275,7 @@ describe('history and rollback of a type stored per package (#32351)', () => {
       it('two holders: a rollback naming A to its v1 writes A\'s row only, and B\'s row is byte-identical', async () => {
         await twoHolders();
         const before = await rowOf(type, B);
-        await manager.rollback(type, 'x', 1, { packageId: A } as never);
+        await manager.rollback(type, 'x', 1, { packageId: A });
         expect(labelOf(await rowOf(type, A))).toBe('A1');
         expect(await rowOf(type, B)).toEqual(before);
         expect(await versions(type, { packageId: A })).toEqual([4, 3, 1]);
@@ -304,11 +304,11 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         expect(await versions(type, { packageId: B })).toEqual([2]);
         expect((await loader.getHistoryRecord(type, 'x', 1, { packageId: A }))?.metadata).toEqual(body('A1', A));
         expect(await loader.getHistoryRecord(type, 'x', 2, { packageId: A })).toBeNull();
-        expect((await manager.diff(type, 'x', 1, 3, { packageId: A } as never)).identical).toBe(false);
-        await expect(manager.diff(type, 'x', 1, 2, { packageId: A } as never)).rejects.toThrow(/Version 2 not found/);
-        await expect(manager.rollback(type, 'x', 2, { packageId: A } as never)).rejects.toThrow(/Version 2 not found/);
+        expect((await manager.diff(type, 'x', 1, 3, { packageId: A })).identical).toBe(false);
+        await expect(manager.diff(type, 'x', 1, 2, { packageId: A })).rejects.toThrow(/Version 2 not found/);
+        await expect(manager.rollback(type, 'x', 2, { packageId: A })).rejects.toThrow(/Version 2 not found/);
         // Paging counts the package's versions, not the name's.
-        const page = await manager.getHistory(type, 'x', { packageId: A, limit: 1 } as never);
+        const page = await manager.getHistory(type, 'x', { packageId: A, limit: 1 });
         expect([page.records.map((record) => record.version), page.total, page.hasMore]).toEqual([[3], 2, true]);
       });
 
@@ -325,7 +325,14 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         });
         expect(await rowsOf(type)).toEqual(before);
         // A rollback naming a package that holds no row is refused the same way.
-        expect((await refusal(manager.rollback(type, 'x', 2, { packageId: B } as never)))?.reason).toBe('not-held-by-qualifier');
+        expect(await refusal(manager.rollback(type, 'x', 2, { packageId: B }))).toEqual({
+          code: 'RESOURCE_CONFLICT',
+          status: 409,
+          reason: 'not-held-by-qualifier',
+          callerPackageId: B,
+          candidates: [{ kind: 'package', packageId: A }],
+        });
+        expect(await rowsOf(type)).toEqual(before);
       });
 
       it('a package-less customization saved into A\'s row is A\'s version, and its snapshot is byte-identical', async () => {
@@ -334,7 +341,7 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         await loader.save(type, 'x', body('B1', B));
         expect(await versions(type, { packageId: A })).toEqual([2, 1]);
         expect((await loader.getHistoryRecord(type, 'x', 2, { packageId: A }))?.metadata).toEqual(body('custom'));
-        await manager.rollback(type, 'x', 2, { packageId: A } as never);
+        await manager.rollback(type, 'x', 2, { packageId: A });
         expect(labelOf(await rowOf(type, A))).toBe('custom');
         expect(labelOf(await rowOf(type, B))).toBe('B1');
       });
@@ -362,6 +369,70 @@ describe('history and rollback of a type stored per package (#32351)', () => {
         // An unattributed version lands in the one holder's row, as before.
         await manager.rollback(type, 'x', 2);
         expect((await rowsOf(type)).map((row) => [row.package_id, labelOf(row), row.version])).toEqual([[A, 'custom', 4]]);
+      });
+
+      it('a package-less row beside two packages\' rows: the environment address (null, \'\' or the sentinel) reads and rolls back its versions only', async () => {
+        await twoHolders();
+        // A package-less save of a name two packages hold fills the bare slot (#32347 R1b's state).
+        await loader.save(type, 'x', body('env1'));
+        await loader.save(type, 'x', body('env2'));
+        const slots = (await rowsOf(type)).map((row) => [row.package_id ?? null, labelOf(row)]);
+        expect(slots).toHaveLength(3);
+        expect(slots).toEqual(expect.arrayContaining([[A, 'A2'], [B, 'B1'], [null, 'env2']]));
+        // The several-slots refusal (#32347 R1b) names the environment beside both packages, in the rows' order.
+        const candidates = (await refusal(manager.getHistory(type, 'x')))?.candidates;
+        expect(candidates).toHaveLength(3);
+        expect(candidates).toEqual(expect.arrayContaining([
+          { kind: 'package', packageId: A }, { kind: 'package', packageId: B }, { kind: 'environment' },
+        ]));
+        for (const environment of [null, '', 'sys_metadata']) {
+          expect(await versions(type, { packageId: environment })).toEqual([5, 4]);
+          expect((await loader.getHistoryRecord(type, 'x', 4, { packageId: environment }))?.metadata).toEqual(body('env1'));
+          expect(await loader.getHistoryRecord(type, 'x', 1, { packageId: environment })).toBeNull();
+        }
+        expect((await manager.diff(type, 'x', 4, 5, { packageId: null })).identical).toBe(false);
+        await expect(manager.rollback(type, 'x', 1, { packageId: null })).rejects.toThrow(/Version 1 not found in history for .* \(environment\)/);
+        const packageRows = (await rowsOf(type)).filter((row) => row.package_id);
+        await manager.rollback(type, 'x', 4, { packageId: '' });
+        expect((await rowsOf(type)).filter((row) => !row.package_id).map(labelOf)).toEqual(['env1']);
+        expect((await rowsOf(type)).filter((row) => row.package_id)).toEqual(packageRows);
+        expect(await versions(type, { packageId: 'sys_metadata' })).toEqual([6, 5, 4]);
+      });
+
+      it('the environment address on a name with no package-less row is refused naming the packages', async () => {
+        await twoHolders();
+        expect(await refusal(loader.registerRollback(type, 'x', body('A1', A), 1, undefined, undefined, { packageId: null }))).toEqual({
+          code: 'RESOURCE_CONFLICT',
+          status: 409,
+          reason: 'not-held-by-qualifier',
+          callerPackageId: null,
+          candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }],
+        });
+      });
+
+      it('a rollback naming a package when no row of the name is left answers "not found", not a refusal naming nobody', async () => {
+        await twoHolders();
+        await loader.delete(type, 'x', { packageId: A });
+        await loader.delete(type, 'x', { packageId: B });
+        const error = await manager.rollback(type, 'x', 1, { packageId: A }).then(() => undefined, (e: any) => e);
+        expect(error?.message).toMatch(/not found for rollback/);
+        expect(error?.status).toBeUndefined();
+      });
+
+      it('a direct rollback naming A with B\'s version while B holds a row says the version is B\'s, and writes nothing', async () => {
+        await twoHolders();
+        const before = await rowsOf(type);
+        const error = await loader.registerRollback(type, 'x', body('B1', B), 2, undefined, undefined, { packageId: A })
+          .then(() => undefined, (e: any) => e);
+        expect(error?.message).toMatch(/^Version 2 of .*\/x is package "com\.acme\.beta"'s, not package "com\.acme\.alpha"'s/);
+        expect(error?.refusal).toBeUndefined();
+        expect(await rowsOf(type)).toEqual(before);
+      });
+
+      it('two holders and no package: a rollback or diff of a version that does not exist answers the 409, not "not found"', async () => {
+        await twoHolders();
+        expect((await refusal(manager.rollback(type, 'x', 42)))?.status).toBe(409);
+        expect((await refusal(manager.diff(type, 'x', 1, 42)))?.status).toBe(409);
       });
 
       it('CONTROL: one holder and no package answer as before', async () => {

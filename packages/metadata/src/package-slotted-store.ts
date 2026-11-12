@@ -361,7 +361,7 @@ export function storeRowWriteKey(
 }
 
 /** Whether a package id names a caller with a package (not empty, not the provenance sentinel). */
-function isPackageCaller(packageId: string | null | undefined): packageId is string {
+export function isPackageCaller(packageId: string | null | undefined): packageId is string {
   return typeof packageId === 'string' && packageId !== '' && packageId !== OVERLAY_SENTINEL;
 }
 
@@ -442,25 +442,28 @@ export function refuseSeveralSlots(store: ReadonlyMap<string, unknown> | undefin
 }
 
 /**
- * [ADR-0150 D3/D4, #32351] Refuse a write that names `packageId` (the package a
- * rollback names, or the package whose version it restores) when `store` holds
- * no slot of `name` for that package: no row is that package's to write, and
- * ⛔ never another holder's. The refusal names every slot the store holds (each
- * package, and the environment for the package-less slot).
+ * [ADR-0150 D3/D4, #32351] Refuse a write that addresses `packageId` (the
+ * package a rollback names, or the package whose version it restores; `null`
+ * for the environment's package-less slot) when `store` holds no slot of
+ * `name` for it: no row is that holder's to write, and ⛔ never another
+ * holder's. The refusal names every slot the store holds, packages first, then
+ * the environment (the exact-qualifier door's order). The caller answers a
+ * name with no slot at all as its own miss and never asks this.
  *
  * @throws {PackageScopedNameRefusedError} always (`not-held-by-qualifier`).
  */
-export function refuseSlotNotHeld(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string, packageId: string): never {
+export function refuseSlotNotHeld(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string, packageId: string | null): never {
+  const holders = storeKeysNamed(store, type, name).map(slotPackageOf);
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'not-held-by-qualifier',
     type: type as PackageScopedResolvableType,
     name,
     callerPackageId: packageId,
-    candidates: storeKeysNamed(store, type, name).map((key) => {
-      const holder = slotPackageOf(key);
-      return holder === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: holder };
-    }),
+    candidates: [
+      ...holders.filter((holder): holder is string => holder !== undefined).map((holder) => ({ kind: 'package' as const, packageId: holder })),
+      ...(holders.includes(undefined) ? [{ kind: 'environment' as const }] : []),
+    ],
   };
   throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
 }

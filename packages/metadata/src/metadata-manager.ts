@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isPackageCaller,
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
@@ -3953,7 +3954,8 @@ export class MetadataManager implements IMetadataService {
    * Returns a timeline of all changes made to the item.
    *
    * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
-   * `options.packageId` reads that package's versions only; naming none, a
+   * `options.packageId` reads that package's versions only (`null`: the
+   * environment's, recorded under no package); naming none, a
    * name more than one row slot holds is refused 409 naming every holder
    * (`PackageScopedNameRefusedError`), and one holder answers as before.
    */
@@ -4035,7 +4037,7 @@ export class MetadataManager implements IMetadataService {
     this.writeRegistryEntry(
       type,
       name,
-      address?.packageId !== undefined && PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      isPackageCaller(address?.packageId) && PACKAGE_SLOTTED_STORE_TYPES.has(type)
         ? withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId })
         : restoredMetadata,
     );
@@ -4109,9 +4111,10 @@ function historyAddressOf(options?: MetadataHistoryAddress): MetadataHistoryAddr
   return options?.packageId === undefined ? undefined : { packageId: options.packageId };
 }
 
-/** [#32351] The "not found" message's package, for a by-package type read by package; empty otherwise. */
+/** [#32351] The "not found" message's address, for a by-package type read by address; empty otherwise. */
 function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): string {
-  return address?.packageId !== undefined && PACKAGE_SLOTTED_STORE_TYPES.has(type) ? ` (package ${address.packageId})` : '';
+  if (address?.packageId === undefined || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return '';
+  return isPackageCaller(address.packageId) ? ` (package ${address.packageId})` : ' (environment)';
 }
 
 /**
