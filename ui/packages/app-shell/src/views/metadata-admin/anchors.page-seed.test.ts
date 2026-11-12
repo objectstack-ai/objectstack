@@ -8,13 +8,18 @@ import { describe, it, expect, vi } from 'vitest';
 // `isolate: false`, so whether the module is already warm depends on what else
 // the worker happened to run first; when it wasn't, the seeding test blew the
 // budget. (It surfaced as a timeout rather than a wrong result because
-// `createSeed` swallows failures and returns `{}`.)
+// `createSeed` swallows failures.)
 //
 // Importing it here moves that cost into the file's import phase, which no test
 // or hook timeout applies to, so it can never land inside a timed window again.
 // Keep the specifier identical to the one in anchors.ts — ESM caches by resolved
 // specifier, so this makes the hook's own dynamic import resolve immediately.
 import '@object-ui/plugin-detail';
+// The same for the three packages `validateMetadataDraft` reaches through the
+// CEL authoring helpers' dynamic imports (`check:test-source-alias`).
+import '@objectstack/formula';
+import '@objectstack/lint';
+import '@object-ui/core';
 
 // The synthesizer the hook imports, passed through to the real one unless a
 // test names what it returns (a synthesized page that places no component).
