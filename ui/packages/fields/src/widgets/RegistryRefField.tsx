@@ -35,6 +35,7 @@ import {
   holderOrder,
   holderPackageFieldOf,
   holderPackageOf,
+  readFormObject,
   storedGrantHolders,
   type PermissionSetHolder,
 } from './permissionSetHolders.js';
@@ -107,7 +108,11 @@ import { useFieldTranslation } from './useFieldTranslation.js';
  *    picked on every form;
  *  - a package's set is reached only by naming the package, which only the
  *    grant's package column can carry, and only on a create
- *    (`PERMISSION_SET_GRANT_COLUMNS`). The record form hands the widget
+ *    (`PERMISSION_SET_GRANT_COLUMNS`). The widget knows it is that column by
+ *    its object AND its name: the record form stamps the object it edits on
+ *    the field (`withFormObject`), and a field with no stamp, or another
+ *    object's, is read as a target that takes a bare name
+ *    (objectstack#32795). The record form hands the widget
  *    its sibling writer (`onAutofill`) on a create form alone, so there the
  *    pick writes the holder's package into that column, and a later pick that
  *    needs none clears what an earlier one wrote;
@@ -290,9 +295,17 @@ function holdersByName(type: string, items: readonly RegistryItemHeader[] | null
   return out;
 }
 
-/** The option key for one holder of a name: the name for the environment's own set, else name and package. */
+/**
+ * The option key for one holder of a name: the name for the environment's own
+ * set, else the `[name, package]` pair as JSON (objectstack#32795). A
+ * separator joined into one string (`name@package`) is one key for two pairs
+ * once either part can hold the separator, and a stored value the registry
+ * does not list is offered as its own option under its own text. A JSON pair
+ * always opens with `["`, which no permission-set name opens with (the name
+ * grammar is snake_case), and two different pairs never serialise alike.
+ */
 function holderOptionValue(name: string, holder: PermissionSetHolder): string {
-  return holder === null ? name : `${name}@${holder}`;
+  return holder === null ? name : JSON.stringify([name, holder]);
 }
 
 /** What one option writes: the name, and the package that addresses its holder (or none). */
@@ -349,7 +362,9 @@ export function RegistryRefField({
   // holder's package, the package the record names there, and whether this
   // form can write it (the record form's sibling writer, on a create only).
   const holders = holdersByName(registryType, listed);
-  const packageField = holders ? holderPackageFieldOf(boundColumnOf(props.name, props.field)) : null;
+  const packageField = holders
+    ? holderPackageFieldOf(readFormObject(props.field), boundColumnOf(props.name, props.field))
+    : null;
   const storedPackage = packageField ? dependentValues?.[packageField] : undefined;
   const writePackage = packageField !== null && typeof onAutofill === 'function' ? onAutofill : null;
 
@@ -448,6 +463,10 @@ export function RegistryRefField({
   // cannot address is listed and disabled.
   const options: Array<{ value: string; label: string; disabled?: boolean }> = [];
   const targets = new Map<string, OptionTarget>();
+  // The options this form cannot address. `commit` refuses them itself: the
+  // `disabled` flag is the host control's to honour, and a pick of one would
+  // write a name whose holder the payload cannot name (objectstack#32795).
+  const blockedKeys = new Set<string>();
   const listedShared = new Set<string>();
   let unaddressable = false;
   for (const item of offered.sort((a, b) => a.name.localeCompare(b.name))) {
@@ -463,7 +482,10 @@ export function RegistryRefField({
       const key = holderOptionValue(item.name, h.holder);
       const addressing = addressingPackageOf(all, h.holder);
       const blocked = addressing !== undefined && !writePackage;
-      if (blocked) unaddressable = true;
+      if (blocked) {
+        unaddressable = true;
+        blockedKeys.add(key);
+      }
       options.push({ value: key, label: holderText(h.item, h.holder), ...(blocked ? { disabled: true } : {}) });
       targets.set(key, { name: item.name, addressing });
     }
@@ -480,8 +502,10 @@ export function RegistryRefField({
   // A pick writes the NAME. On a form that can write the holder's package, it
   // also writes the package that addresses the picked holder, or clears one an
   // earlier pick wrote where the new pick needs none; a pick that needs none on
-  // a record that names none writes nothing beside the name.
+  // a record that names none writes nothing beside the name. A pick of an
+  // option this form cannot address writes nothing at all.
   const commit = (next: string) => {
+    if (blockedKeys.has(next)) return;
     const target = targets.get(next);
     onChange(target ? target.name : next);
     if (!writePackage || !packageField) return;
