@@ -11,7 +11,9 @@
  *    the action is listed to exactly the callers the door admits — and that
  *    capability is an organization-scoped one the platform administrator's
  *    grant holds;
- *  - its form is the door's closed body set, one param per key.
+ *  - its form is the door's closed body set, one param per key;
+ *  - it is offered to agents with `requiresConfirmation: true`, so an agent's
+ *    call to message the organization waits for a person to confirm it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -23,7 +25,7 @@ import { IN_APP_MESSAGE_BODY_KEYS, IN_APP_MESSAGE_CAPABILITY, IN_APP_MESSAGE_ROU
 type Param = { name?: string; field?: string; type?: string; multiple?: boolean; required?: boolean; defaultValue?: unknown };
 
 const action = (SysNotification.actions ?? []).find((a: { name: string }) => a.name === 'send_in_app_message') as
-    | { type: string; target: string; locations: string[]; requiredPermissions?: string[]; params?: Param[] }
+    | { type: string; target: string; locations: string[]; requiredPermissions?: string[]; params?: Param[]; ai?: { exposed?: boolean; requiresConfirmation?: boolean } }
     | undefined;
 
 describe('send_in_app_message ↔ POST /api/v1/messaging/in-app-messages', () => {
@@ -32,6 +34,12 @@ describe('send_in_app_message ↔ POST /api/v1/messaging/in-app-messages', () =>
         expect(action!.type).toBe('api');
         expect(action!.locations).toEqual(['list_toolbar']);
         expect(action!.target).toBe(IN_APP_MESSAGE_ROUTE);
+    });
+
+    it('is offered to agents, and an agent call waits for a person to confirm it', () => {
+        // Neither a delete nor `danger`, so the bridge would not ask on its
+        // own: the action asks explicitly, never relaxed.
+        expect(action!.ai).toMatchObject({ exposed: true, requiresConfirmation: true });
     });
 
     it("declares exactly the door's capability — an organization-scoped one the platform administrator holds", () => {

@@ -131,10 +131,15 @@ export const SysNotification = ObjectSchema.create({
           helpText: 'Optional. A page in this app (starting with /) or a web address the message opens.',
         },
       ],
+      // Exposed, and an agent's call waits for a person to confirm it: the
+      // action is neither a delete nor `danger`, so the bridge's default would
+      // let an agent holding an administrator's credentials message the whole
+      // organization unasked.
       ai: {
         exposed: true,
         description:
-          'Send an in-app message (params: title, body, optional severity info|warning|critical and link) to everyone in the current organization (everyone: true) or to picked members (recipients: user ids), not both. Organization administrators only; each recipient must be a member of the current organization.',
+          'Send an in-app message (params: title, body, optional severity info|warning|critical and link) to everyone in the current organization (everyone: true) or to picked members (recipients: user ids), not both. Organization administrators only; each recipient must be a member of the current organization. Ask the human to confirm before calling.',
+        requiresConfirmation: true,
       },
     },
   ],
