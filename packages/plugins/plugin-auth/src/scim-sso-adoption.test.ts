@@ -214,12 +214,13 @@ function adoptFacts(localPart: string, change: Partial<SsoAccountFacts> = {}): S
 }
 
 /**
- * The account SSO JIT leaves behind: a `sys_user` the vendor created and a
- * `sys_account` linking it to the provider — written through the vendor's own
- * internal adapter, so `account.create.after` stamps `source` exactly as a
- * real federated sign-in does. A fact the stamp would not produce (an
- * `env_native` account with an SSO link and no password) is then written
- * directly; that is the fixture's one changed fact, not a side effect.
+ * The account SSO JIT leaves behind: the `sys_user` row, and a `sys_account`
+ * row naming the provider it signed in through — the two rows
+ * `@better-auth/sso` writes on a first sign-in, with `source` as the
+ * platform's identity-source stamp leaves it (`idp_provisioned` for a
+ * federated link). Written as rows: a sign-in cannot be driven without an
+ * identity provider, and what the rule reads is exactly these rows. Each
+ * refusal fixture changes one of them.
  */
 async function seedSsoAccount(h: Harness, facts: SsoAccountFacts): Promise<string> {
   await h.engine.insert(
@@ -234,30 +235,30 @@ async function seedSsoAccount(h: Harness, facts: SsoAccountFacts): Promise<strin
     },
     SYSTEM,
   );
-  const ctx = await h.manager.getAuthContext();
-  const user = await ctx.internalAdapter.createUser({ email: facts.email, name: 'Sso Jit', emailVerified: true });
-  if (facts.linkedProvider) {
-    await ctx.internalAdapter.createAccount({
-      userId: user.id,
-      providerId: facts.linkedProvider,
-      accountId: `sub-${user.id}`,
-    });
-  }
-  if (facts.localPassword) {
-    await ctx.internalAdapter.createAccount({
-      userId: user.id,
-      providerId: 'credential',
-      accountId: user.id,
-      password: await ctx.password.hash('correct-horse-battery-staple-32148'),
-    });
-  }
-  const row = (await h.engine.findOne('sys_user', { where: { id: user.id }, fields: ['source'] }, SYSTEM)) as
-    | { source?: unknown }
-    | null;
-  if (row?.source !== facts.source) {
-    await h.engine.update('sys_user', { id: user.id, source: facts.source }, SYSTEM);
-  }
-  return user.id;
+  const userId = `usr_${facts.email.split('@')[0].replace(/[^a-z0-9]/gi, '_')}`;
+  await h.engine.insert(
+    'sys_user',
+    { id: userId, email: facts.email, name: 'Sso Jit', email_verified: true, source: facts.source },
+    SYSTEM,
+  );
+  if (facts.linkedProvider) await linkAccount(h, userId, facts.linkedProvider);
+  if (facts.localPassword) await linkAccount(h, userId, 'credential');
+  return userId;
+}
+
+/** A `sys_account` row: `credential` is a local password, anything else a federated link. */
+async function linkAccount(h: Harness, userId: string, providerId: string): Promise<void> {
+  await h.engine.insert(
+    'sys_account',
+    {
+      id: `acc_${providerId}_${userId}`,
+      user_id: userId,
+      provider_id: providerId,
+      account_id: providerId === 'credential' ? userId : `sub-${userId}`,
+      ...(providerId === 'credential' ? { password: 'not-a-real-hash-32148' } : {}),
+    },
+    SYSTEM,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -408,8 +409,9 @@ describe('[#32148] SCIM still refuses with 409 when any condition fails', () => 
     {
       name: 'the account holds a local password',
       reason: 'holds_local_password',
-      // Written as the platform's own stamp leaves it would refuse on the
-      // source alone; `idp_provisioned` is kept so the password is the one cause.
+      // The platform's stamp would also flip `source` to `env_native`, which
+      // refuses on its own; `idp_provisioned` is kept so the password is the
+      // one cause (the state a lost stamp leaves).
       facts: (l) => adoptFacts(l, { localPassword: true }),
     },
     {
@@ -459,8 +461,7 @@ describe('[#32148] SCIM still refuses with 409 when any condition fails', () => 
       { id: 'ssop_held', provider_id: PROVIDER, issuer: 'https://idp.example/held', domain: DOMAIN, domain_verified: true, organization_id: ORG },
       SYSTEM,
     );
-    const ctx = await h.manager.getAuthContext();
-    await ctx.internalAdapter.createAccount({ userId: user.id, providerId: PROVIDER, accountId: 'sub-held' });
+    await linkAccount(h, user.id, PROVIDER);
     const verdict = await judgeScimSsoAdoption(h.engine as never, { email: facts.email, organizationId: ORG });
     expect(verdict).toEqual({ adopt: false, reason: 'held_by_scim' });
     await expectRefused(h, user.id, facts.email, await h.send(scimRequest(h.token, 'POST', '/Users', createBody(facts.email))));
