@@ -1,6 +1,6 @@
 # ADR-0106: Metadata-Plane Field-Level Security — Per-Caller Masking of Object Schemas
 
-**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682)
+**Status**: Accepted (2026-07-27; implemented 2026-08-08 — #3682) · **Amended** (2026-11-11, ruling record 6787890900 — an object the caller may not read is absent from every schema-serving outlet; see "Amendment (2026-11-11): object-level visibility")
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove, fail-posture discipline), [ADR-0066](./0066-unified-authorization-model.md) (unified authz; D3 field `requiredPermissions` — mask on read, deny on write), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set as the only capability container; `readable`/`editable` FLS bits), [ADR-0046](./0046-package-docs-as-metadata.md) (§6.7 audience gate — the existing per-caller metadata read gate this ADR generalizes from)
 **Tracking**: #3661 (steps ① ② shipped client-side as objectui#2866; this ADR is step ③)
@@ -237,6 +237,14 @@ gets the full schema; a non-admin hitting any route gets the projection.
    `$metadata`/describe-style surfaces, client SDK describe calls); anything
    found either routes through the same projection or is filed per Prime
    Directive #10.
+5. *(Amendment 2026-11-11.)* The outlets the audit and later work brought under
+   the same projection, each of which also applies the object-level rule of
+   the amendment below: the published, layered and diff reads of an object,
+   the MCP `list_objects`, `describe_object` and `validate_expression` tools
+   on both transports, and the stdio MCP bridge's object view. The object
+   state-machine read applies the object-level rule only, not the field
+   projection; that it does not apply the field projection is a known
+   residual.
 
 ### D6 — Failure posture: three tiers, never silent, never empty-200
 
@@ -278,6 +286,43 @@ UI correctness. ①'s client-side gates are **not** superseded: the schema
 mask handles existence; the client channel still drives
 readable-but-disabled rendering and payload stripping. The two layers are
 complementary by design.
+
+### Amendment (2026-11-11): object-level visibility
+
+*Ruling record 6787890900.*
+
+- Every schema-serving outlet leaves out of its lists an object the caller may
+  not read, and answers a read of such an object exactly as that outlet
+  answers a name that names no object.
+- Whether the caller may read the object is decided once, in the same posture
+  resolution that decides the field projection, and every schema-serving
+  outlet reaches the same answer from that verdict, so no two outlets disagree
+  about whether an object exists for the caller. The metadata API's reads of
+  one object by name — `GET /meta/object/:name` (cached, uncached, layered,
+  published and diff reads), the object state-machine read, and the runtime
+  `/metadata` catch-all's read of one object — answer that verdict before
+  they read any store.
+- The D4 exemptions and the D8 switch are unchanged and are decided first;
+  with the D8 switch set, the object rule is off as well.
+- A readable object's reference field may still name an object the caller may
+  not read.
+- What is enforced when a read cannot be evaluated: a fault in the field
+  question answers the D6 tier-3 fault (5xx), and is asked first; an object
+  admission that throws answers that fault too, never an empty list; a fault
+  the security service's object admission folds into "not admitted" is
+  answered as the object not existing, which fails closed.
+- A security service that answers field visibility but offers no object-level
+  read admission narrows no object; the runtime says so once, at warn.
+- A caller with no principal, or with no resolved permission set, is served no
+  object. The D7 fallback set decides fields only, never which objects exist
+  for the caller.
+- The doors that judge an action against its object — the action list, the
+  action read and the run doors — keep judging it on that object's field
+  projection; this amendment does not change their verdicts.
+- Known residuals, not narrowed by this amendment: outlets that carry only
+  object names and labels (the API description document, label bundles),
+  navigation entries that name an object, and the object state-machine read's
+  field level — it applies the object-level rule, not the field projection.
 
 ---
 

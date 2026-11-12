@@ -148,6 +148,40 @@ kernel.use(new HonoServerPlugin({
 }));
 ```
 
+## Response compression
+
+The server compresses responses by default. There is nothing to configure. A response
+goes out brotli-encoded (`Content-Encoding: br`) or gzip-encoded (`gzip`) when all of
+these hold:
+
+- the request's `Accept-Encoding` names `br` or `gzip`. Brotli wins a tie, and `q=0`
+  refuses a coding;
+- the body is at least 1 KB. A declared `Content-Length` decides this. Without one,
+  the server reads the body only until it reaches 1 KB;
+- the content type is compressible text (JSON, JavaScript, CSS, HTML, SVG and the like).
+
+That covers API JSON, the Console's JavaScript and CSS bundles, and static files,
+whichever route serves them. These responses are never encoded:
+
+- **Streams.** A response written through `res.write()` (SSE, the AI data stream,
+  streamed exports), any `text/event-stream`, and a response that sets
+  `Transfer-Encoding`. An encoder holds bytes back until it has enough to emit, so an
+  encoded stream would reach the client late.
+- **Responses that already carry a `Content-Encoding`.** Nothing is encoded twice.
+- **`206 Partial Content` and `HEAD`.** A `Range` request on a static file still gets
+  the identity bytes its `Content-Range` describes. An encoded answer drops
+  `Accept-Ranges`.
+- **Responses marked `Cache-Control: no-transform`.**
+
+Every response the server could encode carries `Vary: Accept-Encoding`, whatever the
+client sent. So do the `HEAD`, `206` and `304` answers for such a response, although
+they are never encoded themselves. The `ETag` is passed through unchanged. Saves send it back as `If-Match`
+and the server compares it strongly, so a weakened `W/` tag would fail those saves.
+
+A reverse proxy or CDN in front of the server sees `Content-Encoding` and does not
+encode the body again. Code that calls the app in-process (`app.fetch`, `app.request`)
+gets an encoded body only if it forwards an `Accept-Encoding` header.
+
 ## Architecture
 
 This plugin wraps `@objectstack/hono` to provide a turnkey HTTP server solution for the Runtime. It binds the standard `HttpDispatcher` to a Hono application and starts listening on the configured port.

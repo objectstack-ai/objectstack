@@ -365,6 +365,13 @@ there — write the value itself (`sourceObject: 'crm_case'`). A `{…}` token
 there is refused, since it would reach the messaging service with its braces,
 and so is an envelope. The node's `actionUrl` is a text slot (below).
 
+**A `notify` node names no organization.** The notification and its inbox rows
+belong to [the organization the run acts as](#the-acting-organization) — for a
+run that carries none, that of the record it links to, else the trigger record —
+and no key on the node chooses another. A selector that expands over
+organization membership reads that organization's members only; another
+organization's flows notify its own.
+
 **A `notify` node mails a person who is not a user through an email field.**
 An applicant who came in through a public form has no account, so no user id
 reaches them. Write `recipients: { emailField: 'applicant_email' }` — the whole
@@ -1212,6 +1219,25 @@ unwrapped control produce identical output). `retry` only delays that. The
 `flow-try-catch-without-catch` lint rule names the shape at authoring time; the
 minimal handler is one bare `assignment` node, as shown under "Per-iteration
 containment" above.
+
+**Not on a save's path.** A flow whose start node runs it after a record change
+(`record-after-create`, `-update`, `-delete`, `-insert`, `-write`) runs inside
+the save: the save answers only when the run does. So an `http` or
+`connector_action` node there that a `retry` reaches — this `try_catch`'s, at
+any depth of its `try` region, or the flow's `errorHandling: { strategy:
+'retry' }` — would hold the user's save through every attempt and every backoff
+delay while the outside system is down. Such a flow is refused at publish
+(`flow-after-save-inline-retry`: a `422` at the metadata save door, a refused
+registration at the engine, an error at `objectstack validate`). Give the
+`http` node `durable: true` instead. Where a messaging HTTP outbox is wired,
+the request is queued there and retried in the background, so the save does
+not wait; where none is wired, the node falls back to the inline call and the
+save waits for it as before. A `connector_action` has no background path:
+remove the retry around it, or run the flow on demand or on a schedule. A
+durable `http` node fits only a call that needs no credential, because a
+credential must not go in an `http` node's url or headers. A before-trigger,
+scheduled, API or on-demand flow, and an inline call nothing retries, are
+unaffected.
 
 > BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
 > protocol as the **interop** representation and map onto these constructs on

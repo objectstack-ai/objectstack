@@ -525,6 +525,80 @@ function faceListOfActions(actions: readonly McpActionSummary[]): {
   };
 }
 
+/**
+ * [ADR-0150 D6] Whether `run_action`'s `actionName` is a listed face rather
+ * than an action name. No action name admits `-` (`SnakeCaseIdentifierSchema`),
+ * and both ruled face forms (`OBJECT-ACTION`, `NS-NAME`, and the hashed long
+ * form) carry one, so a `-` names a face and a name never collides with one.
+ */
+function isActionFace(actionName: string): boolean {
+  return actionName.includes('-');
+}
+
+/** The address a listed face names: what `run_action` forwards to the bridge. */
+interface ResolvedActionFace {
+  name: string;
+  objectName?: string;
+  namespace?: string;
+}
+
+/**
+ * [ADR-0150 D6] `run_action`'s face resolution: a face is read back against the
+ * caller's OWN `list_actions` rows, with the listing's visibility filter and
+ * its refused-face rule, so `run_action` accepts exactly the faces
+ * `list_actions` hands this caller. Two actions bound under one name (the
+ * platform binds `invite_user` to four objects) list one row each, and each
+ * row's face names that one binding, where the bare name is refused as
+ * ambiguous.
+ *
+ * Answers the resolved address, or the tool error: a face no visible row
+ * carries is not found, as an unknown name is; a face given with an
+ * `objectName` or `namespace` that names another binding is refused, never
+ * resolved in favour of either.
+ */
+async function resolveActionFace(
+  bridge: McpActionBridge,
+  allowSystem: boolean,
+  face: string,
+  objectName: string | undefined,
+  namespace: string | undefined,
+): Promise<{ address: ResolvedActionFace } | { refusal: ReturnType<typeof codedErrorResult> }> {
+  const listed = await bridge.listActions();
+  const faced = faceListOfActions(allowSystem ? listed : listed.filter(isListableAction));
+  const row = faced.actions.find((a) => a.face === face);
+  if (!row) {
+    const shared = faced.refusedFaces.find((r) => r.face === face);
+    return {
+      refusal: codedErrorResult({
+        code: StandardErrorCode.enum.RESOURCE_NOT_FOUND,
+        status: 404,
+        message: shared
+          ? `Action face "${face}" names no one action: ${shared.reason}`
+          : `Action face "${face}" not found: list_actions lists no action under that face for you. `
+            + 'Pass a face list_actions lists, or the action\'s name with its objectName and namespace.',
+      }),
+    };
+  }
+  const disagrees: string[] = [];
+  if (objectName !== undefined && objectName !== row.objectName) {
+    disagrees.push(`objectName "${objectName}" (the face's is ${row.objectName ? `"${row.objectName}"` : 'none'})`);
+  }
+  if (namespace !== undefined && namespace !== row.namespace) {
+    disagrees.push(`namespace "${namespace}" (the face's is ${row.namespace ? `"${row.namespace}"` : 'none'})`);
+  }
+  if (disagrees.length > 0) {
+    return {
+      refusal: codedErrorResult({
+        code: StandardErrorCode.enum.VALIDATION_ERROR,
+        status: 400,
+        message: `Action face "${face}" names action "${row.name}", but the call also passes ${disagrees.join(' and ')}. `
+          + 'Pass the face alone, or the name with its own objectName and namespace.',
+      }),
+    };
+  }
+  return { address: { name: row.name, objectName: row.objectName, namespace: row.namespace } };
+}
+
 function systemObjectActionRefusal(actionName: string, objectName: string): string {
   return (
     `Action "${actionName}" on system object "${objectName}" is not exposed via MCP: a system object's action is ` +
@@ -1711,6 +1785,12 @@ function strictToolInput<T extends z.ZodRawShape>(
         knownKeys: Object.keys(shape),
         aliases: options.aliases,
         history: '',
+        // These argument shapes are not protocol metadata and never carried a
+        // retirement kit, so no unknown key here is a retired key: the
+        // upgrade-guide pointer would send an agent to a page unrelated to
+        // its mistake. Only the tools closed HERE opt out; the dataset pair
+        // takes spec `strictObject` schemas and keeps the spec refusal.
+        retiredKeyUpgradeGuide: false,
       })),
     })
     .strict();
@@ -1724,6 +1804,19 @@ const OBJECT_NAME_ALIASES = { object: 'objectName', table: 'objectName' } as con
 
 /** The spellings every record-scoped tool shares. */
 const RECORD_ID_ALIASES = { id: 'recordId', record_id: 'recordId' } as const;
+
+/**
+ * What every `recordId` argument holds, said where an agent reads it: the
+ * record-scoped tools take the id under the name `recordId`, while the answers
+ * it comes from (`create_record`'s `{ object, id, record }`, a `query_records`
+ * row unless a `fields` projection drops it) carry it as `id` — the data protocol's own spelling
+ * (`CreateDataResponseSchema`). The two names stay as they are: an `id` alias
+ * and a `recordId` → `id` rename were both refused on this surface, so the
+ * hand-off is stated rather than accepted under a second spelling.
+ */
+const RECORD_ID_DESCRIPTION =
+  'The record id: the `id` that create_record answers and that each query_records row carries by default, '
+  + 'sent under the name recordId.';
 
 /**
  * Wire the FULL tool surface a bridge can serve onto one {@link McpServer} —
@@ -2088,7 +2181,11 @@ export function registerObjectTools(
       note('describe_object'),
       {
         description:
-          'Get the schema of a data object: its fields (name, type, label, required) and enabled features.',
+          'Get the schema of a data object as you may read it, with what a write needs. Each field: name, type, label, '
+          + 'required, readonly (a write to it is dropped), system (a platform-injected column), options (value + label; '
+          + 'send the value) on a field that offers a fixed set, and defaultValue when an insert applies one. '
+          + 'validations: each active rule\'s name, type, message, severity, events and the fields it names (the '
+          + 'message is what a refused write answers). Also the enabled features.',
         inputSchema: strictToolInput(
           { surface: 'this describe_object call', aliases: { ...OBJECT_NAME_ALIASES, name: 'objectName' } },
           { objectName: z.string().describe('The object/table name, e.g. "task"') },
@@ -2451,7 +2548,7 @@ export function registerObjectTools(
           { surface: 'this get_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
           },
         ),
         annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -2515,7 +2612,7 @@ export function registerObjectTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             data: z.record(z.string(), z.unknown()).describe('Field values to change'),
           },
         ),
@@ -2542,7 +2639,7 @@ export function registerObjectTools(
           { surface: 'this delete_record call', aliases: { ...OBJECT_NAME_ALIASES, ...RECORD_ID_ALIASES } },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             // The confirmation member, keyed off the contract's constant as
             // `run_action` declares it. OPTIONAL in the schema on purpose: a
             // required member would refuse an unconfirmed call as a bare input
@@ -2784,7 +2881,9 @@ export function registerActionTools(
         'List the business actions you can invoke in this app (e.g. "complete task", "convert lead"). ' +
         'Returns each action\'s name, the object it operates on, a description, whether it needs a record id, ' +
         'whether it is destructive, and its input parameters. Only actions the app author has exposed to AI ' +
-        'and that the caller is permitted to run are returned. Use run_action to invoke one. An action that ' +
+        'and that the caller is permitted to run are returned. Use run_action to invoke one. One name can be ' +
+        'listed on several rows, one per object it is bound to: each row carries its own face, and run_action ' +
+        'takes that face as actionName (or the row\'s name with its objectName and namespace). An action that ' +
         'carries "unavailable" cannot be run with the credential you connected with: run_action would refuse ' +
         'it with unavailable.code, and unavailable.reason says why and what would let it run, so tell the ' +
         'user instead of calling it.',
@@ -2812,7 +2911,9 @@ export function registerActionTools(
     note('run_action'),
     {
       description:
-        'Invoke a business action by name (see list_actions). Runs the app\'s registered business logic — ' +
+        'Invoke a business action by name (see list_actions). When list_actions lists a name on several rows, ' +
+        'pass the row\'s face as actionName (or the name with the row\'s objectName and namespace); the bare ' +
+        'name alone is refused as ambiguous. Runs the app\'s registered business logic — ' +
         'this can mutate data or trigger flows. Invocation is gated (author AI opt-in + your capabilities), ' +
         'but the action body itself runs as trusted application code with the app\'s full data authority. ' +
         'Supply recordId for actions that operate on a specific record, and params for any declared inputs. ' +
@@ -2841,7 +2942,12 @@ export function registerActionTools(
           },
         },
         {
-        actionName: z.string().describe('The action name from list_actions, e.g. "complete_task"'),
+        actionName: z
+          .string()
+          .describe(
+            'The action name from list_actions, e.g. "complete_task", or a listed row\'s face, e.g. '
+            + '"todo_task-complete_task". Pass the face when list_actions lists the name on several rows.',
+          ),
         objectName: z
           .string()
           .optional()
@@ -2858,7 +2964,7 @@ export function registerActionTools(
         recordId: z
           .string()
           .optional()
-          .describe('The id of the record to act on (for record-scoped actions).'),
+          .describe(`For a record-scoped action, the record to act on. ${RECORD_ID_DESCRIPTION}`),
         params: z
           .record(z.string(), z.unknown())
           .optional()
@@ -2897,7 +3003,8 @@ export function registerActionTools(
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     },
     async (args) => {
-      const { actionName, objectName, namespace, recordId, params } = args;
+      const { recordId, params } = args;
+      let { actionName, objectName, namespace } = args;
       // Read off the constant, so the member's spelling has exactly one
       // authority in this package (the schema key above is the same constant).
       const confirm = args[AI_ACTION_CONFIRMATION_MEMBER];
@@ -2905,6 +3012,14 @@ export function registerActionTools(
         return errorResult('actionName is required');
       }
       try {
+        // [ADR-0150 D6] A listed face names one binding: read it back against
+        // this caller's listing and run that binding by its address. A name
+        // (no `-`) takes the path below exactly as before.
+        if (isActionFace(actionName)) {
+          const resolved = await resolveActionFace(bridge, allowSystem, actionName, objectName, namespace);
+          if ('refusal' in resolved) return resolved.refusal;
+          ({ name: actionName, objectName, namespace } = resolved.address);
+        }
         // [#27681] A `sys_*` action runs only where `list_actions` would list
         // it: the bridge's own listing is what attests the author's
         // `ai.exposed` (see `isListableAction`). A name with no `objectName`
@@ -3113,7 +3228,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             field: z.string().optional().describe('A file or image field of the record'),
             fileId: z
               .string()
@@ -3183,7 +3298,7 @@ export function registerFileTools(
           },
           {
             objectName: z.string().describe('The object/table name'),
-            recordId: z.string().describe('The record id'),
+            recordId: z.string().describe(RECORD_ID_DESCRIPTION),
             field: z.string().optional().describe('A file or image field of the record the upload fills'),
             attachments: z
               .literal(true)
