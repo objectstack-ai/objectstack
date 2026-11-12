@@ -5,7 +5,7 @@
 
 feat(plugin-audit, cli): `os serve` hands the audit sealer its crypto provider; one-shot commands start no sealer; a sealed row is amended before a migration rewrites it, or refused (ADR-0154 D3, D7)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Part of the audit ledger's tamper evidence (ADR-0154). No object is sealed by default yet; this release wires the host and the redaction amendments that a sealed `sys_audit_log` will need.
