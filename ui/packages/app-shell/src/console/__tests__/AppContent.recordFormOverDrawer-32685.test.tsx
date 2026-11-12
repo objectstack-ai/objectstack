@@ -41,11 +41,12 @@ const probe = vi.hoisted(() => ({
 }));
 
 vi.mock('@object-ui/plugin-form', async (importOriginal) => {
-  const actual = await importOriginal<Record<string, any>>();
-  const RealModalForm = actual.ModalForm;
+  type FormProps = { schema: { onOpenChange?: (open: boolean) => void } & Record<string, unknown> } & Record<string, unknown>;
+  const actual = await importOriginal<typeof import('@object-ui/plugin-form')>();
+  const RealModalForm = actual.ModalForm as unknown as React.ComponentType<FormProps>;
   return {
     ...actual,
-    ModalForm: (props: any) => {
+    ModalForm: (props: FormProps) => {
       const schema = {
         ...props.schema,
         onOpenChange: (open: boolean) => {
@@ -86,7 +87,7 @@ vi.mock('../../views/ObjectView', async () => {
   const { useSearchParams } = await import('react-router-dom');
   const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
   return {
-    ObjectView: ({ objects }: { objects: any[] }) => {
+    ObjectView: ({ objects }: { objects: ReadonlyArray<unknown> }) => {
       if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
       const [searchParams] = useSearchParams();
       const recordId = searchParams.get('recordId');
