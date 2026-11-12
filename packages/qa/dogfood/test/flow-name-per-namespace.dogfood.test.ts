@@ -27,7 +27,10 @@
 //    is still refused;
 //  - the epic's Q4 (6760226691): a flow the deployment switched off while one
 //    package held its name stays off after a second namespace's package
-//    installs a flow of that name, and the newcomer's flow arms.
+//    installs a flow of that name, and the newcomer's flow arms;
+//  - alpha's screen flow of a name beta also ships, started by alpha's flow
+//    action, pauses, and is finished at the bare run door the Console resumes
+//    at and through MCP `resume_run`: each acts on the run's own slot.
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -37,6 +40,7 @@ import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AppPlugin } from '@objectstack/runtime';
 import { MetadataPlugin } from '@objectstack/metadata';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
+import { MCPServerPlugin } from '@objectstack/mcp';
 import { defineStack } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 
@@ -54,6 +58,9 @@ const FLOW = 'qa_ns_flow';
 /** The name `alpha` ships alone at boot, and `theta` installs later (Q4). */
 const Q4 = 'qa_ns_q4';
 const ACTION = 'alpha_run_shared';
+/** The screen flow `alpha` and `beta` both ship, and alpha's AI-exposed flow action that starts it. */
+const SCREEN = 'qa_ns_screen';
+const SCREEN_ACTION = 'alpha_run_screen';
 const ENDPOINT_PATH = '/apps/alpha/run-shared';
 
 const item = (p: string) => ({
@@ -66,13 +73,30 @@ const flow = (p: string, name = FLOW) => ({
   edges: [{ id: 'e1', source: 'start', target: 'end' }],
 });
 
-/** `alpha`: the shared flow, the Q4 flow, and one flow action and one flow endpoint naming the shared flow. */
+/** A screen flow of the shared name `SCREEN`: one screen asking for a required `note`, then the end. */
+const screenFlow = (p: string) => ({
+  name: SCREEN, label: `${p} screen flow`, type: 'screen', status: 'active', runAs: 'user',
+  nodes: [
+    { id: 'start', type: 'start', label: 'Start' },
+    { id: 'ask', type: 'screen', label: 'Ask', config: { title: `${p} asks`, fields: [{ name: 'note', label: 'Note', type: 'text', required: true }] } },
+    { id: 'end', type: 'end', label: 'End' },
+  ],
+  edges: [{ id: 'e1', source: 'start', target: 'ask' }, { id: 'e2', source: 'ask', target: 'end' }],
+});
+
+/** `alpha`: the shared flows, the Q4 flow, a flow action naming each shared flow, and one flow endpoint. */
 const alphaStack = defineStack({
   manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_ns_alpha', version: '1.0.0', type: 'app' },
   requires: ['automation'],
   objects: [item('alpha')],
-  flows: [flow('alpha'), flow('alpha', Q4)],
-  actions: [{ name: ACTION, label: 'Run the shared flow', objectName: 'alpha_item', type: 'flow', target: FLOW }],
+  flows: [flow('alpha'), flow('alpha', Q4), screenFlow('alpha')],
+  actions: [
+    { name: ACTION, label: 'Run the shared flow', objectName: 'alpha_item', type: 'flow', target: FLOW },
+    {
+      name: SCREEN_ACTION, label: 'Run the shared screen flow', objectName: 'alpha_item', type: 'flow', target: SCREEN,
+      ai: { exposed: true, description: 'Run alpha\'s screen flow: it asks for a note, then ends.' },
+    },
+  ],
   apis: [{
     name: 'alpha_run_shared_api', path: `/api/v1${ENDPOINT_PATH}`, method: 'POST',
     summary: 'Run the shared flow', description: 'Runs alpha\'s flow of the shared name.',
@@ -84,7 +108,7 @@ const alphaStack = defineStack({
 const betaStack = defineStack({
   manifest: { id: BETA, namespace: 'beta', name: 'qa_ns_beta', version: '1.0.0', type: 'app' },
   objects: [item('beta')],
-  flows: [flow('beta')],
+  flows: [flow('beta'), screenFlow('beta')],
 } as never);
 
 /** An inline install-local manifest. */
@@ -171,6 +195,7 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
         }),
         new AppPlugin(betaStack as never),
         new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: join(tempDir, 'installs') }),
+        new MCPServerPlugin(),
       ],
     }));
     stack = booted.value;
@@ -284,5 +309,50 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     expect(await runsOf(THETA, Q4)).toBe(1);
     // The row is still alpha's own, and only alpha's.
     expect(await ledgerRows(Q4)).toEqual([{ package_id: ALPHA, active: false }]);
+  });
+
+  it('alpha\'s screen flow, started by alpha\'s flow action with beta\'s of the name installed, pauses and is finished at the bare run door and through MCP resume_run', async () => {
+    /** One `tools/call` over the live MCP transport, as the signed-in admin. */
+    const tool = async (name: string, args: Record<string, unknown>) => {
+      const res = await stack.api('/mcp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Authorization: `Bearer ${admin}` },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } }),
+      });
+      expect(res.status).toBe(200);
+      const rpc: any = await res.json();
+      expect(rpc.error, JSON.stringify(rpc.error)).toBeUndefined();
+      const text = String(rpc.result?.content?.[0]?.text ?? '');
+      let payload: any;
+      try { payload = JSON.parse(text); } catch { payload = { message: text }; }
+      return { isError: rpc.result?.isError === true, payload, text };
+    };
+    /** Start alpha's screen flow through alpha's own flow action: the run pauses on alpha's screen, in alpha's slot. */
+    const startPaused = async (): Promise<string> => {
+      const started = await call('POST', `/actions/alpha_item/${SCREEN_ACTION}`, { params: {} });
+      expect(started.status, JSON.stringify(started.body)).toBe(200);
+      const result = started.body?.data?.result ?? started.body?.data ?? started.body?.result ?? started.body;
+      expect([result?.status, result?.screen?.title], JSON.stringify(started.body)).toEqual(['paused', 'alpha asks']);
+      expect((await automation().getRun(result.runId))?.flowName).toBe(automation().flowSlotKey(ALPHA, SCREEN));
+      return String(result.runId);
+    };
+    expect([slotLabel(ALPHA, SCREEN), slotLabel(BETA, SCREEN)]).toEqual(['alpha screen flow', 'beta screen flow']);
+
+    // The Console resumes at the bare door; the run id names alpha's run, so it acts on alpha's slot.
+    const consoleRun = await startPaused();
+    const screen = await call('GET', `/automation/${SCREEN}/runs/${consoleRun}/screen`);
+    expect([screen.status, screen.body?.data?.screen?.title], JSON.stringify(screen.body)).toEqual([200, 'alpha asks']);
+    const resumed = await call('POST', `/automation/${SCREEN}/runs/${consoleRun}/resume`, { inputs: { note: 'done' } });
+    expect(resumed.status, JSON.stringify(resumed.body)).toBe(200);
+    expect((await automation().getRun(consoleRun))?.status).toBe('completed');
+    // The bare list still names no run: refused naming both.
+    expectRefusedNamingBoth(await call('GET', `/automation/${SCREEN}/runs`));
+
+    // MCP resume_run admits alpha's own flow action for alpha's run.
+    const agentRun = await startPaused();
+    const viaMcp = await tool('resume_run', { runId: agentRun, values: { note: 'done' } });
+    expect(viaMcp.isError, viaMcp.text).toBe(false);
+    expect(viaMcp.payload?.action).toBe(SCREEN_ACTION);
+    expect((await automation().getRun(agentRun))?.status).toBe('completed');
   });
 });

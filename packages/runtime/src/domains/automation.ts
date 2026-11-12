@@ -27,8 +27,9 @@ import {
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
-// [#31696] One holder's flow of a shared name, served from its own slot.
-import { flowSlotView } from '../flow-slot-view.js';
+// [#31696] One holder's flow of a shared name, served from its own slot; a
+// start's admission walks callees from the calling flow's package.
+import { flowSlotView, flowWalkReads, runSlotView } from '../flow-slot-view.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -2911,6 +2912,8 @@ async function respondToFlowTrigger(
     flowName: string,
     body: any,
     context: HttpProtocolContext,
+    /** [#31696] The holder table the start admission's callees resolve over. */
+    registry?: AutomationAddressRegistry,
 ): Promise<HttpDispatcherResult> {
     if (await flowIsUnknown(automationService, flowName)) {
         return {
@@ -2947,6 +2950,8 @@ async function respondToFlowTrigger(
             flowStartRecordKeys(automationContext),
             context?.executionContext,
             (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
+            // [#31696] Callees read from the calling flow's package, as the run reads them.
+            flowWalkReads(automationService, async () => registry),
         );
     } catch (err) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
@@ -3636,6 +3641,12 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // `409` covers) are served from that holder's own slot, every step of the
     // door reading the one flow (`../flow-slot-view.ts`). The definition
     // writes keep the `409`, as does an engine with no slot entries.
+    //
+    // [ADR-0150 D4, #31696] A BARE run door (`/:name/runs/:runId/…`: the run
+    // read, resume, cancel, restore-suspension and the screen read) on such a
+    // name acts on the run's own slot: a run id names exactly one run, and
+    // the run carries its slot key, so it is no guess at a name. A run of
+    // another flow, or one carrying no package, keeps the `409`.
     {
         const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
@@ -3647,7 +3658,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
             if (!slotted) return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
             automationService = slotted;
         } else if (admission) {
-            return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
+            const byRun = !address.qualifier && admission.status === 409 && parts[1] === 'runs' && parts[2]
+                ? await runSlotView(automationService, parts[0], parts[2])
+                : undefined;
+            if (!byRun) return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
+            automationService = byRun;
         }
     }
 
@@ -3690,7 +3705,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
-            return respondToFlowTrigger(deps, automationService, triggerName, body, context);
+            return respondToFlowTrigger(deps, automationService, triggerName, body, context, addressRegistry);
         }
     }
 
@@ -3904,7 +3919,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                return respondToFlowTrigger(deps, automationService, name, body, context);
+                return respondToFlowTrigger(deps, automationService, name, body, context, addressRegistry);
             }
         }
 

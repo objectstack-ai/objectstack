@@ -69,7 +69,7 @@ import {
 // and this door share (the maintainer's ruling, letters B and A).
 import { flowStartRefusal } from './flow-start-admission.js';
 // [#31696] A flow endpoint's `target` resolves from the endpoint's own package.
-import { endpointPackageOf, flowServiceForCaller } from './flow-slot-view.js';
+import { endpointPackageOf, flowServiceForCaller, flowWalkReads } from './flow-slot-view.js';
 import type { PackageScopedRegistry } from '@objectstack/objectql';
 import type { HttpProtocolContext } from './http-dispatcher.js';
 
@@ -612,6 +612,8 @@ async function executeFlow(
         flowStartRecordKeys(automationContext as Record<string, unknown>),
         ctx.executionContext,
         (object, id) => deps.callData('get', { object, id }, ctx.dataDriver, ctx.environmentId, ctx.executionContext),
+        // [#31696] Callees read from the calling flow's package, as the run reads them.
+        flowWalkReads(service, async () => deps.registry),
     );
     const result = await automation.execute(plan.flow, automationContext);
 

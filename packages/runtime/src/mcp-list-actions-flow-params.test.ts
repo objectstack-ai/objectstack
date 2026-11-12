@@ -51,11 +51,14 @@ const FLOW = {
     ],
 };
 
-function makeBridge(automation: any) {
-    const object = { name: 'crm_lead', label: 'Lead', fields: {}, actions: [FLOW_ACTION] };
+function makeBridge(automation: any, shipped: { objectPackage?: string; registry?: Record<string, unknown> } = {}) {
+    const object = {
+        name: 'crm_lead', label: 'Lead', fields: {}, actions: [FLOW_ACTION],
+        ...(shipped.objectPackage ? { _packageId: shipped.objectPackage } : {}),
+    };
     const ql: any = {
         executeAction: vi.fn(),
-        registry: { getObject: () => object },
+        registry: { getObject: () => object, ...shipped.registry },
         find: vi.fn(async () => []),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
@@ -77,8 +80,8 @@ function makeBridge(automation: any) {
     return (dispatcher as any).buildMcpBridge(ctx);
 }
 
-async function listed(automation: any) {
-    const actions = await makeBridge(automation).listActions();
+async function listed(automation: any, shipped?: Parameters<typeof makeBridge>[1]) {
+    const actions = await makeBridge(automation, shipped).listActions();
     return actions.find((a: any) => a.name === 'schedule_followup');
 }
 
@@ -112,5 +115,52 @@ describe('list_actions surfaces a flow action’s inputs (#15705)', () => {
         });
         expect(summary).toBeDefined();
         expect(summary).not.toHaveProperty('params');
+    });
+});
+
+/**
+ * [ADR-0150 D3/D4, #31696] A flow name two namespaces' packages hold: the
+ * engine refuses the bare read (409, naming both) and holds one slot each.
+ * The listing reads the flow the action's own package names, as `run_action`
+ * runs it, so P's flow action still lists its inputs.
+ */
+describe('list_actions reads a flow action\'s target from the action\'s own package (ADR-0150 D3)', () => {
+    const CRM = 'com.crm.pkg';
+    const HR = 'com.hr.pkg';
+    const holders = [CRM, HR];
+    const registry = {
+        packageScopedHoldersOf: (type: string, name: string) => (type === 'flow' && name === FLOW.name ? holders : []),
+        getPackageScopedItem: (type: string, name: string, packageId: string) =>
+            (type === 'flow' && name === FLOW.name && holders.includes(packageId) ? { name, _packageId: packageId } : undefined),
+        getEnvironmentScopedItem: () => undefined,
+        getPackage: (id: string) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' }),
+        getAllPackages: () => holders.map((id) => ({ manifest: { id, namespace: id === CRM ? 'crm' : 'hr' }, source: 'code' })),
+    };
+    const slotted = () => ({
+        execute: vi.fn(),
+        getFlow: vi.fn(async () => { throw Object.assign(new Error('held by two packages'), { code: 'RESOURCE_CONFLICT', status: 409 }); }),
+        flowSlotKey: vi.fn((pkg: string | null, name: string) => (name === FLOW.name && pkg && holders.includes(pkg) ? `${pkg}/${name}` : undefined)),
+        getFlowSlot: vi.fn((pkg: string | null, name: string) => (name === FLOW.name && pkg === CRM ? FLOW : null)),
+        executeSlot: vi.fn(),
+        toggleFlowSlot: vi.fn(),
+    });
+
+    it('P\'s flow action lists the inputs of P\'s own flow, read from P\'s slot', async () => {
+        const automation = slotted();
+        const summary = await listed(automation, { objectPackage: CRM, registry });
+        expect(summary.params).toEqual([
+            { name: 'subject', type: 'string', required: true, description: 'Subject' },
+            { name: 'dueDate', type: 'string', required: true, description: 'Due date' },
+        ]);
+        expect(automation.getFlowSlot.mock.calls.map((c: unknown[]) => c[0])).toEqual([CRM]);
+        expect(automation.getFlow).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL — an action with no package reads bare: refused, it lists without params, and the listing does not fail', async () => {
+        const automation = slotted();
+        const summary = await listed(automation, { registry });
+        expect(summary).toBeDefined();
+        expect(summary).not.toHaveProperty('params');
+        expect(automation.getFlowSlot).not.toHaveBeenCalled();
     });
 });

@@ -134,19 +134,37 @@ describe('flowServiceForCaller — the target resolves from the caller package',
     });
 });
 
-/** The `/actions` door over one object whose flow action targets `FLOW`, the action declared by `actionPackage`. */
-function actionDispatcher(engine: ReturnType<typeof engineWith>, registry: ReturnType<typeof registryWith>, actionPackage?: string) {
-    const flowAction = { name: 'convert', label: 'Convert', objectName: 'crm_lead', type: 'flow', target: FLOW };
-    const objectDef = { name: 'crm_lead', actions: [flowAction], ...(actionPackage ? { _packageId: actionPackage } : {}) };
+/**
+ * How {@link actionDispatcher} declares the flow action: embedded in the
+ * object's `actions[]` (the default), or as a standalone `action` item bound to
+ * the object, stamped with `standalonePackage` (left out: no package).
+ */
+interface ActionShape {
+    readonly standalone?: boolean;
+    readonly standalonePackage?: string;
+    /** Rows the data plane answers a `get` of, by object: `object → ids`. */
+    readonly rows?: Record<string, string[]>;
+    /** The request's `params`. */
+    readonly params?: Record<string, unknown>;
+}
+
+/** The `/actions` door over one object whose flow action targets `FLOW`, the object declared by `actionPackage`. */
+function actionDispatcher(engine: object, registry: ReturnType<typeof registryWith>, actionPackage?: string, shape: ActionShape = {}) {
+    const flowAction = {
+        name: 'convert', label: 'Convert', objectName: 'crm_lead', type: 'flow', target: FLOW,
+        ...(shape.standalonePackage ? { _packageId: shape.standalonePackage } : {}),
+    };
+    const objectDef = { name: 'crm_lead', actions: shape.standalone ? [] : [flowAction], ...(actionPackage ? { _packageId: actionPackage } : {}) };
     const ql: any = {
         executeAction: vi.fn(async () => ({ ran: 'script' })),
         getSchema: (name: string) => (name === objectDef.name ? objectDef : undefined),
         registry: {
             ...registry,
             getObject: (name: string) => (name === objectDef.name ? objectDef : undefined),
-            getItem: () => undefined,
+            getItem: (type: string, name: string) => (shape.standalone && type === 'action' && name === flowAction.name ? flowAction : undefined),
         },
-        find: vi.fn(async () => []),
+        find: vi.fn(async (object: string, opts?: { where?: { id?: unknown } }) =>
+            (shape.rows?.[object] ?? []).filter((id) => id === opts?.where?.id).map((id) => ({ id }))),
         insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     };
     const metadata: any = {
@@ -163,17 +181,37 @@ function actionDispatcher(engine: ReturnType<typeof engineWith>, registry: Retur
     const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
     const dispatcher = new HttpDispatcher(kernel);
     const ctx: any = { request: {}, environmentId: 'platform', executionContext: { userId: 'u1', systemPermissions: [] } };
-    return async () => (await dispatcher.handleActions('/crm_lead/convert', 'POST', {}, ctx) as any).response;
+    const body = shape.params ? { params: shape.params } : {};
+    const call = async () => (await dispatcher.handleActions('/crm_lead/convert', 'POST', body, ctx) as any).response;
+    return Object.assign(call, { ql });
 }
 
 describe('a flow action runs the flow its own package names (ADR-0150 D3)', () => {
     const shared = registryWith({ [`flow:${FLOW}`]: [CRM, HR] });
 
-    it('P\'s flow action still runs P\'s flow, with a second namespace\'s same-name flow installed', async () => {
+    it('P\'s flow action still runs P\'s flow, with a second namespace\'s same-name flow installed (CONTROL: an embedded action inherits its object\'s package)', async () => {
         const engine = engineWith([CRM, HR]);
         const response = await actionDispatcher(engine, shared, CRM)();
         expect(response.status, JSON.stringify(response.body)).toBe(200);
         expect(engine.executeSlot.mock.calls.map((c) => [c[0], c[1]])).toEqual([[CRM, FLOW]]);
+        expect(engine.execute).not.toHaveBeenCalled();
+    });
+
+    it('a standalone action with no package, bound to P\'s object, never inherits the object\'s package: 409 naming both, nothing runs', async () => {
+        const engine = engineWith([CRM, HR]);
+        const response = await actionDispatcher(engine, shared, CRM, { standalone: true })();
+        expect([response.status, response.body?.error?.code], JSON.stringify(response.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(response.body?.error?.message).toContain(CRM);
+        expect(response.body?.error?.message).toContain(HR);
+        expect(engine.execute).not.toHaveBeenCalled();
+        expect(engine.executeSlot).not.toHaveBeenCalled();
+    });
+
+    it('a standalone action its own package stamps runs that package\'s flow, whatever its object\'s package', async () => {
+        const engine = engineWith([CRM, HR]);
+        const response = await actionDispatcher(engine, shared, CRM, { standalone: true, standalonePackage: HR })();
+        expect(response.status, JSON.stringify(response.body)).toBe(200);
+        expect(engine.executeSlot.mock.calls.map((c) => [c[0], c[1]])).toEqual([[HR, FLOW]]);
         expect(engine.execute).not.toHaveBeenCalled();
     });
 
@@ -241,5 +279,139 @@ describe('a flow endpoint runs the flow its own package names (ADR-0150 D3)', ()
         const answer = await endpointCall(engine, registryWith({ [`flow:${FLOW}`]: [CRM], 'api:crm_convert': [CRM] }));
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(engine.execute.mock.calls.map((c: any[]) => c[0])).toEqual([FLOW]);
+    });
+});
+
+/**
+ * [ADR-0150 D3/D4, #31696] A start's record-read admission walks the flows the
+ * run reaches (`flowDeclaredRecordReads`): a `subflow` / `map` callee is read
+ * the way the engine's run reads it (`resolveFlowKey`), from the CALLING
+ * flow's package, never bare. P's flow `FLOW` hands its input to the subflow
+ * `SUB`, a name CRM and HR both hold: the start reads P's own subflow, and the
+ * record the input names is judged against the object THAT subflow reads.
+ */
+const SUB = 'enrich_account';
+const cel = (source: string) => ({ dialect: 'cel', source });
+const parentFlow = {
+    name: FLOW, label: 'Convert', type: 'autolaunched', status: 'active',
+    variables: [{ name: 'account_id', type: 'text', isInput: true }],
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'sub', type: 'subflow', label: 'Enrich', config: { flowName: SUB, input: { accountId: cel('account_id') } } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [],
+};
+/** `SUB` as `pkg` ships it: it reads one row of `object` by the id it is handed. */
+const subflowReading = (object: string) => ({
+    name: SUB, label: 'Enrich', type: 'autolaunched', status: 'active',
+    variables: [{ name: 'accountId', type: 'text', isInput: true }],
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'read', type: 'get_record', label: 'Read', config: { objectName: object, filter: { id: cel('accountId') }, outputVariable: 'row' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [],
+});
+const SUB_READS: Record<string, string> = { [CRM]: 'crm_account', [HR]: 'hr_employee' };
+
+/** An engine holding `FLOW` for `parentHolders` and `SUB` for CRM and HR, one slot each; the bare entries refuse a shared name. */
+function walkEngine(parentHolders: string[]) {
+    const holdersOf: Record<string, string[]> = { [FLOW]: parentHolders, [SUB]: [CRM, HR] };
+    const refusal = (name: string) => Object.assign(new Error(`Flow '${name}' is held by ${holdersOf[name].join(' and ')}`), { code: 'RESOURCE_CONFLICT', status: 409 });
+    const keyOf = (pkg: string | null, name: string) => {
+        const holders = holdersOf[name] ?? [];
+        if (pkg === null || !holders.includes(pkg)) return undefined;
+        return holders.length > 1 ? `${pkg}/${name}` : name;
+    };
+    const definition = (pkg: string, name: string) => (name === FLOW ? parentFlow : subflowReading(SUB_READS[pkg]));
+    return {
+        handlerReady: true,
+        getFlow: vi.fn(async (name: string) => {
+            const holders = holdersOf[name];
+            if (!holders) return null;
+            if (holders.length > 1) throw refusal(name);
+            return definition(holders[0], name);
+        }),
+        execute: vi.fn(async (_name: string, _context?: unknown) => ({ success: true, output: { ran: 'bare' } })),
+        flowSlotKey: vi.fn((pkg: string | null, name: string) => keyOf(pkg, name)),
+        getFlowSlot: vi.fn((pkg: string | null, name: string) => (keyOf(pkg, name) && pkg ? definition(pkg, name) : null)),
+        executeSlot: vi.fn(async (pkg: string | null, _name: string, _context?: unknown) => ({ success: true, output: { ran: pkg } })),
+        toggleFlowSlot: vi.fn(async () => {}),
+    };
+}
+const walkRegistry = (parentHolders: string[]) => registryWith({ [`flow:${FLOW}`]: parentHolders, [`flow:${SUB}`]: [CRM, HR], 'api:crm_convert': [CRM] });
+/** Each row id the data plane holds, by object: both subflows' objects hold `acc_1`. */
+const ROWS = { crm_account: ['acc_1'], hr_employee: ['acc_1'] };
+/** The subflows' objects the start read, in order (the actor's own `sys_user` read is not the walk's). */
+const readObjects = (find: { mock: { calls: unknown[][] } }) =>
+    find.mock.calls.map((c) => c[0]).filter((object) => object === 'crm_account' || object === 'hr_employee');
+const subReads = (engine: ReturnType<typeof walkEngine>) =>
+    engine.getFlowSlot.mock.calls.filter((c) => c[1] === SUB).map((c) => c[0]);
+
+describe('a start\'s record-read walk reads each callee from the calling flow\'s package (ADR-0150 D3/D4)', () => {
+    it('the action door: P\'s flow action starts, its input judged against the object P\'s own subflow reads', async () => {
+        const engine = walkEngine([CRM]);
+        const call = actionDispatcher(engine, walkRegistry([CRM]), CRM, { rows: ROWS, params: { account_id: 'acc_1' } });
+        const response = await call();
+        expect(response.status, JSON.stringify(response.body)).toBe(200);
+        expect(readObjects(call.ql.find)).toEqual(['crm_account']);
+        expect(subReads(engine)).toEqual([CRM]);
+        expect(engine.getFlow.mock.calls.map((c) => c[0])).not.toContain(SUB);
+        expect(engine.execute.mock.calls.map((c) => c[0])).toEqual([FLOW]);
+    });
+
+    it('the action door: a row P\'s subflow cannot read is refused 404 before the run, though HR\'s object holds it', async () => {
+        const engine = walkEngine([CRM]);
+        const call = actionDispatcher(engine, walkRegistry([CRM]), CRM, { rows: { hr_employee: ['acc_1'] }, params: { account_id: 'acc_1' } });
+        const response = await call();
+        expect([response.status, response.body?.error?.code], JSON.stringify(response.body)).toEqual([404, 'RECORD_NOT_FOUND']);
+        expect(readObjects(call.ql.find)).toEqual(['crm_account']);
+        expect(engine.execute).not.toHaveBeenCalled();
+    });
+
+    it('the endpoint door: P\'s flow endpoint starts, reading P\'s own subflow', async () => {
+        const engine = walkEngine([CRM]);
+        const endpoint = ApiEndpointSchema.parse({ name: 'crm_convert', path: '/api/v1/apps/crm/convert', method: 'POST', type: 'flow', target: FLOW });
+        const callData = vi.fn(async (_op: string, params: { object: string; id: string }) =>
+            ((ROWS as Record<string, string[]>)[params.object]?.includes(params.id) ? { object: params.object, id: params.id, record: { id: params.id } } : null));
+        const ctx: EndpointExecutionContext = {
+            endpoint, params: {}, method: 'POST', path: endpoint.path, query: {}, headers: {}, body: { account_id: 'acc_1' },
+            executionContext: { userId: 'u1' } as never,
+            protocolContext: { request: {} } as never,
+        };
+        const answer = await executeEndpointTarget(ctx, { callData: callData as never, automationService: engine, registry: walkRegistry([CRM]) });
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(callData.mock.calls.map((c) => c[1].object)).toEqual(['crm_account']);
+        expect(subReads(engine)).toEqual([CRM]);
+        expect(engine.getFlow.mock.calls.map((c) => c[0])).not.toContain(SUB);
+    });
+
+    it('the trigger door: HR\'s address of a flow both hold starts HR\'s flow, reading HR\'s own subflow', async () => {
+        const engine = walkEngine([CRM, HR]);
+        const find = vi.fn(async (object: string, opts?: { where?: { id?: unknown } }) =>
+            ((ROWS as Record<string, string[]>)[object] ?? []).filter((id) => id === opts?.where?.id).map((id) => ({ id })));
+        const ql = { registry: walkRegistry([CRM, HR]), find };
+        const resolve = (n: string) => (n === 'automation' ? engine : n === 'objectql' || n === 'data' ? ql : undefined);
+        const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
+        const dispatcher = new HttpDispatcher(kernel);
+        const ec = { userId: 'u1', systemPermissions: [] };
+        const answered: any = await dispatcher.handleAutomation(`/hr/${FLOW}/trigger`, 'POST', { account_id: 'acc_1' }, { request: {}, executionContext: ec } as any, {});
+        expect(answered.response?.status ?? 200, JSON.stringify(answered.response?.body)).toBe(200);
+        expect(readObjects(find)).toEqual(['hr_employee']);
+        expect(subReads(engine)).toEqual([HR]);
+        expect(engine.executeSlot.mock.calls.map((c) => [c[0], c[1]])).toEqual([[HR, FLOW]]);
+        expect(engine.getFlow.mock.calls.map((c) => c[0])).not.toContain(SUB);
+    });
+
+    it('CONTROL — a caller package that reaches neither callee holder is refused 409 naming both, nothing runs', async () => {
+        const engine = walkEngine([OPS]);
+        const call = actionDispatcher(engine, registryWith({ [`flow:${FLOW}`]: [OPS], [`flow:${SUB}`]: [CRM, HR] }), OPS, { rows: ROWS, params: { account_id: 'acc_1' } });
+        const response = await call();
+        expect([response.status, response.body?.error?.code], JSON.stringify(response.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(JSON.stringify(response.body)).toContain(CRM);
+        expect(JSON.stringify(response.body)).toContain(HR);
+        expect(readObjects(call.ql.find)).toEqual([]);
+        expect(engine.execute).not.toHaveBeenCalled();
     });
 });

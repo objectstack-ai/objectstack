@@ -71,9 +71,10 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
-// [#31696] A flow action's `target` resolves from the action's own package.
-import { flowServiceForCaller } from './flow-slot-view.js';
+import { flowDeclaredRecordReads, flowRunsElevated, flowStartRefusal, type FlowWalkReads } from './flow-start-admission.js';
+// [#31696] A flow action's `target` resolves from the action's own package,
+// and its start admission walks callees from the calling flow's package.
+import { flowServiceForCaller, flowWalkReads } from './flow-slot-view.js';
 import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
@@ -2686,11 +2687,11 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
     // action with no package keeps the bare name, which the engine refuses
     // for a shared name, naming both; so does an action whose registry
     // cannot be read (fail closed).
-    const registry = callerPackageId
-        ? (await Promise.resolve()
-            .then(() => deps.getObjectQL(requestContext, envId))
-            .catch(() => null) as { registry?: any } | null)?.registry
-        : undefined;
+    let heldRegistry: Promise<any> | undefined;
+    const readRegistry = (): Promise<any> => (heldRegistry ??= Promise.resolve()
+        .then(() => deps.getObjectQL(requestContext, envId))
+        .then((ql: { registry?: unknown } | null | undefined) => ql?.registry, () => undefined));
+    const registry = callerPackageId ? await readRegistry() : undefined;
     const automation = flowServiceForCaller(service, registry, action?.target, callerPackageId);
     // [#9446] Row 1 of the table, answered by the SAME optional `getFlow`
     // registry probe the trigger door uses — the engine's not-found exit
@@ -2755,6 +2756,8 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
         },
         ec,
         (object, id) => callData(deps, requestContext, 'get', { object, id }, requestContext?.dataDriver, envId, ec),
+        // [#31696] Callees read from the calling flow's package, as the run reads them.
+        flowWalkReads(automation, readRegistry),
     );
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
@@ -4085,6 +4088,11 @@ export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: un
  *
  * `readRecord` is the door's own caller-scope read, the `callData('get', …)`
  * its subject load uses, so there is no second loader.
+ *
+ * [ADR-0150 D3/D4, #31696] `walk` is how the definition's `subflow` / `map`
+ * callees are read: from the calling flow's package, as the run reads them
+ * (`flowWalkReads`, `flow-slot-view.ts`). Every door that starts a flow by
+ * name passes it; without it a callee is the bare read.
  */
 export async function refuseUnreadableFlowStartRecords(
     automation: unknown,
@@ -4092,6 +4100,7 @@ export async function refuseUnreadableFlowStartRecords(
     start: { objectName: unknown; recordKeys: FlowStartRecordKeys; inputs?: FlowStartRecordKeys },
     executionContext: { isSystem?: boolean } | null | undefined,
     readRecord: (objectName: string, recordId: string) => Promise<unknown>,
+    walk?: FlowWalkReads,
 ): Promise<void> {
     if (executionContext?.isSystem === true) return;
     const loaded = new Set<string>();
@@ -4121,7 +4130,7 @@ export async function refuseUnreadableFlowStartRecords(
     }
     const inputs = (start.inputs ?? []).filter(([, value]) => isNamedStartValue(value));
     if (inputs.length === 0) return;
-    const reads = await flowDeclaredRecordReads(automation, flowName);
+    const reads = await flowDeclaredRecordReads(automation, flowName, walk);
     for (const [key, value] of inputs) {
         for (const read of reads.get(key) ?? []) {
             const ids = read.many ? recordIdListOrRefuse(key, value) : [oneRecordIdOrRefuse(key, value)];
@@ -5137,14 +5146,21 @@ function declaringPackageOf(row: any): string | undefined {
 }
 
 /**
- * [ADR-0150 D3, #31696] The package whose item a resolved action is: the
- * declaration's own stamp, else its object's — the package
- * {@link collectActionDeclarations} files the row under. `undefined` for an
- * environment-authored action. A reference the action writes (a flow
- * action's `target`) resolves from it.
+ * [ADR-0150 D3, #31696] The package whose item a resolved action is — the
+ * package {@link collectActionDeclarations} files the row under: the
+ * declaration's own stamp, else, for an action declared INSIDE its object's
+ * `actions` (reference identity with that entry, which is what
+ * {@link resolveRouteActionDeclaration} returns for an embedded action), the
+ * object's. ⛔ A STANDALONE action never inherits the package of the object it
+ * is bound to: unstamped, it has no package (the environment's own action),
+ * whatever object its route names. `undefined` for no package. A reference
+ * the action writes (a flow action's `target`) resolves from it.
  */
 export function actionDeclaringPackage(action: unknown, obj: unknown): string | undefined {
-    return declaringPackageOf(action) ?? declaringPackageOf(obj);
+    const own = declaringPackageOf(action);
+    if (own !== undefined) return own;
+    const actions = (obj as { actions?: unknown } | null | undefined)?.actions;
+    return Array.isArray(actions) && actions.includes(action) ? declaringPackageOf(obj) : undefined;
 }
 
 
