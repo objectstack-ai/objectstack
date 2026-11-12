@@ -3363,6 +3363,17 @@ export class MetadataManager implements IMetadataService {
   }
 
   /**
+   * [#32488] The name of the loader {@link loadMany} read `item` — that very
+   * object — from; `undefined` for an object it did not hand out. The boot
+   * priming pass asks it so that, of two loaders' items stored under one
+   * identity once the host's package is stamped, the earlier loader's item
+   * keeps the entry (`MetadataPlugin`'s pass).
+   */
+  sourceLoaderOf(item: object): string | undefined {
+    return this.loadedFrom.get(item)?.contract.name;
+  }
+
+  /**
    * Load multiple metadata items from loaders.
    * Aggregates results from all loaders.
    */
