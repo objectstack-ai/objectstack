@@ -563,6 +563,8 @@ The response is the `BatchUpdateResponse` envelope: a top-level `success` flag p
 
 ### Partial Failure Response
 
+A batch with any failed record answers **`207 Multi-Status`** with the same `BatchUpdateResponse` envelope; `200 OK` above is the answer when every record succeeded. An atomic batch that rolled back answers `207` too. `207` is a 2xx, so a client that reads any 2xx as an answer (the `@objectstack/client` SDK does) gets this report, not an error. `/updateMany` and `/deleteMany` answer the same way.
+
 When the batch is not atomic and some records fail, each failing entry carries an `errors` array of `ApiError` objects — read the human-readable cause from `errors[0].message` and branch on the machine-readable `errors[0].code`. An atomic batch never returns this shape — it either commits everything or reports every row as failed (with `errors[0].code` `ROLLED_BACK` / the causal code / `NOT_ATTEMPTED`):
 
 ```json

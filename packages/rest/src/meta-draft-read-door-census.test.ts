@@ -195,14 +195,18 @@ const LEDGER: readonly LedgerRow[] = [
         door: 'GET /meta/:type/:name/layers (and the deprecated ?layers=) — the pending draft layer',
     },
     {
-        site: 'POST ${basePath}/analytics/dataset/query » body.previewDrafts',
+        // [#32200] Both analytics switches moved, unchanged and still admitted in
+        // one declaration, into the per-body judgment the single door and the
+        // batch door share (`answerDatasetQuery`), so their key names that
+        // function now. One judgment, so still two switches, not four.
+        site: 'function answerDatasetQuery » body.previewDrafts',
         disposition: 'read',
-        door: 'POST /analytics/dataset/query previewDrafts — the draft dataset and the pending seed draft\'s rows',
+        door: 'POST /analytics/dataset/query (and each query of /batch) previewDrafts — the draft dataset and the pending seed draft\'s rows',
     },
     {
-        site: "POST ${basePath}/analytics/dataset/query » req.query?.preview === 'draft'",
+        site: "function answerDatasetQuery » req.query?.preview === 'draft'",
         disposition: 'read',
-        door: 'POST /analytics/dataset/query?preview=draft — the same switch, spelled on the query',
+        door: 'POST /analytics/dataset/query?preview=draft (and /batch?preview=draft) — the same switch, spelled on the query',
     },
 ];
 

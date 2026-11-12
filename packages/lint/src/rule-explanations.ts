@@ -62,12 +62,15 @@ const FIELD_NO_CONSUMERS_EXPLANATION: RuleExplanation = {
   paragraphs: [
     'A declared field is CONSUMED when something in this stack reads or displays it: a view column, ' +
       'an inline grid column, a form section, a page binding, a flow node, a dataset or cube member, a ' +
-      'dashboard widget, a formula, a validation, a hook or an action that names it; a declared field ' +
+      'dashboard widget, a formula, a validation, a hook or an action that names it; a row-level ' +
+      'security predicate (`rowLevelSecurity[].using` / `.check`, or an object\'s `defaultRowScope`) that ' +
+      'filters or checks rows by it; the ' +
+      'line-position field an inline grid stamps on drag-reorder and orders its lines by; a declared field ' +
       'group (`group` naming one of the object\'s `fieldGroups`) that places it on the synthesized ' +
       'layout; or a seed or import mapping that matches on it (`externalId` / `upsertKey`). One such ' +
       'site is enough: a field that is only drawn is the ordinary state of most fields, not a defect.',
     'A CARRIER names a field without reading it, so it does not count: a translation label, a seed ' +
-      'value, an import-mapping target, a permission grant, a flow that only WRITES it, an ' +
+      'value, an import-mapping target, a field-level permission grant, a flow that only WRITES it, an ' +
       '`inlineColumns` entry on a relationship field that does not set `inlineEdit` (no grid is ' +
       'drawn), or a dataset or cube member path the analytics door refuses (a hop or column that does ' +
       'not resolve, or a join the dataset\'s `include` does not declare).',
@@ -769,6 +772,55 @@ const SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION: RuleExplanation = {
+  rule: 'security-controlled-by-parent-master-reference-hidden',
+  covers: 'why a hidden master reference still decides a detail write',
+  paragraphs: [
+    'A `controlled_by_parent` detail derives its record access from its master (ADR-0055). Creating, ' +
+      'editing or deleting a detail row needs edit access to the master record its master reference names, ' +
+      'and the platform reads that reference from the stored row, whatever the writer may read. So a ' +
+      'permission set\'s `readable: false` on the master reference hides the field from the set\'s holders ' +
+      'and does not take it out of the decision: the master it names still decides whether each holder may ' +
+      'write the row.',
+    'What the field-level security does change is the refusal. A writer who can read the master reference ' +
+      'is told which master\'s edit access the write needs and which check refused it. A writer who cannot ' +
+      'read it gets the same `403 PERMISSION_DENIED` with a generic sentence, "no edit permission on the ' +
+      'parent record of this detail", which names no master object, no master record and no check. The ' +
+      'writer has no way to tell from the refusal which record to ask for access to.',
+    'Reported for each permission set whose own entry for the master reference reads `readable: false` (an ' +
+      'omitted `readable` is `true`), on a detail this stack declares with one master. Not reported when the ' +
+      'same set holds View All or Modify All on the detail, because that bit makes the entry inert ' +
+      '(`security-superuser-field-mask-inert`).',
+    'This is a warning, not an error: hiding the reference is legal and no door refuses it. To fix it, make ' +
+      'the reference readable (`readable: true`, or delete the entry) when the set\'s holders should see why ' +
+      'a write is refused. Keep it hidden when a generic refusal is what is meant.',
+  ],
+};
+
+const SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'security-synced-private-unreadable',
+  covers: 'why members read no row of a private synced object',
+  paragraphs: [
+    'A pull writes the rows of a `managedBy: \'synced\'` object with no person owner: the run is the ' +
+      'attribution, never an owner (ADR-0153 D4). On `sharingModel: \'private\'` record sharing shows a ' +
+      'member the rows they own plus the rows a share grants them, so with no share a member whose ' +
+      'permission set grants `allowRead` lists no row at all. Members never write a synced object ' +
+      'whatever the model says.',
+    'A sharing rule grants read on the object when its `object` names it, it is not `active: false`, and ' +
+      'its `accessLevel` is `read` or `edit` (absent reads as `read`). Any recipient and any `condition` ' +
+      'count. A condition that does not lower grants nothing at runtime, and that is reported on the rule ' +
+      'itself (`os explain sharing-rule-unlowerable-condition`), not here.',
+    'There are two ways out. Declare `sharingModel: \'public_read\'` (recommended): every member who ' +
+      'holds `allowRead` reads the pulled rows. Or keep \'private\' and declare a sharing rule that grants ' +
+      'read to the members who should see the rows.',
+    'Not judged here: an object with no `sharingModel` (that is the `security-owd-unset` error, whose fix ' +
+      'line for a synced object names the same two ways out), any model other than \'private\', and a ' +
+      'permission set\'s read depth (`readScope: \'org\'`, `viewAllRecords`), which also reaches owner-less ' +
+      'rows. A sharing rule another installed package declares is not visible to this stack; if one ' +
+      'grants read, ignore the warning.',
+  ],
+};
+
 const SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION: RuleExplanation = {
   rule: 'security-external-owner-unmapped',
   covers: 'why members cannot write an external object',
@@ -918,6 +970,32 @@ const SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION: RuleExplanation = {
       'reach every row another way, with `readScope: \'org\'` / `writeScope: \'org\'` on the entry or a ' +
       '`rowLevelSecurity` policy whose condition every row satisfies; the mask then binds. If the bypass is ' +
       'meant, delete the field entry, which never took effect.',
+  ],
+};
+
+const SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION: RuleExplanation = {
+  rule: 'security-update-policy-no-check',
+  covers: 'why a caller-keyed update policy should declare a check',
+  paragraphs: [
+    'A row-level policy with no `check` also admits new rows the ownership floor admits; declare `check` to ' +
+      'bound what an update may write. The write check is decided per operation across the applicable policies ' +
+      '(ADR-0058 D4). When none of them declares `check`, each applicable policy\'s `using` stands in as its ' +
+      'check and they are OR-combined, and the platform\'s ownership floor (`owner_only_writes`, ' +
+      '`created_by == current_user.id`) joins that OR wherever the write\'s pre-image gate kept it. So an ' +
+      '`update` or `all` policy whose `using` is `owner_id == current_user.id` admits a written row whose ' +
+      '`owner_id` is the caller, and also one whose `created_by` is the caller. The same holds for any other ' +
+      'caller column the policy keys, an assignee for example. Changing `owner_id` itself needs the transfer ' +
+      'grant (`allowTransfer` or `modifyAllRecords`) whatever the check says.',
+    'Declaring `check` changes the composition for every caller the policy applies to: when any applicable ' +
+      'policy declares `check`, only the declared checks decide, OR-combined. The USING-only siblings and the ' +
+      'ownership floor take no part in the check, so a creator who is not the owner loses update unless a ' +
+      '`check` admits them. Decide which callers an update should admit, and write exactly that as the `check`.',
+    'The finding is `info` tier: the composition is the published one and no door refuses a policy without ' +
+      '`check`. `--strict` promotes warnings and never an `info` finding, so neither `os lint --strict` nor ' +
+      '`os validate --strict` fails on it. A policy keyed on `created_by` alone is not reported, ' +
+      'because on the new row its `using` admits exactly whom the floor admits. Each policy is judged as ' +
+      'declared: whether a sibling policy declares `check` for a given caller depends on the sets and ' +
+      'positions that caller holds, which the authored metadata does not settle.',
   ],
 };
 
@@ -2034,12 +2112,35 @@ const FLOW_NODE_UNREACHABLE_EXPLANATION: RuleExplanation = {
       'reached by attachment to its host node rather than by an edge, so it and the nodes only it leads to ' +
       'are not judged. Nodes inside a region body (`loop`, `parallel`, `try_catch` and the rest) are not ' +
       'judged here either: a region is a single-entry acyclic graph, which the region validator already ' +
-      'holds, so every node in it is reached. A flow with no start node, or with an edge whose endpoint ' +
-      'names no node, is not judged: the flow parse refuses those shapes first.',
+      'holds, so every node in it is reached. A flow with an edge whose endpoint names no node is not ' +
+      'judged: the flow parse refuses that edge first. A flow with no start node is not judged here either: ' +
+      'the parse accepts it, and `flow-start-node-missing` names it.',
     'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
       'save, drafts included: a designer that deletes a node and leaves its successor unwired must still ' +
       'be able to save the draft. The draft stores with the finding in its diagnostics, and publish ' +
       'refuses it.',
+    FLOW_GATE_REACH,
+  ],
+};
+
+const FLOW_START_NODE_MISSING_EXPLANATION: RuleExplanation = {
+  rule: 'flow-start-node-missing',
+  covers: 'why a flow with no start node never runs and what to add',
+  paragraphs: [
+    'A flow run begins at the flow\'s first `start` node and follows edges from there; nothing else ' +
+      'schedules a top-level node. A flow whose top-level `nodes` hold no node of type `start` can ' +
+      'therefore never run: every trigger and every explicit run would be refused with ' +
+      '`FLOW_NO_START_NODE`, and the automation engine refuses to register the flow at all, so the stored ' +
+      'row reads `registration: refused`.',
+    'The cure is one node: add a node with `type: \'start\'` to the top-level `nodes` and an edge from it ' +
+      'to the first step. A record-change or schedule flow declares its trigger in that node\'s `config`.',
+    'Only a flow with no start node is reported. A flow with more than one registers and runs from the ' +
+      'first, and `flow-node-unreachable` names each extra start node. Region bodies (`loop`, `parallel`, ' +
+      '`try_catch` and the rest) are entered at their single entry node, not at a start node, so they are ' +
+      'not judged.',
+    'The rule lives in lint rather than in the flow parse because the metadata save door parses every ' +
+      'save, drafts included: a designer draft may hold no start node mid-edit and must still save. The ' +
+      'draft stores with the finding in its diagnostics, and a live save and a publish refuse it.',
     FLOW_GATE_REACH,
   ],
 };
@@ -2693,6 +2794,45 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       'ingress gate on its own. The rule is a warning because it cannot see the remote table, only ' +
       'that the platform provisions no storage.',
     UNPROVISIONED_ANCHOR_REMEDY,
+  ],
+};
+
+/**
+ * [#32449] The table's rows in words — shared by the two authoring surfaces
+ * whose declarations reach the engine's `aggregate` door (an `object-grid`'s
+ * `aggregations`, a list view's column summaries). Written by hand from
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY`: the rules' tests check that its key
+ * facts are present, not that its type lists equal the table's.
+ */
+const AGGREGATE_PAIR_ROWS =
+  'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
+  'field read `0`, `sum` over a `datetime` added the years on SQLite, and PostgreSQL had no such ' +
+  'function. `sum` accepts number, currency, rating, slider, progress, summary, boolean and toggle; ' +
+  '`avg` the same plus percent; `min` and `max` the numeric types, date, datetime, time, boolean and ' +
+  'toggle (an extreme of a date is the earliest or latest value, drawn as the field draws it) — never ' +
+  'text, option values or references, whose order is collation-dependent. `count_distinct` accepts ' +
+  'every type except the JSON-stored ones (json, composite, repeater, record, location, address, ' +
+  'vector, multiselect, checkboxes, tags) and a field declared `multiple: true`, whose values no two ' +
+  'backends compare alike; `count` accepts every type.';
+
+const GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'grid-aggregation-field-type-refused',
+  covers: 'why a grouped grid cannot aggregate that field that way',
+  paragraphs: [
+    'An `object-grid` block\'s `aggregations` (`[{ field, type }]`) are the per-group numbers a grouped ' +
+      'grid draws in its group headers, answered by ONE aggregate query on the server. The engine\'s ' +
+      '`aggregate` door asks the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, ' +
+      '`@objectstack/spec/data`) about every pair and refuses one it refuses with `400 INVALID_FIELD`, so ' +
+      'such an aggregation breaks the grid\'s grouped load, and every load after it. A grid handed its ' +
+      'rows (`data.provider: \'value\'`) groups them in the browser instead and draws a figure the pair ' +
+      'cannot mean, `0` for a text sum; the declaration is refused either way.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts, or a function the field accepts. A `formula` ' +
+      'field stores no value, whatever its `returnType`, so a total over it has to be STORED as a number ' +
+      'field (kept by a hook) and aggregated as one. The block is bound by its `dataSource.object`, else ' +
+      '`properties.objectName`; an object this stack does not define, a field that does not resolve, a ' +
+      'dotted path, a field two packages define at the same priority, and a field with no declared ' +
+      'type (or one outside `FieldType`) are not judged here.',
   ],
 };
 
@@ -3892,6 +4032,33 @@ const LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION: RuleExplanation = {
     'Not judged: a level whose `orderBy` names its own grouping field (it compiles no node), a field with no ' +
       'declared type, and a declared type outside `FieldType` — the aggregate door judges neither. A name ' +
       'that resolves to nothing is `list-view-field-unknown`; a dotted one is `list-view-field-dotted`.',
+  ],
+};
+
+const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-summary-field-type-refused',
+  covers: 'which functions a column summary can apply to its field',
+  paragraphs: [
+    'A list column\'s `summary` is answered on the server, by two aggregate queries: the group header ' +
+      'query of a grouped view (one number per group) and the footer\'s whole-set query of a paged grid. ' +
+      'Both lower the summary through `COLUMN_SUMMARY_AGGREGATION`: `count_unique` to `count_distinct`, ' +
+      '`sum`, `avg`, `min` and `max` by name. The field is `summary.field` on the object form, else the ' +
+      'column\'s own `field`. The engine\'s `aggregate` door asks the aggregate × field-type table ' +
+      '(`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) about every pair and refuses one ' +
+      'it refuses with `400 INVALID_FIELD`, so the grouped view renders no group and the footer falls ' +
+      'back to the page\'s figure, labelled as the page\'s. An ungrouped view whose rows fit one page ' +
+      'sends neither query and computes its footer in the browser, where such a pair can still show a ' +
+      'whole-set figure (`count_unique` over a multi-select counts distinct lists); once the set ' +
+      'outgrows the page or the view is grouped, that figure becomes the page\'s or no group at all, ' +
+      'so the declaration is refused whatever the row count.',
+    AGGREGATE_PAIR_ROWS,
+    'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
+      'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. ' +
+      'A `formula` field stores no value, whatever its `returnType`, so a total over it has to be ' +
+      'STORED as a number field (kept by a hook). Not judged: ' +
+      '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
+      'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +
+      'outside `FieldType`, which the door does not judge either.',
   ],
 };
 
@@ -5841,12 +6008,15 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION.rule]: SECURITY_CBP_AMBIGUOUS_RELATION_EXPLANATION,
   [SECURITY_CBP_NO_RELATION_EXPLANATION.rule]: SECURITY_CBP_NO_RELATION_EXPLANATION,
   [SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION.rule]: SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN_EXPLANATION,
+  [SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION.rule]: SECURITY_CBP_MASTER_REFERENCE_HIDDEN_EXPLANATION,
   [SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION.rule]: SECURITY_EXTERNAL_OWNER_UNMAPPED_EXPLANATION,
+  [SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION.rule]: SECURITY_SYNCED_PRIVATE_UNREADABLE_EXPLANATION,
   [SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION.rule]: SECURITY_FLS_UNKNOWN_FIELD_EXPLANATION,
   [SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION.rule]: SECURITY_MASTER_DETAIL_UNGRANTED_EXPLANATION,
   [SECURITY_WILDCARD_VAMA_EXPLANATION.rule]: SECURITY_WILDCARD_VAMA_EXPLANATION,
   [SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION.rule]: SECURITY_MODIFY_ALL_DELETE_WITHHELD_EXPLANATION,
   [SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION.rule]: SECURITY_SUPERUSER_FIELD_MASK_INERT_EXPLANATION,
+  [SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION.rule]: SECURITY_UPDATE_POLICY_NO_CHECK_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_UNREADABLE_EXPLANATION,
   [SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION.rule]: SECURITY_ROLLUP_SOURCE_ROW_SCOPED_EXPLANATION,
   [SECURITY_OWD_ALIAS_EXPLANATION.rule]: SECURITY_OWD_ALIAS_EXPLANATION,
@@ -5887,6 +6057,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION.rule]: SHARING_RULE_OBJECT_NOT_SHAREABLE_EXPLANATION,
   [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION.rule]: SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT_EXPLANATION,
   [FLOW_NODE_UNREACHABLE_EXPLANATION.rule]: FLOW_NODE_UNREACHABLE_EXPLANATION,
+  [FLOW_START_NODE_MISSING_EXPLANATION.rule]: FLOW_START_NODE_MISSING_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_INVALID_EXPLANATION,
   [FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION.rule]: FLOW_TIME_RELATIVE_DESCRIPTOR_UNROUTABLE_EXPLANATION,
   [FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION.rule]: FLOW_TIME_RELATIVE_OBJECT_MISMATCH_EXPLANATION,
@@ -5911,6 +6082,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [SORT_FIELD_UNKNOWN_EXPLANATION.rule]: SORT_FIELD_UNKNOWN_EXPLANATION,
   [SORT_FIELD_UNSORTABLE_EXPLANATION.rule]: SORT_FIELD_UNSORTABLE_EXPLANATION,
   [SORT_FIELD_UNPROVISIONED_EXPLANATION.rule]: SORT_FIELD_UNPROVISIONED_EXPLANATION,
+  [GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION.rule]: GRID_AGGREGATION_FIELD_TYPE_REFUSED_EXPLANATION,
   [SEARCHABLE_FIELD_UNKNOWN_EXPLANATION.rule]: SEARCHABLE_FIELD_UNKNOWN_EXPLANATION,
   [SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION.rule]: SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION,
   [SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION.rule]: SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION,
@@ -5954,6 +6126,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [LIST_VIEW_FIELD_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_FIELD_UNKNOWN_EXPLANATION,
   [LIST_VIEW_FIELD_DOTTED_EXPLANATION.rule]: LIST_VIEW_FIELD_DOTTED_EXPLANATION,
   [LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION.rule]: LIST_VIEW_GROUP_ORDER_UNORDERABLE_EXPLANATION,
+  [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION.rule]: LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION,
   [LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION.rule]: LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_UNKNOWN_EXPLANATION,
   [LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION.rule]: LIST_VIEW_KANBAN_LANE_REPEATED_EXPLANATION,

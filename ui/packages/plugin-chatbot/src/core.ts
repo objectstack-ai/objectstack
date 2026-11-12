@@ -49,14 +49,14 @@ export { publishHealthFromResponse } from './publishHealth';
 export type { PublishHealth, PublishOutcome } from './publishHealth';
 
 // The pending-approval envelope parse the app-shell hydration mapper shares
-// with the live one (objectui#8442). `mapMessages` holds only `import type`
-// edges back into the chat UI, which are erased.
-export { detectPendingApproval } from './mapMessages';
+// with the live one (objectui#8442). `toolResultParsers` holds only an
+// `import type` edge back into the chat UI, which is erased.
+export { detectPendingApproval } from './toolResultParsers';
 
 // objectstack#25908 — the chart reader the hydration mapper and the message
 // cache share with the live one, so a stored chart has one dialect.
-export { chartsFromParts, chartAnswerParts } from './mapMessages';
-export type { ChartAnswerPart } from './mapMessages';
+export { chartsFromParts, chartAnswerParts } from './toolResultParsers';
+export type { ChartAnswerPart } from './toolResultParsers';
 
 // objectstack#30223 — the HITL continuation marker. The chat transcript, the
 // conversation list preview and the conversation-language probe all skip a

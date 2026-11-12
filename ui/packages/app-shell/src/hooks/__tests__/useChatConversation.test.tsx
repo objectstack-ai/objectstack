@@ -11,7 +11,7 @@ import { renderHook, waitFor, act } from '@testing-library/react';
 // The chat surface derives the draft/plan affordance cards from the tool result
 // via these mappers — round-tripping our cache through them is the real
 // production path (live render → cache → cache-fallback reload).
-import { uiMessageToChatMessage } from '@object-ui/plugin-chatbot';
+import { uiMessageToChatMessage, type AnswerSource } from '@object-ui/plugin-chatbot';
 // objectui#9232 — the cache round trip is only proven by driving the affordance
 // it exists to restore, so the test mounts the real HITL hook over the restored
 // messages and presses Approve. `hydratedMessagesToChatMessages` is the
@@ -163,38 +163,32 @@ describe('useChatConversation', () => {
     ]);
   });
 
-  it('falls back to POST when cached id 404s', async () => {
+  it('settles with no conversation when the cached id 404s (the first send creates one)', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-missing');
-    fetchMock
-      .mockResolvedValueOnce(new Response('not found', { status: 404 }))
-      .mockResolvedValueOnce(jsonResponse({ id: 'conv-new', messages: [] }));
+    fetchMock.mockResolvedValueOnce(new Response('not found', { status: 404 }));
 
     const { result } = renderHook(() =>
       useChatConversation({ userId: 'u1', apiBase: API_BASE }),
     );
 
-    await waitFor(() => expect(result.current.conversationId).toBe('conv-new'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
     expect(result.current.initialMessages).toEqual([]);
-    expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBe('conv-new');
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The dead pointer is dropped; nothing replaces it until a send.
+    expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations/conv-missing`);
-    const postCall = fetchMock.mock.calls[1];
-    expect(postCall[0]).toBe(`${API_BASE}/conversations`);
-    expect((postCall[1] as RequestInit).method).toBe('POST');
   });
 
-  it('creates a new conversation when there is no cache', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-fresh', messages: [] }));
-
+  it('makes no request at all when there is no cache', async () => {
     const { result } = renderHook(() =>
       useChatConversation({ userId: 'u2', apiBase: API_BASE }),
     );
 
-    await waitFor(() => expect(result.current.conversationId).toBe('conv-fresh'));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations`);
-    expect(localStorage.getItem(`${CACHE_PREFIX}:u2`)).toBe('conv-fresh');
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`${CACHE_PREFIX}:u2`)).toBeNull();
   });
 
   it('uses a distinct cache key per scope', async () => {
@@ -211,7 +205,7 @@ describe('useChatConversation', () => {
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations/conv-scoped`);
   });
 
-  it('reset() deletes the current conversation and creates a new one', async () => {
+  it('reset() deletes the current conversation; the next send creates the new one', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-old');
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: 'conv-old', messages: [] }))
@@ -227,19 +221,26 @@ describe('useChatConversation', () => {
       await result.current.reset();
     });
 
-    expect(result.current.conversationId).toBe('conv-new');
+    expect(result.current.conversationId).toBeUndefined();
     expect(result.current.initialMessages).toEqual([]);
-    expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBe('conv-new');
-
+    expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBeNull();
     const calls = fetchMock.mock.calls;
-    expect(calls).toHaveLength(3);
+    expect(calls).toHaveLength(2);
     expect(calls[1][0]).toBe(`${API_BASE}/conversations/conv-old`);
     expect((calls[1][1] as RequestInit).method).toBe('DELETE');
+
+    // The first send mints the replacement.
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-new');
+    expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBe('conv-new');
     expect(calls[2][0]).toBe(`${API_BASE}/conversations`);
     expect((calls[2][1] as RequestInit).method).toBe('POST');
   });
 
   it('swallows fetch errors and clears loading', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u3`, 'conv-cached');
     fetchMock.mockRejectedValueOnce(new Error('network down'));
 
     const { result } = renderHook(() =>
@@ -264,7 +265,7 @@ describe('useChatConversation — forceNew (the sidebar New button)', () => {
     vi.unstubAllGlobals();
   });
 
-  it('skips the cached conversation and creates a fresh one', async () => {
+  it('skips the cached conversation and settles with none (the first send creates it)', async () => {
     localStorage.setItem('objectstack:ai-chat-conversation-id:u1', 'conv-cached');
     fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-fresh', messages: [] }));
 
@@ -273,16 +274,23 @@ describe('useChatConversation — forceNew (the sidebar New button)', () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    // NO call — the cached id was never fetched and nothing was minted.
+    expect(fetchMock).not.toHaveBeenCalled();
+    // The pointer is dropped, so a later plain visit opens a clean chat.
+    expect(localStorage.getItem('objectstack:ai-chat-conversation-id:u1')).toBeNull();
+
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
     expect(result.current.conversationId).toBe('conv-fresh');
-    // ONE call — the create; the cached id was never even fetched.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations`);
     expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
-    // Cache now points at the fresh conversation.
     expect(localStorage.getItem('objectstack:ai-chat-conversation-id:u1')).toBe('conv-fresh');
   });
 
   it('overrides the resolved-once guard when flipping forceNew on an open page', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-a');
     fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-a', messages: [] }));
 
     const { result, rerender } = renderHook(
@@ -293,15 +301,15 @@ describe('useChatConversation — forceNew (the sidebar New button)', () => {
     await waitFor(() => expect(result.current.conversationId).toBe('conv-a'));
 
     // The user clicks New: same mount, forceNew flips true. The stale id must
-    // clear immediately (so the URL-mirroring host can't bounce back), then a
-    // fresh conversation resolves.
-    fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-b', messages: [] }));
+    // clear (so the URL-mirroring host can't bounce back) — and stay clear:
+    // no row is minted until the user sends.
     rerender({ forceNew: true });
-    await waitFor(() => expect(result.current.conversationId).toBe('conv-b'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
     const createCalls = fetchMock.mock.calls.filter(
       (c) => c[0] === `${API_BASE}/conversations` && c[1]?.method === 'POST',
     );
-    expect(createCalls.length).toBe(2);
+    expect(createCalls.length).toBe(0);
   });
 
   it('is ignored while an explicit activeId is set (deep link wins)', async () => {
@@ -352,7 +360,7 @@ describe('useChatConversation — resumeMode "fresh" + startNew (the floating as
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations/conv-empty`);
   });
 
-  it('starts a fresh conversation when the cached one was actually used, leaving it in history', async () => {
+  it('opens a clean chat when the cached one was actually used, leaving it in history', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-used');
     fetchMock
       .mockResolvedValueOnce(
@@ -367,7 +375,14 @@ describe('useChatConversation — resumeMode "fresh" + startNew (the floating as
       useChatConversation({ userId: 'u1', apiBase: API_BASE, resumeMode: 'fresh' }),
     );
 
-    await waitFor(() => expect(result.current.conversationId).toBe('conv-fresh'));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // The first send mints the fresh thread.
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-fresh');
     expect(result.current.initialMessages).toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations/conv-used`);
@@ -379,7 +394,7 @@ describe('useChatConversation — resumeMode "fresh" + startNew (the floating as
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBe('conv-fresh');
   });
 
-  it('startNew() mints a fresh conversation and switches to it without deleting the current one', async () => {
+  it('startNew() switches to a fresh conversation (minted on its first send) without deleting the current one', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-current');
     fetchMock
       .mockResolvedValueOnce(
@@ -398,7 +413,12 @@ describe('useChatConversation — resumeMode "fresh" + startNew (the floating as
     await act(async () => {
       await result.current.startNew();
     });
+    expect(result.current.conversationId).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
     expect(result.current.conversationId).toBe('conv-next');
     expect(result.current.initialMessages).toEqual([]);
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBe('conv-next');
@@ -555,7 +575,7 @@ describe('sanitizeChatMessagesForCache — affordance cards survive a cache roun
 // above. It rides inside the cached `output`, beside any envelope, so a turn
 // that also waits on an approval keeps both.
 describe('sanitizeChatMessagesForCache — the answer source survives a cache round-trip (objectstack#31868)', () => {
-  const answerSource = {
+  const answerSource: AnswerSource = {
     object: 'opportunity',
     label: 'Opportunities',
     filter: { stage: 'won', amount: { $gte: 1000 } },
@@ -563,6 +583,7 @@ describe('sanitizeChatMessagesForCache — the answer source survives a cache ro
     groupBy: ['owner'],
     aggregations: [{ function: 'sum', field: 'amount' }],
     records: 7,
+    line: 'Summed the amount of 7 won opportunities',
   };
 
   function roundTrip(toolInvocations: Parameters<typeof sanitizeChatMessagesForCache>[0][number]['toolInvocations']) {
@@ -673,6 +694,7 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
   });
 
   it('rekeyScope writes the new scope key, keeps the legacy key, and flips conversationScope', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:build`, 'conv-a');
     fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-a', messages: [] }));
 
     const { result, rerender } = renderHook(
@@ -694,6 +716,7 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
   });
 
   it('a scope change to the rekeyed scope resumes the SAME conversation without re-resolving', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:build`, 'conv-a');
     fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-a', messages: [] }));
 
     const { result, rerender } = renderHook(
@@ -717,7 +740,7 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
     const createCalls = fetchMock.mock.calls.filter(
       (c) => c[0] === `${API_BASE}/conversations` && c[1]?.method === 'POST',
     );
-    expect(createCalls.length).toBe(1); // only the original resolve created one
+    expect(createCalls.length).toBe(0); // resumed from the cache; nothing minted
   });
 
   it('rekeyScope is a no-op before a conversation is resolved', async () => {
@@ -765,7 +788,7 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
     expect(fetchMock.mock.calls[0][0]).toBe(`${API_BASE}/conversations/conv-legacy`);
   });
 
-  it('creates a fresh conversation when the predicate rejects, leaving the legacy key intact', async () => {
+  it('settles with no conversation when the predicate rejects, leaving the legacy key intact', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1:build`, 'conv-other');
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: 'conv-other', messages: [] }))
@@ -782,13 +805,17 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
     expect(result.current.conversationId).toBe('conv-fresh');
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1:app:crm:build`)).toBe('conv-fresh');
     // The legacy product-only thread was NOT hijacked or unlinked.
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1:build`)).toBe('conv-other');
   });
 
-  it('treats a failing legacy fetch as a miss (creates fresh) instead of dead-ending', async () => {
+  it('treats a failing legacy fetch as a miss (first send creates) instead of dead-ending', async () => {
     localStorage.setItem(`${CACHE_PREFIX}:u1:build`, 'conv-legacy');
     fetchMock
       .mockResolvedValueOnce(new Response('boom', { status: 500 }))
@@ -805,6 +832,10 @@ describe('useChatConversation — A1.b rekeyScope + legacy-scope fallback', () =
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
     expect(result.current.conversationId).toBe('conv-fresh');
   });
 
@@ -1044,10 +1075,11 @@ describe('useChatConversation — a FAILED same-conversation re-read keeps the c
     expect(result.current.initialMessages).toHaveLength(0);
   });
 
-  it('still clears when the held conversation is GONE (404) and the replacing create fails', async () => {
+  it('still clears when the held conversation is GONE (404)', async () => {
     // The guard covers a transport failure re-reading a LIVE conversation. A
     // 404 is the server being definitive: the id is dead and its caches have
-    // already been cleared, so a failing create must not resurrect it on screen.
+    // already been cleared, so it must not stay on screen. No replacement is
+    // minted (objectstack#32031): the next send creates one.
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ id: 'conv-a', messages: [{ id: 'm1', role: 'user', content: 'a' }] }),
     );
@@ -1058,9 +1090,7 @@ describe('useChatConversation — a FAILED same-conversation re-read keeps the c
     );
     await waitFor(() => expect(result.current.conversationId).toBe('conv-a'));
 
-    fetchMock
-      .mockResolvedValueOnce(new Response('gone', { status: 404 })) // GET conv-a
-      .mockResolvedValueOnce(new Response('nope', { status: 500 })); // POST create
+    fetchMock.mockResolvedValueOnce(new Response('gone', { status: 404 })); // GET conv-a
     act(() => result.current.rekeyScope('app:crm:build'));
     rerender({ scope: 'app:crm:build' });
 
@@ -1113,6 +1143,7 @@ describe('useChatConversation — clears chat cache on logout / user switch', ()
   });
 
   it('purges when the user logs out (userId → undefined)', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-x');
     fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-x', messages: [] }));
     const { rerender } = renderHook(
       ({ userId }: { userId: string | undefined }) => useChatConversation({ userId, apiBase: API_BASE }),
@@ -1130,6 +1161,7 @@ describe('useChatConversation — clears chat cache on logout / user switch', ()
   });
 
   it('purges when a different user signs in (u1 → u2)', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1`, 'conv-x');
     fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-x', messages: [] }));
     const { rerender } = renderHook(
       ({ userId }: { userId: string }) => useChatConversation({ userId, apiBase: API_BASE }),
@@ -1141,6 +1173,228 @@ describe('useChatConversation — clears chat cache on logout / user switch', ()
 
     // u1's cached pointer is gone; the effect fired the purge on the switch.
     expect(localStorage.getItem(`${CACHE_PREFIX}:u1`)).toBeNull();
+  });
+});
+
+// objectstack#32031 — no conversation row exists until the first message is
+// sent. The hook used to `POST /conversations` the moment a surface mounted
+// with nothing cached — and nothing is cached after every sign-in
+// (`purgeChatCaches`) — so each visit that sent nothing left an empty
+// "New conversation" row in the chat list. `?new` / `startNew()` minted one
+// more even while the current thread was still empty. Now every such path
+// settles with no conversation and `ensureConversation` (the first send)
+// creates exactly one.
+describe('useChatConversation — the conversation is created on the first send (objectstack#32031)', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+  const isCreate = (c: unknown[]) =>
+    c[0] === `${API_BASE}/conversations` && (c[1] as RequestInit | undefined)?.method === 'POST';
+  const createCount = () => fetchMock.mock.calls.filter(isCreate).length;
+
+  beforeEach(() => {
+    localStorage.clear();
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('N visits with nothing cached and no message sent mint no row', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-x', messages: [] }));
+    for (let visit = 0; visit < 3; visit += 1) {
+      const { result, unmount } = renderHook(() =>
+        useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+      );
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      expect(result.current.conversationId).toBeUndefined();
+      // Settled, scope-matched: the host mounts its pane as `…:pending`.
+      expect(result.current.conversationScope).toBe('ask');
+      unmount();
+    }
+    expect(createCount()).toBe(0);
+  });
+
+  it('a visit after sign-out / sign-in (caches purged) mints no row', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:ask`, 'conv-old');
+    purgeChatCaches();
+    fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-x', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.conversationId).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('the first send creates exactly one row, even on a fast double submit', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-1', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let ids: Array<string | undefined> = [];
+    await act(async () => {
+      ids = await Promise.all([
+        result.current.ensureConversation(),
+        result.current.ensureConversation(),
+      ]);
+    });
+    expect(ids).toEqual(['conv-1', 'conv-1']);
+    expect(createCount()).toBe(1);
+    expect(result.current.conversationId).toBe('conv-1');
+    expect(result.current.conversationScope).toBe('ask');
+    // Cached under the scope, so a reload resumes it.
+    expect(localStorage.getItem(`${CACHE_PREFIX}:u1:ask`)).toBe('conv-1');
+
+    // CONTROL: a later send reuses the held conversation — no second create.
+    let again: string | undefined;
+    await act(async () => {
+      again = await result.current.ensureConversation();
+    });
+    expect(again).toBe('conv-1');
+    expect(createCount()).toBe(1);
+  });
+
+  it('a reload after the first send resumes that conversation', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'conv-1', messages: [] }));
+    const first = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(first.result.current.isLoading).toBe(false));
+    await act(async () => {
+      await first.result.current.ensureConversation();
+    });
+    first.unmount();
+
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ id: 'conv-1', messages: [{ id: 'm1', role: 'user', content: 'hello' }] }),
+    );
+    const second = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(second.result.current.conversationId).toBe('conv-1'));
+    expect(second.result.current.initialMessages).toHaveLength(1);
+    expect(createCount()).toBe(1);
+  });
+
+  it('a send made while the resolve is still running is created once it settles with nothing', async () => {
+    // The cached id is gone; the GET is slow, and the user sends meanwhile.
+    localStorage.setItem(`${CACHE_PREFIX}:u1:ask`, 'conv-dead');
+    let answerGet: (r: Response) => void = () => {};
+    fetchMock
+      .mockReturnValueOnce(new Promise<Response>((r) => { answerGet = r; }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'conv-1', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    let early: string | undefined = 'unset';
+    await act(async () => {
+      early = await result.current.ensureConversation();
+    });
+    expect(early).toBeUndefined(); // recorded, not yet created
+    expect(createCount()).toBe(0);
+
+    await act(async () => {
+      answerGet(new Response('gone', { status: 404 }));
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe('conv-1'));
+    expect(createCount()).toBe(1);
+  });
+
+  it('a send made while the resolve is still running joins the thread it finds (no create)', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:ask`, 'conv-live');
+    let answerGet: (r: Response) => void = () => {};
+    fetchMock.mockReturnValueOnce(new Promise<Response>((r) => { answerGet = r; }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    await act(async () => {
+      answerGet(jsonResponse({ id: 'conv-live', messages: [] }));
+    });
+    await waitFor(() => expect(result.current.conversationId).toBe('conv-live'));
+
+    // The recorded request was dropped: a later startNew() settles empty and
+    // stays empty until a NEW send — it does not mint on the stale request.
+    await act(async () => {
+      await result.current.startNew();
+    });
+    expect(result.current.conversationId).toBeUndefined();
+    expect(createCount()).toBe(0);
+  });
+
+  it('`?new` and startNew() on a still-empty surface mint no row', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ id: 'conv-x', messages: [] }));
+    const { result, rerender } = renderHook(
+      ({ forceNew }: { forceNew: boolean }) =>
+        useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE, forceNew }),
+      { initialProps: { forceNew: false } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    rerender({ forceNew: true }); // the sidebar's New / `?new=1`
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    rerender({ forceNew: true });
+    await act(async () => {
+      await result.current.startNew(); // the floating assistant's New chat
+    });
+    await act(async () => {
+      await result.current.startNew();
+    });
+    expect(result.current.conversationId).toBeUndefined();
+    expect(createCount()).toBe(0);
+  });
+
+  it('CONTROL: startNew() from a used conversation gives a fresh one on its first send', async () => {
+    localStorage.setItem(`${CACHE_PREFIX}:u1:ask`, 'conv-used');
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ id: 'conv-used', messages: [{ id: 'm1', role: 'user', content: 'hi' }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'conv-next', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(result.current.conversationId).toBe('conv-used'));
+
+    await act(async () => {
+      await result.current.startNew();
+    });
+    expect(result.current.conversationId).toBeUndefined();
+    expect(createCount()).toBe(0);
+
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-next');
+    expect(createCount()).toBe(1);
+  });
+
+  it('a failed create leaves no conversation, and the next send retries', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('nope', { status: 500 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 'conv-1', messages: [] }));
+    const { result } = renderHook(() =>
+      useChatConversation({ userId: 'u1', scope: 'ask', apiBase: API_BASE }),
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    let first: string | undefined = 'unset';
+    await act(async () => {
+      first = await result.current.ensureConversation();
+    });
+    expect(first).toBeUndefined();
+    expect(result.current.conversationId).toBeUndefined();
+
+    await act(async () => {
+      await result.current.ensureConversation();
+    });
+    expect(result.current.conversationId).toBe('conv-1');
+    expect(createCount()).toBe(2);
   });
 });
 

@@ -41,6 +41,7 @@ import {
   refuseAcceptedDefaultsWithoutWall,
   type DeploymentAcceptance,
 } from './suggested-audience-bindings.js';
+import { refuseAgentCeilingInBaselineOptions } from './agent-ceiling-grant-refusal.js';
 import { RLSCompiler, RLS_DENY_FILTER, policyDeclaresClause } from './rls-compiler.js';
 import {
   andComposeLayers,
@@ -275,9 +276,7 @@ import {
   owdOpenWritesCoversOperation,
 } from './platform-ownership-policies.js';
 import { OwnershipFloorAlternates } from './ownership-floor-alternates.js';
-import { hasPhantomTenantAnchor } from './federated-phantom-anchors.js';
 import {
-  externalOrganizationScopeIsUndeclared,
   refuseUndeclaredExternalObjectScope,
   registeredObjectsOf,
   undeclaredExternalScopeDenialWarning,
@@ -316,6 +315,10 @@ import {
   readDeploymentOrgScopingEntitlement,
   type DeploymentOrgScopingEntitlementReading,
 } from '@objectstack/core';
+// [ADR-0015 §10] The one reading of an external object's organization scope and
+// the provenance test it composes: `@objectstack/core`'s, which this plugin's
+// `external-organization-scope.ts` and `federated-phantom-anchors.ts` re-export.
+import { externalOrganizationScopeIsUndeclared, hasPhantomTenantAnchor } from '@objectstack/core';
 import {
   securityObjects,
   securityDefaultPermissionSets,
@@ -840,9 +843,10 @@ export async function absentUnderCallerRead(read: () => Promise<unknown>): Promi
  * both "cannot read": neither gives the caller the record, so neither may let
  * an explanation say it exists. A store fault propagates, as in
  * {@link absentUnderCallerRead}. Only the classification of a refusal differs
- * from that predicate, and only for a third-party asker: a principal
- * explaining itself keeps the write path's notion, so its explanation shows
- * what its own doors do.
+ * from that predicate. [Ruling of record 6787890900] A principal explaining
+ * itself is asked the same read through {@link readUnlessRefused}, three ways,
+ * so a refused read is "cannot read" for it too and is answered for every
+ * record id alike, with the refusal as its decider.
  */
 export async function unreadableUnderCallerRead(read: () => Promise<unknown>): Promise<boolean> {
   const answer = await readUnlessRefused(read);
@@ -1611,6 +1615,9 @@ export class SecurityPlugin implements Plugin {
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
     this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+    // [ADR-0090 D10] The baseline is held by every signed-in person, so an
+    // agent ceiling set is never part of it, however it was named.
+    refuseAgentCeilingInBaselineOptions(this.fallbackPermissionSet, this.acceptedDefaultPermissionSets);
   }
 
   /**
@@ -2479,8 +2486,12 @@ export class SecurityPlugin implements Plugin {
    * explained user's: a caller the read door does not return the record to is
    * answered exactly as for an id no row carries. [#22851, ruling C] A caller
    * explaining ANOTHER user whose read of the record is refused (a declared
-   * 4xx) is answered so too; a caller explaining itself keeps the write path's
-   * notion (no row), so its explanation shows what its own doors do.
+   * 4xx) is answered so too. [Ruling of record 6787890900] A caller explaining
+   * itself whose read of the object is refused gets the same explanation for
+   * every record id: the missing record's, with the layer that refused the
+   * read as its decider (omitted when no read layer names the refusal). A
+   * self-explanation is told by the request (no other user named), whatever
+   * kind of principal the caller is.
    *
    * The request is the contract's `ExplainAccessRequest` itself, so the
    * method's declared type carries every member the body honours, the batch
@@ -5361,6 +5372,14 @@ export class SecurityPlugin implements Plugin {
    * `ERR_DATASOURCE_UNAVAILABLE` → `503`) and this gate answers nothing. It
    * used to answer the 404 above, because the existence probe flattened a
    * fault into "absent" — the one thing an outage must never be reported as.
+   *
+   * [ADR-0055 §3] Every `403` above is decided on the master the STORED
+   * reference names, whatever the caller may read, and worded by what the
+   * caller may read: a caller whose field-level security does not let them
+   * read the detail's master reference ({@link getReadableFields}, failing
+   * closed) gets the same `403 PERMISSION_DENIED`, for the same leg, with a
+   * sentence that names no master, no master record and no leg. A caller who
+   * can read the reference gets the specific sentence.
    */
   private assertControlledByParentWrite(
     permissionSets: PermissionSet[],
@@ -5371,11 +5390,12 @@ export class SecurityPlugin implements Plugin {
   ): Promise<void> {
     // [#25223 cut 3] The body moved to `security-plugin-cbp-write-gate.ts` (see `CbpWriteGateHost`).
     const readPermissionEvaluator = () => this.permissionEvaluator;
-    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
+    const host: Pick<CbpWriteGateHost, 'assertControlledByParentChainEditable' | 'controlledByParentPredicateWriteMasters' | 'declaresControlledByParent' | 'extractSingleId' | 'getReadableFields' | 'permissionEvaluator' | 'readRowById' | 'resolveCbpRelation'> = {
       assertControlledByParentChainEditable: (...a) => this.assertControlledByParentChainEditable(...a),
       controlledByParentPredicateWriteMasters: (...a) => this.controlledByParentPredicateWriteMasters(...a),
       declaresControlledByParent: (...a) => this.declaresControlledByParent(...a),
       extractSingleId: (...a) => this.extractSingleId(...a),
+      getReadableFields: (...a) => this.getReadableFields(...a),
       get permissionEvaluator() { return readPermissionEvaluator(); },
       readRowById: (...a) => this.readRowById(...a),
       resolveCbpRelation: (...a) => this.resolveCbpRelation(...a),

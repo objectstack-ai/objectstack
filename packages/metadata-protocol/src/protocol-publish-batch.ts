@@ -51,6 +51,8 @@ import { CLOSURE_CONTEXT_KEY_BY_TYPE, type RuntimePendingDeclarations } from './
 import type { SeedLoadPartialWrites } from './seed-loader.js';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
 import { seedAppliedLanded } from './seed-applied-landed.js';
+import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
+import type { ProtocolHost } from './protocol-host.js';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -267,4 +269,32 @@ export async function collectBatchPendingDeclarations(
     // closure-relevant drafts byte-identical to the pre-#10377 gate call,
     // rather than routing it through a merge that would be a no-op.
     return any ? pending : undefined;
+}
+
+/**
+ * [#30020 codemod] The body of
+ * `ObjectStackProtocolImplementation#applySeedBodies`, the host it builds for
+ * {@link applySeedBodies} included: moved here whole by `--hand-host` of
+ * `scripts/codemod-split-protocol.mjs`. It runs on the class's host
+ * (`protocol-host.ts`) as `this`, so the class keeps a one-call stub; the
+ * method's docblock there is its contract.
+ */
+export async function applySeedBodiesOnHost(
+    this: Pick<ProtocolHost, 'engine' | 'getMetaItem' | 'getServicesRegistry'>,
+    bodies: unknown[],
+): Promise<{
+    success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[];
+    issues?: Array<{ path: string; message: string; code?: string | undefined }>;
+    landed?: SeedAppliedLandedParsed[];
+}> {
+    // [#25467 cut 14] The body moved to `protocol-publish-batch.ts` (see `PublishBatchHost`).
+    const readEngine = () => this.engine;
+    const host: ThisParameterType<typeof applySeedBodies> = {
+        get engine() { return readEngine(); },
+        getMetaItem: (...a) => this.getMetaItem(...a),
+        // [#25779] The `field-files` service, so a published seed's files
+        // are stored as the boot seed's are.
+        getFieldFiles: () => this.getServicesRegistry?.().get(FIELD_FILE_SERVICE) as IFieldFileService | undefined,
+    };
+    return applySeedBodies.call(host, bodies);
 }

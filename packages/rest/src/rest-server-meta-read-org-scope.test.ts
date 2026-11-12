@@ -24,6 +24,8 @@
 //     code. Until ADR-0131 C7 promotes such rows, a single-posture deployment
 //     observes this too (stage 0's F10 of the retirement card).
 
+// Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case.
+import '@objectstack/objectql';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
@@ -240,6 +242,14 @@ function makeStubEngine() {
         },
         async syncObjectSchema() { return true; },
         registry: {
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
+            // [#31699] Except the email template, which `SchemaRegistry` reads by
+            // package (its name is scoped to the namespace): a bare read of it
+            // resolves through the package-scoped resolver, here this double's own item.
+            readsByPackage: (type: string) => type === 'email_template',
+            resolveItem: () => undefined,
             registerItem: () => {}, registerObject: () => {},
             // [#19542] The live resolution universe the runtime publish gate
             // reads. It answered `[]` for every type, which was harmless while

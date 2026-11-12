@@ -370,6 +370,10 @@ describe('[#21002] the dispatcher published door follows the layered read for a 
         const { engine, rows } = makeStubEngine();
         const loaderEntry = { ...flowBody(SHIPPED, 'LOADER'), _packageId: 'com.example.pkg' };
         engine.registry = {
+            // A registry that reads no type by package (ADR-0150): every by-name read stays
+            // this double's `getItem`. Undeclared, the protocol refuses a by-name read of a
+            // package-scoped type, since it cannot tell how this registry reads it.
+            readsByPackage: () => false,
             registerItem: () => {},
             registerObject: () => {},
             getPackage: installedPackage,

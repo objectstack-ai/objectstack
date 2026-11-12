@@ -220,6 +220,15 @@ describe('claimSeedOwnership', () => {
     expect(writes).toHaveLength(0);
   });
 
+  it('[ADR-0153 D4] skips a synced object — a pulled row has no owner column to claim', async () => {
+    const { ql, writes } = makeQL(
+      [{ name: 'erp_order_copy', managedBy: 'synced', fields: [{ name: 'owner_id' }] }],
+      { erp_order_copy: [{ id: 'o1', owner_id: null }] },
+    );
+    expect(await claimSeedOwnership(ql, ADMIN)).toEqual([]);
+    expect(writes).toHaveLength(0);
+  });
+
   it('skips external (federated) objects even when they expose owner_id', async () => {
     // Federated read-only objects (ADR-0015) bind to a remote table; the
     // platform must not scan or re-own them — and the remote table may not even

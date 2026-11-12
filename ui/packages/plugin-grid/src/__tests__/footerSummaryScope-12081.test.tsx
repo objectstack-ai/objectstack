@@ -37,6 +37,9 @@
  *   - every footer aggregate the spec declares takes the same route.
  *   - CONTROL: rows handed in whole, and a grid whose one page is the whole
  *     set, keep the footer they had and ask the server nothing.
+ *   - ADR-0144 D6: a money aggregate over a `record`-mode amount is left out
+ *     of the whole-set query (the double refuses it as the engine does), so
+ *     the other columns keep their whole-set figures.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
@@ -46,6 +49,7 @@ import { parseFilterAST } from '@objectstack/spec/data';
 import type { DataSource, ObjectGridSchema } from '@object-ui/types';
 
 import { ObjectGrid } from '../ObjectGrid';
+import { wholeSetSummaryNodes } from '../useWholeSetSummary';
 import { __clearRecordCrudVerdictCache } from '../hooks/useRecordCrudVerdicts';
 import { installExplainDouble } from './explainDouble';
 import { registerAllFields } from '@object-ui/fields';
@@ -70,14 +74,22 @@ afterEach(() => {
 const OBJECT = 'plan_line';
 const PAGE = 25;
 
-type Row = { id: string; name: string; stage: string; amount: number; note: string | null } & Record<string, unknown>;
-/** 300 rows; every fifth `note` is empty, every third row is `won`. */
+type Row = { id: string; name: string; stage: string; amount: number; note: string | null; closed_at: string; qty: number; currency_code: string } & Record<string, unknown>;
+/**
+ * 300 rows; every fifth `note` is empty, every third row is `won`, and
+ * `closed_at` is one day later per row, so the last row is the latest.
+ * `currency_code` alternates USD / EUR, for the `record`-mode amount cases
+ * (ADR-0144 D6); `qty` is a plain number beside it.
+ */
 const ROWS: Row[] = Array.from({ length: 300 }, (_, i) => ({
   id: `r${i}`,
   name: `Line ${i}`,
   stage: i % 3 === 0 ? 'won' : 'open',
   amount: (i + 1) * 100,
   note: i % 5 === 0 ? null : `n${i}`,
+  closed_at: new Date(Date.UTC(2025, 0, 1, 9, 30) + i * 86_400_000).toISOString(),
+  qty: (i % 7) + 1,
+  currency_code: i % 2 === 0 ? 'USD' : 'EUR',
 }));
 
 const OBJECT_FIELDS = {
@@ -86,6 +98,7 @@ const OBJECT_FIELDS = {
   stage: { type: 'text', label: 'Stage' },
   amount: { type: 'number', label: 'Amount' },
   note: { type: 'text', label: 'Note' },
+  closed_at: { type: 'datetime', label: 'Closed At' },
 };
 
 /** The `FilterCondition` subset the lowered filters here use. */
@@ -113,10 +126,18 @@ function matchesSearch(row: Record<string, unknown>, term: unknown, fields: unkn
 type Agg = { function: string; field?: string; alias: string };
 type AggregateQuery = { where?: unknown; groupBy?: string[]; aggregations?: Agg[]; search?: unknown; searchFields?: unknown };
 
-/** One aggregation node over a row set, as `engine.aggregate` answers it. */
-function aggregateOf(rows: Row[], node: Agg): number | null {
+/**
+ * One aggregation node over a row set, as `engine.aggregate` answers it. A
+ * `min` / `max` over stored instants is the stored TEXT (ISO text orders as
+ * time), as a SQL driver answers it.
+ */
+function aggregateOf(rows: Row[], node: Agg): number | string | null {
   const values: unknown[] = node.field === undefined ? [] : rows.map((r) => r[node.field!]).filter((v) => v !== null && v !== undefined);
   const total = (): number => values.reduce((a: number, b) => a + Number(b), 0);
+  if ((node.function === 'min' || node.function === 'max') && typeof values[0] === 'string') {
+    const sorted = [...(values as string[])].sort();
+    return node.function === 'min' ? sorted[0] : sorted[sorted.length - 1];
+  }
   switch (node.function) {
     case 'count': return node.field === undefined ? rows.length : values.length;
     case 'count_distinct': return new Set(values).size;
@@ -133,8 +154,23 @@ type FilterInput = Parameters<typeof parseFilterAST>[0];
 const matching = (where: unknown, search: unknown, searchFields: unknown) =>
   ROWS.filter((r) => matchesWhere(r, where) && matchesSearch(r, search, searchFields));
 
-function makeDataSource(opts: { door?: 'answers' | 'absent' | 'refuses' | 'no-row' | 'strings' } = {}) {
+/** A field def's `record`-mode code pointer, as the engine's D6 door reads it. */
+const recordPointerOf = (def: unknown): string | undefined => {
+  const config = (def as { currencyConfig?: { currencyMode?: unknown; currencyField?: unknown } } | undefined)?.currencyConfig;
+  return config?.currencyMode === 'record' && typeof config.currencyField === 'string' ? config.currencyField : undefined;
+};
+
+function makeDataSource(opts: {
+  door?: 'answers' | 'absent' | 'refuses' | 'no-row' | 'strings';
+  /** The object definition's fields `getObjectSchema` answers (default `OBJECT_FIELDS`). */
+  fields?: Record<string, unknown>;
+  /** Held until this settles, so a test can read the grid before its definition lands. */
+  schemaRead?: Promise<unknown>;
+} = {}) {
   const door = opts.door ?? 'answers';
+  const fields: Record<string, unknown> = opts.fields ?? OBJECT_FIELDS;
+  /** Every aggregate the door refused as the engine's ADR-0144 D6 door does: `fn(field)`. */
+  const refusals: string[] = [];
   const ds: Record<string, ReturnType<typeof vi.fn>> = {
     find: vi.fn(async (_object: string, params: Record<string, unknown>) => {
       const where = params.$filter === undefined ? undefined : parseFilterAST(params.$filter as FilterInput);
@@ -147,13 +183,24 @@ function makeDataSource(opts: { door?: 'answers' | 'absent' | 'refuses' | 'no-ro
     create: vi.fn(),
     update: vi.fn(),
     delete: vi.fn(),
-    getObjectSchema: vi.fn(async () => ({ name: OBJECT, fields: OBJECT_FIELDS })),
+    getObjectSchema: vi.fn(async () => {
+      await opts.schemaRead;
+      return { name: OBJECT, fields };
+    }),
   };
   if (door !== 'absent') {
     ds.queryGroupHeaders = vi.fn(async (_object: string, query: AggregateQuery) => {
       if (door === 'refuses') throw Object.assign(new Error('refused'), { code: 'UNSUPPORTED_QUERY_PARAM' });
       const groupBy = query.groupBy ?? [];
       if (groupBy.length > 0) throw new Error('double: this suite asks no grouped query');
+      // [ADR-0144 D6] The engine refuses a raw sum / avg / min / max over a
+      // `record`-mode amount in an ungrouped query, and runs none of it.
+      const raw = (query.aggregations ?? []).filter((node) => ['sum', 'avg', 'min', 'max'].includes(node.function)
+        && node.field !== undefined && recordPointerOf(fields[node.field]) !== undefined);
+      if (raw.length > 0) {
+        refusals.push(...raw.map((node) => `${node.function}(${node.field})`));
+        throw Object.assign(new Error('refused: a raw aggregate across currencies'), { code: 'INVALID_FIELD', status: 400 });
+      }
       if (door === 'no-row') return [];
       const rows = matching(query.where, query.search, query.searchFields);
       // `strings`: a driver answering decimals and 64-bit counts as their string
@@ -164,7 +211,7 @@ function makeDataSource(opts: { door?: 'answers' | 'absent' | 'refuses' | 'no-ro
       }))];
     });
   }
-  return ds;
+  return Object.assign(ds, { refusals });
 }
 
 type TestDataSource = ReturnType<typeof makeDataSource>;
@@ -497,5 +544,156 @@ describe('the page label is the pack\'s, not an English suffix (objectui#12081 i
     await waitFor(() => expect(footerText('amount')).toContain('（本页）'));
     expect(footerText('amount')).toContain('合计');
     expect(footerText('amount')).not.toMatch(/this page|Sum/);
+  });
+});
+
+describe('a date-family `min` / `max` in the footer reads as its cell, never as a number (objectstack#32119)', () => {
+  const CLOSED_MAX = [
+    { field: 'name', label: 'Name' },
+    { field: 'closed_at', label: 'Closed At', summary: 'max' },
+  ];
+
+  /** The Closed At cell of the row named `name`, in the grid on screen. */
+  function closedAtCell(name: string): string | null {
+    const headers = [...document.querySelectorAll('thead tr th')].map((th) => th.textContent ?? '');
+    const index = headers.findIndex((text) => text.includes('Closed At'));
+    for (const tr of document.querySelectorAll('tbody tr')) {
+      const tds = tr.querySelectorAll('td');
+      if ([...tds].some((td) => td.textContent === name) && tds.length > index) return tds[index].textContent;
+    }
+    return null;
+  }
+
+  /** The cell a one-row grid of `row` draws for Closed At — the cell's own face. */
+  async function cellOf(row: Row): Promise<string> {
+    cleanup();
+    const ds = makeDataSource({ door: 'absent' });
+    render(hostGrid(ds, { rows: [row], columns: CLOSED_MAX }));
+    await waitFor(() => expect(closedAtCell(row.name)).toBeTruthy());
+    return closedAtCell(row.name)!;
+  }
+
+  it('rows handed in whole: the `max` is the latest row\'s cell, not its year', async () => {
+    const ds = makeDataSource({ door: 'absent' });
+    const rows = ROWS.slice(0, 10);
+    render(hostGrid(ds, { rows, columns: CLOSED_MAX }));
+    await waitFor(() => expect(footerText('closed_at')).toBeTruthy());
+    await waitFor(() => expect(closedAtCell('Line 9')).toBeTruthy());
+    expect(footerText('closed_at')).toBe(`Closed At: Max: ${closedAtCell('Line 9')}`);
+    expect(footerText('closed_at')).not.toMatch(/2,025|NaN/);
+  });
+
+  it('own fetch, one page of 300: the whole set\'s `max` (the server\'s stored text) reads as the last row\'s cell', async () => {
+    const ds = makeDataSource();
+    render(ownFetchGrid(ds, CLOSED_MAX));
+    await waitFor(() => expect(footerText('closed_at')).toMatch(/^Closed At: Max: /));
+    const footer = footerText('closed_at');
+    expect(footer).not.toMatch(/2,025|NaN|this page/);
+    expect(footer).toBe(`Closed At: Max: ${await cellOf(ROWS[299])}`);
+  });
+
+  it('a `sum` / `avg` over a datetime column draws no figure; CONTROL — a `max` over a number column still reads as a number', async () => {
+    const ds = makeDataSource({ door: 'absent' });
+    render(hostGrid(ds, {
+      rows: ROWS.slice(0, 10),
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'closed_at', label: 'Closed At', summary: 'sum' },
+        { field: 'amount', label: 'Amount', type: 'number', summary: 'max' },
+      ],
+    }));
+    await waitFor(() => expect(footerText('amount')).toBe(`Amount: Max: ${fmt(1000)}`));
+    expect(footerText('closed_at')).toBeNull();
+  });
+});
+
+describe('a money aggregate over a `record`-mode amount is left out of the whole-set query (ADR-0144 D6)', () => {
+  const recordAmount = (currencyField: string) => ({
+    type: 'currency', label: 'Amount', currencyConfig: { currencyMode: 'record', currencyField },
+  });
+  /** `amount` in each row's own currency, the code in the sibling `currency_code`. */
+  const SIBLING = {
+    ...OBJECT_FIELDS,
+    amount: recordAmount('currency_code'),
+    currency_code: { type: 'text', label: 'Currency' },
+    qty: { type: 'number', label: 'Qty' },
+  };
+  /** `amount` in its parent invoice's currency, through the `master_detail` (ADR-0144 D2, amended). */
+  const PARENT_PATH = {
+    ...OBJECT_FIELDS,
+    amount: recordAmount('invoice.currency_code'),
+    invoice: { type: 'master_detail', reference: 'invoice', label: 'Invoice' },
+    qty: { type: 'number', label: 'Qty' },
+  };
+  const COLUMNS = [
+    { field: 'name', label: 'Name' },
+    { field: 'amount', label: 'Amount', type: 'currency', summary: 'sum' },
+    { field: 'qty', label: 'Qty', type: 'number', summary: 'sum' },
+  ];
+  const qtyWhole = `Qty: Sum: ${fmt(ROWS.reduce((a, r) => a + r.qty, 0))}`;
+  /** The money nodes on `amount` among every query the door was asked. */
+  const amountMoneyNodes = (ds: TestDataSource) => ds.queryGroupHeaders.mock.calls
+    .flatMap(([, query]) => (query as AggregateQuery).aggregations ?? [])
+    .filter((node) => node.field === 'amount' && node.function !== 'count');
+
+  it.each([
+    ['a sibling code field', SIBLING],
+    ['a parent path', PARENT_PATH],
+  ])('%s: the plain-number sum keeps its whole-set figure, and no refused request is sent', async (_pointer, fields) => {
+    const ds = makeDataSource({ fields });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+
+    await waitFor(() => expect(footerText('qty')).toBe(qtyWhole));
+    // The record-mode column draws nothing (the footer's own D6 skip, kept).
+    expect(footerText('amount')).toBeNull();
+    expect(ds.refusals).toEqual([]);
+    expect(amountMoneyNodes(ds)).toEqual([]);
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect((ds.queryGroupHeaders.mock.calls[0][1] as AggregateQuery).aggregations).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'qty', alias: 'sum_qty' },
+    ]);
+  });
+
+  it('the money aggregate is not asked while the field catalogue is still on its way, and is asked once it lands', async () => {
+    let land!: () => void;
+    const schemaRead = new Promise<void>((resolve) => { land = resolve; });
+    const ds = makeDataSource({ fields: SIBLING, schemaRead });
+    render(hostGrid(ds, { rows: ROWS, columns: COLUMNS }));
+    // The untyped cells stay withheld until the definition lands (objectui#10657),
+    // so the page's footer is what marks the grid as drawn.
+    await waitFor(() => expect(footerText('qty')).toMatch(/^Qty: Sum \(this page\): /));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Unknown currency mode: no guess is sent, and the footer stays the page's.
+    expect(ds.getObjectSchema).toHaveBeenCalled();
+    expect(ds.queryGroupHeaders).not.toHaveBeenCalled();
+    expect(footerText('qty')).toMatch(/^Qty: Sum \(this page\): /);
+
+    land();
+    await waitFor(() => expect(footerText('qty')).toBe(qtyWhole));
+    expect(ds.refusals).toEqual([]);
+    expect(ds.queryGroupHeaders).toHaveBeenCalledTimes(1);
+  });
+
+  it('a summary list whose only figure is a record-mode money aggregate asks nothing; the counts over the amount stand', () => {
+    expect(wholeSetSummaryNodes([{ field: 'amount', summary: 'sum' }] as never, SIBLING)).toBeNull();
+    expect(wholeSetSummaryNodes([
+      { field: 'amount', summary: 'max' },
+      { field: 'id', summary: { type: 'min', field: 'amount' } },
+      { field: 'name', summary: { type: 'avg', field: 'amount' } },
+      { field: 'note', summary: { type: 'count_filled', field: 'amount' } },
+      { field: 'stage', summary: { type: 'count_unique', field: 'amount' } },
+      { field: 'qty', summary: 'avg' },
+    ] as never, PARENT_PATH)).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'count', field: 'amount', alias: 'count_amount' },
+      { function: 'count_distinct', field: 'amount', alias: 'count_distinct_amount' },
+      { function: 'avg', field: 'qty', alias: 'avg_qty' },
+    ]);
+    // CONTROL: the same columns over a catalogue that does not say `record` keep every node.
+    expect(wholeSetSummaryNodes([{ field: 'amount', summary: 'sum' }] as never, OBJECT_FIELDS)).toEqual([
+      { function: 'count', alias: 'count' },
+      { function: 'sum', field: 'amount', alias: 'sum_amount' },
+    ]);
   });
 });

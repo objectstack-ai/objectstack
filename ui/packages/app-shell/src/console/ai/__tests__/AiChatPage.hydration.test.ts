@@ -371,15 +371,8 @@ describe('AiChatPage hydration — the data tools\' source block (objectstack#31
         },
       ]),
     );
-    // The same lifted copy the live mapper gives: the drawn members only.
-    expect(msg.toolInvocations?.[0].answerSource).toEqual({
-      object: 'crm_opportunity',
-      label: 'Opportunities',
-      filter: { stage: 'open' },
-      scope: 'visible_to_you',
-      groupBy: ['owner'],
-      aggregations: [{ function: 'sum', field: 'amount' }],
-      records: 7,
-    });
+    // The same lifted copy the live mapper gives: the block as the contract
+    // (ObjectQuerySourceSchema) parses it.
+    expect(msg.toolInvocations?.[0].answerSource).toEqual(source);
   });
 });

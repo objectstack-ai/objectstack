@@ -28,6 +28,7 @@ import { describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { PageSchema } from '@objectstack/spec/ui';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 interface Row {
     id: string;
@@ -88,6 +89,7 @@ function makeStubEngine(
             return { deleted: 0 };
         },
         registry: {
+            ...NO_PACKAGE_SCOPED_READS,
             listItems: () => [],
             isPackageDisabled: () => false,
             registerItem: (type: string, body: any) => { registered.push({ kind: 'item', type, body }); },
@@ -413,12 +415,15 @@ describe('a stored action whose newTabUrl is an absolute URL — read and named,
 const DECLARED_PAGE_TYPE = (PageSchema as unknown as { shape: { type: { parse(v: unknown): unknown } } })
     .shape.type.parse(undefined);
 
-const typelessPageBody = { name: 'invoice_record', label: 'Invoice', object: 'crm_invoice' };
+// Each places a component: a record page (the declared default) that places
+// none is served flagged invalid, which is not what these pins are about.
+const PLACED = [{ name: 'main', components: [{ type: 'record:details' }] }];
+const typelessPageBody = { name: 'invoice_record', label: 'Invoice', object: 'crm_invoice', regions: PLACED };
 const typelessPageRow = { type: 'page', name: 'invoice_record', metadata: typelessPageBody };
 const appPageRow = { type: 'page', name: 'launchpad', metadata: { name: 'launchpad', label: 'Launchpad', type: 'app' } };
 const typelessDraftRow = {
     type: 'page', name: 'invoice_record_next', state: 'draft',
-    metadata: { name: 'invoice_record_next', label: 'Invoice (next)', object: 'crm_invoice' },
+    metadata: { name: 'invoice_record_next', label: 'Invoice (next)', object: 'crm_invoice', regions: PLACED },
 };
 
 describe('[#20101] a stored page row without `type` is served with PageSchema\'s declared default', () => {

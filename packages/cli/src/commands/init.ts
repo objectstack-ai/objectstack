@@ -22,7 +22,7 @@ import {
 import { validateScaffold } from '../utils/scaffold-validate.js';
 import { makeDirectorySync } from '../utils/make-directory.js';
 import { summarizeTree, describeEntry } from 'create-objectstack/created-summary';
-import { GENERATOR_SCAFFOLD_TARGETS } from './generate.js';
+import { GENERATOR_SCAFFOLD_TARGETS, barrelExportLine } from './generate.js';
 
 // ─── Version resolution ──────────────────────────────────────────────
 //
@@ -771,6 +771,22 @@ function renderWiredStackKeys(): string {
  * zero rather than an import that fails.
  */
 function renderEmptyWiredBarrel(stackKey: string, type: string): string {
+  // An app package holds at most one app (ADR-0019 D3), so "`os g app` writes
+  // one here" is advice the generator refuses once the directory has an app —
+  // and the `app` and blank starters ship one. Same advice as the starter
+  // app's own comment (`src/apps/main.app.ts` below).
+  if (type === 'app') {
+    return `// The ${stackKey} in this directory. A package whose manifest type is 'app'
+// holds at most one app: \`objectstack generate app NAME\` writes it here while
+// there is none, and adds its export line below. Once there is one, put another
+// object in the Console by adding a navigation entry for it to that app (a
+// 'group' entry with children nests them) rather than a second app, or replace
+// that app. objectstack.config.ts hands every export of this file to the stack,
+// so an app exported here is part of it, and an app file this index does not
+// export is never loaded.
+export {};
+`;
+  }
   return `// The ${stackKey} in this directory. \`objectstack generate ${type} NAME\` writes one
 // here and adds its export line below. objectstack.config.ts hands every
 // export of this file to the stack, so a ${type} exported here is part of it,
@@ -789,6 +805,128 @@ export {};
  * write it always had.
  */
 const EMPTY_WIRED_BARRELS = new WeakSet<(name: string, namespace: string) => string>();
+
+/**
+ * The export lines a wired barrel carries after its empty header, keyed by the
+ * barrel's renderer. {@link writeTemplateSrcFiles} APPENDS these, one per line
+ * the file lacks, to a barrel that already exists instead of overwriting it —
+ * what `objectstack generate` does to a barrel it finds — so an author's own
+ * `src/views/index.ts` keeps every export it had and still wires the
+ * template's view.
+ */
+const WIRED_BARREL_EXPORTS = new WeakMap<
+  (name: string, namespace: string) => string,
+  (name: string, namespace: string) => string[]
+>();
+
+/**
+ * The barrel of the wired directory for `type`, written as the empty one
+ * {@link renderEmptyWiredBarrel} renders followed by `exports` — the bytes
+ * `os init` would write and then `os g <type>` would append to, so a template
+ * that ships a scaffold of its own wires it exactly the way the generator
+ * would have.
+ */
+function wiredBarrelExporting(
+  type: string,
+  exports: (name: string, namespace: string) => string[],
+): (name: string, namespace: string) => string {
+  const barrel = SCAFFOLD_WIRED_BARRELS.find((b) => b.type === type);
+  if (!barrel) throw new Error(`os init: no generator writes '${type}', so there is no barrel to wire it in`);
+  const render = (name: string, namespace: string) =>
+    renderEmptyWiredBarrel(barrel.stackKey, barrel.type)
+    + exports(name, namespace).map((line) => `${line}\n`).join('');
+  WIRED_BARREL_EXPORTS.set(render, exports);
+  return render;
+}
+
+// ─── The starter app and list view (#32212) ──────────────────────────
+//
+// A project with objects and no app boots with its objects served over REST
+// and MCP and nothing of its own in the Console, which lists an object only
+// where an app's navigation names it — so the dev banner's Console link opened
+// on the platform's apps alone. The `app` template therefore ships what
+// `os g app main --object <its object>` and `os g view <its object>` write,
+// and the `plugin` template the list view alone (see its entry for why).
+//
+// Both reference the object through an import of its own module (`.name`),
+// never as a typed-out string: a rename of the object moves the references
+// with it. That is the shape `create-objectstack`'s blank starter uses for the
+// same files, so the two scaffolders do not teach two ways to bind an object.
+
+/** The object a template's starter files bind: its module and binding name. */
+function starterObjectImport(namespace: string): string {
+  return `import ${toCamelCase(namespace)}Item from '../objects/${namespace}_item.object';`;
+}
+
+/**
+ * The starter object's barrel, `src/objects/index.ts`: the line
+ * `os g object <namespace>_item` would append, read off the generator rather
+ * than restated (#32393), so the barrel re-exports the object by name exactly
+ * as every barrel line `os g object` writes beside it does.
+ */
+function starterObjectExport(namespace: string): string {
+  return `${barrelExportLine('object', `${namespace}_item`, `./${namespace}_item.object`).line}\n`;
+}
+
+/**
+ * The comment above the starter object's declaration. The object is written
+ * in the style `os g object` writes (#32393): `Field.*` builders, and the
+ * binding exported by name. The default export stays beside it — the starter
+ * app and list view import it, and `scaffold-object-declaration-shape.test.ts`
+ * holds every `*.object.ts` door to a default export of the declared binding.
+ */
+function starterObjectExportsNote(importers: readonly string[]): string {
+  return [
+    '// Exported by name, the binding src/objects/index.ts re-exports, the way',
+    '// `objectstack generate object` exports each object it writes. The default',
+    `// export at the bottom is the one ${importers.length === 1 ? 'this file imports' : 'these files import'}:`,
+    ...importers.map((file) => `//   ${file}`),
+  ].join('\n');
+}
+
+/** The plural label the starter app and list view show the starter object under. */
+function starterObjectPlural(namespace: string): string {
+  return `${toTitleCase(namespace)} Items`;
+}
+
+/**
+ * The list view `os g view <namespace>_item` writes for the starter object,
+ * with `fields` as its columns (every field the object declares, as the
+ * generator lists them) and `note` as the comment saying where it is opened.
+ */
+function renderStarterListView(namespace: string, fields: readonly string[], note: readonly string[]): string {
+  const binding = `${toCamelCase(namespace)}Item`;
+  return `import * as UI from '@objectstack/spec/ui';
+${starterObjectImport(namespace)}
+
+/**
+ * ${toTitleCase(`${namespace}_item`)} Views
+ */
+${note.map((line) => `// ${line}`.trimEnd()).join('\n')}
+const ${binding}Views: UI.View = {
+  // A views container is registered under the object it binds to: \`object\`
+  // is its identity, so it declares no \`name\` or \`label\` of its own. The
+  // label people see is the list view's, below.
+  object: ${binding}.name,
+  list: {
+    label: 'All ${starterObjectPlural(namespace)}',
+    type: 'grid',
+    columns: [
+${fields.map((field) => `      { field: '${field}' },`).join('\n')}
+    ],
+    sort: [{ field: '${fields[0]}', order: 'asc' }],
+    pagination: { pageSize: 25 },
+  },
+};
+
+export default ${binding}Views;
+`;
+}
+
+/** The views barrel line `os g view <namespace>_item` appends. */
+function starterViewExport(namespace: string): string {
+  return `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.view';`;
+}
 
 /**
  * `srcFiles` plus an empty barrel for every wired directory the template does
@@ -884,11 +1022,11 @@ ${renderWiredStackKeys()}
 });
 `,
     srcFiles: withWiredBarrels({
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
-`,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
+      'src/objects/index.ts': (_name, namespace) => starterObjectExport(namespace),
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item = ObjectSchema.create({
+${starterObjectExportsNote(['src/apps/main.app.ts', `src/views/${namespace}_item.view.ts`])}
+export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   // Field groups: the sections an item's form and detail page draw, top to
@@ -903,19 +1041,18 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
     { key: 'details', label: 'Details' },
   ],
   fields: {
-    name: {
-      type: 'text',
+    // Each field through a \`Field.*\` builder (Field.textarea, Field.select,
+    // Field.lookup, …), the way \`objectstack generate object\` writes them.
+    name: Field.text({
       label: 'Name',
       required: true,
       group: 'details',
-    },
-    description: {
-      type: 'textarea',
+    }),
+    description: Field.textarea({
       label: 'Description',
       group: 'details',
-    },
-    status: {
-      type: 'select',
+    }),
+    status: Field.select({
       label: 'Status',
       options: [
         { label: 'Draft', value: 'draft' },
@@ -924,7 +1061,7 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
       ],
       defaultValue: 'draft',
       group: 'details',
-    },
+    }),
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
@@ -937,6 +1074,59 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 
 export default ${toCamelCase(namespace)}Item;
 `,
+      // The starter app: what the Console lists beside the platform's own
+      // apps, with the starter object as its one navigation entry. The bytes
+      // `os g app main --object <namespace>_item` writes, the object bound by
+      // import instead of by its typed-out name.
+      'src/apps/index.ts': wiredBarrelExporting('app', () => [
+        "export { default as main } from './main.app';",
+      ]),
+      'src/apps/main.app.ts': (name, namespace) => `import * as UI from '@objectstack/spec/ui';
+${starterObjectImport(namespace)}
+
+/**
+ * Main App
+ */
+// This project's app: what the Console lists beside the platform's own apps,
+// and what puts an object in the Console's navigation. An object no app lists
+// is still served over REST and MCP, but the Console has no route to it. A
+// package whose manifest type is 'app' holds at most one app, so this is the
+// one: to put another object in the Console, add a navigation entry for it
+// below (a 'group' entry with children nests them) rather than a second app,
+// and give it a list view — \`objectstack generate view OBJECT\` writes one.
+//
+// The object is referenced through its import, never as a typed-out name, so
+// renaming it moves this entry with it. When you delete the starter object,
+// delete its entry below too.
+const mainApp: UI.App = {
+  name: '${namespace}_main_app',
+  label: '${toTitleCase(name)}',
+  navigation: [
+    {
+      id: \`\${${toCamelCase(namespace)}Item.name}_nav\`,
+      type: 'object',
+      label: '${starterObjectPlural(namespace)}',
+      objectName: ${toCamelCase(namespace)}Item.name,
+    },
+  ],
+};
+
+export default mainApp;
+`,
+      // The starter object's list view: what the app's entry above opens.
+      'src/views/index.ts': wiredBarrelExporting('view', (_name, namespace) => [starterViewExport(namespace)]),
+      'src/views/__name___item.view.ts': (_name, namespace) => renderStarterListView(
+        namespace,
+        ['name', 'description', 'status'],
+        [
+          `The list the Console opens from the \`${starterObjectPlural(namespace)}\` entry of`,
+          'src/apps/main.app.ts. Every column names a field the object declares: a',
+          'column naming a field it lacks renders blank. The object is referenced',
+          'through its import, so renaming it moves this view with it. When you',
+          'delete the starter object, delete this file and its export line in',
+          'src/views/index.ts too.',
+        ],
+      ),
     }),
   },
 
@@ -993,19 +1183,20 @@ ${renderWiredStackKeys()}
 });
 `,
     srcFiles: withWiredBarrels({
-      'src/objects/index.ts': (_name, namespace) => `export { default as ${toCamelCase(namespace)}Item } from './${namespace}_item.object';
-`,
-      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema } from '@objectstack/spec/data';
+      'src/objects/index.ts': (_name, namespace) => starterObjectExport(namespace),
+      'src/objects/__name___item.object.ts': (_name, namespace) => `import { ObjectSchema, Field } from '@objectstack/spec/data';
 
-const ${toCamelCase(namespace)}Item = ObjectSchema.create({
+${starterObjectExportsNote([`src/views/${namespace}_item.view.ts`])}
+export const ${toCamelCase(namespace)}Item = ObjectSchema.create({
   name: '${namespace}_item',
   label: '${toTitleCase(namespace)} Item',
   fields: {
-    name: {
-      type: 'text',
+    // Each field through a \`Field.*\` builder (Field.textarea, Field.select,
+    // Field.lookup, …), the way \`objectstack generate object\` writes them.
+    name: Field.text({
       label: 'Name',
       required: true,
-    },
+    }),
   },
   // Org-wide default (OWD): who can see records they don't own. 'private' is
   // owner-only until access is widened by a permission grant or a sharing
@@ -1018,6 +1209,24 @@ const ${toCamelCase(namespace)}Item = ObjectSchema.create({
 
 export default ${toCamelCase(namespace)}Item;
 `,
+      // The starter object's list view, and no app (#32212). A view travels
+      // with its object: a host that lists the object in its own navigation
+      // opens this list. Navigation is the host's to compose — an app shipped
+      // here would land in the app switcher of every stack that loads the
+      // package — and this template has no `dev` or `start` script, so there
+      // is no Console of its own for an app to fill.
+      'src/views/index.ts': wiredBarrelExporting('view', (_name, namespace) => [starterViewExport(namespace)]),
+      'src/views/__name___item.view.ts': (_name, namespace) => renderStarterListView(
+        namespace,
+        ['name'],
+        [
+          'The list a host opens for this object: a stack that loads this package',
+          'and names the object in its app navigation shows these columns. Every',
+          'column names a field the object declares: a column naming a field it',
+          'lacks renders blank. The object is referenced through its import, so',
+          'renaming it moves this view with it.',
+        ],
+      ),
       // The starter test the `test` script above runs (#25175). Without a test
       // file, `vitest run` exits 1 with "No test files found", so a fresh
       // project failed its own `npm test`. It loads the package's stack —
@@ -1187,6 +1396,23 @@ export function writeTemplateSrcFiles(
     // An empty wired barrel is written only where none exists (#20215): see
     // EMPTY_WIRED_BARRELS for the author's file this would overwrite.
     if (EMPTY_WIRED_BARRELS.has(contentFn) && fs.existsSync(fullPath)) continue;
+
+    // A wired barrel that carries the template's own export lines is, where a
+    // barrel already exists, APPENDED to rather than overwritten: the author's
+    // exports stay, and each line of the template's the file lacks is added,
+    // so the template's scaffold is still wired (see WIRED_BARREL_EXPORTS).
+    const exportLines = WIRED_BARREL_EXPORTS.get(contentFn);
+    if (exportLines && fs.existsSync(fullPath)) {
+      const before = fs.readFileSync(fullPath, 'utf8');
+      const present = new Set(before.split(/\r?\n/));
+      const missing = exportLines(projectName, namespace).filter((line) => !present.has(line));
+      if (missing.length > 0) {
+        const separator = before === '' || before.endsWith('\n') ? '' : '\n';
+        fs.writeFileSync(fullPath, `${before}${separator}${missing.map((line) => `${line}\n`).join('')}`);
+        written.push(resolvedPath);
+      }
+      continue;
+    }
 
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

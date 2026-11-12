@@ -2,7 +2,9 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
-import type { IAutomationService, AutomationResult, FlowRuntimeState, FlowUnboundCause } from './automation-service';
+import type { IAutomationService, AutomationResult, FlowRuntimeState, FlowUnboundCause, ConnectorSourcePullRequest } from './automation-service';
+import type { OwnershipQueueCallerPackage } from './ownership-queue-service';
+import type { JobRunTrigger } from './job-service';
 import { FLOW_UNBOUND_CAUSES } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
 import { FlowSchema } from '../automation/flow.zod';
@@ -492,5 +494,87 @@ describe('FlowRuntimeState — carries the reason a flow is unbound', () => {
     // `reason` still forbids parsing, and now names where classification lives.
     expect(doc).toContain('do not parse it');
     expect(doc).toContain('{@link FlowRuntimeState.unboundCause}');
+  });
+});
+
+/**
+ * [ADR-0150 D3] `ConnectorSourcePullRequest.callerPackageId` — the caller's
+ * package, so a job's pull reads its `mapping` by `(package, name)`. Pinned at
+ * the type level (`check:test-typecheck` compiles this file) and on the doc:
+ *
+ *  1. **A widening.** A request without the key is accepted as before, and so
+ *     is an implementation written before it.
+ *  2. **The sibling contract's spelling and value type** — exactly the
+ *     ownership-queue reads' `callerPackageId: string | null`, optional.
+ *  3. **The absent value is stated where it is read:** no package, which
+ *     ADR-0150 D3 answers — the environment's own mapping, else the one
+ *     package holder, and a name two packages hold is refused. Never "exactly
+ *     as today": the first registered holder is no longer served.
+ *
+ * ⛔ Not pinned: how an implementation resolves from the package — that is the
+ * producer half (the runtime binder and the pull's mapping read).
+ */
+type PullRequestKeys = keyof ConnectorSourcePullRequest;
+export type PullRequestCallerPackageIsTheSiblingType = Assert<
+  Eq<ConnectorSourcePullRequest['callerPackageId'], OwnershipQueueCallerPackage | undefined>
+>;
+// [ADR-0153 D7] `jobRunId` and `trigger`: the job run that drove the pull,
+// for its run record. Optional, so the lit control below still holds.
+export type PullRequestKeysAreTheSixKnown = Assert<
+  Eq<PullRequestKeys, 'mapping' | 'context' | 'environmentId' | 'callerPackageId' | 'jobRunId' | 'trigger'>
+>;
+export type PullRequestJobRunIdIsText = Assert<Eq<ConnectorSourcePullRequest['jobRunId'], string | undefined>>;
+export type PullRequestTriggerIsTheJobTrigger = Assert<Eq<ConnectorSourcePullRequest['trigger'], JobRunTrigger | undefined>>;
+/** LIT CONTROL: the pre-existing required member alone still satisfies the contract. */
+export type PullRequestCallerPackageIsOptional = Assert<{ mapping: string } extends ConnectorSourcePullRequest ? true : false>;
+
+describe('ConnectorSourcePullRequest — carries the caller package (ADR-0150 D3)', () => {
+  it('a request without the key and a request with it both satisfy the contract', async () => {
+    const seen: ConnectorSourcePullRequest[] = [];
+    // An implementation written before the key: it reads only `mapping`.
+    const legacy: Pick<IAutomationService, 'pullConnectorSource'> = {
+      pullConnectorSource: async (request: { mapping: string }) => {
+        seen.push(request);
+        throw new Error(`not pulled: ${request.mapping}`);
+      },
+    };
+    const requests: ConnectorSourcePullRequest[] = [
+      { mapping: 'crm_accounts' },
+      { mapping: 'crm_accounts', callerPackageId: 'com.acme.crm' },
+      { mapping: 'crm_accounts', callerPackageId: null },
+      { mapping: 'crm_accounts', callerPackageId: '' },
+      { mapping: 'crm_accounts', environmentId: 'env_a', callerPackageId: 'com.acme.crm' },
+      // @ts-expect-error — a caller package is an id, not a package object
+      { mapping: 'crm_accounts', callerPackageId: { id: 'com.acme.crm' } },
+    ];
+    for (const request of requests.slice(0, 5)) {
+      await expect(legacy.pullConnectorSource!(request)).rejects.toThrow('not pulled: crm_accounts');
+    }
+    expect(seen).toHaveLength(5);
+    // DARK: absent, not `undefined`-valued.
+    expect(Object.keys(requests[0])).not.toContain('callerPackageId');
+  });
+
+  it('the doc states what an absent value means and where the package comes from', () => {
+    const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
+    const block = source.slice(source.indexOf('export interface ConnectorSourcePullRequest'));
+    const body = block.slice(0, block.indexOf('\n}'));
+    const at = body.indexOf('callerPackageId?: string | null;');
+    expect(at).toBeGreaterThan(-1);
+    const doc = body.slice(body.lastIndexOf('/**', at), at);
+    // The absent value: no package, read by D3 — never "exactly as today",
+    // which named the first-registered read the pull no longer makes.
+    expect(doc).toMatch(/Absent \(omitted, `null` or `''`\): the read is by no package/);
+    expect(doc).toMatch(/environment's own mapping, else the one package that holds the name/);
+    expect(doc).toMatch(/a name two packages hold is a refusal naming both/);
+    expect(doc).not.toMatch(/exactly as[\s*]+today/);
+    // Where the value comes from, and the ruling it serves.
+    expect(doc).toContain('ADR-0150 D3');
+    expect(doc).toMatch(/the package[\s*]+that declares the job/);
+    // [#32071] A residual top-level job names no package; a disabled package's mapping is not found.
+    expect(doc).toMatch(/top-level job no package body of its artifact[\s*]+declares belongs to no package and sends none/);
+    expect(doc).toMatch(/A disabled package's mapping, when it is the one the[\s*]+name reaches, is not found/);
+    // The precedent the spelling follows.
+    expect(doc).toContain('OwnershipQueueCallerPackage');
   });
 });

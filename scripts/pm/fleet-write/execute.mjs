@@ -52,8 +52,10 @@
  * installation remedy `transferRemedy` spells, in the log and the summary.
  * A `workflow_dispatch` is one POST the platform answers 204 to with no body,
  * carrying the inputs the op table closes for that file and nothing else
- * (`WORKFLOW_DISPATCH_INPUTS`: none for the shard-timings refresh,
- * `refresh_version_pr: "true"` alone for `release.yml`, its bookkeeping lane)
+ * on the stroke's own repository (`WORKFLOW_DISPATCH_BY_REPO`: none for the
+ * shard-timings refresh, `refresh_version_pr: "true"` alone for `release.yml`,
+ * its bookkeeping lane, `apps: "affected"` alone for cloud's
+ * `deploy-staging.yml`)
  * — its row reads `accepted`; the run it started is read back by the SEAT
  * (`dispatch.mjs`), never here, because the answer carries no run id, and the
  * token that request spends `actions: write` on reaches that path and the
@@ -225,8 +227,8 @@
  *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
  *     carries a `ghsa_id` in its shape (`advisoryReportReadBack`): the row
  *     names that id and the state, and a notice annotation names the id
- *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), so the seat follows
- *     with `advisory_collaborators_add`. A 2xx without an id is a FAILED
+ *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), and the seat is done
+ *     (`advisory_collaborators_add` only when a maintainer asks for it). A 2xx without an id is a FAILED
  *     action whose sentence says UNCONFIRMED — a report may have been filed,
  *     so ⛔ never re-sent.
  *   - `advisory_create` is the same shape: ONE POST of the row's body to the
@@ -1999,6 +2001,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
+  'the cloud staging deploy: ONE POST to cloud\'s deploy-staging.yml dispatch endpoint carrying { ref: main, inputs: { apps: "affected" } } after the sender gate on cloud, landing as accepted; a 422 or 403 from cloud a FAILED action; a non-default input, another ref, a file cloud does not list, or the file on the wrong repository refused with ZERO requests, exit 2': 7,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
   // 29 → 30 as the follow-up left the draft open: three pr_create NEGATIVE pins (no read, no request, no assignee) replace the create-side runs.
   // 30 → 36 with the workflows split read on the relay: the plan with a reading, a Tier S workflow pull requesting no one, an H reading,
@@ -2017,8 +2020,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
-// pr_enqueue_front's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 26;
+// pr_enqueue_front's, 26 → 27 with the cloud staging deploy's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 27;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2552,6 +2555,31 @@ export async function selfTest() {
       t('⛔ force alone, any other input, and the string "true" are each refused with zero requests, exit 2', [await refused({ force: true }, 'actions[0].inputs.force is not an input'), await refused({ refresh_version_pr: true, dry_run: true }, 'actions[0].inputs.dry_run is not an input'), await refused({ refresh_version_pr: 'true' }, 'must be a JSON boolean')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
       const shard = await run(base([{ op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main', inputs: { refresh_version_pr: true } }]), allowed);
       t('⛔ the release entry\'s inputs on the shard-timings refresh — a file whose entry is null — are refused with zero requests, exit 2', [shard.exit, shard.seen.length], [EXIT_REFUSED, 0]);
+    }
+
+    // ── the cloud staging deploy ────────────────────────────────────────────
+    battery('the cloud staging deploy: ONE POST to cloud\'s deploy-staging.yml dispatch endpoint carrying { ref: main, inputs: { apps: "affected" } } after the sender gate on cloud, landing as accepted; a 422 or 403 from cloud a FAILED action; a non-default input, another ref, a file cloud does not list, or the file on the wrong repository refused with ZERO requests, exit 2');
+    {
+      const CLOUD = 'objectstack-ai/cloud';
+      const FILE = 'deploy-staging.yml';
+      const DISPATCHES = `POST /repos/${CLOUD}/actions/workflows/${FILE}/dispatches`;
+      const CLOUD_PERM = `GET /repos/${CLOUD}/collaborators/os-support-ai/permission`;
+      const onCloud = { [CLOUD_PERM]: allowed[PERM] };
+      const deploy = (extra = {}, repo = CLOUD) => ({ ...base([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main', inputs: { apps: 'affected' }, ...extra }]), repo });
+      const ok = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 204, json: null } }, { file: paceFile });
+      t('the one write is the dispatch call on CLOUD\'s deploy-staging.yml with { ref: main, inputs: { apps: "affected" } }, exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[DISPATCHES, { ref: 'main', inputs: { apps: 'affected' } }]]]);
+      t('…under the App token, after the sender gate on cloud — the ONE repository the stroke names', [ok.seen.map((s) => s.call), ok.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[CLOUD_PERM, DISPATCHES], true]);
+      t('…a bodiless 204 lands as accepted, its summary row naming cloud\'s dispatch endpoint, no other actions/* request and no annotation', [ok.rows[0]?.status, ok.rows[0]?.result, ok.summary.includes(`| 1 | \`workflow_dispatch\` | \`${DISPATCHES}\` | 204 | accepted (HTTP 204, no body) |`), ok.seen.filter((s) => s.call.includes('/actions/') && s.call !== DISPATCHES), ok.annotations], [204, 'accepted (HTTP 204, no body)', true, [], []], ok.summary);
+      const undeclared = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 422, json: { message: 'Unexpected inputs provided: ["apps"]' } } });
+      t('a 422 — cloud\'s file declaring no such input, the unverified reading wrong — is a FAILED action, exit 5, with the platform\'s sentence', [undeclared.exit, undeclared.rows[0]?.status, undeclared.rows[0]?.result.includes('Unexpected inputs')], [EXIT_ACTION_FAILED, 422, true]);
+      const noGrant = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a 403 — the installation not covering cloud with actions write — is a FAILED action, exit 5', [noGrant.exit, noGrant.rows[0]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, true]);
+      const refused = async (payload, needle) => {
+        const r = await run(payload, { ...allowed, ...onCloud, [DISPATCHES]: { status: 204, json: null } });
+        return [r.exit, r.seen.length, r.logs.some((l) => l.includes('REFUSED') && l.includes(needle))];
+      };
+      t('⛔ apps all, and another ref, are refused with zero requests, exit 2', [await refused(deploy({ inputs: { apps: 'all' } }), 'actions[0].inputs.apps must be "affected"'), await refused(deploy({ ref: 'develop' }), 'actions[0].ref must be one of "main"')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
+      t('⛔ deploy-staging.yml on THIS repository, and release.yml\'s refresh on cloud, are refused with zero requests, exit 2 — the file judged against the stroke\'s own repository', [await refused(deploy({}, REPO), 'is not a workflow the relay starts on "objectstack-ai/objectstack"'), await refused(deploy({ workflow: 'release.yml', inputs: { refresh_version_pr: true } }), 'is not a workflow the relay starts on "objectstack-ai/cloud"')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
     }
 
     // ── the failed-jobs re-run ──────────────────────────────────────────────
@@ -3143,7 +3171,7 @@ export async function selfTest() {
       // ── advisory_report
       const filed = await advRun([report({ severity: 'high', cwe_ids: ['CWE-79'] })], { ...allowed, [REPORTS]: advisory({ state: 'triage' }, 201) });
       t('⭐ report: the sender gate, then ONE POST to the reports endpoint — nothing read first — whose body is exactly the summary, description, severity and cwe_ids sent; exit 0', [filed.exit, filed.seen.map((s) => s.call), writes(filed.seen)[0]?.body], [EXIT_OK, [PERM, REPORTS], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, severity: 'high', cwe_ids: ['CWE-79'] }], filed.logs.join(' | '));
-      const REPORTED = `reported ${GHSA} · state triage — add whoever works it with advisory_collaborators_add`;
+      const REPORTED = `reported ${GHSA} · state triage`;
       t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [filed.rows.map((r) => [r.call, r.status, r.result]), filed.summary.includes(`| 1 | \`advisory_report\` | \`${REPORTS}\` | 201 | ${REPORTED} |`)], [[[REPORTS, 201, REPORTED]], true], filed.summary);
       t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [filed.annotations, filed.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(filed.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_report', ghsaId: GHSA }], [`::notice title=fleet-write advisory_report::fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`], { action: 1, op: 'advisory_report', ghsaId: GHSA }]);
       const noId = await advRun([report()], { ...allowed, [REPORTS]: advisory({ ghsa_id: MARKER }, 201) });
@@ -3173,7 +3201,7 @@ export async function selfTest() {
       // ── advisory_create
       const drafted = await advRun([draft({ severity: 'high', cwe_ids: ['CWE-863'] })], { ...allowed, [CREATE]: advisory({}, 201) });
       t('⭐ draft: the sender gate, then ONE POST to the bare collection — nothing read first — whose body is exactly the summary, description, one npm vulnerabilities entry per package, severity and cwe_ids sent; exit 0', [drafted.exit, drafted.seen.map((s) => s.call), writes(drafted.seen)[0]?.body], [EXIT_OK, [PERM, CREATE], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, vulnerabilities: [{ package: { ecosystem: 'npm', name: '@objectstack/rest' } }], severity: 'high', cwe_ids: ['CWE-863'] }], drafted.logs.join(' | '));
-      const CREATED = `created ${GHSA} · state draft — add whoever works it with advisory_collaborators_add`;
+      const CREATED = `created ${GHSA} · state draft`;
       t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [drafted.rows.map((r) => [r.call, r.status, r.result]), drafted.summary.includes(`| 1 | \`advisory_create\` | \`${CREATE}\` | 201 | ${CREATED} |`)], [[[CREATE, 201, CREATED]], true], drafted.summary);
       t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [drafted.annotations, drafted.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(drafted.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_create', ghsaId: GHSA }], [`::notice title=fleet-write advisory_create::fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`], { action: 1, op: 'advisory_create', ghsaId: GHSA }]);
       const draftNoId = await advRun([draft()], { ...allowed, [CREATE]: advisory({ ghsa_id: MARKER }, 201) });
@@ -3535,12 +3563,23 @@ export async function selfTest() {
       const upper = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf(items(10, 100, 'draft'), nextLink('draft', CURSOR).replace('rel="next"', 'REL="Next"')), [pageKey('draft', CURSOR)]: pageOf(items(110, 5, 'draft')) });
       t('a next relation in another case is the same relation (RFC 8288): REL="Next" is followed on its cursor — 105 listed', [upper.exit, upper.seen.map((s) => s.call), JSON.parse(opens(upper)).count], [EXIT_OK, [PERM, pageKey('triage'), pageKey('draft'), pageKey('draft', CURSOR), pageKey('closed')], 105]);
       // ⛔ A field that crosses is only ever its declared value: a nested severity carrying the marker, a number for a date.
+      const fieldExtras = [{ severity: { level: MARKER } }, { severity: 'catastrophic' }, { created_at: 1730000000 }, { updated_at: `${MARKER}` }, { created_at: ['2026-11-01T00:00:00Z'] }];
       const fieldRuns = [];
-      for (const extra of [{ severity: { level: MARKER } }, { severity: 'catastrophic' }, { created_at: 1730000000 }, { updated_at: `${MARKER}` }, { created_at: null }]) {
+      for (const extra of fieldExtras) {
         const r = await listRun([list()], { ...allowed, ...empty, [pageKey('draft')]: pageOf([item(1, 'draft'), item(2, 'draft', extra)]) });
         fieldRuns.push(r);
       }
-      t("⛔ an advisory whose severity is not one of the platform's four or null (a nested object carrying the marker, a made-up word), or whose created_at or updated_at is not an ISO-8601 string (a number, prose carrying the marker, null), is FAILED at the page fence — status 200, nothing sealed, no part — and the value is echoed nowhere", [fieldRuns.map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.status, r.rows[0]?.result]), fieldRuns.some((r) => [...r.logs, r.summary ?? '', JSON.stringify(r.rows)].join('\n').match(/ADVISORY MARKER|catastrophic|1730000000/))], [fieldRuns.map(() => [EXIT_ACTION_FAILED, 0, 0, 200, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — ${advisoryListPageFailure({ status: 200, json: [item(2, 'draft', { severity: 'catastrophic' })] }, 'draft')}`]), false]);
+      t("⛔ an advisory whose severity is not one of the platform's four or null (a nested object carrying the marker, a made-up word), or whose created_at or updated_at is neither null nor an ISO-8601 string (a number, prose carrying the marker, a list), is FAILED at the page fence — status 200, nothing sealed, no part — naming the failing field, and the value is echoed nowhere", [fieldRuns.map((r) => [r.exit, r.annotations.length, notices(r).length, r.rows[0]?.status, r.rows[0]?.result]), fieldRuns.some((r) => [...r.logs, r.summary ?? '', JSON.stringify(r.rows)].join('\n').match(/ADVISORY MARKER|catastrophic|1730000000|2026-11-01T/))], [fieldExtras.map((extra, k) => [EXIT_ACTION_FAILED, 0, 0, 200, `FAILED: REFUSED at the relay's fence on the listing, nothing sealed or emitted — a page of the listing lists an advisory whose ${['severity', 'severity', 'created_at', 'updated_at', 'created_at'][k]} is not of the field's declared shape`]), false]);
+      // ⭐ The platform declares created_at and updated_at nullable: an advisory carrying null there lands, crossing as null.
+      const nulled = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf([item(1, 'triage', { created_at: null, updated_at: null, severity: null })]), [pageKey('draft')]: pageOf([item(2, 'draft', { updated_at: null })]) });
+      const nulledJson = (() => {
+        try {
+          return JSON.parse(opens(nulled));
+        } catch {
+          return null;
+        }
+      })();
+      t("⭐ an advisory whose severity, created_at and updated_at are null — each nullable in the platform's repository-advisory schema — LANDS: exit 0, the landed sentence, ten parts, and the seat opens the nulls exactly as the platform answered them", [nulled.exit, nulled.rows.map((x) => [x.status, x.result]), nulled.annotations.length, nulledJson?.count, nulledJson?.advisories?.map((a) => [a.ghsa_id, a.severity, a.created_at, a.updated_at])], [EXIT_OK, [[200, ADVISORY_LIST_LANDED]], ADVISORY_READ_MAX_PARTS, 2, [[idOf(1), null, null, null], [idOf(2), 'high', '2026-11-01T00:00:00Z', null]]]);
       // ⭐ One sealed size whatever the count — the row and the log read the same.
       const none = await listRun([list()], { ...allowed, ...empty });
       const many = await listRun([list()], { ...allowed, ...empty, [pageKey('triage')]: pageOf(items(10, 100, 'triage'), nextLink('triage', CURSOR)), [pageKey('triage', CURSOR)]: pageOf(items(110, 50, 'triage')) });
@@ -3596,7 +3635,7 @@ export async function selfTest() {
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const ids = Array.from({ length: 400 }, (_, k) => idOf(k));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') || ids.some((id) => text.includes(id)) || text.includes(CURSOR) || text.includes(encodeURIComponent(CURSOR)) ? i : null)).filter((i) => i !== null);
-      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [39, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
+      t("⛔ THE MARKER TEST: across every run of this battery — landed, paged, exact, short-with-next, any-case relation, field-fenced, null-dated, empty and large, capped, off-link, repeated, over-cap, fenced, unreached, gated, unsealed, refused — the marker, every listed advisory's id and the cursor reach NO log line, row, step summary, annotation or pace-log line", [swept.length, leaks], [40, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER') || ids.some((id) => l.includes(id)) || l.includes(CURSOR))).join(' | '));
       t('…positive control: the answers served carried the marker, the ids and the cursor, the cursor reached the platform on the second page — where it belongs — and the generic row printer, given a served item, WOULD print the marker and its id', [JSON.stringify(served).includes('ADVISORY MARKER') && JSON.stringify(served).includes(idOf(1)), paged.seen.some((s) => s.call.includes(encodeURIComponent(CURSOR))), resultOf({}, item(1, 'draft')).includes('ADVISORY MARKER') && resultOf({}, item(1, 'draft')).includes(idOf(1))], [true, true, true]);
     }
 

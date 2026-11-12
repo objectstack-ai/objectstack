@@ -155,8 +155,12 @@ export interface ScheduleDispatchLedger {
      * it, so the bare key would be one row for all of them). Optional for the
      * reason the members below are: a ledger without it keys every flow by
      * the bare shape, as before.
+     *
+     * [#31696] `name` is the flow's name where `flowName` is a slot key
+     * (`PACKAGE/NAME`, the binding of one package's flow of a name two
+     * packages hold): the key spells the name, never the slot key.
      */
-    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean };
+    flowDispatchHolder?(flowName: string): { packageId: string | null; claimBare: boolean; name?: string };
     settleDispatch?(key: string, outcome: ScheduleDispatchOutcome): Promise<void>;
     readDispatch?(key: string): Promise<ScheduleDispatchClaim | null>;
     /**
@@ -1239,7 +1243,7 @@ export class ScheduleTrigger implements FlowTrigger {
      */
     private dispatchKeys(flowName: string, window: TickWindow): { key: string; legacyKey: string | null } {
         const ledger = this.getLedger();
-        let holder: { packageId: string | null; claimBare: boolean } = { packageId: null, claimBare: true };
+        let holder: { packageId: string | null; claimBare: boolean; name?: string } = { packageId: null, claimBare: true };
         if (ledger && typeof ledger.flowDispatchHolder === 'function') {
             try {
                 holder = ledger.flowDispatchHolder(flowName) ?? holder;
@@ -1247,8 +1251,9 @@ export class ScheduleTrigger implements FlowTrigger {
                 // no answer is the bare key, as before the segment existed
             }
         }
-        const key = scheduleDispatchKey(flowName, window, holder.packageId);
-        const bare = scheduleDispatchKey(flowName, window);
+        const name = holder.name ?? flowName;
+        const key = scheduleDispatchKey(name, window, holder.packageId);
+        const bare = scheduleDispatchKey(name, window);
         return { key, legacyKey: holder.claimBare && bare !== key ? bare : null };
     }
 

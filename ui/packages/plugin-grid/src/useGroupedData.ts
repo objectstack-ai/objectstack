@@ -10,6 +10,7 @@ import { useState, useMemo, useCallback } from 'react';
 import type { GroupingConfig } from '@object-ui/types';
 import { compareSortValues, getSortValue, type SortValue } from '@object-ui/core';
 import { deriveColumnSummary, listViewGroupOrderColumn, type ListViewGroupHeaderRow } from '@objectstack/spec/ui';
+import { temporalCellText, temporalExtreme, temporalInstant, type TemporalCellFace } from './temporalCellFace';
 
 /** Supported aggregation function types. */
 export type AggregationType = 'sum' | 'count' | 'avg' | 'min' | 'max' | 'count_distinct';
@@ -40,9 +41,18 @@ export interface AggregationResult {
   /**
    * The computed value. `null` only on a server-grouped grid, where it is what
    * the aggregate itself answered (`avg` / `min` / `max` over no values) —
-   * shown as a dash rather than invented as `0`.
+   * shown as a dash rather than invented as `0`. For a `min` / `max` over a
+   * `date` / `datetime` field it is the extreme's instant in epoch
+   * milliseconds, and {@link AggregationResult.display} carries the text.
    */
   value: number | null;
+  /**
+   * The value as the aggregated field's cell draws it, present only when that
+   * is not the number: a `min` / `max` over a `date` / `datetime` field, drawn
+   * through the cell's own face (locale, format) — objectstack#32119. Absent
+   * on every numeric result, which is drawn from `value` as before.
+   */
+  display?: string;
 }
 
 export interface GroupEntry {
@@ -186,24 +196,68 @@ function buildSegmentLabel(
 }
 
 /**
+ * Per aggregated field whose cell paints a date-family face, that face, and
+ * the display locale its extremes are drawn under (objectstack#32119).
+ *
+ * A package-internal hand-off: `ObjectGrid` holds the object definition and
+ * resolves the faces; the published {@link useGroupedData} carries none, and
+ * there a `min` / `max` it cannot read as a number is left out.
+ */
+export interface TemporalAggregateFaces {
+  faces: ReadonlyMap<string, TemporalCellFace>;
+  locale: string | undefined;
+}
+
+/**
+ * A `min` / `max` over a date-family field: the extreme's instant as the
+ * value and the cell's text as the display, or `undefined` when the stored
+ * value names no instant the cell can draw.
+ */
+function temporalAggregateOf(
+  field: string,
+  type: AggregationType,
+  raw: unknown,
+  temporal: TemporalAggregateFaces,
+  face: TemporalCellFace,
+): AggregationResult | undefined {
+  const instant = temporalInstant(raw);
+  const display = instant === undefined ? undefined : temporalCellText(face, raw, temporal.locale);
+  if (instant === undefined || display === undefined) return undefined;
+  return { field, type, value: instant, display };
+}
+
+/**
  * Compute aggregation results for a set of rows.
+ *
+ * A `min` / `max` over a date-family field (`temporal`) is the extreme
+ * instant, drawn as the cell draws it, and `null` over a group with no time
+ * in it (objectstack#32119); read as numbers, every stored time is dropped
+ * as non-finite and the group drew `0`.
  */
 function computeAggregations(
   rows: any[],
   configs: GroupAggregationConfig[],
+  temporal: TemporalAggregateFaces | undefined,
 ): AggregationResult[] {
-  return configs.map(({ field, type }) => {
+  return configs.flatMap(({ field, type }): AggregationResult[] => {
     if (type === 'count_distinct') {
       const set = new Set<unknown>();
       for (const r of rows) {
         const v = r[field];
         if (v != null && v !== '') set.add(v);
       }
-      return { field, type, value: set.size };
+      return [{ field, type, value: set.size }];
     }
     if (type === 'count') {
       // count includes nulls (row count for the bucket).
-      return { field, type, value: rows.length };
+      return [{ field, type, value: rows.length }];
+    }
+    const face = temporal?.faces.get(field);
+    if (face && (type === 'min' || type === 'max')) {
+      const raw = temporalExtreme(rows.map((r) => r[field]), type);
+      if (raw === undefined) return [{ field, type, value: null }];
+      const result = temporalAggregateOf(field, type, raw, temporal!, face);
+      return result ? [result] : [];
     }
     const nums = rows
       .map((r) => Number(r[field]))
@@ -227,7 +281,7 @@ function computeAggregations(
         value = 0;
     }
 
-    return { field, type, value };
+    return [{ field, type, value }];
   });
 }
 
@@ -475,20 +529,41 @@ export function serverSummaryOf(type: AggregationType): (typeof SERVER_SUMMARY)[
 /**
  * Read the grid's per-group aggregations off ONE header row. A configured
  * aggregation the header query carried no column for is left out rather than
- * reported as a number nobody computed.
+ * reported as a number nobody computed, and so is one whose answer is not a
+ * number (objectstack#32119): ⛔ never `NaN`.
+ *
+ * A `min` / `max` over a date-family field (`temporal`) answers the stored
+ * value of the extreme, not a number: it is read as its instant and drawn as
+ * the field's cell draws it.
  */
 function readServerAggregations(
   row: ListViewGroupHeaderRow,
   configs: GroupAggregationConfig[] | undefined,
+  temporal: TemporalAggregateFaces | undefined,
 ): AggregationResult[] {
   if (!configs || configs.length === 0) return [];
   const out: AggregationResult[] = [];
   for (const { field, type } of configs) {
     const summary = serverSummaryOf(type);
     if (!summary || typeof field !== 'string' || field === '') continue;
+    // `unknown` by the spec's own declaration: `summary` may be `min` / `max`,
+    // whose column holds the aggregated field's stored value (text for a
+    // date-family field), not a number.
     const value = deriveColumnSummary(row, summary, field);
     if (value === undefined) continue;
-    out.push({ field, type, value: value === null ? null : Number(value) });
+    if (value === null) {
+      out.push({ field, type, value: null });
+      continue;
+    }
+    const face = temporal?.faces.get(field);
+    if (face && (type === 'min' || type === 'max')) {
+      const result = temporalAggregateOf(field, type, value, temporal!, face);
+      if (result) out.push(result);
+      continue;
+    }
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) continue;
+    out.push({ field, type, value: numeric });
   }
   return out;
 }
@@ -551,6 +626,7 @@ export function useGroupedData(
  * label order.
  *
  * @param optionRanks - per grouping field, its declared option order
+ * @param temporalAggregates - per aggregated field, its date-family cell face
  */
 export function useGroupedDataInOptionOrder(
   config: GroupingConfig | undefined,
@@ -559,6 +635,7 @@ export function useGroupedDataInOptionOrder(
   formatValue: GroupValueFormatter | undefined,
   server: ServerGroupSource | undefined,
   optionRanks: GroupOptionRanks | undefined,
+  temporalAggregates?: TemporalAggregateFaces,
 ): UseGroupedDataResult {
   // [objectui#7217] The SAME normalized list `ObjectGrid`'s formatter memo
   // reads. Memoized on the raw array rather than on `config`: hosts rebuild
@@ -630,7 +707,7 @@ export function useGroupedDataInOptionOrder(
             count: Number.isFinite(count) ? count : 0,
             keyValues,
             collapsed,
-            aggregations: readServerAggregations(row, aggregations),
+            aggregations: readServerAggregations(row, aggregations, temporalAggregates),
             subgroups: isLeaf ? [] : buildServerLevel(depth + 1, compositeKey, keyValues),
           };
         });
@@ -692,7 +769,7 @@ export function useGroupedDataInOptionOrder(
         const collapsed =
           compositeKey in toggledKeys ? toggledKeys[compositeKey] : collapsedDefault;
         const agg = aggregations && aggregations.length > 0
-          ? computeAggregations(entry.rows, aggregations)
+          ? computeAggregations(entry.rows, aggregations, temporalAggregates)
           : [];
         const keyValues = { ...prefix, [f.field]: entry.rows[0]?.[f.field] ?? null };
         const subgroups = depth + 1 < fields.length
@@ -714,7 +791,7 @@ export function useGroupedDataInOptionOrder(
     };
 
     return buildLevel(data, 0, '', {});
-  }, [data, fields, isGrouped, toggledKeys, aggregations, formatValue, server, optionRanks]);
+  }, [data, fields, isGrouped, toggledKeys, aggregations, formatValue, server, optionRanks, temporalAggregates]);
 
   const toggleGroup = useCallback((key: string) => {
     setToggledKeys((prev) => {

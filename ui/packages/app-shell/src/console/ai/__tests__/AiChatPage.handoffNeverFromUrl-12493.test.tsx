@@ -41,13 +41,22 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
     useAiModels: () => ({ models: [], defaultModelId: undefined }),
     useHitlInChat: () => ({ decide: vi.fn(), decisions: {} }),
     useObjectChat: (opts: Record<string, unknown>) => {
+      // The real hook ARMS the parent id when the prop arrives and sends it
+      // with the next turn, even if the prop has dropped by then (the
+      // URL-mirror drops it as the build conversation id lands); see
+      // `parentConvRef` in useObjectChat. Model that, not a read of the prop at
+      // send time: the first message is replayed on the task after the id
+      // lands (objectstack#32031).
+      const parentRef = React.useRef<unknown>(opts.parentConversationId);
+      if (opts.parentConversationId) parentRef.current = opts.parentConversationId;
       return {
         messages: [],
         isLoading: false,
         error: undefined,
         sendMessage: (text: string) => {
           sent.push(text);
-          sentParent.push(opts.parentConversationId);
+          sentParent.push(parentRef.current);
+          parentRef.current = undefined;
         },
         stop: vi.fn(),
         reload: vi.fn(),
@@ -151,7 +160,17 @@ function mount(entry: Entry) {
   );
 }
 
-/** Let the conversation mint, the URL mirror land and any deferred replay fire. */
+/**
+ * A build thread the user already has (cached for the product-only `build`
+ * scope). objectstack#32031 — a visit no longer mints a conversation, so the
+ * pins that need one on screen (the URL mirror, the handoff's parent thread)
+ * open on an existing thread instead of on a mount-time create.
+ */
+function seedThread(): void {
+  localStorage.setItem('objectstack:ai-chat-conversation-id:u1:build', 'conv-900');
+}
+
+/** Let the conversation resolve, the URL mirror land and any deferred replay fire. */
 async function settle(): Promise<void> {
   await waitFor(() => expect(screen.getByTestId('pane')).toBeInTheDocument());
   await waitFor(() => expect(probe.location?.pathname).toMatch(/^\/ai\/build\/conv-\d+$/));
@@ -177,6 +196,7 @@ describe('AiChatPage — a URL parameter never sends a message (objectui#12493)'
   });
 
   it('a page loaded with ?handoffPrompt= sends nothing', async () => {
+    seedThread();
     mount('/ai/build?handoffPrompt=create%20an%20object%20named%20probe');
     await settle();
 
@@ -184,6 +204,7 @@ describe('AiChatPage — a URL parameter never sends a message (objectui#12493)'
   });
 
   it('the in-app "Open in Builder" handoff lands its text once, by navigation state', async () => {
+    seedThread();
     mount('/ai/build');
     await settle();
     const askThread = probe.location?.pathname.split('/').pop();
@@ -229,6 +250,7 @@ describe('AiChatPage — a URL parameter never sends a message (objectui#12493)'
   });
 
   it('CONTROL: a user-typed first message sends', async () => {
+    seedThread();
     mount('/ai/build');
     await settle();
 
@@ -236,5 +258,27 @@ describe('AiChatPage — a URL parameter never sends a message (objectui#12493)'
       (capturedProps.onSendMessage as (text: string) => void)('hello builder');
     });
     await waitFor(() => expect(sent).toEqual(['hello builder']));
+  });
+
+  // objectstack#32031 — the page-level half: a fresh visit (nothing cached, the
+  // state after every sign-in) creates NO conversation; the user's first send
+  // creates exactly one, lands in it, and the URL follows it so a reload
+  // resumes it.
+  it('CONTROL: with no thread yet, the first message creates one conversation and sends into it', async () => {
+    mount('/ai/build');
+    await waitFor(() => expect(screen.getByTestId('pane')).toBeInTheDocument());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(minted).toBe(0);
+    expect(probe.location?.pathname).toBe('/ai/build');
+
+    await act(async () => {
+      (capturedProps.onSendMessage as (text: string) => void)('hello builder');
+    });
+    await waitFor(() => expect(sent).toEqual(['hello builder']));
+    expect(minted).toBe(1);
+    await waitFor(() => expect(probe.location?.pathname).toBe('/ai/build/conv-1'));
+    expect(localStorage.getItem('objectstack:ai-chat-conversation-id:u1:build')).toBe('conv-1');
   });
 });

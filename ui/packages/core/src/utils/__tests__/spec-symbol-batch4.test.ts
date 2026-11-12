@@ -136,7 +136,7 @@ describe('the CRUD affordance matrix is spec-owned (ADR-0103)', () => {
     // re-buckets an object class.
     for (const managedBy of [
       undefined, 'platform', 'config', 'system',
-      'engine-owned', 'append-only', 'better-auth', 'totally-unknown',
+      'engine-owned', 'append-only', 'synced', 'better-auth', 'totally-unknown',
     ]) {
       expect(
         resolveEffectiveCrudAffordances({ managedBy }),

@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_MAX_INLINE_GRID_COLUMNS,
   deriveInlineGridColumns,
+  deriveInlineGridSortField,
   deriveInlineRowFormFields,
   isInlineRowFormOffered,
 } from './inline-grid-columns';
@@ -288,5 +289,42 @@ describe('isInlineRowFormOffered', () => {
     expect(isInlineRowFormOffered({ formFields: ['a'] })).toBe(true);
     expect(isInlineRowFormOffered({ columns: [{ name: 'a' }] })).toBe(false);
     expect(isInlineRowFormOffered({})).toBe(false);
+  });
+});
+
+/**
+ * The child field an inline grid stamps each line's position into and orders
+ * its rows by. The renderer's rule (`deriveDetail`, objectui
+ * `packages/plugin-form/src/deriveMasterDetail.ts`): the first child field, in
+ * field-map order, whose name is a sort-position name.
+ */
+describe('deriveInlineGridSortField', () => {
+  it('resolves the sort-position field the child declares', () => {
+    const def = { fields: { name: { type: 'text' }, qty: { type: 'number' }, position: { type: 'number' } } };
+    expect(deriveInlineGridSortField(def)).toBe('position');
+  });
+
+  it('takes the first match in the child\'s FIELD order, not the order of the names', () => {
+    const def = { fields: { line_no: { type: 'number' }, name: { type: 'text' }, position: { type: 'number' } } };
+    expect(deriveInlineGridSortField(def)).toBe('line_no');
+  });
+
+  it('reads the name only: a hidden, readonly or system field still holds the position', () => {
+    expect(deriveInlineGridSortField({ fields: { sequence: { type: 'number', hidden: true } } })).toBe('sequence');
+    expect(deriveInlineGridSortField({ fields: { sort: { type: 'text', readonly: true, system: true } } })).toBe('sort');
+  });
+
+  it('is the one sort-position name both derivations leave out', () => {
+    const def = { fields: { name: { type: 'text' }, sort_order: { type: 'number' } } };
+    const sortField = deriveInlineGridSortField(def);
+    expect(sortField).toBe('sort_order');
+    expect(deriveInlineGridColumns(def).map((c) => c.name)).not.toContain(sortField);
+    expect(deriveInlineRowFormFields(def)).not.toContain(sortField);
+  });
+
+  it('a name that only resembles one resolves nothing, and neither does a missing field map', () => {
+    expect(deriveInlineGridSortField({ fields: { order: { type: 'number' }, rank: { type: 'number' } } })).toBeUndefined();
+    expect(deriveInlineGridSortField({})).toBeUndefined();
+    expect(deriveInlineGridSortField(undefined)).toBeUndefined();
   });
 });

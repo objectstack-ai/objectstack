@@ -93,8 +93,100 @@
               "note": "Read by the executor: the read action's query parameter that receives that starting point (`query[param]` on both `rest` and `openapi`)."
             }
           }
+        },
+        "paging": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull still makes one action call and reads one response, whatever paging you declare.",
+          "note": "PLANNED RECORD (ADR-0153 D2, the P2 spec card #32061): the connector's declared paging convention, `{ style, param?, nextPath? }` — `page` / `offset` / `cursor` send `param`, `cursor` reads the next cursor at `nextPath`, `none` states that one response is the whole set (the one way to say a single response is complete, which D3's full-pull mark needs). Refused at parse when it is unusable: `param` missing beside page/offset/cursor, `nextPath` missing beside cursor, either present beside none. READ BY NOTHING YET: packages/services/service-automation/src/connector-pull.ts#pullConnectorSource still makes ONE action call (its header: \"One response per pull\"). The paging loop, its one commit after the last page and `paging_cursor_repeated` are the P2 engine card's (#32062), which flips this row (and its children) to `live` citing the loop and drops `authorWarn` / `authorHint` in the same edit.",
+          "children": {
+            "style": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): which convention the read action pages by."
+            },
+            "param": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): the query parameter that receives the page, offset or cursor."
+            },
+            "nextPath": {
+              "status": "planned",
+              "verifiedAt": "2026-11-10",
+              "note": "Planned with its container `paging` (see that row): where the next cursor, or the \"more pages\" marker, is read."
+            }
+          }
+        },
+        "deletePolicy": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull marks no deleted row, whichever policy you set.",
+          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): what a pull does with a row the source no longer has — `'mark'` stamps `_sync_deleted_at` and clears it if the row comes back, `'ignore'` leaves the row. Declared with NO schema `.default()` so an authored value stays distinguishable from an absent one (absent reads as `'mark'`), which is what lets this row warn the author at all. READ BY NOTHING YET: the delete marking, its completeness rule and the incremental-`mark` refusal are the P2 engine card's (#32062), which flips this row to `live` and drops `authorWarn` / `authorHint`."
+        },
+        "deletedField": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: the sync-in pull that honours it is the P2 engine card of ADR-0153, so until that release a pull does not read this field, so a source soft-delete is not marked.",
+          "note": "PLANNED RECORD (ADR-0153 D3, the P2 spec card #32061): the source soft-delete field an incremental pull reads to learn of a delete it cannot see as an absence. READ BY NOTHING YET: the P2 engine card (#32062) reads it with the delete marking and flips this row to `live`."
         }
       }
+    },
+    "datasourceSource": {
+      "status": "live",
+      "verifiedAt": "2026-11-10",
+      "note": "LIVE since the P2 engine card's wiring slice (#32062, ADR-0153 D1/D2/D8): a job's `pull` reads the federated object this key names and copies its rows into the `synced` target. The build refusals of the P2 spec card (#32061) stay live in packages/spec/src/stack.zod.ts#collectSourcedMappingErrors, and the pull judges the same rules again at run time for a stack the build never saw. Since the run-record slice (ADR-0153 D7) each run stores the read position it reaches at a window's end on `sys_sync_run`, and the next run of the same mapping (the package that holds it and its name, ADR-0150 D3) in the same organization starts there, when it reads the same source object and field into the same target. Children still `planned` carry their own `authorWarn`: `deletePolicy` and `deletedField` (delete marking, D3).",
+      "children": {
+        "object": {
+          "status": "live",
+          "verifiedAt": "2026-11-10",
+          "note": "Live with its container `datasourceSource`: the federated object the pull reads, its `external.columnMap` entry onto `id` the key (`source_key_missing` when absent).",
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (reads the object through the protocol, refuses one that is not federated or lives on a managed datasource, and reads its rows)"
+        },
+        "watermark": {
+          "status": "live",
+          "verifiedAt": "2026-11-10",
+          "note": "Live with its container `datasourceSource`: the field the read windows are cut on and the lowest value read.",
+          "children": {
+            "field": {
+              "status": "live",
+              "verifiedAt": "2026-11-10",
+              "note": "Live with its container (see `datasourceSource`). Judged at build: a datetime, date or `scale: 0` number field of the source object, exact as an integer, copied unchanged onto a target field of its type.",
+              "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (the window field: a datetime, date or `scale: 0` number field of the source, and a `fieldMapping` entry copies it unchanged onto a target field of its type — `watermark_field_unmapped` otherwise)"
+            },
+            "start": {
+              "status": "live",
+              "verifiedAt": "2026-11-10",
+              "note": "Live with its container (see `datasourceSource`): where a pull starts when no position is committed for the mapping in its organization (and on every `full: true` run), and the lowest value any run reads from. Since ADR-0153 D7 a run otherwise starts at the position the last committed run stored on `sys_sync_run`.",
+              "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (a first run, a `full: true` run or a run whose stored position came from another source, field or target starts there; a resumed run never starts below it; `watermark_start_invalid` for a value the field's kind does not read)"
+            }
+          },
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (the windows are cut on `watermark.field`, from the committed position or `watermark.start`)"
+        },
+        "full": {
+          "status": "live",
+          "verifiedAt": "2026-11-10",
+          "note": "LIVE since the run-record slice (ADR-0153 D7): `full: true` makes every run read from `watermark.start`; omitted, a run reads on from the position the last committed run of the mapping stored on `sys_sync_run`. Delete marking by absence (D3), which only a full pull can do, lands with D3's own rows.",
+          "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (`full: true` skips the read of the last committed position, so the run starts at `watermark.start`; otherwise the run starts from that position, read from `sys_sync_run`)"
+        },
+        "deletePolicy": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned under the live container `datasourceSource`, until delete marking (ADR-0153 D3), and the same key as `connectorSource.deletePolicy` (ADR-0153 D3, no schema default; absent reads as `'mark'`).",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: a datasource pull marks no deleted row until delete marking lands (ADR-0153 D3), so a row removed at the source stays as it was."
+        },
+        "deletedField": {
+          "status": "planned",
+          "verifiedAt": "2026-11-10",
+          "note": "Planned under the live container `datasourceSource`, until delete marking (ADR-0153 D3), and the same key as `connectorSource.deletedField` (ADR-0153 D3).",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: a datasource pull marks no deleted row until delete marking lands (ADR-0153 D3), so a row removed at the source stays as it was."
+        }
+      },
+      "evidence": "packages/services/service-automation/src/datasource-pull.ts#pullDatasourceSource (dispatched from packages/services/service-automation/src/connector-pull.ts#pullConnectorSource when the mapping carries `datasourceSource`, the contract method `IAutomationService.pullConnectorSource` a job's `pull` binds through: packages/runtime/src/app-artifact-handlers.ts#judgeJobPull binds either source). It judges the binding against the objects as the protocol serves them, reads the federated object in windows (packages/services/service-automation/src/datasource-window-read.ts#readSourceInWindows, both ADR-0153 D1 read paths) and writes through `@objectstack/core`'s `runImport`"
     },
     "overrides": {
       "status": "planned",

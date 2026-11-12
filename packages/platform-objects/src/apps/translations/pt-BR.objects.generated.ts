@@ -2106,6 +2106,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Permitir provisionamento just-in-time",
         help: "Na política de público somente por convite, cria uma conta para quem faz login por este provedor sem conta nem convite. Desativado por padrão: essa pessoa é recusada. As demais políticas provisionam como antes. Altere em “Editar opções de login”."
       },
+      skip_user_info: {
+        label: "Ler declarações apenas do token de ID",
+        help: "Somente OIDC. Lê o e-mail, o nome e os grupos do token de ID verificado do provedor de identidade e não chama o endpoint userinfo dele. Ative para o Microsoft Entra ID, cuja resposta de userinfo não traz grupos nem preferred_username. Desativado por padrão: um provedor com endpoint userinfo lê suas declarações dessa resposta. Altere em “Editar opções de login”."
+      },
       user_id: {
         label: "Registrado por",
         help: "Usuário que registrou este provedor"
@@ -2156,7 +2160,15 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           discoveryEndpoint: {
             label: "URL de descoberta",
-            helpText: "Opcional. URL do documento de descoberta OIDC. Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`."
+            helpText: "Opcional. URL do documento de descoberta OIDC (https). Deixe em branco para derivar `<issuer>/.well-known/openid-configuration`. Um endpoint informado aqui é considerado confiável para este provedor."
+          },
+          userInfoEndpoint: {
+            label: "URL de userinfo",
+            helpText: "Opcional. URL do endpoint userinfo do OIDC (https), usada no lugar da indicada pelo documento de descoberta. Um endpoint informado aqui é considerado confiável para este provedor: informe-o quando o registro for recusado porque o documento de descoberta indica um host de userinfo em que o servidor não confia."
+          },
+          skipUserInfo: {
+            label: "Ler declarações apenas do token de ID",
+            helpText: "Opcional. Ler as declarações do usuário apenas do token de ID verificado e nunca chamar o endpoint userinfo. Microsoft Entra ID: ative para mapear \"preferred_username\", que o endpoint userinfo dele não retorna."
           },
           scopes: {
             label: "Escopos",
@@ -2165,7 +2177,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           },
           mapEmail: {
             label: "Mapear: declaração de e-mail",
-            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\".",
+            helpText: "Opcional. Declaração mapeada para o e-mail. O padrão é \"email\". Microsoft Entra ID (emissor em login.microsoftonline.com): usuários sem caixa de correio não trazem a declaração \"email\"; mapeie \"preferred_username\" (ou \"upn\") e ative \"Ler declarações apenas do token de ID\".",
             placeholder: "email"
           },
           mapName: {
@@ -2208,6 +2220,26 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
             helpText: "Opcional. Formato de NameID SAML solicitado. O padrão é o formato configurado no IdP.",
             placeholder: "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress"
           },
+          mapEmail: {
+            label: "Mapear: atributo de e-mail",
+            helpText: "Opcional. Atributo da asserção mapeado para o e-mail do usuário. O padrão é \"email\" e, depois, o NameID. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          mapFirstName: {
+            label: "Mapear: atributo de nome",
+            helpText: "Opcional. Atributo da asserção mapeado para o nome do usuário. O padrão é \"givenName\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          mapLastName: {
+            label: "Mapear: atributo de sobrenome",
+            helpText: "Opcional. Atributo da asserção mapeado para o sobrenome do usuário. O padrão é \"surname\". Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          mapName: {
+            label: "Mapear: atributo de nome de exibição",
+            helpText: "Opcional. Atributo da asserção mapeado para o nome completo do usuário, usado quando os atributos de nome e sobrenome estão ausentes. O padrão é \"displayName\" e, depois, o NameID. Okta: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          },
           mapGroups: {
             label: "Mapear: atributo de grupos",
             helpText: "Opcional. Atributo da asserção que contém os grupos do usuário. Cada login concede os conjuntos de permissões mapeados para esses grupos. Deixe em branco para não mapear grupos.",
@@ -2234,12 +2266,78 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       delete_sso_provider: {
         label: "Excluir provedor de SSO",
-        description: "Excluir este provedor de SSO? Os usuários do domínio dele não poderão mais entrar por meio dele.",
-        successMessage: "Provedor de SSO excluído"
+        description: "Excluir este provedor de SSO? Todo usuário vinculado a ele é desvinculado, inclusive usuários sem outro método de entrada vinculado (sem senha, sem outro provedor). Os mapeamentos de grupos do IdP e os conjuntos de permissões concedidos por eles são removidos junto. Esta ação não pode ser desfeita.",
+        resultDialog: {
+          title: "Provedor de SSO excluído",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Removido"
+          }
+        },
+        preflight: {
+          fields: {
+            summary: "O que esta exclusão remove",
+            linkedUsers: "Usuários desvinculados",
+            usersWithoutOtherSignIn: "Usuários sem outro método de entrada vinculado"
+          }
+        }
       },
       edit_sso_sign_in_options: {
         label: "Editar opções de login",
         successMessage: "Opções de login salvas"
+      },
+      edit_saml_provider: {
+        label: "Editar configurações SAML",
+        params: {
+          issuer: {
+            label: "Entity ID do IdP",
+            helpText: "O EntityID SAML do IdP. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          entryPoint: {
+            label: "URL de SSO do IdP",
+            helpText: "O endpoint de logon único do IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          cert: {
+            label: "Novo certificado de assinatura do IdP",
+            helpText: "O novo certificado de assinatura X.509 do IdP (PEM). Deixe em branco para manter o certificado armazenado."
+          },
+          keepCurrentCert: {
+            label: "Continuar confiando no certificado atual",
+            helpText: "Enquanto o IdP faz a troca, aceitar asserções assinadas por qualquer um dos certificados. Edite novamente sem esta opção para remover o antigo."
+          }
+        },
+        resultDialog: {
+          title: "Configurações SAML salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
+      },
+      edit_oidc_provider: {
+        label: "Editar configurações OIDC",
+        params: {
+          clientId: {
+            label: "ID do cliente",
+            helpText: "ID do cliente OAuth emitido pelo IdP. Deixe em branco para manter o valor armazenado. Só pode ser alterado enquanto nenhum usuário estiver vinculado ao provedor."
+          },
+          clientSecret: {
+            label: "Novo segredo do cliente",
+            helpText: "Deixe em branco para manter o segredo armazenado. O segredo armazenado nunca é exibido."
+          },
+          scopes: {
+            label: "Escopos",
+            helpText: "Escopos OAuth separados por espaços ou vírgulas, substituindo a lista armazenada. Deixe em branco para mantê-la.",
+            placeholder: "openid email profile"
+          }
+        },
+        resultDialog: {
+          title: "Configurações OIDC salvas",
+          acknowledge: "Concluído",
+          fields: {
+            message: "Alterado"
+          }
+        }
       },
       show_sso_groups_claim: {
         label: "Mostrar declaração de grupos",
@@ -2267,6 +2365,57 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Concluído",
           fields: {
             groupsClaim: "Declaração de grupos"
+          }
+        }
+      },
+      show_sso_attribute_mapping: {
+        label: "Mostrar mapeamento de atributos",
+        resultDialog: {
+          title: "Mapeamento de atributos",
+          description: "Os atributos do IdP (SAML) ou declarações (OIDC) de onde este provedor lê o e-mail e o nome do usuário a cada login. Vazio significa o padrão: e-mail de \"email\" (SAML: depois o NameID); nome de \"givenName\" + \"surname\" e, depois, \"displayName\" (OIDC: \"name\"). Nome e sobrenome se aplicam apenas a SAML. Altere com \"Editar mapeamento de atributos\".",
+          acknowledge: "Concluído",
+          fields: {
+            protocol: "Protocolo",
+            email: "E-mail",
+            firstName: "Nome",
+            lastName: "Sobrenome",
+            name: "Nome de exibição"
+          }
+        }
+      },
+      edit_sso_attribute_mapping: {
+        label: "Editar mapeamento de atributos",
+        params: {
+          email: {
+            label: "Atributo de e-mail",
+            helpText: "O atributo ou declaração do IdP mapeado para o e-mail do usuário. Deixe como está para manter o atual; limpe para voltar ao padrão (\"email\"). Entra ID SAML: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+            placeholder: "email"
+          },
+          firstName: {
+            label: "Atributo de nome (SAML)",
+            helpText: "Somente SAML. O atributo da asserção mapeado para o nome do usuário. Deixe como está para manter o atual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/givenname",
+            placeholder: "givenName"
+          },
+          lastName: {
+            label: "Atributo de sobrenome (SAML)",
+            helpText: "Somente SAML. O atributo da asserção mapeado para o sobrenome do usuário. Deixe como está para manter o atual. Entra ID: http://schemas.xmlsoap.org/ws/2005/05/identity/claims/surname",
+            placeholder: "surname"
+          },
+          name: {
+            label: "Atributo de nome de exibição",
+            helpText: "O atributo ou declaração do IdP mapeado para o nome completo do usuário (SAML: usado quando nome e sobrenome estão ausentes). Deixe como está para manter o atual. Okta SAML: name. Entra ID: http://schemas.microsoft.com/identity/claims/displayname",
+            placeholder: "displayName"
+          }
+        },
+        resultDialog: {
+          title: "Mapeamento de atributos salvo",
+          description: "Os atributos ou declarações de onde este provedor passa a ler o e-mail e o nome do usuário a cada login. Vazio significa que o padrão se aplica.",
+          acknowledge: "Concluído",
+          fields: {
+            email: "E-mail",
+            firstName: "Nome",
+            lastName: "Sobrenome",
+            name: "Nome de exibição"
           }
         }
       }
@@ -2361,6 +2510,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Resumo do token",
         help: "HMAC-SHA-256 (base64url) do bearer, com a chave do segredo de autenticação da implantação — unidirecional; o texto simples é mostrado uma vez na emissão e nunca armazenado."
       },
+      token_hint: {
+        label: "Dica do token",
+        help: "Os últimos quatro caracteres do token bearer, registrados na emissão para distinguir as credenciais de uma mesma conexão; nunca o token nem seu resumo. Vazio em uma credencial emitida antes de as dicas serem registradas."
+      },
       active: {
         label: "Ativa",
         help: "Chave de revogação — uma credencial inativa é recusada na verificação"
@@ -2368,6 +2521,10 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       expires_at: {
         label: "Expira em",
         help: "Expiração rígida opcional para a troca escalonada de credenciais; uma credencial expirada é recusada"
+      },
+      last_used_at: {
+        label: "Último uso",
+        help: "Quando a credencial autenticou uma solicitação SCIM pela última vez, registrado no máximo uma vez por minuto; vazio quando nenhum uso foi registrado"
       },
       user_id: {
         label: "Emitida por",
@@ -2417,6 +2574,7 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
           acknowledge: "Guardei o token",
           fields: {
             token: "Token",
+            tokenHint: "Dica do token",
             connectionId: "ID da conexão",
             expiresAt: "Expira em"
           }
@@ -2774,6 +2932,23 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
         label: "Organização",
         help: "A organização em que a concessão é feita: a organização proprietária da conexão SCIM ou do provedor SSO."
       },
+      match_status: {
+        label: "Status de correspondência",
+        help: "Se o grupo indicado pelo mapeamento é um que sua conexão SCIM envia atualmente. Sem correspondência, nada é concedido. Não se aplica a um provedor SSO, que não armazena uma lista de grupos.",
+        options: {
+          matched: "Corresponde",
+          unmatched: "Não corresponde a nenhum grupo atual",
+          not_applicable: "Não se aplica"
+        }
+      },
+      matched_group_id: {
+        label: "ID do grupo correspondente",
+        help: "O ID do grupo SCIM ao qual o mapeamento corresponde atualmente. Vazio quando não corresponde a nenhum."
+      },
+      match_changed_at: {
+        label: "Correspondência alterada em",
+        help: "Quando o status de correspondência ou o grupo correspondente mudou pela última vez."
+      },
       created_at: {
         label: "Criado em"
       },
@@ -2783,7 +2958,64 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all: {
-        label: "Todos"
+        label: "Todos",
+        emptyState: {
+          title: "Ainda não há mapeamentos de grupo",
+          message: "Conceda um conjunto de permissões aos membros de um grupo do provedor de identidade com \"Mapear grupo de SSO\" (um grupo que um provedor de SSO envia no login) ou \"Mapear grupo de SCIM\" (um grupo que uma conexão SCIM provisiona)."
+        }
+      }
+    },
+    _actions: {
+      map_sso_group: {
+        label: "Mapear grupo de SSO",
+        description: "Concede um conjunto de permissões a cada membro de um grupo que um provedor de SSO envia no login. Vale a partir do próximo login de cada membro pelo provedor.",
+        successMessage: "Mapeamento de grupo salvo. Vale a partir do próximo login de cada membro pelo provedor.",
+        params: {
+          providerId: {
+            label: "ID do provedor de SSO",
+            helpText: "O ID do provedor de SSO cujo login traz o grupo, por exemplo \"okta\". O provedor precisa ter uma declaração de grupos (Editar declaração de grupos no provedor de SSO)."
+          },
+          groupExternalId: {
+            label: "ID externo do grupo",
+            helpText: "O valor do grupo exatamente como a declaração de grupos o envia quando é um ID, por exemplo um ID de objeto de grupo do Entra ID. Preencha este campo ou o nome de exibição do grupo, não ambos."
+          },
+          groupDisplayName: {
+            label: "Nome de exibição do grupo",
+            helpText: "O valor do grupo exatamente como a declaração de grupos o envia quando é um nome, por exemplo \"Sales\". Preencha este campo ou o ID externo do grupo, não ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permissões",
+            helpText: "O conjunto de permissões que um membro do grupo recebe na organização do provedor. Conjuntos de administrador são recusados."
+          }
+        }
+      },
+      map_scim_group: {
+        label: "Mapear grupo de SCIM",
+        description: "Concede um conjunto de permissões a cada membro de um grupo que uma conexão SCIM provisiona. Os membros atuais do grupo o recebem imediatamente.",
+        successMessage: "Mapeamento de grupo salvo",
+        params: {
+          connectionId: {
+            label: "ID da conexão SCIM",
+            helpText: "A conexão SCIM pela qual o grupo é provisionado, por exemplo \"okta-prod\": o ID da conexão da sua credencial."
+          },
+          groupExternalId: {
+            label: "ID externo do grupo",
+            helpText: "O externalId do grupo como o provedor de identidade o envia. Preencha este campo ou o nome de exibição do grupo, não ambos."
+          },
+          groupDisplayName: {
+            label: "Nome de exibição do grupo",
+            helpText: "O displayName do grupo, comparado exatamente. Preencha este campo ou o ID externo do grupo, não ambos."
+          },
+          permissionSet: {
+            label: "Conjunto de permissões",
+            helpText: "O conjunto de permissões que um membro do grupo recebe na organização da conexão. Conjuntos de administrador são recusados."
+          }
+        }
+      },
+      delete_group_mapping: {
+        label: "Excluir mapeamento",
+        confirmText: "Excluir este mapeamento de grupo? Os membros do grupo deixam de receber o conjunto de permissões dele. Para uma conexão SCIM, os membros do grupo são reprojetados agora e perdem as concessões feitas por este mapeamento. Para um provedor de SSO, as concessões que os logins dele fizeram para este conjunto são removidas agora, a menos que outro mapeamento do provedor cite o mesmo conjunto. Para restaurá-lo, mapeie o grupo de novo.",
+        successMessage: "Mapeamento de grupo excluído"
       }
     }
   },
@@ -3585,6 +3817,55 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       },
       note: {
         label: "Nota"
+      }
+    }
+  },
+  sys_metadata_commit: {
+    label: "Metadata Commit",
+    pluralLabel: "Metadata Commits",
+    description: "Package-scoped commit log grouping a turn’s metadata changes.",
+    fields: {
+      id: {
+        label: "ID"
+      },
+      package_id: {
+        label: "Package"
+      },
+      operation: {
+        label: "Operation",
+        options: {
+          apply: "apply",
+          revert: "revert"
+        }
+      },
+      message: {
+        label: "Message",
+        help: "Change summary; for AI turns, the user instruction that produced it."
+      },
+      actor: {
+        label: "Actor"
+      },
+      ai_model: {
+        label: "AI Model"
+      },
+      parent_commit_id: {
+        label: "Parent Commit"
+      },
+      event_seq_start: {
+        label: "Event Seq Start"
+      },
+      event_seq_end: {
+        label: "Event Seq End"
+      },
+      items: {
+        label: "Items",
+        help: "JSON: [{ type, name, existedBefore, prevVersion }] — the revert plan."
+      },
+      item_count: {
+        label: "Item Count"
+      },
+      created_at: {
+        label: "Created At"
       }
     }
   },

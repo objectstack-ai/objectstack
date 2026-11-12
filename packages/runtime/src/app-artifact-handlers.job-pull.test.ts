@@ -37,13 +37,16 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@objectstack/core';
+import type { ConnectorSourcePullResult } from '@objectstack/spec/contracts';
 import { SCHEDULED_WORK_ENV } from '@objectstack/types';
 import { runImport, type ExportFieldMeta, type ImportProtocolLike, type ImportRunSummary } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { SqlDriver } from '@objectstack/driver-sql';
+import { CronJobAdapter } from '@objectstack/service-job';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
-import { collectJobsWithoutBody, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
+import { collectJobsWithoutBody, jobDeclaringPackages, scheduleAppArtifactJobs } from './app-artifact-handlers.js';
 // The source under test reaches `@objectstack/metadata` by dynamic import
 // (`app-plugin.ts`); paid here, at collection, not inside a case's clock.
 import '@objectstack/metadata';
@@ -145,7 +148,7 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
         expect([...h.scheduled.keys()]).toEqual(['orders_pull_hourly']);
 
         const outcome = await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
         expect(outcome).toEqual({ outcome: 'completed' });
     });
 
@@ -195,7 +198,29 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
 
         const out = await h.schedule([PULL_JOB], { mappings: [importOnly] });
         expect(out.notScheduled).toEqual(['orders_pull_hourly']);
-        expect(h.said('warn').some((m) => m.includes('connectorSource'))).toBe(true);
+        expect(h.said('warn').some((m) => m.includes('connectorSource') && m.includes('datasourceSource'))).toBe(true);
+    });
+
+    it('[ADR-0153 D1] a pull whose mapping declares a datasourceSource is scheduled, and a degraded run names the object it read', async () => {
+        const h = harness();
+        const { connectorSource: _dropped, ...rest } = MAPPING;
+        const sourced = { ...rest, datasourceSource: { object: 'erp_order', watermark: { field: 'updated_at', start: '2026-01-01' } } };
+        const datasourceResult: ConnectorSourcePullResult = {
+            source: 'datasource', mapping: 'orders_pull', targetObject: 'order', object: 'erp_order', datasource: 'erp',
+            readPath: 'builtin', watermark: { field: 'updated_at', from: '2026-01-01T00:00:00.000Z' }, pulled: 4,
+            summary: { total: 4, processed: 4, created: 3, updated: 0, skipped: 0, errors: 1, ok: 3, cancelled: false },
+        };
+        // The harness mock is typed from the connector fixture (`result`); the datasource arm is the contract's own.
+        h.defaultAutomation.pullConnectorSource.mockResolvedValueOnce(datasourceResult as unknown as ReturnType<typeof result>);
+
+        const out = await h.schedule([PULL_JOB], { mappings: [sourced] });
+        expect(out.pulls).toEqual(['orders_pull_hourly']);
+        expect(out.notScheduled).toEqual([]);
+        const outcome = (await h.run('orders_pull_hourly')) as { outcome: string; reason?: string };
+        expect(h.defaultAutomation.pullConnectorSource).toHaveBeenCalledWith({ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID });
+        expect(outcome.outcome).toBe('degraded');
+        expect(outcome.reason).toContain("from 'erp_order'");
+        expect(outcome.reason).toContain('1 of 4');
     });
 
     it('a pull beside a body is NOT scheduled — neither run form runs', async () => {
@@ -222,6 +247,10 @@ describe('#20281 stage ③ (Q1-B): a job pulls a mapping by declaration, through
             { appId: APP_ID, ql: undefined, source: 'Test' },
         );
         expect(out.pulls).toEqual(['orders_pull_hourly']);
+        // [#32071] …and the pull is asked as the body that declares the job,
+        // not the top-level id the job service keys it under.
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: 'com.example.jobs' }]);
     });
 
     it('with no automation service serving pullConnectorSource the pull job is NOT scheduled, and the composition remedy is said', async () => {
@@ -272,7 +301,7 @@ describe('collectJobsWithoutBody judges a pull job by the binder\'s own judgeJob
         });
         expect(byName.get('sourceless_pull')).toEqual({
             name: 'sourceless_pull',
-            pullRefusal: expect.stringMatching(/^pull\.mapping: mapping 'orders_import' declares no connectorSource/),
+            pullRefusal: expect.stringMatching(/^pull\.mapping: mapping 'orders_import' declares no source/),
         });
         // Code beside the `pull` is the pull's refusal — judged before the body
         // beside it, as the binder judges it — never a `bodyRefusal`.
@@ -311,7 +340,7 @@ describe('#20281 stage ③ (Q2-O1): every run form runs as the job\'s declared o
         await h.schedule([{ ...PULL_JOB, organization: 'org_a' }]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' }, callerPackageId: APP_ID }]);
     });
 
     it('a body job\'s ctx.api write runs under { isSystem: true, tenantId } — the real QuickJS sandbox', async () => {
@@ -448,8 +477,8 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.run('orders_pull_hourly');
         await h.run('orders_pull_hourly');
         expect(h.pulls).toEqual([
-            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
-            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' } },
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' }, callerPackageId: APP_ID },
+            { mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_one' }, callerPackageId: APP_ID },
         ]);
         expect(systemWriteOrganization).toHaveBeenCalledTimes(2);
     });
@@ -460,7 +489,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([{ ...PULL_JOB, organization: 'org_a' }]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true, tenantId: 'org_a' }, callerPackageId: APP_ID }]);
         expect(systemWriteOrganization).not.toHaveBeenCalled();
     });
 
@@ -475,7 +504,7 @@ describe('a pull of a job with no organization runs as the organization its writ
             await h.schedule([PULL_JOB]);
 
             expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
-            expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+            expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
             expect(h.said('warn')).toEqual([]);
         });
     }
@@ -485,7 +514,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([PULL_JOB]);
 
         await h.run('orders_pull_hourly');
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
     });
 
     it('a probe that throws is said once at warn, naming the job, and the run goes on with today\'s context', async () => {
@@ -494,7 +523,7 @@ describe('a pull of a job with no organization runs as the organization its writ
         await h.schedule([PULL_JOB]);
 
         expect(await h.run('orders_pull_hourly')).toEqual({ outcome: 'completed' });
-        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
         const warns = h.logger.warn.mock.calls.filter((c) => String(c[0]).includes("'orders_pull_hourly'"));
         expect(warns).toHaveLength(1);
         expect(warns[0][1]).toMatchObject({ job: 'orders_pull_hourly', mapping: 'orders_pull', error: 'connection reset' });
@@ -645,5 +674,269 @@ describe('a no-organization job pull on a real engine: the match lookup carries 
         expect(b.summaries[0]).toMatchObject({ errors: 2, created: 0 });
         expect(JSON.stringify(b.summaries[0].results)).toContain('ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED');
         expect(await b.stored()).toEqual([]);
+    });
+});
+
+/**
+ * [#32071 Part B, ADR-0150 D3] A pull job's run names the package that
+ * declares the job as `callerPackageId`, so the automation service reads its
+ * mapping from that package. On an artifact of several packages that is the
+ * body declaring the job (`jobDeclaringPackages`, over
+ * `resolveArtifactPackageOrder`), never the top-level id the job service keys
+ * every job under; a top-level job no body declares is the residual, declared
+ * from the top-level id.
+ */
+describe('[#32071] a pull job names the package that declares it', () => {
+    withPosture(undefined);
+
+    it('a single-package artifact: the app itself', async () => {
+        const h = harness();
+        await h.schedule([PULL_JOB]);
+        await h.run('orders_pull_hourly');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true }, callerPackageId: APP_ID }]);
+    });
+
+    it('several packages: each body\'s job its own body; a residual top-level job no package', async () => {
+        const residual = { ...PULL_JOB, name: 'residual_pull' };
+        const bundle = {
+            manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app' },
+            jobs: [residual],
+            packages: [
+                { manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app', mappings: [MAPPING] } },
+                { manifest: { id: 'com.example.jobs', name: 'Jobs', version: '0.1.0', type: 'module', jobs: [PULL_JOB] } },
+            ],
+        };
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        expect(of(PULL_JOB)).toBe('com.example.jobs');
+        // A top-level copy of a body's job (an assembled artifact) is that body's.
+        expect(of({ ...PULL_JOB })).toBe('com.example.jobs');
+        // The residual's owner is no package (`recordResidualOwner`)…
+        expect(of(residual)).toBeUndefined();
+        // …unless a body carries the top-level id: then that body is its package.
+        expect(jobDeclaringPackages(bundle, 'com.example.maps')(residual)).toBe('com.example.maps');
+        // No `packages[]`: every job is the app's.
+        expect(jobDeclaringPackages({ id: APP_ID, jobs: [PULL_JOB] }, APP_ID)(PULL_JOB)).toBe(APP_ID);
+    });
+    it('two bodies each declaring job `sync`, loaded as top-level copies: neither run pulls as the other — each is refused 409 naming both', async () => {
+        // A JSON-loaded artifact binds the flattened top-level copies, so the
+        // job is met by name, and the name is the two bodies'.
+        const h = harness();
+        const runs: Array<(c: unknown) => Promise<unknown>> = [];
+        h.services.job = { ...(h.services.job as object), schedule: async (_n: string, _s: unknown, run: (c: unknown) => Promise<unknown>) => { runs.push(run); } };
+        const sync = { ...PULL_JOB, name: 'sync' };
+        const bundle = JSON.parse(JSON.stringify({
+            manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+            jobs: [sync, sync],
+            packages: [
+                { manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+                { manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [sync] } },
+            ],
+        }));
+        const of = jobDeclaringPackages(bundle, 'com.example.top');
+        expect(typeof of({ ...sync }), 'never the first body').toBe('object');
+        await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            bundle,
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(runs.length).toBeGreaterThan(0);
+        for (const run of runs) {
+            const err = await run({ jobId: 'sync' }).then(() => undefined, (e: unknown) => e as { code?: string; status?: number; message?: string });
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+            expect(err?.message).toContain('com.example.alpha');
+            expect(err?.message).toContain('com.example.beta');
+        }
+        // Before any call or write: no pull was asked for, as any package or as none.
+        expect(h.pulls).toEqual([]);
+    });
+
+    it('a residual top-level job\'s run names no package, so the pull reads by no package as before', async () => {
+        const h = harness();
+        const residual = { ...PULL_JOB, name: 'residual_pull' };
+        const out = await scheduleAppArtifactJobs(
+            { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+            {
+                manifest: { id: 'com.example.top', name: 'Top', version: '0.1.0', type: 'app' },
+                jobs: [residual],
+                packages: [
+                    { manifest: { id: 'com.example.maps', name: 'Maps', version: '0.1.0', type: 'app', mappings: [MAPPING] } },
+                ],
+            },
+            { appId: 'com.example.top', ql: undefined, source: 'Test' },
+        );
+        expect(out.pulls).toEqual(['residual_pull']);
+        await h.run('residual_pull');
+        expect(h.pulls).toEqual([{ mapping: 'orders_pull', context: { isSystem: true } }]);
+        expect(Object.keys(h.pulls[0] as object)).not.toContain('callerPackageId');
+    });
+});
+
+/**
+ * [#32355, ADR-0150 D3] A job name a package body declares and the residual
+ * carries too. `composeStacks(…, { manifest: 'preserve' })` with an input that
+ * has no `manifest` emits that input's jobs at the top level only (the
+ * residual), beside the flattened copies of every body's jobs; loaded from JSON,
+ * the binder meets them all by name. The residual's job is not the body's, so
+ * the name is attributed to neither: each run is refused before any call or
+ * write, naming the declaring body and the residual. The job service keys both
+ * under the one name and keeps the later; when that is the residual's job, it
+ * was pulled as the body before.
+ */
+describe('[#32355] a job name a package body declares and the residual carries is attributed to neither', () => {
+    withPosture(undefined);
+
+    const SYNCED = { name: 'order', label: 'Order', managedBy: 'synced', fields: { external_id: { type: 'text', label: 'External id' } } };
+    const mappingOf = (name: string, connector: string) => ({ ...MAPPING, name, connectorSource: { connector, action: 'request' } });
+    const pullJob = (name: string, mapping: string) => ({ name, schedule: INTERVAL, pull: { mapping } });
+    const alpha = (jobs: unknown[]) => defineStack({
+        manifest: { id: 'com.example.alpha', name: 'Alpha', version: '0.1.0', type: 'module' },
+        objects: [SYNCED],
+        mappings: [mappingOf('alpha_map', 'alpha_api')],
+        jobs,
+    } as never);
+    // No `manifest`: its jobs reach the artifact's top level and no package body.
+    const host = (jobs: unknown[]) => defineStack({
+        objects: [{ ...SYNCED, name: 'host_record', label: 'Host record' }],
+        mappings: [{ ...mappingOf('host_map', 'host_api'), targetObject: 'host_record' }],
+        jobs,
+    } as never);
+    const beta = defineStack({
+        manifest: { id: 'com.example.beta', name: 'Beta', version: '0.1.0', type: 'app' },
+        objects: [{ ...SYNCED, name: 'beta_record', label: 'Beta record' }],
+    } as never);
+    /** The artifact as `os build` writes it and a boot reads it back: composed, then through JSON. */
+    const jsonLoaded = (stacks: unknown[]) =>
+        JSON.parse(JSON.stringify(composeStacks(stacks as never[], { manifest: 'preserve' }))) as Record<string, any>;
+
+    /**
+     * Schedule `bundle` as `appId` on a real job service (`CronJobAdapter`), then fire every job it holds:
+     * what each run answered, and every pull asked. Real, because the service keys both jobs of a shared
+     * name under one key and the later replaces the earlier, so which job survives is the service's to say.
+     */
+    async function scheduleAndRun(bundle: unknown, appId: string) {
+        const h = harness();
+        const adapter = new CronJobAdapter();
+        type Thrown = { code?: string; status?: number; message?: string };
+        const thrown = new Map<string, Thrown>();
+        const schedule = adapter.schedule.bind(adapter);
+        adapter.schedule = (key, when, run, options) => schedule(key, when, async (c) => {
+            try { return await run(c); } catch (e) { thrown.set(key, e as Thrown); throw e; }
+        }, options);
+        h.services.job = adapter;
+        try {
+            const out = await scheduleAppArtifactJobs(
+                { logger: h.logger, getService: (n: string) => h.services[n] } as unknown as PluginContext,
+                bundle,
+                { appId, ql: undefined, source: 'Test' },
+            );
+            const answers: Array<Thrown & { key: string; run?: string }> = [];
+            for (const key of await adapter.listJobs()) {
+                await adapter.trigger(key);
+                const err = thrown.get(key);
+                const run = (await adapter.getExecutions(key)).at(-1)?.status;
+                answers.push({ key, run, code: err?.code, status: err?.status, message: err?.message });
+            }
+            return { out, answers, pulls: h.pulls };
+        } finally {
+            await adapter.destroy();
+        }
+    }
+
+    it('the artifact a build emits carries the pair: the body job copied to the top level, and the residual\'s own job of the same name', () => {
+        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+        expect(bundle.manifest.id).toBe('com.example.beta');
+        expect(bundle.jobs.map((j: any) => [j.name, j.pull.mapping])).toEqual([['sync', 'alpha_map'], ['sync', 'host_map']]);
+        expect(bundle.packages.map((p: any) => [p.manifest.id, (p.manifest.jobs ?? []).map((j: any) => j.name)]))
+            .toEqual([['com.example.alpha', ['sync']], ['com.example.beta', []]]);
+    });
+
+    it('JSON-loaded, on a real job service: the run of the name is refused 409 naming the body and the residual — never pulled as the body', async () => {
+        const bundle = jsonLoaded([alpha([pullJob('sync', 'alpha_map')]), host([pullJob('sync', 'host_map')]), beta]);
+        const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        // Both are scheduled, under one key: the later (the residual's, `host_map`) replaces the body's copy.
+        expect(out.pulls).toEqual(['sync', 'sync']);
+        // Before any call or write: no pull was asked for, as any package or as none —
+        // never `host_map` pulled as `com.example.alpha`, the body that declares the name.
+        expect(pulls).toEqual([]);
+        expect(answers.map((a) => [a.key, a.run])).toEqual([['sync', 'failed']]);
+        expect({ code: answers[0].code, status: answers[0].status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
+        expect(answers[0].message).toContain('package "com.example.alpha"');
+        expect(answers[0].message).toContain('package "com.example.beta"');
+        // Every job of the name, by name: the refusal, with both packages its candidates.
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        for (const job of bundle.jobs) {
+            expect(of(job)).toMatchObject({
+                status: 'refused',
+                reason: 'ambiguous-in-environment',
+                type: 'job',
+                name: 'sync',
+                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'package', packageId: 'com.example.beta' }],
+            });
+        }
+        // A residual whose owner is no package (no body carries the top-level id): named all the same.
+        const noPackage = jobDeclaringPackages(bundle, 'com.example.top')(bundle.jobs[1]) as { status?: string; candidates?: unknown; message?: string };
+        expect(noPackage.status).toBe('refused');
+        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }]);
+        expect(noPackage.message).toContain('names no package');
+    });
+
+    it('control: the residual\'s owner IS the one declaring body — one holder, that body', async () => {
+        // `alpha` last: the artifact's id is alpha's, so the residual runs as alpha, the body that declares `sync`.
+        const bundle = jsonLoaded([host([pullJob('sync', 'host_map')]), alpha([pullJob('sync', 'alpha_map')])]);
+        expect(bundle.manifest.id).toBe('com.example.alpha');
+        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.alpha');
+        expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([['sync', 'success', undefined]]);
+        // One key for the pair: the later (the body's copy, `alpha_map`) replaces the residual's, and runs as alpha.
+        expect(pulls.map((p: any) => [p.mapping, p.callerPackageId])).toEqual([['alpha_map', 'com.example.alpha']]);
+    });
+
+    it('controls: a residual job with a name of its own binds as today, and a body job with no residual twin binds to its body', async () => {
+        const bundle = jsonLoaded([
+            alpha([pullJob('sync', 'alpha_map'), pullJob('alpha_only', 'alpha_map')]),
+            host([pullJob('host_sync', 'host_map'), pullJob('sync', 'host_map')]),
+            beta,
+        ]);
+        const of = jobDeclaringPackages(bundle, 'com.example.beta');
+        const byName = (name: string) => bundle.jobs.find((j: any) => j.name === name);
+        // The residual's own name: its owner, the body carrying the artifact's id — as before.
+        expect(of(byName('host_sync'))).toBe('com.example.beta');
+        // …and no package when no body carries that id — as before.
+        expect(jobDeclaringPackages(bundle, 'com.example.top')(byName('host_sync'))).toBeUndefined();
+        // A body's job no residual job shares a name with: its body.
+        expect(of(byName('alpha_only'))).toBe('com.example.alpha');
+        // Only the shared name is refused.
+        expect(typeof of(byName('sync'))).toBe('object');
+
+        const { answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+        expect(answers.map((a) => [a.key, a.run, a.code])).toEqual([
+            ['alpha_only', 'success', undefined],
+            ['host_sync', 'success', undefined],
+            ['sync', 'failed', 'RESOURCE_CONFLICT'],
+        ]);
+        // `CronJobAdapter.trigger()` hands `trigger: 'manual'` and the binder forwards it; that adapter writes
+        // no run row, so no `jobRunId` rides along.
+        expect(pulls).toEqual([
+            { mapping: 'alpha_map', context: { isSystem: true }, callerPackageId: 'com.example.alpha', trigger: 'manual' },
+            { mapping: 'host_map', context: { isSystem: true }, callerPackageId: 'com.example.beta', trigger: 'manual' },
+        ]);
+    });
+
+    it('fail-closed: a disabled twin on either side still refuses the name — the enabled one is never pulled as the body', async () => {
+        const off = (job: Record<string, unknown>) => ({ ...job, enabled: false });
+        for (const [bodyJob, residualJob, survivor] of [
+            [off(pullJob('sync', 'alpha_map')), pullJob('sync', 'host_map'), 'host_map'],
+            [pullJob('sync', 'alpha_map'), off(pullJob('sync', 'host_map')), 'alpha_map'],
+        ] as const) {
+            const bundle = jsonLoaded([alpha([bodyJob]), host([residualJob]), beta]);
+            // Disabled or not, every job of the name is counted, and each answers the refusal.
+            const of = jobDeclaringPackages(bundle, 'com.example.beta');
+            for (const job of bundle.jobs) expect(of(job)).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment', name: 'sync' });
+            // The binder skips the disabled one; the enabled one is scheduled, and its run is refused before any pull.
+            const { out, answers, pulls } = await scheduleAndRun(bundle, 'com.example.beta');
+            expect(bundle.jobs.find((j: any) => j.enabled !== false).pull.mapping).toBe(survivor);
+            expect(out.pulls).toEqual(['sync']);
+            expect(answers.map((a) => [a.key, a.run, a.code, a.status])).toEqual([['sync', 'failed', 'RESOURCE_CONFLICT', 409]]);
+            expect(pulls).toEqual([]);
+        }
     });
 });

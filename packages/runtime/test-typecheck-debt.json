@@ -34,7 +34,7 @@
       "TS18048: 'res.response' is possibly 'undefined'.": 6
     },
     "src/domains/meta-object-fls.test.ts": {
-      "TS18048: 'res.response' is possibly 'undefined'.": 4
+      "TS18048: 'res.response' is possibly 'undefined'.": 2
     },
     "src/error-envelope.conformance.test.ts": {
       "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 6
@@ -52,7 +52,7 @@
       "TS2493: Tuple type '…' of length '1' has no element at index '1'.": 1
     },
     "src/http-dispatcher.keys.test.ts": {
-      "TS18048: 'res.response' is possibly 'undefined'.": 9
+      "TS18048: 'res.response' is possibly 'undefined'.": 8
     },
     "src/http-dispatcher.mcp.test.ts": {
       "TS18048: 'res.response' is possibly 'undefined'.": 11

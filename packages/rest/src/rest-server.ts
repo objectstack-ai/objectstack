@@ -3696,7 +3696,7 @@ export class RestServer {
             ...this.metaListSource(p, environmentId),
             serviceProbe: (caller) => this.serviceProbeFor((caller as any)?.__kernel),
             navPruneLogged: this.navPruneLogged,
-            isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+            isItemOfDisabledPackage: async ({ type, name, packageId, member }) => {
                 if (typeof p.getMetaItem !== 'function') return false;
                 // [#30218] The REQUEST's environment's engine, through the
                 // shared resolver: the raw `undefined` of the unscoped mount
@@ -3712,6 +3712,8 @@ export class RestServer {
                     type,
                     name,
                     ...(packageId ? { packageId } : {}),
+                    // [#32076] The member the layers were read at.
+                    ...(member !== undefined ? { member } : {}),
                     ...(environmentId ? { environmentId } : {}),
                 };
                 const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
@@ -4400,6 +4402,14 @@ export class RestServer {
         // key, byte-identical to a read that never asked for one, so the answer
         // says nothing about whether a draft exists.
         const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        // [ruling record 6787890900] An object the caller may not read is the
+        // layered chain's absence, answered BEFORE the store is read, so no
+        // store answer about it (a disabled package's refusal among them)
+        // reaches the caller.
+        if (maskPosture.kind === 'hidden') {
+            RestServer.sendMetaReadRefusal(res, { reason: 'absent' });
+            return;
+        }
         const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
         const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
@@ -5656,6 +5666,7 @@ export class RestServer {
             get objectQLProvider() { return readObjectQLProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
 

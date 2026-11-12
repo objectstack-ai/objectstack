@@ -51,6 +51,9 @@
 // `dist/`). The dynamic calls stay where they are — this only decides where the
 // first load is paid.
 import '@objectstack/spec/api';
+// …and `@objectstack/objectql`, which the meta routes `rest-server.ts` registers
+// load dynamically, for the same reason (`pnpm check:test-source-alias`).
+import '@objectstack/objectql';
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import type { Logger } from '@objectstack/spec/contracts';
@@ -315,14 +318,18 @@ describe('[#17551] the structurally-malformed filter spellings are refused at th
       expect(res.body.code).not.toBe('ANALYTICS_QUERY_FAILED');
       expect(res.body.code).toBe('VALIDATION_FAILED');
       // …and it says WHICH member, which the deeper refusal never did.
-      const fields: Array<{ field: string; message: string }> = res.body.details.fields;
+      const fields: Array<{ field: string; message: string; hint?: string }> = res.body.details.fields;
       expect(fields.map((f) => f.field).some((f) => f.startsWith('selection.runtimeFilter'))).toBe(true);
       if (c.member) {
         // [#20116] Exactly one entry, at the slot, carrying the face's sentence.
         const atMember = fields.filter((f) => f.field === c.member);
         expect(atMember, JSON.stringify(fields)).toHaveLength(1);
-        expect(atMember[0]!.message).toMatch(c.sentence!);
-        expect(atMember[0]!.message).not.toContain(' at where.');
+        // [#32279] A comparand-shape refusal answers its one-line head as
+        // `message` and the face's sentence as `hint`; a refusal with no head
+        // (the comparand-type face's) still answers the sentence as `message`.
+        const sentence = atMember[0]!.hint ?? atMember[0]!.message;
+        expect(sentence).toMatch(c.sentence!);
+        expect(sentence).not.toContain(' at where.');
         // The normalizer never ran: the refusal is the door's, not INVALID_FILTER.
         expect(res.body.code).not.toBe('INVALID_FILTER');
       }

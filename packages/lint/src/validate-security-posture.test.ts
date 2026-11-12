@@ -32,9 +32,12 @@ import {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 } from './validate-security-posture.js';
 import { lintDataModel } from './data-model-rules.js';
 import { explainRule } from './rule-explanations.js';
+import { AUTHORING_COMMANDS, runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 
 // [#22161] Each finding of the rule ids this file's rule shortened is one
 // verdict sentence; the reasoning it used to carry is the id's `os explain`
@@ -151,6 +154,26 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
     expect(text).toContain('os explain security-external-owner-unmapped');
     expect(text).toContain("is told to declare 'public_read' instead");
     expect(finding.message).not.toContain('incident');
+  });
+
+  // [ADR-0153 D4] A pulled copy has no person owner, so 'private' — the
+  // general recommendation — would hide every row a sharing rule does not
+  // grant. The fix-it for a synced object recommends a model that does not.
+  it("a synced object's fix-it recommends 'public_read', and names the sharing rule 'private' needs", () => {
+    const [finding, ...rest] = validateSecurityPosture({
+      objects: [{ name: 'erp_order_copy', label: 'ERP order copy', managedBy: 'synced' }],
+    });
+    expect(rest).toEqual([]);
+    expect(finding).toMatchObject({ severity: 'error', rule: SECURITY_OWD_UNSET, where: 'object "erp_order_copy"' });
+    expect(finding.hint).toMatch(/^declare sharingModel: 'public_read' \(recommended:/);
+    expect(finding.hint).toContain('a sharing rule that grants read');
+    expect(finding.hint).not.toContain("'private' (owner + shares; recommended)");
+    expect(finding.hint).not.toContain('\n');
+    // twin: the same object unmanaged keeps the general recommendation
+    const [plain] = validateSecurityPosture({ objects: [{ name: 'erp_order_copy', label: 'ERP order copy' }] });
+    expect(plain.hint).toContain("'private' (owner + shares; recommended)");
+    // and a synced object that declares its model is not flagged
+    expect(rulesOf({ objects: [{ name: 'erp_order_copy', managedBy: 'synced', sharingModel: 'public_read' }] })).toEqual([]);
   });
 
   it('does not flag system objects for unset OWD', () => {
@@ -780,6 +803,138 @@ describe('validateSecurityPosture (ADR-0090 D7)', () => {
         objects: [{ name: 'sys_member', fieldGroups: [{ key: 'role_info', label: 'Organization Role' }] }],
       }),
     ).toEqual([]);
+  });
+
+  // ── What an `objectExtensions` entry writes onto an object (#31998) ──
+  // The service-desk scenario that found this hit the refusal on an object
+  // field and moved the same field into an extension, which walked through
+  // `validate`, `build` and `verify`. Each case below asks the extension door
+  // and the owner door the same question and expects the same answer, located
+  // at the entry the author wrote.
+  describe('[#31998] an objectExtensions entry is judged as the owner door judges', () => {
+    const roleSelect = { type: 'select', label: 'Group Function', options: [{ value: 'l1', label: 'Tier 1' }] };
+
+    it('refuses an extension field NAMED with the reserved token, at the entry, with the owner door\'s message', () => {
+      const viaExtension = validateSecurityRoleWord({
+        objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }],
+      });
+      expect(viaExtension).toHaveLength(1);
+      expect(viaExtension[0]).toMatchObject({
+        severity: 'error',
+        rule: SECURITY_ROLE_WORD,
+        where: 'field "sd_agent.role"',
+        path: 'objectExtensions[0].fields.role.name',
+      });
+      // Same field on the owner's own `fields`: one rule, one message.
+      const viaOwner = validateSecurityRoleWord({
+        objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { role: roleSelect } }],
+      });
+      expect(viaOwner.map((f) => [f.where, f.message, f.hint])).toEqual(
+        viaExtension.map((f) => [f.where, f.message, f.hint]),
+      );
+      expect(viaOwner[0]!.path).toBe('objects[0].fields.role.name');
+    });
+
+    it('refuses an extension field LABELLED with the reserved word, at its label', () => {
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [{ extend: 'sd_agent', fields: { group_function: { type: 'text', label: 'Support Role' } } }],
+      });
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [SECURITY_ROLE_WORD, 'error', 'objectExtensions[0].fields.group_function.label'],
+      ]);
+      expect(findings[0]!.message).toBe('field label "Support Role" uses the reserved word "role" (ADR-0090 D3).');
+    });
+
+    it('reads a packages[] body\'s extensions, as the registry registers them', () => {
+      const findings = validateSecurityRoleWord({
+        packages: [
+          { manifest: { objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { tier: { type: 'text' } } }] } },
+          { manifest: { objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }] } },
+        ],
+      });
+      expect(findings.map((f) => f.path)).toEqual(['packages[1].manifest.objectExtensions[0].fields.role.name']);
+      expect(findings[0]!.where).toBe('field "sd_agent.role"');
+    });
+
+    it('refuses the extension\'s own `label` and a `fieldPatches` relabel — the two labels it serves', () => {
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [
+          {
+            extend: 'crm_account',
+            label: 'Account Roles',
+            fieldPatches: {
+              industry: { label: 'Role In Market' },
+              // Option labels stay out: the owner door does not judge them.
+              type: { options: { customer: { label: 'Role Player' } } },
+            },
+          },
+        ],
+      });
+      expect(findings.map((f) => [f.where, f.path])).toEqual([
+        ['object "crm_account"', 'objectExtensions[0].label'],
+        ['field "crm_account.industry"', 'objectExtensions[0].fieldPatches.industry.label'],
+      ]);
+      expect(findings.every((f) => f.rule === SECURITY_ROLE_WORD && f.severity === 'error')).toBe(true);
+      expect(findings[0]!.message).toBe('object label "Account Roles" uses the reserved word "role" (ADR-0090 D3).');
+    });
+
+    it('stays silent on a clean extension — the showcase shape', () => {
+      expect(
+        validateSecurityRoleWord({
+          objectExtensions: [
+            {
+              extend: 'showcase_account',
+              label: 'Account (Success Overlay)',
+              pluralLabel: 'Accounts (Success Overlay)',
+              fields: {
+                loyalty_tier: { type: 'select', label: 'Loyalty Tier', options: [{ value: 'gold', label: 'Gold' }] },
+                payroll_code: { type: 'text', label: 'Payroll — Controlled Rollout' },
+              },
+              fieldPatches: { industry: { label: 'Sector' } },
+              priority: 210,
+            },
+          ],
+        }),
+      ).toEqual([]);
+    });
+
+    it('refuses an extension field on a sys_ object: the exemption covers the platform\'s words, not an app\'s', () => {
+      // The owner-side control first, unchanged: the platform's own
+      // `sys_member.role` stays exempt.
+      expect(
+        validateSecurityRoleWord({ objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }] }),
+      ).toEqual([]);
+      const findings = validateSecurityRoleWord({
+        objects: [{ name: 'sys_member', fields: { role: { name: 'role', label: 'Role' } } }],
+        objectExtensions: [{ extend: 'sys_user', fields: { support_role: { type: 'text', label: 'Desk' } } }],
+      });
+      expect(findings.map((f) => [f.where, f.path])).toEqual([
+        ['field "sys_user.support_role"', 'objectExtensions[0].fields.support_role.name'],
+      ]);
+    });
+
+    it('judges the owner field and the extension field side by side, each at its own entry', () => {
+      const findings = validateSecurityRoleWord({
+        objects: [{ name: 'sd_agent', sharingModel: 'private', fields: { role_code: { type: 'text', label: 'Code' } } }],
+        objectExtensions: [{ extend: 'sd_agent', fields: { role: roleSelect } }],
+      });
+      expect(findings.map((f) => f.path)).toEqual([
+        'objects[0].fields.role_code.name',
+        'objectExtensions[0].fields.role.name',
+      ]);
+    });
+
+    it('judges only the entry a package\'s later extension of the same target leaves served', () => {
+      // One entry per package per target: the registry removes the earlier
+      // one, its fields included, so its words are never served.
+      const findings = validateSecurityRoleWord({
+        objectExtensions: [
+          { extend: 'sd_agent', fields: { role: roleSelect } },
+          { extend: 'sd_agent', fields: { duty_role: { type: 'text', label: 'Duty' } } },
+        ],
+      });
+      expect(findings.map((f) => f.path)).toEqual(['objectExtensions[1].fields.duty_role.name']);
+    });
   });
 
   // ── Rule: security-private-no-readscope (info) ──────────────────────
@@ -1706,6 +1861,230 @@ describe('validateSecurityPosture · a field mask its own set\'s View All / Modi
 });
 
 /**
+ * ── Rule: security-update-policy-no-check (ADR-0058 D4, info) ───────────────
+ *
+ * When no applicable policy for a write declares `check`, each applicable
+ * policy's `using` stands in as its check, OR-combined, with the platform's
+ * ownership floor (`created_by == current_user.id`) where the pre-image gate
+ * kept it. A USING-only `update` / `all` policy keyed on any other caller
+ * column therefore also admits the rows the floor admits. Info tier: the
+ * composition is the published one, so the finding never fails a run.
+ */
+describe('validateSecurityPosture · a caller-keyed update policy with no check is noted at info tier', () => {
+  const noted = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack)
+      .filter((f) => f.rule === SECURITY_UPDATE_POLICY_NO_CHECK)
+      .map((f) => [f.severity, f.where, f.path]);
+  const set = (...rowLevelSecurity: Array<Record<string, unknown>>) => ({
+    permissions: [PermissionSetSchema.parse({
+      name: 'sales_rep',
+      objects: { deal: { allowRead: true, allowCreate: true, allowEdit: true } },
+      rowLevelSecurity,
+    })],
+  });
+  const AT = 'permissions[0].rowLevelSecurity[0].check';
+
+  it('a USING-only update policy keyed on owner_id is noted, at info', () => {
+    expect(noted(set({ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id' })))
+      .toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('a USING-only all policy keyed on owner_id is noted, at info', () => {
+    expect(noted(set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' })))
+      .toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('any caller column other than created_by is noted: an assignee, record.FIELD, either operand order, the SQL spelling', () => {
+    for (const using of [
+      'assignee == current_user.id',
+      'record.owner_id == current_user.id',
+      'current_user.id == owner_id',
+      'owner_id = current_user.id',
+      "created_by == current_user.id || (stage == 'open' && owner_id == current_user.id)",
+    ]) {
+      expect(noted(set({ name: 'p', object: 'deal', operation: 'update', using })), using)
+        .toEqual([['info', 'permission set "sales_rep"', AT]]);
+    }
+  });
+
+  it('control: a policy that declares check is not noted', () => {
+    expect(noted(set({
+      name: 'own_deals', object: 'deal', operation: 'all',
+      using: 'owner_id == current_user.id', check: 'owner_id == current_user.id',
+    }))).toEqual([]);
+  });
+
+  it('control: a blank check declares nothing, as the runtime reads it', () => {
+    expect(noted({
+      permissions: [{
+        name: 'sales_rep',
+        rowLevelSecurity: [{ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', check: '  ' }],
+      }],
+    })).toEqual([['info', 'permission set "sales_rep"', AT]]);
+  });
+
+  it('control: a USING keyed on created_by only is not noted', () => {
+    expect(noted(set({ name: 'mine', object: 'deal', operation: 'update', using: 'created_by == current_user.id' }))).toEqual([]);
+    expect(noted(set({ name: 'mine', object: '*', operation: 'all', using: 'record.created_by == current_user.id' }))).toEqual([]);
+  });
+
+  it('control: a USING that does not key the caller is not noted', () => {
+    expect(noted(set({ name: 'open_deals', object: 'deal', operation: 'update', using: "stage == 'prospecting'" }))).toEqual([]);
+    expect(noted(set({ name: 'team', object: 'deal', operation: 'update', using: 'owner_id in current_user.org_user_ids' }))).toEqual([]);
+  });
+
+  it('control: a select-only policy, and the other single verbs, are not noted', () => {
+    for (const operation of ['select', 'insert', 'delete']) {
+      expect(noted(set({ name: 'p', object: 'deal', operation, using: 'owner_id == current_user.id' })), operation).toEqual([]);
+    }
+  });
+
+  it('control: a disabled policy is not noted', () => {
+    expect(noted(set({ name: 'p', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', enabled: false }))).toEqual([]);
+  });
+
+  it('is info tier on every command the registry serves, so neither os lint --strict nor os validate --strict fails on it', () => {
+    // `--strict` counts errors and warnings only, on both doors: `os lint`
+    // grades an `info` as a suggestion (cli `lint-strict-warnings.e2e.test.ts`),
+    // and `os validate` leaves every registry finding of `severity: 'info'` out
+    // of its strict count (cli `validate-json-strict-exit.e2e.test.ts`; ruling
+    // of record 6787890900). So the tier is the pin: through the registry the
+    // finding reaches every command, `validate` and `lint` named below, as
+    // `info`, never in the gating set and never as a warning.
+    const stack = {
+      objects: [{ name: 'deal', label: 'Deal', sharingModel: 'public_read', fields: { title: { type: 'text', label: 'Title' } } }],
+      ...set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' }),
+    };
+    for (const command of AUTHORING_COMMANDS) {
+      const findings = runAuthoringRules(command, { normalized: stack, parsed: stack });
+      const ours = findings.filter((f) => f.rule === SECURITY_UPDATE_POLICY_NO_CHECK);
+      expect(ours.map((f) => f.severity), command).toEqual(['info']);
+      const { errors, advisories } = splitBySeverity(ours);
+      expect(errors, command).toEqual([]);
+      expect(advisories.filter((f) => f.severity === 'warning'), command).toEqual([]);
+    }
+    expect(AUTHORING_COMMANDS).toEqual(expect.arrayContaining(['validate', 'lint']));
+  });
+
+  it('states the composition rule and its side effect, and the id is explained', () => {
+    const [f] = validateSecurityPosture(set({ name: 'own_deals', object: 'deal', operation: 'all', using: 'owner_id == current_user.id' }))
+      .filter((x) => x.rule === SECURITY_UPDATE_POLICY_NO_CHECK);
+    expect(f.message).toContain('all policy "own_deals" (owner_id == current_user.id) declares no check.');
+    expect(f.message).toContain(
+      'A row-level policy with no `check` also admits new rows the ownership floor admits; declare `check` to bound what an update may write.',
+    );
+    expect(f.hint).toContain('takes the USING-only siblings and the floor out of the check');
+    expect(f.hint).toContain('a creator who is not the owner loses update unless a `check` admits them');
+    for (const text of [f.message, f.hint]) expect(text, text).not.toContain('\n');
+    const explanation = explainRule(SECURITY_UPDATE_POLICY_NO_CHECK);
+    expect(explanation).toBeDefined();
+    expect(explanation!.paragraphs.join('\n')).toContain('only the declared checks decide');
+  });
+});
+
+/**
+ * ── Rule: security-controlled-by-parent-master-reference-hidden (ADR-0055 §3) ──
+ *
+ * A write of a controlled_by_parent detail needs edit access to the master its
+ * stored reference names, whatever the writer may read. A set that hides that
+ * reference (`readable: false`) hides a field that still decides its holders'
+ * writes, and a holder refused there is told only the rule, with no master
+ * named. Legal, so a warning. Sets below are PARSED by `PermissionSetSchema`
+ * unless a case says otherwise.
+ */
+describe('validateSecurityPosture · a hidden master reference still decides a controlled_by_parent write', () => {
+  const hidden = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack)
+      .filter((f) => f.rule === SECURITY_CBP_MASTER_REFERENCE_HIDDEN)
+      .map((f) => [f.severity, f.where, f.path]);
+  const DETAIL = objectFixture({
+    name: 'line_item', sharingModel: 'controlled_by_parent',
+    fields: {
+      invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true },
+      note: { type: 'text', label: 'Note' },
+    },
+  });
+  const MASTER = objectFixture({ name: 'invoice', sharingModel: 'private' });
+  const withSets = (objects: unknown[], ...sets: Array<Record<string, unknown>>) => ({
+    objects,
+    permissions: sets.map((set) => PermissionSetSchema.parse(set)),
+  });
+
+  it('warns a set that hides the master reference of a controlled_by_parent detail', () => {
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: { line_item: { allowRead: true, allowEdit: true }, invoice: { allowRead: true, allowEdit: true } },
+      fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([['warning', 'permission set "clerk"', 'permissions[0].fields["line_item.invoice"]']]);
+  });
+
+  it('warns each set that hides it, and an unparsed entry reads as the parse writes it', () => {
+    const raw = { name: 'raw', objects: {}, fields: { 'line_item.invoice': { readable: false } } };
+    expect(hidden({ objects: [MASTER, DETAIL], permissions: [raw, { ...raw, name: 'raw_two' }] })).toEqual([
+      ['warning', 'permission set "raw"', 'permissions[0].fields["line_item.invoice"]'],
+      ['warning', 'permission set "raw_two"', 'permissions[1].fields["line_item.invoice"]'],
+    ]);
+    expect(hidden(withSets([MASTER, DETAIL], raw))).toEqual(hidden({ objects: [MASTER, DETAIL], permissions: [raw] }));
+  });
+
+  it('warns on an optional master reference too: the stored master still decides the write', () => {
+    const optional = objectFixture({
+      name: 'line_item', sharingModel: 'controlled_by_parent',
+      fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: false } },
+    });
+    expect(hidden(withSets([MASTER, optional], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([['warning', 'permission set "clerk"', 'permissions[0].fields["line_item.invoice"]']]);
+  });
+
+  it('control: a readable master reference, and a hidden field that is not the master reference, get nothing', () => {
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: true, editable: true } },
+    }))).toEqual([]);
+    expect(hidden(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.note': { readable: false, editable: false } },
+    }))).toEqual([]);
+    expect(hidden(withSets([MASTER, DETAIL], { name: 'clerk', objects: {} }))).toEqual([]);
+  });
+
+  it('control: the same field on an object that is not a controlled_by_parent detail gets nothing', () => {
+    const ownSharing = objectFixture({
+      name: 'line_item', sharingModel: 'private',
+      fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } },
+    });
+    expect(hidden(withSets([MASTER, ownSharing], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([]);
+    // A detail this stack does not declare is not judged.
+    expect(hidden(withSets([MASTER], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    }))).toEqual([]);
+  });
+
+  it('control: the set\'s own View All on the detail makes the mask inert, so the inert rule speaks instead', () => {
+    const stack = withSets([MASTER, DETAIL], {
+      name: 'auditor', objects: { line_item: { allowRead: true, viewAllRecords: true } },
+      fields: { 'line_item.invoice': { readable: false, editable: false } },
+    });
+    expect(hidden(stack)).toEqual([]);
+    expect(validateSecurityPosture(stack).map((f) => f.rule)).toContain(SECURITY_SUPERUSER_FIELD_MASK_INERT);
+  });
+
+  it('states the rule and its consequence in one line, and the id is explained', () => {
+    const [f] = validateSecurityPosture(withSets([MASTER, DETAIL], {
+      name: 'clerk', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } },
+    })).filter((x) => x.rule === SECURITY_CBP_MASTER_REFERENCE_HIDDEN);
+    expect(f.message).toContain("'line_item.invoice' hides the master reference");
+    expect(f.message).toContain('still decides each write of the detail');
+    expect(f.message).toContain('a refusal naming no master');
+    expect(f.message, f.message).not.toContain('\n');
+    expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+    expect(f.hint).toContain('readable: true');
+    expect(f.hint, f.hint).not.toContain('\n');
+    expect(explainRule(SECURITY_CBP_MASTER_REFERENCE_HIDDEN)).toBeDefined();
+  });
+});
+
+/**
  * ── The structural meta-guard (#4992 pattern, #5009/#5018 shape) — #5017 ─────
  *
  * #4984 removed the `??` alias reads from a sharing rule's fields; #5009
@@ -1879,8 +2258,9 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // the OWD dials FLAT and has no `security` envelope to nest them under.
     // [#18306] `fieldGroups` joined when the ADR-0090 D3 vocabulary freeze
     // started visiting the group headings that sit above the fields it already
-    // judged.
-    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'name', 'sharingModel'],
+    // judged. [ADR-0153 D4] `managedBy` joined: `security-owd-unset` gives a
+    // `synced` object its own fix-it.
+    expected: ['actions', 'fieldGroups', 'fields', 'isSystem', 'label', 'managedBy', 'name', 'sharingModel'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
@@ -1894,13 +2274,12 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     keys: () => Object.keys(PermissionSetSchema.shape),
   },
   // [#25760] One row-level policy, read by the controlled-by-parent owner arm
-  // for the keys that decide whether it is that arm's subject. `using` and
-  // `check` are read through a computed key (`policy[predicate]`), which the
-  // scan cannot see; the corpus fixture below carries both spellings, so a
-  // retired `check` would still fail the key-legality guard.
+  // for the keys that decide whether it is that arm's subject. That arm reads
+  // `using` and `check` through a computed key (`policy[predicate]`); the
+  // update-check arm (ADR-0058 D4) reads both by name, so they are listed.
   {
     receiver: 'policy',
-    expected: ['enabled', 'name', 'object', 'operation'],
+    expected: ['check', 'enabled', 'name', 'object', 'operation', 'using'],
     declaredBy: 'PermissionSetSchema.rowLevelSecurity[]',
     keys: () => shapeKeysOf(PermissionSetSchema.shape.rowLevelSecurity),
   },
@@ -2017,9 +2396,17 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   },
   {
     receiver: 'ext',
-    expected: ['extend', 'fields', 'priority', 'validations'],
+    expected: ['extend', 'fieldPatches', 'fields', 'label', 'priority', 'validations'],
     declaredBy: 'ObjectStackSchema.objectExtensions[]',
     keys: () => shapeKeysOf(ObjectStackSchema.shape.objectExtensions),
+  },
+  // [#31998] One `fieldPatches` entry, read by the role-word rule for the label
+  // a base field is served with, and for nothing else.
+  {
+    receiver: 'displayPatch',
+    expected: ['label'],
+    declaredBy: 'ObjectStackSchema.objectExtensions[].fieldPatches{}',
+    keys: () => shapeKeysOf(shapeOf(ObjectStackSchema.shape.objectExtensions).fieldPatches),
   },
   // [#18535] The ADR-0066 D1 capability declarations the anchor rule reads: it
   // wants their NAMES and hands the declarations themselves to the predicate,
@@ -2093,6 +2480,9 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       // #30905: `cbpMasterCandidates`' required-master list (`.length`, a JS property) and the spec
       // resolver's answer (`controlledByParentMasterOf`: `.field` / `.optional`, fields of its own return value).
       'requiredMasters', 'master',
+      // #31998: the role-word extension walk's finding path (`….fieldPatches.${fieldName}.label`), a template
+      // segment and not a receiver.
+      'fieldPatches',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -2209,6 +2599,8 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_MODIFY_ALL_DELETE_WITHHELD,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -2243,6 +2635,18 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
         name: 'ps', label: 'PS',
         objects: { deal: { allowRead: true, viewAllRecords: true } },
         fields: { 'deal.amount': { readable: false, editable: false } },
+      }],
+    },
+  },
+  {
+    // A USING-only `update` policy keyed on the caller's `owner_id`, no `check`:
+    // every key the arm reads (`rowLevelSecurity[].{name,operation,using,check,enabled}`)
+    // is one an author can legally write.
+    label: 'update-policy-no-check',
+    stack: {
+      permissions: [{
+        name: 'ps', label: 'PS', objects: {},
+        rowLevelSecurity: [{ name: 'own_deals', object: 'deal', operation: 'update', using: 'owner_id == current_user.id', enabled: true }],
       }],
     },
   },
@@ -2354,6 +2758,21 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    // A resolving controlled_by_parent detail whose master reference a set
+    // hides; every key the arm reads (`fields[KEY].readable`) is authorable.
+    label: 'cbp-master-reference-hidden',
+    stack: {
+      objects: [
+        objectFixture({ name: 'invoice', sharingModel: 'private' }),
+        objectFixture({
+          name: 'line_item', sharingModel: 'controlled_by_parent',
+          fields: { invoice: { type: 'master_detail', label: 'Invoice', reference: 'invoice', required: true } },
+        }),
+      ],
+      permissions: [{ name: 'ps', label: 'PS', objects: {}, fields: { 'line_item.invoice': { readable: false, editable: true } } }],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -2378,7 +2797,9 @@ describe('validateSecurityPosture — every branch is reachable without an undec
     // 18 since #25760: an owner-keyed update policy on a controlled_by_parent detail that has not opted in.
     // 19 since #26591: the same rule id, for a policy keyed only on a column the opt-in does not admit.
     // 20 since #29544: a field mask its own set's View All / Modify All makes inert.
-    expect(pushedRuleIds()).toHaveLength(20);
+    // 21: a caller-keyed update policy that declares no check (ADR-0058 D4, info).
+    // 22: a set's readable: false on a controlled_by_parent detail's master reference.
+    expect(pushedRuleIds()).toHaveLength(22);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {

@@ -11,7 +11,7 @@ import {
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
 import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
-import { findNamespaceObjectNameClashes, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
+import { findNamespaceObjectNameClashes, namespacedHoldersMeet, validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { validateNamespaceNotAddressLiteral } from './kernel/address-grammar';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -42,7 +42,13 @@ import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { fieldGroupBodyTableRefusal, type NamedInboundRelationship } from './data/related-list-body-table';
 import { externalBindingDatasourceRefusal } from './data/external-binding-datasource';
-import { InlineGridColumnSchema, summaryFunctionReadsField, VALUE_DOMAIN_FIELD_TYPES } from './data/field.zod';
+import { InlineGridColumnSchema, summaryFunctionReadsField } from './data/field.zod';
+import {
+  isRecordCurrencyCodeField,
+  recordCurrencyFollowedCodeError,
+  recordCurrencyRecordRollupError,
+  recordCurrencyUnfollowedRollupError,
+} from './data/record-currency-path';
 import { AUDIT_FIELD_DEFS } from './data/injected-system-column-provenance';
 import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
@@ -4492,30 +4498,6 @@ function recordCurrencyPathOf(field: unknown): { via: string; code: string } | u
 }
 
 /**
- * Why a child amount that follows no parent cannot be the subject of a
- * `record` roll-up, and what to declare instead: the end of the refusal
- * {@link collectRecordCurrencyPathErrors} (c) prints.
- */
-function unfollowedAmountReason(childObject: string, childField: string, def: unknown): string {
-  const named = `'${childObject}.${childField}'`;
-  const config = isRecord(def) && isRecord(def.currencyConfig) ? def.currencyConfig : undefined;
-  if (config?.currencyMode === 'record' && typeof config.currencyField === 'string') {
-    return `${named} is in each '${childObject}' record's own currency (the code in '${config.currencyField}'), so the `
-      + 'roll-up would add amounts in several currencies. Make the child amount follow this record '
-      + '(`currencyField: \'MASTER_DETAIL_FIELD.CODE_FIELD\'`), or roll up a stored home-currency amount of the child '
-      + 'instead and declare that currency.';
-  }
-  if (config?.currencyMode === 'fixed' && typeof config.defaultCurrency === 'string') {
-    return `${named} is fixed to ${config.defaultCurrency}, so the total is in ${config.defaultCurrency} whatever this `
-      + `record's code holds. Declare \`currencyConfig: { currencyMode: 'fixed', defaultCurrency: '${config.defaultCurrency}' }\` `
-      + 'on the summary instead.';
-  }
-  return `${named} declares no currency that follows this record, so the total is not in the currency this record's `
-    + 'code holds. Delete `currencyConfig` on the summary, or declare `currencyMode: \'fixed\'` if every amount it reads '
-    + 'is in one currency.';
-}
-
-/**
  * [ADR-0144 D2 and D6, amended 2026-11-09 by #31743, ruling A recorded in
  * 6739066323] The two halves of a child that follows its parent's currency
  * that need both objects, judged where the stack holds both — the
@@ -4565,6 +4547,10 @@ function unfollowedAmountReason(childObject: string, childField: string, def: un
  * extension or a child field it does not hold; and neither is a roll-up whose
  * relationship field is neither written nor the child's one relation back to
  * the parent.
+ *
+ * The (a) and (c)-unfollowed wording is `data/record-currency-path.ts`'s,
+ * shared with the engine registry, which judges the same pairs at a
+ * single-object save.
  */
 function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
@@ -4572,14 +4558,6 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
   // fields elsewhere: judging a code field or a roll-up against it would refuse
   // what the owner declares. Such a parent is skipped (not in `declared`).
   const { fieldsByObject, declared } = stackObjectFields(config);
-  const codeTypes = [...VALUE_DOMAIN_FIELD_TYPES].map((t) => `\`${t}\``).join(' or ');
-  const isCodeField = (f: unknown): boolean =>
-    isRecord(f) && typeof f.type === 'string' && VALUE_DOMAIN_FIELD_TYPES.has(f.type) && f.valueDomain === 'iso_4217_currency';
-  const codeFieldsOf = (fields: Record<string, unknown>): string =>
-    ((names) => (names.length > 0
-      ? `candidates: ${names.map((n) => `'${n}'`).join(', ')}`
-      : 'it has none; declare one, conventionally `currency_code: Field.text({ valueDomain: \'iso_4217_currency\' })`'))(
-      Object.keys(fields).filter((k) => isCodeField(fields[k])));
 
   for (const [objectName, fields] of fieldsByObject) {
     for (const [fieldName, field] of Object.entries(fields)) {
@@ -4590,23 +4568,10 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         const parentName = isRecord(via) && via.type === 'master_detail' && typeof via.reference === 'string' ? via.reference : undefined;
         const parent = parentName === undefined || !declared.has(parentName) ? undefined : fieldsByObject.get(parentName);
         if (parentName !== undefined && parent !== undefined) {
-          const where = `Object '${objectName}' field '${fieldName}' currencyConfig.currencyField`;
-          const code = hasOwnKey(parent, followed.code) ? parent[followed.code] : undefined;
-          if (!isRecord(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}', the object the master_detail `
-                + `'${followed.via}' references, and '${parentName}' declares no field '${followed.code}', so the amount `
-                + `has no code to follow. Name the field of '${parentName}' that holds its ISO 4217 code — `
-                + `${codeFieldsOf(parent)}.`,
-            );
-          } else if (!isCodeField(code)) {
-            errors.push(
-              `${where}: '${followed.via}.${followed.code}' follows '${parentName}.${followed.code}', a `
-                + `'${String(code.type)}' field that does not hold an ISO 4217 code, so a write could store any value as `
-                + `the currency. A followed code field is a ${codeTypes} field declaring \`valueDomain: 'iso_4217_currency'\` `
-                + `on '${parentName}' — ${codeFieldsOf(parent)}.`,
-            );
-          }
+          const refusal = recordCurrencyFollowedCodeError({
+            object: objectName, field: fieldName, via: followed.via, code: followed.code, parent: parentName, parentFields: parent,
+          });
+          if (refusal !== undefined) errors.push(refusal);
         }
       }
 
@@ -4623,17 +4588,13 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
       // unresolved or extension-only child is skipped, as (a) and (b) skip one.
       const childField = hasOwnKey(child, ops.field) ? child[ops.field] : undefined;
       const judgeRecord = summaryCurrency?.currencyMode === 'record' && declared.has(ops.object) && childField !== undefined;
+      const rollup = { object: objectName, field: fieldName, fn: String(ops.function), childObject: ops.object, childField: ops.field };
       const refuseRecord = (why: string): void => {
-        errors.push(
-          `Object '${objectName}' field '${fieldName}' currencyConfig: \`currencyMode: 'record'\` on a summary is admitted `
-            + `only for a roll-up through a master_detail whose child amounts follow this record's currency through that `
-            + `very field (\`currencyField: 'MASTER_DETAIL_FIELD.CODE_FIELD'\` on the child amount). This summary rolls up `
-            + `${String(ops.function)}(${ops.object}.${ops.field}), and ${why}`,
-        );
+        errors.push(recordCurrencyRecordRollupError(rollup, why));
       };
       const amount = recordCurrencyPathOf(childField);
       if (amount === undefined) {
-        if (judgeRecord) refuseRecord(unfollowedAmountReason(ops.object, ops.field, childField));
+        if (judgeRecord) errors.push(recordCurrencyUnfollowedRollupError(rollup, childField));
         continue;
       }
       const amountVia = child[amount.via];
@@ -4668,7 +4629,7 @@ function collectRecordCurrencyPathErrors(config: ObjectStackDefinition): string[
         continue;
       }
       // A path whose code the parent does not hold is (a)'s finding, told once at the amount.
-      if (!isCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
+      if (!isRecordCurrencyCodeField(hasOwnKey(fields, amount.code) ? fields[amount.code] : undefined)) continue;
       if (summaryCurrency?.currencyMode === 'record' && summaryCurrency.currencyField === amount.code) continue;
       const spelling = `\`currencyConfig: { currencyMode: 'record', currencyField: '${amount.code}' }\``;
       errors.push(
@@ -4719,8 +4680,9 @@ function lineItemsChildObject(
 
 /**
  * A job's `pull.mapping` must name a mapping this stack declares, and that
- * mapping must carry a `connectorSource` (ruling Q1-B on the connector-sync
- * card: "`os validate` checks the mapping name").
+ * mapping must carry a source — a `connectorSource`, or since ADR-0153 D1 a
+ * `datasourceSource` (ruling Q1-B on the connector-sync card: "`os validate`
+ * checks the mapping name").
  *
  * Both halves are refused here rather than at the first tick, where the
  * automation service would reject the run (`mapping_not_found` /
@@ -4734,7 +4696,7 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const jobs = Array.isArray(config.jobs) ? config.jobs : [];
   if (jobs.length === 0) return errors;
-  const mappings = new Map<string, { connectorSource?: unknown }>();
+  const mappings = new Map<string, { connectorSource?: unknown; datasourceSource?: unknown }>();
   for (const m of Array.isArray(config.mappings) ? config.mappings : []) {
     if (isRecord(m) && typeof m.name === 'string') mappings.set(m.name, m);
   }
@@ -4747,15 +4709,227 @@ function collectJobPullMappingErrors(config: ObjectStackDefinition): string[] {
       errors.push(
         `Job '${String(job.name)}' pulls mapping '${name}' which is not defined in mappings. ` +
           `Declare the mapping (its targetObject, fieldMapping and a connectorSource naming the ` +
-          `rest or openapi connector it pulls from) or correct the name.`,
+          `rest or openapi connector it pulls from, or a datasourceSource naming the federated ` +
+          `object it reads) or correct the name.`,
       );
       continue;
     }
-    if (mapping.connectorSource === undefined) {
+    // [ADR-0153 D1] `job.pull` accepts either source.
+    if (mapping.connectorSource === undefined && mapping.datasourceSource === undefined) {
       errors.push(
-        `Job '${String(job.name)}' pulls mapping '${name}', which declares no connectorSource — ` +
+        `Job '${String(job.name)}' pulls mapping '${name}', which declares no source — ` +
           `there is nothing to pull. Add connectorSource: { connector, action } to the mapping, ` +
-          `naming the rest or openapi connector it reads from.`,
+          `naming the rest or openapi connector it reads from, or datasourceSource: { object, watermark } ` +
+          `naming the federated object it reads.`,
+      );
+    }
+  }
+  return errors;
+}
+
+/**
+ * [ADR-0153 D2 invariant 7] The largest number of decimal digits an integer
+ * column may declare and still read back as an exact JavaScript number: every
+ * 15-digit integer is inside ±2^53. A 16-digit one may not be, and no dialect
+ * client is verified (by the P2 engine card) to read wider ones as a `bigint`
+ * or a string, so a wider or undeclared precision is refused at build.
+ */
+const SYNC_EXACT_INTEGER_PRECISION = 15;
+
+/**
+ * The field types whose value a pull reads as a string (ADR-0153 D2 invariant
+ * 7: "the key is a string or an integer"). A key of any other type — a
+ * fraction, a date, a JSON value — is not one a key cursor compares exactly.
+ */
+const SYNC_STRING_KEY_TYPES: ReadonlySet<string> = new Set([
+  'text', 'textarea', 'email', 'url', 'phone', 'select', 'radio', 'autonumber', 'lookup', 'master_detail', 'user',
+]);
+
+/**
+ * A field's declared exactness as a pull key or an integer watermark: an
+ * integer `number` (`scale: 0`) that declares a `precision` of at most
+ * {@link SYNC_EXACT_INTEGER_PRECISION} digits. Answers why it is not, or
+ * `undefined` when it is.
+ */
+function inexactIntegerReason(field: Record<string, unknown>): string | undefined {
+  const precision = field.precision;
+  if (typeof precision !== 'number') {
+    return `declares no precision, so a value past 2^53 could read back rounded — declare precision: ` +
+      `${SYNC_EXACT_INTEGER_PRECISION} or fewer digits`;
+  }
+  if (precision > SYNC_EXACT_INTEGER_PRECISION) {
+    return `declares precision ${precision}, past the ${SYNC_EXACT_INTEGER_PRECISION} digits every value of ` +
+      `which reads back as an exact JavaScript integer — declare precision: ${SYNC_EXACT_INTEGER_PRECISION} ` +
+      `or fewer, or key the source on a string column`;
+  }
+  return undefined;
+}
+
+/**
+ * [ADR-0153 D1–D4] The build refusals over a SOURCED mapping that need the
+ * stack's objects — live as they land, ahead of the pull that reads the keys
+ * (the P2 engine card), because each one refuses a binding no pull could
+ * honour. The rules the mapping alone can judge (one source, `upsert` with a
+ * key) are `MappingSchema`'s own refinement and are refused at parse.
+ *
+ *  - **A `synced` target** (D4): a mapping carrying either source writes an
+ *    object whose `managedBy` is `'synced'`, the bucket every write guard
+ *    holds read-only to members. A pull into an ordinary object leaves the
+ *    rows editable by members, and the next pull keeps or overwrites the edit
+ *    silently.
+ *  - **A federated source object** (D1): `datasourceSource.object` names an
+ *    object of this stack that declares an `external` binding (ADR-0015). A
+ *    managed object's rows are already local.
+ *  - **`source_key_missing`** (D2 invariant 6): that object's
+ *    `external.columnMap` maps a remote column onto `id`, the key the rows are
+ *    matched and paged by.
+ *  - **`source_key_not_exact`** (invariant 7): the key's declared type (the
+ *    object's own `id` field, when it declares one) is a string, or an
+ *    integer of an exact precision.
+ *  - **A halvable `watermark.field`** (invariant 1): a field of the source
+ *    object of type `datetime`, `date`, or `number` with `scale: 0` — and an
+ *    integer one of an exact precision (**`watermark_not_exact`**, invariant 7).
+ *  - **`watermark_field_unmapped`** (D3): a `fieldMapping` entry copies
+ *    `watermark.field` unchanged (transform `none`) onto a target field of
+ *    the same type, which the mark's range compares with `watermark.start`.
+ *
+ * Resolved against this stack's own objects, like the mapping's `targetObject`
+ * above it; a target this stack does not define is already refused there and
+ * gets no second finding here.
+ */
+function collectSourcedMappingErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  const mappings = Array.isArray(config.mappings) ? config.mappings : [];
+  if (mappings.length === 0) return errors;
+  const objects = new Map<string, Record<string, unknown>>();
+  for (const obj of Array.isArray(config.objects) ? config.objects : []) {
+    if (isRecord(obj) && typeof obj.name === 'string') objects.set(obj.name, obj);
+  }
+  const fieldOf = (obj: Record<string, unknown> | undefined, name: string): Record<string, unknown> | undefined => {
+    const fields = obj?.fields;
+    const field = isRecord(fields) ? fields[name] : undefined;
+    return isRecord(field) ? field : undefined;
+  };
+
+  for (const m of mappings) {
+    if (!isRecord(m)) continue;
+    const source = m.datasourceSource !== undefined ? 'datasourceSource'
+      : m.connectorSource !== undefined ? 'connectorSource' : undefined;
+    if (source === undefined) continue;
+    const subject = `Mapping '${String(m.name)}'`;
+
+    const target = typeof m.targetObject === 'string' ? objects.get(m.targetObject) : undefined;
+    if (target !== undefined && target.managedBy !== 'synced') {
+      errors.push(
+        `${subject} pulls rows into object '${String(m.targetObject)}' through its ${source}, but that object ` +
+          `is not managedBy: 'synced' (it is ${target.managedBy === undefined ? 'unset' : `'${String(target.managedBy)}'`}). ` +
+          `A pulled copy is read-only to members, so a member's edit is never kept or lost silently by the next ` +
+          `pull; declare managedBy: 'synced' on the target object (ADR-0153 D4).`,
+      );
+    }
+
+    if (source !== 'datasourceSource' || !isRecord(m.datasourceSource)) continue;
+    const ds = m.datasourceSource;
+    const objectName = typeof ds.object === 'string' ? ds.object : undefined;
+    if (objectName === undefined) continue;
+    const at = `${subject} (datasourceSource.object '${objectName}')`;
+    const sourceObject = objects.get(objectName);
+    if (sourceObject === undefined) {
+      errors.push(
+        `${at} names an object which is not defined in objects. A datasource source reads a federated object ` +
+          `this stack declares; declare it (its datasource and external binding) or correct the name.`,
+      );
+      continue;
+    }
+    if (!isRecord(sourceObject.external)) {
+      errors.push(
+        `${at} names an object that is not federated: it declares no external binding (ADR-0015), so its rows ` +
+          `are already local and there is nothing to copy. Name a federated object — one on an external ` +
+          `datasource whose external binding addresses the remote table.`,
+      );
+      continue;
+    }
+
+    // Invariant 6: the key is the remote column the binding maps onto `id`.
+    const columnMap = isRecord(sourceObject.external.columnMap) ? sourceObject.external.columnMap : {};
+    const keyColumn = Object.keys(columnMap).find((remote) => columnMap[remote] === 'id');
+    if (keyColumn === undefined) {
+      errors.push(
+        `${at}: source_key_missing — the object's external.columnMap maps no remote column onto 'id', so the ` +
+          `pull has no key to match a row's copy by or to page by. Map the source's unique, never-null key ` +
+          `column onto id in external.columnMap.`,
+      );
+    } else {
+      const idField = fieldOf(sourceObject, 'id');
+      const idType = typeof idField?.type === 'string' ? idField.type : undefined;
+      let notExact: string | undefined;
+      if (idField !== undefined && idType === 'number') {
+        notExact = idField.scale !== 0
+          ? 'its id field is a number that does not declare scale: 0, and a key is a string or an integer'
+          : (() => {
+            const why = inexactIntegerReason(idField);
+            return why === undefined ? undefined : `its integer id field ${why}`;
+          })();
+      } else if (idType !== undefined && !SYNC_STRING_KEY_TYPES.has(idType)) {
+        notExact = `its id field is of type '${idType}', and a key is a string or an integer`;
+      }
+      if (notExact !== undefined) {
+        errors.push(
+          `${at}: source_key_not_exact — the key column '${keyColumn}' cannot be compared exactly: ${notExact}.`,
+        );
+      }
+    }
+
+    // Invariant 1 and 7: the watermark field windows are cut on.
+    const watermark = isRecord(ds.watermark) ? ds.watermark : undefined;
+    const wmName = typeof watermark?.field === 'string' ? watermark.field : undefined;
+    if (wmName === undefined) continue;
+    const wmField = fieldOf(sourceObject, wmName);
+    const wmType = typeof wmField?.type === 'string' ? wmField.type : undefined;
+    if (wmField === undefined) {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is not a field of the source object. Name the datetime, date or ` +
+          `integer field the source stamps on every write.`,
+      );
+      continue;
+    }
+    if (wmType === 'number' && wmField.scale === 0) {
+      const why = inexactIntegerReason(wmField);
+      if (why !== undefined) {
+        errors.push(`${at}: watermark_not_exact — watermark.field '${wmName}' is an integer field that ${why}.`);
+      }
+    } else if (wmType !== 'datetime' && wmType !== 'date') {
+      errors.push(
+        `${at}: watermark.field '${wmName}' is ${wmType === 'number' ? "a number field that does not declare scale: 0" : `of type '${String(wmType)}'`}, ` +
+          `which a read window cannot be halved on. Name a datetime or date field, or a number field that ` +
+          `declares scale: 0 (an integer).`,
+      );
+      continue;
+    }
+
+    // D3: the watermark is copied unchanged onto a target field of its type.
+    const copies = (Array.isArray(m.fieldMapping) ? (m.fieldMapping as unknown[]) : []).filter(
+      (entry): entry is Record<string, unknown> =>
+        isRecord(entry) &&
+        (entry.transform === undefined || entry.transform === 'none') &&
+        (entry.source === wmName || (Array.isArray(entry.source) && entry.source.length === 1 && entry.source[0] === wmName)),
+    );
+    const targetName = (entry: Record<string, unknown>): string | undefined =>
+      typeof entry.target === 'string' ? entry.target
+        : Array.isArray(entry.target) && entry.target.length === 1 && typeof entry.target[0] === 'string'
+          ? entry.target[0] : undefined;
+    const typed = copies.some((entry) => {
+      const name = targetName(entry);
+      if (name === undefined) return false;
+      if (target === undefined) return true; // no target to judge the type against; refused above
+      return fieldOf(target, name)?.type === wmType;
+    });
+    if (!typed) {
+      errors.push(
+        `${at}: watermark_field_unmapped — no fieldMapping entry copies watermark.field '${wmName}' unchanged ` +
+          `(transform none) onto a ${wmType} field of the target object. Every pulled row must carry its ` +
+          `watermark value, which a delete mark's range compares with watermark.start; add ` +
+          `{ source: '${wmName}', target: FIELD } to fieldMapping, FIELD naming a ${wmType} field of the target.`,
       );
     }
   }
@@ -5481,6 +5655,10 @@ function validateCrossReferences(
       }
     }
   }
+
+  // [ADR-0153 D1–D4] A sourced mapping's target, source object, key and
+  // watermark, judged against this stack's objects.
+  errors.push(...collectSourcedMappingErrors(config));
 
   // Validate permission-set / profile object grants → object references.
   // ARTIFACT-SCOPED (#18202) — the rule's own doc carries why it fails loudly.
@@ -6315,8 +6493,8 @@ const warnedAddressLiteralNamespaces = new Set<string>();
  * [ADR-0150 D5, child G1] Warn, once per package and namespace, about a
  * namespace this stack declares (its own `manifest.namespace` or a
  * `packages[]` body's) that spells a literal segment of the address grammar
- * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `trigger`). The
- * sentence is the install door's own judge
+ * (`actions`, `connectors`, `global`, `hooks`, `oauth`, `runs`, `trigger`).
+ * The sentence is the install door's own judge
  * (`validateNamespaceNotAddressLiteral`).
  *
  * ## Why a warning here and a refusal at the build
@@ -7446,6 +7624,11 @@ function refuseUnmergeableCollections(
  * per-object: a differing `actions` pair is refused before ownership could
  * matter, and an identical pair is one declaration whichever stack it is
  * attributed to.
+ *
+ * [ADR-0150 D4 · #32477] After the walk, the objects a nested artifact's
+ * package bodies declare are judged against every other input's, under every
+ * strategy — {@link refuseNestedBodyObjectConflicts}. They are never merged
+ * into the list this returns.
  * @internal
  */
 function mergeObjects(
@@ -7533,7 +7716,118 @@ function mergeObjects(
     }
   }
 
+  refuseNestedBodyObjectConflicts(stacks);
+
   return { objects: result.length > 0 ? result : undefined, actionsOwner };
+}
+
+/**
+ * One declaration of an object name by one input stack, as
+ * {@link refuseNestedBodyObjectConflicts} judges it: at the input's own top
+ * level, or inside one package body of a nested artifact (`holder`).
+ * @internal
+ */
+interface ComposedObjectDeclaration {
+  stackIndex: number;
+  site: string;
+  holder?: ComposedBodyHolder;
+}
+
+/**
+ * [ADR-0150 D4 · #32477] Refuse two inputs that declare one object name when
+ * either declaration sits inside a nested artifact's package body — under
+ * EVERY `objectConflict` strategy.
+ *
+ * A nested artifact — an input that already carries `packages[]`, such as one
+ * `composeStacks` built under `manifest: 'preserve'` — keeps its objects in its
+ * package bodies, and a multi-package one carries no flattened copy at all, so
+ * the walk in {@link mergeObjects} saw none of them: a nested artifact whose
+ * body declares object `X`, beside an input that also declares `X`, composed
+ * under `'error'`, where the same pair of flat inputs is refused. The boot then
+ * refused the artifact (`DUPLICATE_ARTIFACT_OBJECT_NAME`, under `'preserve'`)
+ * or kept one body's `X` and silently dropped the other declaration with its
+ * fields and embedded actions (the default manifest) — and installing the same
+ * packages one by one refuses the second package's claim on `X`.
+ *
+ * The strategy does not rescue the pair: composition carries a nested input's
+ * bodies as they are ({@link preservePackageEntries}), so `'override'` cannot
+ * replace a declaration inside one and `'merge'` cannot fold it. Measured,
+ * both left the body's `X` to the boot exactly as `'error'` would have, so the
+ * refusal is the same under all three (seat ruling on #32477, option A).
+ *
+ * Read as the boot reads the artifact (`resolveArtifactCollections` in
+ * `@objectstack/runtime`): an input's own top-level `objects` claim a name
+ * over its bodies, so a body declaration counts only for a name its input's
+ * top level does not carry, and the first body per name stands for the input.
+ * Body declarations are judged here and never lifted into the composed top
+ * level, so the composed output is unchanged; an input with no `packages[]`
+ * contributes nothing new, so flat inputs are judged by {@link mergeObjects}
+ * alone, exactly as before. Runs at step 2, before step 6 reads the action
+ * keys an object embeds ({@link collectComposedActionKeyCollisions} skips a
+ * body object on the premise that this door already judged it).
+ * @internal
+ */
+function refuseNestedBodyObjectConflicts(stacks: readonly ObjectStackDefinition[]): void {
+  const declarations = new Map<string, ComposedObjectDeclaration[]>();
+  const note = (name: string, declaration: ComposedObjectDeclaration): void => {
+    const list = declarations.get(name) ?? [];
+    list.push(declaration);
+    declarations.set(name, list);
+  };
+  const bodyNames = new Set<string>();
+
+  for (const [i, stack] of stacks.entries()) {
+    const own = (stack as { objects?: unknown }).objects;
+    const topLevel = new Set<string>();
+    if (Array.isArray(own)) {
+      for (const [j, obj] of own.entries()) {
+        if (!isRecord(obj) || typeof obj.name !== 'string' || topLevel.has(obj.name)) continue;
+        topLevel.add(obj.name);
+        note(obj.name, { stackIndex: i, site: `stack.objects[${j}]` });
+      }
+    }
+    const packages = (stack as Record<string, unknown>).packages;
+    if (!Array.isArray(packages)) continue;
+    const claimed = new Set(topLevel);
+    for (const [k, entry] of packages.entries()) {
+      const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+      if (!isRecord(body) || !Array.isArray(body.objects)) continue;
+      for (const obj of body.objects as unknown[]) {
+        if (!isRecord(obj) || typeof obj.name !== 'string' || claimed.has(obj.name)) continue;
+        claimed.add(obj.name);
+        bodyNames.add(obj.name);
+        note(obj.name, { stackIndex: i, site: `packages[${k}].objects['${obj.name}']`, holder: composedBodyHolder(body) });
+      }
+    }
+  }
+
+  const issues: string[] = [];
+  for (const name of bodyNames) {
+    const declared = declarations.get(name)!;
+    if (new Set(declared.map((d) => d.stackIndex)).size < 2) continue;
+    const sites = declared.map((d) => {
+      const at = `${stackLabel(stacks[d.stackIndex], d.stackIndex)} at ${d.site}`;
+      if (d.holder === undefined) return at;
+      const pkg = d.holder.id === undefined ? 'a package with no id' : `package '${d.holder.id}'`;
+      return `${at} (${pkg}${d.holder.namespace === undefined ? '' : `, namespace '${d.holder.namespace}'`})`;
+    });
+    issues.push(`object '${name}' is defined in multiple stacks: ${sites.join(' and ')}.`);
+  }
+  if (issues.length === 0) return;
+
+  const count = issues.length;
+  throw new StackComposeObjectConflictError(
+    `composeStacks conflict (${count} object${count === 1 ? '' : 's'} declared inside a nested artifact's package body ` +
+      `and by another input):\n\n${issues.map((issue) => `  ✗ ${issue}`).join('\n')}\n\n` +
+      `A nested artifact's package bodies are composed as they are, so no objectConflict strategy resolves this: ` +
+      `'override' cannot replace a declaration inside a body and 'merge' cannot fold one, and installing the ` +
+      `same packages one by one refuses the second package's claim on the name. Rename one of the objects, ` +
+      `contribute to the other package's object through 'objectExtensions' instead of declaring it again, or ` +
+      `compose the packages as flat inputs (each a stack of its own) under the default manifest with ` +
+      `{ objectConflict: 'override' } or { objectConflict: 'merge' }, which fold the two into one object. ` +
+      `Under { manifest: 'preserve' } each package keeps its own body, so there only the first two remedies apply.`,
+    issues,
+  );
 }
 
 /**
@@ -7554,9 +7848,11 @@ function mergeObjects(
  * - An embedded action reaches the output through exactly ONE stack's object —
  *   the one `mergeObjects` handed the object's `actions` to (`actionsOwner`).
  *   Under `objectConflict: 'override'` the other stacks' embedded declarations
- *   on that object are not in the artifact at all, so they cannot collide with
+ *   on that object are not in the COMPOSED object, so they cannot collide with
  *   anything; that loss is the object strategy's own semantics, not an action
- *   collision. Under `'merge'` two objects declaring DIFFERENT `actions` are
+ *   collision. (A `manifest: 'preserve'` artifact still carries them in their
+ *   own package bodies; the runtime binder binds what the composed artifact
+ *   carries, so they are bound at no address.) Under `'merge'` two objects declaring DIFFERENT `actions` are
  *   refused at `mergeObjects` before this walk runs (#14848), and identical
  *   ones are one declaration carried once — so the array attributed here never
  *   displaced another stack's entries.
@@ -7571,6 +7867,28 @@ function mergeObjects(
  * Deliberately NOT refused, as in `defineStack`: the cross-scope pair (a global
  * and an object-bound action sharing a name — two keys) and one name bound to
  * two different objects.
+ *
+ * [ADR-0150 D2/D4] Nor, under `manifest: 'preserve'` (`preserve`), two
+ * packages' object-less action of one name when the packages hold the name
+ * apart ({@link composedPackagesHoldApart}): the rule the install gate applies
+ * to the same pair, so one artifact carries what two installs carry. Preserve
+ * keeps each body under its own package, the boot registers each under that
+ * package, and a call reaches each by its namespace's address
+ * (`/actions/NS/global/NAME`) while the call that names no package is refused
+ * naming both. Under the default (flattening) manifest the package identity
+ * is lost, so the pair stays refused, and the refusal names `preserve`
+ * ({@link formatComposedActionKeyCollisions}). Two packages of one namespace,
+ * two bodies of one package, and a package with no namespace stay refused
+ * under either manifest, and an object-bound key keeps the one-holder rule.
+ *
+ * [ADR-0150 D4 · #32335] A nested artifact's package bodies are read too: an
+ * input carrying `packages[]` keeps its declarations there (and a
+ * multi-package `'preserve'` artifact carries no flattened copy), so walking
+ * only top levels admitted a nested artifact beside a third package of one of
+ * its bodies' namespaces declaring the same name — the pair the install gate
+ * refuses, and which the boot then reached at neither address. Each body's
+ * declaration is noted against its input and judged with the body as its
+ * holder, so compose and install refuse the same pairs.
  *
  * Runs BEFORE `mergeActionsIntoObjects` so the composed output's own echo is
  * not counted either. Returns one line per colliding key, in first-seen order.
@@ -7590,17 +7908,29 @@ function collectComposedActionKeyCollisions(
   stacks: ObjectStackDefinition[],
   composedObjects: ObjectStackDefinition['objects'],
   actionsOwner: ReadonlyMap<string, number>,
-): string[] {
+  preserve: boolean,
+): { lines: string[]; preserveWouldAdmit: boolean } {
   type Action = NonNullable<ObjectStackDefinition['actions']>[number];
   // key → stack index → where that stack declares it
   const sitesByKey = new Map<string, Map<number, string[]>>();
-  const note = (scope: string, name: string, stackIndex: number, site: string): void => {
+  // key → stack index → who in that stack declares it: its top level, and/or
+  // the package bodies of a nested artifact ({@link composedPackagesHoldApart}).
+  const declarersByKey = new Map<string, Map<number, ComposedKeyDeclarers>>();
+  // Keys some object EMBEDS: object-bound, whatever the scope string reads.
+  const embeddedKeys = new Set<string>();
+  const note = (scope: string, name: string, stackIndex: number, site: string, body?: ComposedBodyHolder): void => {
     const key = `${scope}:${name}`;
     const byStack = sitesByKey.get(key) ?? new Map<number, string[]>();
     const sites = byStack.get(stackIndex) ?? [];
     sites.push(site);
     byStack.set(stackIndex, sites);
     sitesByKey.set(key, byStack);
+    const declarers = declarersByKey.get(key) ?? new Map<number, ComposedKeyDeclarers>();
+    const own = declarers.get(stackIndex) ?? { topLevel: false, bodies: [] };
+    if (body === undefined) own.topLevel = true;
+    else if (!own.bodies.some((held) => held.id === body.id && held.namespace === body.namespace)) own.bodies.push(body);
+    declarers.set(stackIndex, own);
+    declarersByKey.set(key, declarers);
   };
 
   for (const [i, stack] of stacks.entries()) {
@@ -7634,12 +7964,63 @@ function collectComposedActionKeyCollisions(
     for (const [j, action] of (embedded as Action[]).entries()) {
       if (!isRecord(action)) continue;
       note(obj.name, action.name, owner, `objects['${obj.name}'].actions[${j}]`);
+      embeddedKeys.add(`${obj.name}:${action.name}`);
+    }
+  }
+  // [ADR-0150 D4 · #32335] A nested artifact — an input that already carries
+  // `packages[]`, such as one `composeStacks` built under `manifest: 'preserve'`
+  // — keeps its declarations in its package bodies, and a multi-package one
+  // carries no flattened copy at all, so the two walks above see none of them.
+  // The boot binds each body's actions (`actionBindingGroups` in
+  // `@objectstack/runtime`), and installing the same packages one by one judges
+  // each body, so a key a body declares is noted against its input here as well.
+  const composedObjectNames = new Set((composedObjects ?? []).filter(isRecord).map((obj) => obj.name));
+  for (const [i, stack] of stacks.entries()) {
+    const packages = (stack as Record<string, unknown>).packages;
+    if (!Array.isArray(packages)) continue;
+    for (const [k, entry] of packages.entries()) {
+      const body: unknown = isRecord(entry) ? entry.manifest : undefined;
+      if (!isRecord(body)) continue;
+      const holder = composedBodyHolder(body);
+      if (Array.isArray(body.actions)) {
+        for (const [j, action] of (body.actions as unknown[]).entries()) {
+          if (!isRecord(action)) continue;
+          // Truthiness, as the top-level walk above keys it.
+          note((action.objectName as string) || GLOBAL_ACTION_SCOPE, action.name as string, i, `packages[${k}].actions[${j}]`, holder);
+        }
+      }
+      if (!Array.isArray(body.objects)) continue;
+      for (const obj of body.objects as unknown[]) {
+        // A body object the composed top level also carries is the composed
+        // one at the boot (the top level claims it over every body), and the
+        // walk above already judged what that object carries.
+        if (!isRecord(obj) || typeof obj.name !== 'string' || composedObjectNames.has(obj.name)) continue;
+        if (!Array.isArray(obj.actions)) continue;
+        for (const [j, action] of (obj.actions as unknown[]).entries()) {
+          if (!isRecord(action)) continue;
+          note(obj.name, action.name as string, i, `packages[${k}].objects['${obj.name}'].actions[${j}]`, holder);
+          embeddedKeys.add(`${obj.name}:${action.name as string}`);
+        }
+      }
     }
   }
 
   const errors: string[] = [];
+  // [ADR-0150 D2/D4] Whether `preserve` would admit EVERY refused key: the
+  // refusal names it only then, never beside a key it would refuse too.
+  let admissible = 0;
+  let inadmissible = 0;
   for (const [key, byStack] of sitesByKey) {
     if (byStack.size < 2) continue;
+    // [ADR-0150 D2/D4] The object-less key, held apart by its packages: admitted
+    // under `preserve`, and under the flattening manifest the refusal names it.
+    if (!embeddedKeys.has(key) && key.startsWith(`${GLOBAL_ACTION_SCOPE}:`)
+      && composedPackagesHoldApart(stacks, declarersByKey.get(key)!)) {
+      if (preserve) continue;
+      admissible += 1;
+    } else {
+      inadmissible += 1;
+    }
     // Stack order, not note order — standalone declarations are walked before
     // embedded ones, so a later stack's standalone would otherwise be named
     // ahead of an earlier stack's embedded action.
@@ -7648,7 +8029,92 @@ function collectComposedActionKeyCollisions(
       .map(([index, sites]) => `${stackLabel(stacks[index], index)} at ${sites.join(' + ')}`);
     errors.push(`Action key '${key}' is declared by ${byStack.size} stacks: ${joinDeclarationOrigins(parties)}.`);
   }
-  return errors;
+  return { lines: errors, preserveWouldAdmit: admissible > 0 && inadmissible === 0 };
+}
+
+/**
+ * Who in one input stack declares a key: its own top level (`topLevel`), and
+ * the package bodies of a nested artifact that declare it (`bodies`).
+ * @internal
+ */
+interface ComposedKeyDeclarers {
+  topLevel: boolean;
+  bodies: ComposedBodyHolder[];
+}
+
+/**
+ * One package body of a nested artifact, as a holder of an action name: the id
+ * the body is keyed by and its namespace.
+ * @internal
+ */
+interface ComposedBodyHolder {
+  id: string | undefined;
+  namespace: string | undefined;
+}
+
+/**
+ * [ADR-0150 D4 · #32335] A package body as the holder of the actions it
+ * declares, read as the boot reads it: the id is `id || name`, the spelling
+ * `artifactPackageId` in `@objectstack/core` keys every package by (so an
+ * empty `id` falls back to `name`), and an empty or absent namespace is none.
+ * @internal
+ */
+function composedBodyHolder(body: Record<string, unknown>): ComposedBodyHolder {
+  const id = body.id || body.name;
+  const namespace = body.namespace;
+  return {
+    id: typeof id === 'string' && id !== '' ? id : undefined,
+    namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined,
+  };
+}
+
+/**
+ * [ADR-0150 D2/D4] Do the input stacks that declare one object-less action
+ * name (`declarers`, by stack index) hold it APART, as packages the install
+ * gate would admit side by side? Each input contributes its holders:
+ *
+ * - a flat input is ONE package — a `manifest` with an `id`;
+ * - [#32335] a nested artifact (an input carrying `packages[]`) contributes
+ *   each package body that declares the name, as installing those packages one
+ *   by one would. A nested artifact whose own TOP LEVEL declares the name
+ *   holds none apart: that declaration belongs to no single body.
+ *
+ * No two holders may be one package (two bodies of one package are one
+ * holder, and it holds one body per name), and no two may meet under
+ * {@link namespacedHoldersMeet}, the namespace half of the install gate's
+ * rule, read from its one copy: a package with no namespace, or two packages
+ * of one namespace, meet. So a nested artifact composed with a third package
+ * of one of its bodies' namespaces is refused, as the install of that third
+ * package is.
+ * @internal
+ */
+function composedPackagesHoldApart(
+  stacks: readonly ObjectStackDefinition[],
+  declarers: ReadonlyMap<number, ComposedKeyDeclarers>,
+): boolean {
+  const holders: Array<{ id: string; namespace: string | undefined }> = [];
+  for (const [index, declared] of declarers) {
+    const stack = stacks[index] as Record<string, unknown> & ObjectStackDefinition;
+    if (Array.isArray(stack.packages)) {
+      if (declared.topLevel || declared.bodies.length === 0) return false;
+      for (const body of declared.bodies) {
+        if (body.id === undefined) return false;
+        holders.push({ id: body.id, namespace: body.namespace });
+      }
+      continue;
+    }
+    const id = stack.manifest?.id;
+    if (typeof id !== 'string' || id === '') return false;
+    const namespace = stack.manifest?.namespace;
+    holders.push({ id, namespace: typeof namespace === 'string' && namespace !== '' ? namespace : undefined });
+  }
+  for (let a = 0; a < holders.length; a += 1) {
+    for (let b = a + 1; b < holders.length; b += 1) {
+      if (holders[a].id === holders[b].id) return false;
+      if (namespacedHoldersMeet(holders[a].namespace, holders[b].namespace)) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -7658,7 +8124,7 @@ function collectComposedActionKeyCollisions(
  * carries. Names no strategy option: there is none for actions by ruling.
  * @internal
  */
-function formatComposedActionKeyCollisions(lines: readonly string[]): string {
+function formatComposedActionKeyCollisions(lines: readonly string[], preserveWouldAdmit: boolean): string {
   const header =
     `composeStacks conflict: cross-stack action key collision ` +
     `(${lines.length} issue${lines.length === 1 ? '' : 's'}):`;
@@ -7672,7 +8138,14 @@ function formatComposedActionKeyCollisions(lines: readonly string[]): string {
   const fix =
     `Fix: rename one of the colliding actions within its scope, bind one of them to a different ` +
     `object, or remove the duplicate from one of the stacks. composeStacks does not pick a winner for actions.`;
-  return `${header}\n\n${body}\n\n${why}\n${fix}`;
+  // [ADR-0150 D2/D4] Only where `preserve` would admit every refused key:
+  // each package of its own namespace keeps its object-less action there.
+  const preserve = preserveWouldAdmit
+    ? `\nTo keep each package's object-less action, compose with { manifest: 'preserve' }: it keeps each package's ` +
+      `body under its own package, so two packages of two namespaces may each declare one object-less ` +
+      `action of a name, called at '/actions/NAMESPACE/${GLOBAL_ACTION_SCOPE}/NAME'.`
+    : '';
+  return `${header}\n\n${body}\n\n${why}\n${fix}${preserve}`;
 }
 
 /**
@@ -8193,7 +8666,11 @@ function collectArtifactCrossReferenceErrors(
  * multiple applications (e.g., CRM + Todo + BI) into a single project.
  *
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
- * **Objects** are merged according to the `objectConflict` strategy.
+ * **Objects** are merged according to the `objectConflict` strategy. Any input
+ * carrying `packages[]` (a nested artifact) keeps its objects in its package
+ * bodies, which are composed as they are: an object name one of those bodies
+ * declares and another input declares too is refused under every strategy,
+ * since no strategy can replace or fold a declaration inside a body (#32477).
  * **Manifest** is selected based on the `manifest` option — or, with
  * `manifest: 'preserve'`, every input's package identity is additionally folded
  * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded, and a
@@ -8485,11 +8962,13 @@ function composeBuiltStacks(
   //    copies each bound standalone action into its object: that copy is the
   //    echo an input built by `defineStack` already carries, and counting it
   //    would make every bound action collide with itself.
-  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner);
-  if (actionCollisions.length > 0) {
+  //    [ADR-0150 D2/D4] Under `manifest: 'preserve'`, two packages' object-less
+  //    action of one name is admitted when the packages hold it apart.
+  const actionCollisions = collectComposedActionKeyCollisions(stacks, objects, actionsOwner, opts.manifest === 'preserve');
+  if (actionCollisions.lines.length > 0) {
     throw new StackComposeActionKeyCollisionError(
-      formatComposedActionKeyCollisions(actionCollisions),
-      actionCollisions,
+      formatComposedActionKeyCollisions(actionCollisions.lines, actionCollisions.preserveWouldAdmit),
+      actionCollisions.lines,
     );
   }
 

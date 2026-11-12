@@ -566,7 +566,7 @@ export default class Compile extends Command {
 
       // 3a-quinquies. [ADR-0150 D5, child G1] A namespace of this artifact
       //     spelling a literal segment of the address grammar (`actions`, `connectors`,
-      //     `global`, `hooks`, `oauth`, `trigger`) is REFUSED, naming the
+      //     `global`, `hooks`, `oauth`, `runs`, `trigger`) is REFUSED, naming the
       //     literal and the doors that serve it — the install door and
       //     `defineStack` ask the same judge (`validateNamespaceNotAddressLiteral`).
       //     The SAME call `os validate` makes at its step 2c-quater, ahead of

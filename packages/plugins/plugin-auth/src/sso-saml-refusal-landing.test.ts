@@ -116,6 +116,8 @@ interface RpOptions {
   provider?: Record<string, unknown>;
   /** Extra `AuthManager` config (e.g. `audience`). */
   config?: Record<string, unknown>;
+  /** Extra stored `samlConfig` members (e.g. `idpInitiatedCallbackUrl`, `mapping`, or a `cert` the IdP no longer signs with). */
+  samlConfig?: Record<string, unknown>;
 }
 
 async function makeRp(opts: RpOptions = {}): Promise<Rp> {
@@ -150,6 +152,7 @@ async function makeRp(opts: RpOptions = {}): Promise<Rp> {
         identifierFormat: EMAIL_FORMAT,
         idpMetadata: { entityID: IDP_ENTITY },
         spMetadata: { entityID: SP_ENTITY },
+        ...opts.samlConfig,
       }),
       ...opts.provider,
     },
@@ -168,12 +171,32 @@ interface SignIn {
   errorCallbackURL?: string;
 }
 
+/** Who answers as the IdP, when not the configured one: another entity id, another signing key, assertion attributes. */
+interface IdpAs {
+  entityID?: string;
+  keyPem?: string;
+  cert?: string;
+  /** Assertion attributes by name; the Response then carries an AttributeStatement. */
+  attributes?: Record<string, string>;
+  /** The NameID, when it is not the email. */
+  nameID?: string;
+}
+
+const xmlText = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+/** An AttributeStatement carrying each attribute as one string value. */
+const attributeStatement = (attributes: Record<string, string>): string =>
+  `<saml:AttributeStatement>${Object.entries(attributes)
+    .map(([name, value]) => `<saml:Attribute Name="${xmlText(name)}" NameFormat="urn:oasis:names:tc:SAML:2.0:attrname-format:uri"><saml:AttributeValue xsi:type="xs:string">${xmlText(value)}</saml:AttributeValue></saml:Attribute>`)
+    .join('')}</saml:AttributeStatement>`;
+
 /** `/sign-in/sso` → the IdP → `POST` ACS; answers the ACS response. */
 async function signInThroughIdp(
   rp: Rp,
   email: string,
   body: SignIn = { callbackURL: AFTER, errorCallbackURL: FAILED },
   shapeResponse: (samlResponse: string) => string = (r) => r,
+  idpAs: IdpAs = {},
 ): Promise<Response> {
   const start = await rp.manager.handleRequest(
     new Request(`${AUTH}/sign-in/sso`, {
@@ -194,14 +217,43 @@ async function signInThroughIdp(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
   )).text();
   const sp = samlify.ServiceProvider({ metadata: spMetadata });
+  const entityID = idpAs.entityID ?? IDP_ENTITY;
   const idp = samlify.IdentityProvider({
-    entityID: IDP_ENTITY,
-    privateKey: idpKeyPem,
-    signingCert: idpCert,
+    entityID,
+    privateKey: idpAs.keyPem ?? idpKeyPem,
+    signingCert: idpAs.cert ?? idpCert,
     nameIDFormat: [EMAIL_FORMAT],
     singleSignOnService: [{ Binding: 'urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect', Location: IDP_SSO }],
   });
-  const { context } = await idp.createLoginResponse(sp, { extract: { request: { id: requestId } } }, 'post', { email });
+  // With attributes or another NameID, the Response is rendered from the
+  // default template with every tag filled here, as samlify fills it itself.
+  const custom =
+    idpAs.attributes || idpAs.nameID
+      ? (template: string) => {
+          const now = new Date();
+          const later = new Date(now.getTime() + 5 * 60_000).toISOString();
+          const id = `_${crypto.randomUUID()}`;
+          const filled = samlify.SamlLib.replaceTagsByValue(template, {
+            ID: id,
+            AssertionID: `_${crypto.randomUUID()}`,
+            Destination: ACS,
+            Audience: SP_ENTITY,
+            SubjectRecipient: ACS,
+            Issuer: entityID,
+            IssueInstant: now.toISOString(),
+            StatusCode: 'urn:oasis:names:tc:SAML:2.0:status:Success',
+            ConditionsNotBefore: now.toISOString(),
+            ConditionsNotOnOrAfter: later,
+            SubjectConfirmationDataNotOnOrAfter: later,
+            NameIDFormat: EMAIL_FORMAT,
+            NameID: idpAs.nameID ?? email,
+            InResponseTo: requestId,
+            AuthnStatement: '',
+          });
+          return { id, context: filled.replace('{AttributeStatement}', idpAs.attributes ? attributeStatement(idpAs.attributes) : '') };
+        }
+      : undefined;
+  const { context } = await idp.createLoginResponse(sp, { extract: { request: { id: requestId } } }, 'post', { email }, custom);
 
   return rp.manager.handleRequest(
     new Request(ACS, {
@@ -293,7 +345,8 @@ describe('which requests the SAML landing wraps', () => {
     const post = new Request(ACS, { method: 'POST', body: '' });
     expect(ssoCallbackOf('/sso/saml2/sp/acs/acme-entra', post)).toEqual({ protocol: 'saml', providerId: 'acme-entra', request: post });
     expect(ssoCallbackOf('/sso/saml2/sp/acs/acme-entra', new Request(ACS))).toBeUndefined();
-    expect(ssoCallbackOf('/sso/callback/acme-okta', new Request(ACS))).toEqual({ protocol: 'oidc', providerId: 'acme-okta' });
+    const get = new Request(ACS);
+    expect(ssoCallbackOf('/sso/callback/acme-okta', get)).toEqual({ protocol: 'oidc', providerId: 'acme-okta', request: get });
   });
 });
 
@@ -329,10 +382,19 @@ describe('reading the landing from the relay state', () => {
     expect(await readSamlAcsLanding(ctx, PROVIDER_ID, acsPost('RelayState=rs'))).toEqual({ success: AFTER, error: CONSOLE_LOGIN });
   });
 
-  it('no landing without a relay state, a row, or a readable row', async () => {
-    expect(await readSamlAcsLanding(context(stateRow({ callbackURL: AFTER })), PROVIDER_ID, acsPost('SAMLResponse=x'))).toBeUndefined();
-    expect(await readSamlAcsLanding(context(null), PROVIDER_ID, acsPost('RelayState=rs'))).toBeUndefined();
-    expect(await readSamlAcsLanding(context({ value: '{not json' }), PROVIDER_ID, acsPost('RelayState=rs'))).toBeUndefined();
+  it('with no relay state, no row, or no readable row (IdP-initiated): the platform error page, for the bare fallback', async () => {
+    const idpInitiatedLanding = { fallback: BASE, error: CONSOLE_LOGIN };
+    expect(await readSamlAcsLanding(context(stateRow({ callbackURL: AFTER })), PROVIDER_ID, acsPost('SAMLResponse=x'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context(null), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context({ value: '{not json' }), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+    expect(await readSamlAcsLanding(context(stateRow({ errorURL: FAILED })), PROVIDER_ID, acsPost('RelayState=rs'))).toEqual(idpInitiatedLanding);
+  });
+
+  it('with no relay-state row and no platform error page configured, the vendor default; an unsafe one, no landing', async () => {
+    const bare = { ...context(null), options: {} };
+    expect(await readSamlAcsLanding(bare, PROVIDER_ID, acsPost('SAMLResponse=x'))).toEqual({ fallback: BASE, error: `${AUTH}/error` });
+    const elsewhere = { ...context(null), options: { onAPIError: { errorURL: 'https://elsewhere.example/login' } } };
+    expect(await readSamlAcsLanding(elsewhere, PROVIDER_ID, acsPost('SAMLResponse=x'))).toBeUndefined();
   });
 
   it('applies the vendor redirect safety rule to the error URL', async () => {
@@ -375,6 +437,31 @@ describe('putting an ACS answer on its landing', () => {
     expect(landSamlRefusal(json, landingOf)).toBe(json);
   });
 
+  it('IdP-initiated: a refusal on the bare app-origin fallback is re-based onto the platform error page, every header kept', () => {
+    const idp = { fallback: BASE, error: CONSOLE_LOGIN };
+    const res = landSamlRefusal(redirect(`${BASE}/?error=unsolicited_response&error_description=IdP-initiated+SSO+not+allowed`), idp);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(`${CONSOLE_LOGIN}?error=unsolicited_response&error_description=IdP-initiated+SSO+not+allowed`);
+    expect(res.headers.get('set-cookie')).toBe('a=1');
+    expect(landSamlRefusal(redirect('/?error=account_not_linked'), idp).headers.get('location')).toBe(`${CONSOLE_LOGIN}?error=account_not_linked`);
+  });
+
+  it('IdP-initiated: a success on the fallback, and anything not on the bare fallback, are left alone', () => {
+    const idp = { fallback: BASE, error: CONSOLE_LOGIN };
+    for (const location of [
+      BASE, // the vendor's success on its fallback
+      `${BASE}/`,
+      `${BASE}/sso-landing?error=unsolicited_response`, // a configured IdP-initiated callback
+      `${BASE}/?tenant=acme&error=unsolicited_response`, // the root, with a query of its own
+      `${BASE}/?error=unsolicited_response#top`,
+      `https://elsewhere.example/?error=unsolicited_response`,
+      `//elsewhere.example/?error=unsolicited_response`,
+    ]) {
+      const res = redirect(location);
+      expect(landSamlRefusal(res, idp), location).toBe(res);
+    }
+  });
+
   it('with no landing read, the vendor answer stands', async () => {
     const vendor = redirect(`${AFTER}?error=account_not_linked`);
     const saml = { protocol: 'saml' as const, providerId: PROVIDER_ID, request: new Request(ACS, { method: 'POST' }) };
@@ -393,7 +480,11 @@ const seedAdmin = async (rp: Rp) => {
 };
 
 /** An IdP-initiated Response: the IdP posts an assertion no AuthnRequest asked for (no InResponseTo, no RelayState). */
-async function idpInitiated(rp: Rp, email: string): Promise<Response> {
+async function idpInitiated(
+  rp: Rp,
+  email: string,
+  shapeResponse: (samlResponse: string) => string = (r) => r,
+): Promise<Response> {
   const spMetadata = await (await rp.manager.handleRequest(
     new Request(`${AUTH}/sso/saml2/sp/metadata?providerId=${PROVIDER_ID}`),
   )).text();
@@ -411,19 +502,20 @@ async function idpInitiated(rp: Rp, email: string): Promise<Response> {
     new Request(ACS, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ SAMLResponse: context }).toString(),
+      body: new URLSearchParams({ SAMLResponse: shapeResponse(context) }).toString(),
     }),
   );
 }
 
 describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', () => {
-  it('off (the default): an unsolicited Response is refused 302 error=unsolicited_response, and signs nobody in', async () => {
+  it('off (the default): an unsolicited Response is refused 302 error=unsolicited_response on the platform error page, and signs nobody in', async () => {
     const rp = await makeRp({ provider: { allowJit: true } });
     await seedAdmin(rp);
     const res = await idpInitiated(rp, 'new.person@acme.com');
     expect(res.status).toBe(302);
-    expect(landing(res).error).toBe('unsolicited_response');
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'unsolicited_response' });
     expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
   });
 
   it('on: the same Response signs the person in', async () => {
@@ -445,7 +537,8 @@ describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', 
       data: { providerId: 'other-idp', issuer: 'https://other.example/entity', domain: 'other.example', allowIdpInitiated: true },
     });
     const res = await idpInitiated(rp, 'new.person@acme.com');
-    expect(landing(res).error).toBe('unsolicited_response');
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'unsolicited_response' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
   });
 
   it('CONTROL: an SP-initiated sign-in is answered as before with the toggle off', async () => {
@@ -454,6 +547,57 @@ describe('SAML IdP-initiated sign-in is a per-provider toggle, off by default', 
     const res = await signInThroughIdp(rp, 'new.person@acme.com');
     expect(res.headers.get('location')).toBe(AFTER);
     expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+});
+
+describe('a refused IdP-initiated SAML sign-in lands on the platform error page, as one with no errorCallbackURL does', () => {
+  // With no relay state the vendor lands every IdP-initiated answer on its
+  // fallback, the bare app origin, whose console redirect drops the query.
+
+  it('on, but the person may not be provisioned: error=SELF_REGISTRATION_CLOSED on the platform error page, no user created', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'SELF_REGISTRATION_CLOSED' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email)).toEqual(['admin@acme.com']);
+  });
+
+  it('on, and the email belongs to an account this provider is not linked to: error=account_not_linked on the platform error page', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await rp.engine.insert('sys_user', { id: 'usr_known', email: KNOWN_EMAIL, name: 'Mia Chen', email_verified: true });
+    const res = await idpInitiated(rp, KNOWN_EMAIL);
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'account_not_linked' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it("a Response the vendor's signature check refuses: error=saml_error on the platform error page", async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'someone@acme.com', tamper);
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: CONSOLE_LOGIN, error: 'saml_error' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+  });
+
+  it('CONTROL: an allowed IdP-initiated sign-in still lands on the app origin, signed in', async () => {
+    const rp = await makeRp({ provider: { allowIdpInitiated: true, allowJit: true } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(BASE);
+    expect(cookiesOf(res)).toMatch(/session_token=[^;]/);
+  });
+
+  it("CONTROL: a provider's own IdP-initiated callback keeps its refusals, as the operator configured", async () => {
+    const rp = await makeRp({ provider: { allowJit: true }, samlConfig: { idpInitiatedCallbackUrl: `${BASE}/sso-landing` } });
+    await seedAdmin(rp);
+    const res = await idpInitiated(rp, 'new.person@acme.com');
+    expect(res.status).toBe(302);
+    expect(landing(res)).toEqual({ base: `${BASE}/sso-landing`, error: 'unsolicited_response' });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
   });
 });
 
@@ -491,5 +635,119 @@ describe('invite_only refuses an unknown SAML user unless the provider allows JI
     const res = await signInThroughIdp(rp, 'new.person@acme.com');
     expect(res.headers.get('location')).toBe(AFTER);
     expect(cookiesOf(res)).toMatch(/session_token=/);
+  });
+});
+
+// ── Why a SAML sign-in was refused (`sso-saml-refusal-cause.ts`, #32086) ────
+
+describe('[#32086] a refused SAML response names its cause on error_description, keeping error=saml_error', () => {
+  /** The IdP after a certificate rotation: a new key and certificate the provider does not know yet. */
+  let rotated: { keyPem: string; cert: string };
+  beforeAll(() => {
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const keyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }) as string;
+    rotated = { keyPem, cert: selfSignedCertificate(createPrivateKey(keyPem), publicKey) };
+  });
+
+  const refusal = (res: Response) => {
+    const url = new URL(res.headers.get('location') ?? '', BASE);
+    return {
+      base: `${url.origin}${url.pathname}`,
+      params: [...url.searchParams.keys()].sort(),
+      error: url.searchParams.get('error'),
+      description: url.searchParams.get('error_description'),
+    };
+  };
+  const causeLines = (rp: Rp) => rp.warn.mock.calls.filter(([text]) => String(text).startsWith('[auth] SSO sign-in refused'));
+  const unsigned = (r: string) =>
+    Buffer.from(Buffer.from(r, 'base64').toString('utf8').replace(/<ds:Signature[\s\S]*?<\/ds:Signature>/g, '')).toString('base64');
+  const failedStatus = (r: string) =>
+    Buffer.from(Buffer.from(r, 'base64').toString('utf8').replace('urn:oasis:names:tc:SAML:2.0:status:Success', 'urn:oasis:names:tc:SAML:2.0:status:Responder')).toString('base64');
+
+  it.each([
+    ['the IdP signs with a rotated certificate the provider does not know', 'saml_signing_certificate_mismatch', (rp: Rp) => signInThroughIdp(rp, 'someone@acme.com', undefined, undefined, rotated)],
+    ['the IdP answers a failure status (Entra: user not assigned)', 'saml_idp_status_not_success', (rp: Rp) => signInThroughIdp(rp, 'someone@acme.com', undefined, failedStatus)],
+    ['the response carries no signature', 'saml_response_unsigned', (rp: Rp) => signInThroughIdp(rp, 'someone@acme.com', undefined, unsigned)],
+    ['a known certificate signs for another IdP entity id', 'saml_issuer_mismatch', (rp: Rp) => signInThroughIdp(rp, 'someone@acme.com', undefined, undefined, { entityID: 'https://other-idp.example/entity' })],
+  ])('%s: 302 to the error page, error=saml_error, error_description=%s, one warn line, nobody signed in', async (_case, cause, signIn) => {
+    const rp = await makeRp();
+    const res = await signIn(rp);
+    expect(res.status).toBe(302);
+    expect(refusal(res)).toEqual({ base: FAILED, params: ['error', 'error_description'], error: 'saml_error', description: cause });
+    expect(cookiesOf(res)).not.toMatch(/session_token=[^;]/);
+    expect(causeLines(rp)).toEqual([[expect.stringContaining(`(${cause})`), { providerId: PROVIDER_ID, protocol: 'saml', cause }]]);
+  });
+
+  it('CONTROL: a broken signature under the known certificate and issuer stays the unclassified "Invalid SAML response", with no cause line', async () => {
+    const rp = await makeRp();
+    const res = await signInThroughIdp(rp, 'someone@acme.com', undefined, tamper);
+    expect(refusal(res)).toEqual({ base: FAILED, params: ['error', 'error_description'], error: 'saml_error', description: 'Invalid SAML response' });
+    expect(causeLines(rp)).toEqual([]);
+  });
+
+  it('CONTROL: a valid response still signs in, with no cause line', async () => {
+    const rp = await makeRp();
+    const res = await signInThroughIdp(rp, 'new.person@acme.com');
+    expect(res.headers.get('location')).toBe(AFTER);
+    expect(causeLines(rp)).toEqual([]);
+  });
+
+  it('a configured certificate stored as PEM, with armour and line breaks, is the same certificate', async () => {
+    const pem = `-----BEGIN CERTIFICATE-----\n${idpCert.match(/.{1,64}/g)!.join('\n')}\n-----END CERTIFICATE-----\n`;
+    const rp = await makeRp({ samlConfig: { cert: pem } });
+    expect((await signInThroughIdp(rp, 'new.person@acme.com')).headers.get('location')).toBe(AFTER);
+    const res = await signInThroughIdp(rp, 'someone@acme.com', undefined, undefined, rotated);
+    expect(refusal(res).description).toBe('saml_signing_certificate_mismatch');
+  });
+
+  it('with the rotated certificate added to the provider (a list), the same sign-in succeeds', async () => {
+    const rp = await makeRp({ provider: { allowJit: true }, samlConfig: { cert: [idpCert, rotated.cert] } });
+    await seedAdmin(rp);
+    const res = await signInThroughIdp(rp, 'new.person@acme.com', undefined, undefined, rotated);
+    expect(res.headers.get('location')).toBe(AFTER);
+  });
+
+  it('neither the redirect nor the cause line carries the subject or a certificate', async () => {
+    const rp = await makeRp();
+    const res = await signInThroughIdp(rp, 'someone@acme.com', undefined, undefined, rotated);
+    const said = `${res.headers.get('location')} ${JSON.stringify(causeLines(rp))}`;
+    for (const leaked of ['someone@acme.com', rotated.cert.slice(0, 40), idpCert.slice(0, 40)]) expect(said).not.toContain(leaked);
+  });
+});
+
+// ── Who a SAML sign-in resolves to: the provider's attribute mapping (#32086) ─
+
+describe('[#32086] the attribute mapping decides the email and name a SAML sign-in resolves to', () => {
+  const ENTRA = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims';
+  const userNamed = (rp: Rp, email: string) => rp.engine.tables.get('sys_user')?.find((u: any) => u.email === email);
+  const signedIn = async (rp: Rp, email: string, idpAs: IdpAs) => {
+    const res = await signInThroughIdp(rp, email, undefined, undefined, idpAs);
+    expect(res.headers.get('location'), res.headers.get('location') ?? '').toBe(AFTER);
+  };
+
+  it('Okta sends the full name as "name": unmapped, the user is named after the NameID; mapped, after the attribute', async () => {
+    const unmapped = await makeRp({ provider: { allowJit: true } });
+    await seedAdmin(unmapped);
+    await signedIn(unmapped, 'mia.chen@acme.com', { attributes: { name: 'Mia Chen' } });
+    expect(userNamed(unmapped, 'mia.chen@acme.com')?.name).toBe('mia.chen@acme.com');
+
+    const mapped = await makeRp({ provider: { allowJit: true }, samlConfig: { mapping: { name: 'name' } } });
+    await seedAdmin(mapped);
+    await signedIn(mapped, 'mia.chen@acme.com', { attributes: { name: 'Mia Chen' } });
+    expect(userNamed(mapped, 'mia.chen@acme.com')?.name).toBe('Mia Chen');
+  });
+
+  it('Entra ID sends claim URIs: mapped, the email comes from the emailaddress claim (not an opaque NameID) and the name from givenname + surname', async () => {
+    const rp = await makeRp({
+      provider: { allowJit: true },
+      samlConfig: { mapping: { email: `${ENTRA}/emailaddress`, firstName: `${ENTRA}/givenname`, lastName: `${ENTRA}/surname` } },
+    });
+    await seedAdmin(rp);
+    await signedIn(rp, 'ignored@acme.com', {
+      nameID: 'a1b2c3-opaque-object-id',
+      attributes: { [`${ENTRA}/emailaddress`]: 'Mia.Chen@acme.com', [`${ENTRA}/givenname`]: 'Mia', [`${ENTRA}/surname`]: 'Chen' },
+    });
+    expect(userNamed(rp, 'mia.chen@acme.com')?.name).toBe('Mia Chen');
+    expect(rp.engine.tables.get('sys_user')?.map((u: any) => u.email).sort()).toEqual(['admin@acme.com', 'mia.chen@acme.com']);
   });
 });

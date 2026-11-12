@@ -19,6 +19,7 @@ import type { ActionDescriptor } from '../automation/node-executor.zod';
 import type { ConnectorDescriptor, ConnectorState } from '../integration/connector-descriptor';
 import type { ConversionNotice, ConversionTodoNotice } from '../conversions/types';
 import type { ExecutionContext } from '../kernel/execution-context.zod';
+import type { JobRunTrigger } from './job-service';
 import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal } from '../api/automation-api.zod';
 
@@ -1064,12 +1065,52 @@ export interface RunListResult {
  * connector-sync card).
  */
 export interface ConnectorSourcePullRequest {
-    /** Name of the `mapping` whose `connectorSource` is pulled. */
+    /** Name of the `mapping` whose source (`connectorSource` or `datasourceSource`) is pulled. */
     mapping: string;
     /** The execution context the target read and the writes run under. */
     context?: ExecutionContext;
     /** The environment the mapping and the target are read in, when the caller is environment-scoped. */
     environmentId?: string;
+    /**
+     * The package the caller belongs to, so `mapping` is read by
+     * `(package, name)` (ADR-0150 D3). For a job's pull it is the package
+     * that declares the job; a top-level job no package body of its artifact
+     * declares belongs to no package and sends none. ⛔ Not inferred to answer that package's own
+     * mapping: in an artifact of several packages the job binder finds the
+     * mapping in any package body, so the name may resolve through the
+     * closure, or be refused as outside it.
+     *
+     * - A package id: the name resolves from that package — its own mapping,
+     *   else the unique holder in its declared dependency closure plus `sys`.
+     *   A name nothing in the environment holds is not found. A name held
+     *   twice in that reach, held only by a package outside it, or held only
+     *   by an environment-authored item (ADR-0150 D3 (a)) is a refusal naming
+     *   every candidate. A disabled package's mapping, when it is the one the
+     *   name reaches, is not found, as every read of it answers.
+     * - Absent (omitted, `null` or `''`): the read is by no package — the
+     *   environment's own mapping, else the one package that holds the name;
+     *   a name two packages hold is a refusal naming both (ADR-0150 D3).
+     *
+     * The spelling and value type are the ownership-queue reads' caller
+     * package (`OwnershipQueueCallerPackage`). Optional, so an implementation
+     * written before it still satisfies the contract; such an implementation
+     * reads by no package whatever the caller sends.
+     */
+    callerPackageId?: string | null;
+    /**
+     * The job run that drove this pull (ADR-0153 D7): the `runId` the job
+     * service handed the job's handler (`JobHandler`), on the shipped adapters
+     * the `sys_job_run` id of this attempt. The pull's run record keeps it, as
+     * text, so a job-run retention sweep never reaches the pull's history.
+     * Absent for a pull no job drove, or a job service that wrote no run row.
+     */
+    jobRunId?: string;
+    /**
+     * Why the job run that drove this pull started (ADR-0153 D7): `schedule`
+     * or `manual`, as the job service handed it to the handler. Absent for a
+     * pull no job drove, or a job service that sends none.
+     */
+    trigger?: JobRunTrigger;
 }
 
 /**
@@ -1094,11 +1135,32 @@ export interface ConnectorSourcePullSummary {
 
 /**
  * What one {@link IAutomationService.pullConnectorSource} call did. A refused
- * pull never answers this — it rejects before anything is written.
+ * pull never answers this: a connector pull rejects before anything is
+ * written; a datasource pull refused part-way through its read rejects too,
+ * keeping the windows it read to their end and the position it committed.
+ *
+ * [ADR-0153 D1] A mapping pulls from one of two sources, `connectorSource` or
+ * `datasourceSource`, and the answer says which: `source` is the discriminator.
+ * The connector arm leaves it optional, so an implementation written before
+ * the datasource source answers the connector arm unchanged; read an absent
+ * `source` as `'connector'`. Narrow on `source === 'datasource'` before reading
+ * either arm's own fields.
  */
-export interface ConnectorSourcePullResult {
+export type ConnectorSourcePullResult = ConnectorSourcePullConnectorResult | ConnectorSourcePullDatasourceResult;
+
+/** The fields both arms of {@link ConnectorSourcePullResult} carry. */
+export interface ConnectorSourcePullResultBase {
     mapping: string;
     targetObject: string;
+    /** Records the source answered: the one action response's, or every window's. */
+    pulled: number;
+    summary: ConnectorSourcePullSummary;
+}
+
+/** A pull of a `connectorSource`: one declared `rest` / `openapi` connector action. */
+export interface ConnectorSourcePullConnectorResult extends ConnectorSourcePullResultBase {
+    /** Absent on an implementation written before the datasource source; reads as `'connector'`. */
+    source?: 'connector';
     connector: string;
     action: string;
     /**
@@ -1107,9 +1169,31 @@ export interface ConnectorSourcePullResult {
      * highest value already stored in `target`), `undefined` on a first pull.
      */
     watermark?: { field: string; target: string; param: string; from: unknown };
-    /** Records the one action response carried. */
-    pulled: number;
-    summary: ConnectorSourcePullSummary;
+}
+
+/**
+ * [ADR-0153 D1, D2] A pull of a `datasourceSource`: the federated object it
+ * names, read in windows cut on `watermark.field`.
+ */
+export interface ConnectorSourcePullDatasourceResult extends ConnectorSourcePullResultBase {
+    source: 'datasource';
+    /** The federated object the rows were read from (`datasourceSource.object`). */
+    object: string;
+    /** The datasource that object lives on. */
+    datasource: string;
+    /**
+     * Which read path the datasource's driver took (ADR-0153 D1): `builtin` —
+     * windows read whole, paged by the source key; `floored` — a plugin
+     * driver read through the engine's floor, windows halved over its row cap.
+     */
+    readPath: 'builtin' | 'floored';
+    /**
+     * The window field, the position the read started from, and the position
+     * this run committed at a window's end (absent when the run wrote no row),
+     * each in the field's storage form: an ISO date-time, an ISO date or an
+     * integer.
+     */
+    watermark: { field: string; from: string | number; committed?: string | number };
 }
 
 /**
@@ -1531,8 +1615,11 @@ export interface IAutomationService {
     getConnectorDescriptors?(): ConnectorDescriptor[];
 
     /**
-     * Pull one `mapping`'s `connectorSource` and write the records through the
-     * import runner — the connector sync executor, on the automation service.
+     * Pull one `mapping`'s source and write the records through the import
+     * runner — the sync executor, on the automation service. The source is the
+     * mapping's `connectorSource` (one connector action) or, [ADR-0153 D1], its
+     * `datasourceSource` (a federated object read in windows); the result's
+     * `source` says which.
      *
      * The door a job's `pull` run form binds through (`JobSchema.pull`, ruling
      * Q1-B on the connector-sync card): the job binder resolves the
@@ -1541,12 +1628,13 @@ export interface IAutomationService {
      * only as an instance method of the automation PLUGIN, which no other
      * package holds.
      *
-     * Rejects — before anything is written — when the binding cannot be
-     * honoured (no such mapping, no `connectorSource`, a connector that is not
-     * a declared `rest` / `openapi` instance, an upstream `ok: false`, …), with
-     * an error carrying an ADR-0112 `code` + `status` and a `reason`
-     * discriminator. A pull whose rows the import runner refused RESOLVES, and
-     * says so in `summary.errors`.
+     * Rejects when the binding cannot be honoured (no such mapping, no source,
+     * a connector that is not a declared `rest` / `openapi` instance, an
+     * upstream `ok: false`, a datasource source that is not a federated object,
+     * …), with an error carrying an ADR-0112 `code` + `status` and a `reason`
+     * discriminator: a connector pull before anything is written, a datasource
+     * pull keeping the windows it read to their end. A pull whose rows the
+     * import runner refused RESOLVES, and says so in `summary.errors`.
      *
      * Optional for the reason {@link getConnectorDescriptors} is: a connector
      * registry is a capability of the flow-engine implementation, not of every

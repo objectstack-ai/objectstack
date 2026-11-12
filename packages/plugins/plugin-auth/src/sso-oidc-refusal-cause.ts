@@ -45,8 +45,9 @@
  *   nothing that depends on whether an account exists. The refusal happens
  *   before any user lookup, so the answer is the same for every account.
  * - SAML causes: the vendor discards the SAML cause inside the package (a
- *   bare `catch` around `parseLoginResponse`), so it is not readable here; that
- *   half waits on the vendor. Where a SAML refusal LANDS is this module's,
+ *   bare `catch` around `parseLoginResponse`), so it is not readable from the
+ *   vendor's lines; `sso-saml-refusal-cause.ts` diagnoses it from the posted
+ *   response instead (#32086). Where a SAML refusal LANDS is this module's,
  *   below.
  *
  * The values are lowercase `error_description` tokens in the vendor's own
@@ -79,9 +80,23 @@
  * is then a redirect carrying `error=` that is not the success URL, it is
  * re-based onto that error URL with its `error` and `error_description` as
  * the vendor wrote them, built the way the vendor builds every other SAML
- * refusal. A refusal already on the error URL comes out byte-identical; a
- * success, an IdP-initiated response (no relay state), and a relay state the
- * vendor itself cannot read are left as the vendor answered them.
+ * refusal. A refusal already on the error URL comes out byte-identical, and a
+ * success is left as the vendor answered it.
+ *
+ * A response with no relay-state row to read (IdP-initiated: no `RelayState`,
+ * or one this app never wrote or cannot read) names no error URL. The vendor
+ * lands it, success and refusal alike, on the provider's IdP-initiated
+ * callback, and with none configured (every provider the Register SAML
+ * Provider bridge stores) on its fallback, the bare app origin. The site root
+ * reads no `?error=`: the console mount redirects `/` to the console without
+ * the query, so the refusal reached the sign-in page with nothing to show.
+ * {@link readSamlAcsLanding} answers such a response with the platform error
+ * page (`onAPIError.errorURL`, the default a sign-in that names no
+ * `errorCallbackURL` lands on), and only a refusal on the bare fallback (the
+ * site root, with no query but the refusal's own `error` and
+ * `error_description`) is re-based onto it. Any other IdP-initiated callback an
+ * operator configured is their landing and is left as the vendor answered it.
+ * The refusal stays a refusal: only its `Location` moves.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -107,6 +122,25 @@ export const SSO_OIDC_UNCLASSIFIED_REFUSAL = 'token_not_verified';
 
 /** The vendor's `error=` value on that redirect, which this module never changes. */
 const OPAQUE_REFUSAL_ERROR = 'invalid_provider';
+
+/**
+ * The vendor's description when the sign-in's claims carry no email address
+ * (or, for an IdP that sends no ID token, no `sub`): `handleOIDCCallback`'s
+ * `if (!userInfo.email || !userInfo.id)`.
+ */
+export const SSO_OIDC_MISSING_USER_INFO = 'missing_user_info';
+
+/**
+ * What {@link SSO_OIDC_MISSING_USER_INFO} becomes on the redirect: the email
+ * claim is the one missing. With an ID token (every OIDC sign-in that asks for
+ * the `openid` scope) the subject is always present, because the vendor
+ * refuses a token without `sub` first (`id_token_subject_missing`), so the
+ * missing member is the email the provider's email mapping reads.
+ */
+export const SSO_OIDC_EMAIL_CLAIM_MISSING = 'email_claim_missing';
+
+/** The mapping key that names the claim the email is read from (the form's "Map: Email claim"). */
+export const SSO_OIDC_EMAIL_MAPPING_KEY = 'mapping.email';
 
 const CALLBACK_PATH_PREFIX = '/sso/callback/';
 
@@ -261,22 +295,69 @@ function splitLocation(location: string): { head: string; segments: string[]; fr
   };
 }
 
-/** Whether a `Location` is the vendor's opaque ID-token refusal. */
-function isOpaqueRefusal(location: string): boolean {
+/** Whether a `Location` is the vendor's `invalid_provider` refusal with this description. */
+function isVendorRefusal(location: string, description: string): boolean {
   const parts = splitLocation(location);
   return (
     !!parts &&
     parts.segments.includes(`error=${OPAQUE_REFUSAL_ERROR}`) &&
-    parts.segments.includes(`error_description=${SSO_OIDC_UNCLASSIFIED_REFUSAL}`)
+    parts.segments.includes(`error_description=${description}`)
   );
 }
 
-function withDescription(location: string, cause: SsoOidcRefusalCause): string {
+/** Whether a `Location` is the vendor's opaque ID-token refusal. */
+function isOpaqueRefusal(location: string): boolean {
+  return isVendorRefusal(location, SSO_OIDC_UNCLASSIFIED_REFUSAL);
+}
+
+function withDescription(location: string, cause: string, replaced: string = SSO_OIDC_UNCLASSIFIED_REFUSAL): string {
   const parts = splitLocation(location)!;
   const segments = parts.segments.map((s) =>
-    s === `error_description=${SSO_OIDC_UNCLASSIFIED_REFUSAL}` ? `error_description=${cause}` : s,
+    s === `error_description=${replaced}` ? `error_description=${cause}` : s,
   );
   return `${parts.head}?${segments.join('&')}${parts.fragment}`;
+}
+
+/**
+ * Reads the claim a provider's email mapping names (`mapping.email`, `email`
+ * when unset), for the refusal's log line; `undefined` when it cannot be read.
+ */
+export type SsoOidcEmailClaimReader = (providerId: string) => Promise<string | undefined>;
+
+/**
+ * The vendor's `missing_user_info` refusal, named: the redirect's description
+ * becomes {@link SSO_OIDC_EMAIL_CLAIM_MISSING}, and one `warn` line names the
+ * claim the provider's email mapping read and the mapping key that would
+ * supply another one. The line carries no claim value and nothing about the
+ * account. ⛔ No email is ever derived here: which claim holds the address is
+ * the administrator's explicit choice.
+ */
+async function nameMissingEmailClaim(
+  response: Response,
+  location: string,
+  providerId: string,
+  host: SsoRefusalHostLogger | undefined,
+  readEmailClaim: SsoOidcEmailClaimReader | undefined,
+): Promise<Response> {
+  const claim = (await readEmailClaim?.(providerId).catch(() => undefined)) || 'email';
+  const meta = {
+    providerId,
+    protocol: 'oidc',
+    cause: SSO_OIDC_EMAIL_CLAIM_MISSING,
+    claim,
+    mappingKey: SSO_OIDC_EMAIL_MAPPING_KEY,
+  };
+  const text =
+    `[auth] SSO sign-in refused: the identity provider sent no "${claim}" claim, which the provider's email mapping `
+    + `(${SSO_OIDC_EMAIL_MAPPING_KEY}, "Map: Email claim") reads the user's email address from. Remedy: set `
+    + `${SSO_OIDC_EMAIL_MAPPING_KEY} to a claim this identity provider sends for every user; for Microsoft Entra ID `
+    + 'users without a mailbox that is preferred_username (or upn), read from the ID token, so the provider must also '
+    + 'read its claims from the ID token (skipUserInfo).';
+  if (host) host.warn(text, meta);
+  else console.warn(text, meta);
+  const headers = new Headers(response.headers);
+  headers.set('location', withDescription(location, SSO_OIDC_EMAIL_CLAIM_MISSING, SSO_OIDC_MISSING_USER_INFO));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 /**
@@ -296,6 +377,7 @@ export async function runSsoOidcCallbackScope(
   providerId: string,
   host: SsoRefusalHostLogger | undefined,
   run: () => Promise<Response>,
+  readEmailClaim?: SsoOidcEmailClaimReader,
 ): Promise<Response> {
   const scope: CallbackScope = { held: [] };
   let response: Response;
@@ -307,6 +389,10 @@ export async function runSsoOidcCallbackScope(
   }
 
   const location = response.headers.get('location');
+  if (location && isVendorRefusal(location, SSO_OIDC_MISSING_USER_INFO)) {
+    for (const line of scope.held) line.release();
+    return nameMissingEmailClaim(response, location, providerId, host, readEmailClaim);
+  }
   if (!location || !isOpaqueRefusal(location)) {
     for (const line of scope.held) line.release();
     return response;
@@ -348,7 +434,7 @@ export function ssoSamlAcsProviderId(endpointPath: string | undefined): string |
 
 /** One SSO callback request that runs inside the refusal scope. */
 export type SsoCallbackRequest =
-  | { protocol: 'oidc'; providerId: string }
+  | { protocol: 'oidc'; providerId: string; request: Request }
   | { protocol: 'saml'; providerId: string; request: Request };
 
 /**
@@ -357,7 +443,7 @@ export type SsoCallbackRequest =
  */
 export function ssoCallbackOf(endpointPath: string | undefined, request: Request): SsoCallbackRequest | undefined {
   const oidc = ssoOidcCallbackProviderId(endpointPath);
-  if (oidc !== undefined) return { protocol: 'oidc', providerId: oidc };
+  if (oidc !== undefined) return { protocol: 'oidc', providerId: oidc, request };
   const saml = ssoSamlAcsProviderId(endpointPath);
   if (saml !== undefined && request.method === 'POST') return { protocol: 'saml', providerId: saml, request };
   return undefined;
@@ -371,11 +457,16 @@ export interface SamlLandingContext {
   internalAdapter: { findVerificationValue: (identifier: string) => Promise<{ value: string } | null | undefined> };
 }
 
-/** Where one SAML sign-in lands: its success URL, and the error URL for every refusal. */
-export interface SamlAcsLanding {
-  success: string;
-  error: string;
-}
+/**
+ * Where one SAML sign-in lands.
+ *
+ * - A sign-in this app started (its relay-state row read): its `success` URL,
+ *   and the `error` URL for every refusal.
+ * - A response with no relay-state row to read (IdP-initiated): `fallback` is
+ *   the vendor's last-resort landing, the bare app origin, and only a refusal
+ *   on it is re-based onto `error`, the platform error page.
+ */
+export type SamlAcsLanding = { success: string; error: string } | { fallback: string; error: string };
 
 /** The `RelayState` an ACS `POST` carries, form-encoded or JSON (the two media types the vendor admits). */
 async function relayStateOf(request: Request): Promise<string | undefined> {
@@ -427,19 +518,16 @@ function safeSamlTarget(
 }
 
 /**
- * Where this ACS request's refusals land, read BEFORE the vendor runs: the
- * relay-state row the vendor wrote at `/sign-in/sso` (`auth-state:<RelayState>`,
- * read through the vendor's own `internalAdapter`, which the vendor deletes
- * once it has read it), with the same default and the same safety rule the
- * vendor applies to it. `undefined` when there is no relay state, the row is
- * gone or unreadable, or the error URL is not a safe target: the vendor then
- * has no error URL either, and its answer stands.
+ * The relay-state row the vendor wrote at `/sign-in/sso` for this ACS request
+ * (`auth-state:<RelayState>`, read through the vendor's own `internalAdapter`,
+ * which the vendor deletes once it has read it), or `undefined` when there is
+ * no relay state, the row is gone, or it is unreadable or names no
+ * `callbackURL`.
  */
-export async function readSamlAcsLanding(
+async function readRelayStateRow(
   context: SamlLandingContext,
-  providerId: string,
   request: Request,
-): Promise<SamlAcsLanding | undefined> {
+): Promise<{ callbackURL: string; errorURL?: unknown } | undefined> {
   const relayState = await relayStateOf(request);
   if (!relayState) return undefined;
   const row = await context.internalAdapter.findVerificationValue(`auth-state:${relayState}`);
@@ -450,14 +538,37 @@ export async function readSamlAcsLanding(
   } catch {
     return undefined;
   }
-  if (typeof state?.callbackURL !== 'string') return undefined;
-  const errorURL =
-    typeof state.errorURL === 'string' && state.errorURL
-      ? state.errorURL
-      : context.options.onAPIError?.errorURL || `${context.baseURL}/error`;
+  return typeof state?.callbackURL === 'string' ? { callbackURL: state.callbackURL, errorURL: state.errorURL } : undefined;
+}
+
+/**
+ * Where this ACS request's refusals land, read BEFORE the vendor runs, with the
+ * same default and the same safety rule the vendor applies to an error URL:
+ *
+ * - with a relay-state row, the sign-in's own error URL (its
+ *   `errorCallbackURL`, else the platform error page);
+ * - with none (an IdP-initiated response), the platform error page, for a
+ *   refusal the vendor puts on its bare app-origin fallback.
+ *
+ * `undefined` when that error URL is not a safe target: the vendor then has no
+ * error URL either, and its answer stands.
+ */
+export async function readSamlAcsLanding(
+  context: SamlLandingContext,
+  providerId: string,
+  request: Request,
+): Promise<SamlAcsLanding | undefined> {
+  const platformErrorURL = context.options.onAPIError?.errorURL || `${context.baseURL}/error`;
   const appOrigin = new URL(context.baseURL).origin;
   const acsPathname = new URL(`${context.baseURL}${SAML_ACS_PATH_PREFIX}${providerId}`).pathname;
-  const error = safeSamlTarget(errorURL, acsPathname, appOrigin, context.isTrustedOrigin);
+  const safe = (url: string) => safeSamlTarget(url, acsPathname, appOrigin, context.isTrustedOrigin);
+  const state = await readRelayStateRow(context, request);
+  if (!state) {
+    const error = safe(platformErrorURL);
+    return error ? { fallback: appOrigin, error } : undefined;
+  }
+  const errorURL = typeof state.errorURL === 'string' && state.errorURL ? state.errorURL : platformErrorURL;
+  const error = safe(errorURL);
   return error ? { success: state.callbackURL, error } : undefined;
 }
 
@@ -478,13 +589,36 @@ function rebaseSamlRefusal(location: string, target: string): string {
 }
 
 /**
+ * Whether `location` sits on the vendor's bare app-origin fallback: the site
+ * root, with no fragment and no query but the `error` and `error_description`
+ * the vendor sets on a refusal. The fallback itself carries no query, so a
+ * success there carries no `error=` and is never re-based.
+ */
+function isOnBareFallback(location: string, fallback: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(location, fallback);
+  } catch {
+    return false;
+  }
+  return (
+    url.origin === new URL(fallback).origin &&
+    url.pathname === '/' &&
+    url.hash === '' &&
+    [...url.searchParams.keys()].every((key) => key === 'error' || key === 'error_description')
+  );
+}
+
+/**
  * Put one SAML ACS answer on its landing: a redirect that carries `error=` and
- * is not the success URL is re-based onto the error URL. Every other answer is
- * returned untouched.
+ * is not the success URL (for an IdP-initiated response: that sits on the bare
+ * fallback) is re-based onto the error URL. Every other answer is returned
+ * untouched.
  */
 export function landSamlRefusal(response: Response, landing: SamlAcsLanding): Response {
   const location = response.headers.get('location');
-  if (!location || location === landing.success) return response;
+  if (!location) return response;
+  if ('success' in landing ? location === landing.success : !isOnBareFallback(location, landing.fallback)) return response;
   if (!new URL(location, 'http://better-auth.local').searchParams.has('error')) return response;
   const landed = rebaseSamlRefusal(location, landing.error);
   if (landed === location) return response;
@@ -503,8 +637,9 @@ export async function runSsoCallbackScope(
   host: SsoRefusalHostLogger | undefined,
   readSamlLanding: (saml: Extract<SsoCallbackRequest, { protocol: 'saml' }>) => Promise<SamlAcsLanding | undefined>,
   run: () => Promise<Response>,
+  readEmailClaim?: SsoOidcEmailClaimReader,
 ): Promise<Response> {
-  if (callback.protocol === 'oidc') return runSsoOidcCallbackScope(callback.providerId, host, run);
+  if (callback.protocol === 'oidc') return runSsoOidcCallbackScope(callback.providerId, host, run, readEmailClaim);
   // A landing that cannot be read leaves the vendor's answer as it is.
   const landing = await readSamlLanding(callback).catch(() => undefined);
   const response = await run();

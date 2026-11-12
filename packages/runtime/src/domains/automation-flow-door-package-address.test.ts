@@ -79,6 +79,8 @@
  * `meta-save-actor.test.ts` calls them.
  */
 
+// Pays `@objectstack/metadata`'s first load at collection, never inside a clocked case.
+import '@objectstack/metadata';
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -95,7 +97,7 @@ const SHARED = 'shared_flow';
 
 const AUTHOR = { userId: 'u_admin', isSystem: false, systemPermissions: ['manage_metadata'] };
 
-const flowOf = (name: string, label: string) => ({ name, label, type: 'autolaunched', nodes: [], edges: [] });
+const flowOf = (name: string, label: string) => ({ name, label, type: 'autolaunched', nodes: [{ id: 'start', type: 'start', label: 'Start' }], edges: [] });
 
 const liveEngines: ObjectQL[] = [];
 afterEach(async () => {

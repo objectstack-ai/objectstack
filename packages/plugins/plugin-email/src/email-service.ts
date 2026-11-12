@@ -344,9 +344,45 @@ function listToArray(
   return arr.map((addr) => formatCallerAddress(addr, field));
 }
 
+/** The message's text fields — each a string in `SendEmailInput`. */
+type MessageTextField = 'subject' | 'text' | 'html';
+
+/** How a refusal names a value's JSON kind ("a number", "an array", …). */
+function kindOf(value: unknown): string {
+  if (Array.isArray(value)) return 'an array';
+  const kind = typeof value;
+  return /^[aeiou]/.test(kind) ? `an ${kind}` : `a ${kind}`;
+}
+
+/**
+ * Refuse a text field that is present but not a string — the type
+ * `SendEmailInput` already declares for it, judged where a JSON body can
+ * carry any value.
+ *
+ * Without this, nothing typed these fields: `subject` was coerced with
+ * `String()`, so an object sent a mail reading `Subject: [object Object]`, and
+ * a non-string `text` / `html` passed the truthiness presence check and threw
+ * inside the transport's stream, which `send` records as a delivery failure —
+ * a `200 status: failed` for input the caller wrote. Refused here instead, as
+ * `VALIDATION_FAILED` naming the field, before any `sys_email` delivery row or
+ * transport call: the same refusal path, and so the same REST `400` and the
+ * same `failed` rejection row ({@link EmailService.recordRejectedMessage}), as
+ * a malformed recipient.
+ *
+ * `undefined` and `null` are absence, not a wrong type: whether an absent
+ * field is acceptable stays the presence checks' question, exactly as before
+ * (no subject is still "subject is required"; a `null` `text` beside a string
+ * `html` still sends).
+ */
+function assertTextField(value: unknown, field: MessageTextField): void {
+  if (value === undefined || value === null || typeof value === 'string') return;
+  throw new Error(`VALIDATION_FAILED: \`${field}\` must be a string, not ${kindOf(value)}`);
+}
+
 /**
  * Validate input + apply default-from + canonicalize recipients.
  * Throws Error('VALIDATION_FAILED: REASON') for malformed payloads — a
+ * non-string `subject` / `text` / `html` ({@link assertTextField}) and a
  * malformed caller-supplied address (`to` / `cc` / `bcc` / `replyTo`)
  * included. An unsendable `from` is the one malformed address that is NOT a
  * `VALIDATION_FAILED`: see {@link formatCallerAddress}.
@@ -358,6 +394,9 @@ export function normalizeMessage(
   if (!input || typeof input !== 'object') {
     throw new Error('VALIDATION_FAILED: input must be an object');
   }
+  assertTextField(input.subject, 'subject');
+  assertTextField(input.text, 'text');
+  assertTextField(input.html, 'html');
   const subject = String(input.subject ?? '').trim();
   if (!subject) throw new Error('VALIDATION_FAILED: subject is required');
   if (!input.text && !input.html) {
@@ -571,9 +610,20 @@ export const DEFAULT_TEMPLATE_LOCALE = 'en-US';
  * `locale` undefined → the loader's own deterministic best answer for the name
  * (see `createRegistryEmailTemplateLoader`), which `sendTemplate` consults only
  * as a last resort, when the bundle carries no en-US member at all.
+ *
+ * `options.callerPackageId` is the package the send is made from
+ * (`SendTemplateInput.callerPackageId`): the registry loader resolves the
+ * name from it (ADR-0150 D3). Absent, the name keeps its bare-name meaning. A
+ * replacement loader that keys on `(name, locale)` alone may ignore it.
  */
 export interface TemplateLoader {
-  load(name: string, locale: string | undefined): Promise<EmailTemplateRow | null>;
+  load(name: string, locale: string | undefined, options?: TemplateLoadOptions): Promise<EmailTemplateRow | null>;
+}
+
+/** What a {@link TemplateLoader} read is asked beside `(name, locale)`. */
+export interface TemplateLoadOptions {
+  /** The package the send is made from; absent or `null`, a caller with no package (ADR-0150 D3). */
+  callerPackageId?: string | null;
 }
 
 /**
@@ -588,7 +638,7 @@ export interface TemplateLoader {
 export const TEMPLATE_BUNDLE_LOCALES = Symbol('@objectstack/plugin-email:template-bundle-locales');
 
 /** What the built-in loader answers under {@link TEMPLATE_BUNDLE_LOCALES}. */
-export type TemplateBundleLocales = (name: string) => Promise<string[]>;
+export type TemplateBundleLocales = (name: string, options?: TemplateLoadOptions) => Promise<string[]>;
 
 /**
  * What the loader answers: the render input of one resolved `email_template`
@@ -1005,7 +1055,7 @@ export class EmailService implements IEmailService {
   /**
    * Write the `sys_email` record for a message REJECTED before delivery —
    * a `normalizeMessage` throw (bad/absent `from`, no recipient, no subject,
-   * no body).
+   * no body, a non-string `subject` / `text` / `html`).
    *
    * ## Why a row for something that was never sent
    * `sys_email` is documented as the log of "every email the platform has
@@ -1043,7 +1093,12 @@ export class EmailService implements IEmailService {
       ...(rawAddressText(raw.cc) ? { cc_addresses: rawAddressText(raw.cc) } : {}),
       ...(rawAddressText(raw.bcc) ? { bcc_addresses: rawAddressText(raw.bcc) } : {}),
       ...(rawAddressText(raw.replyTo) ? { reply_to: rawAddressText(raw.replyTo) } : {}),
-      subject: String(raw.subject ?? '').trim() || UNSTATED_COLUMN,
+      // Only a string is recorded, as for the body columns below: a
+      // non-string subject is one of the refusals recorded here, and
+      // `String()` on it either invents `[object Object]` or THROWS (an object
+      // whose own `toString` is not callable), which would replace the
+      // caller's `VALIDATION_FAILED` with a TypeError — a 500, and no row.
+      subject: (typeof raw.subject === 'string' ? raw.subject.trim() : '') || UNSTATED_COLUMN,
       ...(typeof raw.text === 'string' ? { body_text: raw.text } : {}),
       ...(typeof raw.html === 'string' ? { body_html: raw.html } : {}),
       ...(raw.relatedObject ? { related_object: raw.relatedObject } : {}),
@@ -1520,8 +1575,13 @@ export class EmailService implements IEmailService {
     // resolved to, exactly. A no-locale call keeps its ladder: en-US, then the
     // loader's own answer.
     const bundleLocales = (loader as { [TEMPLATE_BUNDLE_LOCALES]?: TemplateBundleLocales })[TEMPLATE_BUNDLE_LOCALES];
+    // [ADR-0150 D3, #31699] The package the send is made from: the name
+    // resolves from it, on every rung. Absent, the bare-name meaning.
+    const loadOptions: TemplateLoadOptions | undefined = typeof input.callerPackageId === 'string' && input.callerPackageId !== ''
+      ? { callerPackageId: input.callerPackageId }
+      : undefined;
     const locales = preferred && typeof bundleLocales === 'function'
-      ? await bundleLocales.call(loader, input.template)
+      ? await bundleLocales.call(loader, input.template, loadOptions)
       : undefined;
     const tried = new Set<string>();
     let row: EmailTemplateRow | null = null;
@@ -1531,15 +1591,15 @@ export class EmailService implements IEmailService {
         const tag = requested === undefined ? undefined : resolveBundleLocale(bundle, requested);
         if (tag === undefined || tried.has(tag)) continue;
         tried.add(tag);
-        row = await loader.load(input.template, tag);
+        row = await loader.load(input.template, tag, loadOptions);
         if (row) break;
       }
     } else {
       tried.add(wanted);
-      row = await loader.load(input.template, wanted);
+      row = await loader.load(input.template, wanted, loadOptions);
     }
     if (!row && !tried.has(DEFAULT_TEMPLATE_LOCALE)) {
-      row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE);
+      row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE, loadOptions);
     }
     if (!row && !preferred) {
       // A bundle with no en-US row at all. A caller that never named a locale
@@ -1547,7 +1607,7 @@ export class EmailService implements IEmailService {
       // case) and hard-failing it now would swap one bug for an outage — so
       // fall through to the loader's own no-locale answer, which is
       // deterministic by contract rather than driver row order.
-      row = await loader.load(input.template, undefined);
+      row = await loader.load(input.template, undefined, loadOptions);
     }
     if (!row) {
       throw new Error(`TEMPLATE_NOT_FOUND: ${input.template} (locale=${wanted})`);

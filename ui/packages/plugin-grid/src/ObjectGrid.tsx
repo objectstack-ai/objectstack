@@ -93,7 +93,8 @@ import { useObjectGridDiagnostics } from './objectGridDiagnostics';
 import { useObjectGridQueryInputs } from './objectGridQueryInputs';
 import { useObjectGridGroupingDecisions } from './objectGridGroupingDecisions';
 import { useObjectGridRowLoad } from './objectGridRowLoad';
-import { temporalGroupHeading, useObjectGridGrouping } from './objectGridGrouping';
+import { useObjectGridGrouping } from './objectGridGrouping';
+import { temporalCellText } from './temporalCellFace';
 import { useObjectGridSummaries } from './objectGridSummaries';
 import { useObjectGridRowHeightSync } from './objectGridRowHeight';
 import { useObjectGridColumnState } from './objectGridColumnState';
@@ -1404,8 +1405,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const {
     bulkFanoutParams, resolvedTotalMatching, summaries, hasSummary,
   } = useObjectGridSummaries({
-    schema, dataSource, objectName, objectSchema, data, hasInlineData, externalManualPagination,
-    hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
+    schema, dataSource, objectName, objectSchema, objectFields, objectTypesPending, data, hasInlineData,
+    externalManualPagination, hostFindParams, hostRowCount, lastFindParamsRef, totalMatching, refreshKey, serverPage,
     fetchWindow, serverGroupedFetch, isGrouped,
   });
 
@@ -3678,7 +3679,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // reads; the group's own label (its sort key) everywhere else.
   const groupHeadingOf = (group: typeof groups[number]): string => {
     const temporalFace = temporalGroupFaces.get(group.field);
-    return (temporalFace && temporalGroupHeading(temporalFace, group.keyValues[group.field], displayLocale))
+    return (temporalFace && temporalCellText(temporalFace, group.keyValues[group.field], displayLocale))
       || group.label;
   };
   // The rows an open leaf group draws: a server-grouped group's current page,

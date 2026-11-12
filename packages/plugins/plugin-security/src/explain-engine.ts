@@ -24,6 +24,7 @@ import {
   isGrantExpired,
   derivePosture as deriveAdminPosture,
   catalogEntryAddress,
+  holdsPlatformPermissionSet,
   permissionSetSwitchedOff,
   readDisabledCatalogNames,
   resolveUserAuthzGrants,
@@ -161,13 +162,14 @@ function isAuthzPosture(v: unknown): v is AuthzPosture {
  *         role positions are a provisioning source only and are no longer read
  *         as posture evidence — closing the same #2836 dual-track explain-side.
  */
-function derivePosture(context: any): AuthzPosture {
+function derivePosture(ql: unknown, context: any): AuthzPosture {
   if (!context?.userId || context?.principalKind === 'guest') return 'EXTERNAL';
   if (isAuthzPosture(context?.posture)) return context.posture;
-  const permissions: string[] = Array.isArray(context?.permissions) ? context.permissions : [];
   return deriveAdminPosture({
     isPlatformAdmin: context?.hasPlatformAdminGrant === true,
-    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => permissions.includes(n)),
+    // [ADR-0150 D3] The PLATFORM's organization-administrator set, as the
+    // resolver reads the rung: another package's set of that name confers none.
+    isTenantAdmin: ORGANIZATION_ADMIN_GRANTS.some((n) => holdsPlatformPermissionSet(ql, context, n)),
     // [Ruling of record 6355206139] The same evidence the resolver reads: the
     // projected `org_external` identity.
     isExternal: holdsExternalPosition(context?.positions),
@@ -277,6 +279,33 @@ const EXPLAIN_TO_ENGINE_OP: Record<ExplainOperation, string> = {
  */
 function dataOpOf(operation: ExplainOperation, engineOp: string): string {
   return operation === 'export' ? 'find' : engineOp;
+}
+
+/**
+ * [Ruling of record 6755714726 on #32004] The object grant the `object_crud`
+ * layer reports for `engineOp`, asked of one set list.
+ *
+ * A `transfer` is reported only where the record could be edited AND its
+ * owner changed: its door is the by-id update of `owner_id`, which is admitted
+ * by the update grant (edit, which implies read) and then by the ownership
+ * gate's transfer grant. The evaluator's `transfer` cell is the second half
+ * alone — the grant that gate reads on an update and on an insert naming
+ * another owner (ADR-0142's create-and-assign), and it stays exactly that — so
+ * the composition lives here, in the explanation, and enforcement is unchanged.
+ * Both halves are asked of the same set list, as the door asks them: the edit
+ * may come from one set and the transfer grant from another. Every other
+ * operation is its evaluator cell, unchanged.
+ */
+function objectGrantOf(
+  evaluator: PermissionEvaluator,
+  engineOp: string,
+  object: string,
+  sets: PermissionSet[],
+  opts: { isPrivate?: boolean },
+): boolean {
+  const grant = evaluator.checkObjectPermission(engineOp, object, sets, opts);
+  if (engineOp !== 'transfer') return grant;
+  return grant && evaluator.checkObjectPermission('update', object, sets, opts);
 }
 
 export interface ExplainEngineDeps {
@@ -553,7 +582,9 @@ export interface ExplainEngineDeps {
    * asker explaining ANOTHER principal is asked the same caller-context by-id
    * read through the security service's own binding, where a declared refusal
    * counts as "cannot read" too (ruling C); this dependency keeps the write
-   * path's notion, which a principal explaining itself is asked.
+   * path's notion, which a principal explaining itself is asked when its
+   * caller hands no classified read of its own (`ExplainAsker.self`, through
+   * which a refused read is answered for every record id alike).
    */
   recordAbsentToCaller?: (object: string, recordId: string, context: any) => Promise<boolean>;
 }
@@ -1816,7 +1847,7 @@ async function applyRecordAttribution(
     declaredColumns, depthScope, delegator, delegatedUnitScope,
   } = ra;
   const isRead = engineOp === 'find';
-  const posture = derivePosture(context);
+  const posture = derivePosture(deps.ql, context);
 
   const record = deps.fetchRecord
     ? await deps.fetchRecord(object, recordId, engineOp).catch(() => null)
@@ -2528,12 +2559,40 @@ export interface ExplainAsker {
    * [#22851, ruling C] The asker's own caller-context by-id read, classified
    * for an asker who is NOT the explained principal: `true` when the read
    * leaves the asker without the row, by returning none OR by refusing (a
-   * declared 4xx); a store fault rejects. Asked only for such an asker. A
-   * principal explaining itself is asked the write path's question
-   * (`recordAbsentToCaller`: absent means no row) instead, so a
-   * self-explanation shows what that principal's own doors do.
+   * declared 4xx); a store fault rejects. Asked only for such an asker: a
+   * principal explaining itself is asked {@link ExplainAsker.self} when the
+   * caller hands it, and otherwise the write path's question
+   * (`recordAbsentToCaller`: absent means no row).
    */
   cannotRead: (object: string, recordId: string) => Promise<boolean>;
+  /**
+   * Present exactly when the asker IS the explained principal: a
+   * self-explanation, however its context was copied on the way here. `readOf`
+   * is the asker's own caller-context by-id read, classified three ways: a
+   * row, no row, or `refused` (a declared 4xx, such as no read grant on the
+   * object); a store fault rejects.
+   *
+   * [Ruling of record 6787890900] A principal whose read of the object is
+   * refused gets the same explanation for every record id: the answer an id no
+   * row carries gets, with the read's refusal named as the decider
+   * ({@link explainRecordOnPass}). Nothing in it tells a stored record from a
+   * missing one.
+   */
+  self?: { readOf: (object: string, recordId: string) => Promise<ExplainAskerRead> };
+}
+
+/** The asker's own by-id read, classified ({@link ExplainAsker.self}). */
+export type ExplainAskerRead = 'row' | 'no_row' | 'refused';
+
+/** The asker for one explanation, each of its read questions answered once per record. */
+function askedOncePerRecord(asker: ExplainAsker | undefined): ExplainAsker | undefined {
+  if (!asker) return undefined;
+  const self = asker.self;
+  return {
+    context: asker.context,
+    cannotRead: oncePerRecord(asker.cannotRead),
+    ...(self ? { self: { readOf: oncePerRecord(self.readOf) } } : {}),
+  };
 }
 
 /**
@@ -2549,10 +2608,15 @@ export interface ExplainAsker {
  * every layer's per-record attribution. An asker who can read it learns
  * nothing new about its existence, and gets the full record story.
  *
- * [#22851] Ruling C settles what "cannot read" means for each asker, on the
- * one caller-context by-id read: for an asker explaining ANOTHER principal,
- * no row or a declared refusal (`asker.cannotRead`); for a principal
- * explaining itself, no row (`recordAbsentToCaller`, the write path's notion).
+ * [#22851] Ruling C settles what "cannot read" means for an asker explaining
+ * ANOTHER principal, on the one caller-context by-id read: no row or a
+ * declared refusal (`asker.cannotRead`).
+ *
+ * [Ruling of record 6787890900] A principal explaining itself cannot read an
+ * id its own by-id read finds no row for, and one its read of the object
+ * refuses. The refused read is answered for every id alike: the missing
+ * record's answer, with the refusal of the read as its decider
+ * ({@link ExplainAsker.self}).
  *
  * Module-internal on purpose: the package publishes {@link explainAccess},
  * whose signature and self-explanation answer this leaves as they are. The
@@ -2568,7 +2632,7 @@ export async function explainAccessForAsker(
   // asker and the explained), from up to three places (the asker gate, the
   // by-id write guard, the master leg of a read), and the principal's READ
   // pass below asks it again: each (principal, record) pair is read once.
-  const askerOnce: ExplainAsker | undefined = asker && { context: asker.context, cannotRead: oncePerRecord(asker.cannotRead) };
+  const askerOnce = askedOncePerRecord(asker);
   return explainOnce({ ...deps, recordAbsentToCaller: askedOnce(deps.recordAbsentToCaller) }, input, askerOnce);
 }
 
@@ -2621,7 +2685,7 @@ export async function explainRecordsForAsker(
   const verdictById = new Map<string, NonNullable<ExplainDecision['record']>>();
   for (const recordId of new Set(recordIds)) {
     const recordDeps = depsForRecord(recordId);
-    const askerOnce: ExplainAsker | undefined = asker && { context: asker.context, cannotRead: oncePerRecord(asker.cannotRead) };
+    const askerOnce = askedOncePerRecord(asker);
     const out = await explainRecordOnPass(
       {
         ...recordDeps,
@@ -2638,10 +2702,10 @@ export async function explainRecordsForAsker(
 }
 
 /** One answer per (object, record) for the length of one explanation; a rejection stays the rejection it was. */
-function oncePerRecord(
-  question: (object: string, recordId: string) => Promise<boolean>,
-): (object: string, recordId: string) => Promise<boolean> {
-  const asked = new Map<string, Promise<boolean>>();
+function oncePerRecord<T>(
+  question: (object: string, recordId: string) => Promise<T>,
+): (object: string, recordId: string) => Promise<T> {
+  const asked = new Map<string, Promise<T>>();
   return (object, recordId) => {
     const key = JSON.stringify([object, recordId]);
     let answer = asked.get(key);
@@ -2697,6 +2761,22 @@ function attributeThePrincipalsRead(layers: ExplainLayer[], read: ExplainDecisio
     if (!layer.record || !readLayer?.record) continue;
     layer.record = { ...readLayer.record, detail: principalReadPreface(operation) + (readLayer.record.detail ?? '') };
     if (layer.layer === 'tenant_isolation') layer.verdict = readLayer.verdict;
+  }
+}
+
+/**
+ * [Ruling of record 6787890900] Name a refused read on every per-record
+ * attribution of a self-explanation whose principal's read of the object is
+ * refused. Each attribution is already the one an id no row carries gets; the
+ * preface says why, and names the layer that refused the read when the read
+ * pass names one. It reads no record, so every id gets the same words.
+ */
+function attributeTheRefusedRead(layers: ExplainLayer[], decider: string | undefined): void {
+  const preface = `The principal's own read of this object is refused${decider ? ` (the ${decider} layer)` : ''}, ` +
+    'so this explanation is the same for every record id: ';
+  for (const layer of layers) {
+    if (!layer.record) continue;
+    layer.record = { ...layer.record, detail: preface + (layer.record.detail ?? '') };
   }
 }
 
@@ -3011,11 +3091,14 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
   }
 
   // ── 3. object_crud — the core grant, with per-set attribution ─────────
-  const agentCrud = deps.evaluator.checkObjectPermission(engineOp, object, sets, { isPrivate: secMeta.isPrivate });
+  // [Ruling of record 6755714726 on #32004] A `transfer` is the grant of edit
+  // AND of the transfer grant ({@link objectGrantOf}); every other operation
+  // is its evaluator cell.
+  const agentCrud = objectGrantOf(deps.evaluator, engineOp, object, sets, { isPrivate: secMeta.isPrivate });
   // [ADR-0090 D10] Both principals must grant the CRUD op; the agent may not
   // act beyond the delegator's own reach (and vice-versa).
   const delegatorCrud = delegatorSets
-    ? deps.evaluator.checkObjectPermission(engineOp, object, delegatorSets, { isPrivate: secMeta.isPrivate })
+    ? objectGrantOf(deps.evaluator, engineOp, object, delegatorSets, { isPrivate: secMeta.isPrivate })
     : true;
   // [#3545] An UNRESOLVED posture is a denial in the middleware, so it must read
   // as one here too — explain and enforcement disagreeing on a security surface
@@ -3033,11 +3116,27 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
     ? await deps.delegatedUnitReadScope(sets, object, engineOp, context, delegatorSets).catch(() => null)
     : null;
   const crudAllowed = (agentCrud || delegatedUnitScope !== null) && delegatorCrud && !delegatorRefused && !postureUnresolved;
+  const setsGranting = (op: string): string[] => sets
+    .filter((s) => deps.evaluator.checkObjectPermission(op, object, [s], { isPrivate: secMeta.isPrivate }))
+    .map((s: any) => String(s.name ?? '?'));
+  // [Ruling of record 6755714726 on #32004] A transfer's two halves may come
+  // from two sets, so each half names its own: the sets granting edit, and the
+  // sets holding the transfer grant. A set is attributed only where the
+  // composition holds: the transfer grant without edit grants no transfer.
+  const transferHalves = engineOp === 'transfer' && !postureUnresolved
+    ? { edit: setsGranting('update'), grant: setsGranting('transfer') }
+    : undefined;
   const granting = postureUnresolved
     ? []
-    : sets
-        .filter((s) => deps.evaluator.checkObjectPermission(engineOp, object, [s], { isPrivate: secMeta.isPrivate }))
-        .map((s: any) => String(s.name ?? '?'));
+    : transferHalves
+      ? agentCrud
+        ? sets.map((s: any) => String(s.name ?? '?')).filter((n) => transferHalves.edit.includes(n) || transferHalves.grant.includes(n))
+        : []
+      : setsGranting(engineOp);
+  // Read only where the agent's own sets hold the transfer grant and grant no edit.
+  const transferGrantWithoutEdit = transferHalves !== undefined
+    && deps.evaluator.checkObjectPermission('transfer', object, sets, { isPrivate: secMeta.isPrivate })
+    && !deps.evaluator.checkObjectPermission('update', object, sets, { isPrivate: secMeta.isPrivate });
   layers.push({
     layer: 'object_crud',
     verdict: crudAllowed ? 'grants' : 'denies',
@@ -3046,7 +3145,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
         ? `No resolved permission set grants ${operation} on '${object}'; the business units the principal's ` +
           `delegated admin scope covers are read as delegated administration (ADR-0090 D12), and no other ` +
           `(see readFilter).`
-        : `${operation} on '${object}' is granted by [${granting.join(', ')}]` +
+        : (transferHalves
+          ? `${operation} on '${object}' is granted: edit by [${transferHalves.edit.join(', ')}] and the transfer ` +
+            `grant by [${transferHalves.grant.join(', ')}]`
+          : `${operation} on '${object}' is granted by [${granting.join(', ')}]`) +
           (delegatorSets ? ' AND by the delegator (D10 intersection).' : '.')
       : postureUnresolved
         // [#10401] One wording, shared with the middleware's own throw, so
@@ -3062,7 +3164,10 @@ async function explainObjectPass(deps: ExplainEngineDeps, input: ExplainInput, a
                 `runs in — D10 fails closed (access denied).`
               : agentCrud && !delegatorCrud
                 ? `The agent grants ${operation} on '${object}' but the DELEGATOR does not — D10 intersection denies (an agent may not exceed the user it acts for).`
-                : `No resolved permission set grants ${operation} on '${object}'` +
+                : transferGrantWithoutEdit
+                  ? `No resolved permission set grants edit on '${object}'. A transfer is an update of the record's ` +
+                    `owner, so it needs edit beside the transfer grant: the transfer grant alone transfers no record.`
+                  : `No resolved permission set grants ${operation} on '${object}'` +
                   (secMeta.isPrivate ? " (object is 'private' posture — non-superuser '*' wildcards are excluded, ADR-0066 D2)." : '.'),
     contributors: granting.map((n) => ({ kind: 'permission_set' as const, name: n, via: viaOf(n) })),
   });
@@ -3364,17 +3469,25 @@ async function explainRecordOnPass(
   // context, and no exemption sits beside it: a system asker is asked too,
   // and the door returns it every row.
   //
-  // [#22851] Ruling C: what "cannot read" means differs by asker, on that one
-  // read. A principal explaining itself is asked the write path's question
-  // (`recordAbsentToCaller`: absent means no row), so its explanation shows
-  // what its own doors do; an asker explaining ANOTHER principal is asked
+  // [#22851] Ruling C: an asker explaining ANOTHER principal is asked
   // `asker.cannotRead`, where a declared refusal of its read counts as
-  // "cannot read" too. A store fault fails the explanation either way.
+  // "cannot read" too.
+  //
+  // [Ruling of record 6787890900] A principal explaining itself is asked its
+  // own read, classified three ways (`asker.self`): no row and a refusal are
+  // both "cannot read", and a refusal is answered for every record id alike,
+  // with the read's refusal as the decider (below). Without that question (the
+  // published `explainAccess`), the write path's (`recordAbsentToCaller`:
+  // absent means no row). A store fault fails the explanation either way.
   const askerContext = asker?.context ?? context;
-  const askerIsPrincipal = askerContext === context;
-  const askerCannotRead = askerIsPrincipal
-    ? readQuestion !== undefined && (await readQuestion(object, recordId, context))
-    : await asker!.cannotRead(object, recordId);
+  const askerIsPrincipal = asker?.self !== undefined || askerContext === context;
+  const askerRead = asker?.self ? await asker.self.readOf(object, recordId) : undefined;
+  const askerReadRefused = askerRead === 'refused';
+  const askerCannotRead = askerRead !== undefined
+    ? askerRead !== 'row'
+    : askerIsPrincipal
+      ? readQuestion !== undefined && (await readQuestion(object, recordId, context))
+      : await asker!.cannotRead(object, recordId);
   // [#21771] Ruling A on the write doors: a row the principal cannot READ is
   // a row that does not exist, so an update or delete of it answers what a
   // nonexistent id answers, wherever enforcement reaches that question: past
@@ -3431,6 +3544,22 @@ async function explainRecordOnPass(
     // A read story that reaches no refusal names no decider: the door's
     // answer stands, `visible: false`, and no layer is credited with it.
     const readDecider = read.record && read.record.visible === false ? read.record.decidedBy : undefined;
+    recordVerdict = { recordId, visible: false, ...(readDecider ? { decidedBy: readDecider } : {}) };
+  }
+  if (askerReadRefused) {
+    // [Ruling of record 6787890900] A principal whose own read of the object
+    // is refused is told, for every record id, the missing record's story
+    // (written above) and the refusal of that read as its decider. The decider
+    // is the read-operation pass's own: for a read, this pass; for any other
+    // verb, a read pass of the same record, whose asker is refused the same
+    // read, so it too reads no row. The refusal is a fact of the object, never
+    // of a record, so no stored row reaches either. A read pass that names no
+    // refusing layer leaves the decider out, for every id alike.
+    const read = operation === 'read'
+      ? recordVerdict
+      : (await explainOnce(deps, { object, operation: 'read', context, recordId }, asker)).record;
+    const readDecider = read && read.visible === false ? read.decidedBy : undefined;
+    attributeTheRefusedRead(layers, readDecider);
     recordVerdict = { recordId, visible: false, ...(readDecider ? { decidedBy: readDecider } : {}) };
   }
   return { record: recordVerdict, posture: out.posture };

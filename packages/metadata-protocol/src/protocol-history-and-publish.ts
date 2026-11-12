@@ -4,8 +4,8 @@
  * [#29985 codemod] The "History, publish, drafts, publish backfill" facet of
  * `ObjectStackProtocolImplementation`: the bodies of `historyMetaItem`,
  * `publishMetaItem`, `publishMetaItemUnaudited`, `promoteDraftForPublish`,
- * `runPublishSideEffects`, `discardPackageDrafts` moved out of `protocol.ts`
- * whole by `scripts/codemod-split-protocol.mjs`.
+ * `runPublishSideEffects`, `publishPackageDrafts`, `discardPackageDrafts` moved
+ * out of `protocol.ts` whole by `scripts/codemod-split-protocol.mjs`.
  *
  * A MOVE, not a redesign. `ProtocolHistoryAndPublishFacet` is a stateless facet over the host
  * (ruling 6624345766): each static method below is the body of the class
@@ -36,17 +36,153 @@ import type { OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { storedFlowVerdictBody } from './protocol-flow-save-replay.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
-import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
+import { canonicalMetaType, canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { packagelessPublishNoDraftRefusal, permissionSetOwnerBindingRefusal } from './protocol-authoring-refusals.js';
 import { memberOption, mutationEventMemberOfBody, resolveBundleMemberSelector } from './protocol-bundle-members.js';
-import { clientFacingFailureText } from './protocol-client-failures.js';
+import { clientFacingFailureCode, clientFacingFailureText } from './protocol-client-failures.js';
 import type { PublishMaterializeResult } from './protocol-package-lifecycle-types.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
-import { withPendingAudit } from './protocol-audit-entry.js';
+import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+import { overlayMemberWhere } from './migrations/overlay-index.js';
+import { isMissingTableError } from '@objectstack/metadata/errors';
+import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
+import type { PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
+import { commitPlanKey } from './protocol-bundle-members.js';
+import type { CommitPlanItem } from './protocol-bundle-members.js';
+import type { PreflightViolationCode } from './protocol-audit-entry.js';
+import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { SeedAppliedLandedParsed } from '@objectstack/spec/api';
+// [#29985 codemod] `ObjectStackProtocolImplementation` here is `ObjectStackProtocolImplementationStatics` (imported AS the class): forwarders to its statics (#30147).
+import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplementation } from './protocol.js';
+import { PROMOTION_REGISTRY_QUESTION, type RegistryQuestion } from './registry-question.js';
+import { engineCanRollBack } from '@objectstack/core';
+import type { SysMetadataRepository } from './sys-metadata-repository.js';
+
+/**
+ * [#32396] A promotion a package publish wrote: what {@link undoLandedPromotions}
+ * needs to put it back.
+ */
+type LandedPromotion = {
+    /** The draft row as `listDrafts` listed it (stored type spelling, its package binding, its member). */
+    d: { type: string; name: string; member?: string; packageId?: string | null };
+    /** The folded type the promotion addressed. */
+    singularType: string;
+    /** The package the ACTIVE row was written under. */
+    packageId: string | null;
+    /** The active row's stamp, as `repo.promoteDraft` answered it. */
+    version: string;
+    /** The draft row the promotion consumed. */
+    promotedDraft?: { body: unknown; hash: string };
+};
+
+/**
+ * [#32396] `promoteDraftForPublish` answers no `result` only to a call that
+ * stated `judgeOnly`. A caller that did not, and still received none, is told
+ * so by name rather than reading `undefined` as a version.
+ */
+function unwrittenPromotionError(type: string, name: string): Error {
+    return new Error(
+        `The promotion of ${type}/${name} answered no write although it was not asked to only judge the draft; `
+        + 'nothing about this item is known to have been published.',
+    );
+}
+
+/**
+ * [#32396, ADR-0067 D2] Undo every promotion a refused package publish made,
+ * on a runtime whose engine could not roll the batch's transaction back
+ * (`engineCanRollBack` false). Newest first; for each item, the active row goes
+ * back to what it was before the publish — removed when the publish created
+ * it, restored to its prior version when the publish edited it (the same two
+ * moves an ADR-0067 D3 revert makes, read off the same pre-publish capture) —
+ * and the draft row the promotion consumed is put back as the pending draft,
+ * byte for byte, so its hash and its version token are the ones the author
+ * holds.
+ *
+ * Each undo step appends its own history event, as a revert does: history is
+ * append-only (D3), so the log records that the publish happened and was
+ * undone rather than pretending it never ran. Phase 2 never ran for a refused
+ * batch, so there is no event, materialization or audit row to undo, and the
+ * registry still serves the pre-publish state; each undo write still takes the
+ * registry route every stored-row write takes, the heal
+ * (`restoreArtifactRegistryView`), which re-derives the item's entry from the
+ * active rows the store serves and so re-asserts that state.
+ *
+ * Returns the promotions it could NOT undo, each with its failure; empty means
+ * the store is back to its pre-publish state. Never throws: one item's failure
+ * does not stop the others from being undone.
+ *
+ * Not covered: a causal promotion the store itself left half-written (its
+ * active row stored, its history append then failed) is not in `landed` — the
+ * promotion threw — and is the store's own non-atomicity on such a runtime.
+ */
+async function undoLandedPromotions(host: Pick<ProtocolHost, 'isArtifactBacked' | 'restoreArtifactRegistryView'>, args: {
+    repo: SysMetadataRepository;
+    landed: ReadonlyArray<LandedPromotion>;
+    /** The pre-publish capture (`existedBefore` / `prevVersion` per item). */
+    plan: ReadonlyArray<CommitPlanItem>;
+    packageId: string;
+    actor?: string;
+}): Promise<Array<{ item: LandedPromotion; error: unknown }>> {
+    const notUndone: Array<{ item: LandedPromotion; error: unknown }> = [];
+    const actor = args.actor ?? null;
+    const source = 'protocol.publishPackageDrafts';
+    const message = `undo the promotion: the batch publish of package '${args.packageId}' was refused (ADR-0067 D2)`;
+    for (const item of [...args.landed].reverse()) {
+        const ref = { type: item.singularType, name: item.d.name, org: 'env' } as unknown as Parameters<SysMetadataRepository['get']>[0];
+        // Per item, as the revert derives it: a runtime item is not refused by
+        // the artifact-override gate on its way back out.
+        const intent: 'override-artifact' | 'runtime-only' =
+            host.isArtifactBacked(item.singularType, item.d.name) ? 'override-artifact' : 'runtime-only';
+        try {
+            if (!item.promotedDraft) {
+                throw new Error(`the draft ${item.d.type}/${item.d.name} consumed was not captured, so it cannot be put back`);
+            }
+            const before = args.plan.find((it) => commitPlanKey(it) === commitPlanKey(item.d));
+            if (before?.existedBefore) {
+                if (before.prevVersion === null) {
+                    throw new Error(`${item.d.type}/${item.d.name} was live before the publish, at no recorded version to restore`);
+                }
+                await args.repo.restoreVersion(ref, before.prevVersion, {
+                    actor, source, message, intent, packageId: item.packageId, ...memberOption(item.d.member),
+                });
+                // The registry route every stored-row write takes. Phase 2 never
+                // ran, so the registry still serves this body; the heal
+                // re-registers the active row the store now serves, the one just
+                // restored, without opening another write-through caller.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+            } else {
+                await args.repo.delete(ref, {
+                    parentVersion: item.version, actor, source, message, intent,
+                    state: 'active', packageId: item.packageId, ...memberOption(item.d.member),
+                });
+                // …and a removed row's heal, as `revertCommit`'s removal takes
+                // it: the registry never registered this row, so it is left
+                // serving what it served before the publish.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+            }
+            // A drain that failed left the draft row in place (#4981): it is
+            // still pending, and putting it back again would conflict with it.
+            const draftKey = item.d.packageId ?? null;
+            const pending = await args.repo.get(ref, { state: 'draft', packageId: draftKey, ...memberOption(item.d.member) });
+            if (!pending) {
+                await args.repo.put(ref, item.promotedDraft.body, {
+                    parentVersion: null, actor, source, message, intent, state: 'draft', packageId: draftKey,
+                });
+                // No registry entry serves a draft row: the heal re-derives this
+                // item's entry from the active rows the store now serves, the
+                // state the undo above just restored — the route the stored-row
+                // census asks of every write.
+                await host.restoreArtifactRegistryView(item.singularType, item.d.name, null, item.d.member);
+            }
+        } catch (error) {
+            notUndone.push({ item, error });
+        }
+    }
+    return notUndone;
+}
 
 export class ProtocolHistoryAndPublishFacet {
     /** The body of `ObjectStackProtocolImplementation#historyMetaItem`; the method's docblock there is its contract. */
@@ -365,11 +501,13 @@ export class ProtocolHistoryAndPublishFacet {
         // site has no transaction of its own, so recording it in the `catch` is
         // where it always effectively landed; what changed is that the helper no
         // longer assumes that on behalf of the batch route too.
-        const { singularType, advisories, result } = await host.promoteDraftForPublish({ ...request, member })
+        const { singularType, advisories, result } = await host.promoteDraftForPublish({ ...request, member, registryQuestion: PROMOTION_REGISTRY_QUESTION['item-publish'] })
             .catch(async (err: unknown) => {
                 await host.recordPendingDenialAudit(err);
                 throw err;
             });
+        // [#32396] This call states no `judgeOnly`, so the promotion was written.
+        if (!result) throw unwrittenPromotionError(request.type, request.name);
         // [#7748] ADR-0010 — success audit (best-effort), the same shape
         // `saveMetaItem` and `deleteMetaItem` write on their allowed paths.
         //
@@ -537,6 +675,25 @@ export class ProtocolHistoryAndPublishFacet {
              * all address it, so the body judged is the body that goes live.
              */
             member?: string;
+            /**
+             * [ADR-0144 D2 and D6, amended] The registry question this
+             * promotion asks before the row goes live, stated by every producer
+             * ({@link PROMOTION_REGISTRY_QUESTION}, `registry-question.ts`): the
+             * per-item publish asks against the registry, a package publish
+             * body-only.
+             */
+            registryQuestion: RegistryQuestion;
+            /**
+             * [#32396, ADR-0067 D2] Judge, do not write: every refusal this
+             * method can raise is raised exactly as it would be, and the method
+             * returns just before `repo.promoteDraft`, so nothing is written
+             * and the answer carries no `result`. Stated by
+             * `publishPackageDrafts` on a runtime that cannot roll back, which
+             * judges its whole batch this way before promoting any of it: a
+             * refused draft then refuses the batch with nothing promoted,
+             * rather than after the drafts before it are already live.
+             */
+            judgeOnly?: boolean;
         }): Promise<{
             singularType: string;
             /**
@@ -551,7 +708,16 @@ export class ProtocolHistoryAndPublishFacet {
              * discipline — per the maintainer's ruling, no parallel top-level map.
              */
             advisories: RuntimeAuthoringIssue[];
-            result: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+            /** What `repo.promoteDraft` wrote. Absent exactly when `judgeOnly` was stated. */
+            result?: { version: string; seq: number; item: MetadataItem; packageId: string | null };
+            /**
+             * [#32396] The draft row this promotion consumed — the body and
+             * hash it judged and `repo.promoteDraft` promoted (`expectedDraftHash`
+             * holds the two to one row). `publishPackageDrafts` puts it back
+             * when it undoes the promotion on a runtime that cannot roll back.
+             * Absent when nothing was written.
+             */
+            promotedDraft?: { body: unknown; hash: string };
         }> {
         const singularType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         if (!host.isOverlayAllowed(singularType)
@@ -723,7 +889,15 @@ export class ProtocolHistoryAndPublishFacet {
             // writes, the per-item publish answers the registry's own envelope
             // and a batch publish aborts on it into `failed[]` as on the
             // refusals below (ADR-0067 D2). See {@link objectRegistrationRefusal}.
-            const registration = host.objectRegistrationRefusal(draftForGate.body, layer);
+            //
+            // [ADR-0144 D2 and D6, amended] The per-item publish has no
+            // sibling, so it also asks the doors that read the registry's
+            // other objects (#29673's batch reason does not reach it); a
+            // package publish keeps the body-only question
+            // (`registry-question.ts`).
+            const registration = host.objectRegistrationRefusal(draftForGate.body, layer, {
+                againstRegistry: request.registryQuestion === 'against-registry',
+            });
             if (registration) throw registration;
         }
 
@@ -904,6 +1078,7 @@ export class ProtocolHistoryAndPublishFacet {
         if (draftForGate) {
             const grantRefusal = await host.unknownGrantObjectSaveRefusal(
                 singularType, draftForGate.body, request.name, request.batchObjects, undefined, 'publish',
+                undefined, promoteInto,
             );
             if (grantRefusal) throw grantRefusal;
         }
@@ -1013,6 +1188,9 @@ export class ProtocolHistoryAndPublishFacet {
 
         // [ADR-0146 D2] The override write gate's refusal, the last before the store.
         if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
+        // [#32396] Every refusal above has had its turn; a judge-only call stops
+        // here, before the one write this method makes.
+        if (request.judgeOnly) return { singularType, advisories: runtimeAdvisories };
         const artifactBacked = host.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
@@ -1066,7 +1244,12 @@ export class ProtocolHistoryAndPublishFacet {
                 // [#22877] …of the member that was judged.
                 ...memberOption(request.member),
             });
-            return { singularType, advisories: runtimeAdvisories, result };
+            return {
+                singularType,
+                advisories: runtimeAdvisories,
+                result,
+                ...(draftForGate ? { promotedDraft: { body: draftForGate.body, hash: draftForGate.hash } } : {}),
+            };
         } catch (err: any) {
             if (err instanceof ConflictError) {
                 // [#21207] Keyed values or none in the text and attributes.
@@ -1236,6 +1419,1119 @@ export class ProtocolHistoryAndPublishFacet {
             ...mutationEventMemberOfBody(args.singularType, args.body),
         });
         return out;
+    }
+
+    /** The body of `ObjectStackProtocolImplementation#publishPackageDrafts`; the method's docblock there is its contract. */
+    static async publishPackageDrafts(this: Pick<ProtocolHost, 'applyPublishBackfill' | 'applySeedBodies' | 'collectBatchPendingDeclarations' | 'engine' | 'ensureOverlayIndex' | 'facade' | 'findEnvironmentRow' | 'getOverlayRepo' | 'getServicesRegistry' | 'isArtifactBacked' | 'objectNamespaceObjectNameClash' | 'objectNamespacePrefixViolation' | 'planPublishBackfill' | 'promoteDraftForPublish' | 'receiptVersion' | 'recordMetadataAudit' | 'recordPackageCommit' | 'recordPendingDenialAudit' | 'restoreArtifactRegistryView' | 'runPublishSideEffects'>, request: {
+        packageId: string;
+        actor?: string;
+        /**
+         * ADR-0067 — commit message (for AI turns: the user's instruction).
+         * [ADR-0146 D1] Also the change note of every item this publish
+         * promotes: each `sys_metadata_history` row it writes records it as
+         * `change_note`. Absent or empty, those rows keep the sentence naming
+         * the package.
+         */
+        message?: string;
+        /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
+        aiModel?: string;
+        /**
+         * [#24253] Opt-in: fields THIS publish adds whose literal
+         * `defaultValue` is written into the object's existing rows once the
+         * drafts are live. Absent or empty, no row is touched. Every entry is
+         * judged before anything is promoted ({@link planPublishBackfill}), and
+         * one that cannot be honoured refuses the whole request.
+         */
+        backfill?: ReadonlyArray<{ object: string; field: string }>;
+        /**
+         * [#24253] The caller's execution context: the principal the
+         * `backfill` writes run as, so object permissions, RLS/FLS and record
+         * hooks apply exactly as they do to that caller's own edit. Required
+         * when `backfill` names anything. [#25484] The build probes read as it
+         * too: a dashboard widget is probed through `queryDataset` as this
+         * caller, the renderer's path, never as the system.
+         */
+        context?: unknown;
+    }): Promise<{
+        success: boolean;
+        /**
+         * [#10462] First-class discriminant for WHICH exit answered — the fact
+         * `success` alone cannot carry: a publish with nothing to promote and
+         * a genuine refusal both answer `success: false` (cloud#1488 graded
+         * the former as a rollback and burned two repair rounds on artifacts
+         * that were already correct). Producer invariants, pinned in the
+         * conformance suites: `outcome === 'refused'` if and only if
+         * `failed.length > 0`; `outcome === 'nothing_to_publish'` if and only
+         * if `published.length === 0 && failed.length === 0`; and
+         * `success === (outcome === 'published')` — `success` keeps its exact
+         * pre-#10462 value and is now derivable. Values are lowercase snake,
+         * matching the `sys_metadata_audit` outcome vocabulary.
+         */
+        outcome: 'published' | 'refused' | 'nothing_to_publish';
+        publishedCount: number;
+        failedCount: number;
+        published: Array<{
+            type: string;
+            name: string;
+            version: string;
+            /**
+             * [#9343] The #4463 runtime authoring gate's non-blocking findings
+             * for THIS draft's promotion — the same element shape and the same
+             * omitted-when-empty discipline as
+             * `PublishMetaItemResponseSchema.advisories` on the single-item
+             * door (#9176), riding each `published[]` element per the
+             * maintainer's ruling (no parallel top-level map). Present ONLY
+             * when the gate raised at least one finding against this draft —
+             * an empty array is never emitted, so an advisory-free batch's
+             * response bytes are unchanged. Advisory by construction: every
+             * entry is `warning`/`info`, because an `error` finding refuses
+             * the promotion and — the batch being all-or-nothing (ADR-0067
+             * D2) — aborts the whole batch as `failed[]` instead;
+             * `failed[]` elements never carry this key.
+             */
+            advisories?: RuntimeAuthoringIssue[];
+        }>;
+        failed: Array<{ type: string; name: string; error: string; code?: string }>;
+        /** Aggregate result of materializing every published `seed` (absent when no seeds). */
+        seedApplied?: { success: boolean; inserted: number; updated: number; error?: string; errors?: unknown[]; landed?: SeedAppliedLandedParsed[] };
+        /**
+         * ADR-0086 P2 — aggregate result of publish-time materializers across the
+         * batch (e.g. `flow`). Absent when no published item had a registered
+         * materializer. `failures` names each item whose projection did NOT
+         * land, so the caller surfaces it instead of reporting a clean publish
+         * over an item that never went live.
+         */
+        materializeApplied?: {
+            success: boolean;
+            inserted: number;
+            updated: number;
+            failures: Array<{ type: string; name: string; error: string }>;
+        };
+        /**
+         * ADR-0038 L3 — post-publish runtime probe report (absent when nothing
+         * was publishable). One real read per published artifact: seeded
+         * objects must have rows, views must be readable, dashboard widgets'
+         * dataset selections must execute and return data. `issues` carries
+         * BuildIssue-shaped findings (layer 'runtime') for the agent / chat
+         * health surfaces; probes never fail the publish itself.
+         */
+        probes?: import('./build-probes.js').BuildProbeReport;
+        /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
+        commitId?: string;
+        /**
+         * [#24253] What the requested `backfill` wrote, per field — present
+         * only when the request named at least one field and the batch
+         * published. See {@link applyPublishBackfill}.
+         */
+        backfillApplied?: PublishBackfillReceipt;
+    }> {
+        // [ADR-0131 D6] FIRST: an organization-scoped package publish is
+        // refused. See {@link organizationScopedWriteRefusal}.
+        ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
+            `Package '${request.packageId}'`, request,
+        );
+        // [#24253] The request's own shape is judged before any server state
+        // is read; what it names is judged against the drafts below.
+        const backfillRequest = readPublishBackfillRequest(request.packageId, request.backfill, request.context);
+        await this.ensureOverlayIndex();
+        // Environment-wide drafts only: the environment repository lists the
+        // environment's rows (a legacy organization's is left out off the
+        // physical column), so a legacy organization-scoped draft
+        // is never promoted here (it waits for the promotion ceremony,
+        // ADR-0131 C7).
+        const repo = this.getOverlayRepo();
+        const drafts = await repo.listDrafts({ packageId: request.packageId });
+        // [#24253] Before anything is promoted: a backfill entry that cannot be
+        // honoured refuses the request whole, so a publish never lands with
+        // half of what its caller asked for.
+        const backfillPlan = backfillRequest.length > 0
+            ? await this.planPublishBackfill(request.packageId, backfillRequest, drafts)
+            : [];
+
+        // Runtime enforcement of the package namespace-prefix rule (ADR-0028
+        // current-state contract). `defineStack` enforces this at compile time,
+        // but Studio-authored packages never take that path — so a bare,
+        // collision-prone object name (`ticket` instead of `leave_ticket`)
+        // could publish unchecked. Read the package's DECLARED namespace and
+        // reject any object draft missing the `<ns>_` prefix BEFORE promoting
+        // anything — the publish is atomic, so one bad name fails the whole
+        // batch with an actionable message. Like `defineStack`, we do NOT
+        // invent a prefix here when the package declares no namespace (legacy
+        // packages are grandfathered); the default is derived+persisted once at
+        // install time (`installPackage`), so real Studio packages always have
+        // one by the time they publish.
+        //
+        // [#24547] The verdict is {@link objectNamespacePrefixViolation}'s, the
+        // judge the direct save in {@link saveMetaItem} and the per-item
+        // publish ({@link promoteDraftForPublish}) ask too, so the three doors
+        // give one verdict and one sentence for one name in one package.
+        /**
+         * Every PRE-FLIGHT refusal of this batch, in one report.
+         *
+         * The namespace-prefix rule established the posture and the
+         * ADR-0121 endpoint gates below join it: a violation is found BEFORE
+         * anything is promoted, and it fails the WHOLE batch
+         * (`publishedCount: 0`, `published: []`) rather than publishing the
+         * healthy siblings around it. That is not a choice made here — it is
+         * ADR-0067 D2's turn-atomicity ("a commit cannot half-land") read
+         * backwards onto the pre-flight, and it is what `MetadataManager.
+         * publishPackage` does with the same gates on the other path (#5189):
+         * one `validationErrors` list, `itemsPublished: 0`.
+         *
+         * Both gates run before the report is returned, so an author fixing a
+         * package sees the object-name violations AND the endpoint violations
+         * in one round trip instead of one class per publish attempt.
+         */
+        const preflightViolations: Array<{
+            type: string;
+            name: string;
+            error: string;
+            code: PreflightViolationCode;
+        }> = [];
+        for (const d of drafts) {
+            if (d.type !== 'object') continue;
+            const err = this.objectNamespacePrefixViolation(d.name, request.packageId);
+            if (err) {
+                preflightViolations.push({
+                    type: d.type,
+                    name: d.name,
+                    error: err,
+                    code: 'NAMESPACE_PREFIX',
+                });
+            }
+            // [ADR-0150 D6, child K] …and the namespace/object-name rule, the
+            // save door's and the per-item publish's judge, so the batch is
+            // refused before anything is promoted.
+            const clash = this.objectNamespaceObjectNameClash(d.name, request.packageId);
+            if (clash) {
+                preflightViolations.push({
+                    type: d.type,
+                    name: d.name,
+                    error: clash,
+                    code: 'NAMESPACE_CONFLICT',
+                });
+            }
+        }
+
+        // ═══ [#8908] The AT-REST spelling gate ════════════════════════════════
+        //
+        // The second pre-flight rule, and the one route by which the namespace
+        // #7894 retired could still mint ACTIVE rows. See
+        // {@link isNonCanonicalStoredType} for the class and for why the
+        // manifest-PRESENT plurals are deliberately NOT in it.
+        //
+        // Refused here, at the pre-flight, rather than by folding the stored
+        // spelling at the promote — that alternative was weighed and ruled
+        // against on #8908 (auto-adjudicated 2026-08-15, option (a)). Folding
+        // would make these rows behave like `objects`: unpromotable, batch
+        // aborted on `NO_DRAFT`, which is fail-closed but strands the operator
+        // with a verdict that describes a missing draft rather than the residue
+        // they actually have. The refusal below names the row, names the
+        // canonical spelling, and says what to do about it — the shape the
+        // namespace-prefix gate above already established, and batch-atomic for
+        // the same ADR-0067 D2 reason.
+        //
+        // ⛔ What this deliberately does NOT do: migrate the row. A
+        // `_migrate-stored` / boot-reconciliation conversion was the other
+        // option on the card and is explicitly NOT ruled — it stays available as
+        // a follow-up with its own appetite. Do not grow one here.
+        //
+        // ⚠️ The reason the message does not just say "run the stored
+        // migration", and STILL does not: `migrateStoredMetadata` canonicalizes
+        // BODIES, and rewriting a stored type spelling is an identity move, so
+        // that door cannot fix this residue either. What changed under #8957 is
+        // only what it SAYS about it. When this comment was written it scanned
+        // with `PLURAL_TO_SINGULAR[rawType] ?? rawType` — the same manifest map
+        // — so for exactly these spellings it converted bodies under the plural
+        // key, found nothing to change, and reported the row `canonical`:
+        // "nothing to do" about the row this gate had just refused, from the
+        // door an operator naturally reaches for next. It now scans with the
+        // canonical fold and reports the row `skipped`, carrying this same
+        // reason. The two doors agree; neither migrates it, and the actionable
+        // instruction is still the re-author path, stated in full.
+        for (const d of drafts) {
+            if (!isNonCanonicalStoredType(d.type)) continue;
+            const canonical = canonicalMetaType(d.type);
+            preflightViolations.push({
+                type: d.type,
+                name: d.name,
+                error: `Draft '${d.type}/${d.name}' is stored under the non-canonical metadata type `
+                    + `'${d.type}'; the canonical type for this item is '${canonical}'. Publishing it would `
+                    + `mint an ACTIVE row in a second namespace that no registry read and no compliance `
+                    + `query on '${canonical}' can see (the '/meta' URL door now folds a type to its canonical spelling before it writes; `
+                    + `this row predates that). Re-author the item under '${canonical}' `
+                    + `(PUT /meta/${canonical}/${d.name}) and drop the '${d.type}' row. Note that `
+                    + `POST /meta/_migrate-stored does NOT rewrite a stored type spelling — it canonicalizes `
+                    + `bodies, and reports rows of this class as 'skipped' with that same reason.`,
+                code: 'STORED_TYPE_NOT_CANONICAL',
+            });
+        }
+
+        // [#5488 — RETIRED GATE, recorded overturn of PR #5279]
+        //
+        // `gateApiDraftsForPublish` stood here (#5206 step 2, #5040 E7 /
+        // ADR-0121) and ran the endpoint publish gates over this batch's `api`
+        // drafts. It is deliberately REMOVED, two days after it landed, by the
+        // maintainer ruling of 2026-08-07T16:59Z implemented in #5488 — not
+        // deleted as dead weight and not lost in a refactor.
+        //
+        // Why it can go: the gate judged whether an `api` draft was fit to be
+        // PROMOTED TO ACTIVE in `sys_metadata`. No such row is ever served. The
+        // serving criterion belongs to `IMetadataService.matchEndpoint` →
+        // `EndpointMatcher` → `MetadataManager.listForIndex('api')`, which
+        // reads the manager's registry plus its filesystem/memory loaders;
+        // `sys_metadata` is in neither, so a promoted endpoint 404s forever
+        // (real boot, #5488 — no `EXCLUDED` line, because it was never in the
+        // index to be excluded from). The gate was a correct verdict about a
+        // state with no consumer.
+        //
+        // Why it MUST go rather than sit unreached: `api` is now code-only
+        // (`allowRuntimeCreate: false` + `allowEnvironmentOverlay: false`), and the
+        // #5086 inlet refuses the write BEFORE persistence and BEFORE the
+        // draft/publish branch — it does not look at `mode`. So no `api` draft
+        // row can be created any more, and this gate could never again see one.
+        // Leaving it would leave unreachable code asserting a rule about a row
+        // that cannot exist, which is the shape of a phantom check.
+        //
+        // What still judges endpoints, unchanged: `validateApiEndpointDeclarations`
+        // / `identityFreeEndpointGateFailure` (`api/endpoint-publish-gate.ts`)
+        // on the route that actually serves — the stack schema, `publishPackage`
+        // (#5189), and again at load in `buildEndpointIndex` (PR #5203). ADR-0121
+        // keeps its "publish REJECTS" ruling in full on that route; only the
+        // runtime-authored-draft door it used to also cover is gone, because
+        // that door opened onto nothing.
+        //
+        // Re-entry, as the ruling recorded it: if #2657 Part B promotes `apis`
+        // to a registered type WITH A REAL CONSUMPTION PATH, this gate comes
+        // back with it — implementation first, declaration second.
+
+        if (preflightViolations.length > 0) {
+            // ═══ [#8595] The PRE-FLIGHT refusal's own audit rows ═══════════════
+            //
+            // Without these, this `return` left `sys_metadata_audit` completely
+            // empty: a package refused for a bad object name was indistinguish-
+            // able in the trail from a package nobody ever pressed Publish on —
+            // the #7748 defect, at the one refusal site neither #8400 nor #8594
+            // could reach. Both of those write from BELOW: #8400's rows are
+            // driven off the post-commit state and its `batch_aborted` row from
+            // the transaction's `catch`, and #8594's inner verdicts ride out on
+            // an error thrown inside the promotion loop. This `return` is ABOVE
+            // `engine.transaction()`, so no error is ever thrown and no
+            // promotion is ever attempted — control never reaches either site.
+            //
+            // ── Shape: ONE ROW PER VIOLATION, keyed on its own (type, name) ───
+            //
+            // Not one row for the batch. A pre-flight refusal is not "one causal
+            // item aborted the batch" — it is N violations, each naming a
+            // different draft, so there is no single causal item to key a batch
+            // row on. `batch_aborted`'s own note records why that matters: the
+            // audit row is keyed on `(type, name)`, and minting an identity for
+            // an unattributable failure "would put a fictional item in a
+            // compliance ledger" — which is exactly what a single batch-level
+            // row would need here. Every violation, by contrast, already HAS an
+            // honest identity: the draft that broke the rule.
+            //
+            // Measured against the reader rather than assumed: `auditMetaItem`
+            // (the door `GET /api/v1/meta/:type/:name/audit` serves Studio's
+            // audit-log tab from) queries `where { type, name }` ordered by
+            // `occurred_at desc`. One row per violation is therefore readable
+            // per item; a synthetic batch row would be readable under no real
+            // item at all.
+            //
+            // ── Durability ────────────────────────────────────────────────────
+            //
+            // Written outside any transaction because there is not one here yet
+            // — the pre-flight is the code above `engine.transaction()`. So
+            // unlike every other denial on this route there is nothing to
+            // survive: the row lands when it is written. `publishPackageDrafts`
+            // audits its refusals from a position a rollback cannot reach at
+            // every site, and this one gets it by construction.
+            for (const v of preflightViolations) {
+                await this.recordMetadataAudit({
+                    // [#8908] THE BOUNDARY FOLD, on the route that reads rows at
+                    // rest. `v.type` is the STORED spelling, which for a
+                    // `STORED_TYPE_NOT_CANONICAL` violation is by definition not
+                    // the canonical one — and `recordMetadataAudit` now refuses a
+                    // non-canonical `type` outright rather than folding it
+                    // silently (see its header). Folding here is not merely what
+                    // makes the writer's assert satisfiable: it is what makes the
+                    // row READABLE. `auditMetaItem` serves
+                    // `GET /meta/:type/:name/audit`, whose own `:type` segment is
+                    // folded at the `/meta` boundary, so a row filed under the
+                    // plural spelling is a row no operator can query for. The
+                    // stored spelling is not lost — it is named in `note` and in
+                    // `failed[].error`, where it is the actionable fact.
+                    type: canonicalMetaType(v.type),
+                    name: v.name,
+                    organizationId: null,
+                    operation: 'publish',
+                    outcome: 'denied',
+                    // The violation's own verdict, in the audit column's
+                    // lowercase vocabulary — the value a compliance query
+                    // filters on. See `PREFLIGHT_AUDIT_CODE` for why this one
+                    // carries the specific rule while `batch_aborted` carries a
+                    // fixed value.
+                    code: PREFLIGHT_AUDIT_CODE[v.code],
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishPackageDrafts',
+                    // `note` is WIRE-VISIBLE (`auditMetaItem` maps it straight
+                    // onto the `/audit` response). Safe here: this text is
+                    // `validateObjectNamespacePrefix`'s own authored, actionable
+                    // message — no driver dialect to withhold, unlike the
+                    // `batch_aborted` note's `clientFacingFailureText`.
+                    note: `refused before publish — package '${request.packageId}': ${v.error}`,
+                });
+            }
+            return {
+                success: false,
+                // [#10462] Guarded by `preflightViolations.length > 0`, so
+                // `failed[]` is non-empty by construction — this exit is
+                // always a refusal.
+                outcome: 'refused',
+                publishedCount: 0,
+                failedCount: preflightViolations.length,
+                published: [],
+                // Projected explicitly: `organizationId` is internal bookkeeping
+                // for the audit rows above and must not widen this response.
+                failed: preflightViolations.map((v) => ({
+                    type: v.type, name: v.name, error: v.error, code: v.code,
+                })),
+            };
+        }
+
+        const published: Array<{ type: string; name: string; version: string; advisories?: RuntimeAuthoringIssue[] }> = [];
+        const failed: Array<{ type: string; name: string; error: string; code?: string; issues?: Array<{ path: string; message: string; code?: string }> }> = [];
+
+        // Structure first, seeds LAST — a seed's rows can only land after its
+        // object's table exists (publishMetaItem creates it). Within the seeds we
+        // batch-apply every body in ONE loader pass below (multi-pass reference
+        // resolution across the whole set), so per-item apply is suppressed.
+        const ordered = [
+            ...drafts.filter((d) => d.type !== 'seed'),
+            ...drafts.filter((d) => d.type === 'seed'),
+        ];
+        const seedBodies: unknown[] = [];
+
+        // [#10377] The closure this batch is judged against, read ONCE and
+        // BEFORE any promotion (a promote deletes the draft row it reads).
+        // Every member of the batch is then gated against the same complete
+        // set, which is what makes a dashboard-plus-its-dataset package
+        // publishable in either order — see
+        // {@link collectBatchPendingDeclarations}.
+        const pendingDeclarations = await this.collectBatchPendingDeclarations(drafts);
+        const batchDatasources: ReadonlySet<string> = new Set(
+            drafts.filter((d) => canonicalMetaType(d.type) === 'datasource').map((d) => d.name),
+        );
+        const batchObjects: ReadonlySet<string> = new Set(
+            drafts.filter((d) => canonicalMetaType(d.type) === 'object').map((d) => d.name),
+        );
+
+        // ADR-0067 — capture each artifact's PRE-publish state so this turn can
+        // be recorded as ONE revertible commit. existedBefore=false → the commit
+        // creates it (revert = soft-remove); true → it edits an existing artifact
+        // (revert = restoreVersion(prevVersion)).
+        //
+        // [#8896] This paragraph used to end "Best-effort: a capture failure
+        // just omits that item from the revert plan, never blocks the publish."
+        // Both halves were wrong, and they were wrong in different directions —
+        // the comment described the code inaccurately, AND the behaviour it
+        // described would not have been correct either:
+        //
+        //   * The code never omitted. It pushed a FABRICATED entry —
+        //     `existedBefore: false, prevVersion: null` — i.e. the literal
+        //     opposite of the healthy branch's `existedBefore: !!activeRow` for
+        //     any artifact that did exist. `existedBefore: false` means "revert
+        //     = soft-remove", so reverting this commit DELETES an artifact
+        //     whose previous version was supposed to be restored. A read that
+        //     failed was answered with a value, and the value chosen was the
+        //     destructive one.
+        //   * Omitting would not have been the fix. An item missing from the
+        //     plan is simply not reverted, so the revert silently leaves the
+        //     newly published version live while reporting the turn undone.
+        //
+        // Both are the same defect underneath: a revert plan derived from a
+        // read that did not happen. So the capture is discriminated by error
+        // TYPE instead, per the maintainer's ruling for this family —
+        // unprovisioned is truthful emptiness, everything else surfaces. See
+        // the `catch` below for why the benign branch keeps exactly the push
+        // that was wrong unconditionally.
+        const commitItems: CommitPlanItem[] = [];
+        for (const d of ordered) {
+            try {
+                // Read the pre-publish active row in the draft's scope, the
+                // environment's (ADR-0131 D6), so an env-wide edit is not
+                // mis-recorded as a create in the revert plan (#3115).
+                // [#21911] The explicit system opt-in — see findServedOverlayRow.
+                // [#22877] …and the draft's own bundle member: another
+                // member's active row is not this member's pre-publish state,
+                // and the revert plan records the member it describes.
+                // [#29414] …and the publishing package's own row: every draft
+                // listed here is bound to `request.packageId` and is promoted
+                // into that package's row, so another package's active row of
+                // the same name (a row bound to the read-only base beside its
+                // `.custom` pair) is not this item's pre-publish state. Read
+                // package-agnostically, the pair's first publish was recorded
+                // as an edit of the base row's version, and its revert
+                // addressed the base row instead of removing the pair's.
+                const activeRow = (await this.findEnvironmentRow('sys_metadata', {
+                    where: {
+                        type: d.type, name: d.name, state: 'active', package_id: request.packageId,
+                        ...overlayMemberWhere(d.type, d.member),
+                    },
+                    context: { isSystem: true },
+                })) as { version?: number } | null;
+                commitItems.push({
+                    type: d.type,
+                    name: d.name,
+                    existedBefore: !!activeRow,
+                    prevVersion: activeRow && typeof activeRow.version === 'number' ? activeRow.version : null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
+                });
+            } catch (error) {
+                // [#8896] Benign: `sys_metadata` has not been provisioned yet.
+                // There is then genuinely no active row for anything, so
+                // `existedBefore: false, prevVersion: null` IS this artifact's
+                // pre-publish state and the revert plan it produces (revert =
+                // soft-remove) is correct. That is the ONE case in which the
+                // unconditional push above was ever right, and it is kept
+                // byte-for-byte. Asked through the shared `isMissingTableError`
+                // predicate (`@objectstack/metadata/errors`, #4825).
+                //
+                // Everything else — a connection drop, a timeout, a query
+                // error — means an active row may well exist and simply was not
+                // seen, so no honest `existedBefore` can be computed. It
+                // propagates, and the position of this loop is what makes that
+                // safe: the capture pass runs BEFORE Phase 1's transaction, so
+                // nothing has been written yet and the publish fails having
+                // changed nothing. Refusing to publish beats publishing with a
+                // revert plan that would delete an artifact on the way back.
+                //
+                // No new error code and no new response field: the caller
+                // receives the read's own failure, envelope intact.
+                if (!isMissingTableError(error, 'sys_metadata')) throw error;
+                commitItems.push({
+                    type: d.type, name: d.name, existedBefore: false, prevVersion: null,
+                    ...(d.member !== undefined ? { member: d.member } : {}),
+                });
+            }
+        }
+        const publishedSeqs: number[] = [];
+        // ADR-0086 P2 — accumulate each item's publish-time materialization so a
+        // batch package publish surfaces a permission set that failed to go live
+        // (owned by the env door / another package), not just a clean count.
+        const materialize = { any: false, inserted: 0, updated: 0, failures: [] as Array<{ type: string; name: string; error: string }> };
+
+        // ═══ Phase 1 — ATOMIC metadata writes (ADR-0067 D2) ═══
+        // Every draft promotion AND the sys_metadata_commit record run inside
+        // ONE engine transaction: any failure rolls ALL of them back — "a
+        // commit cannot half-land". Nested repository writes JOIN this
+        // transaction via the engine's ambient-tx join (a nested begin would
+        // deadlock single-connection pools), and side effects are deliberately
+        // deferred to Phase 2: DDL cannot run inside the driver transaction,
+        // in-memory registry mutations cannot roll back, and projections /
+        // probes are healed by boot reconciliation — side effects can
+        // self-heal, a half-landed metadata batch cannot (the ADR-0094
+        // lesson).
+        //
+        // [#32396] …and on a runtime that CANNOT roll back, the same promise
+        // is kept without the transaction. `engine.transaction()` exists on
+        // every real engine, but ObjectQL runs its callback with no
+        // transaction and no rollback when the default driver declares none
+        // (the ADR-0119 D1 degrade — the remote Turso transport is one), and
+        // an engine with no `transaction()` at all runs the loop bare. The
+        // probe this door used, `typeof engine.transaction === 'function'`,
+        // answered "atomic" for both, so a draft refused at item 9 of 11 left
+        // items 1-8 live under a response that said nothing landed. Asked
+        // with `engineCanRollBack` instead — the predicate `batchData`'s
+        // atomic gate and `/discovery`'s `transactionalBatch` already share,
+        // which reads the driver's declaration as well — and where it answers
+        // no:
+        //
+        //   1. Phase 0 judges EVERY draft before any is promoted
+        //      (`promoteDraftForPublish` with `judgeOnly`), so a refusal — the
+        //      class the reported publish hit — refuses the batch with nothing
+        //      written. Phase 1 still judges each draft again as it promotes
+        //      it, against the store as the earlier promotions left it, so it
+        //      refuses everything it refused before.
+        //   2. A failure Phase 0 could not see (a refusal that only the
+        //      earlier promotions provoke, a draft saved in between, a store
+        //      fault) undoes every promotion already made, newest first, before
+        //      the refusal is answered: see {@link undoLandedPromotions}.
+        const canRollBack = engineCanRollBack(this.engine);
+        type PromotedDraft = LandedPromotion & {
+            body: unknown;
+            seq: number;
+            /**
+             * [#9343] The #4463 gate's advisory half for this promotion,
+             * captured from `promoteDraftForPublish`'s return inside Phase 1
+             * so Phase 2 can attach it to this draft's `published[]` element.
+             * Empty = the gate raised nothing (or did not run) — the element
+             * then carries no `advisories` key at all.
+             */
+            advisories: RuntimeAuthoringIssue[];
+        };
+        const promoted: PromotedDraft[] = [];
+        // (assigned inside the transaction closure — keep the wide type)
+        let commit = null as { commitId: string } | null;
+        // ADR-0119 D1 — `transaction` is contract-declared, so this reaches it
+        // by name instead of through a structural cast. Bound once up front:
+        // the probe and the call must agree on one resolved function.
+        const engineTx = typeof this.engine?.transaction === 'function'
+            ? this.engine.transaction.bind(this.engine)
+            : undefined;
+        const inTxn: <T>(cb: () => Promise<T>) => Promise<T> =
+            engineTx ? (cb) => engineTx(() => cb()) : (cb) => cb();
+        /** The promotion request for one draft: Phase 0 judges it, Phase 1 writes it. */
+        const promotionRequest = (d: (typeof ordered)[number]) => ({
+            registryQuestion: PROMOTION_REGISTRY_QUESTION['package-publish'],
+            // [#8908] The stored spelling, FOLDED — this route's
+            // boundary, the analogue of `canonicalizeMetaRequestType`
+            // on the six `/meta` entry points. Every row that
+            // reaches here has passed the at-rest spelling gate
+            // above, so the only non-canonical spellings left are
+            // the manifest-PRESENT plurals, for which this fold and
+            // the manifest fold `promoteDraftForPublish` already
+            // applies agree exactly — the promote resolves the same
+            // row it always did, and `d.type` (unfolded) still
+            // populates `failed[]` / `published[]`, which are wire
+            // shapes reporting what the operator actually stored.
+            //
+            // What it changes for those rows is the two things
+            // downstream of `request.type` that had NOT folded:
+            // `getEffectiveLock`'s overlay limb (queried the plural,
+            // found no row, answered `'none'` — "the author declared
+            // no protection" — for an item whose canonical row may
+            // carry `_lock`; the single-item twin of that hole is
+            // #8769 group C), and the `type` on the pending audit
+            // rows those two gates hand back, which the writer now
+            // refuses if it is not canonical.
+            type: canonicalMetaType(d.type),
+            name: d.name,
+            // [#8907] Promote each draft under the PACKAGE
+            // `listDrafts` surfaced it from: ADR-0048 keys
+            // overlay rows by `(org, type, name, package_id)`,
+            // so with two packages holding drafts for one
+            // `(type, name)` a promote that omits the package
+            // dimension cannot tell them apart — publishing A
+            // promoted and drained B's row, left A's own edit
+            // pending, and still answered `success: true`.
+            // `d.packageId` is the row's own binding, so this
+            // is the listed key restated, never a new one.
+            packageId: d.packageId,
+            // [#22877] …and as the bundle member `listDrafts`
+            // surfaced it as: two members' drafts of one name
+            // are two drafts, and promoting the canonical one
+            // for each promoted it twice (`NO_DRAFT` the
+            // second time, aborting the batch) and left the
+            // other member's draft pending.
+            ...memberOption(d.member),
+            // [#10377] The whole batch's own declarations, so
+            // this member is judged against the package it is
+            // being published AS PART OF and not against the
+            // universe as it stood before the publish started.
+            ...(pendingDeclarations !== undefined
+                ? { pending: pendingDeclarations } : {}),
+            // [#26724] …and the datasources it drafts, which
+            // an object draft beside them may name.
+            batchDatasources,
+            // [#28990] …and the objects it drafts, which a
+            // permission-set draft beside them may grant on.
+            batchObjects,
+            ...(request.actor ? { actor: request.actor } : {}),
+            // [ADR-0146 D1] The author's change note, when the
+            // publish carries one, is what every history row
+            // this batch writes records as its `change_note`
+            // (the same note the package commit below keeps),
+            // so the item history says why the item changed.
+            // With none, the sentence naming the package.
+            message: request.message
+                ? request.message
+                : `publish app package '${request.packageId}'`,
+        });
+        /** Tag the causal item on the error that aborts the batch (the `catch` below reads it). */
+        const tagCausal = (e: unknown, d: (typeof ordered)[number]): Error => {
+            const err = e instanceof Error ? e : new Error(String(e));
+            (err as { __batchItem?: unknown }).__batchItem = d;
+            return err;
+        };
+        try {
+            // ═══ [#32396] Phase 0 — judge the whole batch, write nothing ═══
+            if (!canRollBack) {
+                for (const d of ordered) {
+                    try {
+                        await this.promoteDraftForPublish({ ...promotionRequest(d), judgeOnly: true });
+                    } catch (e: unknown) {
+                        throw tagCausal(e, d);
+                    }
+                }
+            }
+            await inTxn(async () => {
+                for (const d of ordered) {
+                    try {
+                        if (d.type === 'seed') {
+                            // Capture the body BEFORE promote (the draft row is
+                            // deleted by the promote, and reading the draft is
+                            // unambiguous).
+                            const ref = { type: d.type, name: d.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
+                            const draft = await repo.get(ref, { state: 'draft', ...memberOption(d.member) });
+                            if (draft?.body) seedBodies.push(draft.body);
+                        }
+                        const { singularType, advisories, result, promotedDraft } = await this.promoteDraftForPublish(promotionRequest(d));
+                        // [#32396] This call states no `judgeOnly`, so the promotion was written.
+                        if (!result) throw unwrittenPromotionError(d.type, d.name);
+                        promoted.push({
+                            d, singularType,
+                            body: result.item.body,
+                            packageId: result.packageId,
+                            version: result.version,
+                            seq: result.seq,
+                            advisories,
+                            ...(promotedDraft ? { promotedDraft } : {}),
+                        });
+                        if (typeof result.seq === 'number') publishedSeqs.push(result.seq);
+                    } catch (e: unknown) {
+                        // Tag the causal item and abort — the surrounding
+                        // transaction rolls back every promotion made so far,
+                        // or, on a runtime that cannot roll back, the `catch`
+                        // below undoes them.
+                        throw tagCausal(e, d);
+                    }
+                }
+                // ADR-0067 — record this turn as ONE commit, INSIDE the same
+                // transaction as the promotions it describes: the commit row and
+                // the published state land or roll back together, so a recorded
+                // commit can never describe a partial publish.
+                if (promoted.length > 0) {
+                    // [#22877] Keyed by member too: two members of one name
+                    // are two plan items.
+                    const promotedKeys = new Set(promoted.map((p) => commitPlanKey(p.d)));
+                    commit = await this.recordPackageCommit({
+                        packageId: request.packageId,
+                        operation: 'apply',
+                        ...(request.message ? { message: request.message } : {}),
+                        ...(request.actor ? { actor: request.actor } : {}),
+                        ...(request.aiModel ? { aiModel: request.aiModel } : {}),
+                        items: commitItems.filter((it) => promotedKeys.has(commitPlanKey(it))),
+                        ...(publishedSeqs.length
+                            ? { eventSeqStart: Math.min(...publishedSeqs), eventSeqEnd: Math.max(...publishedSeqs) }
+                            : {}),
+                    });
+                }
+            });
+        } catch (e: any) {
+            // The batch rolled back — NOTHING landed (ADR-0067 D2). Report the
+            // causal item with its real error; every other draft is marked
+            // BATCH_ABORTED so the caller sees the all-or-nothing semantics
+            // instead of inferring them from publishedCount 0.
+            const causal = e?.__batchItem as
+                { type: string; name: string; organizationId?: string | null; member?: string } | undefined;
+            // [#32396] On a runtime that cannot roll back, "nothing landed" is
+            // made true here rather than assumed: every promotion Phase 1 made
+            // before the failure is undone, newest first, before anything below
+            // reports the refusal. With a rollback the engine has already undone
+            // them, and `promoted[]` describes writes that no longer exist.
+            const stillLive = !canRollBack && promoted.length > 0
+                ? await undoLandedPromotions(this, {
+                    repo,
+                    landed: promoted,
+                    plan: commitItems,
+                    packageId: request.packageId,
+                    ...(request.actor ? { actor: request.actor } : {}),
+                })
+                : [];
+            const stillLiveKeys = new Set(stillLive.map((s) => commitPlanKey(s.item.d)));
+            const undone = !canRollBack && promoted.length > 0;
+            if (stillLive.length > 0) {
+                // AGENTS.md "Degradation log levels": the refusal below reads as
+                // a clean all-or-nothing answer while these items ARE live.
+                console.error(
+                    `[protocol.publishPackageDrafts] batch publish of '${request.packageId}' was refused at `
+                    + `${causal ? `${causal.type}/${causal.name}` : 'an unidentified item'}, and this runtime cannot roll back `
+                    + `a transaction, so the ${promoted.length} promotion(s) made before the refusal were undone by hand — `
+                    + `but ${stillLive.length} could not be: ${stillLive.map((s) => `${s.item.d.type}/${s.item.d.name}`).join(', ')} `
+                    + `ARE LIVE although the publish reports the batch refused, and nothing retries the undo. Fix: resolve the `
+                    + `cause below, then either correct the refused item and publish the package again, or remove or revert `
+                    + `each live item named here. Cause: ${stillLive.map((s) => clientFacingFailureText(s.error, String((s.error as { message?: unknown })?.message ?? s.error))).join(' | ')}`,
+                );
+            }
+            // [#8333 · P6] `failed[].error` is RESPONSE DATA, not a message, so
+            // no HTTP boundary's withhold reaches it. Measured on `origin/main`
+            // by failing the `sys_metadata` write under the promote: the batch
+            // answered `failed[0].error = "SQLITE_ERROR: no such table:
+            // sys_metadata"`.
+            //
+            // ⚠️ This is the site the card warned about, and the measurement is
+            // why it could be converted rather than escalated. Its authored
+            // population — the one #4277 exists for — is `assertRuntimeAuthoringRules`'
+            // author-time rejection, and it DECLARES `422 INVALID_METADATA`
+            // with structured `issues`. Reproduced end to end with a real
+            // broken-CEL approval flow: after this change the caller still
+            // receives `flows[0].nodes[1].config.approvers[0].value:
+            // [approval-expression-invalid] …`, plus `code` and `issues`. Every
+            // other refusal reaching here declares 4xx too (`NOT_OVERRIDABLE`
+            // 403, `METADATA_CONFLICT` 409, the repository's 403/404/409/422).
+            // So the rule withholds the driver text and nothing else.
+            //
+            // [#8441] `code` was left as it was by #8333 — a different field
+            // with a different rule (a closed union) — and measured afterwards
+            // it still carried the driver's own dialect: `SQLITE_ERROR` beside
+            // the withheld sentence. It is now filtered by CATALOG MEMBERSHIP,
+            // not by the 4xx question, so `INVALID_METADATA` / `NOT_OVERRIDABLE`
+            // and every other declared code reach the caller untouched. See
+            // {@link clientFacingFailureCode}. `issues` stays as it was: it is
+            // structured authoring feedback, which no driver error carries.
+            console.warn(
+                `[protocol.publishPackageDrafts] batch publish of '${request.packageId}' rolled back at `
+                + `${causal ? `${causal.type}/${causal.name}` : 'an unidentified item'}: ${e?.message ?? e}`,
+            );
+            // One error drives the whole map — the batch is all-or-nothing — so
+            // the filter runs once rather than per row.
+            const causalCode = clientFacingFailureCode(e);
+            // ═══ [#8400] The refusal audit — OUTSIDE the transaction ═══
+            //
+            // This is the row whose PLACEMENT is the whole point of the card.
+            // `engine.transaction()` has already unwound by the time control
+            // reaches this `catch`, so the insert below lands in no transaction
+            // and survives the rollback that provoked it. Written INSIDE the
+            // Phase-1 closure it would roll back with the batch, and the trail
+            // would once again record nothing at all about a refused publish —
+            // the exact defect #7748 exists to close, reintroduced on the batch
+            // route.
+            //
+            // ⚠️ [#8594 — the sibling above is now FIXED, one line below.] The
+            // note that stood here said the inner denial rows were written from
+            // inside this transaction and rolled back with it, so this row could
+            // be unconditional: there was never anything of theirs to duplicate.
+            // That is no longer true — `promoteDraftForPublish` hands its refusal
+            // row out instead of writing it, and the line below lands it here,
+            // outside the transaction, in the INNER verdict's own vocabulary
+            // (`item_locked` / `metadata_conflict`, with its `lock_state`).
+            //
+            // The row below stays unconditional anyway, for a different reason:
+            // it records a DIFFERENT fact. `item_locked` says why THIS item was
+            // refused; `batch_aborted` says the whole batch rolled back and
+            // nothing landed — the ADR-0067 D2 consequence, which is what the
+            // other drafts' authors need to read, and the only row there is when
+            // the cause carries no inner verdict at all (a driver fault,
+            // `NOT_OVERRIDABLE`, `INVALID_METADATA`). Two facts, two rows, same
+            // causal item.
+            //
+            // ⚠️ `note` is WIRE-VISIBLE — `auditMetaItem` maps it straight onto
+            // the `GET /api/v1/meta/:type/:name/audit` response — so it carries
+            // {@link clientFacingFailureText}, not `e.message`. Putting the raw
+            // sentence here would route the driver dialect #8333 withheld from
+            // `failed[].error` around that rule through a second door. The full
+            // untruncated text is already in the `console.warn` above, which is
+            // where an operator reads it.
+            // ═══ [#8594] The INNER verdict's own row — also outside the txn ═══
+            //
+            // `promoteDraftForPublish` refused this batch and handed its denial
+            // row out on the error rather than writing it inside the closure
+            // that has since unwound. Recording it here gives a package publish
+            // refused by a lock the same `code = 'item_locked'` + `lock_state`
+            // row a single-item publish has always left — the vocabulary a
+            // compliance query actually filters on, which `batch_aborted` alone
+            // could not supply. No-op when the cause carries no inner verdict.
+            //
+            // `source` is re-stamped: the shared Phase-1 helper passes
+            // `protocol.publishMetaItem` for both of its routes, and this row
+            // was written by the batch route.
+            await this.recordPendingDenialAudit(e, { source: 'protocol.publishPackageDrafts' });
+            if (causal) {
+                await this.recordMetadataAudit({
+                    // [#8908] Folded for the same two reasons as the pre-flight
+                    // rows above — readability through `auditMetaItem`, and the
+                    // writer's assert. `causal` is the draft row itself
+                    // (`__batchItem`), so its `type` is the STORED spelling.
+                    type: canonicalMetaType(causal.type),
+                    name: causal.name,
+                    organizationId: null,
+                    operation: 'publish',
+                    outcome: 'denied',
+                    // adr0112-ok: D6b — persisted audit column, its own
+                    // vocabulary. ONE fixed value for this site rather than the
+                    // lower-cased causal code: the causal code is whatever the
+                    // catalog can produce, and lower-casing it would turn this
+                    // column's documented closed set into an open one that
+                    // drifts with every new error code. The cause is in `note`.
+                    code: 'batch_aborted',
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    source: 'protocol.publishPackageDrafts',
+                    // [#32396] "nothing landed" only while it is true: an undo
+                    // that left items live says which instead.
+                    note: `batch publish of package '${request.packageId}' rolled back (ADR-0067 D2); `
+                        + (stillLive.length > 0
+                            ? `${stillLive.length} promotion(s) could not be undone and are live `
+                                + `(${stillLive.map((s) => `${s.item.d.type}/${s.item.d.name}`).join(', ')})`
+                            : 'nothing landed')
+                        + `${causalCode ? ` [${causalCode}]` : ''}: `
+                        + clientFacingFailureText(e, 'publish failed'),
+                });
+            }
+            // No row when the causal item is unidentifiable (a failure in the
+            // transaction machinery itself rather than in any one promotion):
+            // the audit row is keyed on `(type, name)`, and minting an identity
+            // for a failure nobody can attribute would put a fictional item in
+            // a compliance ledger. `console.warn` above stays the record there.
+            // [#32396] How the batch came to have landed nothing — said as it
+            // happened: the engine's rollback, the undo of the promotions this
+            // runtime could not roll back, or a refusal before any promotion.
+            const howNothingLanded = canRollBack
+                ? 'the transaction rolled back'
+                : undone
+                    ? 'every draft promoted before it was put back as a pending draft'
+                    : 'nothing was promoted';
+            const causalName = causal ? `${causal.type}/${causal.name}` : 'another item';
+            const failedOut = ordered.map((d) =>
+                causal && commitPlanKey(d) === commitPlanKey(causal)
+                    ? {
+                        type: d.type, name: d.name,
+                        error: clientFacingFailureText(e, 'publish failed'),
+                        ...(causalCode ? { code: causalCode } : {}),
+                        // Carry structured spec-validation issues so the publish
+                        // surface can point at the offending field.
+                        ...(Array.isArray(e?.issues) ? { issues: e.issues } : {}),
+                    }
+                    : stillLiveKeys.has(commitPlanKey(d))
+                        // [#32396] Not `BATCH_ABORTED`: that code says "not
+                        // published", and this item is live.
+                        ? {
+                            type: d.type, name: d.name,
+                            error: `LIVE although the batch was refused — it was promoted before ${causalName} failed, `
+                                + `and this runtime cannot roll back, so it was put back by hand and that failed; `
+                                + 'remove or revert it, or publish the package again once the refused item is corrected',
+                        }
+                        : {
+                            type: d.type, name: d.name,
+                            error: `not published — the batch is all-or-nothing (ADR-0067 D2) and `
+                                + `${causalName} failed; ${howNothingLanded}`,
+                            code: 'BATCH_ABORTED',
+                        });
+            return {
+                success: false,
+                // [#10462] `failedOut` mirrors `ordered` one-to-one, so it is
+                // empty ONLY when the batch had zero drafts — a failure in the
+                // transaction machinery itself over nothing pending. Deriving
+                // the outcome (rather than hard-coding 'refused') keeps the
+                // producer invariant `outcome === 'refused' iff
+                // failed.length > 0` true on every return site; on that edge
+                // "nothing to publish" stays the truthful answer (nothing was
+                // pending, nothing was refused) and the `console.warn` above
+                // remains the record of the machinery failure.
+                outcome: failedOut.length > 0 ? 'refused' : 'nothing_to_publish',
+                publishedCount: 0,
+                failedCount: failedOut.length,
+                published: [],
+                failed: failedOut,
+            };
+        }
+
+        // ═══ Phase 2 — side effects, after the metadata committed ═══
+        // Registry refresh, DDL, materializers, projections, events — per item
+        // in publish order. Best-effort at the batch level: the metadata IS
+        // live at this point, so a side-effect failure must be surfaced (via
+        // materialize.failures / probes), never turned into a fake unpublish.
+
+        // ─── [#8400] ADR-0010 — one `publish`/`allowed` row per promoted item ──
+        //
+        // Studio's "publish whole app" wrote NO audit rows at all: this route
+        // calls `promoteDraftForPublish` directly, so #7748's row in
+        // `publishMetaItem` never ran for it, and the trail showed a batch
+        // publish of twenty artifacts as nothing whatsoever.
+        //
+        // PLACEMENT — Phase 2, driven off `promoted[]`, and deliberately not
+        // inside the Phase-1 closure. An audit row written in there rolls back
+        // with the batch; for an allowed publish that is arguably right, but the
+        // same placement applied to the refusal (see the `catch` above) is
+        // exactly wrong, and one route must not audit its two outcomes under two
+        // different durability rules. Driving both off the post-commit state
+        // gives the row the same meaning at both sites: it exists iff the
+        // decision is durable. This also matches the position `saveMetaItem`,
+        // `deleteMetaItem` and `publishMetaItem` all take — persistence
+        // committed, side effects not yet run.
+        //
+        // Before the side-effect loop rather than interleaved with it: every
+        // promoted item's metadata is already live, so its row must not depend
+        // on whether a later item's DDL happened to throw.
+        for (const p of promoted) {
+            await this.recordMetadataAudit({
+                // [#8908] Folded — the third and last site on this route that
+                // builds an audit row out of a stored `type`. Deliberately
+                // `canonicalMetaType(p.d.type)` and not `p.singularType`: the
+                // latter is the MANIFEST fold, which is a no-op for exactly the
+                // spellings this card is about, so it would have looked like a
+                // canonicalization while changing nothing (measured and closed on
+                // #8858 as a provable no-op).
+                type: canonicalMetaType(p.d.type),
+                name: p.d.name,
+                organizationId: null,
+                operation: 'publish',
+                outcome: 'allowed',
+                code: 'ok',
+                ...(request.actor ? { actor: request.actor } : {}),
+                source: 'protocol.publishPackageDrafts',
+                note: `active — package '${request.packageId}'`
+                    + (commit ? `, commit ${commit.commitId}` : ''),
+            });
+        }
+
+        for (const p of promoted) {
+            // [#9343] Omitted-when-empty, never `advisories: []` — the #4717
+            // discipline every advisory-carrying door follows: an advisory-free
+            // element's bytes are unchanged, and absence means "nothing to
+            // report", never "the gate did not run".
+            const element: (typeof published)[number] = {
+                // [#21207] Each element's version token is keyed, like the
+                // single-item doors' (`receiptVersion`); `p.version` stays the
+                // stored hash for everything internal.
+                type: p.d.type, name: p.d.name, version: await this.receiptVersion(p.version),
+                ...(p.advisories.length > 0 ? { advisories: [...p.advisories] } : {}),
+            };
+            published.push(element);
+            try {
+                const eff = await this.runPublishSideEffects({
+                    singularType: p.singularType,
+                    name: p.d.name,
+                    body: p.body,
+                    packageId: p.packageId,
+                    ...(request.actor ? { actor: request.actor } : {}),
+                    skipSeedApply: true,
+                });
+                // [#30693] A refused object-storage sync rides THIS element's
+                // `advisories`, the same `object-storage-sync-refused` warning
+                // `publishMetaItem` and a publish-mode save answer (#30635).
+                // The metadata is live and the element stays published; before
+                // this, only the server log said the table was not created or
+                // altered. Appended after the gate's findings, still
+                // omitted-when-empty: a clean sync adds no key.
+                if (eff.storageRefused) {
+                    element.advisories = [...(element.advisories ?? []), eff.storageRefused];
+                }
+                if (eff.materializeApplied) {
+                    materialize.any = true;
+                    materialize.inserted += eff.materializeApplied.inserted;
+                    materialize.updated += eff.materializeApplied.updated;
+                    if (!eff.materializeApplied.success) {
+                        materialize.failures.push({
+                            type: p.d.type, name: p.d.name,
+                            error: eff.materializeApplied.error ?? 'materialize failed',
+                        });
+                    }
+                }
+            } catch (e: any) {
+                // Boot reconciliation heals registry/DDL/projection drift; the
+                // published metadata is authoritative. Surface, don't lie.
+                console.warn(
+                    `[Protocol] publish side effects failed for ${p.d.type}/${p.d.name}: ${e?.message ?? e}`,
+                );
+                materialize.any = true;
+                // [#8333 · P7] The PREFIX is unchanged byte for byte — it is
+                // the operational fact a caller needs (the metadata IS live;
+                // boot reconciliation heals the drift), and pins read it. Only
+                // the interpolation changes: measured on `origin/main`, a
+                // driver failure inside the side effects put `SQLITE_ERROR: no
+                // such table: sys_metadata` on the tail of this sentence, on a
+                // 200 response.
+                //
+                // Everything this `try` wraps is infrastructure — registry
+                // write-through, table DDL, the projector, the event — so no
+                // authored refusal was measured arriving here at all; the
+                // materializer's authored refusal takes P8's RETURN path
+                // instead. The rule is applied uniformly anyway rather than
+                // special-cased: a declared 4xx from any of them is still
+                // quoted.
+                materialize.failures.push({
+                    type: p.d.type, name: p.d.name,
+                    error: 'side effects failed (metadata is live; boot reconciliation heals): '
+                        + clientFacingFailureText(e, 'the reason is in the server log'),
+                });
+            }
+        }
+
+        const seedApplied = seedBodies.length > 0 ? await this.applySeedBodies(seedBodies) : undefined;
+
+        // [#24253] AFTER every promoted item's side effects, never before: the
+        // registry write-through is what makes the engine serve the new field
+        // (a write naming a field the registry lacks is stripped), and
+        // `ensureObjectStorage` is what adds its column. A sync that was
+        // refused there leaves no column, so the write below fails and is
+        // reported per field, never skipped.
+        const backfillApplied = backfillPlan.length > 0 && published.length > 0
+            ? await this.applyPublishBackfill(request.packageId, backfillPlan, request.context)
+            : undefined;
+
+        // ADR-0038 L3: exercise what was just published — one real read per
+        // artifact — so "Published!" can never again mean "and silently
+        // broken". Best-effort by design: a probe crash is swallowed (the
+        // publish already happened and must report as such), and findings ride
+        // the response for the agent / chat health card to act on.
+        let probes: import('./build-probes.js').BuildProbeReport | undefined;
+        if (published.length > 0) {
+            try {
+                const { runBuildProbes } = await import('./build-probes.js');
+                const analytics = this.getServicesRegistry?.().get('analytics');
+                probes = await runBuildProbes({
+                    engine: this.engine as any,
+                    getItem: async (type, name) => {
+                        const wrapper: any = await (this.facade as any).getMetaItem({ type, name });
+                        return wrapper?.item ?? wrapper ?? undefined;
+                    },
+                    published,
+                    ...(analytics && typeof analytics.queryDataset === 'function' ? { analytics } : {}),
+                    organizationId: null,
+                    ...(request.context !== undefined ? { context: request.context } : {}),
+                });
+            } catch {
+                probes = undefined;
+            }
+        }
+
+        // ADR-0067 D2 — the commit record was written INSIDE the Phase-1
+        // transaction above, together with the promotions it describes.
+
+        // [#10462] The no-op exit — a publish with nothing to promote — used
+        // to be the ONLY exit that left no trace at all: no audit row (right:
+        // `sys_metadata_audit` rows are keyed on `(type, name)`, and a batch
+        // with zero items has no honest identity to mint — the limiting case
+        // of the rule both refusal sites already follow) and no log line
+        // (wrong: an operator who reads `success: false` as a refusal goes
+        // looking for a rollback that never happened). `info`, not `warn`:
+        // nothing was claimed persisted and nothing was lost, so this is
+        // neither a durability nor a functional degradation.
+        if (published.length === 0 && failed.length === 0) {
+            console.info(
+                `[Protocol] publishPackageDrafts: nothing to publish for package `
+                + `'${request.packageId}' — no pending drafts were found, and nothing was refused.`,
+            );
+        }
+
+        return {
+            success: failed.length === 0 && published.length > 0,
+            // [#10462] Derived, never stored: 'refused' the moment anything is
+            // in `failed[]` (defensive — every failure on this route unwinds
+            // through the Phase-1 catch above today), else 'published' iff
+            // something landed, else the no-op. Exactly the three-way fact
+            // `success` compresses into one boolean.
+            outcome: failed.length > 0
+                ? 'refused'
+                : published.length > 0 ? 'published' : 'nothing_to_publish',
+            publishedCount: published.length,
+            failedCount: failed.length,
+            published,
+            failed,
+            ...(seedApplied ? { seedApplied } : {}),
+            ...(materialize.any
+                ? { materializeApplied: {
+                    success: materialize.failures.length === 0,
+                    inserted: materialize.inserted,
+                    updated: materialize.updated,
+                    failures: materialize.failures,
+                } }
+                : {}),
+            ...(probes ? { probes } : {}),
+            ...(commit ? { commitId: commit.commitId } : {}),
+            ...(backfillApplied ? { backfillApplied } : {}),
+        };
     }
 
     /** The body of `ObjectStackProtocolImplementation#discardPackageDrafts`; the method's docblock there is its contract. */

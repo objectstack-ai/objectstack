@@ -39,6 +39,7 @@ export {
 export type {
   EmailServiceOptions,
   TemplateLoader,
+  TemplateLoadOptions,
   EmailTemplateRow,
   EmailPersistence,
   EmailQueueDelivery,
@@ -107,6 +108,9 @@ export {
   type ResendTransportOptions,
   type PostmarkTransportOptions,
   type SmtpTransportOptions,
+  type SmtpConnectPolicy,
+  type SmtpConnectRequest,
+  type SmtpConnectCallback,
   type MakeTransportOptions,
   type EmailTransportProvider,
   type ApiKeyEmailProvider,

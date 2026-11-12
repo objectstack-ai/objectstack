@@ -14,10 +14,15 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  BARE_NAME_ONE_HOLDER_TYPES,
   ENGINE_FUNCTION_TYPE,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
   OVERRIDABLE_BASELINE_PACKAGES,
   PackageScopedNameRefusedError,
   RUNTIME_COMPATIBILITY_PACKAGE_ID,
+  isNamespaceScopedBareNameType,
+  isPackageScopedType,
+  packageScopedActionOwnersSentence,
   packageScopedHolderSource,
   resolvePackageScopedHolders,
   type PackageResolutionClosureOf,
@@ -127,7 +132,10 @@ describe('ADR-0150 D3 exceptions over a supplied holder set', () => {
 
   it('an overridable baseline yields to another holder of the step, and answers when it is the only one', () => {
     expect(resolve([[EMAIL, 'builtin']], [EMAIL], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', via: 'baseline' });
-    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // The step-2 yield, on a name the platform does not request with no package.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'welcome')).toMatchObject({ status: 'resolved', item: 'a', via: 'closure' });
+    // [#31699] A platform-requested name (`auth.*`) resolves environment-wide whatever the caller: the override still wins.
+    expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [EMAIL, A], P, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
     expect(resolve([[EMAIL, 'builtin'], [A, 'a']], [], undefined, 'email_template', 'auth.password_reset')).toMatchObject({ status: 'resolved', item: 'a', via: 'unique-holder' });
   });
 
@@ -219,5 +227,38 @@ describe('the one refusal class every package-scoped by-name door throws (ADR-01
     expect(err.httpStatus).toBe(409);
     expect(err.refusal).toBe(refusal);
     expect(err.message).toBe(refusal.message);
+  });
+});
+
+describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
+  it('each is a phase-1 type ADR-0150 addresses by package, so a reader that refuses a bare read of a narrowed type it cannot judge reaches every one', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES.length).toBeGreaterThan(0);
+    for (const type of NAMESPACE_SCOPED_BARE_NAME_TYPES) {
+      expect(BARE_NAME_ONE_HOLDER_TYPES, type).toContain(type);
+      expect(isPackageScopedType(type), type).toBe(true);
+      expect(isNamespaceScopedBareNameType(type), type).toBe(true);
+    }
+    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
+  });
+});
+
+describe('[#32244, review 6781770671 N1] packageScopedActionOwnersSentence', () => {
+  it('two packages on two objects: each is a different action, naming each package with its object', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['contact']]]))).toBe(
+      `Each is a different action: package "${A}" binds it to object "account"; package "${B}" binds it to object "contact".`,
+    );
+  });
+
+  it('an object and none are different actions too', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, [undefined]]]))).toBe(
+      `Each is a different action: package "${A}" binds it to object "account"; package "${B}" binds it to no object.`,
+    );
+  });
+
+  it('two packages on ONE object are not called different actions: the sentence only names them', () => {
+    expect(packageScopedActionOwnersSentence(new Map([[A, ['account']], [B, ['account']]]))).toBe(
+      `Package "${A}" binds it to object "account"; package "${B}" binds it to object "account".`,
+    );
   });
 });

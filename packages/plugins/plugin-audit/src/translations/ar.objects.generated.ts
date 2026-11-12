@@ -43,7 +43,8 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
           package_uninstall: "إلغاء تثبيت حزمة",
           package_unmanaged_import: "Package Unmanaged Import",
           credential_use: "Credential Use",
-          scim_refused: "SCIM Refused"
+          scim_refused: "SCIM Refused",
+          audit_signing_key_change: "Audit Signing Key Change"
         }
       },
       user_id: {
@@ -289,6 +290,126 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "تاريخ الإنشاء"
+      }
+    }
+  },
+  sys_audit_checkpoint: {
+    label: "Audit Checkpoint",
+    pluralLabel: "Audit Checkpoints",
+    description: "Signed Merkle checkpoints of the audit ledger. Written only by the platform sealer.",
+    fields: {
+      id: {
+        label: "Checkpoint ID"
+      },
+      sealed_object: {
+        label: "Sealed Object",
+        help: "The object whose rows this checkpoint seals"
+      },
+      chain_key: {
+        label: "Chain Key",
+        help: "`org:` and the organization id, or `deployment` for rows about no organization"
+      },
+      tenant_id: {
+        label: "Organization",
+        help: "The organization this chain is about; empty for the deployment chain"
+      },
+      sequence: {
+        label: "Sequence",
+        help: "Position in the chain, from 0"
+      },
+      kind: {
+        label: "Kind",
+        help: "A window sealed on time, or rows that arrived after their window was sealed",
+        options: {
+          window: "Window",
+          late: "Late"
+        }
+      },
+      window_start: {
+        label: "Window Start"
+      },
+      window_end: {
+        label: "Window End"
+      },
+      sealed_through: {
+        label: "Sealed Through",
+        help: "The end of the last window the sealing pass had completed for every chain of the object"
+      },
+      leaf_count: {
+        label: "Leaf Count"
+      },
+      row_ids: {
+        label: "Row IDs",
+        help: "JSON array of the sealed row ids"
+      },
+      leaf_hashes: {
+        label: "Leaf Hashes",
+        help: "JSON array of each sealed row's leaf hash, in the order of the row ids; checked against the signed root"
+      },
+      root: {
+        label: "Merkle Root"
+      },
+      previous_digest: {
+        label: "Previous Digest",
+        help: "SHA-256 of the chain's previous checkpoint's signed body; empty for the first"
+      },
+      columns: {
+        label: "Columns",
+        help: "JSON: the columns sealed in clear and as commitments"
+      },
+      canon_version: {
+        label: "Canonical Form Version"
+      },
+      seed_handle: {
+        label: "Seed Handle",
+        help: "The sys_secret row holding the sealed seed that salts the value columns of this checkpoint"
+      },
+      fencing_token: {
+        label: "Fencing Token"
+      },
+      sealed_at: {
+        label: "Sealed At"
+      },
+      signing_key_id: {
+        label: "Signing Key"
+      },
+      signature: {
+        label: "Signature"
+      }
+    }
+  },
+  sys_audit_signing_key: {
+    label: "Audit Signing Key",
+    pluralLabel: "Audit Signing Keys",
+    description: "Public halves of the keys that sign audit checkpoints. Written only by the platform.",
+    fields: {
+      id: {
+        label: "Key Row ID"
+      },
+      fingerprint: {
+        label: "Fingerprint",
+        help: "The key id: lowercase hex SHA-256 of the raw public key"
+      },
+      public_key: {
+        label: "Public Key",
+        help: "Raw Ed25519 public key, base64"
+      },
+      status: {
+        label: "Status",
+        options: {
+          active: "Active",
+          retired: "Retired"
+        }
+      },
+      created_at: {
+        label: "Created At"
+      },
+      retired_at: {
+        label: "Retired At"
+      },
+      private_handle: {
+        label: "Private Key Handle",
+        help: "The sys_secret row holding the wrapped private half"
       }
     }
   }

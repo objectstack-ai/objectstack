@@ -8,13 +8,19 @@ import type {
     MessagingChannelContext,
     SendResult,
 } from './channel.js';
-import { templateRefusalAfterCurrencyReadFault, type EmailSenderSurface } from './email-channel.js';
+import { templateCallerPackageOf, templateRefusalAfterCurrencyReadFault, type EmailSenderSurface } from './email-channel.js';
 import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
 
 /** The object the inbox channel writes rows to. */
 export const INBOX_OBJECT = 'sys_inbox_message';
+
+/**
+ * [#32240] The `sys_inbox_message` column holding the catalog keys a row's
+ * `title` / `body_md` were rendered from (`NotificationTextKeys`).
+ */
+export const INBOX_TEXT_KEYS_FIELD = 'keyed_text';
 
 /** The receipt object the inbox channel writes a `delivered` row to (ADR-0030). */
 export const RECEIPT_OBJECT = 'sys_notification_receipt';
@@ -218,6 +224,9 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 // against the declared input, so a rename on either side fails
                 // to compile. No default currency sends no key (#27754).
                 if (currency) renderInput.currency = currency;
+                // [ADR-0150 D3, #31699] The package the template name resolves from.
+                const callerPackageId = templateCallerPackageOf(payload);
+                if (callerPackageId) renderInput.callerPackageId = callerPackageId;
                 try {
                     const rendered = await email.renderTemplate(renderInput);
                     title = rendered.subject;
@@ -237,6 +246,7 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                                 template: templateName,
                                 ...(templateData !== undefined ? { data: templateData } : {}),
                                 ...(templateLocale ? { locale: templateLocale } : {}),
+                                ...(callerPackageId ? { callerPackageId } : {}),
                                 currency: probe,
                             }),
                         ),
@@ -256,6 +266,13 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                 organization_id: n.organizationId ?? null,
                 created_at: at,
             };
+            // [#32240] The keys `title` / `body_md` were rendered from, so a
+            // reader in another language reads this row in theirs
+            // (`inbox-reader-locale.ts`). Read off the unit the service or the
+            // dispatcher set, never off `payload`. Not on the template path:
+            // that text is the template's, not the keys'. Absent ⇒ the column
+            // is left unwritten, the insert byte-identical to before.
+            if (n.keyedText && !templateName) row[INBOX_TEXT_KEYS_FIELD] = n.keyedText;
 
             let inboxId: string | undefined;
             try {

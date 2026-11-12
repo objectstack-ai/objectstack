@@ -15,6 +15,7 @@ import {
   detectProposedPlan,
   detectBuilderHandoff,
   buildProgressFromDraftReview,
+  supersededPlanIds,
 } from '../mapMessages';
 
 describe('uiMessageToChatMessage', () => {
@@ -837,5 +838,28 @@ describe('detectDraftResult is exported for shared hydration', () => {
     expect(detectDraftResult({ status: 'drafted', drafted: [{ type: 'app', name: 'a' }] })?.items).toEqual([
       { type: 'app', name: 'a' },
     ]);
+  });
+});
+
+describe('supersededPlanIds — the plans a later plan in the same turn replaced', () => {
+  const plan = { objects: [{ name: 'book', fieldCount: 1 }], counts: { objects: 1, views: 0, dashboards: 0, seedData: 0 }, questions: [], assumptions: [] };
+  const step = (id: string, toolCallId: string, proposedPlan: typeof plan | null = plan) => ({
+    id,
+    role: 'assistant' as const,
+    content: '',
+    toolInvocations: [{ toolCallId, toolName: 'propose_blueprint', state: 'output-available' as const, ...(proposedPlan ? { proposedPlan } : {}) }],
+  });
+  const user = (id: string) => ({ id, role: 'user' as const, content: 'build it' });
+
+  it('one turn spread over several messages keeps only its newest plan', () => {
+    expect([...supersededPlanIds([user('u1'), step('a1', 'p1'), step('a2', 'p2'), step('a3', 'p3')])]).toEqual(['p1', 'p2']);
+  });
+
+  it('a user message starts a new turn; a lone plan of an earlier turn is kept', () => {
+    expect([...supersededPlanIds([user('u1'), step('a1', 'p0'), user('u2'), step('a2', 'p1'), step('a3', 'p2')])]).toEqual(['p1']);
+  });
+
+  it('an invocation with no plan supersedes nothing, and a single plan is never superseded', () => {
+    expect(supersededPlanIds([user('u1'), step('a1', 'p1'), step('a2', 'x', null)]).size).toBe(0);
   });
 });

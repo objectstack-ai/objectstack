@@ -14,6 +14,7 @@ import type {
 } from '@objectstack/spec/contracts';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { AudiencePosture } from '@objectstack/spec/system';
+import type { OrganizationEditionChoice } from '@objectstack/spec/api';
 import type { AuthInvitationStatus } from './invitation-status.js';
 
 /**
@@ -180,7 +181,7 @@ export interface TwoFactorChallenge {
   methods: TwoFactorMethod[];
 }
 
-/** What `AuthClient.signIn` answers: a session, or a pending two-factor challenge. */
+/** What a sign-in (`AuthClient.signIn`, `signInWithPhonePassword`, `signInWithPhoneOtp`) answers: a session, or a pending two-factor challenge. */
 export type SignInResult =
   | { user: AuthUser; session: AuthClientSession; twoFactor?: undefined }
   | { twoFactor: TwoFactorChallenge; user?: undefined; session?: undefined };
@@ -324,6 +325,27 @@ export interface AuthPublicConfig {
      */
     cloudManaged?: boolean;
     /**
+     * Developer Edition organizations can be created here
+     * (`AuthFeaturesConfigSchema.developerEditionCreate` in `@objectstack/spec`):
+     * `true` only where the host's organization-create door accepts
+     * `?edition=developer`, the value `createOrganization`'s `edition`
+     * sends. A create-organization form reads its choices from
+     * `organizationEditions`, not from this boolean. Absent or `false` ⇒ no
+     * developer choice is served.
+     */
+    developerEditionCreate?: boolean;
+    /**
+     * The editions the host's organization-create door accepts besides its
+     * default (`AuthFeaturesConfigSchema.organizationEditions` in
+     * `@objectstack/spec`): each with its `edition` query value, a `label` and
+     * a `hint` the host already resolved in the request language, and its
+     * `memberLimit` when one applies. The create-organization dialog draws
+     * each as a choice that starts unchecked and sends the picked one's
+     * `edition` through `createOrganization`. Absent or empty ⇒ the door
+     * takes no edition and no choice is drawn.
+     */
+    organizationEditions?: readonly OrganizationEditionChoice[];
+    /**
      * When `false`, the server's `beforeCreateOrganization` hook blocks
      * creation of new organizations. The org plugin endpoints (list, update,
      * invite-accept) still work — only fresh creation is forbidden.
@@ -448,10 +470,20 @@ export interface AuthClient {
   resetPassword: (token: string, newPassword: string) => Promise<void>;
   /** framework#2780 — request a sign-in/verification OTP SMS for the phone number. */
   sendPhoneOtp: (phoneNumber: string) => Promise<void>;
-  /** framework#2780 — verify a phone OTP; signs in the number's user. */
-  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
-  /** framework#2780 — sign in with phone number + password (no SMS; gated by `features.phoneNumber`). */
-  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<{ user: AuthUser; session: AuthClientSession }>;
+  /**
+   * framework#2780 — verify a phone OTP; signs in the number's user. For an
+   * account with an enrolled second factor, the answer is a `twoFactor`
+   * challenge instead of a session, as `signIn` answers: finish it with
+   * `verifySignInTwoFactor`.
+   */
+  signInWithPhoneOtp: (phoneNumber: string, code: string) => Promise<SignInResult>;
+  /**
+   * framework#2780 — sign in with phone number + password (no SMS; gated by
+   * `features.phoneNumber`). For an account with two-factor sign-in on, the
+   * answer is a `twoFactor` challenge instead of a session, as `signIn`
+   * answers (objectstack#32107): finish it with `verifySignInTwoFactor`.
+   */
+  signInWithPhonePassword: (phoneNumber: string, password: string) => Promise<SignInResult>;
   /** framework#2780 — request a password-reset OTP SMS for the phone number. */
   requestPhonePasswordReset: (phoneNumber: string) => Promise<void>;
   /** framework#2780 — reset the password using a phone OTP. */
@@ -495,8 +527,19 @@ export interface AuthClient {
    * as the `timezone` QUERY parameter of `POST /organization/create`, never in
    * the body, which stays `{ name, slug, logo }`. Omitted or empty, nothing is
    * sent and the server keeps its default zone; the server judges the value.
+   *
+   * `edition` is the `edition` value of one of the host's
+   * `features.organizationEditions` choices (for example `developer`). It
+   * travels as the `edition` QUERY parameter the same way, and only a host
+   * that serves that choice accepts it. Omitted, nothing is sent.
    */
-  createOrganization: (data: { name: string; slug: string; logo?: string; timezone?: string }) => Promise<AuthOrganization>;
+  createOrganization: (data: {
+    name: string;
+    slug: string;
+    logo?: string;
+    timezone?: string;
+    edition?: string;
+  }) => Promise<AuthOrganization>;
   /** Set the active organization for the current session */
   setActiveOrganization: (orgId: string) => Promise<AuthOrganization | null>;
   /** Get the full active organization object */

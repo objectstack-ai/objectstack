@@ -366,7 +366,9 @@ export {
   SECURITY_CBP_NO_RELATION,
   SECURITY_CBP_AMBIGUOUS_RELATION,
   SECURITY_CBP_OWNER_POLICY_WITHOUT_OPT_IN,
+  SECURITY_CBP_MASTER_REFERENCE_HIDDEN,
   SECURITY_SUPERUSER_FIELD_MASK_INERT,
+  SECURITY_UPDATE_POLICY_NO_CHECK,
   holdsSuperuserBypass,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
@@ -420,6 +422,17 @@ export type {
   ExternalOwnerSharingFinding,
   ExternalOwnerSharingSeverity,
 } from './validate-external-owner-sharing.js';
+
+// [ADR-0153 D4] A `private` `synced` object that no sharing rule grants read on
+// shows a member none of its owner-less pulled rows.
+export {
+  validateSyncedPrivateReadability,
+  SECURITY_SYNCED_PRIVATE_UNREADABLE,
+} from './validate-synced-private-readability.js';
+export type {
+  SyncedPrivateReadabilityFinding,
+  SyncedPrivateReadabilitySeverity,
+} from './validate-synced-private-readability.js';
 
 // #4983 — the sibling surface, and ADR-0056 D4's gate finally wired. An RLS
 // `using` / `check` the runtime cannot compile is DROPPED (and, when it is the
@@ -550,6 +563,7 @@ export {
   SORT_FIELD_UNKNOWN,
   SORT_FIELD_UNSORTABLE,
   SORT_FIELD_UNPROVISIONED,
+  GRID_AGGREGATION_FIELD_TYPE_REFUSED,
 } from './validate-sortable-fields.js';
 export type {
   SortableFieldFinding,
@@ -582,11 +596,14 @@ export type {
 // over another object than the one the list view lists.
 // [#28018] Its EIGHTH: a `kanban.lanes` entry that is not an option of the
 // group field, or a lane listed twice.
+// [#32449] Its NINTH: a column summary whose function the aggregate door
+// refuses over the aggregated field's declaration.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
   LIST_VIEW_GROUP_ORDER_UNORDERABLE,
+  LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED,
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
@@ -1052,6 +1069,7 @@ export {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_NODE_UNREACHABLE,
+  FLOW_START_NODE_MISSING,
   FLOW_MULTI_WRITE_UNFILTERED,
   FLOW_LOOP_BODY_UNCONTAINED,
   FLOW_TRY_CATCH_WITHOUT_CATCH,

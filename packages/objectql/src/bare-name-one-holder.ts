@@ -33,10 +33,11 @@
  *    package's dataset;
  *  - `api` — the endpoint matcher keeps ONE api per name, the last-registered,
  *    so the other package's declared path answers `404`;
- *  - `action`, object-less only — `/actions/global/NAME` runs the
- *    last-registered package's handler while `/meta/action/NAME` serves the
- *    first-registered package's declaration, so the button a client draws and
- *    the code that runs come from two packages;
+ *  - `action`, object-less only — `/actions/global/NAME` ran the
+ *    last-registered package's handler while `/meta/action/NAME` served the
+ *    first-registered package's declaration, so the button a client drew and
+ *    the code that ran came from two packages (since narrowed to the
+ *    namespace: "The narrowing");
  *  - `function` — the engine's function registry keeps one function per name,
  *    the last-registered, and a flow `script` node's `function` and an
  *    action's `target` resolve it with no package;
@@ -52,9 +53,10 @@
  *    connector picker reads) serves the FIRST-registered package's
  *    declaration; a provider-bound instance is the engine's one connector
  *    per name, and a second one at boot already refuses the boot (ADR-0097);
- *  - `email_template` — a send's `template: NAME` resolves the
+ *  - `email_template` — a send's `template: NAME` resolved the
  *    FIRST-registered package's bundle, and `/meta/email_template/NAME`
- *    serves the same one;
+ *    served the same one (both since narrowed to the namespace: "The
+ *    narrowing");
  *  - `agent` — `/meta/agent/NAME` served the FIRST-registered package's
  *    agent, the one by-name read of an agent the open framework serves (the
  *    agent runtime that resolves an agent by name is the cloud's);
@@ -87,9 +89,9 @@
  *    package whose handlers the hook binder bound it for
  *    ({@link handlerOwnerPackageId}): the function registry is the engine's,
  *    not the registry's, so its one door is that bind;
- *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}; none today for the covered
- *    types, kept in the vocabulary so a platform-held name is refused the way
- *    the security catalog refuses one.
+ *  - **a built-in** — {@link BUILT_IN_BARE_NAMES}: a name the platform itself
+ *    requests by a fixed spelling (the object-less action `install_package`,
+ *    #31697), refused the way the security catalog refuses one.
  *
  * ⛔ **Never the environment catalog.** An item authored in this environment
  * under a package's name is the ADR-0005 overlay — the sanctioned
@@ -140,6 +142,22 @@
  * built-in name (D9: the refusal narrows, it does not go). `agent` and `skill`
  * narrowed first (#31701): `/meta/agent|skill/NAME` read through
  * `readPackageScopedItem`, and the MCP prompt and agent faces are `NS-NAME`.
+ * The object-less `action` followed (#31697): a call that names no package —
+ * the engine's `executeAction`, the bare `/actions` door and MCP's bare
+ * `run_action` — is refused `409 RESOURCE_CONFLICT` naming every holder of the
+ * name, and the namespace-qualified address (`/actions/NS/global/NAME`,
+ * `run_action` with `namespace`) reaches each. The same 409 answers two
+ * packages' same-named action bound to ONE object (epic ruling record
+ * 6729825528, letter A), which this rule never covered.
+ *
+ * `email_template` followed (#31699): `/meta/email_template/NAME` reads
+ * through `readPackageScopedItem` member by member, and a send resolves the
+ * name from the package it is made from (a flow's `notify` node passes the
+ * flow's armed package; a send that names none resolves caller-less, and a
+ * refusal names every holder). A name two packages hold is read at the
+ * resolved holder's own address, so the bundle is that holder's alone
+ * (plugin-email's template loader).
+ *
  * `tool` followed (#31985): `/meta/tool/NAME` reads through
  * `readPackageScopedItem` (child E8), and a package's `tool` record has no
  * other reader and no AI face to carry. Every tool an MCP client or a model is
@@ -147,7 +165,18 @@
  * action-backed tools), never from a `tool` record, and a skill's `tools`
  * names resolve against that registry. Once tool records become live, the
  * resolver of a skill's `tools` resolves from the skill's package (ADR-0150
- * D3) and refuses two holders, naming them.
+ * D3) and refuses two holders, naming them (`packages/spec/liveness/tool.json`
+ * records that precondition).
+ *
+ * Two holdings still meet under a narrowed type, whatever the namespaces:
+ *
+ *  - a name the platform requests by its bare spelling
+ *    (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`) — the
+ *    `auth.*` mails the platform sends name no package, so a deployment keeps
+ *    one overriding package per name;
+ *  - a bundle ADDITION ({@link isBundleAdditionPair}) — a dependent package's
+ *    member its base does not ship, under the base's name, is no second
+ *    address: it names its base's template, and is refused as before.
  *
  * ## What it deliberately does not judge
  *
@@ -176,24 +205,32 @@
  */
 
 import type { ObjectStackManifest } from '@objectstack/spec/kernel';
+import { namespacedHoldersMeet } from '@objectstack/spec/kernel';
 import {
   artifactPackageId,
   BARE_NAME_ONE_HOLDER_TYPES,
+  isPackageScopedType,
+  isPlatformRequestedBareName,
   OVERRIDABLE_BASELINE_PACKAGES,
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
   type BareNameHolder,
   type BareNameOneHolderType,
   type BareNameRegistryType,
 } from '@objectstack/core';
+import { ITEM_KEY_DISCRIMINATORS, readDiscriminatorValue } from '@objectstack/metadata-core';
 import { isObjectLessActionKey, standaloneActionOwnerKey } from './action-governance.js';
 
 // [epic #31527 child R2] The holder vocabulary — the covered types, the
 // overridable baselines and the holder spelling — lives in `@objectstack/core`
 // (`package-scoped-resolution.ts`) beside the package-scoped resolution rule
 // that is written in it, so every reader of either reads one copy. Re-exported
-// here under the same names; the rule it serves is this module's.
+// here under the same names; the rule it serves is this module's. [#32076] The
+// narrowed types (`NAMESPACE_SCOPED_BARE_NAME_TYPES`) joined them, so the
+// metadata protocol, which objectql depends on, reads the same list.
 export type { BareNameRegistryType, BareNameOneHolderType, BareNameHolder } from '@objectstack/core';
 export {
   BARE_NAME_ONE_HOLDER_TYPES,
@@ -201,6 +238,8 @@ export {
   isBareNameOneHolderType,
   isOverridableBaseline,
   describeBareNameHolder,
+  NAMESPACE_SCOPED_BARE_NAME_TYPES,
+  isNamespaceScopedBareNameType,
 };
 
 /** The covered registry types, in the order a refusal lists them. */
@@ -245,19 +284,28 @@ const COLLECTION_KEY: Readonly<Record<BareNameRegistryType, string>> = Object.fr
 
 /**
  * The names the platform itself holds, whichever package registers first.
- * None today: the platform ships no item of a covered type under a name a
- * package could take. Applied at the package door only, as the security
- * catalog applies its own. For `tool` the platform requests no tool record by
- * name (ADR-0150 D3's exception list holds none): the tools the AI service
- * registers by name (`PLATFORM_PROVIDED_TOOL_NAMES`) live in its own tool
- * registry, not in this registry, so none is a built-in here.
+ * Applied at the package door only, as the security catalog applies its own.
+ *
+ * - `action`: `install_package` (#31697; epic ruling record 6762267053,
+ *   item 2 (b)). The Console's marketplace and the cloud connection call
+ *   `POST /actions/sys_package/install_package` by that fixed name, naming no
+ *   package, and an object-less action reaches every object's route when the
+ *   object binds none of that name. So no package may hold the object-less
+ *   name, and a package's never makes the platform's install button answer
+ *   `409`. The census found no other fixed-name action request in the
+ *   platform's own code (`packages/**` and `ui/**` sources).
+ * - every other covered type: none — the platform ships no item of it under
+ *   a name a package could take. For `tool` (#31985) the platform requests no
+ *   tool record by name (ADR-0150 D3's exception list holds none): the tools
+ *   the AI service registers by name (`PLATFORM_PROVIDED_TOOL_NAMES`) live in
+ *   its own tool registry, not in this registry, so none is a built-in here.
  */
 export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, ReadonlySet<string>>> = Object.freeze({
   picklist: new Set<string>(),
   mapping: new Set<string>(),
   dataset: new Set<string>(),
   api: new Set<string>(),
-  action: new Set<string>(),
+  action: new Set<string>(['install_package']),
   function: new Set<string>(),
   flow: new Set<string>(),
   webhook: new Set<string>(),
@@ -269,22 +317,47 @@ export const BUILT_IN_BARE_NAMES: Readonly<Record<BareNameOneHolderType, Readonl
 });
 
 /**
- * [ADR-0150 D2/D9, child B] The covered types whose one-holder rule has
- * narrowed from the deployment to the namespace (module doc, "The narrowing").
- * Each type joins in its own trailing change, once its by-name readers, its
- * AI faces and its stored references all carry the package: the AI family's
- * `agent` and `skill` first (#31701), then `tool` (#31985). A type not listed
- * here keeps one package holder per deployment.
+ * [#31697; contract review G6, epic answer on #32213] The OBJECT-BOUND action
+ * keys (`OBJECT:NAME`) the platform itself holds. The Console's marketplace
+ * and the cloud connection post `POST /actions/sys_package/install_package`
+ * by that fixed name, and that route reaches an action bound to `sys_package`
+ * first, so {@link BUILT_IN_BARE_NAMES}' object-less entry alone does not
+ * guard it. A package declaring an action bound to one of these keys is
+ * refused at install, naming the platform — a declared narrowing (first-party
+ * count 0). The census: no other fixed-name action request in the platform's
+ * own code (`packages/**` and `ui/**` sources), and no source in this
+ * repository declares the action (the call reaches the cloud control plane).
  */
-export const NAMESPACE_SCOPED_BARE_NAME_TYPES: readonly BareNameOneHolderType[] = Object.freeze([
-  'agent',
-  'skill',
-  'tool',
-]);
+export const BUILT_IN_BOUND_ACTION_KEYS: ReadonlySet<string> = new Set(['sys_package:install_package']);
 
-/** Has `type`'s one-holder rule narrowed to the namespace ({@link NAMESPACE_SCOPED_BARE_NAME_TYPES})? */
-export function isNamespaceScopedBareNameType(type: unknown): boolean {
-  return typeof type === 'string' && (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
+/** One object-bound action a manifest declares under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). */
+export interface DeclaredBuiltInBoundAction {
+  readonly name: string;
+  readonly objectName: string;
+}
+
+/**
+ * The object-bound actions `manifest` (and each plugin it carries) declares
+ * under a key the platform holds ({@link BUILT_IN_BOUND_ACTION_KEYS}). An
+ * overridable baseline package is not judged, as {@link declaredBareNames}.
+ */
+export function declaredBuiltInBoundActions(manifest: ObjectStackManifest | unknown): DeclaredBuiltInBoundAction[] {
+  const out: DeclaredBuiltInBoundAction[] = [];
+  if (isOverridableBaseline('action', artifactPackageId(manifest))) return out;
+  const read = (source: unknown) => {
+    const items = source && typeof source === 'object' ? (source as Record<string, unknown>)[COLLECTION_KEY.action] : undefined;
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      const name = itemName(item);
+      if (name === undefined || holdsBareName('action', item)) continue;
+      const objectName = standaloneActionOwnerKey(item);
+      if (BUILT_IN_BOUND_ACTION_KEYS.has(`${objectName}:${name}`)) out.push({ name, objectName });
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return out;
 }
 
 /**
@@ -295,14 +368,27 @@ export function isNamespaceScopedBareNameType(type: unknown): boolean {
  * (`NS/NAME`) and two AI faces (`NS-NAME`), and every by-name reader resolves
  * a bare name by `(package, name)` or refuses it naming both. A package with
  * no namespace has no address of its own, so it still meets every holder.
+ *
+ * A name the PLATFORM requests by its bare spelling, with no package
+ * (`PLATFORM_REQUESTED_BARE_NAMES_BY_TYPE`, `@objectstack/core`; ADR-0150 D3
+ * Exceptions) keeps one holder per deployment whatever the namespaces: its
+ * requester can name no package, so two holders would leave it refused as
+ * ambiguous on every request (`email_template`'s `auth.*` mails, #31699).
+ * `name` omitted judges by the type alone.
+ *
+ * The namespace comparison is `namespacedHoldersMeet` (`@objectstack/spec`),
+ * the copy `composeStacks` reads for the same pair in one artifact.
  */
 export function bareNameHoldersMeet(
   type: BareNameOneHolderType,
   incomingNamespace: string | undefined,
   holderNamespace: string | undefined,
+  name?: string,
 ): boolean {
   if (!isNamespaceScopedBareNameType(type)) return true;
-  return !(incomingNamespace && holderNamespace && incomingNamespace !== holderNamespace);
+  if (name !== undefined && isPackageScopedType(type) && isPlatformRequestedBareName(type, name)) return true;
+  // The namespace half is spec's one copy, which `composeStacks` reads too.
+  return namespacedHoldersMeet(incomingNamespace, holderNamespace);
 }
 
 /**
@@ -387,6 +473,64 @@ export function declaredBareNames(manifest: ObjectStackManifest | unknown): Decl
   const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
   if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
   return out;
+}
+
+/**
+ * [ADR-0150 D9, #31699] The members of the bundle `(type, name)` a manifest
+ * declares — each item's discriminator value (an email template's `locale`,
+ * its canonical value when it states none), read from the same sources as
+ * {@link declaredBareNames}. Empty for a type that is no bundle.
+ */
+export function declaredBundleMembers(
+  manifest: ObjectStackManifest | unknown,
+  type: BareNameRegistryType,
+  name: string,
+): Set<string> {
+  const members = new Set<string>();
+  const disc = ITEM_KEY_DISCRIMINATORS[type];
+  if (!disc) return members;
+  const read = (source: unknown) => {
+    if (!source || typeof source !== 'object') return;
+    const items = (source as Record<string, unknown>)[COLLECTION_KEY[type]];
+    if (!Array.isArray(items)) return;
+    for (const item of items) {
+      if (itemName(item) === name) members.add(readDiscriminatorValue(item, disc.field) || disc.canonical);
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return members;
+}
+
+/**
+ * One package's holding of a bundled name, as {@link isBundleAdditionPair}
+ * reads it: the members it holds, and its declared dependency closure.
+ */
+export interface BundleHolding {
+  readonly packageId: string;
+  readonly members: ReadonlySet<string>;
+  readonly reach: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0150 D9, #31699] Is one of two package holdings of a bundled name an
+ * ADDITION to the other's bundle — the adding package declares (transitively)
+ * the other, the other does not declare it back, and the two hold no member in
+ * common (a dependent's `fr-FR` beside its base's `en-US`, #28802)? The test
+ * the registry's package-scoped holder read drops a dependent's addition by.
+ *
+ * An addition is no second address: it names its base's template, so it
+ * meets the base under the one-holder rule whatever the two namespaces
+ * declare, and stays refused once the type narrows to the namespace, as it was
+ * refused before.
+ */
+export function isBundleAdditionPair(a: BundleHolding, b: BundleHolding): boolean {
+  const adds = (adding: BundleHolding, base: BundleHolding): boolean =>
+    adding.reach.has(base.packageId)
+    && !base.reach.has(adding.packageId)
+    && ![...adding.members].some((member) => base.members.has(member));
+  return adds(a, b) || adds(b, a);
 }
 
 /** How a refusal names a covered type. */

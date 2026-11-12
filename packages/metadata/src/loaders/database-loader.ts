@@ -25,7 +25,18 @@ import { lowerFilterCondition, type FilterLoweringOptions } from '@objectstack/s
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { historySnapshotBody } from '../utils/history-snapshot-body.js';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } from './loader-interface.js';
+import {
+  PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
+  refuseSeveralSlots,
+  slotPackageOf,
+  storedBundleMemberOf,
+  storedItemPackageId,
+  storeRemovalKeys,
+  storeRowKey,
+  storeRowWriteKey,
+} from '../package-slotted-store.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [commit 6a180e42d] Both predicates moved to `@objectstack/types` — see its
 // `driver-error-classification.ts` `## Home` section. The verdicts are
@@ -271,6 +282,27 @@ export interface DatabaseLoaderOptions {
  * Implements the MetadataLoader interface to provide database read/write
  * for metadata records. Uses the MetadataRecordSchema envelope to persist
  * metadata with scope, versioning, and audit fields.
+ *
+ * [ADR-0150 D3/D4, #32246] A type stored per `(package, name)`
+ * (`PACKAGE_SLOTTED_STORE_TYPES`) keeps one row per `(package, name)`, with
+ * `package_id` filled, by the in-memory store's own rules
+ * (`package-slotted-store.ts`): a save fills the slot `storeRowWriteKey`
+ * picks, a delete takes the slots `storeRemovalKeys` picks, and `loadSlots` /
+ * `loadManySlots` answer every row with its package. A row's package is its
+ * `package_id` column, else the package its stored body names (a row written
+ * before this loader filled the column: its next save binds it, and so does
+ * `migrateDatabaseLoaderRowPackages`). Versions of such a type are numbered
+ * per name across its packages' rows, so their `sys_metadata_history` rows —
+ * unique on `(type, name, version)` — never collide, and the row of a name
+ * saved last is its highest version: `load`, `loadMany` and `loadManyKeyed`
+ * answer that one, one item per name, as they did. Every other type keeps one
+ * row per `(type, name)`, as before.
+ *
+ * [#31699 R3-B, epic ruling 6796068023] A bundled type (`email_template`) holds
+ * several members under one `(package, name)`, a row each: `loadMany` and
+ * `loadManyKeyed` keep one row per `(package, name, member)` — every member of
+ * every slot, as `main` answered every row — and a rollback by name of a name
+ * with one row slot restores the row of the member its body declares.
  */
 export class DatabaseLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -313,6 +345,8 @@ export class DatabaseLoader implements MetadataLoader {
   private readonly listCache?: LRUCache<string, string[]>;
   /** (type, name) → MetadataStats — primes `stat()` */
   private readonly statCache?: LRUCache<string, MetadataStats | null>;
+  /** [#31699 R7-A] Each body a plural read handed out from a legacy row, with that row's id and package ({@link bindReadRowPackage}). */
+  private readonly legacyReadRows = new WeakMap<object, { id: string; packageId: string }>();
 
   constructor(options: DatabaseLoaderOptions) {
     if (!options.driver && !options.engine) {
@@ -1032,8 +1066,11 @@ export class DatabaseLoader implements MetadataLoader {
     }
 
     try {
+      // [#32246] A by-package type has a row per package: the one saved last,
+      // its highest version.
       const row = await this._findOne(this.tableName, {
         where: this.baseFilter(type, name),
+        ...(PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { orderBy: [{ field: 'version', order: 'desc' as const }] } : {}),
       });
 
       if (!row) {
@@ -1081,15 +1118,13 @@ export class DatabaseLoader implements MetadataLoader {
    * them, and splitting them would have made every keyed `list()` read miss the
    * cache and re-hit the database.
    */
-  private async readTypeRows(
-    type: string
-  ): Promise<Array<{ name: string | null; data: Record<string, unknown> }>> {
+  private async readTypeRows(type: string): Promise<StoredTypeRow[]> {
     await this.ensureSchema();
 
     if (this.loadManyCache) {
       const cached = this.loadManyCache.get(type);
       if (cached !== undefined) {
-        return cached as Array<{ name: string | null; data: Record<string, unknown> }>;
+        return cached as StoredTypeRow[];
       }
     }
 
@@ -1098,12 +1133,25 @@ export class DatabaseLoader implements MetadataLoader {
         where: this.baseFilter(type),
       });
 
-      const result: Array<{ name: string | null; data: Record<string, unknown> }> = [];
+      const result: StoredTypeRow[] = [];
       for (const row of rows) {
         const data = this.rowToData(row);
         if (data === null) continue;
         const name = row.name;
-        result.push({ name: typeof name === 'string' && name !== '' ? name : null, data });
+        const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
+        result.push({
+          name: typeof name === 'string' && name !== '' ? name : null,
+          data,
+          ...(PACKAGE_SLOTTED_STORE_TYPES.has(type)
+            ? {
+                packageId,
+                version: Number(row.version) || 0,
+                ...(isBundledStoreType(type) ? { member: storedBundleMemberOf(type, data, row.bundle_member) ?? null } : {}),
+                // [#31699 R7-A] A legacy row: its package named by its stored body alone.
+                ...(packageId !== undefined && packageId !== row.package_id ? { legacyRowId: String(row.id) } : {}),
+              }
+            : {}),
+        });
       }
 
       this.loadManyCache?.set(type, result);
@@ -1119,7 +1167,65 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     _options?: MetadataLoadOptions
   ): Promise<T[]> {
-    return (await this.readTypeRows(type)).map(entry => entry.data) as T[];
+    return (await this.unscopedTypeRows(type)).map(entry => this.handOut(entry)) as T[];
+  }
+
+  /**
+   * [#31699 R7-B] A copy of a cached body, so a caller that stamps what it is
+   * handed (the boot priming pass's `applyProtection`) never edits the
+   * plural-read cache. A legacy row's copy is recorded for
+   * {@link bindReadRowPackage}.
+   */
+  private handOut(entry: StoredTypeRow): Record<string, unknown> {
+    const copy = { ...entry.data };
+    if (entry.legacyRowId !== undefined && entry.packageId !== undefined) this.legacyReadRows.set(copy, { id: entry.legacyRowId, packageId: entry.packageId });
+    return copy;
+  }
+
+  /**
+   * [#31699 R7-A; epic ruling 6809488921] Bind the empty `package_id` column of
+   * the legacy row a plural read handed `item` out from to the package that
+   * row's own stored body names: the column only — no body, no version, no
+   * history row, no insert (#32347's column-only update). ⛔ Never from
+   * `item`'s stamp as it stands now, never a row the read did not hand out,
+   * and never into a slot another row of the name holds. `MetadataManager.register`
+   * calls it in place of the write-through it skips (`skipSourceLoader`).
+   */
+  async bindReadRowPackage(type: string, name: string, item: object): Promise<void> {
+    const read = this.legacyReadRows.get(item);
+    if (!read) return;
+    const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    const row = rows.find((candidate) => String(candidate.id) === read.id);
+    if (!row || row.package_id === read.packageId || storedRowPackageId(row) !== read.packageId) return;
+    const memberOf = (of: Record<string, unknown>) => storedBundleMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
+    if (rows.some((other) => other !== row && other.package_id === read.packageId && memberOf(other) === memberOf(row))) return;
+    await this._update(this.tableName, read.id, { package_id: read.packageId });
+    this.invalidate(type, name);
+  }
+
+  /**
+   * [#32246] {@link readTypeRows} as the unscoped reads answer it: for a
+   * by-package type, one row per name — the one saved last (its highest
+   * version), in the order names first appear — as when the loader kept one
+   * row per name. Every other type: every row.
+   *
+   * [#31699 R3-B] A bundled by-package type keeps one row per
+   * `(package, name, member)` ({@link unscopedRowKey}): one per name would
+   * drop every other member of a bundle, and every other package's bundle.
+   */
+  private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
+    const rows = await this.readTypeRows(type);
+    if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return rows;
+    const bundled = isBundledStoreType(type);
+    const latest = new Map<string, StoredTypeRow>();
+    const unnamed: StoredTypeRow[] = [];
+    for (const row of rows) {
+      if (row.name === null) { unnamed.push(row); continue; }
+      const key = bundled ? unscopedRowKey(row.name, row.packageId, row.member ?? null) : row.name;
+      const held = latest.get(key);
+      if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(key, row);
+    }
+    return [...latest.values(), ...unnamed];
   }
 
   /**
@@ -1137,13 +1243,35 @@ export class DatabaseLoader implements MetadataLoader {
     type: string,
     _options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
-    const entries = await this.readTypeRows(type);
+    const entries = await this.unscopedTypeRows(type);
+    // [#31699 R3-B] A bundled type's entries carry the package each row holds,
+    // so a merge above this loader keeps two packages' same member apart.
+    const withPackage = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type);
     const keyed: MetadataKeyedItem<T>[] = [];
     for (const entry of entries) {
       if (entry.name === null) continue;
-      keyed.push({ name: entry.name, data: entry.data as T });
+      const data = this.handOut(entry);
+      keyed.push(withPackage ? keyedRow<T>(entry.name, { ...entry, data }) : { name: entry.name, data: data as T });
     }
     return keyed;
+  }
+
+  /**
+   * [ADR-0150 D3/D4, #32246] Every row of `name`, each with the package it
+   * holds the item for ({@link storedRowPackageId}) — the type-wide read
+   * {@link loadManyKeyed} shares, so it costs no query of its own.
+   */
+  async loadSlots<T = any>(type: string, name: string): Promise<MetadataKeyedItem<T>[]> {
+    return (await this.loadManySlots<T>(type)).filter((slot) => slot.name === name);
+  }
+
+  /** [ADR-0150 D4, #32246] Every named row of `type`, each with the package it holds the item for. */
+  async loadManySlots<T = any>(type: string): Promise<MetadataKeyedItem<T>[]> {
+    const slots: MetadataKeyedItem<T>[] = [];
+    for (const entry of await this.readTypeRows(type)) {
+      if (entry.name !== null) slots.push(keyedRow<T>(entry.name, entry));
+    }
+    return slots;
   }
 
   async exists(type: string, name: string): Promise<boolean> {
@@ -1224,9 +1352,11 @@ export class DatabaseLoader implements MetadataLoader {
       const names = rows
         .map(row => row.name as string)
         .filter(name => typeof name === 'string');
+      // [#32246] A by-package type has a row per package: one name each.
+      const listed = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? [...new Set(names)] : names;
 
-      this.listCache?.set(type, names);
-      return names;
+      this.listCache?.set(type, listed);
+      return listed;
     } catch (error) {
       this.rethrowUnlessTableUnprovisioned(error);
       // Benign only: no table, therefore no names. Not cached.
@@ -1400,21 +1530,43 @@ export class DatabaseLoader implements MetadataLoader {
   ): Promise<void> {
     await this.ensureSchema();
 
+    // [ADR-0150 D3, #32246 R1/R1b] A by-package type keeps a row per
+    // `(package, name)`. With more than one row slot of the name — two
+    // packages', or a package's beside the name's package-less row — a
+    // rollback by name cannot tell whose row it restores: the first row the
+    // driver returned would be overwritten with a body that may be another
+    // holder's. It is refused naming every holder (`refuseSeveralSlots`),
+    // before any write or history row. Rollback by package is a follow-up card.
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      refuseSeveralSlots(await this.rowSlots(type, name), type, name);
+    }
+
     const now = new Date().toISOString();
     const metadataJson = JSON.stringify(restoredData);
     // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
     const newChecksum = contentHash(metadataJson, type);
 
-    const existing = await this._findOne(this.tableName, {
-      where: this.baseFilter(type, name),
-    });
+    // [#31699 R3-B] A bundled type's one slot holds a row per member: the
+    // rollback restores the row of the member the restored body declares,
+    // never the first row the driver returns (another member's).
+    const member = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? storedBundleMemberOf(type, restoredData)
+      : undefined;
+    const existing = member === undefined
+      ? await this._findOne(this.tableName, { where: this.baseFilter(type, name) })
+      : (await this._find(this.tableName, { where: this.baseFilter(type, name) }))
+          .find((row) => (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
 
     if (!existing) {
-      throw new Error(`Metadata ${type}/${name} not found for rollback`);
+      throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
 
     const previousChecksum = existing.checksum as string | undefined;
-    const newVersion = ((existing.version as number) ?? 0) + 1;
+    // [#32246] A by-package type numbers versions per name (see the class
+    // doc); the name has one row slot here (refused above).
+    const newVersion = PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? await this.nextNameVersion(type, name)
+      : ((existing.version as number) ?? 0) + 1;
 
     await this._update(this.tableName, existing.id as string, {
       metadata: metadataJson,
@@ -1440,6 +1592,92 @@ export class DatabaseLoader implements MetadataLoader {
     );
   }
 
+  /**
+   * [ADR-0150 D4, #32246] Where a save of a by-package type lands: the name's
+   * rows read as store slots, and the slot the store's write rule picks
+   * (`storeRowWriteKey`) — this package's row, or for a package-less body the
+   * one holder's row (D4: its customization) or the name's package-less row.
+   * A package's first item takes over the name's package-less row when no
+   * other package holds the name, as the in-memory store does, so that row is
+   * updated and bound rather than left beside it. `rows` are the name's rows,
+   * from which {@link nextNameVersion} numbers a write.
+   */
+  private async slottedSaveTarget(
+    type: string,
+    name: string,
+    data: unknown,
+  ): Promise<{
+    existing: Record<string, unknown> | null;
+    packageId?: string;
+    rows: Array<Record<string, unknown>>;
+    member?: string | null;
+  }> {
+    const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
+    const bySlot = new Map<string, Record<string, unknown>>();
+    for (const row of rows) {
+      const key = storeRowKey(name, storedRowPackageId(row));
+      if (!bySlot.has(key)) bySlot.set(key, row);
+    }
+    const { key, replaces } = storeRowWriteKey(bySlot, type, name, data);
+    // [#31699 R4-A, #32422; epic ruling 6799056319] A bundled type's slot holds
+    // a row per member: the write goes to the row of the member the body
+    // declares (the canonical one spelled `null`, `storedBundleMemberOf`), and
+    // a member with no row in the slot is inserted — ⛔ never written over
+    // another member's row. The slot itself is chosen from every row of the
+    // name, as for every by-package type.
+    if (isBundledStoreType(type)) {
+      const member = storedBundleMemberOf(type, data) ?? null;
+      const rowOf = (slot: string) => rows.find((row) => storeRowKey(name, storedRowPackageId(row)) === slot
+        && (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member);
+      const existing = rowOf(key) ?? replaces.map(rowOf).find(Boolean) ?? null;
+      return { existing, packageId: slotPackageOf(key), rows, member };
+    }
+    const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
+    return { existing, packageId: slotPackageOf(key), rows };
+  }
+
+  /**
+   * [#32246] The rows of `name`, a by-package type, grouped by the store slot
+   * each holds the item for ({@link storeRowKey}: its package, else the
+   * name's package-less slot).
+   */
+  private async rowSlots(type: string, name: string): Promise<Map<string, Record<string, unknown>[]>> {
+    const bySlot = new Map<string, Record<string, unknown>[]>();
+    for (const row of await this._find(this.tableName, { where: this.baseFilter(type, name) })) {
+      const key = storeRowKey(name, storedRowPackageId(row));
+      bySlot.set(key, [...(bySlot.get(key) ?? []), row]);
+    }
+    return bySlot;
+  }
+
+  /**
+   * [#32246] The next version of `name`, a by-package type: one past the
+   * highest it has had — over every package's row of it and, while history is
+   * tracked, over its `sys_metadata_history` rows, which are unique on
+   * `(type, name, version)` and outlive a removed package's row. So a package
+   * removed and saved again never reuses a version the history holds. An
+   * unreadable history leaves the rows' number: the history insert then
+   * reports its own failure, the write itself having succeeded.
+   */
+  private async nextNameVersion(
+    type: string,
+    name: string,
+    rows?: ReadonlyArray<Record<string, unknown>>,
+  ): Promise<number> {
+    let highest = highestVersion(rows ?? (await this._find(this.tableName, { where: this.baseFilter(type, name) })));
+    if (this.trackHistory) {
+      try {
+        await this.ensureHistorySchema();
+        highest = Math.max(highest, highestVersion(await this._find(this.historyTableName, { where: { type, name } })));
+      } catch (error) {
+        if (!isMissingTableError(error, this.historyTableName)) {
+          console.warn(`[Metadata] Could not read \`${this.historyTableName}\` for the next version of ${type}/${name}; numbering from its rows.`, error);
+        }
+      }
+    }
+    return highest + 1;
+  }
+
   async save(
     type: string,
     name: string,
@@ -1456,19 +1694,34 @@ export class DatabaseLoader implements MetadataLoader {
     try {
       // [#21828] The one stamp vocabulary of `sys_metadata` — see {@link contentHash}.
       const newChecksum = contentHash(metadataJson, type);
-      const existing = await this._findOne(this.tableName, {
-        where: this.baseFilter(type, name),
-      });
+      // [ADR-0150 D4, #32246] A by-package type: the row of the slot this
+      // write fills, the package that row is bound to, and the name's next
+      // version. Every other type: the name's one row, as before.
+      const slot = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? await this.slottedSaveTarget(type, name, data) : undefined;
+      const existing = slot
+        ? slot.existing
+        : await this._findOne(this.tableName, {
+            where: this.baseFilter(type, name),
+          });
+      const binding = slot?.packageId !== undefined && existing?.package_id !== slot.packageId
+        ? { package_id: slot.packageId }
+        : {};
 
       if (existing) {
         // Skip the write when the stored CONTENT is identical (prevents phantom
         // version bumps). [#21828] Content, not stamps: see `storedBodyUnchanged`.
         const previousChecksum = existing.checksum as string | undefined;
-        if (storedBodyUnchanged(existing, type, newChecksum)) {
+        if (storedBodyUnchanged(existing, type, newChecksum) || (slot?.member !== undefined && onlyBoundStampAdded(existing, type, data, slot.packageId))) {
           // No DB write, but make sure the cached payload reflects the latest
           // call (prior cached `null` would otherwise mask a freshly-saved
-          // record).
-          this.loadCache?.set(this.cacheKey(type, name), data as Record<string, unknown>);
+          // record). [#32246] An unchanged row written before this loader
+          // bound rows is bound now — its column only, no new version.
+          if (Object.keys(binding).length > 0) {
+            await this._update(this.tableName, existing.id as string, binding);
+            this.invalidate(type, name);
+          } else if (!slot) {
+            this.loadCache?.set(this.cacheKey(type, name), data as Record<string, unknown>);
+          }
           return {
             success: true,
             path: `datasource://${this.tableName}/${type}/${name}`,
@@ -1478,7 +1731,7 @@ export class DatabaseLoader implements MetadataLoader {
         }
 
         // Update existing record
-        const version = ((existing.version as number) ?? 0) + 1;
+        const version = slot ? await this.nextNameVersion(type, name, slot.rows) : ((existing.version as number) ?? 0) + 1;
 
         await this._update(this.tableName, existing.id as string, {
           metadata: metadataJson,
@@ -1486,6 +1739,7 @@ export class DatabaseLoader implements MetadataLoader {
           checksum: newChecksum,
           updated_at: now,
           state: 'active',
+          ...binding,
         });
 
         this.invalidate(type, name);
@@ -1510,6 +1764,7 @@ export class DatabaseLoader implements MetadataLoader {
       } else {
         // Create new record
         const id = generateId();
+        const version = slot ? await this.nextNameVersion(type, name, slot.rows) : 1;
         await this._create(this.tableName, {
           id,
           name,
@@ -1520,8 +1775,12 @@ export class DatabaseLoader implements MetadataLoader {
           checksum: newChecksum,
           strategy: 'merge',
           state: 'active',
-          version: 1,
+          version,
           source: 'database',
+          ...binding,
+          // [#31699 R4-A] A bundled type's new row names its member, as the
+          // store's unique key `(type, name, package_id, bundle_member)` reads it.
+          ...(slot?.member !== undefined ? { bundle_member: slot.member } : {}),
           created_at: now,
           updated_at: now,
         });
@@ -1532,7 +1791,7 @@ export class DatabaseLoader implements MetadataLoader {
         await this.createHistoryRecord(
           type,
           name,
-          1,
+          version,
           data,
           'create',
           newChecksum
@@ -1556,9 +1815,33 @@ export class DatabaseLoader implements MetadataLoader {
 
   /**
    * Delete a metadata item from the database
+   *
+   * [ADR-0150 D4, #32198] With `options.packageId`, one package's item of a
+   * type stored per `(package, name)` is being removed while another package
+   * may hold the same name, and only a row that holds THAT package's item is
+   * deleted ({@link storedRowPackageId}). A row holding another package's
+   * item, or one it cannot attribute to any package, is kept: ⛔ never
+   * another package's stored item.
+   *
+   * [#32246] Such a type keeps a row per `(package, name)`, and a delete takes
+   * the rows of the slots the store's removal rule picks (`storeRemovalKeys`):
+   * that package's row with `options.packageId`; with none, every row of the
+   * name while at most one package holds it, and refused
+   * (`PackageScopedNameRefusedError`) when two or more do. Every other type
+   * deletes its name's row, as before.
    */
-  async delete(type: string, name: string): Promise<void> {
+  async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     await this.ensureSchema();
+
+    if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
+      const bySlot = await this.rowSlots(type, name);
+      const { keys } = storeRemovalKeys(bySlot, type, name, options?.packageId);
+      for (const key of keys) {
+        for (const row of bySlot.get(key) ?? []) await this._delete(this.tableName, row.id as string);
+      }
+      if (keys.length > 0) this.invalidate(type, name);
+      return;
+    }
 
     // Find the existing record to get its ID
     const existing = await this._findOne(this.tableName, {
@@ -1570,11 +1853,75 @@ export class DatabaseLoader implements MetadataLoader {
       return;
     }
 
+    if (options?.packageId !== undefined && storedRowPackageId(existing) !== options.packageId) {
+      // Another package's item (or none this row can name): not this removal's.
+      return;
+    }
+
     // Delete from the main metadata table using the record's ID
     await this._delete(this.tableName, existing.id as string);
 
     this.invalidate(type, name);
   }
+}
+
+/**
+ * [ADR-0150 D4, #32198] The package whose item a `sys_metadata` row holds:
+ * its `package_id` column when a writer filled it, else the package its stored
+ * body carries (`storedItemPackageId`: the envelope's `packageId`, else the
+ * registry's `_packageId` stamp). `undefined` when neither names one — a row
+ * bound to no package, or a body that does not parse, which a package-scoped
+ * delete therefore never takes.
+ */
+function storedRowPackageId(row: Record<string, unknown>): string | undefined {
+  const column = row.package_id;
+  if (typeof column === 'string' && column !== '' && column !== 'sys_metadata') return column;
+  const stored = row.metadata;
+  if (stored === null || stored === undefined) return undefined;
+  let body: unknown;
+  try {
+    body = typeof stored === 'string' ? JSON.parse(stored) : stored;
+  } catch {
+    return undefined;
+  }
+  return storedItemPackageId(body);
+}
+
+/** [#32246] One row of {@link DatabaseLoader}'s type-wide read. */
+interface StoredTypeRow {
+  /** The row's `name` column; `null` when it holds no usable string. */
+  name: string | null;
+  data: Record<string, unknown>;
+  /** For a by-package type, the package the row holds its item for. */
+  packageId?: string;
+  /** For a by-package type, the row's version (the highest is the row saved last). */
+  version?: number;
+  /** [#31699 R3-B] For a bundled by-package type, the member the row holds (`null`: the canonical one). */
+  member?: string | null;
+  /** [#31699 R7-A] For a by-package type's row whose `package_id` is empty and whose body names `packageId`: its id. */
+  legacyRowId?: string;
+}
+
+/** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */
+function unscopedRowKey(name: string, packageId: string | undefined, member: string | null): string {
+  return JSON.stringify([packageId ?? null, name, member]);
+}
+
+/** A type-wide row keyed by its name, with its package when it holds one's item. */
+function keyedRow<T>(name: string, entry: StoredTypeRow): MetadataKeyedItem<T> {
+  return entry.packageId === undefined
+    ? { name, data: entry.data as T }
+    : { name, data: entry.data as T, packageId: entry.packageId };
+}
+
+/** The highest `version` among `rows`; `0` for none. */
+function highestVersion(rows: ReadonlyArray<Record<string, unknown>>): number {
+  let highest = 0;
+  for (const row of rows) {
+    const version = Number(row.version);
+    if (Number.isFinite(version) && version > highest) highest = version;
+  }
+  return highest;
 }
 
 /**
@@ -1631,6 +1978,21 @@ function storedBodyUnchanged(row: Record<string, unknown>, type: string, hash: s
     return false;
   }
   return hashSpec(storedBody, type) === hash;
+}
+
+/**
+ * [#31699 R4-B] Whether `data` is `row`'s stored body plus nothing but a
+ * `_packageId` stamp naming the package `row` is already bound to: the stamp
+ * `MetadataManager.loadMany` puts on a body its row binds by the `package_id`
+ * column alone. Such a save writes nothing new, so it is no change.
+ */
+function onlyBoundStampAdded(row: Record<string, unknown>, type: string, data: unknown, packageId: string | undefined): boolean {
+  if (packageId === undefined || storedRowPackageId(row) !== packageId) return false;
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) return false;
+  if ((data as Record<string, unknown>)._packageId !== packageId) return false;
+  const unstamped: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+  delete unstamped._packageId;
+  return storedBodyUnchanged(row, type, contentHash(JSON.stringify(unstamped), type));
 }
 
 /**

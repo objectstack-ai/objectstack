@@ -34,6 +34,7 @@ import './lint-root-preload.testkit.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { NO_PACKAGE_SCOPED_READS } from './no-package-scoped-reads.testkit.js';
 
 const CRM_PKG = 'com.acme.crm';
 const CRM_APP = { name: 'crm', label: 'CRM', navigation: [], _packageId: CRM_PKG, _provenance: 'package' };
@@ -81,6 +82,7 @@ function harness() {
     const ofType = (asked: string, packageId?: string) =>
         items.filter((i) => typeOf(i) === asked && (!packageId || i._packageId === packageId));
     const registry = {
+        ...NO_PACKAGE_SCOPED_READS,
         getArtifactItem(asked: string, name: string, packageId?: string) {
             const hit = ofType(asked, packageId).find((i) => i.name === name);
             return hit && isCodeArtifactBody(hit) ? hit : undefined;

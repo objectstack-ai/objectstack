@@ -36,6 +36,7 @@ import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { LocalizationProvider } from '@object-ui/i18n';
+import { formatDateTimeCompactParts } from '@object-ui/core';
 import { isMachineLocale, recordLocaleArgumentsAsync } from '@object-ui/test-support';
 
 /** 2020-03-04 15:30:00 UTC — the suite runs in UTC. */
@@ -199,7 +200,10 @@ const SURFACES: Surface[] = [
       vi.unstubAllGlobals();
       return text;
     },
-    de: [/4\.3\.2020, 15:30:00/],
+    // The shared timestamp face is 12-hour in every locale, as the grid's
+    // compact face already is in de-DE cells (objectstack#32158): the de pin
+    // moved from `15:30:00` on purpose; en is the face it always was.
+    de: [/4\.3\.2020, 3:30:00\sPM/],
     en: [/3\/4\/2020, 3:30:00\sPM/],
   },
   {
@@ -242,5 +246,51 @@ describe('console page faces follow the declared session locale (objectui#9909)'
     });
     expect(calls.some((c) => c.locale === 'de-DE'), `saw: ${JSON.stringify(calls).slice(0, 2000)}`).toBe(true);
     expect(calls.filter(isMachineLocale), 'these call sites formatted in the machine locale').toEqual([]);
+  });
+});
+
+/** The audit log's timestamp column under a declared locale and, optionally, a declared display zone. */
+async function auditTimestampFace(locale: string, timezone?: string): Promise<string> {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({ records: [{ id: 'log_1', created_at: STORED, action: 'update', object_name: 'account' }] }), {
+        status: 200,
+      }),
+    ),
+  );
+  render(
+    <LocalizationProvider value={timezone ? { locale, timezone } : { locale }}>
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>
+    </LocalizationProvider>,
+  );
+  await screen.findByText('account');
+  const text = faceOf(document.body);
+  cleanup();
+  vi.unstubAllGlobals();
+  return text;
+}
+
+describe('the audit log reads one clock per locale, the grid’s (objectstack#32158)', () => {
+  it('zh-CN: the timestamp is the 12-hour face to the second, not the 24-hour Intl default', async () => {
+    const zh = await auditTimestampFace('zh-CN');
+    expect(zh).toContain('2020/3/4 下午3:30:00');
+    expect(zh).not.toContain('15:30:00');
+    // The same clock a zh-CN grid cell paints for that instant, plus seconds.
+    const cell = formatDateTimeCompactParts(STORED, { locale: 'zh-CN' });
+    expect(cell?.time).toBe('下午3:30');
+    expect(zh).toContain(`${cell?.time}:00`);
+  });
+
+  it('en: the timestamp face is unchanged', async () => {
+    expect(await auditTimestampFace('en')).toContain('3/4/2020, 3:30:00 PM');
+  });
+
+  it('the timestamp is drawn in the declared display zone, not the machine’s', async () => {
+    // 15:30 UTC is 23:30 in Shanghai; the suite's machine zone is UTC.
+    expect(await auditTimestampFace('zh-CN', 'Asia/Shanghai')).toContain('2020/3/4 下午11:30:00');
+    expect(await auditTimestampFace('en', 'Asia/Shanghai')).toContain('3/4/2020, 11:30:00 PM');
   });
 });

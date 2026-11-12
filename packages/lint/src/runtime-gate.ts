@@ -273,6 +273,23 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // `stackKeyForType('connector')` itself. Not a context row either, for the
   // `position` / `app` reason above: the rule judges each entry on its own.
   connector: 'connectors',
+  // [#31998] `object_extension` — `allowRuntimeCreate: true` (ADR-0146 D10):
+  // Studio's add-field on a base's `.custom` pair and the `/meta` doors write
+  // one, and its publish reaches this gate like any other item. Until this row
+  // no rule ran on it at all, so a field named `role` the CLI refuses on the
+  // extension (and the owner door refuses on the object) was published here.
+  // `security-role-word` crosses with this row, whole, on its own entry.
+  //
+  // ⛔ NOT a mapping ahead of its rule (the `seed: 'data'` failure above): the
+  // rule reads `stack.objectExtensions` through `objectExtensionsByTarget`, the
+  // key `ObjectStackDefinitionSchema` gives the collection, and the door case in
+  // `validate-security-posture.runtime-surface.test.ts` builds the snapshot at
+  // `stackKeyForType('object_extension')` itself. Not a context row either, for
+  // the `position` / `app` reason above: the vocabulary freeze judges each
+  // written word on its own, and a write's own collection holds exactly one
+  // member — its own item (an extension carries `extend` and no `name`, so it is
+  // never name-keyed).
+  object_extension: 'objectExtensions',
 };
 
 /**

@@ -54,6 +54,12 @@ export interface LoginFormLabels {
   /** Label for the SSO sign-in button (defaults to "Sign in with SSO") */
   ssoButton?: string;
   /**
+   * Shown, before any request, when "Sign in with SSO" is pressed without an
+   * email address in the field: single sign-on routes by the email's domain
+   * (defaults to "Enter your work email to sign in with SSO.").
+   */
+  ssoEmailRequiredText?: string;
+  /**
    * Break-glass link shown under the federated button when SSO-only
    * ("enforced") mode hides the password form (defaults to "Use a password
    * instead"). Reveals the email/password form for the env owner / local admin.
@@ -378,6 +384,7 @@ export function LoginForm({
     noAccountText: labels.noAccountText ?? "Don't have an account?",
     signUpText: labels.signUpText ?? 'Sign up',
     ssoButton: labels.ssoButton ?? 'Sign in with SSO',
+    ssoEmailRequiredText: labels.ssoEmailRequiredText ?? 'Enter your work email to sign in with SSO.',
     usePasswordText: labels.usePasswordText ?? 'Use a password instead',
     backToSsoText: labels.backToSsoText ?? 'Back to single sign-on',
     ssoOnlyDescription:
@@ -422,19 +429,28 @@ export function LoginForm({
     const identifier = email.trim();
     try {
       if (formMode === 'phone-otp') {
-        await signInWithPhoneOtp(phone.trim(), otpCode.trim());
-      } else if (phonePasswordEnabled && looksLikePhoneIdentifier(identifier)) {
+        const { twoFactorRequired } = await signInWithPhoneOtp(phone.trim(), otpCode.trim());
+        if (twoFactorRequired) {
+          // Code accepted; the account has an enrolled second factor. The
+          // provider holds the challenge and this form draws the same code
+          // step the password paths reach. The SMS code is spent, and the
+          // host hears `onSuccess` only once the second factor is verified.
+          setOtpCode('');
+          return;
+        }
+      } else {
         // Unified identifier: a phone-shaped entry routes to phone+password.
         // Normalize identically to the backend (strip formatting, no country
         // code) or the phoneNumber lookup fails.
-        await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password);
-      } else {
-        const { twoFactorRequired } = await signIn(identifier, password);
+        const { twoFactorRequired } = phonePasswordEnabled && looksLikePhoneIdentifier(identifier)
+          ? await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password)
+          : await signIn(identifier, password);
         if (twoFactorRequired) {
           // Password accepted; the account has two-factor sign-in on. The
           // provider now holds the challenge and this form draws the code
-          // step (objectstack#29105). Nothing is signed in yet, so the host
-          // hears `onSuccess` only once the code is verified.
+          // step, whichever identifier signed in (objectstack#29105,
+          // objectstack#32107). Nothing is signed in yet, so the host hears
+          // `onSuccess` only once the code is verified.
           setPassword('');
           setPasswordVisible(false);
           return;
@@ -487,9 +503,11 @@ export function LoginForm({
     if (ssoSubmitting) return;
     setError(null);
     const identifier = email.trim();
-    // SSO routes by email domain — a phone-shaped identifier can't map to an IdP.
-    if (looksLikePhoneIdentifier(identifier)) {
-      setError('Enter your email address to sign in with SSO.');
+    // SSO routes by email domain: an empty field or a phone-shaped identifier
+    // can't map to an IdP, so say so here instead of sending a request the
+    // server refuses with its own field-list message.
+    if (!identifier || looksLikePhoneIdentifier(identifier)) {
+      setError(l.ssoEmailRequiredText);
       return;
     }
     setSsoSubmitting(true);

@@ -35,19 +35,27 @@
 //     skill's with the rename; the tool's with the namespace co-owner rule's
 //     sentence, which refuses it first), and does not install;
 //   - CONTROL: a package declaring fresh agent, skill and tool names installs,
-//     and every AI door serves it as before.
+//     and every AI door serves it as before;
+//   - [#32151, ADR-0150 D3/D4] on the ARTIFACT door (a second boot of its own,
+//     the door `os dev` and `os start` load a compiled artifact through, which
+//     registers every package body's items into the metadata service), the
+//     metadata service keeps each package's agent and skill, and the layered
+//     read `/meta/TYPE/NAME/layers?package=` serves each package's own code
+//     layer (it served the package registered last for both).
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { type VerifyStack } from '@objectstack/verify';
+import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { AppPlugin, HttpDispatcher } from '@objectstack/runtime';
 import { MarketplaceInstallLocalPlugin } from '@objectstack/cloud-connection';
 import { MCPServerPlugin } from '@objectstack/mcp';
-import { defineStack } from '@objectstack/spec';
+import { MetadataPlugin } from '@objectstack/metadata';
+import { composeStacks, defineStack } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { bootShowcase } from './showcase-boot.js';
+import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 
 const AGENT = 'qa_shared_agent';
 const SKILL = 'qa_shared_skill';
@@ -351,5 +359,139 @@ describe('agent, skill and tool names held per namespace, on a booted showcase',
     expect(await metaAt('agent', AGENT, 'com.qa.bare.alpha')).toEqual(['com.qa.bare.alpha', 'alpha agent']);
     expect(await promptText(`alpha-${SKILL}`)).toContain('alpha skill instructions');
     expect(await promptText(`gamma-${SKILL}`)).toContain('gamma skill instructions');
+  });
+});
+
+/**
+ * [#32151, ADR-0150 D3/D4] The artifact door, which the boot above does not
+ * reach: `bootStack` mounts `AppPlugin` as the stack's one registrar and a
+ * `MetadataPlugin` with no artifact, so the metadata service there holds no
+ * agent or skill at all. `os dev` (HMR) and `os start` load the compiled
+ * artifact through `MetadataPlugin`'s artifact door instead, which registers
+ * every package body's items into the metadata service, stamped
+ * `_packageId`. Its in-memory store was keyed by bare name for these types, so
+ * the package registered last overwrote the other: on main 45f0f81f every
+ * `get` of the name, the one naming the other package included, answered the
+ * survivor, and `GET /meta/TYPE/NAME/layers?package=<the other>` served the
+ * survivor's body as both the code and the effective layer, under the
+ * survivor's `packageId`.
+ *
+ * The one narrowing the slots bring is a read of the metadata service naming
+ * a package that holds no slot of the name: it was answered the stored item
+ * (the one holder's, or the survivor), and is now answered nothing. The HTTP
+ * read naming such a package was already refused `409` (ADR-0150 D5) before
+ * the service was asked, and still is.
+ */
+describe('the artifact door keeps each namespace\'s agent and skill in the metadata service, and the layered read serves each package its own (#32151)', () => {
+  const ALPHA = 'com.qa.bare.alpha';
+  const BETA = 'com.qa.bare.beta';
+  const SOLO_AGENT = 'qa_solo_agent';
+  const SOLO_SKILL = 'qa_solo_skill';
+  const artifactPackage = (p: 'alpha' | 'beta') => defineStack({
+    manifest: { id: `com.qa.bare.${p}`, namespace: p, name: `qa_bare_${p}`, version: '1.0.0', type: p === 'alpha' ? 'app' : 'module' },
+    objects: [item(p)],
+    agents: [agent(p), ...(p === 'alpha' ? [agent(p, SOLO_AGENT)] : [])],
+    skills: [skill(p), ...(p === 'alpha' ? [skill(p, SOLO_SKILL)] : [])],
+  } as never);
+  const artifact = composeStacks([artifactPackage('alpha'), artifactPackage('beta')], { manifest: 'preserve' });
+
+  let stack: VerifyStack;
+  let admin: string;
+  let dir: string;
+  let metadata: {
+    get(type: string, name: string, packageId?: string): Promise<any>;
+    getDiagnosed(type: string, name: string, packageId?: string): Promise<{ data: unknown; degraded: boolean; errors: string[] }>;
+    list(type: string): Promise<any[]>;
+  };
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'dogfood-slotted-store-ai-'));
+    const artifactPath = join(dir, 'objectstack.json');
+    writeBuildShapedArtifact(artifact as unknown as Record<string, unknown>, artifactPath);
+    stack = await bootStack(artifact, {
+      extraPlugins: [
+        new MetadataPlugin({
+          rootDir: dir, watch: false, artifactWatch: false, registerSystemObjects: false,
+          artifactSource: { mode: 'local-file', path: artifactPath },
+        }),
+      ],
+    });
+    admin = await stack.signIn();
+    metadata = await stack.kernel.getServiceAsync('metadata');
+  }, 300_000);
+
+  afterAll(async () => {
+    await stack?.stop?.();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const layers = async (type: string, name: string, pkg?: string) => {
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}/layers${pkg ? `?package=${pkg}` : ''}`);
+    const body = (await r.json()) as any;
+    return { status: r.status, code: body?.code?.label, effective: body?.effective?.label, packageId: body?.packageId, body };
+  };
+
+  it.each(['agent', 'skill'] as const)('%s: `/layers?package=` serves each package\'s own code and effective layer (BASE: both were the package registered last)', async (type) => {
+    const name = type === 'agent' ? AGENT : SKILL;
+    for (const p of ['alpha', 'beta'] as const) {
+      const read = await layers(type, name, `com.qa.bare.${p}`);
+      expect([read.status, read.code, read.effective, read.packageId], JSON.stringify(read.body).slice(0, 300))
+        .toEqual([200, `${p} ${type}`, `${p} ${type}`, `com.qa.bare.${p}`]);
+    }
+  });
+
+  it.each(['agent', 'skill'] as const)('%s: the metadata service holds both packages\' items: a read naming each package answers its own, and the read naming none is refused naming both (BASE: every read answered the package registered last)', async (type) => {
+    const name = type === 'agent' ? AGENT : SKILL;
+    expect((await metadata.get(type, name, ALPHA))?.label).toBe(`alpha ${type}`);
+    expect((await metadata.get(type, name, BETA))?.label).toBe(`beta ${type}`);
+    expect((await metadata.list(type)).filter((i) => i?.name === name).map((i) => i?.label).sort()).toEqual([`alpha ${type}`, `beta ${type}`]);
+    const refused = await metadata.get(type, name).then(() => undefined, (e: any) => e);
+    expect([refused?.code, refused?.status], 'never one of them picked').toEqual(['RESOURCE_CONFLICT', 409]);
+    for (const holder of [ALPHA, BETA]) expect(String(refused?.message)).toContain(holder);
+  });
+
+  it.each(['agent', 'skill'] as const)('CONTROL — %s: the doors that already resolved by package answer as before: the bare read and the bare layered read refuse naming both, `?package=` serves each package\'s own', async (type) => {
+    const name = type === 'agent' ? AGENT : SKILL;
+    for (const path of [`/meta/${type}/${name}`, `/meta/${type}/${name}/layers`]) {
+      const r = await stack.apiAs(admin, 'GET', path);
+      const text = await r.text();
+      const body = JSON.parse(text);
+      expect([r.status, codeOf(body)], path).toEqual([409, 'RESOURCE_CONFLICT']);
+      for (const holder of [ALPHA, BETA]) expect(text, path).toContain(holder);
+    }
+    for (const p of ['alpha', 'beta'] as const) {
+      const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}?package=com.qa.bare.${p}`);
+      const it = ((await r.json()) as any)?.item;
+      expect([r.status, it?.label, it?._packageId]).toEqual([200, `${p} ${type}`, `com.qa.bare.${p}`]);
+    }
+  });
+
+  it.each(['agent', 'skill'] as const)('%s: a read of the metadata service naming a package that holds no slot of the name answers nothing (BASE: the one holder\'s item, or the survivor of two)', async (type) => {
+    const solo = type === 'agent' ? SOLO_AGENT : SOLO_SKILL;
+    expect(await metadata.get(type, solo, BETA), 'one holder').toBeUndefined();
+    expect(await metadata.getDiagnosed(type, solo, BETA)).toEqual({ data: undefined, degraded: false, errors: [] });
+    expect(await metadata.get(type, type === 'agent' ? AGENT : SKILL, 'com.qa.bare.gamma'), 'two holders').toBeUndefined();
+  });
+
+  it.each(['agent', 'skill'] as const)('CONTROL — %s: `/layers?package=` a package that holds no slot is refused 409 naming the holder (D5), for one holder and for two, as before', async (type) => {
+    for (const [name, pkg, holders] of [
+      [type === 'agent' ? SOLO_AGENT : SOLO_SKILL, BETA, [ALPHA]],
+      [type === 'agent' ? AGENT : SKILL, 'com.qa.bare.gamma', [ALPHA, BETA]],
+    ] as const) {
+      const read = await layers(type, name, pkg);
+      expect([read.status, codeOf(read.body)], JSON.stringify(read.body).slice(0, 300)).toEqual([409, 'RESOURCE_CONFLICT']);
+      for (const holder of holders) expect(JSON.stringify(read.body), name).toContain(holder);
+    }
+  });
+
+  it.each(['agent', 'skill'] as const)('CONTROL — %s: one holder per name: every read answers the one package\'s item, bare or by its package', async (type) => {
+    const name = type === 'agent' ? SOLO_AGENT : SOLO_SKILL;
+    expect((await metadata.get(type, name))?.label).toBe(`alpha ${type}`);
+    expect((await metadata.get(type, name, ALPHA))?.label).toBe(`alpha ${type}`);
+    const bare = await layers(type, name);
+    expect([bare.status, bare.code, bare.packageId]).toEqual([200, `alpha ${type}`, ALPHA]);
+    const r = await stack.apiAs(admin, 'GET', `/meta/${type}/${name}`);
+    const it = ((await r.json()) as any)?.item;
+    expect([r.status, it?.label, it?._packageId]).toEqual([200, `alpha ${type}`, ALPHA]);
   });
 });

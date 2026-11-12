@@ -2223,7 +2223,7 @@ describe('HttpDispatcher', () => {
         // for every non-builder.
         it('POST /packages/:id/publish-drafts clears the publish gate on the package\'s unpublished app', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
-                success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+                success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockResolvedValue([
                 { name: 'production_management', label: '生产管理', _unpublished: true, navigation: [] },
@@ -2260,7 +2260,7 @@ describe('HttpDispatcher', () => {
         // because "publish" and "show in the switcher" were one key.
         it('POST /packages/:id/publish-drafts leaves `hidden` untouched — it publishes, it does not un-hide', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
-                success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+                success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockResolvedValue([
                 { name: 'account_like', hidden: true, _unpublished: true, navigation: [] },
@@ -2289,7 +2289,7 @@ describe('HttpDispatcher', () => {
 
         it('POST /packages/:id/publish-drafts reports (not throws) when the visibility flip fails', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
-                success: true, publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockRejectedValue(new Error('meta backend down'));
             const saveMetaItem = vi.fn();
@@ -2322,7 +2322,7 @@ describe('HttpDispatcher', () => {
         // requires `error`, naming the CONSEQUENCE and the FIX.
         it('POST /packages/:id/publish-drafts logs at ERROR (consequence + fix) when the saveMetaItem write fails', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
-                success: true, publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+                success: true, outcome: 'published', publishedCount: 1, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             const getMetaItems = vi.fn().mockResolvedValue([
                 { name: 'edu_admin', _unpublished: true, navigation: [] },
@@ -2374,7 +2374,7 @@ describe('HttpDispatcher', () => {
         // then skips exactly those apps, leaving boot-cached consumers stale.
         it('POST /packages/:id/publish-drafts reports the apps already published when the flip fails MID-LOOP', async () => {
             const publishPackageDrafts = vi.fn().mockResolvedValue({
-                success: true, publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
+                success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [], seedApplied: { success: true },
             });
             // 4 unpublished apps; the write for the 3rd rejects. So `alpha` and
             // `beta` are persisted published, `gamma` and `delta` are not.
@@ -2436,6 +2436,66 @@ describe('HttpDispatcher', () => {
                 expect(line).toContain('sys_metadata write rejected');
             } finally {
                 errorSpy.mockRestore();
+            }
+        });
+
+        // #32455 — ADR-0067 D2, "no partial visibility flip": the flip follows
+        // only an outcome that refused nothing (`published`, or
+        // `nothing_to_publish` for an additive build). A refused batch answers
+        // this 200 too, and the flip used to unhide the package's app anyway.
+        // The real producer's refusals are pinned in
+        // `packages-publish-drafts-change-note.integration.test.ts`.
+        const flipDoubles = (publishResult: Record<string, unknown>) => {
+            const publishPackageDrafts = vi.fn().mockResolvedValue(publishResult);
+            const getMetaItems = vi.fn().mockResolvedValue([{ name: 'crm', _unpublished: true, navigation: [] }]);
+            const saveMetaItem = vi.fn().mockResolvedValue({ ok: true });
+            const trigger = vi.fn().mockResolvedValue(undefined);
+            (kernel as any).context.trigger = trigger;
+            (kernel as any).getService = vi.fn().mockImplementation((name: string) => {
+                if (name === 'protocol') return Promise.resolve({ publishPackageDrafts, getMetaItems, saveMetaItem });
+                if (name === 'objectql') return Promise.resolve({ registry: { getAllPackages: vi.fn().mockReturnValue([]) } });
+                return null;
+            });
+            return { getMetaItems, saveMetaItem, trigger };
+        };
+
+        it('POST /packages/:id/publish-drafts runs no visibility flip after a REFUSED publish, and announces nothing', async () => {
+            const { getMetaItems, saveMetaItem, trigger } = flipDoubles({
+                success: false, outcome: 'refused', publishedCount: 0, failedCount: 2, published: [],
+                failed: [
+                    { type: 'object', name: 'ticket', error: 'refused', code: 'INVALID_METADATA' },
+                    { type: 'view', name: 'ticket.open', error: 'not published', code: 'BATCH_ABORTED' },
+                ],
+            });
+
+            const result = await dispatcher.handlePackages('/app.crm/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
+
+            expect(result.response?.status).toBe(200);
+            const data = (result.response as any)?.body?.data;
+            expect(data?.outcome).toBe('refused');
+            expect(data?.failed?.[0]?.code).toBe('INVALID_METADATA');
+            expect(getMetaItems).not.toHaveBeenCalled();
+            expect(saveMetaItem).not.toHaveBeenCalled();
+            expect(data).not.toHaveProperty('unhiddenApps');
+            expect(data).not.toHaveProperty('unhideError');
+            expect(trigger).not.toHaveBeenCalled();
+        });
+
+        it('POST /packages/:id/publish-drafts flips nothing on an answer that names no refusal-free outcome — it fails closed', async () => {
+            // No `outcome` at all (an off-contract producer), and a value the
+            // declaration does not name: neither says "nothing was refused".
+            for (const outcome of [{}, { outcome: 'partial' }]) {
+                const { getMetaItems, saveMetaItem, trigger } = flipDoubles({
+                    success: true, ...outcome, publishedCount: 0, failedCount: 0, published: [], failed: [],
+                });
+
+                const result = await dispatcher.handlePackages('/app.crm/publish-drafts', 'POST', {}, {}, PKG_ADMIN());
+
+                expect(result.response?.status, JSON.stringify(outcome)).toBe(200);
+                expect(getMetaItems, JSON.stringify(outcome)).not.toHaveBeenCalled();
+                expect(saveMetaItem, JSON.stringify(outcome)).not.toHaveBeenCalled();
+                expect((result.response as any)?.body?.data, JSON.stringify(outcome)).not.toHaveProperty('unhiddenApps');
+                expect(trigger, JSON.stringify(outcome)).not.toHaveBeenCalled();
             }
         });
     });

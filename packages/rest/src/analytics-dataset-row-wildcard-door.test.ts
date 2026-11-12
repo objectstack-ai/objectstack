@@ -108,7 +108,10 @@ function mockProtocol(saved: unknown[]) {
   return {
     getDiscovery: async () => ({ version: 'v0', routes: { data: '', metadata: '' } }),
     getMetaTypes: async () => [],
-    getMetaItems: async () => saved,
+    // [#32072] Read BY NAME, as the door reads a `datasetName`.
+    getMetaItem: async ({ name }: { name: string }) => ({
+      type: 'dataset', name, item: (saved as Array<{ name?: string }>).find((d) => d?.name === name),
+    }),
   };
 }
 
