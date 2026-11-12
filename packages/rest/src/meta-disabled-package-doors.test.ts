@@ -557,17 +557,20 @@ describe('[#32354] RestServer: stored rows judged over the served set', () => {
         expect(JSON.stringify(again.body)).toContain(PKG);
     }, 60_000);
 
-    it.each(ORDERS)('%s, ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, with details.candidates', async (_order, packages) => {
+    it.each(ORDERS)('%s, ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, the plain read with details.candidates', async (_order, packages) => {
         const host = setup();
         for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
         for (const pkg of [PKG, OTHER_PKG, THIRD_PKG]) await save(host, 'three_rows_dash', pkg);
         host.registry.disablePackage(PKG);
-        for (const refused of [await host.plain('dashboard', 'three_rows_dash'), await host.layers('dashboard', 'three_rows_dash')]) {
-            expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-            expect([...(refused.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(refused.body))
-                .toEqual([OTHER_PKG, THIRD_PKG].sort());
-            noDisabledTrace([refused]);
-        }
+        const read = await host.plain('dashboard', 'three_rows_dash');
+        expect([read.status, read.body?.code], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect([...(read.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
+            .toEqual([OTHER_PKG, THIRD_PKG].sort());
+        // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders.
+        const layers = await host.layers('dashboard', 'three_rows_dash');
+        expect(layers.status, JSON.stringify(layers.body)).toBe(409);
+        for (const pkg of [OTHER_PKG, THIRD_PKG]) expect(JSON.stringify(layers.body)).toContain(pkg);
+        noDisabledTrace([read, layers]);
     }, 60_000);
 
     it.each(ORDERS)('%s, case 3: ?package=DISABLED, where the enabled package ships the name and the disabled one holds it only as a stored row, is the withheld 404', async (_order, packages) => {

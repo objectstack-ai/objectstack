@@ -142,8 +142,10 @@ export async function servedRowHolderOf(
     if (typeof registry.packageScopedHoldersOf !== 'function' || typeof registry.isPackageDisabled !== 'function') return undefined;
     const disabled = (id: string): boolean => registry.isPackageDisabled(id) === true;
     // No disabled package at all: no read moves, and no row is read for it.
+    // The predicate `isPackageDisabled` reads, asked of each installed record.
     if (typeof registry.getAllPackages === 'function'
-        && !(registry.getAllPackages() as ReadonlyArray<{ id?: string }>).some((pkg) => typeof pkg?.id === 'string' && disabled(pkg.id))) {
+        && !(registry.getAllPackages() as ReadonlyArray<{ enabled?: unknown; status?: unknown } | undefined>)
+            .some((pkg) => pkg?.enabled === false || pkg?.status === 'disabled')) {
         return undefined;
     }
     if ([...shippingPackageIds(host.shippedArtifactsOf(type, name, undefined, member))].some((id) => !disabled(id))) return undefined;

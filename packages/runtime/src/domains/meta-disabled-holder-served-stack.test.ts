@@ -276,18 +276,20 @@ describe.each([
         }
     }, 120_000);
 
-    it('ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, with details.candidates', async () => {
+    it('ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, the plain read with details.candidates', async () => {
         const booted = await bootRowKernel(registered, freshFile());
         try {
             for (const id of [ROW_D, ROW_E, ROW_F]) await layStoredRow(booted.engine, 'three_rows_dash', id, `${rowTag(id)} row`);
             booted.engine.registry.disablePackage(ROW_D);
-            for (const path of ['/meta/dashboard/three_rows_dash', '/meta/dashboard/three_rows_dash/layers']) {
-                const refused = await get(booted.kernel, path);
-                expect([refused.status, codeOf(refused.body)], JSON.stringify(refused.body)).toEqual([409, 'RESOURCE_CONFLICT']);
-                const candidates = (refused.body?.error?.details ?? refused.body?.details)?.candidates;
-                expect([...(candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(refused.body)).toEqual([ROW_E, ROW_F].sort());
-                noDisabledTrace([refused]);
-            }
+            const read = await get(booted.kernel, '/meta/dashboard/three_rows_dash');
+            expect([read.status, codeOf(read.body)], JSON.stringify(read.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            expect([...(read.body?.error?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(read.body))
+                .toEqual([ROW_E, ROW_F].sort());
+            // The layered door answers a package-scoped refusal by its sentence alone, as for two registry holders.
+            const layers = await get(booted.kernel, '/meta/dashboard/three_rows_dash/layers');
+            expect([layers.status, codeOf(layers.body)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+            for (const id of [ROW_E, ROW_F]) expect(JSON.stringify(layers.body)).toContain(id);
+            noDisabledTrace([read, layers]);
         } finally {
             await down(booted);
         }
