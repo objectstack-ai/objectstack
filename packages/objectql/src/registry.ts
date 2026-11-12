@@ -5222,6 +5222,38 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0150 D4, #32534] Release `owner`'s claim, recorded by
+   * {@link claimBareNameFunctions}, on each of `names`: the functions a
+   * re-bind takes off that owner. The runtime's app-artifact binder
+   * (`bindAppArtifactHandlers`) calls it when a function its previous bind
+   * gave `owner` goes to another owner, and when `owner`'s package body is
+   * dropped, right after it removes those functions from the engine. A claim
+   * is the only record of a function's holder this rule reads, and the
+   * engine's `unregisterFunctionsByPackage` does not reach it, so without the
+   * release the old owner goes on holding a name it no longer registers: once
+   * sealed, the gaining owner's bind is refused naming it (its whole group
+   * left unbound), and an unsealed boot's seal reports a clash that is not
+   * there.
+   *
+   * Only `owner`'s claim on the names given is released: every other
+   * holder's claim and `owner`'s other names stay. It judges nothing and
+   * records nothing else, sealed or not; an owner-less call releases nothing,
+   * as an owner-less bind claims nothing.
+   */
+  releaseBareNameFunctions(owner: string | undefined, names: readonly string[]): void {
+    if (!owner || names.length === 0) return;
+    const byName = this.bareNameClaims.get('function');
+    if (!byName) return;
+    const packageId = handlerOwnerPackageId(owner);
+    for (const name of new Set(names)) {
+      const claimants = byName.get(name);
+      if (!claimants) continue;
+      claimants.delete(packageId);
+      if (claimants.size === 0) byName.delete(name);
+    }
+  }
+
+  /**
    * The cold boot's seal (`bare-name-one-holder.ts`, "The cold boot"): from
    * this call on, both doors and the hook binder's function bind refuse a new
    * holder of a covered name. Answers every name the boot left held twice, as

@@ -57,7 +57,9 @@
  * the engine, so no flow `script` node and no hook resolves to them; and a
  * function the new bind gives to another owner leaves the owner the previous
  * bind gave it, so one function is never held by two of the artifact's
- * packages (`releaseMovedFunctions`).
+ * packages (`releaseMovedFunctions`). Either way the old owner's bare-name
+ * claim on the function goes with it (`releaseFunctionClaims`), so the
+ * registry's one-holder rule stops counting it as that function's holder.
  *
  * ## Each package's handlers under its own package (ADR-0150 D4)
  *
@@ -342,7 +344,13 @@ export function bindAppArtifactHandlers(
         const engine = ql as FunctionHoldingEngine;
         if (typeof engine.unregisterFunctionsByPackage === 'function') {
             const kept = new Set([owner, ...boundOwners]);
-            for (const each of previous.owners) if (!kept.has(each)) engine.unregisterFunctionsByPackage(each);
+            for (const each of previous.owners) {
+                if (kept.has(each)) continue;
+                engine.unregisterFunctionsByPackage(each);
+                // [#32534] …and its bare-name claims on them, or the dropped
+                // body goes on holding names it no longer registers.
+                releaseFunctionClaims(engine, each, previous.functions.get(each) ?? []);
+            }
             const givenTo = new Map<string, string>();
             for (const group of hookGroups) for (const name of Object.keys(group.functions)) givenTo.set(name, group.owner);
             for (const [each, names] of previous.functions) {
@@ -509,6 +517,8 @@ function recordBind(ql: object, owner: string, record: BoundRecord): void {
 
 /** The engine's function-holder seam the re-bind reads and writes (`ObjectQL`'s methods of these names). */
 interface FunctionHoldingEngine {
+    /** The engine's registry: the bare-name rule records a function's holder as a claim there (`claimBareNameFunctions`). */
+    readonly registry?: { releaseBareNameFunctions?(owner: string | undefined, names: readonly string[]): void };
     unregisterFunctionsByPackage?(packageId: string): number;
     registerFunction?(name: string, handler: any, options?: { packageId?: string; effect?: unknown }): void;
     resolveFunctionEntry?(name: string): { readonly handler: any; readonly packageId?: string; readonly effect?: unknown } | undefined;
@@ -558,12 +568,33 @@ function releaseMovedFunctions(engine: FunctionHoldingEngine, holder: string, mo
         if (entry) keep.push({ name, entry, bare: holders.packageHolders.length > 1 ? undefined : engine.resolveFunctionEntry?.(name) });
     }
     engine.unregisterFunctionsByPackage?.(holder);
+    // [#32534] The moved names leave `holder`'s bare-name claims too, ahead of
+    // the gaining owner's bind: after the cold-boot seal that bind is refused
+    // over a claim the old owner still records, and its whole group is left
+    // unbound.
+    releaseFunctionClaims(engine, holder, moved);
     for (const { name, entry, bare } of keep) {
         engine.registerFunction(name, entry.handler, { packageId: holder, ...(entry.effect ? { effect: entry.effect } : {}) });
         if (bare && bare.packageId !== holder) {
             engine.registerFunction(name, bare.handler, { packageId: bare.packageId, ...(bare.effect ? { effect: bare.effect } : {}) });
         }
     }
+}
+
+/**
+ * [#32534] Release `holder`'s bare-name claims on `names`
+ * (`SchemaRegistry#releaseBareNameFunctions`), functions this re-bind has
+ * just taken off it in the engine. The engine removes a function by package
+ * and never reaches the claim the hook binder recorded at the bind
+ * (`claimBareNameFunctions`), which is how the bare-name rule knows a
+ * function's holder; so without it the old owner holds the name still, and a
+ * gaining owner's bind after the cold-boot seal is refused naming it. A
+ * registry without the release (a host's own engine double) is left as it is.
+ */
+function releaseFunctionClaims(engine: FunctionHoldingEngine, holder: string, names: readonly string[]): void {
+    const registry = engine.registry;
+    if (names.length === 0 || typeof registry?.releaseBareNameFunctions !== 'function') return;
+    registry.releaseBareNameFunctions(holder, names);
 }
 
 /** The package an owner {@link appArtifactHandlerOwner} minted names, as the engine's holder set keys it. */

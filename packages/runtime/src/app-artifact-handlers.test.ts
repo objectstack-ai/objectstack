@@ -668,6 +668,90 @@ describe('[ADR-0150 D4] a multi-package artifact binds each body\'s hooks and fu
         }
     });
 
+    // [#32534] After the cold-boot seal the registry's one-holder rule judges a
+    // function bind by the claims earlier binds recorded, and two packages of
+    // one namespace meet under it. The re-bind takes a moved or dropped
+    // function's claim off its old owner with the function.
+    describe('[#32534] after the seal, a re-bind takes the old owner\'s bare-name claim off with the function', () => {
+        const GAMMA = 'com.qa.bodies.gamma';
+        /** A body of alpha's namespace: beta and gamma are co-owners of it (they declare it and depend on alpha). */
+        const body = (id: string, objectNs: Ns | 'gamma', hooks: unknown[]) => ({
+            id, namespace: 'alpha', name: `qa_bodies_${objectNs}`, version: '1.0.0', type: id === ALPHA ? 'app' : 'module',
+            objects: [{ name: `${objectNs}_doc`, fields: {} }],
+            hooks,
+            ...(id === ALPHA ? {} : { dependencies: { [ALPHA]: '^1.0.0' } }),
+        });
+        const installGamma = (ql: ObjectQL) => ql.registry.installPackage(body(GAMMA, 'gamma', []) as never, 'code' as never);
+        /** Gamma's own bind of `name`, as the runtime binds a package's functions: the refusal it answers, or `undefined`. */
+        const gammaBinds = (ql: ObjectQL, name: string): any => {
+            try {
+                ql.bindHooks([], { packageId: appArtifactHandlerOwner(GAMMA), functions: { [name]: stamp('gamma') } });
+                return undefined;
+            } catch (err) {
+                return err;
+            }
+        };
+        const holdersNamed = (err: any) => (err?.conflicts ?? []).map((c: any) => c.existingHolder?.packageId);
+
+        it('a function moved to another owner binds that owner\'s whole group and is held by it; the old owner keeps its other claims (base: the gaining owner\'s bind was refused naming the old owner, its group left unbound, the function held by nobody)', async () => {
+            const artifactWith = (topLevelHooks: unknown[]) => ({
+                manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+                packages: [
+                    { manifest: body(ALPHA, 'alpha', [hookOn('alpha', 'qa_alpha_own', 'qa_alpha_own')]) },
+                    { manifest: body(BETA, 'beta', [hookOn('beta', 'qa_beta_moving', 'qa_moving'), hookOn('beta', 'qa_beta_kept', 'qa_kept')]) },
+                ],
+                hooks: topLevelHooks,
+                functions: { qa_moving: stamp('moving'), qa_kept: stamp('kept'), qa_alpha_own: stamp('alpha_own') },
+            });
+            const first = artifactWith([]);
+            const { errors, logger } = recordingErrors();
+            const ql = engineFor(first, logger);
+            installGamma(ql);
+            bind(ql, first, logger);
+            expect(ql.functionHoldersOf('qa_moving').packageHolders, 'precondition: only beta\'s hook names it').toEqual([BETA]);
+            expect(ql.registry.sealBareNameHolders(), 'the cold boot finds no function held twice').toEqual([]);
+
+            // The top level now names it too: it moves to the artifact's own package, a co-owner of beta's namespace.
+            bind(ql, artifactWith([hookOn('alpha', 'qa_res_moving', 'qa_moving')]), logger);
+
+            expect(errors.map((e) => e.message), 'every group bound').toEqual([]);
+            expect(ql.functionHoldersOf('qa_moving').packageHolders, 'held once, by the gaining owner').toEqual([ALPHA]);
+            expect(String(await insertInto(ql, 'alpha')).split(';').filter(Boolean).sort(), 'the gaining owner\'s whole group fires').toEqual(['alpha_own', 'moving']);
+            expect(String(await insertInto(ql, 'beta')).split(';').filter(Boolean).sort()).toEqual(['kept', 'moving']);
+            // The moved name is the gaining owner's alone now; the old owner's other claim stays.
+            expect(holdersNamed(gammaBinds(ql, 'qa_moving')), 'refused naming the new holder only').toEqual([ALPHA]);
+            const kept = gammaBinds(ql, 'qa_kept');
+            expect(kept?.code, 'CONTROL: beta still holds what it keeps').toBe('NAMESPACE_CONFLICT');
+            expect(holdersNamed(kept)).toEqual([BETA]);
+        });
+
+        it('a dropped body\'s function claims leave with its functions: a co-owner of its namespace then binds the name (base: refused, naming the dropped body)', () => {
+            const withBeta = {
+                manifest: { id: ALPHA, namespace: 'alpha', name: 'qa_bodies_alpha', version: '1.0.0', type: 'app' },
+                packages: [
+                    { manifest: body(ALPHA, 'alpha', [hookOn('alpha', 'qa_alpha_own', 'qa_alpha_own')]) },
+                    { manifest: body(BETA, 'beta', [hookOn('beta', 'qa_beta_only', 'qa_beta_fn')]) },
+                ],
+                functions: { qa_beta_fn: stamp('beta_fn'), qa_alpha_own: stamp('alpha_own') },
+            };
+            const { errors, logger } = recordingErrors();
+            const ql = engineFor(withBeta, logger);
+            installGamma(ql);
+            bind(ql, withBeta, logger);
+            expect(ql.registry.sealBareNameHolders()).toEqual([]);
+
+            bind(ql, { ...withBeta, packages: [withBeta.packages[0]], functions: { qa_alpha_own: stamp('alpha_own') } }, logger);
+
+            expect(errors.map((e) => e.message)).toEqual([]);
+            expect(ql.functionHoldersOf('qa_beta_fn').packageHolders, 'the dropped body\'s function left the engine').toEqual([]);
+            expect(gammaBinds(ql, 'qa_beta_fn'), 'no holder is left to refuse it').toBeUndefined();
+            expect(ql.functionHoldersOf('qa_beta_fn').packageHolders).toEqual([GAMMA]);
+            const own = gammaBinds(ql, 'qa_alpha_own');
+            expect(own?.code, 'CONTROL: the owner the re-bind keeps keeps its claims').toBe('NAMESPACE_CONFLICT');
+            expect(holdersNamed(own)).toEqual([ALPHA]);
+        });
+    });
+
     it('CONTROL — on a built artifact a body\'s hook binds the handler ref its runtime module serves at the top level; a residual hook binds under the artifact\'s id', async () => {
         // `os build` lowers an inline hook handler it cannot extract to a ref the
         // runtime module serves; the artifact loader merges the module's callables

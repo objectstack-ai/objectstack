@@ -803,7 +803,12 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.functionHoldersOf.call(hooksAndFunctionsHost.of(this), name);
   }
 
-  /** Remove all functions registered under a given `packageId`. */
+  /**
+   * Remove all functions registered under a given `packageId`, from the bare
+   * map and the holder set ({@link functionHoldersOf}); answers how many bare
+   * entries left. [#32534] When the last registration of a name leaves and
+   * exactly one holder of it remains, the bare read answers that holder.
+   */
   unregisterFunctionsByPackage(packageId: string): number {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.unregisterFunctionsByPackage.call(hooksAndFunctionsHost.of(this), packageId);
