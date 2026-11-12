@@ -62,7 +62,7 @@ import {
     refuseUnjudgeableByNameRead,
 } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
+import { packageScopedRefusalOf, refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -552,6 +552,8 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             }
         } catch (error) {
             // [#5707] A read that did not happen is not "no draft pending".
+            // [#32568] The exact address's refusal is an answer, never a store outage.
+            if (packageScopedRefusalOf(error) !== undefined) throw error;
             host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
     }

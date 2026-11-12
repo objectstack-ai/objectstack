@@ -531,6 +531,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             // [#5532] Falling through to the active read here would answer
             // "there is no draft for this item" from a read that never
             // reached the table the drafts live in.
+            // [#32568] The exact address's refusal is an answer, never a store outage.
+            if (packageScopedRefusalOf(error) !== undefined) throw error;
             host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
         }
     }
@@ -645,6 +647,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         // let a storage outage arrive at the client as `not found` (active
         // read) or `NO_DRAFT` (draft read) — both of them claims about
         // authorship, made from a read that never happened.
+        // [#32568] The exact address's refusal is an answer, never a store outage.
+        if (packageScopedRefusalOf(error) !== undefined) throw error;
         host.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
     }
 
