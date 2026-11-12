@@ -47,21 +47,36 @@ const SERVER_REFUSAL = {
 
 type RefusalCode = keyof typeof SERVER_REFUSAL;
 
-/** A signed-out visitor; `/sign-in/email` answers with `{ code, message }`. */
-function refusingServer(status: number, code: string, message: string, config: unknown = {}): typeof fetch {
+/**
+ * A signed-out visitor; `/sign-in/email` answers with `{ code, message }`, plus
+ * any further body fields the server sends (`details`).
+ */
+function refusingServer(
+  status: number,
+  code: string,
+  message: string,
+  config: unknown = {},
+  extra: Record<string, unknown> = {},
+): typeof fetch {
   const json = (s: number, body: unknown) =>
     new Response(JSON.stringify(body), { status: s, headers: { 'Content-Type': 'application/json' } });
   return (async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes('/sign-in/email')) return json(status, { code, message });
+    if (url.includes('/sign-in/email')) return json(status, { code, message, ...extra });
     if (url.endsWith('/config')) return json(200, config);
     return json(200, null);
   }) as typeof fetch;
 }
 
 /** Submit the zh form against a server that refuses with `code`; return the banner text. */
-async function submitRefused(status: number, code: string, message: string, config?: unknown): Promise<string> {
-  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn: refusingServer(status, code, message, config) });
+async function submitRefused(
+  status: number,
+  code: string,
+  message: string,
+  config?: unknown,
+  extra?: Record<string, unknown>,
+): Promise<string> {
+  const client = createAuthClient({ baseURL: AUTH_URL, fetchFn: refusingServer(status, code, message, config, extra) });
   render(
     <I18nProvider config={{ defaultLanguage: 'zh', detectBrowserLanguage: false }} persistLanguage={false}>
       <AuthProvider authUrl={AUTH_URL} client={client}>
@@ -143,5 +158,35 @@ describe('DefaultLoginPage — with no mail service, a wrong password points to 
       data: { features: { emailDelivery: true } },
     });
     expect(text).toBe(zhErrors.invalidCredentials);
+  });
+});
+
+// objectstack#32432 — plugin-auth refuses the password sign-in of an account its
+// identity provider deactivated through SCIM with better-auth's `403
+// BANNED_USER` and `details: { cause: 'scim_deactivated' }`; an
+// administrator's ban answers the same status, code and message with no
+// `details`. The page tells them apart by `code` and `details.cause`, never by
+// the message: the whole read path runs here, from the fetch answer through
+// `createAuthClient` and `LoginForm` to this package's map and the zh pack.
+describe('DefaultLoginPage — a SCIM-deactivated sign-in is not shown as a ban (objectstack#32432)', () => {
+  const BAN_MESSAGE =
+    'You have been banned from this application. Please contact support if you believe this is an error.';
+
+  it('the zh pack translates the deactivation sentence', () => {
+    expect(zhErrors.accountDeactivated).toBeTruthy();
+    expect(zhErrors.accountDeactivated).not.toBe(enErrors.accountDeactivated);
+  });
+
+  it('details.cause scim_deactivated shows the deactivation sentence, not the ban message', async () => {
+    const text = await submitRefused(403, 'BANNED_USER', BAN_MESSAGE, undefined, {
+      details: { cause: 'scim_deactivated' },
+    });
+    expect(text).toBe(zhErrors.accountDeactivated);
+    expect(screen.queryByText(BAN_MESSAGE)).toBeNull();
+  });
+
+  it('CONTROL: an administrator\'s ban (no details) keeps the ban wording', async () => {
+    const text = await submitRefused(403, 'BANNED_USER', BAN_MESSAGE);
+    expect(text).toBe(BAN_MESSAGE);
   });
 });

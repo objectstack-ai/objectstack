@@ -2725,6 +2725,7 @@ const ja = {
         invalidCredentials: "メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、リセットするとすぐにサインインできます。",
         invalidCredentialsNoMail: 'メールアドレスまたはパスワードが正しくありません。失敗が続くと、サインインはしばらく一時停止されます。パスワードをお忘れの場合は、管理者にリセットを依頼してください。',
         emailNotVerified: "サインインする前にメールアドレスを確認してください。",
+        accountDeactivated: "あなたのアカウントは所属する組織によって無効にされました。管理者にお問い合わせください。",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.

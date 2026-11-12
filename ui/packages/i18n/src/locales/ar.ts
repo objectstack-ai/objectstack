@@ -2997,6 +2997,7 @@ const ar = {
         invalidCredentials: "بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ أعد تعيينها لتسجيل الدخول على الفور.",
         invalidCredentialsNoMail: 'بريد إلكتروني أو كلمة مرور غير صحيحة. بعد عدة محاولات فاشلة، يتوقف تسجيل الدخول مؤقتًا لبعض الوقت. نسيت كلمة المرور؟ اطلب من المسؤول إعادة تعيينها.',
         emailNotVerified: "يرجى التحقق من بريدك الإلكتروني قبل تسجيل الدخول.",
+        accountDeactivated: "عطّلت مؤسستك حسابك. تواصل مع المسؤول.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.

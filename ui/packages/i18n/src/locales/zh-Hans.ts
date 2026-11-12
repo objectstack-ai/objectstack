@@ -2780,6 +2780,7 @@ const zh = {
         invalidCredentials: '邮箱或密码错误。多次失败后，登录将暂停一段时间。忘记密码？重置密码后即可立即登录。',
         invalidCredentialsNoMail: '邮箱或密码错误。多次失败后，登录将暂停一段时间。忘记密码？请联系管理员为你重置。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
+        accountDeactivated: "你的账号已被所在组织停用。请联系管理员。",
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
         ssoAccountNotInvited: "你的账号尚未在本系统中开通。请联系管理员邀请你。",
         ssoAccountNotLinked: "本系统中已有使用你邮箱的账号，但它尚未关联单点登录。请改用其他方式登录，或请管理员为你关联。",

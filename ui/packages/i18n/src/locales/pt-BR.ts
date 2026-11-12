@@ -2788,6 +2788,7 @@ const pt = {
         invalidCredentials: "E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Redefina-a para entrar imediatamente.",
         invalidCredentialsNoMail: 'E-mail ou senha inválidos. Após várias tentativas sem sucesso, o login fica pausado por um tempo. Esqueceu a senha? Peça ao seu administrador para redefini-la.',
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
+        accountDeactivated: "Sua conta foi desativada pela sua organização. Entre em contato com o administrador.",
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
