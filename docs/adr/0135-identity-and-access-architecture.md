@@ -151,6 +151,57 @@ Two markings do that work, at two levels:
 > It is marked by role on `sys_member`, not by `sys_user.source`, and D4's markings are unchanged.
 > Cloud ADR-0024's own text is not amended here.
 
+> **Note (2026-11-12, objectstack, #32400 landed as `2830f31d75`; contract review `6792533556` on
+> #32400, filed as #32450) — a third writer marks SCIM-provisioned users, and it does not fail
+> open.** The two writers above both key on an account link. A SCIM directory creates none: the
+> vendor keeps its directory links in `sys_scim_user` and `sys_scim_subject` and writes no
+> `sys_account` row, so neither writer sees a SCIM create. A user a directory provisions is marked
+> by the **SCIM provisioning writer**, on the one seam every SCIM user write passes through — the
+> vendor's `identity.reconcileUser` host callback,
+> `packages/plugins/plugin-auth/src/auth-manager.ts#reconcileScimUserLifecycle`, which calls
+> `packages/plugins/plugin-auth/src/scim-identity-source.ts#markDirectoryProvisionedUsers` through
+> the data engine, inside the vendor's SCIM transaction. It has two postures, and the order of the
+> writes is the contract:
+>
+> - **Active state** (a create, a link or re-link, a reprovision, any later write that leaves the
+>   user active): the mark is written first and **fails closed**. A mark that cannot be written
+>   fails the SCIM request, and the identity provider retries. On a datasource that honours
+>   transactions the directory's write rolls back with it, so no user is left active and unmarked.
+>   On a declared degrade — an engine with no `transaction` API, or a driver that cannot open one
+>   ([ADR-0119](./0119-plugin-reachable-transactions-and-honest-atomic-batch.md) D1; both are
+>   named in `packages/plugins/plugin-auth/src/objectql-adapter.ts`) — the request still fails but
+>   nothing rolls back: the vendor's rows stay committed and unmarked until the next SCIM write
+>   for that user, or the next boot, marks them.
+> - **Inactive state** (a deactivation, a `DELETE`, a create with `active: false`): the deprovision
+>   write goes first and the mark after it is **best-effort**. A refused mark is logged at `error`
+>   and swallowed, so the deprovision write already made stands; the next active write for that
+>   user and the boot backfill re-run the mark. Two cases sit outside that guarantee: a mark
+>   failure that aborts the driver transaction itself fails the deprovision write with it (that
+>   is the database, not the mark), and a host with no data engine fails the callback before
+>   either posture is reached.
+>
+> The **boot backfill** covers users a directory provisioned before that writer existed: a
+> `kernel:ready` pass in `packages/plugins/plugin-auth/src/auth-plugin.ts` runs
+> `packages/plugins/plugin-auth/src/scim-identity-source.ts#backfillScimProvisionedIdentitySource`,
+> which finds them from a stored fact — each owns a `sys_scim_subject` row — and marks them. It
+> runs on every boot and is idempotent: it writes only a row whose value is wrong, so once a pass
+> has completed, a later boot writes only a mark missed since (a best-effort mark that did not
+> land, or a row a degrade left unmarked). A pass that cannot complete is logged at `error` and
+> the boot goes on.
+>
+> Why this writer does not fail open as the first two do. Those run inside a person's sign-in or
+> account link: nothing retries a sign-in, and a provenance write must never break one, so they let
+> it succeed and log the stamp that did not land. A provisioning request has no person waiting on
+> it, and the identity provider retries what fails, so refusing it costs a delay and, where the
+> transaction is real, leaves nothing half-written; letting it succeed unmarked would create a
+> managed user who reads `env_native`, and is offered the local-credential actions D5.2 exists to
+> hide, until the directory next writes that user or the process next boots. On a deprovision the
+> priority inverts: disabling the account is the request's whole purpose, so that write goes
+> first and a refused mark does not undo it. The local-password rule is unchanged (D5.2's second
+> bullet: gaining a local credential flips the row to `env_native`): the SCIM writer and the
+> backfill leave the row of a user who holds a local password as it is, and neither writes
+> `env_native` itself. Cloud ADR-0024's own text is not amended here.
+
 ### D5 — Identity comes from the IdP; authorization is decided in the environment
 
 Authentication may be delegated. **Authorization never is.** What a signed-in principal may do is
