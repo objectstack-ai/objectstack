@@ -443,6 +443,113 @@ describe('ADR-0150 D4 — the per-package overlay slot', () => {
   });
 });
 
+/**
+ * [#32408, epic ruling 6761802819 on #31699 F2] An App's customization pair is
+ * shared by every package of the App (ADR-0146 D3), so a row stored there is
+ * bound by the exact read's one owner check (`pairRowOnAddress`,
+ * metadata-protocol): bound to X → only X; unbound with two packages of the
+ * App holding the name → neither; unbound with one → that one; the App's own
+ * address keeps #28390 ruling A. Every reader of the registry's overlay slot
+ * reads the same binding — the holder set, a holder's bundle members (which
+ * decide whether a holding is a bundle addition), a package's item and the
+ * environment's item. Before this, they read the pair's per-package base only:
+ * the row was the pair's own item (a third holder) or the App's, whatever it
+ * declared. Ablated once (the binding put back to the per-package base): the
+ * readings are in the PR body.
+ */
+describe('[#32408] every overlay-slot reader binds an App pair\'s row as the exact read does', () => {
+  const APP = 'com.acme.suite';
+  const X = 'com.acme.suitex';
+  const Y = 'com.acme.suitey';
+  const PAIR = `${APP}.custom`;
+  /** The App and its packages X and Y: each a `module` declaring the App. */
+  const installSuite = () => {
+    install(APP);
+    for (const id of [X, Y]) {
+      registry.installPackage({ ...(manifest(id, [APP]) as object), type: 'module' } as never, 'code');
+    }
+  };
+  /** A row Studio saved into the App's pair, hydrated into the bare slot. */
+  const pairRow = (type: string, nameOf: string, tag: string, declared?: string, locale?: string) => registry.registerItem(type, {
+    ...body(type, nameOf, tag), ...(locale ? { locale } : {}), _packageId: PAIR, _provenance: 'org',
+    ...(declared ? { overrides: { package: declared } } : {}),
+  }, 'name' as never);
+  const pageOf = (packageId: string) => registry.getPackageScopedItem<{ label: string }>('page', 'home', packageId)?.label;
+  const templateOf = (packageId: string, member: string) =>
+    registry.getPackageScopedItem<{ label: string }>('email_template', 'welcome', packageId, member)?.label;
+
+  beforeEach(installSuite);
+
+  it('bound to X → only X: X\'s address serves it, Y\'s serves its own, the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
+    ship('page', 'home', X);
+    ship('page', 'home', Y);
+    pairRow('page', 'home', 'pair', X);
+    expect(pageOf(X)).toBe('pair page');
+    expect(pageOf(Y)).toBe('suitey page');
+    expect(pageOf(PAIR)).toBeUndefined();
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X, Y]);
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('bound to X beside the App holding the name → only X, never the App (BASE: the App\'s, whatever it declared)', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair', X);
+    expect(pageOf(X)).toBe('pair page');
+    expect(pageOf(APP)).toBe('suite page');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
+  });
+
+  it('bound to X, a bundle member: X holds it, the App does not, so X\'s locale stays an addition to the App\'s template (BASE: the App held it, and the bare read was refused naming both)', () => {
+    ship('email_template', 'welcome', APP);
+    registry.registerItem('email_template', { ...body('email_template', 'welcome', 'suitex'), locale: 'fr-FR' }, 'name' as never, X);
+    pairRow('email_template', 'welcome', 'pair', X, 'fr-FR');
+    expect(templateOf(X, 'fr-FR')).toBe('pair template');
+    expect(templateOf(APP, 'fr-FR')).toBeUndefined();
+    expect(registry.packageScopedHoldersOf('email_template', 'welcome')).toEqual([APP]);
+    expect(label(resolve('email_template', 'welcome'))).toBe('suite template');
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
+  });
+
+  it('unbound with two packages of the App holding the name → neither, and the pair is no holder (BASE: the pair\'s own item, a third holder)', () => {
+    ship('page', 'home', X);
+    ship('page', 'home', Y);
+    pairRow('page', 'home', 'pair');
+    ship('email_template', 'welcome', X);
+    ship('email_template', 'welcome', Y);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect([pageOf(X), pageOf(Y), pageOf(PAIR)]).toEqual(['suitex page', 'suitey page', undefined]);
+    expect([templateOf(X, 'fr-FR'), templateOf(Y, 'fr-FR'), templateOf(PAIR, 'fr-FR')]).toEqual([undefined, undefined, undefined]);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X, Y]);
+    expect(resolve('page', 'home')).toMatchObject({
+      status: 'refused', reason: 'ambiguous-in-environment',
+      candidates: [{ kind: 'package', packageId: X }, { kind: 'package', packageId: Y }],
+    });
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+    expect(registry.getEnvironmentScopedItem('email_template', 'welcome', 'fr-FR')).toBeUndefined();
+  });
+
+  it('unbound with one package of the App holding the name → that one (BASE: the pair\'s own item, and the bare read refused naming both)', () => {
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair');
+    ship('email_template', 'welcome', X);
+    pairRow('email_template', 'welcome', 'pair', undefined, 'fr-FR');
+    expect(pageOf(X)).toBe('pair page');
+    expect(templateOf(X, 'fr-FR')).toBe('pair template');
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([X]);
+    expect(label(resolve('page', 'home'))).toBe('pair page');
+    expect(registry.getEnvironmentScopedItem('page', 'home')).toBeUndefined();
+  });
+
+  it('CONTROL — the App\'s own address keeps #28390 ruling A: an unbound row of its pair is the App\'s, beside a package of the App', () => {
+    ship('page', 'home', APP);
+    ship('page', 'home', X);
+    pairRow('page', 'home', 'pair');
+    expect([pageOf(APP), pageOf(X)]).toEqual(['pair page', 'suitex page']);
+    expect(registry.packageScopedHoldersOf('page', 'home')).toEqual([APP, X]);
+  });
+});
+
 describe('phase 1 parity — under the one-holder rule the resolver answers as `getItem` does (red line 3)', () => {
   const NAME = 'shared_name';
 
