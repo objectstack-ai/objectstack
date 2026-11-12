@@ -503,6 +503,91 @@ describe('[#32183] RestServer: a name an enabled and a disabled package both shi
 });
 
 /**
+ * [#32354, ADR-0150 D3] The row layer judges a name's holders over the served
+ * set too: a holder is a registry holder or a package a stored row of the name
+ * is bound to. With one of them disabled, the bare doors read at the one
+ * served holder's address, and refuse naming only the served holders when two
+ * or more are; `?package=DISABLED` is that package's withheld item whether it
+ * holds the name in the registry or only as a stored row. The runtime
+ * dispatcher's pins are in
+ * `packages/runtime/src/domains/meta-disabled-holder-served-stack.test.ts`.
+ *
+ * Measured on the #32183 head (6655b742, step 0 of #32354): rows saved by the
+ * save door (which writes each through to the registry's one bare slot of the
+ * name), the disabled row saved first: the plain read and /layers answered
+ * 404; the enabled row first: /layers answered 409 naming the disabled
+ * package. `?package=DISABLED` of a name the enabled package ships in code
+ * served the disabled row's body under the enabled package's envelope.
+ */
+describe('[#32354] RestServer: stored rows judged over the served set', () => {
+    const THIRD_PKG = 'app.third_demo';
+    const tag = (pkg: string) => (pkg === PKG ? 'disabled' : pkg === THIRD_PKG ? 'third' : 'healthy');
+    const save = (host: ReturnType<typeof setup>, name: string, pkg: string) => host.protocol.saveMetaItem({
+        type: 'dashboard', name, packageId: pkg, item: { name, label: `${tag(pkg)} row`, widgets: [] },
+    });
+    const noDisabledTrace = (answers: ReadonlyArray<{ body: unknown }>) => {
+        for (const answer of answers) {
+            const text = JSON.stringify(answer.body ?? null);
+            expect(text).not.toMatch(/disabled (code|row)/);
+            expect(text).not.toContain(PKG);
+        }
+    };
+    const ORDERS = [['disabled first', [PKG, OTHER_PKG, THIRD_PKG]], ['enabled first', [OTHER_PKG, THIRD_PKG, PKG]]] as const;
+
+    it.each(ORDERS.flatMap(([order, packages]) => [
+        [`${order}, the disabled row saved first`, packages, [PKG, OTHER_PKG]],
+        [`${order}, the enabled row saved first`, packages, [OTHER_PKG, PKG]],
+    ] as const))('%s: no package ships the name; the plain read and /layers serve the enabled row', async (_label, packages, saved) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of saved) await save(host, 'rows_only_dash', pkg);
+        host.registry.disablePackage(PKG);
+        const read = await host.plain('dashboard', 'rows_only_dash');
+        expect([read.status, read.body?.item?.label, read.body?.packageId], JSON.stringify(read.body)).toEqual([200, 'healthy row', OTHER_PKG]);
+        const layers = await host.layers('dashboard', 'rows_only_dash');
+        expect([layers.status, layers.body?.overlay?.label, layers.body?.effective?.label], JSON.stringify(layers.body))
+            .toEqual([200, 'healthy row', 'healthy row']);
+        const exact = await host.plainWith('dashboard', 'rows_only_dash', { package: PKG });
+        expect(exact.status, JSON.stringify(exact.body)).toBe(404);
+        noDisabledTrace([read, layers, exact]);
+        // Re-enabled: two holders again, and /layers refuses naming both.
+        host.registry.enablePackage(PKG);
+        const again = await host.layers('dashboard', 'rows_only_dash');
+        expect(again.status).toBe(409);
+        expect(JSON.stringify(again.body)).toContain(PKG);
+    }, 60_000);
+
+    it.each(ORDERS)('%s, ruling Q2: two served row holders beside a disabled one are refused naming only the served holders, with details.candidates', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        for (const pkg of [PKG, OTHER_PKG, THIRD_PKG]) await save(host, 'three_rows_dash', pkg);
+        host.registry.disablePackage(PKG);
+        for (const refused of [await host.plain('dashboard', 'three_rows_dash'), await host.layers('dashboard', 'three_rows_dash')]) {
+            expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+            expect([...(refused.body?.details?.candidates ?? [])].map((c: any) => c.packageId).sort(), JSON.stringify(refused.body))
+                .toEqual([OTHER_PKG, THIRD_PKG].sort());
+            noDisabledTrace([refused]);
+        }
+    }, 60_000);
+
+    it.each(ORDERS)('%s, case 3: ?package=DISABLED, where the enabled package ships the name and the disabled one holds it only as a stored row, is the withheld 404', async (_order, packages) => {
+        const host = setup();
+        for (const pkg of packages) host.registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
+        host.registry.registerItem('dashboard', { name: 'shipped_dash', label: 'healthy code', widgets: [] } as any, 'name', OTHER_PKG);
+        await save(host, 'shipped_dash', PKG);
+        // CONTROL: enabled, that address serves the row.
+        const own = await host.plainWith('dashboard', 'shipped_dash', { package: PKG });
+        expect([own.status, own.body?.item?.label], JSON.stringify(own.body)).toEqual([200, 'disabled row']);
+        host.registry.disablePackage(PKG);
+        const exact = await host.plainWith('dashboard', 'shipped_dash', { package: PKG });
+        expect(exact.status, JSON.stringify(exact.body)).toBe(404);
+        const bare = await host.plain('dashboard', 'shipped_dash');
+        expect([bare.status, bare.body?.item?.label], JSON.stringify(bare.body)).toEqual([200, 'healthy code']);
+        noDisabledTrace([exact, bare]);
+    }, 60_000);
+});
+
+/**
  * [ruling record 6787890900] An object the caller may not read is answered on
  * every object door exactly as a name with nothing behind it — decided BEFORE
  * the store is read, so no store answer about that object (the protocol's own
