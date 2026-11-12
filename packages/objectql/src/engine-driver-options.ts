@@ -459,7 +459,11 @@ export function engineLayer0Verdict(
     organizationId: activeOrganization,
     accessibleOrgIds: accessibleOrganizationsOf(execCtx),
     // [ADR-0093 D8.1, as amended] Read off the context exactly as Layer 0
-    // reads it, so the engine's verdict is the wall's.
+    // reads it, so the engine and the wall compute one verdict. Agreement,
+    // not enforcement: a `deny` projects a driver scope only where an active
+    // organization names one ({@link driverReadScope}), and under `single` a
+    // person outside every organization carries none, so refusing that
+    // person is the security layer's, never this projection's.
     outsideEveryOrganization: isOutsideEveryOrganization(execCtx),
     // Left to the driver, which resolves the tenant column from the
     // table it actually built (`resolveTenantField`): an object with no

@@ -67,6 +67,12 @@ export interface TenantLayer0Input {
    * `group`). Under `single` it is the organization's one wall: such a caller
    * reaches none of the organization's tenant rows. Omitted or `false`,
    * nothing changes.
+   *
+   * ⛔ Set it from {@link isOutsideEveryOrganization} over the operation's own
+   * execution context and from nothing else. A caller that derives it any
+   * other way — a flag of its own, a guess from `tenantId`, a second reading
+   * of `sys_member` — decides the organization's wall beside the one
+   * predicate every enforcer shares, and the two answers can then differ.
    */
   outsideEveryOrganization?: boolean;
   /**
@@ -152,8 +158,9 @@ const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const }
  *   organization scope to enforce with (no active org under `isolated`, empty
  *   access set under `group`); or a walled posture on an external object that
  *   states no organization scope (ADR-0015 §10); or, under `single`, a tenant
- *   object read or written by a person outside every organization (ADR-0093
- *   D8.1, as amended) → fail closed (zero rows / write denied).
+ *   object — or an external object that states no organization scope — read
+ *   or written by a person outside every organization (ADR-0093 D8.1, as
+ *   amended) → fail closed (zero rows / write denied).
  */
 export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLayer0Verdict {
   // `single` posture (incl. a degraded deployment, which resolves to `single`)
@@ -164,13 +171,22 @@ export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLaye
   // judged on each request, under every posture. A person outside every
   // organization therefore reaches none of the tenant rows here, exactly as the
   // walled postures already answer such a person below (no active organization,
-  // an empty access set). A non-tenant object stays outside the wall, as it is
-  // under every posture. The platform operator is never outside: platform
+  // an empty access set). The platform operator is never outside: platform
   // standing is the deployment's, not a membership (ADR-0131 D5), and
   // {@link isOutsideEveryOrganization} says so.
+  //
+  // For that person the object's own rungs are the walled ladder's, asked in
+  // the walled ladder's order, so the object classes answer as they do under
+  // `isolated` and `group`: an object outside tenancy contributes nothing; an
+  // external object that states no organization scope is denied ahead of the
+  // column question (ADR-0015 §10 — its `organization_id` may be the
+  // registry's anchor, not a column of its own); an object with no
+  // organization column contributes nothing; every other object is denied.
   if (!postureEnforcesWall(input.tenancyPosture)) {
     if (!input.outsideEveryOrganization) return LAYER0_NONE;
-    if (input.tenancyDisabled || input.objectHasOrgIdField === false) return LAYER0_NONE;
+    if (input.tenancyDisabled) return LAYER0_NONE;
+    if (input.externalOrganizationScopeUndeclared) return LAYER0_DENY;
+    if (input.objectHasOrgIdField === false) return LAYER0_NONE;
     return LAYER0_DENY;
   }
 
@@ -217,23 +233,37 @@ export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLaye
  *
  * The rule it serves: under every tenancy posture, a person's data access
  * requires a current membership in the organization, judged on each request.
- * The membership is read once per request, by the resolver
- * (`resolveUserAuthzGrants` → `accessible_org_ids`, validity windows applied),
- * and this reads that answer — it never re-reads `sys_member`. Every reader of
- * the wall asks it: `plugin-security` building its Layer 0 input and its
- * write pre-test, and the engine deciding over its own facts, so the verdict
- * they compute stays one verdict ({@link computeTenantLayer0Verdict}).
+ * The membership is read by the resolver (`resolveUserAuthzGrants` →
+ * `accessible_org_ids`, validity windows applied), and this reads that
+ * answer — it never re-reads `sys_member`. The wall's enforcers ask it:
+ * `plugin-security` building its Layer 0 input and its write pre-test, and
+ * the engine deciding over its own facts, so the verdict they compute stays
+ * one verdict ({@link computeTenantLayer0Verdict}).
  *
  * `true` only when every part holds:
  *
  *  - a principal — a non-empty `userId` — and not a system context (`isSystem`),
  *    which keeps the boot, seed, hook and backfill writes it always had;
  *  - the context carries its membership set, `accessible_org_ids`, and the set is
- *    EMPTY. An envelope that carries no set at all was not built by the
- *    resolver and states nothing about membership, so it is not judged here;
+ *    EMPTY;
  *  - not a platform operator: the `PLATFORM_ADMIN` rung is platform standing,
  *    the deployment's rather than a membership's (ADR-0131 D5, ADR-0095 D3), and
  *    it keeps the reach it had.
+ *
+ * The answer is only as complete as the set the context carries, so every
+ * person context the platform builds carries the resolver's set: a request's
+ * (`resolveAuthzContext`); a flow started at the launch door, which hands the
+ * run the request's; a `runAs: 'user'` run, whose setup resolves the acting
+ * user's beside their grants, resolves a decider's afresh, and takes an empty
+ * set when it cannot resolve one (`@objectstack/service-automation`); and a
+ * hook that runs as the user, whose grant seeding resolves it beside the
+ * grants (`@objectstack/objectql`). A
+ * context that carries no set at all is not judged here: an in-process caller
+ * that builds a person context by hand and leaves the set out keeps the rules
+ * it had — under `single` the organization's own wall does not judge it, and
+ * under the walled postures the wall's own rungs still do (no active
+ * organization under `isolated`, an absent or empty access set under
+ * `group`). A builder of a person context carries the set.
  *
  * An active organization on the context does not make a caller a member: the
  * resolver keeps a claim only while a current membership backs it

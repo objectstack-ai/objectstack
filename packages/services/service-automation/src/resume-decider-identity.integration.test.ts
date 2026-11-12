@@ -144,10 +144,10 @@ function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: stri
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Each user's grants as the resolver answers them, deliberately disjoint. */
-const GRANTS: Record<string, { positions: string[]; permissions: string[]; org_user_ids: string[]; email: string }> = {
-  usr_rep: { positions: ['sales_rep', 'everyone'], permissions: ['deal_rep'], org_user_ids: ['usr_rep', 'usr_mgr', 'usr_dir'], email: 'rep@example.test' },
-  usr_mgr: { positions: ['sales_manager', 'everyone'], permissions: ['deal_manager'], org_user_ids: ['usr_mgr', 'usr_rep'], email: 'mgr@example.test' },
-  usr_dir: { positions: ['sales_director', 'everyone'], permissions: ['deal_director'], org_user_ids: ['usr_dir'], email: 'dir@example.test' },
+const GRANTS: Record<string, { positions: string[]; permissions: string[]; org_user_ids: string[]; accessible_org_ids: string[]; email: string }> = {
+  usr_rep: { positions: ['sales_rep', 'everyone'], permissions: ['deal_rep'], org_user_ids: ['usr_rep', 'usr_mgr', 'usr_dir'], accessible_org_ids: ['org_a', 'org_rep_only'], email: 'rep@example.test' },
+  usr_mgr: { positions: ['sales_manager', 'everyone'], permissions: ['deal_manager'], org_user_ids: ['usr_mgr', 'usr_rep'], accessible_org_ids: ['org_a'], email: 'mgr@example.test' },
+  usr_dir: { positions: ['sales_director', 'everyone'], permissions: ['deal_director'], org_user_ids: ['usr_dir'], accessible_org_ids: [], email: 'dir@example.test' },
 };
 
 function envelopeHarness(opts: { failFor?: string } = {}) {
@@ -205,6 +205,10 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(after.positions).toEqual(GRANTS.usr_mgr.positions);
     expect(after.permissions).toEqual(GRANTS.usr_mgr.permissions);
     expect(after.org_user_ids).toEqual(GRANTS.usr_mgr.org_user_ids);
+    // [ADR-0093 D8.1, as amended] The membership set the organization wall
+    // reads is the decider's too.
+    expect(before.accessible_org_ids).toEqual(GRANTS.usr_rep.accessible_org_ids);
+    expect(after.accessible_org_ids, "the decider's own memberships, never the submitter's").toEqual(GRANTS.usr_mgr.accessible_org_ids);
     expect(after.email, "the decider's own email, never the submitter's").toBe(GRANTS.usr_mgr.email);
     expect(before.email).toBe(GRANTS.usr_rep.email);
     expect(after.positions).not.toContain('sales_rep');
@@ -243,6 +247,7 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(res.success, JSON.stringify(res)).toBe(true);
     expect(h.ctxOf('after2')).toMatchObject({ userId: 'usr_dir', permissions: ['deal_director'] });
     expect(h.ctxOf('after2').org_user_ids).toEqual(GRANTS.usr_dir.org_user_ids);
+    expect(h.ctxOf('after2').accessible_org_ids, "a decider who holds no membership carries an empty set").toEqual([]);
 
     const run = await h.engine.getRun(paused.runId!);
     expect(run?.status).toBe('completed');
@@ -259,6 +264,7 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(after.positions).toEqual([]);
     expect(after.permissions).toEqual([]);
     expect(after.org_user_ids).toBeUndefined();
+    expect(after.accessible_org_ids, "the submitter's memberships do not stand in for the decider's").toEqual([]);
     expect(after.email, "the submitter's email does not stand in for the decider's").toBeUndefined();
   });
 

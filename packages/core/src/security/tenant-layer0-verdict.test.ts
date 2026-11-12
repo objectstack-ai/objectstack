@@ -50,7 +50,7 @@ describe('computeTenantLayer0Verdict — an external object that states no organ
       .toEqual({ kind: 'organization', organizationId: 'org-1' });
   });
 
-  it('CONTROL: under `single` nothing is read — an undeclared object answers `none` like every other', () => {
+  it('CONTROL: under `single` a current member meets nothing — an undeclared object answers `none` like every other', () => {
     expect(computeTenantLayer0Verdict(member({ tenancyPosture: 'single', externalOrganizationScopeUndeclared: true, objectHasOrgIdField: false })))
       .toEqual({ kind: 'none' });
   });
@@ -83,6 +83,17 @@ describe('computeTenantLayer0Verdict — a person outside every organization (AD
   it('a non-tenant object stays outside the wall, as under every posture', () => {
     expect(computeTenantLayer0Verdict(single({ outsideEveryOrganization: true, tenancyDisabled: true }))).toEqual({ kind: 'none' });
     expect(computeTenantLayer0Verdict(single({ outsideEveryOrganization: true, objectHasOrgIdField: false }))).toEqual({ kind: 'none' });
+  });
+
+  it('an external object that states no organization scope is denied ahead of the column question, as `isolated` and `group` deny it', () => {
+    const undeclared = { externalOrganizationScopeUndeclared: true, objectHasOrgIdField: false };
+    const outside = { organizationId: undefined, accessibleOrgIds: [], outsideEveryOrganization: true };
+    expect(computeTenantLayer0Verdict(single({ ...outside, ...undeclared }))).toEqual({ kind: 'deny' });
+    expect(computeTenantLayer0Verdict(member({ ...outside, ...undeclared }))).toEqual({ kind: 'deny' });
+    expect(computeTenantLayer0Verdict(member({ tenancyPosture: 'group', ...outside, ...undeclared }))).toEqual({ kind: 'deny' });
+    // CONTROL — an object outside tenancy is asked first, under every posture.
+    expect(computeTenantLayer0Verdict(single({ ...outside, ...undeclared, tenancyDisabled: true }))).toEqual({ kind: 'none' });
+    expect(computeTenantLayer0Verdict(member({ ...outside, ...undeclared, tenancyDisabled: true }))).toEqual({ kind: 'none' });
   });
 
   it('the posture matrix answers the same: `isolated` and `group` deny the same person', () => {

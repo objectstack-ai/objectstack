@@ -250,8 +250,10 @@ export async function composeWriteTenantWall(
   // true PLATFORM_ADMIN on a posture-permitting object (ADR-0095 D3), and
   // the whole `single` posture all yield `null` here and are untouched —
   // [ADR-0093 D8.1, as amended] save, under `single`, a person outside every
-  // organization, whose tenant-scoped write has no organization to land in
-  // under any posture and is refused with this same answer.
+  // organization — the caller, or the delegator an on-behalf-of write is made
+  // for — whose tenant-scoped write has no organization to land in under any
+  // posture and is refused with this same answer, its developer message naming
+  // the membership rule.
   // System / boot writes never reach this line at all (`isSystem`
   // short-circuits the middleware). Under `group`, "no organization scope"
   // means an EMPTY membership set — ADR-0105 D2's own fail-closed rule.
@@ -307,15 +309,25 @@ export async function composeWriteTenantWall(
   if (denied) {
     // The whole write is refused here, so nothing below is composed: the
     // parts are never computed for a write the pre-test refuses.
+    const whose = denied === 'delegator' ? "the delegator's" : "the caller's";
     return {
       preTest: refuseNoActiveOrganization(
         denied,
-        `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
-          `organization: tenancy posture '${this.tenancyPosture}' walls '${object}', and ` +
-          `${denied === 'delegator' ? "the delegator's" : "the caller's"} context resolved neither ` +
-          `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
-          `writes are refused rather than landing a row with a NULL organization that no reader — ` +
-          `including its own author — could ever see. System contexts and platform operators are unaffected.`,
+        this.orgScopingEnabled
+          ? `[ADR-0123 D2] Tenant-scoped writes are refused when the execution context carries no active ` +
+              `organization: tenancy posture '${this.tenancyPosture}' walls '${object}', and ` +
+              `${whose} context resolved neither ` +
+              `\`tenantId\` nor a non-empty \`accessible_org_ids\`. Reads under this state resolve to nothing; ` +
+              `writes are refused rather than landing a row with a NULL organization that no reader — ` +
+              `including its own author — could ever see. System contexts and platform operators are unaffected.`
+          : // [ADR-0093 D8.1, as amended] Under `single` there is no wall between
+            // organizations; what refuses is the membership rule.
+            `[ADR-0093 D8.1] Under every tenancy posture, a person's data access requires a current ` +
+              `membership in the organization, judged on each request: '${object}' is scoped to the ` +
+              `organization, and ${whose} context holds no current membership in any organization ` +
+              `(an empty \`accessible_org_ids\`). Reads under this state resolve to nothing; writes are ` +
+              `refused. Add the person to the organization (a membership) to restore access. System ` +
+              `contexts and platform operators are unaffected.`,
       ),
       judgePayload: () => null,
       storedImage: null,
@@ -564,28 +576,29 @@ export async function organizationWallRefusal(
   delegatorContext: any,
 ): Promise<'caller' | 'delegator' | null> {
   // [ADR-0093 D8.1, as amended] Under `single` there is no wall BETWEEN
-  // organizations, so the pre-test passes every caller the organization's own
-  // wall admits — everyone but a person outside every organization, whose
+  // organizations, so the pre-test passes every principal the organization's
+  // own wall admits — everyone but a person outside every organization, whose
   // write has no organization to land in under any posture. The walled
-  // postures ask the scope question as before.
+  // postures ask the scope question as before. Each principal — the caller,
+  // and the delegator it acts for — is asked on its own context.
   const lacksOrganizationScope = (ctx: any): boolean =>
     this.orgScopingEnabled
       ? !callerHasOrganizationScope(ctx, this.tenancyPosture)
       : isOutsideEveryOrganization(ctx);
-  if (!lacksOrganizationScope(context)) return null;
-  const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+  if (lacksOrganizationScope(context)) {
+    const callerWall = await this.computeWriteTenantCheckFilter(permissionSets, object, operation, context);
+    if (isTenantWallDenial(callerWall)) return 'caller';
+  }
   // [ADR-0090 D10] The delegator is walled on its own context, exactly as
   // the forge guard walls it — an on-behalf-of write may not land a row
-  // the delegator itself could not place.
-  const delegatorWall =
-    delegatorSets && lacksOrganizationScope(delegatorContext)
-      ? await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext)
-      : null;
-  return isTenantWallDenial(callerWall)
-    ? 'caller'
-    : isTenantWallDenial(delegatorWall)
-      ? 'delegator'
-      : null;
+  // the delegator itself could not place. It is asked whatever the caller's
+  // answer was: a caller with an organization to write in says nothing about
+  // whether the person it acts for holds a membership.
+  if (delegatorSets && lacksOrganizationScope(delegatorContext)) {
+    const delegatorWall = await this.computeWriteTenantCheckFilter(delegatorSets, object, operation, delegatorContext);
+    if (isTenantWallDenial(delegatorWall)) return 'delegator';
+  }
+  return null;
 }
 
 /** The body of `SecurityPlugin#writeWallVerdict`; the method's docblock there is its contract. */
