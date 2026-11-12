@@ -19,7 +19,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { I18nProvider } from '@object-ui/i18n';
 import {
   MePermissionsProvider,
@@ -148,6 +148,9 @@ function freshLocalization(): Record<string, ReturnType<typeof resolved>> {
 let localizationValues = freshLocalization();
 let mailValues: Record<string, ReturnType<typeof resolved>> = { provider: resolved('smtp') };
 let putRefusal: unknown = null;
+// Manifests listed beside localization and mail (the `ai` one, for the built-in AI row), and the `ai` page.
+let extraManifests: unknown[] = [];
+let aiPayload: Record<string, unknown> | null = null;
 
 function ok(data: unknown) {
   return { ok: true, status: 200, statusText: 'OK', json: async () => ({ success: true, data }) } as unknown as Response;
@@ -157,7 +160,10 @@ const fetchMock = vi.fn();
 function routeFetch() {
   fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
-    if (url === '/api/settings' && method === 'GET') return ok({ manifests: [LOCALIZATION_MANIFEST, MAIL_MANIFEST] });
+    if (url === '/api/settings' && method === 'GET') {
+      return ok({ manifests: [LOCALIZATION_MANIFEST, MAIL_MANIFEST, ...extraManifests] });
+    }
+    if (url === '/api/settings/ai' && method === 'GET' && aiPayload) return ok(aiPayload);
     if (url === '/api/settings/localization' && method === 'GET') {
       return ok({ manifest: LOCALIZATION_MANIFEST, values: localizationValues });
     }
@@ -217,6 +223,11 @@ async function settle() {
 
 const row = (id: string) => screen.getByTestId(`first-run-checklist-row-${id}`);
 
+/** Unfolds the rows that are done, which the checklist folds away (objectstack#32157). */
+async function showDone() {
+  fireEvent.click(await screen.findByTestId('first-run-checklist-toggle-done'));
+}
+
 let browserZone = 'Asia/Shanghai';
 let browserLanguages = ['zh-CN'];
 const realResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
@@ -229,6 +240,8 @@ beforeEach(() => {
   localizationValues = freshLocalization();
   mailValues = { provider: resolved('smtp') };
   putRefusal = null;
+  extraManifests = [];
+  aiPayload = null;
   AUTH.activeOrganization = { id: 'org_1', name: 'Default Organization' };
   SHELL.apps = [];
   SHELL.adapter = null;
@@ -299,6 +312,7 @@ describe('each row is read from the real setting', () => {
     };
     renderChecklist(ADMIN);
     await screen.findByTestId('first-run-checklist-row-invite');
+    await showDone();
     for (const id of ['language_country', 'timezone', 'currency']) expect(row(id).getAttribute('data-done')).toBe('true');
     expect(row('organization_name').getAttribute('data-done')).toBe('false');
     expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
@@ -325,6 +339,7 @@ describe('the browser pre-fills; only Confirm writes (objectui#11693 B2, objects
     expect(puts()).toHaveLength(0);
 
     fireEvent.click(screen.getByTestId('first-run-checklist-confirm-currency'));
+    await showDone();
     await waitFor(() => expect(row('currency').getAttribute('data-done')).toBe('true'));
     expect(puts()).toHaveLength(1);
     expect(JSON.parse(String((puts()[0][1] as RequestInit).body))).toEqual({ currency: 'CNY' });
@@ -480,6 +495,7 @@ describe('Connect an AI assistant: done from a real record, never from a click',
   it('an authorized assistant makes it done', async () => {
     granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
     expect(r.getAttribute('data-done')).toBe('true');
     expect(within(r).getByText('An AI assistant or API key of yours is connected.')).toBeTruthy();
@@ -488,6 +504,7 @@ describe('Connect an AI assistant: done from a real record, never from a click',
   it('an API key that still works makes it done', async () => {
     keys = [{ id: 'k_live', name: 'doubao key', revoked: false, expires_at: null }];
     renderChecklist(ADMIN);
+    await showDone();
     const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
     expect(r.getAttribute('data-done')).toBe('true');
   });
@@ -592,6 +609,7 @@ describe('one Home card per item (objectstack#32021 item 3)', () => {
       granted = [{ id: 'c1', clientId: 'cl', name: 'Claude Desktop', scopes: [], organizationId: null, authorizedAt: null, lastUsedAt: null }];
       render(<Claimed item="connect_assistant" />);
       renderChecklist(ADMIN);
+      await showDone();
       const r = await screen.findByTestId('first-run-checklist-row-connect_assistant');
       expect(r.getAttribute('data-done')).toBe('true');
       await settle();
@@ -604,5 +622,212 @@ describe('one Home card per item (objectstack#32021 item 3)', () => {
       await settle();
       expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('false');
     });
+  });
+});
+
+describe('the built-in AI: the provider the server runs, from live.provider (objectstack#32021 item 4)', () => {
+  const AI_MANIFEST = {
+    namespace: 'ai',
+    version: 1,
+    label: 'AI & Embedder',
+    scope: 'global',
+    readPermission: 'manage_platform_settings',
+    writePermission: 'manage_platform_settings',
+    specifiers: [
+      {
+        type: 'select',
+        key: 'provider',
+        label: 'Provider',
+        options: [
+          { value: 'openai', label: 'OpenAI' },
+          { value: 'deepseek', label: 'DeepSeek (OpenAI-compatible)' },
+        ],
+      },
+    ],
+  };
+  type Live = { value: string | null; source: 'settings' | 'environment' | 'none' } | undefined;
+  function serveAi(live: Live, stored: unknown = null) {
+    extraManifests = [AI_MANIFEST];
+    aiPayload = {
+      manifest: AI_MANIFEST,
+      values: { provider: resolved(stored, stored === null ? 'default' : 'global') },
+      ...(live ? { live: { provider: live } } : {}),
+    };
+  }
+
+  /** The checklist on `/`, beside the AI settings page the row links to. */
+  function renderWithSettingsPage(systemPermissions: string[]) {
+    return render(
+      <MemoryRouter initialEntries={['/']}>
+        <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+          <MePermissionsProvider initialPermissions={permissionsPayload(systemPermissions)}>
+            <Routes>
+              <Route path="/" element={<FirstRunChecklist />} />
+              <Route path="/apps/setup/system/settings/ai" element={<h1>AI settings page</h1>} />
+            </Routes>
+          </MePermissionsProvider>
+        </I18nProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('none in use: the row is not done, and its link opens Setup → AI & Embedder', async () => {
+    serveAi({ value: null, source: 'none' });
+    renderWithSettingsPage(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('false');
+    expect(within(r).getByText('Set up the built-in AI')).toBeTruthy();
+    expect(within(r).getByText('No AI provider is in use yet. Choose one and add its key.')).toBeTruthy();
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 7 done');
+
+    fireEvent.click(within(r).getByRole('link', { name: 'Set up' }));
+    expect(await screen.findByRole('heading', { name: 'AI settings page' })).toBeTruthy();
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('set in Setup: done, naming the provider by its option and saying where it came from', async () => {
+    serveAi({ value: 'openai', source: 'settings' }, 'openai');
+    renderChecklist(ADMIN);
+    await showDone();
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('true');
+    expect(within(r).getByText('OpenAI, set in Setup.')).toBeTruthy();
+    expect(within(r).getByRole('link', { name: 'Change' }).getAttribute('href')).toBe('/apps/setup/system/settings/ai');
+  });
+
+  it('detected from the boot environment with nothing saved: done, and says so', async () => {
+    serveAi({ value: 'deepseek', source: 'environment' }, null);
+    renderChecklist(ADMIN);
+    await showDone();
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('true');
+    expect(within(r).getByText('DeepSeek (OpenAI-compatible), detected from the server environment.')).toBeTruthy();
+  });
+
+  it('a saved provider the running system does not use is not done: live decides, not values', async () => {
+    serveAi({ value: null, source: 'none' }, 'openai');
+    renderChecklist(ADMIN);
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(r.getAttribute('data-done')).toBe('false');
+  });
+
+  it('a server that states no provider: no row, rather than "not set"', async () => {
+    serveAi(undefined, 'openai');
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(calls('GET', '/api/settings/ai')).toHaveLength(1);
+    expect(screen.queryByTestId('first-run-checklist-row-ai_provider')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('0 of 6 done');
+  });
+
+  it('a session that may not write ai never reads it and draws no row', async () => {
+    serveAi({ value: null, source: 'none' });
+    renderChecklist(['setup.access', 'setup.write']);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    await settle();
+    expect(calls('GET', '/api/settings/ai')).toHaveLength(0);
+    expect(screen.queryByTestId('first-run-checklist-row-ai_provider')).toBeNull();
+  });
+
+  it('zh: the row reads in the reader language', async () => {
+    serveAi({ value: null, source: 'none' });
+    renderChecklist(ADMIN, 'zh');
+    const r = await screen.findByTestId('first-run-checklist-row-ai_provider');
+    expect(within(r).getByText('设置内置 AI')).toBeTruthy();
+  });
+
+  describe('PRESERVATION: the external assistant row keeps its words and stays a different step', () => {
+    const ACCOUNT_APP = {
+      name: 'account',
+      navigation: [{ type: 'group', id: 'grp', children: [{ type: 'page', id: 'nav_connect_agent', pageName: 'connect_agent' }] }],
+    };
+
+    beforeEach(() => {
+      SHELL.apps = [ACCOUNT_APP];
+      SHELL.adapter = {
+        getClient: () => ({ oauth: { authorizedClients: { list: async () => ({ clients: [], truncated: false }) } } }),
+        find: async () => ({ data: [] }),
+      };
+    });
+
+    it('both rows are drawn, each with its own title, page and done state', async () => {
+      serveAi({ value: 'openai', source: 'settings' }, 'openai');
+      render(<Claimed item="connect_assistant" />);
+      renderChecklist(ADMIN);
+      await showDone();
+      const builtIn = await screen.findByTestId('first-run-checklist-row-ai_provider');
+      const external = await screen.findByTestId('first-run-checklist-row-connect_assistant');
+      expect(builtIn.getAttribute('data-done')).toBe('true');
+      expect(external.getAttribute('data-done')).toBe('false');
+      expect(within(external).getByText('Connect an external AI assistant')).toBeTruthy();
+      expect(within(external).getByRole('link', { name: 'Connect' }).getAttribute('href')).toBe('/apps/account/page/connect_agent');
+      expect(within(builtIn).queryByText('Connect an external AI assistant')).toBeNull();
+      // The built-in row being done does not release the external row's Home claim.
+      await waitFor(() => expect(screen.getByTestId('claimed-connect_assistant').textContent).toBe('true'));
+    });
+  });
+});
+
+describe('rows that are done are folded away, so the card keeps the screen for the work left (objectstack#32157)', () => {
+  function setThreeRows() {
+    localizationValues = {
+      locale: resolved('zh-CN', 'tenant'),
+      default_country: resolved('CN', 'tenant'),
+      timezone: resolved('Asia/Shanghai', 'tenant'),
+      currency: resolved('CNY', 'tenant'),
+    };
+  }
+  const drawnRows = () =>
+    within(screen.getByTestId('first-run-checklist'))
+      .getAllByRole('listitem')
+      .map((li) => li.getAttribute('data-testid')?.replace('first-run-checklist-row-', ''));
+
+  it('done rows are not drawn; one control says how many and unfolds them in their place', async () => {
+    setThreeRows();
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(drawnRows()).toEqual(['organization_name', 'mail', 'invite']);
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('3 of 6 done');
+    const toggle = screen.getByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('Show completed (3)');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(screen.getByRole('list').id);
+
+    fireEvent.click(toggle);
+    expect(drawnRows()).toEqual(['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite']);
+    expect(toggle.textContent).toBe('Hide completed');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(toggle);
+    expect(drawnRows()).toEqual(['organization_name', 'mail', 'invite']);
+    expect(puts()).toHaveLength(0);
+  });
+
+  it('a row confirmed in place folds away once the server has it, and the count follows', async () => {
+    renderChecklist(ADMIN);
+    fireEvent.click(await screen.findByTestId('first-run-checklist-set-currency'));
+    fireEvent.click(screen.getByTestId('first-run-checklist-confirm-currency'));
+    const toggle = await screen.findByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('Show completed (1)');
+    expect(screen.queryByTestId('first-run-checklist-row-currency')).toBeNull();
+    expect(screen.getByTestId('first-run-checklist-progress').textContent).toBe('1 of 6 done');
+  });
+
+  it('CONTROL: with nothing done every row is drawn and there is nothing to unfold', async () => {
+    renderChecklist(ADMIN);
+    await screen.findByTestId('first-run-checklist-row-invite');
+    expect(drawnRows()).toEqual(['organization_name', 'language_country', 'timezone', 'currency', 'mail', 'invite']);
+    expect(screen.queryByTestId('first-run-checklist-toggle-done')).toBeNull();
+  });
+
+  it('zh: the control reads in the reader language', async () => {
+    setThreeRows();
+    renderChecklist(ADMIN, 'zh');
+    const toggle = await screen.findByTestId('first-run-checklist-toggle-done');
+    expect(toggle.textContent).toBe('显示已完成的项（3）');
+    fireEvent.click(toggle);
+    expect(toggle.textContent).toBe('收起已完成的项');
   });
 });

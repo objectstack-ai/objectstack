@@ -69,6 +69,7 @@ import {
 } from './protocol-view-normalization.js';
 import { isShippedViewItem, stripDerivedProvenance } from './protocol-package-bindings.js';
 import { mutationEventMemberOfBody } from './protocol-bundle-members.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import { clientFacingFailureText } from './protocol-client-failures.js';
 import {
     destructiveChangeRemedy,
@@ -79,7 +80,6 @@ import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
 import type { SaveMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
-import { mutationEventPackage } from './protocol-mutation-events.js';
 import type { ProtocolHost } from './protocol-host.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { saveRegistryQuestion } from './registry-question.js';
@@ -2160,7 +2160,7 @@ export class ProtocolSaveFacet {
                 organizationId: null,
                 body: request.item,
                 // [#31698] The row a set's save landed in (ADR-0150 D4).
-                ...mutationEventPackage(singularType, permissionLandsIn),
+                ...projectorEventPackage(singularType, permissionLandsIn),
             });
             host.emitMetadataMutation({
                 type: singularTypeForRepo,
@@ -2169,6 +2169,9 @@ export class ProtocolSaveFacet {
                 organizationId: null,
                 // [#22877] The saved body's member — the row this save wrote.
                 ...mutationEventMemberOfBody(singularTypeForRepo, request.item),
+                // [#32451] …and its package: the binding `put` wrote under (a
+                // draft naming none inherits the active rows' package).
+                ...mutationEventPackage(mode === 'draft' && request.packageId == null ? inheritedDraftPackageId : request.packageId),
             });
             const receiptPackageId = typeof request.packageId === 'string' && request.packageId !== ''
                 ? request.packageId

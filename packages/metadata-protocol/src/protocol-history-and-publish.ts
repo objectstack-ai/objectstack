@@ -42,7 +42,6 @@ import { memberOption, mutationEventMemberOfBody, resolveBundleMemberSelector } 
 import { clientFacingFailureCode, clientFacingFailureText } from './protocol-client-failures.js';
 import type { PublishMaterializeResult } from './protocol-package-lifecycle-types.js';
 import type { MutationProjectionOutcome } from './protocol-mutation-events.js';
-import { mutationEventPackage } from './protocol-mutation-events.js';
 import { PREFLIGHT_AUDIT_CODE, withPendingAudit } from './protocol-audit-entry.js';
 import type { PublishMetaItemRequest } from './protocol-door-requests.js';
 import { withRefusalAudit } from './protocol-refusal-audit.js';
@@ -51,6 +50,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 import { readPublishBackfillRequest } from './protocol-publish-backfill-request.js';
 import type { PublishBackfillReceipt } from './protocol-publish-backfill-request.js';
 import { commitPlanKey } from './protocol-bundle-members.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import type { CommitPlanItem } from './protocol-bundle-members.js';
 import type { PreflightViolationCode } from './protocol-audit-entry.js';
 import { isNonCanonicalStoredType } from './protocol-stored-overlay-types.js';
@@ -1428,7 +1428,7 @@ export class ProtocolHistoryAndPublishFacet {
             organizationId: null,
             body: args.body,
             // [#31698] The row this publish wrote (ADR-0150 D4).
-            ...mutationEventPackage(args.singularType, args.packageId),
+            ...projectorEventPackage(args.singularType, args.packageId),
         });
         if (publishProjection) out.projectionApplied = publishProjection;
         host.emitMetadataMutation({
@@ -1438,6 +1438,8 @@ export class ProtocolHistoryAndPublishFacet {
             organizationId: null,
             // [#22877] The promoted body's member — the row the promotion wrote.
             ...mutationEventMemberOfBody(args.singularType, args.body),
+            // [#32451] …and the package that row is bound to.
+            ...mutationEventPackage(args.packageId),
         });
         return out;
     }

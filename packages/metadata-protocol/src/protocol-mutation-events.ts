@@ -28,10 +28,24 @@ export interface MetadataMutationEvent {
      */
     member?: string;
     /**
-     * [ADR-0150 D4, #31698] The package the mutated row is bound to (its
-     * `package_id`), or `null` for the package-unbound row — part of the row's
-     * address for a type stored per `(package, name)`. Absent where the door
-     * does not state it; a consumer then reads the name with no package.
+     * [#32451, ADR-0150 D4] The package the mutated row is bound to — part of
+     * the row's ADDRESS, as `member` is, so a peer converging on this signal
+     * re-reads THAT package's row of a type stored per `(package, name)`.
+     *
+     * - a package id: the row is bound to that package;
+     * - `null`: the row is known to be bound to NO package (D8). Never sent for
+     *   a binding the producer does not know or cannot single out;
+     * - absent: the producer does not know the binding — a writer that
+     *   predates this field. A receiver judges absence by `=== undefined`, so
+     *   a key present with the value `undefined` is absent too.
+     *
+     * Producers stamp the binding the write resolved, through `boundPackageOf`,
+     * never a request's value verbatim.
+     *
+     * [#31698] The awaited projector's event ({@link MetadataMutationProjector})
+     * carries it for `permission` alone, the one type whose projector (the
+     * security catalog's echo) keeps a copy per `(package, name)`; every other
+     * type's projector event omits it.
      */
     packageId?: string | null;
 }
@@ -58,9 +72,12 @@ export const METADATA_MUTATION_CLUSTER_CHANNEL = 'metadata.mutated';
  * re-reads the row from its own `sys_metadata` and re-runs the registry
  * write-through from that read, so the shared database stays the single
  * source of truth. `event` carries only the row's ADDRESS (type/name/state/
- * org scope); no body ever rides this channel, which is also what makes
- * at-least-once delivery and duplicates harmless by construction — replaying
- * the same address converges to the same registry state.
+ * org scope, the bundle `member`, and [#32451, ADR-0150 D4] the `packageId`
+ * the row is bound to); no body ever rides this channel, which is also what
+ * makes at-least-once delivery and duplicates harmless by construction —
+ * replaying the same address converges to the same registry state. The
+ * package is address, not trust: the peer reads the row at that address and
+ * registers the binding of the row it read.
  */
 export interface ClusterMetadataMutationPayload {
     /** Origin nodeId — used for loopback suppression. */
@@ -123,16 +140,6 @@ export interface MetaItemPublishedEvent {
 export type MetadataMutationProjector = (
     evt: MetadataMutationEvent & { body?: unknown },
 ) => Promise<void>;
-
-/**
- * [ADR-0150 D4, #31698] The {@link MetadataMutationEvent.packageId} a door's
- * projector event carries: the row's package, for `permission` — the one type
- * whose projector (the security catalog's echo) keeps a copy per `(package,
- * name)`. Every other type's event keeps its shape.
- */
-export function mutationEventPackage(type: string, packageId: string | null | undefined): { packageId?: string | null } {
-    return type === 'permission' && packageId !== undefined ? { packageId } : {};
-}
 
 /** Per-write outcome of the awaited mutation projector (ADR-0094). */
 export interface MutationProjectionOutcome {

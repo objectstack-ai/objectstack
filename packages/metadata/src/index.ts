@@ -73,6 +73,12 @@ export { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 // fifth hand-copy of the chain is the defect, not the fix.
 export { deriveViewContainerObject } from './view-container-expansion.js';
 
+// [ADR-0150 D4, #32451] The types this package's store keeps per `(package, name)`.
+// Published so the metadata protocol's cluster peer can tell which types it
+// converges by package, from this one declaration: a copy of the list there
+// would drift the moment a type joins the set here.
+export { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
+
 // Re-export types from spec
 export type {
   MetadataFormat,
