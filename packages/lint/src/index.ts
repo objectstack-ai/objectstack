@@ -1210,6 +1210,22 @@ export type {
   AuthoringSurface,
 } from './authoring-rules.js';
 
+// A finding's USER-FACING sentence in the request's language (ruling record
+// 6819749037): the producers' own catalogs, merged, and the locale ladder
+// (request locale, then the workspace default, then `en`) over the platform
+// locale table. The door that holds the request renders it as
+// `RuntimeAuthoringIssueSchema.userMessage`; also on `@objectstack/lint/runtime`.
+export {
+  FINDING_USER_TEXT_CATALOG,
+  USER_TEXT_FALLBACK_LOCALE,
+  findingUserMessage,
+  mergeUserTextCatalogs,
+  renderUserText,
+  userTextLocaleOf,
+} from './finding-user-text.js';
+export type { UserTextCatalog, UserTextEntry, UserTextParams, UserTextTemplate } from './finding-user-text.js';
+export { SECURITY_POSTURE_USER_TEXT } from './validate-security-posture.user-text.js';
+
 // The runtime publish gate over that registry. Also published as the
 // `@objectstack/lint/runtime` subpath — the entry the kernel boot path imports.
 // That subpath narrows the EXPORT surface to these names, not the module

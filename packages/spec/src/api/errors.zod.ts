@@ -409,11 +409,17 @@ export const EnhancedApiErrorSchema = lazySchema(() => z.object({
    * at throw time; absent means consumers keep their generic substitution
    * (#3821 preserved by construction). Status-agnostic; never replaces
    * `message`.
+   *
+   * In the REQUEST's locale, under the ladder `ApiErrorSchema.userMessage`'s
+   * "Language" section declares (ruling record 6819749037): the locale the
+   * request names, else the workspace default, else `en`, each read against
+   * the platform locale table. The producer composes it; consumers render it
+   * as received.
    */
   userMessage: z.string().optional().describe(
-    'Producer-marked user-facing refusal text, verbatim — see ApiErrorSchema.userMessage. '
-    + 'Present only when the producer opted in at throw time; unmarked errors keep the generic '
-    + 'consumer substitution.',
+    'Producer-marked user-facing refusal text, verbatim, in the request\'s locale (else the workspace '
+    + 'default locale, else `en`) — see ApiErrorSchema.userMessage. Present only when the producer opted '
+    + 'in at throw time; unmarked errors keep the generic consumer substitution.',
   ),
   /**
    * The producer's refusal declaration — the same field, with the same

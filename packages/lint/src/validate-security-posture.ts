@@ -142,6 +142,7 @@ import {
   type VisibleObjectExtension,
 } from './object-graph.js';
 import { injectedColumnsFor } from './system-fields.js';
+import type { UserTextParams } from './finding-user-text.js';
 import {
   PUBLIC_READ_WRITE_WAY_OUT,
   READ_ONLY_EXTERNAL_WAY_OUT,
@@ -197,6 +198,12 @@ export interface SecurityFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+  /**
+   * The names this finding's user-facing sentence interpolates, set by the
+   * advisory push sites whose rule has a sentence in
+   * `validate-security-posture.user-text.ts` (`AuthoringFinding.userTextParams`).
+   */
+  userTextParams?: UserTextParams;
 }
 
 type AnyRec = Record<string, unknown>;
@@ -612,6 +619,7 @@ function pushCbpOwnerPolicyWithoutOptIn(
     hint:
       `Declare sharing: { controlledByParent: { ownerMayEdit: true } } on "${objName}" so its owner_id updates ` +
       `with read access to the master, or drop the policy`,
+    userTextParams: { permissionSet: psName, policy: policyName, object: objName, remedy: 'allow-owner-edit' },
   });
 }
 
@@ -657,6 +665,13 @@ function pushCbpCallerPolicyOffOwnerColumn(
         `against), or drop the policy`
       : `Give "${objName}" an ${CBP_OWNER_COLUMN} column (ownership: 'user', the default) and key the accountable ` +
         `person on it, or drop the policy`,
+    // The same remedy split as `hint`: ⛔ never the opt-in here.
+    userTextParams: {
+      permissionSet: psName,
+      policy: policyName,
+      object: objName,
+      remedy: detail.ownerColumn ? 'key-owner-id' : 'add-owner-id',
+    },
   });
 }
 
@@ -694,6 +709,7 @@ function pushUpdatePolicyNoCheck(
     hint:
       'Declaring `check` on any applicable policy takes the USING-only siblings and the floor out of the check, ' +
       'so a creator who is not the owner loses update unless a `check` admits them.',
+    userTextParams: { permissionSet: psName, policy: policyName },
   });
 }
 
@@ -717,6 +733,7 @@ function pushCbpMasterReferenceHidden(findings: SecurityFinding[], psName: strin
     hint:
       `Make '${flsKey}' readable (readable: true) so a refused holder is told which master the write needs, ` +
       `or keep it hidden if a generic refusal is meant`,
+    userTextParams: { permissionSet: psName, field: flsKey },
   });
 }
 
@@ -1415,6 +1432,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         hint:
           `Remove ${bit} from ${via} and reach the rows with readScope/writeScope or a row-level policy, ` +
           `or delete the entry if the bypass is meant`,
+        userTextParams: { permissionSet: psName, field: flsKey, object: flsObject, bypass: modifyAll ? 'modify' : 'view' },
       });
     }
 
@@ -1530,6 +1548,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
         hint:
           `Gate the book on one of this package's own permission sets (ADR-0090 D9, e.g. its admin set), ` +
           `or fix the typo. Ignore if the set is intentionally provided by another installed package.`,
+        userTextParams: { book: String(book.name ?? i), permissionSet: setName },
       });
     }
   }
@@ -1582,6 +1601,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
               : `If that is intended (personal data), ignore this. Otherwise add readScope: 'org', ` +
                 `or widen the object's sharingModel. Scopes 'own_and_reports', 'unit' and 'unit_and_below' ` +
                 `need requires: ['hierarchy-security'], which @objectstack/security-enterprise provides.`,
+            userTextParams: { permissionSet: psName, object: objName },
           });
         }
       }
@@ -1645,6 +1665,7 @@ export function validateSecurityPosture(stack: AnyRec, opts?: { nowMs?: number }
           hint:
             `Grant it where its master${md.parent ? ` "${md.parent}"` : ''} is granted: ` +
             `permissions[i].objects.${objName} = { allowRead: true, allowCreate: true, allowEdit: true }`,
+          userTextParams: { object: objName, master: md.parent ?? '' },
         });
       }
     }

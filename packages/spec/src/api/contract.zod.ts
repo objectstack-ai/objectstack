@@ -87,13 +87,40 @@ export const ApiErrorSchema = lazySchema(() => z.object({
    *    set it. Same audience-split precedent as `developerMessage` on the
    *    DELETE_RESTRICTED envelope (#7307), pointed the other way.
    *
+   * ## Language
+   *
+   * The text is in the REQUEST's locale (ruling record 6819749037, option C:
+   * text addressed to the end user comes back in the request's language,
+   * composed where it is produced). The ladder, read against the platform
+   * locale table (`PLATFORM_LOCALES` / `platformLocaleTagOf`,
+   * `@objectstack/spec/system`):
+   *
+   *  1. the locale the request names — its `Accept-Language`, or `?locale` on
+   *     the REST door;
+   *  2. else the workspace default — the `localization` settings' locale
+   *     (rungs 1 and 2 are the precedence `ExecutionContext.locale` already
+   *     resolves);
+   *  3. else `en`, the floor every producer carries.
+   *
+   * A rung whose locale is not on the table, or that the producer has no text
+   * for, is passed over for the next one. The producer composes the text; a
+   * consumer renders it as received and keeps no per-code translation table of
+   * its own. "Verbatim" is unchanged by this: it binds the consumer, which
+   * never rewrites the text, not the producer's choice of language. The
+   * declared-refusal path already answers this way: a hook's catalogued
+   * refusal is served through `hooks.<hook>.refusals.<CODE>.message` in the
+   * caller's locale (`HookRefusalSchema`). The finding twin of this field is
+   * `RuntimeAuthoringIssueSchema.userMessage` (`protocol.zod.ts`), under the
+   * same ladder.
+   *
    * It never replaces `message` — the diagnostic channel keeps its own wording
    * for logs and developers.
    */
   userMessage: z.string().optional().describe(
-    'Producer-marked user-facing refusal text, verbatim. Present exactly when the '
-    + 'producer opted in at throw time; consumers render it to end users and keep their '
-    + 'generic substitution for anything unmarked. Status-agnostic; never replaces `message`.',
+    'Producer-marked user-facing refusal text, verbatim, in the request\'s locale (else the workspace '
+    + 'default locale, else `en`). Present exactly when the producer opted in at throw time; consumers '
+    + 'render it to end users as received and keep their generic substitution for anything unmarked. '
+    + 'Status-agnostic; never replaces `message`.',
   ),
   /**
    * The producer's declaration that the 5xx it named is a deliberate REFUSAL
