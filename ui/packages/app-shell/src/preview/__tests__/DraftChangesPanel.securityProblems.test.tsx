@@ -78,7 +78,8 @@ describe('DraftChangesPanel — pre-publish security posture (objectui#5418)', (
     const block = await screen.findByTestId('draft-security-problems');
     // The item, addressed the way the server's own refusal addresses it.
     expect(block.textContent).toContain('object/crmext_visit');
-    // The rule's fix-it HINT, not the ADR paragraph: the actionable half.
+    // The rule's verdict, keyed by its rule id and read in the console's
+    // language (`SECURITY_RULE_TEXT`), not the ADR paragraph.
     expect(block.textContent).toMatch(/sharingModel/);
     // And where to go, which the toast never said.
     expect(block.textContent).toMatch(/Settings → Record sharing/);
