@@ -469,6 +469,20 @@ describe('measure-aggregate-field-type-refused — a total over a formula names 
     expect(explanationOf(RULE)).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
   });
 
+  it('following the fix line clears the finding: a number field carrying the same expression is accepted', () => {
+    const expression = 'daysBetween(record.start_date, record.end_date) + 1';
+    const fields = (measured: Record<string, unknown>) => ({
+      fields: { name: { type: 'text' }, start_date: { type: 'date' }, end_date: { type: 'date' }, measured },
+    });
+    for (const aggregate of ['sum', 'avg', 'min', 'max']) {
+      // Not vacuous: the same expression on a formula is refused with the remedy…
+      const [refused] = findings(stackWith(aggregate, undefined, fields({ type: 'formula', returnType: 'number', expression })));
+      expect(refused?.hint, aggregate).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      // …and on the stored number field the remedy names, it is not.
+      expect(findings(stackWith(aggregate, undefined, fields({ type: 'number', readonly: true, expression }))), aggregate).toEqual([]);
+    }
+  });
+
   it('the controls: a stored class and the count_distinct × JSON-list case keep their own hints', () => {
     const [text] = findings(stackWith('sum', 'text'));
     expect(text?.hint).toContain('type accepts: count, count_distinct.');
@@ -1479,7 +1493,8 @@ describe('[#22161] one-line fixes — the three ids', () => {
         'one query per member',
       ],
       [DIMENSION_VIRTUAL_FIELD_REFUSED]: [
-        'store it in a field of its own on the object',
+        'make it a stored field of its own on the object',
+        'carrying the same `expression`, which the engine computes and stores on every write',
         'point the dimension at that stored field',
       ],
     };
