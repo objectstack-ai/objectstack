@@ -1,6 +1,6 @@
 # ADR-0019: App as the Consumer-Facing Unit
 
-**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-31, v3 narrowed to the consumer-surface decision). Landed in spec: `CONSUMER_INSTALLABLE_TYPES` / `isConsumerInstallable` and the `MarketplaceListingSchema.packageType` narrowing. Pending: the Console marketplace filling `packageType` from the manifest; the `defineStack` check that holds a module package to at most one app ([#32586](https://github.com/objectstack-ai/objectstack/issues/32586)); HotCRM split into a suite that surfaces its sales, service and marketing apps, one per package (hotcrm#2417). · **Amended** (2026-11-12, [#32585](https://github.com/objectstack-ai/objectstack/issues/32585), maintainer ruling 「改成 Salesforce 模式」) — D3's fold reversed: a suite (one install: an app package plus the module packages it composes) may surface more than one app, each defined by a different package of the suite, and an app package still defines at most one app. `type: app` is not renamed (「同意」); D3 gains one terminology table for app package, module, app and suite. D1 and D2 are unchanged. Until this amendment the Pending clause ended "HotCRM folded to a single App (D3/D4)"; see the amendment note under D3.
+**Status**: Accepted — 2026-10-27 (ruled on objectstack#26553, ADR batch 1; proposed 2026-05-31, v3 narrowed to the consumer-surface decision). Landed in spec: `CONSUMER_INSTALLABLE_TYPES` / `isConsumerInstallable` and the `MarketplaceListingSchema.packageType` narrowing. Pending: the Console marketplace filling `packageType` from the manifest; the `defineStack` check that holds a module package to at most one app ([#32586](https://github.com/objectstack-ai/objectstack/issues/32586)); HotCRM split into a suite that surfaces its sales, service and marketing apps, each in a package of its own (hotcrm#2417). · **Amended** (2026-11-12, [#32585](https://github.com/objectstack-ai/objectstack/issues/32585), maintainer ruling 「改成 Salesforce 模式」) — D3's fold reversed: a suite (one install: an app package plus the module packages it composes) may surface more than one app, each defined by a different package of the suite, and an app package still defines at most one app. `type: app` is not renamed (「同意」); D3 gains one terminology table for app package, module, app and suite. D1 and D2 are unchanged. Until this amendment the Pending clause ended "HotCRM folded to a single App (D3/D4)"; see the amendment note under D3.
 **Shares its number with**: [`0019-approval-as-flow-node`](./0019-approval-as-flow-node.md) (Collapse Approval into Flow — approval as a durable-pause node) — an unrelated decision under the same number. Numbers are never reassigned (AGENTS.md Prime Directive 13); cite this record unambiguously as `ADR-0019-app-as-consumer-unit`.
 **Date**: 2026-05-31
 **Deciders**: ObjectStack Protocol Architects
@@ -81,7 +81,7 @@ inside an App or are operator-provisioned, and are never independently browsed
 or installed by a consumer. The consumer Marketplace filters to `type: app` via
 `isConsumerInstallable(type)` (`packages/spec/src/kernel/plugin.zod.ts`).
 
-### D3 — ~~Suites fold into a single App~~ A suite may surface several apps, one per package (no aggregator above App; amended 2026-11-12)
+### D3 — ~~Suites fold into a single App~~ A suite may surface several apps, at most one per package (no aggregator above App; amended 2026-11-12)
 
 The "package contains N apps (suite)" shape is removed from the consumer model.
 ~~A vertical solution that today aggregates many plugins MUST resolve to **one
@@ -215,8 +215,8 @@ sub-plugins used.
   (the catalog is cloud-served and proxied verbatim by
   `runtime/cloud/marketplace-proxy-plugin.ts`), and ~~fold HotCRM to a single App
   (D3/D4)~~ *(reversed 2026-11-12: HotCRM becomes a suite that surfaces several
-  apps, one per package; see the D3 amendment note)*. Both consume the same
-  `isConsumerInstallable` predicate.
+  apps, each in a package of its own; see the D3 amendment note)*. Both consume
+  the same `isConsumerInstallable` predicate.
 
 Nothing in this ADR changes the runtime, the registry, or how packages execute.
 
