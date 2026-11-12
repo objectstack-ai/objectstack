@@ -11,10 +11,8 @@
 - 每张候选读全文 + 全部评论,写派发词前做决策复读:评论读到最后一页。
 - 写裁决区前 grep 申报文件面(源码与测试)的 `ruling`、`Ruling-ref`、`maintainer`、`⛔`。
 - 本卡与命中所引裁决逐字入区(id+原句)作约束;零命中才写无裁决,命中无裁决写命中数。
-- 派发前做前提过时检查,裁决同罪,三面都查:动作面、卡引用面、工作项面。
-- 动作面:`git log --oneline -20 -- <paths>`。
-- 卡引用面:裁决/卡片点名的每张 issue 逐个读当前 open/closed/assignee。
-- 引用读到的现状,⛔ 不引用裁决写作时的描述。
+- 派发前做前提过时检查,裁决同罪,三面都查;动作面:`git log --oneline -20 -- <paths>`。
+- 卡引用面:裁决/卡片点名的每张 issue 逐个读现 open/closed/assignee,引现状 ⛔ 不引裁决旧述。
 - 工作项面:卡片、裁决与分诊评论列的工作项逐条对树核验是否仍未完成,⛔ 不对卡核验。
 - `batch` 等待不填槽,四态见 SKILL.md 该行;同批独立按文件面不相交判,⛔ 不按包或 check 名。
 - 软顶:本席已验收等人批的 Tier H PR 逾 5 ⇒ 停派 Tier H,S/非受管照常,轮报列积压;两周复测。
@@ -133,7 +131,8 @@
 - 凡我觉得可以这样的一律降到第三区,第三区 ⛔ 不与裁决区相左;⛔ 不把假设写成裁决。
 - 认为裁决该动 ⇒ 令中写明,派发前送复核线程,⛔ 不经 dev 转。
 - 须复述所载裁决的 spec 散文 ⇒ 栅栏点名 `packages/spec/src/**` 散文在范围,⛔ 不整片禁。
-- 卡类特有约束恒随派发词:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
+- 标准非协商条款 ⛔ 不抄进派发词:hook 已机械强制段与 os-dev.md 已载通用段砍掉。
+- ⛔ 不砍卡类特有约束:ADR 类 draft-only、tier 推导引用、棘轮实况、释义纪律。
 - 终报要求随派发词带一句:只收机器可核字段(gates / line_budget / deviations / files_changed)。
 - 派发令恒带 `Writes:` 行:PR 只经中继 `pr_create`;评论/标签/正文只经中继写工具;两数都报。
 - ⛔ GitHub MCP 写:`create_pull_request`、`update_pull_request`、`issue_write`、`add_issue_comment` 等。
@@ -146,6 +145,7 @@
 - 已认领、别动 assignee 收窄到 assignee 字段本身;认领协议已满足是另一句话且可能是假的。
 - 触 `skills/**` 的卡,派发词必带 PM 定的净增行数预算(按 feature 大小定,小功能给小数)。
 - 翻转公开语义的裁决随卡带全仓 pin 清扫,两句缺一不可,原文见 runbook。
+- 拒收用例 ⇒ `code`+`status` 最低断言;过滤/谓词语义 ⇒ 编译面清单逐面申报,⛔ 静默略过。
 - 资源与后端:S 级机械 + M ⇒ `mode:subagent`;S 级但不机械(判断面在设计不在门禁)按 M 待遇。
 - `mode:cloud` 只保留给 L/XL、活过 PM 会话的工作、浏览器/dogfood 验证;build 重的 M 卡逐卡判。
 - 申报文件面写 `packages/spec/src/**` 且至少另一包 ⇒ build 重,派 `mode:cloud`,一卡一容器。
