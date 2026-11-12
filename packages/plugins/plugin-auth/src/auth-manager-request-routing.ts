@@ -245,11 +245,18 @@ export async function handleRequest(this: Pick<RequestRoutingHost, 'config' | 'b
   // fails its schema) leaves the scope empty: the observation is handed the
   // verifier's read-only lookup, so a live SCIM bearer still names its
   // connection — resolved after the response, once, for an admitted row.
+  // [#32148] A 409 the vendor words in its own name ("A Better Auth User
+  // already uses this email") leaves in the platform's words; nothing else
+  // about the answer changes (`scim-conflict-detail.ts`).
   const runRequest = isScimProtocolPath(endpointPath)
     ? async (): Promise<Response> => {
         const { scimRequestScope } = await import('./scim-connection-service.js');
         const scope: ScimRequestScope = { scim: true };
-        const scimResponse = await scimRequestScope.run(scope, runHandler);
+        let scimResponse = await scimRequestScope.run(scope, runHandler);
+        if (scimResponse.status === 409) {
+          const { translateScimConflictDetail } = await import('./scim-conflict-detail.js');
+          scimResponse = await translateScimConflictDetail(scimResponse);
+        }
         if (scimResponse.status >= 400) {
           const { observeScimRefusal, scimRefusalConnectionResolver } = await import('./scim-refusal-audit.js');
           observeScimRefusal(
