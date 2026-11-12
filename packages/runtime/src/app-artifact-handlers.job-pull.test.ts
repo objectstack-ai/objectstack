@@ -1047,6 +1047,22 @@ describe('[#32411] two enabled jobs of one name in one artifact are refused at b
         expect(refusals[0].refusal?.candidates).toEqual([{ kind: 'package', packageId: APP_ID }]);
     });
 
+    it('a twin that would not have bound still refuses the name: the twin that binds is not scheduled either', async () => {
+        // On main this pair scheduled exactly one job (the other is NOT scheduled at warn, its mapping missing), and it ran.
+        // The name is refused before any limb judges a job, so neither is scheduled now.
+        const bundle = { id: APP_ID, version: '0.1.0', type: 'app', mappings: [MAPPING], jobs: [
+            { ...PULL_JOB, name: 'paired' },
+            { ...PULL_JOB, name: 'paired', pull: { mapping: 'no_such_mapping' } },
+        ] };
+        const { out, answers, pulls, logger } = await scheduleAndRun(bundle, APP_ID, () => new IntervalJobAdapter());
+        expect(out.refused).toEqual(['paired', 'paired']);
+        expect(out.pulls).toEqual([]);
+        expect(out.notScheduled).toEqual([]);
+        expect(answers).toEqual([]);
+        expect(pulls).toEqual([]);
+        expect(refusalsOf(logger, 'paired').map((e) => ({ code: e.code, status: e.status }))).toEqual([{ code: 'RESOURCE_CONFLICT', status: 409 }]);
+    });
+
     it('a refused name cancels the job of that name an earlier install of the package scheduled', async () => {
         const adapter = new CronJobAdapter();
         const h = harness();
