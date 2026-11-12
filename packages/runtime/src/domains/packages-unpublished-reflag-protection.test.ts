@@ -46,7 +46,7 @@ const PKG_ADMIN = () => ({
  */
 function makeDoor(apps: Array<Record<string, unknown>>) {
     const publishPackageDrafts = vi.fn().mockResolvedValue({
-        success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
+        success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [],
         seedApplied: { success: true, inserted: 0 },
     });
     const getMetaItems = vi.fn().mockResolvedValue({ items: apps });

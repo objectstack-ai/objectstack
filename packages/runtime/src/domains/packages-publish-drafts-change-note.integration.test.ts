@@ -19,7 +19,7 @@
 
 // Pays the lint root's first load at collection, never inside a clocked case.
 import '../lint-root-preload.testkit.js';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,7 +50,13 @@ afterEach(() => {
     noise = null;
 });
 
-async function boot() {
+/**
+ * [#32455] `channel` and `namespace` are for the visibility-flip pins below:
+ * the publish-time authoring gate runs on the `environment` channel only, and
+ * the pre-flight namespace rule needs a declared namespace. Defaults are this
+ * file's original boot.
+ */
+async function boot(opts: { channel?: 'environment' | 'package-author'; namespace?: string } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'os-publish-note-'));
     cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
     const driver = new SqlDriver({
@@ -68,19 +74,23 @@ async function boot() {
     engine.registerDriver(driver as any, true);
     await engine.init();
     for (const o of objects) engine.registry.registerObject(o, PLATFORM_PKG);
-    engine.registry.installPackage({ id: PKG, name: PKG, version: '1.0.0' } as any, 'authored');
+    engine.registry.installPackage(
+        { id: PKG, name: PKG, version: '1.0.0', ...(opts.namespace ? { namespace: opts.namespace } : {}) } as any,
+        'authored',
+    );
     cleanup.push(() => { void engine.destroy(); });
 
-    const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, undefined, 'package-author');
+    const protocol = new ObjectStackProtocolImplementation(engine as any, undefined, undefined, opts.channel ?? 'package-author');
     const kernel: any = {
         getService: (name: string) => {
             if (name === 'protocol') return Promise.resolve(protocol);
             if (name === 'objectql') return Promise.resolve(engine);
             return null;
         },
-        context: { getService: () => null, trigger: () => {} },
+        // [#32455] A spy, so a pin can say whether `metadata:reloaded` was announced.
+        context: { getService: () => null, trigger: vi.fn() },
     };
-    return { engine, protocol, dispatcher: new HttpDispatcher(kernel) };
+    return { engine, protocol, dispatcher: new HttpDispatcher(kernel), trigger: kernel.context.trigger as ReturnType<typeof vi.fn> };
 }
 
 async function draftViews(protocol: any, names: string[]) {
@@ -215,5 +225,125 @@ describe('publish-drafts records the change note and the session user (ADR-0146 
         const published = rows.filter((r) => r.operation_type === 'publish');
         expect(published).toHaveLength(1);
         expect(published[0].recorded_by ?? null).toBeNull();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [#32455] ADR-0045 §3's visibility flip follows only a publish that refused
+// nothing. ADR-0067 D2: "no partial visibility flip". Measured on `main`
+// before the change, through this door: a batch refused at a later draft
+// (outcome `refused`, `publishedCount: 0`) still answered
+// `unhiddenApps: ["<app>"]`, stored the app `_unpublished: false` and announced
+// it, so an app the operator kept hidden reached every launcher anyway.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HIDDEN_APP = 'notes_desk';
+
+/** The app as cold boot hydrates it: the stored row's lifecycle state and its gate. */
+async function storedApp(env: Awaited<ReturnType<typeof boot>>) {
+    const rows = (await env.engine.find('sys_metadata', { where: { type: 'app', name: HIDDEN_APP } })) as any[];
+    return rows.map((r) => ({ state: r.state, _unpublished: JSON.parse(r.metadata)._unpublished }));
+}
+
+/** Active and kept hidden: the ADR-0045 §2 materialized shape, saved straight to active. */
+async function stageHiddenApp(protocol: any) {
+    await protocol.saveMetaItem({
+        type: 'app',
+        name: HIDDEN_APP,
+        item: { name: HIDDEN_APP, label: 'Notes Desk', _unpublished: true },
+        packageId: PKG,
+    });
+}
+
+async function draftObject(protocol: any, name: string, fields: Record<string, unknown>) {
+    await protocol.saveMetaItem({
+        type: 'object',
+        name,
+        // The authored OWD the publish gate asks of every custom object, so the
+        // field below is the only thing the gate can refuse.
+        item: { name, label: name, sharingModel: 'private', fields },
+        packageId: PKG,
+        mode: 'draft',
+    });
+}
+
+async function publishDrafts(env: Awaited<ReturnType<typeof boot>>) {
+    expect(await storedApp(env)).toEqual([{ state: 'active', _unpublished: true }]);
+    env.trigger.mockClear();
+    const result = await env.dispatcher.handlePackages(`/${PKG}/publish-drafts`, 'POST', {}, {}, caller('u_alice'));
+    expect(result.response?.status).toBe(200);
+    return (result.response as any)?.body?.data;
+}
+
+describe('[#32455] publish-drafts flips visibility only after a publish that refused nothing (ADR-0067 D2)', () => {
+    it('a publish refused at a LATER draft (the rollback) leaves the app hidden: no flip, no `unhiddenApps`, no announce', async () => {
+        // The `environment` channel: the publish-time authoring gate runs there.
+        const env = await boot({ channel: 'environment' });
+        await stageHiddenApp(env.protocol);
+        await env.protocol.saveMetaItem({
+            type: 'view',
+            name: 'notes_ticket.open',
+            item: { name: 'notes_ticket.open', label: 'Open', type: 'grid', object: 'notes_ticket', viewKind: 'list', columns: ['reason'] },
+            packageId: PKG,
+            mode: 'draft',
+        });
+        // `{YYYYMM}` is no date token and no field: refused when published.
+        await draftObject(env.protocol, 'notes_ticket', {
+            ticket_no: { type: 'autonumber', label: 'Ticket No', autonumberFormat: 'QJ{YYYYMM}-{0000}' },
+            reason: { type: 'text', label: 'Reason' },
+        });
+
+        const data = await publishDrafts(env);
+
+        expect(data).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        expect(data.failed.map((f: any) => [`${f.type}/${f.name}`, f.code]).sort()).toEqual([
+            ['object/notes_ticket', 'INVALID_METADATA'],
+            ['view/notes_ticket.open', 'BATCH_ABORTED'],
+        ]);
+        expect(data).not.toHaveProperty('unhiddenApps');
+        expect(data).not.toHaveProperty('unhideError');
+        expect(await storedApp(env)).toEqual([{ state: 'active', _unpublished: true }]);
+        expect(env.trigger).not.toHaveBeenCalled();
+    });
+
+    it('a PRE-FLIGHT refusal leaves the app hidden as well', async () => {
+        const env = await boot({ namespace: 'notes' });
+        await stageHiddenApp(env.protocol);
+        await draftViews(env.protocol, ['notes_open']);
+        // An object without the package's `notes_` prefix: refused before anything is promoted.
+        await draftObject(env.protocol, 'ticket', { reason: { type: 'text', label: 'Reason' } });
+
+        const data = await publishDrafts(env);
+
+        expect(data).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        expect(data.failed.map((f: any) => [`${f.type}/${f.name}`, f.code])).toEqual([['object/ticket', 'NAMESPACE_PREFIX']]);
+        expect(data).not.toHaveProperty('unhiddenApps');
+        expect(await storedApp(env)).toEqual([{ state: 'active', _unpublished: true }]);
+        expect(env.trigger).not.toHaveBeenCalled();
+    });
+
+    it('CONTROL: a `published` batch still flips the app and announces it', async () => {
+        const env = await boot();
+        await stageHiddenApp(env.protocol);
+        await draftViews(env.protocol, ['notes_open']);
+
+        const data = await publishDrafts(env);
+
+        expect(data).toMatchObject({ success: true, outcome: 'published', publishedCount: 1 });
+        expect(data.unhiddenApps).toEqual([HIDDEN_APP]);
+        expect(await storedApp(env)).toEqual([{ state: 'active', _unpublished: false }]);
+        expect(env.trigger).toHaveBeenCalledWith('metadata:reloaded', { changed: ['view/notes_open', `app/${HIDDEN_APP}`] });
+    });
+
+    it('CONTROL: `nothing_to_publish` still flips — for an additive build the flip IS the publish (ADR-0045 §3)', async () => {
+        const env = await boot();
+        await stageHiddenApp(env.protocol);
+
+        const data = await publishDrafts(env);
+
+        expect(data).toMatchObject({ success: false, outcome: 'nothing_to_publish', publishedCount: 0, failed: [] });
+        expect(data.unhiddenApps).toEqual([HIDDEN_APP]);
+        expect(await storedApp(env)).toEqual([{ state: 'active', _unpublished: false }]);
+        expect(env.trigger).toHaveBeenCalledWith('metadata:reloaded', { changed: [`app/${HIDDEN_APP}`] });
     });
 });

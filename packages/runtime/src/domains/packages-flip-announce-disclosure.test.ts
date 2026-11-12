@@ -164,7 +164,7 @@ function makeDoor(opts: {
     refusalOnTrigger?: boolean;
 } = {}) {
     const publishPackageDrafts = vi.fn().mockResolvedValue({
-        success: true, publishedCount: 1, failedCount: 0,
+        success: true, outcome: 'published', publishedCount: 1, failedCount: 0,
         published: [{ type: 'flow', name: 'nightly_rollup', version: 'h' }], failed: [],
         seedApplied: { success: true, inserted: 0 },
     });

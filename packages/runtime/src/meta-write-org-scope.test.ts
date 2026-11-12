@@ -478,7 +478,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
         // ADR-0045 §3's flip exists to serve. Everything the flip itself
         // touches (`getMetaItems`, `saveMetaItem`) stays REAL.
         protocol.publishPackageDrafts = async () => ({
-            success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
+            success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [],
         });
 
         const res = responseOf(await dispatcher.handlePackages('/crm_pkg/publish-drafts', 'POST', {}, {}, ctx(ACTIVE_ORG)));
@@ -512,7 +512,7 @@ describe('#7018 — the registry decides whether a metadata write carries the se
             type: 'app', name: APP.name, item: { ...APP, _unpublished: true }, packageId: 'crm_pkg',
         });
         protocol.publishPackageDrafts = async () => ({
-            success: true, publishedCount: 0, failedCount: 0, published: [], failed: [],
+            success: true, outcome: 'published', publishedCount: 0, failedCount: 0, published: [], failed: [],
         });
         error.mockClear();
 
