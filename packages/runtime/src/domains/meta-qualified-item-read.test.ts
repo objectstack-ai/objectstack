@@ -785,10 +785,12 @@ describe('#31699 — a webhook name two packages hold: the item read and the pub
 
     // [#31699 PR 2 × #32183] Both reads judge the served holders (#32497,
     // merged from main): a disabled co-holder holds no name for them.
-    // BASE (this branch's round-3 head 2200b8c9, before #32497, same fixture):
-    // both answered 409 naming both, the disabled holder included (#32694's
-    // premise, measured there).
-    it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM 409 naming both TO the enabled holder\'s] one enabled and one disabled holder (%s): the item read serves the enabled one, the published read answers as for it alone (404, nothing published); re-enabled, both 409', async (_order, order) => {
+    // BASE (main: this head with `webhook` out of the three type sets, dists
+    // rebuilt, same fixture): the item read answered the first registered
+    // holder's when it is the enabled one and 404 when it is the disabled one,
+    // and the first registered again once both are enabled. This branch's
+    // round-3 head 2200b8c9, before #32497, answered 409 naming both.
+    it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM the first registered, or 404 when it is the disabled one, TO the enabled holder\'s] one enabled and one disabled holder (%s): the item read serves the enabled one, the published read answers as for it alone (404, nothing published); re-enabled, both 409, where the item read served the first registered', async (_order, order) => {
         for (const id of order) ship('webhook', 'twin_hook', id);
         registry.disablePackage(B);
         const item = await read('/webhook/twin_hook');

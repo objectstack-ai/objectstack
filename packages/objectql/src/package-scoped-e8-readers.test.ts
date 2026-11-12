@@ -357,10 +357,12 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
 
   // [#31699 PR 2 × #32183] The by-name read judges the served holders (#32497,
   // merged from main), so a disabled co-holder holds no name for it, as the
-  // dispatcher already reads it. BASE (this branch's round-3 head 2200b8c9,
-  // before #32497): 409 naming both, the disabled holder included (#32694's
-  // premise, measured there).
-  it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM 409 naming both TO the enabled holder\'s] one enabled and one disabled holder (%s): a caller with no package reads the enabled one\'s; re-enabled, 409 naming both', async (_order, order) => {
+  // dispatcher already reads it. BASE (main: this head with `webhook` out of
+  // the three type sets, dists rebuilt): the first registered holder's when it
+  // is the enabled one, nothing when it is the disabled one, and the first
+  // registered again once both are enabled. This branch's round-3 head
+  // 2200b8c9, before #32497, answered 409 naming both (#32694's premise).
+  it.each([['alpha first', [A, B]], ['beta first', [B, A]]] as const)('[FROM the first registered, or nothing when it is the disabled one, TO the enabled holder\'s] one enabled and one disabled holder (%s): a caller with no package reads the enabled one\'s; re-enabled, FROM the first registered TO 409 naming both', async (_order, order) => {
     for (const id of order) ship('webhook', 'twin_hook', id);
     registry.disablePackage(B);
     expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'twin_hook' }))?.item)).toBe('alpha webhook');
