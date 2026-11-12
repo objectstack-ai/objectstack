@@ -40,8 +40,18 @@ function lister(items: Header[]) {
   return { listMetadataItems: vi.fn(async () => items), find: vi.fn() } as any;
 }
 
-/** The grant's name column, or an action param that names a set by its name alone. */
-const GRANT_FIELD = { name: 'permission_set', type: 'text', label: 'Permission Set' };
+/**
+ * The grant's name column, as the record form hands it (the form stamps the
+ * object it edits, objectstack#32795), or an action param that names a set by
+ * its name alone.
+ */
+const GRANT_FIELD = {
+  name: 'permission_set',
+  type: 'text',
+  label: 'Permission Set',
+  widget: 'permission-ref',
+  formObject: 'sys_user_permission_set',
+};
 const ACTION_PARAM = { name: 'permissionSet', type: 'text', label: 'Permission Set' };
 
 function mount({
@@ -54,7 +64,7 @@ function mount({
 }: {
   items: Header[];
   value?: string;
-  field?: { name: string; type: string; label: string };
+  field?: Record<string, unknown>;
   dependentValues?: Record<string, unknown>;
   onAutofill?: (patch: Record<string, unknown>) => void;
   readonly?: boolean;
