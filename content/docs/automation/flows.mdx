@@ -1220,6 +1220,21 @@ unwrapped control produce identical output). `retry` only delays that. The
 minimal handler is one bare `assignment` node, as shown under "Per-iteration
 containment" above.
 
+**Not on a save's path.** A flow whose start node runs it after a record change
+(`record-after-create`, `-update`, `-delete`, `-insert`, `-write`) runs inside
+the save: the save answers only when the run does. So an `http` or
+`connector_action` node there that a `retry` reaches — this `try_catch`'s, at
+any depth of its `try` region, or the flow's `errorHandling: { strategy:
+'retry' }` — would hold the user's save through every attempt and every backoff
+delay while the outside system is down. Such a flow is refused at publish
+(`flow-after-save-inline-retry`: a `422` at the metadata save door, a refused
+registration at the engine, an error at `objectstack validate`). Give the
+`http` node `durable: true` instead: the request is queued on the messaging
+HTTP outbox, which retries it in the background, and the save no longer waits.
+A `connector_action` has no background path: drop the retry around it, or make
+the call through a durable `http` node. A before-trigger, scheduled, API or
+on-demand flow, and an inline call nothing retries, are unaffected.
+
 > BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
 > protocol as the **interop** representation and map onto these constructs on
 > import/export — they are not the native authoring model.
