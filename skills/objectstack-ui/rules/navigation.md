@@ -51,8 +51,9 @@ export const CrmApp = App.create({
   (key = app `name`) on a permission set takes the app off its holders' Home
   tiles, App Switcher and `app:launcher` block: `GET /api/v1/me/apps` drops it,
   `/api/v1/meta/app` still serves it and its URL still opens. Not an access
-  gate. Across the sets a person holds the most visible value wins: a `visible`
-  entry on the set everyone holds cancels every `hidden`.
+  gate. Any other value for it on another set they hold (`visible`, `default_on`,
+  `default_off`) outranks `hidden`: the set everyone holds must carry no
+  `tabPermissions` entry for it.
 - **Access.** App `requiredPermissions: ['crm.access']` plus `systemPermissions:
   ['crm.access']` on the holders' permission set. Nobody else is served the app
   (by name: `403`), admins included until a set grants them the capability.
@@ -101,8 +102,7 @@ for a one-off slice) is a permanently-maintained duplicate asset.
 
 **The iron rule (revised):** an interface page **IS the view definition**. It
 binds an object (`interfaceConfig.source`) and carries its **own** `columns` /
-`sort` / `filterBy` directly (Airtable parity — there is no "inherit from a
-named view" concept), plus presentation policy (`userFilters`,
+`sort` / `filterBy` directly, plus presentation policy (`userFilters`,
 `appearance.allowedVisualizations`, `userActions`). The old
 `sourceView` ("inherit from a named object view") is **deprecated** legacy: it
 is still honored at runtime as a fallback when the page defines no `columns` of
