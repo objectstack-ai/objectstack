@@ -39,6 +39,9 @@ Widening:
 - Two co-owners of a shareable namespace, one disabled, `GET /meta/:type/:ns/:name` and the bare read: 409 `ambiguous-in-namespace` → 200 with the enabled co-owner's item.
 - `resolveActionByPackage`, and the REST route rung for a caller's package (`resolveRouteActionDeclaration`), a caller with no package or one whose closure holds both: refused → the enabled holder's declaration and its handler.
 - The security catalog, a permission-set reference with no package column: refused → the enabled holder's set. `holdsPlatformPermissionSet` for that name: false → the enabled holder's platform verdict.
+- The caller arm (`?callerPackage=P`) of `GET /meta/dataset/:name` and of the dataset query doors, single and batch, on both transports: two holders in P's declared closure, one disabled: 409 naming both → 200 with the enabled holder's dataset.
+- The connector pull of a job's mapping for a package caller (the package that declares the job): two holders in its closure, one disabled: 409 `mapping_name_refused` naming both → the enabled holder's mapping is pulled.
+- The flow credential channel's write (the flow save door's credential store), for a flow name an enabled and a disabled package hold: a save that sets, clears or removes a stored credential, refused 409 naming both → written, each row stamped (`flow_package`) with the enabled holder's package, the one the served flow is.
 
 Same status, the disabled package no longer named:
 
@@ -49,6 +52,7 @@ Served or not-found → refused:
 
 - An action caller whose closure holds the name only through the disabled holder, the enabled one outside it: the disabled holder's declaration → refused `outside-closure`, naming the enabled holder (the served → refused line above).
 - A permission-set caller with the disabled holder inside its closure and the enabled one outside: not-found (the catalog withheld the disabled set) → refused `outside-closure`, naming the enabled holder.
+- The dataset caller arm (`?callerPackage=P`), P's closure reaching the name only through a disabled package while an enabled package outside it holds it: 404 (the disabled package's withheld item) → 409 `outside-closure`, naming the enabled holder.
 
 409 → 404:
 
