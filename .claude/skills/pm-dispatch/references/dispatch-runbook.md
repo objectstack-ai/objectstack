@@ -127,7 +127,7 @@
 ## 卡线程(`mode:thread`)
 
 - 席位会话是项目线程(载 coordinator 通道工具)⇒ M 及以上、p1、`security` 卡一卡一线程。
-- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读技能与 `os-dev.md`,起步成本不值。
+- S 级机械卡留席内 `mode:subagent`:开线程要重新克隆、重读 `os-dev.md`,起步成本不值。
 - 披露纪律卡(私密细节不得离开席位会话)也留席内,认领写明;卡线程照计 `batch`。
 - 项目的 coordinator 跨席位统一调度卡线程;每席一个线程跑 PM 循环,卡线程即 dev。
 - 席位随时把候选卡交 coordinator,附优先级、派发令全文与建议 effort,⛔ 不等自己的槽位。
@@ -140,7 +140,7 @@
 - coordinator 开线程即读线程分支交席位(读不到则线程自报);⛔ 线程不认领、不写卡 assignee。
 - 席位写 assignee+`pm:dispatched`+带该 `Branch:` 的认领;线程核对最新认领指向本分支方开工。
 - 分支约定仍是 `claude/issue-<n>-<slug>`;线程只能推指定分支是实测平台例外,认领如实写。
-- worktree 照建;仓 `.claude/agents` 类型未加载(实测),线程照读 `os-dev.md`。
+- worktree 照建;线程读 `os-dev.md`、派发令、卡与全部评论,⛔ 不读 `SKILL.md`;references 按需读。
 - 交回:PR 与报告落地后给席位线程发一条消息(PR、head、报告要点);审核期线程不关,接 FAIL。
 
 ## 派发前置:前提核实,再把本地检出钉到 main
