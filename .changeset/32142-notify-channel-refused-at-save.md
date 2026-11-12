@@ -1,5 +1,6 @@
 ---
 '@objectstack/runtime': minor
+'@objectstack/spec': minor
 ---
 
 fix(runtime)!: the automation write doors refuse a `notify` node that names a channel no plugin registers, so `POST /api/v1/automation` answers 400 at the save instead of storing a flow whose deliveries on that channel fail at every run
@@ -8,7 +9,7 @@ Clause-②: no (narrowing) — the `/automation` definition write doors refuse a
 Metadata-protocol: narrowed
 Skills-docs: none — every `notify` node `skills/objectstack-automation` teaches names `inbox` or `email`, which the messaging service registers, and the refusal text carries the cure.
 
-<!-- adr-0087: not-required (no-migration-prescription) no key, value or spelling is retired and no stored row is touched: the refusal runs at the save doors only, a channel name has no mechanical rewrite (only its author knows which channel was meant), and the refusal names a did-you-mean and the registered channels -->
+<!-- adr-0087: registered notify-channel-unknown-refused -->
 
 **BREAKING** accept-set narrowing at the automation definition write doors: `POST /api/v1/automation`, `PUT /api/v1/automation/NAME` and the copy door `POST /api/v1/automation/NAME/clone`.
 
