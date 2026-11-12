@@ -71,6 +71,7 @@ import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, 
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
+import { NO_RECORD_DRAWERS_OPENING, RecordDrawerOpeningProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -807,6 +808,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isDialogOpen = !!recordFormParam;
+  // objectstack#32685 — the form opens over the record drawer the URL names,
+  // after it, as it does from a click: on a reload the drawer is drawn a
+  // moment after the form would be, and the layer opened last is on top.
+  const [recordDrawersOpening, setRecordDrawersOpening] = useState<RecordDrawersOpening>(NO_RECORD_DRAWERS_OPENING);
   // objectui#12291 — a seeded create's values, carried by the history entry
   // that opened the overlay (`handleEdit` below). The object the router keeps
   // for that entry, so its identity holds until the entry changes.
@@ -955,6 +960,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     ? allObjects.find((o: any) => o.name === formObjectParam)
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
+  const recordFormShown = useRecordFormOpensOverDrawers(isDialogOpen && !!formObjectDef, recordDrawersOpening);
 
   // objectstack#27138 — the record the overlay edits may be held by a pending
   // approval that locks it. The record's field projection leaves that lock out
@@ -1519,6 +1525,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentUserId={user?.id ?? null}
         currentOrgId={activeOrganization?.id ?? null}
       >
+      <RecordDrawerOpeningProvider value={setRecordDrawersOpening}>
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}
@@ -1710,7 +1717,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 title: editingRecord
                   ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
-                open: isDialogOpen,
+                open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
                 // objectui#6514 — the same declared-key gate `RecordFormPage`
                 // runs, through the same helper. This read `f.visible`, a key
@@ -1757,6 +1764,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             />
           )}
       </ConsoleLayout>
+      </RecordDrawerOpeningProvider>
       </FilterScopeProvider>
     </ExpressionProvider>
   );

@@ -46,10 +46,13 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
 } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -171,6 +174,69 @@ export interface RecordDrawerUpcoming {
  * it to warm those records' related counts while the reader looks at this one.
  */
 export const RecordDrawerUpcomingContext = createContext<readonly RecordDrawerUpcoming[]>([]);
+
+/**
+ * The drawers that name a record but are not drawn yet (objectstack#32685),
+ * one token per {@link RecordStackDrawer}. The console's record form
+ * (`?form=`) is a task over the record drawer: opened from the drawer, it is
+ * the later layer, painted above the sheet and first to answer `Esc`. Both
+ * are body portals at one z-index, so the layer opened LAST is the top one.
+ * A URL that names both — a reload, a shared link — mounts the form at once
+ * while the drawer opens a moment later, and the drawer lands on top. The
+ * host of the form holds it shut while this set is not empty, so the form
+ * opens after the drawer it was opened over, as it does from a click.
+ */
+export type RecordDrawersOpening = ReadonlySet<symbol>;
+
+const RecordDrawerOpeningContext = createContext<Dispatch<SetStateAction<RecordDrawersOpening>> | null>(null);
+
+/** Publishes the setter of a {@link RecordDrawersOpening} set to the drawers below. */
+export const RecordDrawerOpeningProvider = RecordDrawerOpeningContext.Provider;
+
+/** No drawer is opening. */
+export const NO_RECORD_DRAWERS_OPENING: RecordDrawersOpening = new Set<symbol>();
+
+/**
+ * Whether the record form the URL opens may open now. It waits one commit
+ * after it is asked for — that commit's drawers report from their layout
+ * effects, which run before this host's — then opens while no drawer is
+ * opening. Once open it stays open: a drawer that starts opening under an open
+ * form never closes it. Hand `requested` true only while the form can be
+ * drawn, and the result to the form's `open`.
+ */
+export function useRecordFormOpensOverDrawers(requested: boolean, opening: RecordDrawersOpening): boolean {
+  const [armed, setArmed] = useState(false);
+  const [shown, setShown] = useState(false);
+  const open = requested && armed && (shown || opening.size === 0);
+  useLayoutEffect(() => {
+    setArmed(requested);
+  }, [requested]);
+  useLayoutEffect(() => {
+    setShown(open);
+  }, [open]);
+  return open;
+}
+
+/**
+ * Reports a drawer that names a record and is not drawn yet, from the commit
+ * that mounts it, until the commit that draws it.
+ */
+function useReportDrawerOpening(opening: boolean) {
+  const setOpening = useContext(RecordDrawerOpeningContext);
+  const [token] = useState(() => Symbol('record-drawer'));
+  useLayoutEffect(() => {
+    if (!setOpening || !opening) return undefined;
+    setOpening((prev) => new Set(prev).add(token));
+    return () => {
+      setOpening((prev) => {
+        if (!prev.has(token)) return prev;
+        const next = new Set(prev);
+        next.delete(token);
+        return next;
+      });
+    };
+  }, [setOpening, token, opening]);
+}
 
 /**
  * Warms the related counts of the records a pane step would show
@@ -422,6 +488,7 @@ export function RecordStackDrawer({
   const { objectLabel, objectPluralLabel } = useObjectLabel();
   const { t, language } = useObjectTranslation();
   const { path, depth, current, push, popTo, stepper, upcoming } = stack;
+  useReportDrawerOpening(!!current && !open);
   const api = useMemo<RecordDrawerApi>(() => ({ open: push }), [push]);
   const pane = useMemo<RecordPaneApi | null>(
     () => (onOpenAsPage ? { openAsPage: () => onOpenAsPage(path) } : null),
