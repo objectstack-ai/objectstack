@@ -167,6 +167,19 @@ export function resolveDriverExec(driver: IDataDriver | null | undefined): Drive
  * (`knex.context.client.config.client`). Each read is individually guarded, so a
  * getter that throws yields `undefined` rather than escaping into a boot hook.
  *
+ * [#32154] …and a fourth, last: the dialect the knex client itself declares
+ * (`knex.client.dialect`). Knex accepts a Client CLASS as `client`, not only a
+ * name, and a driver that ships its own dialect passes one:
+ * `@objectstack/driver-sqlite-wasm`'s `Client_WasmSqlite` (`dialect:
+ * 'sqlite3'`), the driver `@objectstack/verify` boots. The three reads above
+ * find a function there, not a name, and answered `undefined`, so every
+ * table-presence probe on that driver took its raising fallback and the driver
+ * logged `DATABASE_ERROR … no such table: _objectstack_sequences` on a passing
+ * boot of every project that had never numbered a record. The dialect is not a
+ * guess: it is the name knex compiles that connection's SQL for. It is read
+ * only when no name was given, so a driver configured by name answers exactly
+ * as before.
+ *
  * `undefined` is a REAL answer — "this host did not say" — and its consumers
  * must treat it as one. ⛔ It is never defaulted to a dialect: guessing is what
  * `read-probe.ts`'s fence is written against.
@@ -184,6 +197,7 @@ export function resolveDriverClientName(driver: unknown): string | undefined {
     return (
         read(() => candidate?.config?.client) ??
         read(() => candidate?.knex?.client?.config?.client) ??
-        read(() => candidate?.knex?.context?.client?.config?.client)
+        read(() => candidate?.knex?.context?.client?.config?.client) ??
+        read(() => candidate?.knex?.client?.dialect)
     );
 }
