@@ -259,11 +259,13 @@ cites as `ADR-0135 D6`. When the environment turns it on, `@better-auth/sso` mou
 proof-of-ownership challenge covering every domain a provider lists, and signs nobody in through a
 provider until that list is proven; editing the list clears the proof. Where the platform admits a
 new account, a provider creates an account only for an email address at a domain it has proven,
-compared exactly (a subdomain counts only when it is itself listed and verified), failing closed,
-and relaxed by no audience posture, invitation or JIT toggle (plugin-auth's rule at better-auth's
-`user.validateUserInfo` gate). Accounts that already exist are not re-checked. Together these stop
-an organization admin from registering a provider for a domain they do not control. It is off by
-default, because turning it on changes the register-then-login flow. The surface is
+compared exactly (a subdomain counts only when it is itself listed and verified, and a listed entry
+counts only for the host the provider proved), failing closed, and relaxed by no audience posture,
+invitation or JIT toggle (plugin-auth's rule at better-auth's `user.validateUserInfo` gate).
+Accounts that already exist are not re-checked. With the rule that a domain is claimed by one
+provider at most, an SSO provider creates a new account at a domain only when it is the one
+provider that claims that domain and has proven it. It is off by default, because turning it on
+changes the register-then-login flow. The surface is
 `packages/platform-objects/src/identity/sys-sso-provider.object.ts#request_domain_verification`,
 `#verify_domain` and `#domain_verified`.
 
