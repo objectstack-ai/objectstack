@@ -1,11 +1,11 @@
 ---
-'@objectstack/metadata-protocol': minor
+'@objectstack/metadata-protocol': patch
 ---
 
 fix(metadata-protocol)!: a pair address (`?package=<base>.custom`) reads the package it names, so its envelope and its `/layers` code layer are that package's, never the first registered holder's (ADR-0150 D5, #32501)
 
 Clause-②: yes (narrowing) — `GET /meta/:type/:name?package=<App>.custom` and its `/layers`, on both transports, when two enabled modules of the App hold the name, are refused `409 RESOURCE_CONFLICT` naming both modules where they served the first registered module's item; `/layers` at an App pair whose stored row two modules' items could be the code layer of is refused the same way where it reported the first registered shipper's body. The other moved answers keep their status and name the package the address reads in place of the first registered holder: the envelope (`_packageId`, `_packageVersion`, `_provenance`) of `?package=<base>.custom` and of a stored row read at an exact address, and the `/layers` code layer at a pair address. Three widen from 404 to 200: the pair of an enabled base and an App pair one of whose two module holders is disabled, when the disabled holder registered first, and a row of a package that ships nothing beside a disabled shipper.
-Metadata-protocol: narrowed
+Metadata-protocol: none
 Skills-docs: none — `skills/**` and `content/docs/**` teach no read at a customization pair address of a name two packages hold; the prescription ships in the refusal text and the before → after list below.
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export changes shape. The moved answers are reads of registered items and stored rows at an address, so there is nothing for a migration to rewrite and no tombstone. -->
