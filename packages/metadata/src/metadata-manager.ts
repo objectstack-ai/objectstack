@@ -415,6 +415,12 @@ interface ClusterMetadataRemoval {
   /** The package whose item the origin removed; absent for a removal by name. */
   packageId?: string;
   /**
+   * [ADR-0150 D4, #31698] The origin removed its registry entry only
+   * ({@link MetadataManager.unregisterInMemory}): no loader copy was deleted
+   * there, so a peer deletes none either.
+   */
+  registryOnly?: true;
+  /**
    * [ADR-0150 D3, #32560] The origin judged a removal naming no package of an
    * action name to take the environment's own item only: a peer deletes the
    * name's package-less slots from its in-memory copy, never a package's.
@@ -431,12 +437,33 @@ interface ClusterMetadataRemoval {
 function receivedRemovalOf(payload: ClusterMetadataChangedPayload): ClusterMetadataRemoval | undefined {
   const removal: unknown = payload.removal;
   if (removal === null || typeof removal !== 'object') return undefined;
-  const { packageId, packagelessOnly } = removal as { packageId?: unknown; packagelessOnly?: unknown };
+  const { packageId, registryOnly, packagelessOnly } = removal as { packageId?: unknown; registryOnly?: unknown; packagelessOnly?: unknown };
+  if (registryOnly !== undefined && registryOnly !== true) return undefined;
+  const only: { registryOnly?: true } = registryOnly === true ? { registryOnly: true } : {};
   // [#32560] Read wrongly, a package-less-only removal would delete by name
   // and take the package's item: one that is not `true` is dropped too.
-  if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly } : undefined;
-  if (packageId === undefined) return {};
-  return typeof packageId === 'string' ? { packageId } : undefined;
+  if (packagelessOnly !== undefined) return packagelessOnly === true && packageId === undefined ? { packagelessOnly, ...only } : undefined;
+  if (packageId !== undefined && typeof packageId !== 'string') return undefined;
+  return {
+    ...(packageId !== undefined ? { packageId } : {}),
+    ...only,
+  };
+}
+
+/**
+ * [ADR-0150 D4, #31698] {@link MetadataManager.unregisterInMemory}'s options.
+ *
+ * `packageId` names the slot of a type stored per `(package, name)`: a
+ * package's own slot, or `null` for the name's package-less slot. Omitted,
+ * every slot of the name goes, refused (`PackageScopedNameRefusedError`)
+ * when two or more packages hold it, as {@link MetadataManager.unregister}
+ * refuses. A type outside that set has one entry per name, and the option
+ * changes nothing for it.
+ */
+export interface MetadataInMemoryRemovalOptions {
+  packageId?: string | null;
+  /** `false` announces nothing to `subscribe` watchers or cluster peers. */
+  notify?: boolean;
 }
 
 /**
@@ -1204,6 +1231,45 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     this.writeRegistryEntry(type, name, data);
     this.invalidateListCache(type);
+  }
+
+  /**
+   * [ADR-0150 D4, #31698] The removal half of {@link registerInMemory}: drop
+   * the in-memory registry entry of `(type, name)`, or one slot of it
+   * ({@link MetadataInMemoryRemovalOptions}), and nothing else. ⛔ No loader
+   * is asked to delete: a caller that registered a copy of a stored row
+   * removes its copy, and the row stays.
+   *
+   * {@link unregister} is the removal of the ITEM: it deletes from every
+   * writable loader first, so a caller that only wants its in-memory copy
+   * gone, while the stored row lives on, deletes that row through it.
+   *
+   * Announced unless `notify: false`: the watcher `deleted` event, and a
+   * cluster removal marked registry-only, so each peer drops the same slot
+   * and deletes no loader copy of its own.
+   *
+   * @throws {PackageScopedNameRefusedError} no `packageId` given, and two or
+   *   more packages hold the name.
+   */
+  unregisterInMemory(type: string, name: string, options?: MetadataInMemoryRemovalOptions): void {
+    type = canonicalMetadataServiceType(type);
+    const store = this.registry.get(type);
+    const slot = options?.packageId;
+    const keys = slot === null && PACKAGE_SLOTTED_STORE_TYPES.has(type)
+      ? storeKeysNamed(store, type, name).filter((key) => slotPackageOf(key) === undefined)
+      : storeRemovalKeys(store, type, name, slot).keys;
+    if (keys.length === 0) return;
+    this.deleteRegistryEntries(type, name, keys);
+    this.invalidateListCache(type);
+    if (options?.notify === false) return;
+    this.notifyWatchers(type, {
+      type: 'deleted',
+      metadataType: type,
+      name,
+      path: '',
+      data: undefined,
+      timestamp: new Date().toISOString(),
+    }, { ...(typeof slot === 'string' && PACKAGE_SLOTTED_STORE_TYPES.has(type) ? { packageId: slot } : {}), registryOnly: true });
   }
 
   /**
@@ -4220,10 +4286,24 @@ export class MetadataManager implements IMetadataService {
         // node keeps serving what the origin removed. Started here, so an
         // in-memory delete that runs no `await` (`MemoryLoader`) has landed
         // before the invalidation below.
+        //
+        // [ADR-0150 D4, #31698] …and a removal naming a package drops that
+        // package's registry slot only. Another package's slot of the name
+        // stays: it may hold an item no loader can restore
+        // (`registerInMemory`), and the origin did not remove it. A removal
+        // the origin made in its registry alone deletes no loader copy here.
         const removal = receivedRemovalOf(p);
-        if (removal && p.event.name) void this.removeNodeLocalCopies(p.type, p.event.name, removal);
+        if (removal && p.event.name && !removal.registryOnly) {
+          void this.removeNodeLocalCopies(p.type, p.event.name, removal);
+        }
         try {
-          this.invalidateForForeignWrite(p.type, p.event.name);
+          if (removal?.packageId !== undefined && p.event.name && PACKAGE_SLOTTED_STORE_TYPES.has(p.type)) {
+            const store = this.registry.get(p.type);
+            this.deleteRegistryEntries(p.type, p.event.name, storeRemovalKeys(store, p.type, p.event.name, removal.packageId).keys);
+            this.invalidateListCache(p.type);
+          } else {
+            this.invalidateForForeignWrite(p.type, p.event.name);
+          }
         } catch (err) {
           this.logger.error('Cluster remote invalidation failed', undefined, {
             type: p.type,
