@@ -255,9 +255,9 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
       `enregistrements avec une portée de lecture ou d’écriture, ou supprimez la restriction du champ.`,
     'pt-BR': (p) =>
       `No conjunto de permissões "${p.permissionSet}", a restrição do campo "${p.field}" não tem efeito: a ` +
-      `permissão "${bypassLabel('pt-BR', p)}" do conjunto em "${p.object}" anula as restrições de campo para todos ` +
-      `os seus titulares. Remova "${bypassLabel('pt-BR', p)}" e conceda o acesso aos registros com um escopo de ` +
-      `leitura ou gravação, ou exclua a restrição do campo.`,
+      `permissão "${bypassLabel('pt-BR', p)}" do conjunto em "${p.object}" anula as restrições de campo para ` +
+      `todos os seus titulares. Remova "${bypassLabel('pt-BR', p)}" e conceda o acesso aos registros com um ` +
+      `escopo de leitura ou gravação, ou exclua a restrição do campo.`,
     ru: (p) =>
       `В наборе разрешений «${p.permissionSet}» ограничение поля «${p.field}» не действует: право ` +
       `«${bypassLabel('ru', p)}» этого набора для «${p.object}» отменяет ограничения полей для всех его ` +
