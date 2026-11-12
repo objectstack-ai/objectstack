@@ -359,21 +359,26 @@ describe('DatabaseLoader', () => {
       expect(await loader.exists('agent', 'helper')).toBe(false);
     });
 
-    it('keeps a row per package, its own unscoped reads answer the one saved last, and a delete naming no package of a name two packages hold is refused (#32246)', async () => {
+    it('keeps a row per package, its plural unscoped reads answer one per package, and a delete naming no package of a name two packages hold is refused (#32246, #32521)', async () => {
       await loader.save('agent', 'helper', { name: 'helper', label: 'alpha', _packageId: 'com.acme.alpha' });
       await loader.save('agent', 'helper', { name: 'helper', label: 'beta', _packageId: 'com.acme.beta' });
       expect((await loader.loadSlots('agent', 'helper')).map((slot) => [slot.packageId, slot.data.label])).toEqual([
         ['com.acme.alpha', 'alpha'],
         ['com.acme.beta', 'beta'],
       ]);
-      // One item per name, the one saved last, as when the loader kept one row
-      // (`load` asks for the highest version; the endpoint pins read it on a
-      // driver that orders).
+      // `load` and `list` answer one per name, the one saved last, as when the
+      // loader kept one row (`load` asks for the highest version; the endpoint
+      // pins read it on a driver that orders). [#32521] `loadMany` and
+      // `loadManyKeyed` answer one per `(package, name)`, each slot's row saved
+      // last — BEFORE: one per name, `beta`, then `alpha again`.
       expect(await loader.list('agent')).toEqual(['helper']);
-      expect((await loader.loadMany('agent')).map((item: any) => item.label)).toEqual(['beta']);
-      expect((await loader.loadManyKeyed('agent')).map((entry) => [entry.name, entry.data.label])).toEqual([['helper', 'beta']]);
+      expect((await loader.loadMany('agent')).map((item: any) => item.label)).toEqual(['alpha', 'beta']);
+      expect((await loader.loadManyKeyed('agent')).map((entry) => [entry.name, entry.packageId, entry.data.label])).toEqual([
+        ['helper', 'com.acme.alpha', 'alpha'],
+        ['helper', 'com.acme.beta', 'beta'],
+      ]);
       await loader.save('agent', 'helper', { name: 'helper', label: 'alpha again', _packageId: 'com.acme.alpha' });
-      expect((await loader.loadManyKeyed('agent')).map((entry) => entry.data.label)).toEqual(['alpha again']);
+      expect((await loader.loadManyKeyed('agent')).map((entry) => entry.data.label)).toEqual(['alpha again', 'beta']);
 
       await expect(loader.delete('agent', 'helper')).rejects.toMatchObject({ status: 409 });
       expect(await loader.loadSlots('agent', 'helper')).toHaveLength(2);
@@ -2077,7 +2082,8 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       const before = await stored(type);
       const m = manager();
       const items = (await m.loadMany(type)) as Array<{ name: string; label: string; _packageId?: string }>;
-      expect(items.map((item) => [item._packageId, item.label])).toEqual([[BETA, BETA]]);
+      // [#32521] Both holders, each stamped with its own row's package (BEFORE #32521: BETA's alone).
+      expect(items.map((item) => [item._packageId, item.label])).toEqual([[ALPHA, ALPHA], [BETA, BETA]]);
       for (const item of items) await m.register(type, item.name, item, { notify: false });
       expect(await stored(type)).toEqual(before);
       expect((await stored(type)).filter(([packageId]) => packageId === null)).toEqual([]);
@@ -2091,8 +2097,10 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       const before = await stored(type);
       for (const host of [undefined, HOST]) {
         const m = await bootPass(host);
-        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual([`${BETA}\u0000helper`]);
-        expect(await read(m, type, ALPHA)).toEqual([null, ALPHA]);
+        // [#32521] Every holder is primed (BEFORE #32521: BETA's slot alone, and ALPHA's read
+        // answered its unstamped row through the loaders).
+        expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual([`${ALPHA}\u0000helper`, `${BETA}\u0000helper`]);
+        expect(await read(m, type, ALPHA)).toEqual([ALPHA, ALPHA]);
         expect(await read(m, type, BETA)).toEqual([BETA, BETA]);
         expect(await read(m, type, HOST)).toBeUndefined();
       }

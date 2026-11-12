@@ -87,12 +87,12 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
-  bundleEntryKey,
   keyIdentityOf,
   readStoreEntry,
   recordStoreWrite,
   slotPackageOf,
   slotStoreOf,
+  slottedEntryKey,
   storedItemPackageId as indexedItemPackageId,
   storedNameOf,
   storeKeysNamed,
@@ -3355,7 +3355,12 @@ export class MetadataManager implements IMetadataService {
     const results: T[] = [];
     // [#31699 R3-B] A bundled type stored per `(package, name)` keeps one item
     // per `(package, name, member)` (`bundleEntryKey`), never one per name.
-    const bundleEntries = new Set<string>();
+    // [#32521; epic #31527 red line 2] Every type stored per `(package, name)`
+    // keeps one item per store slot (`slottedEntryKey`: its package and slot
+    // identity), FROM one per `body.name` for an unbundled one: two packages'
+    // items of a name are both handed on, so the boot priming pass registers
+    // every holder and a bare read of the name is refused, as without it.
+    const slotEntries = new Set<string>();
 
     for (const loader of this.loaders.values()) {
         try {
@@ -3379,10 +3384,10 @@ export class MetadataManager implements IMetadataService {
             for (const item of items) {
                 const itemAny = item as any;
                 if (itemAny && typeof itemAny.name === 'string') {
-                    const bundleKey = bundleEntryKey(type, itemAny.name, item);
-                    if (bundleKey !== undefined) {
-                        if (bundleEntries.has(bundleKey)) continue;
-                        bundleEntries.add(bundleKey);
+                    const slotKey = slottedEntryKey(type, itemAny.name, item);
+                    if (slotKey !== undefined) {
+                        if (slotEntries.has(slotKey)) continue;
+                        slotEntries.add(slotKey);
                         results.push(item);
                         if (item !== null && typeof item === 'object') this.loadedFrom.set(item, loader);
                         continue;
@@ -3460,7 +3465,9 @@ export class MetadataManager implements IMetadataService {
     options?: MetadataLoadOptions
   ): Promise<MetadataKeyedItem<T>[]> {
     // Keyed by name — or, [#31699 R3-B] for a bundled type stored per
-    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`).
+    // `(package, name)`, by `(package, name, member)` (`bundleEntryKey`), and
+    // [#32521] for every other type stored per `(package, name)` by its store
+    // slot (`slottedEntryKey`): every holder of a name is an entry.
     const items = new Map<string, MetadataKeyedItem<T>>();
 
     for (const loader of this.loaders.values()) {
@@ -3500,7 +3507,7 @@ export class MetadataManager implements IMetadataService {
       const keyed = await loader.loadManyKeyed<T>(type, options);
       for (const entry of keyed) {
         if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
-        const key = bundleEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
+        const key = slottedEntryKey(type, entry.name, entry.data, entry.packageId) ?? entry.name;
         if (items.has(key)) continue;
         items.set(key, { name: entry.name, data: entry.data });
       }
@@ -3511,7 +3518,7 @@ export class MetadataManager implements IMetadataService {
       if (typeof name !== 'string' || name === '' || items.has(name)) continue;
       const result = await loader.load(type, name, options);
       if (result?.data == null) continue;
-      const key = bundleEntryKey(type, name, result.data) ?? name;
+      const key = slottedEntryKey(type, name, result.data) ?? name;
       if (items.has(key)) continue;
       items.set(key, { name, data: result.data as T });
     }

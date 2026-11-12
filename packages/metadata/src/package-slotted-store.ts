@@ -302,6 +302,21 @@ export function bundleEntryKey(type: string, name: string, data: unknown, packag
   return JSON.stringify([packageId ?? storedItemPackageId(data) ?? null, name, storedBundleMemberOf(type, data) ?? null]);
 }
 
+/**
+ * [#32521; epic #31527 red line 2] The identity a plural read over loaders
+ * (`MetadataManager.loadMany`, `loadManyKeyed`) keeps one entry per, for
+ * every type stored per `(package, name)`: a bundled type's `(package, name,
+ * member)` ({@link bundleEntryKey}), every other one's store slot
+ * ({@link storeSlotKey}: the package — `packageId`, else the one the item
+ * carries — and the slot identity). So two packages' items of one name are
+ * two entries, and the boot priming pass registers every holder. `undefined`
+ * for every other type, whose plural reads keep one entry per name.
+ */
+export function slottedEntryKey(type: string, name: string, data: unknown, packageId?: string): string | undefined {
+  if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return undefined;
+  return bundleEntryKey(type, name, data, packageId) ?? storeSlotKey(type, name, packageId ?? storedItemPackageId(data), data);
+}
+
 /** Every key of `store` addressing `name`: its bare slot and each package's slot. */
 export function storeKeysNamed(store: ReadonlyMap<string, unknown> | undefined, type: string, name: string): string[] {
   if (!store) return [];

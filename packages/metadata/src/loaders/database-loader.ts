@@ -1205,23 +1205,28 @@ export class DatabaseLoader implements MetadataLoader {
 
   /**
    * [#32246] {@link readTypeRows} as the unscoped reads answer it: for a
-   * by-package type, one row per name — the one saved last (its highest
-   * version), in the order names first appear — as when the loader kept one
-   * row per name. Every other type: every row.
+   * by-package type, one row per `(package, name)` ({@link unscopedRowKey}) —
+   * the one saved last of that slot (its highest version), in the order the
+   * slots first appear. Every other type: every row.
    *
    * [#31699 R3-B] A bundled by-package type keeps one row per
-   * `(package, name, member)` ({@link unscopedRowKey}): one per name would
-   * drop every other member of a bundle, and every other package's bundle.
+   * `(package, name, member)`: one per name would drop every other member of
+   * a bundle, and every other package's bundle.
+   *
+   * [#32521; epic #31527 red line 2] Every other by-package type keeps one
+   * row per `(package, name)`, FROM one per name: one per name dropped every
+   * package's row but the one saved last, so the boot priming pass registered
+   * that package alone and a bare read of a name two packages hold answered
+   * its body instead of refusing (`409 ambiguous-in-environment`).
    */
   private async unscopedTypeRows(type: string): Promise<StoredTypeRow[]> {
     const rows = await this.readTypeRows(type);
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return rows;
-    const bundled = isBundledStoreType(type);
     const latest = new Map<string, StoredTypeRow>();
     const unnamed: StoredTypeRow[] = [];
     for (const row of rows) {
       if (row.name === null) { unnamed.push(row); continue; }
-      const key = bundled ? unscopedRowKey(row.name, row.packageId, row.member ?? null) : row.name;
+      const key = unscopedRowKey(row.name, row.packageId, row.member ?? null);
       const held = latest.get(key);
       if (!held || (row.version ?? 0) >= (held.version ?? 0)) latest.set(key, row);
     }
@@ -1905,7 +1910,7 @@ interface StoredTypeRow {
   legacyRowId?: string;
 }
 
-/** [#31699 R3-B] The unscoped read's key of a bundled type's row: its package, name and member. */
+/** [#31699 R3-B, #32521] The unscoped read's key of a by-package type's row: its package, name and member (`null` for an unbundled type). */
 function unscopedRowKey(name: string, packageId: string | undefined, member: string | null): string {
   return JSON.stringify([packageId ?? null, name, member]);
 }
