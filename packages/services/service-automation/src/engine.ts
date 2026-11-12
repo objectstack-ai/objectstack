@@ -2839,7 +2839,10 @@ export class AutomationEngine implements IAutomationService {
      * armed; a bare name two slots hold is refused at every bare entry point,
      * naming both, and never picks one.
      */
-    private readonly flowSlots = new FlowSlotTable((name) => this.flowHolder(name)?.status === 'refused');
+    // [#32183, R4-G] `heldByMany` reads every holder, a disabled package's
+    // included: a disable keeps that package's slot armed, so it never folds
+    // a shared name back to one bare entry (`main`'s answer).
+    private readonly flowSlots = new FlowSlotTable((name) => this.durableFlowHolder(name)?.status === 'refused');
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
     /**
@@ -5037,7 +5040,9 @@ export class AutomationEngine implements IAutomationService {
      */
     private sharedFlowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal {
         // [M1] Every holder the registry names, a holder whose body was refused included.
-        const held = this.flowHolder(name);
+        // [#32183, R4-G] A disabled holder too: its slot stays armed, so the
+        // refusal names it, as on `main`.
+        const held = this.durableFlowHolder(name);
         const candidates = held?.status === 'refused' ? held.candidates : this.flowSlots.slotsOf(name).map((slot) =>
             slot.packageId === null ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: slot.packageId },
         );
@@ -5067,7 +5072,10 @@ export class AutomationEngine implements IAutomationService {
             const refusal = this.flowNameRefusal(name, callerPackageId);
             return refusal ? { refusal } : { key: name };
         }
-        const resolution = this.flowNameResolver?.(name, callerPackageId);
+        // [#32183, R4-G] A name two slots hold resolves over every holder, a
+        // disabled package's included: a disable keeps its slot armed and
+        // moves no caller's answer (`main`'s). The served judgment is #32670's.
+        const resolution = this.flowNameResolver?.(name, callerPackageId, { includeDisabledPackages: true });
         if (resolution?.status === 'refused') return { refusal: resolution };
         if (resolution?.status === 'resolved' && resolution.holder.kind === 'package') {
             const key = this.flowSlots.keyOf(name, resolution.holder.packageId);
