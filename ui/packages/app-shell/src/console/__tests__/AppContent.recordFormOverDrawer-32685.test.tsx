@@ -84,11 +84,13 @@ vi.mock('../../views/RecordFormPage', () => ({
 // The list's record drawer, as `ObjectView` mounts it
 // (`objectViewRecordOverlay.tsx`): the real stack and drawer over the list,
 // its root the row `?recordId=` names, opened from an effect once the list
-// has mounted (`useObjectViewRecordNavigation`).
+// has mounted (`useObjectViewRecordNavigation`). On a phone no pane is
+// mounted, only the list (`ObjectView.tsx`, objectstack#27058).
 vi.mock('../../views/ObjectView', async () => {
   const { useMemo, useState, useEffect: useMountEffect } = await import('react');
   const { useSearchParams } = await import('react-router-dom');
   const { RecordStackDrawer, useRecordDrawerStack } = await import('../../views/recordDrawerStack');
+  const { usePhoneViewport } = await import('../../hooks/usePhoneViewport');
   return {
     ObjectView: ({ objects }: { objects: ReadonlyArray<unknown> }) => {
       if (probe.suspend && !probe.suspend.done) throw probe.suspend.promise;
@@ -102,6 +104,8 @@ vi.mock('../../views/ObjectView', async () => {
         return () => clearTimeout(timer);
       }, [recordId]);
       const stack = useRecordDrawerStack({ root });
+      const phone = usePhoneViewport();
+      if (phone) return <div data-testid="list" />;
       return (
         <RecordStackDrawer
           stack={stack}
@@ -266,6 +270,19 @@ describe('#32685 — a related-record form the URL opens over a record drawer is
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
     await waitFor(() => expect(probe.events).toContain('form:false'));
     expect(probe.events).not.toContain('drawer:close');
+  });
+
+  it('on a phone the same URL draws no drawer, and the form is not held for one', async () => {
+    const width = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: 390 });
+    try {
+      mountAt(`/apps/crm/crm_account?recordId=a1&${RELATED_NEW}`);
+      await waitFor(() => expect(document.querySelector('[data-testid="modal-form-footer"]')).not.toBeNull(), { timeout: 5000 });
+      expect(screen.getByTestId('list')).toBeInTheDocument();
+      expect(screen.queryByTestId('record-body')).toBeNull();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width });
+    }
   });
 
   it('CONTROL: the form a URL opens with no drawer opens at once', async () => {
