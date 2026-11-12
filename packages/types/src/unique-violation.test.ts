@@ -255,3 +255,55 @@ describe('uniqueViolationColumn — gated on the predicate', () => {
         expect(uniqueViolationColumn(mysql)).toBeUndefined();
     });
 });
+
+describe('uniqueViolationColumn — the implied organization key part', () => {
+    /**
+     * A field declared `unique: 'organization'` (or `unique: true`) is keyed
+     * `(organization_id, FIELD)`. The organization part is the scope the
+     * platform stamps, not a value the writer typed, so the answer is FIELD —
+     * on both dialects that name columns. The SQLite sentence is the one the
+     * defect was measured on, verbatim.
+     */
+    it("SQLite's composite names the authored column", () => {
+        const err = Object.assign(
+            new Error('UNIQUE constraint failed: k7en_claim_line.organization_id, k7en_claim_line.invoice_no'),
+            { code: 'SQLITE_CONSTRAINT_UNIQUE' },
+        );
+        expect(uniqueViolationColumn(err)).toBe('invoice_no');
+    });
+
+    it("Postgres' DETAIL on `error.detail` names the authored column", () => {
+        const err = Object.assign(
+            new Error('duplicate key value violates unique constraint "uniq_k7en_claim_line_invoice_no"'),
+            { code: '23505', detail: 'Key (organization_id, invoice_no)=(org_a, INV-0001) already exists.' },
+        );
+        expect(uniqueViolationColumn(err)).toBe('invoice_no');
+    });
+
+    it('the position of the organization part does not matter', () => {
+        expect(uniqueViolationColumn('UNIQUE constraint failed: t.invoice_no, t.organization_id')).toBe('invoice_no');
+    });
+
+    it('a key whose only part is the organization still names that column', () => {
+        expect(uniqueViolationColumn('UNIQUE constraint failed: t.organization_id')).toBe('organization_id');
+    });
+
+    // Control: two AUTHORED columns stay a composite — a wrong field is worse
+    // than none — whether or not the organization part rides along.
+    it.each([
+        ['SQLite, organization + two authored', { message: 'UNIQUE constraint failed: t.organization_id, t.department, t.code' }],
+        ['SQLite, two authored', { message: 'UNIQUE constraint failed: t.department, t.code' }],
+        [
+            'Postgres, organization + two authored',
+            {
+                message: 'duplicate key value violates unique constraint "uniq_t_department_code"',
+                code: '23505',
+                detail: 'Key (organization_id, department, code)=(org_a, d, c) already exists.',
+            },
+        ],
+        ['a scope column other than organization_id', { message: 'UNIQUE constraint failed: t.workspace_id, t.invoice_no' }],
+    ])('names no column for %s', (_label, error) => {
+        expect(isUniqueViolationError(error)).toBe(true);
+        expect(uniqueViolationColumn(error)).toBeUndefined();
+    });
+});

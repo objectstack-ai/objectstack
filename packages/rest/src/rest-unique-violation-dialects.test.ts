@@ -290,6 +290,36 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
         unique: true,
         rest: { status: 409, code: 'UNIQUE_VIOLATION' },
     },
+    // An organization-scoped unique field (`unique: 'organization'`) is keyed
+    // `(organization_id, FIELD)`. The organization part is the implied scope,
+    // not a value anybody typed, so the field IS determinable: `email`.
+    {
+        dialect: 'postgres',
+        label: 'organization-scoped unique field — the implied organization part is set aside',
+        channel: 'message',
+        build: () =>
+            driverError(`duplicate key value violates unique constraint "${OFFENDING_INDEX}"`, {
+                code: '23505',
+                detail: `Key (organization_id, email)=(org_a, ${OFFENDING_VALUE}) already exists.`,
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        field: 'email',
+    },
+    // …and its control: two AUTHORED columns beside the organization part are
+    // still a composite, so still no `field`.
+    {
+        dialect: 'postgres',
+        label: 'organization part + two authored columns — still a composite, so no `field`',
+        channel: 'message',
+        build: () =>
+            driverError(`duplicate key value violates unique constraint "${OFFENDING_INDEX}"`, {
+                code: '23505',
+                detail: `Key (organization_id, department, email)=(org_a, sales, ${OFFENDING_VALUE}) already exists.`,
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+    },
     // Negative: Postgres NOT NULL (23502).
     {
         dialect: 'postgres',
@@ -351,6 +381,32 @@ const DIALECT_SAMPLES: readonly DialectSample[] = [
         channel: 'message',
         build: () =>
             driverError(`UNIQUE constraint failed: index '${OFFENDING_INDEX}'`, {
+                code: 'SQLITE_CONSTRAINT_UNIQUE',
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+    },
+    // The organization-scoped unique field as SQLite spells it — the sentence
+    // the defect was measured on, table renamed: the implied organization part
+    // is set aside, and the authored column is named.
+    {
+        dialect: 'sqlite',
+        label: 'organization-scoped unique field — the implied organization part is set aside',
+        channel: 'message',
+        build: () =>
+            driverError('UNIQUE constraint failed: sys_user.organization_id, sys_user.email', {
+                code: 'SQLITE_CONSTRAINT_UNIQUE',
+            }),
+        unique: true,
+        rest: { status: 409, code: 'UNIQUE_VIOLATION' },
+        field: 'email',
+    },
+    {
+        dialect: 'sqlite',
+        label: 'organization part + two authored columns — still a composite, so no `field`',
+        channel: 'message',
+        build: () =>
+            driverError('UNIQUE constraint failed: sys_user.organization_id, sys_user.department, sys_user.email', {
                 code: 'SQLITE_CONSTRAINT_UNIQUE',
             }),
         unique: true,
@@ -501,7 +557,9 @@ describe('#6250 — the 409 body echoes nothing the driver said', () => {
  *
  * `uniqueViolationColumn` answers `undefined` whenever the dialect named an
  * INDEX (MySQL always; SQLite's `index 'x'` form; Postgres' constraint-name
- * form), named a COMPOSITE key, or emitted prose it does not parse. Every one of
+ * form), named a COMPOSITE of more than one authored column (the implied
+ * `organization_id` part of an organization-scoped unique field is not one),
+ * or emitted prose it does not parse. Every one of
  * those must produce the unnamed sentence and **no `field` key at all** — a
  * wrong field name is worse than none, because it sends the user to correct an
  * input that was never the problem. That is why the negative half below asserts

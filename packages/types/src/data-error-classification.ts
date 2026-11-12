@@ -1074,7 +1074,10 @@ function structuredCodeAnswer(
     // and stays on `field`, which still names the column whenever the engine
     // resolved one through `uniqueViolationColumn` (`field` and `fieldLabel`
     // are read off the envelope, not re-derived — the envelope is the
-    // contract, and this module holds no schema to look a label up in).
+    // contract, and this module holds no schema to look a label up in). That
+    // includes an organization-scoped unique field, whose index is the
+    // composite `(organization_id, FIELD)`: the organization part is implied,
+    // so the envelope names FIELD and this sentence reads its label.
     // `developerMessage` is the engine's own sentence (`message`): it names the object and the column
     // and carries no value. The envelope's own `developerMessage` is
     // deliberately NOT relayed — it addresses the in-process caller of
@@ -1746,8 +1749,11 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     //
     // **When it cannot tell, it says nothing.** `uniqueViolationColumn` returns
     // `undefined` for an index name (MySQL's `for key 'idx_email_unique'`,
-    // SQLite's `index 'x'`), for a composite key, and for any dialect it does
-    // not parse — and then this branch emits NO `field` key at all. That
+    // SQLite's `index 'x'`), for a composite of more than one authored column,
+    // and for any dialect it does not parse — and then this branch emits NO
+    // `field` key at all. An organization-scoped unique field's composite
+    // (`organization_id` + the field) is not such a composite: the organization
+    // part is the implied scope, so it names the field. That
     // degradation is the contract, not a fallback: a wrong field name is worse
     // than none, because it sends the user to correct an input that was never
     // the problem.

@@ -60,9 +60,13 @@ import { resolveFieldLabel, type ValidationMessageContext } from './validation/r
  *  - **`field`** — the conflicting column, and ONLY when
  *    {@link uniqueViolationColumn} determinably named one. An index name is
  *    never reported as a column (MySQL's `for key 'idx_email_unique'`,
- *    Postgres' constraint name, a composite key): that function's contract is
- *    that a wrong field name is worse than none, and this envelope does not
- *    widen it.
+ *    Postgres' constraint name, a composite of authored columns): that
+ *    function's contract is that a wrong field name is worse than none, and
+ *    this envelope does not widen it. An organization-scoped unique field's
+ *    key `(organization_id, FIELD)` does name FIELD — the organization part is
+ *    the implied scope, not a value the writer typed — so the refusal of a
+ *    duplicate invoice number reads "A record with this Invoice Number
+ *    already exists" over HTTP, through `fieldLabel` below.
  *  - **`developerMessage`** — the remedy half, split off exactly as the
  *    engine's `DELETE_RESTRICTED` refusal splits it: `message` is the sentence
  *    a user-facing surface renders, `developerMessage` is the one addressed to

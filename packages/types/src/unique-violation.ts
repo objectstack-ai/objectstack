@@ -296,18 +296,39 @@ function bareIdentifier(raw: string): string {
 }
 
 /**
+ * The organization key part a `unique: 'organization'` (or `unique: true`)
+ * declaration adds in front of the authored column (ADR-0120 D3, keyed plain
+ * since ADR-0131 D1): `(organization_id, invoice_no)`. It is the SCOPE of the
+ * uniqueness, not a value anybody typed — the platform stamps it from the
+ * writer's organization — so it is never the answer to "which column?".
+ */
+const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
+
+/**
  * Reduce one dialect's list of constraint targets to THE conflicting column,
  * or `undefined` when there is not exactly one that is determinably a column.
  *
- * A composite key resolves to `undefined` on purpose: there is no single
- * offending column, and picking the first is the same class of wrong answer as
- * returning an index name — it points a form at `tenant_id` when what the user
- * typed twice was `email`.
+ * A composite of AUTHORED columns resolves to `undefined` on purpose: there is
+ * no single offending column, and picking the first is the same class of wrong
+ * answer as returning an index name — it points a form at `tenant_id` when what
+ * the user typed twice was `email`.
+ *
+ * The implied organization key part is not an authored column, so it is set
+ * aside before counting: an organization-scoped unique field's composite
+ * `(organization_id, invoice_no)` names `invoice_no`, the one value the user
+ * entered — the field the declaration was written on. What is left must still
+ * be exactly one column: `(organization_id, department, code)` keeps naming
+ * none, and a key whose ONLY part is `organization_id` ("one row per
+ * organization") still names that column, since then it is the authored one.
+ * Only `organization_id` is set aside: an object whose `tenancy.tenantField`
+ * names another column keys on that column, which this text cannot tell from
+ * an authored one, so such a composite keeps naming none.
  */
 function soleColumn(targets: string): string | undefined {
     const names = targets.split(',').map(bareIdentifier);
-    if (names.length !== 1) return undefined;
-    const [name] = names;
+    const authored = names.length > 1 ? names.filter((n) => n !== IMPLIED_ORGANIZATION_KEY_PART) : names;
+    if (authored.length !== 1) return undefined;
+    const [name] = authored;
     return PLAIN_IDENTIFIER.test(name) ? name : undefined;
 }
 
@@ -390,6 +411,15 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  * A **composite** key is `undefined` for the same reason: `Key (tenant_id,
  * email)=(…)` has no single offending column, and naming the first is the same
  * class of wrong answer.
+ *
+ * Except the composite an organization-scoped unique FIELD builds: its key is
+ * the implied `organization_id` part plus the one authored column, so
+ * `UNIQUE constraint failed: t.organization_id, t.invoice_no` (SQLite) and
+ * `Key (organization_id, invoice_no)=(…)` (Postgres) both name `invoice_no`.
+ * The organization part is the scope the platform stamped, never what the user
+ * typed, so naming the other part is not a guess — it is the field the
+ * declaration sits on. More than one authored column left over is still a
+ * composite and still `undefined`.
  *
  * ## What it reads
  *
