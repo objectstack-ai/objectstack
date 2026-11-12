@@ -4402,6 +4402,14 @@ export class RestServer {
         // key, byte-identical to a read that never asked for one, so the answer
         // says nothing about whether a draft exists.
         const layeredCaller = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
+        // [ruling record 6787890900] An object the caller may not read is the
+        // layered chain's absence, answered BEFORE the store is read, so no
+        // store answer about it (a disabled package's refusal among them)
+        // reaches the caller.
+        if (maskPosture.kind === 'hidden') {
+            RestServer.sendMetaReadRefusal(res, { reason: 'absent' });
+            return;
+        }
         const layeredOptions = { withDraft: mayReadPendingDrafts(layeredCaller) };
         const layered = await p.getMetaItemLayered(layeredRequest, layeredOptions);
         // [#20156 · #20478] THE per-caller gate on every layer, then the mask —
@@ -5658,6 +5666,7 @@ export class RestServer {
             get objectQLProvider() { return readObjectQLProvider(); },
             resolveRequestEnvironmentId: (...a) => this.resolveRequestEnvironmentId(...a),
             resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
         };
         registerMetaObjectStateRoute.call(objectStateHost, scope);
 

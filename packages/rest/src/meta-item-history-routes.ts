@@ -960,6 +960,14 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     }
                     throw maskError;
                 }
+                // [ruling record 6787890900] An object the caller may not read
+                // is this door's answer for a name with nothing behind it,
+                // before any fetch. (An authoring door: the D4 authors it is
+                // open to are never answered `hidden`.)
+                if (diffMaskPosture.kind === 'hidden') {
+                    sendMetaItemAbsent(res);
+                    return;
+                }
                 const diffGated = this.gatesPerCaller(diffMetaType);
                 let diffCurrent: any;
                 try {
@@ -1284,7 +1292,11 @@ export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost,
                     // `isPackageDisabled`: the predicate the protocol asks of
                     // that same field. An object is the layered read's own
                     // refusal below; `package` is never hidden.
-                    let withheld = false;
+                    // [ruling record 6787890900] An object the caller may not
+                    // read is withheld too: it takes this door's own path for a
+                    // name with nothing published behind it, so its answer is
+                    // that name's, byte for byte, and no store is read for it.
+                    let withheld = publishedMaskPosture.kind === 'hidden';
                     if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
                         && typeof publishedProtocol?.getMetaItem === 'function') {
                         // [#30218] The REQUEST's environment's engine,
