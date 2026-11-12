@@ -17,7 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@objectstack/metadata';
-import { MetadataManager } from '@objectstack/metadata';
+import { MetadataManager, DatabaseLoader } from '@objectstack/metadata';
 import { assertEngineFindOnePredicate } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
 
@@ -645,34 +645,52 @@ describe('[ADR-0106 D6] a run whose action definition read fails is refused 503 
  * [#32521; epic #31527 red lines 2 and 3] With no protocol merged listing the
  * bare door reads its declarations from the metadata service's own plural read
  * (`collectActionDeclarations` over `loadMany('action')`). Driven here over a
- * real `MetadataManager` whose loader hands on rows the way `DatabaseLoader`'s
- * keyed read does: each row with its package beside an unstamped body.
+ * real `MetadataManager` over a real `DatabaseLoader` over `sys_metadata` rows,
+ * each bound to its package by the `package_id` column alone.
  */
 describe('[#32521] the bare door over the metadata service\'s own plural read, with no merged listing', () => {
-    const SAVED_LAST = HR;
-    /** A read-only loader whose keyed plural read of `action` hands on `rows`. */
-    const rowsLoader = (rows: Array<{ name: string; data: any; packageId?: string }>) => ({
-        contract: { name: 'rows', protocol: 'memory:', capabilities: { read: true, write: false, watch: false, list: true } },
-        load: async () => ({ data: null }),
-        loadMany: async () => rows.map((row) => row.data),
-        loadManyKeyed: async (type: string) => (type === 'action' ? rows : []),
-        exists: async () => false,
-        stat: async () => null,
-        list: async () => [],
-    });
-    /** `send_digest`'s row held for `pkg` (none: a package-less row), its body unstamped. */
-    const row = (pkg: string | undefined) => {
-        const { _packageId: _stamp, ...data } = act('send_digest', pkg) as Record<string, unknown>;
-        return { name: 'send_digest', data, ...(pkg ? { packageId: pkg } : {}) };
+    /**
+     * A `sys_metadata`-shaped READ-ONLY engine over a fixed row array:
+     * `DatabaseLoader`'s read paths call `find` / `findOne` / `count` and
+     * nothing else. The WHERE matcher refuses what it does not implement.
+     */
+    const readEngine = (rows: Array<Record<string, unknown>>) => {
+        const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
+            Object.entries(w).every(([k, v]) => {
+                if (k.startsWith('$')) throw new Error(`readEngine: unsupported WHERE combinator '${k}'`);
+                if (v !== null && typeof v === 'object') throw new Error(`readEngine: unsupported WHERE operator on '${k}'`);
+                return r[k] === v;
+            });
+        return {
+            async find(_table: string, q: any) {
+                const hits = rows.filter((r) => matches(r, q?.where ?? {}));
+                return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
+            },
+            async findOne(table: string, q: any) {
+                assertEngineFindOnePredicate(table, q);
+                return rows.find((r) => matches(r, q?.where ?? {})) ?? null;
+            },
+            async count(_table: string, q: any) {
+                return rows.filter((r) => matches(r, q?.where ?? {})).length;
+            },
+        };
+    };
+    /** `send_digest`'s row held for `pkg` (none: a package-less row) at `version`, its body unstamped. */
+    const row = (pkg: string | undefined, version: number) => {
+        const { _packageId: _stamp, ...body } = act('send_digest', pkg) as Record<string, unknown>;
+        return {
+            id: `md_send_digest_${pkg ?? 'env'}`, type: 'action', name: 'send_digest', state: 'active', version,
+            source: 'database', package_id: pkg ?? null, metadata: JSON.stringify(body),
+        };
     };
     /**
      * The dispatcher over a manager reading `rows`. The engine's action map
      * holds one `send_digest` (`object:name`, no package): `engineHolds`, the
      * one its rebind kept, which the by-name rung serves.
      */
-    const over = (rows: Array<{ name: string; data: any; packageId?: string }>, engineHolds: any) => {
-        const manager = new MetadataManager({ formats: ['json'], loaders: [] });
-        manager.registerLoader(rowsLoader(rows) as any);
+    const over = (rows: Array<Record<string, unknown>>, engineHolds: any) => {
+        const manager = new MetadataManager({});
+        manager.registerLoader(new DatabaseLoader({ engine: readEngine(rows) as any, trackHistory: false, cache: { enabled: false } } as any) as any);
         const metadata = {
             listObjects: vi.fn(async () => []),
             getObject: vi.fn(async () => undefined),
@@ -691,7 +709,7 @@ describe('[#32521] the bare door over the metadata service\'s own plural read, w
         ((await manager.loadMany('action')) as Array<{ _packageId?: string }>).map((item) => item._packageId ?? 'none');
 
     it('two packages\' rows of the name: the bare call is refused on REST and MCP, 409 naming both (BEFORE: one declaration reached the door and the call ran)', async () => {
-        const { post, bridge, ran, manager } = over([row(CRM), row(HR)], act('send_digest', SAVED_LAST));
+        const { post, bridge, ran, manager } = over([row(CRM, 1), row(HR, 2)], act('send_digest', HR));
         expect(await holders(manager)).toEqual([CRM, HR]);
         const rest = await post('/global/send_digest');
         expect(rest.status, JSON.stringify(rest.body)).toBe(409);
@@ -705,14 +723,14 @@ describe('[#32521] the bare door over the metadata service\'s own plural read, w
         expect(ran).toEqual([]);
     });
 
-    for (const [shape, rows] of [
-        ['one package\'s row', [row(CRM)]],
-        ['one package\'s row and a package-less row of the name (its customization)', [row(CRM), row(undefined)]],
-        ['a package-less row and one package\'s row of the name', [row(undefined), row(CRM)]],
+    for (const [shape, rows, handedOn] of [
+        ['one package\'s row', [row(CRM, 1)], [CRM]],
+        ['one package\'s row and a package-less row of the name saved after it (its customization)', [row(CRM, 1), row(undefined, 2)], ['none']],
+        ['a package-less row and one package\'s row of the name saved after it', [row(undefined, 1), row(CRM, 2)], [CRM]],
     ] as const) {
-        it(`CONTROL — ${shape}: one declaration reaches the door, and the bare call runs on REST and MCP, as before`, async () => {
+        it(`CONTROL — ${shape}: one declaration reaches the door, the row saved last, and the bare call runs on REST and MCP, as before`, async () => {
             const { post, bridge, ran, manager } = over([...rows], act('send_digest', CRM));
-            expect(await holders(manager)).toEqual([rows[0].packageId ?? 'none']);
+            expect(await holders(manager)).toEqual([...handedOn]);
             const rest = await post('/global/send_digest');
             expect(rest.status, JSON.stringify(rest.body)).toBe(200);
             expect((await bridge.runAction('send_digest', {})).ok).toBe(true);
