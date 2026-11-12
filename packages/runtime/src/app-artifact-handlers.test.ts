@@ -236,7 +236,17 @@ describe('[ADR-0150 D4] bindAppArtifactHandlers on a multi-package artifact', ()
         { conflict: 'override', from: ['one', 'two'], runs: 'two', replaced: 'one' },
         { conflict: 'merge', from: ['same', 'same'], runs: 'same', replaced: undefined },
     ] as const)('objectConflict $conflict: the reconciled object\'s action is bound once, under the artifact\'s owner, and the replaced one at no address', async ({ conflict, from, runs, replaced }) => {
-        const artifact = composeStacks([sharedObjectStack('one', from[0]), sharedObjectStack('two', from[1])], { manifest: 'preserve', objectConflict: conflict }) as any;
+        // `composeStacks` refuses this pair under 'preserve' (both bodies keep the
+        // name), so the artifact is assembled by hand in the shape it used to
+        // emit — and an artifact already on disk still carries: the reconciled
+        // object at the top level beside both packages' bodies.
+        const stacks = [sharedObjectStack('one', from[0]), sharedObjectStack('two', from[1])] as any[];
+        const reconciled = composeStacks(stacks, { objectConflict: conflict }) as any;
+        const artifact = {
+            manifest: reconciled.manifest,
+            objects: reconciled.objects,
+            packages: stacks.map((s) => ({ manifest: { ...s.manifest, objects: s.objects } })),
+        } as any;
         expect(artifact.packages, 'precondition: a preserve artifact').toHaveLength(2);
         const ql = new ObjectQL({ logger: quiet } as any);
         const bound = bind(ql, artifact);
