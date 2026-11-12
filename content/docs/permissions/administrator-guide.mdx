@@ -196,6 +196,40 @@ immutable after creation. And keep the additive model in mind: author
 coherent capability bundles, never "subtraction sets".
 Full model: [Permission Sets](/docs/permissions/permission-sets).
 
+## Send a message to your organization
+
+To tell people something in the app (a maintenance window, a policy change),
+open **Setup → Diagnostics → Notification Events** and choose **Send In-App
+Message**. The message lands in each recipient's notifications, the bell,
+like any other notification.
+
+- **Who can send:** whoever holds the `setup.write` capability in their
+  current organization. Organization administrators and platform
+  administrators hold it by default; a plain member is not offered the action,
+  and the server refuses the request. A permission set you author that grants
+  `setup.write` lets its holders send too.
+- **Who receives:** either **Everyone in this organization** (every member of
+  the organization you are working in, whatever their membership level, and
+  nobody outside it), or the people you pick under **Recipients**. Pick
+  members of your current organization only: a person who is not one is
+  refused by name, and nothing is sent.
+- **The message:** a title (up to 255 characters), the message itself
+  (Markdown, up to 10,000 characters), a severity (info, warning or critical)
+  and an optional link, either a page in the app (`/apps/…`) or an `http(s)`
+  address.
+
+When it is sent, the confirmation says how many people it went to. Each
+message is a notification event with the topic `org.announcement`, listed on
+the same page. A member who turned that topic off in their notification
+preferences is not sent it, and is not counted.
+
+Programs and agents send the same message through
+`POST /api/v1/messaging/in-app-messages`, with the body
+`{ everyone | recipients, title, body, severity?, link? }`, under the same
+rules. A flow that should message the whole organization uses the `notify`
+step's `org:members` recipient instead
+([Flows](/docs/automation/flows)).
+
 ## Quick paths
 
 | I need to… | Do this |
@@ -207,6 +241,7 @@ Full model: [Permission Sets](/docs/permissions/permission-sets).
 | Someone changed departments | Update their Business Unit Member row; re-anchor their User Position rows |
 | Let a subsidiary manage its own staff | Grant a set carrying a [delegated admin scope](/docs/permissions/delegated-administration) |
 | Give one user one extra capability | Permission set record → **Assigned Users** → add (direct grant) |
+| Tell everyone in the organization something | Setup → Diagnostics → Notification Events → **Send In-App Message** ([above](#send-a-message-to-your-organization)) |
 
 ## FAQ
 
@@ -239,6 +274,7 @@ sets can't be edited in place either, but they can be cloned and adjusted
 | Password policy, MFA, lockout, SSO | Setup → Configuration → Authentication |
 | Company info, localization, branding | Setup → Configuration |
 | Sessions, notification events, audit logs | Setup → Diagnostics |
+| Send an in-app message to the organization | Setup → Diagnostics → Notification Events |
 | Explain access | Studio → Access |
 
 ---
