@@ -174,7 +174,7 @@ describe('[#32366] the delete heal reads the baseline for the removed row\'s pac
         expect(healLines(h.logged)).toEqual([]);
     });
 
-    it('a package-less row on that name: the bare read is refused, and the heal says so once, naming both holders', async () => {
+    it('a package-less row on that name: the bare read is refused, the removed row\'s entry is retired with no baseline, and the heal says so once, naming both holders', async () => {
         const h = makeHarness({ rows: [overlayRow(null)], holders: [[ALPHA, 'alpha'], [BETA, 'beta']] });
 
         const result = await h.protocol.deleteMetaItem({ type: 'action', name: NAME });
@@ -182,10 +182,10 @@ describe('[#32366] the delete heal reads the baseline for the removed row\'s pac
         // The delete has committed; the heal does not fail it.
         expect(result.success).toBe(true);
         expect(h.rows).toHaveLength(0);
-        // Neither package's baseline is picked, and the entry is not retired
-        // on a read that refused.
+        // Neither package's baseline is picked. [seat ruling 6812637203 Q2]
+        // The removed row's bare-slot entry is retired (at bf53824e: kept).
         expect(h.registered).toEqual([]);
-        expect(h.retired).toEqual([]);
+        expect(h.retired).toEqual([`action|${NAME}`]);
         // BASE: no line at all.
         const lines = healLines(h.logged);
         expect(lines).toHaveLength(1);
@@ -247,6 +247,8 @@ describe('[#32366] a heal that stops is never silent', () => {
             expect(lines[0]).not.toContain('package \'sys_metadata\'');
             expect(lines[0]).not.toContain('package \'undefined\'');
             expect(h.registered).toEqual([]);
+            // A package the store reads as none is a package-less heal (Q2).
+            expect(h.retired, String(packageId)).toEqual([`action|${NAME}`]);
             vi.restoreAllMocks();
         }
     });
@@ -296,6 +298,8 @@ describe('[#32366 S1, ADR-0146] a row bound to a package that holds no item of t
         const result = await h.protocol.deleteMetaItem({ type: 'action', name: NAME, packageId: OTHER });
 
         expect(result.success).toBe(true);
+        // A row bound to a package keeps the logged stop: the Q2 retirement
+        // names the package-less heal only.
         expect(tiers(h)).toEqual({ tier1: [false], tier2: [], tier3: [] });
         const lines = healLines(h.logged);
         expect(lines).toHaveLength(1);

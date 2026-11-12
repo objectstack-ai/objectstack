@@ -68,15 +68,23 @@ import { ObjectStackProtocolImplementationStatics as ObjectStackProtocolImplemen
  * package-scoped refusal (a read naming no package, of a name two packages
  * hold) is named as one, with the package the refused read named as the store
  * read it (its `callerPackageId`: a package-less read is "no package") and the
- * holders its message lists.
+ * holders its message lists. `entry` says what became of the registry entry:
+ * left as it was, or retired from the bare slot (a refused package-less heal,
+ * seat ruling 6812637203 Q2).
  */
-function registryHealStoppedMessage(type: string, name: string, error: unknown): string {
+function registryHealStoppedMessage(type: string, name: string, error: unknown, entry: 'kept' | 'retired' = 'kept'): string {
     const reason = error instanceof Error ? error.message : String(error);
     const refusal = packageScopedRefusalOf(error);
     const named = boundPackageOf(refusal?.callerPackageId);
     const why = refusal !== undefined
         ? `the metadata service refused the baseline read, which named ${named === undefined ? 'no package' : `package '${named}'`}: ${reason}`
         : reason;
+    if (entry === 'retired') {
+        return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
+            + 'The removed row\'s registry entry was retired from the bare slot and no baseline was registered, so a read naming no '
+            + 'package answers the store\'s refusal naming every holder; if a registry reader still serves the removed row, the next '
+            + 'reload (or restart) re-hydrates the registry from the stored rows and heals it.';
+    }
     return `[Protocol] the registry heal after the removal of ${type} '${name}' stopped: ${why}. `
         + 'The stored rows are already correct, but the registry entry is left as it was and may serve the removed row '
         + 'while every read looks normal; the next reload (or restart) re-hydrates the registry from the stored rows and heals it.';
@@ -1381,7 +1389,10 @@ export class ProtocolRegistryHydrationFacet {
      * what stops the walk is logged once, at `error` (the stored rows and the
      * registry then disagree), with what the registry may keep serving and the
      * fix ({@link registryHealStoppedMessage}). A package-scoped refusal of the
-     * baseline read is named as one, with the holders it lists.
+     * baseline read is named as one, with the holders it lists. For a
+     * package-less row that refusal also retires the removed row's bare-slot
+     * entry and registers no baseline (seat ruling 6812637203 Q2): the next read
+     * naming no package answers the store's refusal, naming every holder.
      */
     static async restoreArtifactRegistryView(host: Pick<ProtocolHost, 'anotherPackageShips' | 'applyRegistryWriteThrough' | 'convertStoredItem' | 'engine' | 'findEnvironmentRows' | 'isArtifactBacked' | 'isUnservedSealedOverlay' | 'readItemFromMetadataService' | 'reconcileViewExpansions' | 'registryTakesStoredRows' | 'resyncStoredObjectExtensions' | 'rethrowUnlessMetadataStoreUnprovisioned'>, type: string,
             name: string,
@@ -1540,7 +1551,27 @@ export class ProtocolRegistryHydrationFacet {
 
             // [#32366] Read for the removed row's package, or for the base a
             // pair row overrides — see the header and {@link readHealBaseline}.
-            const baseline = await readHealBaseline(host, type, name, boundPackageOf(packageId));
+            let baseline: ServiceRead;
+            try {
+                baseline = await readHealBaseline(host, type, name, boundPackageOf(packageId));
+            } catch (error) {
+                // [#32366, seat ruling 6812637203 Q2] A PACKAGE-LESS row's heal
+                // whose bare baseline read is refused (two or more packages hold
+                // the name): the removed row's entry leaves the bare slot and no
+                // baseline is registered. A read naming no package then answers
+                // the store's refusal, which names every holder, instead of the
+                // removed row's body. `removeOverlayEntry` keeps refusing a
+                // packaged artifact, as on tier 3. A row bound to a package keeps
+                // the logged stop ({@link readHealBaseline}); the ruling names
+                // the package-less heal only.
+                if (boundPackageOf(packageId) !== undefined || packageScopedRefusalOf(error) === undefined) throw error;
+                if (typeof registry.removeOverlayEntry === 'function') {
+                    registry.removeOverlayEntry(singular, name, memberKey);
+                    if (type !== singular) registry.removeOverlayEntry(type, name, memberKey);
+                }
+                console.error(registryHealStoppedMessage(type, name, error, 'retired'));
+                return;
+            }
             // [#22877] A baseline of ANOTHER member is no baseline of this one:
             // the service keys a type's items by name alone, so it can hold a
             // bundle's other member under the name.
