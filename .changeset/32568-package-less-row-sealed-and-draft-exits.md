@@ -1,14 +1,14 @@
 ---
-'@objectstack/metadata-protocol': patch
+'@objectstack/metadata-protocol': minor
 ---
 
 fix(metadata-protocol)!: a package-less row at a holder's exact address answers one thing on every read and in every hydration state: declined for a sealed type, refused with two holders for an overlay type (ADR-0150 D4, ADR-0126 Regime C)
 
-Clause-②: yes (narrowing) — reads that served now refuse (the draft exits of an overlay type's package-less row of a name two packages hold go from 200 to 409, and a sealed type's package-less draft from 200 to no draft), and reads that refused now serve the holder's own item (a sealed type's package-less registry copy at a holder's exact address, and its layered read, go from 409 to 200).
-Metadata-protocol: none
+Clause-②: no (narrowing) — reads that served now refuse: an overlay type's package-less draft of a name two packages hold, at either holder's strict draft read, preview and layered `draft` layer, goes from 200 to 409 naming every holder, and a sealed type's package-less draft from 200 to no draft at the address. The reads that refused and now serve a sealed type's holder's own item (its package-less registry copy at a holder's exact address, and its layered read, 409 → 200) drop a refusal the governing text denies, so they are no widening: ADR-0126 Regime C declines a sealed managed type's package-less row, and the epic ruling on this card (6817768147) reads it at the exact address as "With the row declined, `?package=X` names its holder explicitly and serves X's own shipped item, exactly as it would with no row stored." No export is added (the new helpers are module-internal).
+Metadata-protocol: narrowed
 Skills-docs: none — `skills/**` and `content/docs/**` teach no exact, draft or layered read of a package-less row of a name a package holds; the prescription ships in the refusal text and the FROM → TO below.
 
-<!-- adr-0087: not-required (no-migration-prescription) no metadata shape, schema, stored row or registered node type changes: the change is which item an exact by-name read serves or refuses, and the stored metadata is read exactly as before, so there is nothing for `objectstack migrate meta` to rewrite -->
+<!-- adr-0087: registered package-less-row-exact-address-by-type-class -->
 
 **BREAKING** at the exact by-name read (`GET /meta/:type/:name?package=X`, the qualified path `GET /meta/:type/:ns/:name`), its strict draft read (`?state=draft`), its preview (`?preview=draft`), the layered read (`?layers=true`, its `draft` layer included) and the list scoped to a package with drafts previewed, on both transports and in process.
 
