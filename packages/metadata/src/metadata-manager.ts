@@ -4622,6 +4622,17 @@ function withEntryPackage<T>(entry: MetadataKeyedItem<T>): T {
  * name (a nested or extension-less file, a row whose `name` column is empty)
  * is answered as before, unstamped. A loader that holds nothing per package is
  * not read twice.
+ *
+ * [#32521; epic #31527 red line 2] A name two or more of the loader's keyed
+ * entries carry with their own packages (a name two packages hold, which
+ * `DatabaseLoader` now answers a row per package of): each body of that name
+ * is stamped with the package of the one keyed entry whose own body it is
+ * (the same content, each entry used once), so both holders are handed on
+ * stamped and the boot priming pass registers each. A body no such entry's
+ * body equals — a package-less row's among them — stays unstamped. Only where
+ * the bodies of the name are exactly the rows keyed by it (each of those rows'
+ * bodies carries the name, and as many bodies carry it as rows are keyed by
+ * it); otherwise none of them is stamped, as above.
  */
 async function withLoaderEntryPackages<T>(
   loader: MetadataLoader,
@@ -4632,18 +4643,37 @@ async function withLoaderEntryPackages<T>(
   if (typeof loader.loadManyKeyed !== 'function' || typeof loader.loadManySlots !== 'function') return items;
   const nameOf = (body: unknown): unknown => (body as { name?: unknown } | null)?.name;
   const packageOf = new Map<string, string | null>();
+  const entriesKeyed = new Map<string, { count: number; ownBodies: boolean }>();
+  const heldBodies = new Map<string, Array<{ body: string; packageId: string }>>();
   for (const entry of await loader.loadManyKeyed<T>(type, options)) {
-    const own = nameOf(entry.data) === entry.name ? entry.packageId ?? null : null;
+    const ownBody = nameOf(entry.data) === entry.name;
+    const own = ownBody ? entry.packageId ?? null : null;
     packageOf.set(entry.name, packageOf.has(entry.name) ? null : own);
+    const keyed = entriesKeyed.get(entry.name) ?? { count: 0, ownBodies: true };
+    entriesKeyed.set(entry.name, { count: keyed.count + 1, ownBodies: keyed.ownBodies && ownBody });
+    if (own !== null) heldBodies.set(entry.name, [...(heldBodies.get(entry.name) ?? []), { body: JSON.stringify(entry.data), packageId: own }]);
   }
   const bodiesNamed = new Map<string, number>();
   for (const item of items) {
     const name = nameOf(item);
     if (typeof name === 'string') bodiesNamed.set(name, (bodiesNamed.get(name) ?? 0) + 1);
   }
+  // [#32521] Paired by content only where the bodies of the name are exactly
+  // the rows keyed by it: every such row's body carries the name, and no other
+  // body does.
+  const severallyHeld = new Set([...heldBodies]
+    .filter(([name, held]) => held.length > 1 && entriesKeyed.get(name)!.ownBodies && entriesKeyed.get(name)!.count === bodiesNamed.get(name))
+    .map(([name]) => name));
   return items.map((item) => {
     const name = nameOf(item);
-    if (typeof name !== 'string' || bodiesNamed.get(name) !== 1) return item;
+    if (typeof name !== 'string') return item;
+    const held = heldBodies.get(name);
+    if (held !== undefined && severallyHeld.has(name)) {
+      const body = JSON.stringify(item);
+      const at = held.findIndex((entry) => entry.body === body);
+      return at === -1 ? item : withEntryPackage({ name, data: item, packageId: held.splice(at, 1)[0]!.packageId });
+    }
+    if (bodiesNamed.get(name) !== 1) return item;
     const packageId = packageOf.get(name);
     return packageId ? withEntryPackage({ name, data: item, packageId }) : item;
   });
