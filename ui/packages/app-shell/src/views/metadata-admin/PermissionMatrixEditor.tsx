@@ -795,8 +795,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // than one package holds it (`holdingOfRead`): the assignment section and the
   // active switch below read and write that holder's grants and state, never
   // the union of every holder's. `null`: more than one holder serves the name
-  // and this read addressed none of them, so the editor draws neither.
-  // `undefined`: one holder, by the name as before.
+  // and this read addressed none of them, or the published list could not be
+  // read, so the editor draws neither. `undefined`: one holder, by the name as
+  // before.
   const [assignmentsHolding, setAssignmentsHolding] = React.useState<PermissionSetHolding | undefined | null>(undefined);
   // objectui#7611 — the Setup catalog (`?scope=environment`) shows who holds the
   // set under its definition; Studio's design surface does not. Nor does a set
@@ -986,13 +987,19 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     setDraftRefused(null);
     // objectstack#32537 — the holder this read addresses, from the published
     // list the effect above holds (its rows carry each holder's `_packageId`).
-    // An unreadable list names no holder, and the editor reads by the name.
-    const holdingRead: Promise<PermissionSetHolding | undefined | null> = (
-      type === 'permission' && publishedSetsRef.current ? publishedSetsRef.current : Promise.resolve(null)
-    ).then(
-      (rows) => (Array.isArray(rows) ? holdingOfRead(rows, name, layeredPackageId) : undefined),
-      () => undefined,
-    );
+    // A list that cannot be read cannot say how many holders the name has, so
+    // it answers `null`: the editor draws nothing holder-scoped rather than a
+    // by-name section that could be every holder's.
+    const publishedForHolding = publishedSetsRef.current;
+    const holdingRead: Promise<PermissionSetHolding | undefined | null> =
+      type !== 'permission'
+        ? Promise.resolve(undefined)
+        : publishedForHolding
+          ? publishedForHolding.then(
+              (rows) => (Array.isArray(rows) ? holdingOfRead(rows, name, layeredPackageId) : null),
+              () => null,
+            )
+          : Promise.resolve(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published

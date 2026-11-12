@@ -34,6 +34,8 @@ import '@objectstack/spec/identity';
 
 let publishedSets: Array<Record<string, unknown>> = [];
 let layeredRefused = false;
+/** The published `permission` list read fails, or answers no list. */
+let publishedListAnswer: 'list' | 'refused' | 'not-a-list' = 'list';
 
 function makeClient() {
   return {
@@ -52,8 +54,12 @@ function makeClient() {
       };
     },
     getDraft: async () => null,
-    list: async (type: string) =>
-      type === 'object' ? [{ item: { name: 'crm_case' } }] : type === 'permission' ? publishedSets : [],
+    list: async (type: string) => {
+      if (type === 'object') return [{ item: { name: 'crm_case' } }];
+      if (type !== 'permission') return [];
+      if (publishedListAnswer === 'refused') throw new Error('list refused');
+      return publishedListAnswer === 'not-a-list' ? { items: publishedSets } : publishedSets;
+    },
     get: async (type: string) => (type === 'object' ? { fields: [] } : null),
     save: async (_t: string, _n: string, payload: Record<string, unknown>) => payload,
   };
@@ -96,6 +102,7 @@ afterEach(() => {
   cleanup();
   publishedSets = [];
   layeredRefused = false;
+  publishedListAnswer = 'list';
 });
 
 const ONE = [{ name: 'sales_rep', label: 'Sales Rep', _packageId: 'com.acme.crm' }];
@@ -190,5 +197,20 @@ describe('the editor draws its sections for the holder it shows (objectstack#325
     await renderEditor('?scope=environment', { area: true });
     expect(screen.queryByTestId('item-switch-stub')).toBeNull();
     expect(setupHref()).toBe(`${SETUP_PAGE}?set=sales_rep`);
+  });
+
+  it('draws nothing holder-scoped when the published list cannot be read: it cannot say how many holders there are', async () => {
+    for (const answer of ['refused', 'not-a-list'] as const) {
+      publishedSets = TWO_PACKAGES;
+      publishedListAnswer = answer;
+      await renderEditor('?scope=environment&package=com.acme.sales');
+      expect(screen.queryByTestId('perm-assignments')).toBeNull();
+      expect(screen.queryByTestId('assigned-users-stub')).toBeNull();
+      cleanup();
+
+      await renderEditor('?scope=environment&package=com.acme.sales', { area: true });
+      expect(screen.queryByTestId('item-switch-stub')).toBeNull();
+      cleanup();
+    }
   });
 });
