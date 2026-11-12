@@ -758,6 +758,94 @@ done, left (orphan, conflicting scope, union incomplete), refused (unreadable, u
 derivation, verify failed) and, under `--apply`, not written (changed during the run,
 write failed). It never prints a value, a ciphertext or a row id.
 
+#### `os audit verify`
+
+Checks the sealed audit ledger (ADR-0154). An object that declares `lifecycle.seal` has
+its rows sealed, one window at a time, into signed checkpoints. This command recomputes
+every checkpoint from the rows the database holds now, in the hot store and in the
+`archive` datasource, and judges each row. **It is read-only: it writes no row.**
+
+```bash
+os audit verify                                     # every chain, the deployment chain included
+os audit verify --org org_123 --org org_456          # only these organizations' chains
+os audit verify --from 2026-11-01 --to 2026-11-08    # only the rows of these windows
+os audit verify --json                               # the machine-readable report
+os audit verify --out ledger-proof.json              # also write the proof bundle
+os audit verify --bundle ledger-proof.json --trusted-key <fingerprint>   # check a bundle offline
+```
+
+**Options:**
+- `--org <id>` — check only this organization's chains (repeatable). Without it, every
+  chain is checked, the deployment chain included.
+- `--from <iso>`, `--to <iso>` — judge only the rows of the windows this range overlaps
+  (ISO-8601). Links and signatures are still checked over each whole chain.
+- `--out <file>` — also write the run's proof bundle (see below), an export of the ledger
+  that carries personal data. It is written whatever the verdict.
+- `--bundle <file>` — check a proof bundle offline instead of the live ledger (see below).
+- `--trusted-key <fingerprint>` — a signing key fingerprint `--bundle` trusts (repeatable).
+- `--database-url <url>`, `--json`
+
+Each row a checkpoint lists reads as one of:
+
+| Verdict | Meaning |
+|---------|---------|
+| `unmodified` | The row is as it was sealed |
+| `late` | The row arrived after its window was sealed, and a later checkpoint sealed it |
+| `redacted` | A signed redaction amendment explains the rewrite of a value column |
+| `expired` | A signed expiry amendment removed the row's range under its own retention policy |
+| `modified` | The row differs from what was sealed |
+| `missing` | The row is in neither the hot store nor the archive |
+
+A row in a sealed window that no checkpoint lists is reported `late` and **unsealed**: on
+the host alone it cannot be told from a forged insert.
+
+Trust comes only from the deployment's own signing key. A key is trusted only when its
+wrapped private half opens with the crypto provider `os serve` seals with (the declaring
+plugin's, or the existing data key from `OS_SECRET_KEY` or the persisted key file; this
+command never mints a key). A key row added to the database by hand is named and trusted
+by nothing. The command prints the fingerprints of the keys it trusted, so you can
+publish them out of band.
+
+Exit codes:
+
+- **0**: every chain, link and signature verifies under a trusted key, and every row is
+  `unmodified`, `late` (sealed), `redacted` or `expired`. Also 0 when nothing is sealed.
+- **1**: a row is `modified`, `missing` or `late` and unsealed, or a link or signature
+  fails. The report names every row that is not `unmodified` and every fault.
+- **2**: no verdict is given. The cause is one of these: a usage error, a stack that would
+  not boot, a crypto provider that cannot open what is sealed, an archive datasource a
+  sealed object declares that this run did not connect (every archived row would read
+  `missing`), or a check that stopped partway.
+
+**The proof bundle.** `--out <file>` writes what an auditor needs to repeat the check
+without your database (format `objectstack.audit.proof-bundle.v1`): the public halves of
+the keys this run trusted, every checkpoint and amendment in scope, and each judged row's
+leaf input. A leaf input holds the row's clear columns and, for its value columns, only
+the salted commitments. The bundle holds no value, no salt and no seed.
+
+**A bundle carries personal data.** Its clear columns (`user_id`, `actor`, `ip_address`,
+`user_agent`, `tenant_id`) identify people. It is an export of the ledger: keep it and pass
+it on under the same access and retention rules as the ledger it came from, and narrow it
+with `--org`, `--from` and `--to` to what the auditor needs. The file is written with mode
+`0600`.
+
+`--bundle <file>` re-runs the verdicts on such a bundle. It boots nothing and needs no
+database and no data key. It checks that each leaf input hashes to its checkpoint's leaf
+hash and the leaf hashes to the signed root, that the links hold, that every signature
+verifies under a trusted key, and that each expiry is honoured under the retention value
+its own signature carries. It requires at least one `--trusted-key <fingerprint>`: a
+fingerprint `os audit verify` printed on the host, which you got out of band. A key the
+bundle carries is used only when it hashes to a fingerprint you gave. A bundle cannot vouch
+for its own keys.
+
+- A bundle keeps the scope of the run that wrote it, so `--bundle` takes no `--org`,
+  `--from` or `--to`. It also takes no `--out` and no `--database-url`.
+- `--trusted-key` applies to `--bundle` only.
+- Any other combination is a usage error (exit 2), as are a missing `--trusted-key` and a
+  file that is not a proof bundle.
+- A bundle proves what its checkpoints hold. Rows of a sealed window that no checkpoint
+  lists (`late` and unsealed) are carried as the writing run found them.
+
 ### Build & Validate
 
 | Command | Description |
