@@ -359,6 +359,16 @@ describe('[#32517] two packages\' same-named actions: the metadata-service-only 
         expect(h.rows).toEqual([]);
     });
 
+    it('NARROWING — the bare execution door, both object-less: 409 naming both packages, nothing runs (BASE: 200, the one saved last ran)', async () => {
+        const h = await bootWithDoor([undefined, undefined]);
+        const res = await h.dispatcher.handleActions('/global/shared_ping', 'POST', {}, ADMIN());
+        expect(statusOf(res), bodyOf(res)).toBe(409);
+        expect(codeOf(res)).toBe('RESOURCE_CONFLICT');
+        expect(bodyOf(res)).toContain('com.acme.alpha');
+        expect(bodyOf(res)).toContain('com.acme.beta');
+        expect(h.executed()).toBe(0);
+    });
+
     it('CONTROL — one package\'s action on one object: the flip writes its row (unchanged)', async () => {
         const door = new MemoryLoader();
         await door.save('action', 'shared_ping', shipped('com.acme.alpha', OTHER));
