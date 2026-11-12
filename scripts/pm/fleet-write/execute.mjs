@@ -52,8 +52,10 @@
  * installation remedy `transferRemedy` spells, in the log and the summary.
  * A `workflow_dispatch` is one POST the platform answers 204 to with no body,
  * carrying the inputs the op table closes for that file and nothing else
- * (`WORKFLOW_DISPATCH_INPUTS`: none for the shard-timings refresh,
- * `refresh_version_pr: "true"` alone for `release.yml`, its bookkeeping lane)
+ * on the stroke's own repository (`WORKFLOW_DISPATCH_BY_REPO`: none for the
+ * shard-timings refresh, `refresh_version_pr: "true"` alone for `release.yml`,
+ * its bookkeeping lane, `apps: "affected"` alone for cloud's
+ * `deploy-staging.yml`)
  * — its row reads `accepted`; the run it started is read back by the SEAT
  * (`dispatch.mjs`), never here, because the answer carries no run id, and the
  * token that request spends `actions: write` on reaches that path and the
@@ -1999,6 +2001,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
   'the release.yml refresh: ONE POST to its dispatch endpoint carrying { ref: main, inputs: { refresh_version_pr: "true" } } under the App token, landing as accepted; force, false, absent, a string or any other input refused with ZERO requests, exit 2': 9,
+  'the cloud staging deploy: ONE POST to cloud\'s deploy-staging.yml dispatch endpoint carrying { ref: main, inputs: { apps: "affected" } } after the sender gate on cloud, landing as accepted; a 422 or 403 from cloud a FAILED action; a non-default input, another ref, a file cloud does not list, or the file on the wrong repository refused with ZERO requests, exit 2': 7,
   "the batch gap on the runner: a stroke carrying DEFAULT_BATCH_THRESHOLD or more content-creating actions is announced as ONE rule ⑤ batch before its first write — on an injected clock every write through the last content-creating one leaves a full DEFAULT_BATCH_GAP_MS after the one before, and the pacing is exactly what the seat budgets; below the threshold, after the batch and on a landing stroke rule ①'s gap; a stroke the job cannot hold refused with ZERO requests; an announcement the log cannot record refused before the first write": 10,
   // 29 → 30 as the follow-up left the draft open: three pr_create NEGATIVE pins (no read, no request, no assignee) replace the create-side runs.
   // 30 → 36 with the workflows split read on the relay: the plan with a reading, a Tier S workflow pull requesting no one, an H reading,
@@ -2017,8 +2020,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's, 22 → 23 with the mailbox
 // branch delete's, 23 → 24 with the private-repository issue body's, 24 → 25 with advisory_list's, 25 → 26 with
-// pr_enqueue_front's: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 26;
+// pr_enqueue_front's, 26 → 27 with the cloud staging deploy's: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 27;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2552,6 +2555,31 @@ export async function selfTest() {
       t('⛔ force alone, any other input, and the string "true" are each refused with zero requests, exit 2', [await refused({ force: true }, 'actions[0].inputs.force is not an input'), await refused({ refresh_version_pr: true, dry_run: true }, 'actions[0].inputs.dry_run is not an input'), await refused({ refresh_version_pr: 'true' }, 'must be a JSON boolean')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
       const shard = await run(base([{ op: 'workflow_dispatch', workflow: 'shard-timings-refresh.yml', ref: 'main', inputs: { refresh_version_pr: true } }]), allowed);
       t('⛔ the release entry\'s inputs on the shard-timings refresh — a file whose entry is null — are refused with zero requests, exit 2', [shard.exit, shard.seen.length], [EXIT_REFUSED, 0]);
+    }
+
+    // ── the cloud staging deploy ────────────────────────────────────────────
+    battery('the cloud staging deploy: ONE POST to cloud\'s deploy-staging.yml dispatch endpoint carrying { ref: main, inputs: { apps: "affected" } } after the sender gate on cloud, landing as accepted; a 422 or 403 from cloud a FAILED action; a non-default input, another ref, a file cloud does not list, or the file on the wrong repository refused with ZERO requests, exit 2');
+    {
+      const CLOUD = 'objectstack-ai/cloud';
+      const FILE = 'deploy-staging.yml';
+      const DISPATCHES = `POST /repos/${CLOUD}/actions/workflows/${FILE}/dispatches`;
+      const CLOUD_PERM = `GET /repos/${CLOUD}/collaborators/os-support-ai/permission`;
+      const onCloud = { [CLOUD_PERM]: allowed[PERM] };
+      const deploy = (extra = {}, repo = CLOUD) => ({ ...base([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main', inputs: { apps: 'affected' }, ...extra }]), repo });
+      const ok = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 204, json: null } }, { file: paceFile });
+      t('the one write is the dispatch call on CLOUD\'s deploy-staging.yml with { ref: main, inputs: { apps: "affected" } }, exit 0', [ok.exit, writes(ok.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[DISPATCHES, { ref: 'main', inputs: { apps: 'affected' } }]]]);
+      t('…under the App token, after the sender gate on cloud — the ONE repository the stroke names', [ok.seen.map((s) => s.call), ok.seen.every((s) => s.auth === `Bearer ${TOKEN}`)], [[CLOUD_PERM, DISPATCHES], true]);
+      t('…a bodiless 204 lands as accepted, its summary row naming cloud\'s dispatch endpoint, no other actions/* request and no annotation', [ok.rows[0]?.status, ok.rows[0]?.result, ok.summary.includes(`| 1 | \`workflow_dispatch\` | \`${DISPATCHES}\` | 204 | accepted (HTTP 204, no body) |`), ok.seen.filter((s) => s.call.includes('/actions/') && s.call !== DISPATCHES), ok.annotations], [204, 'accepted (HTTP 204, no body)', true, [], []], ok.summary);
+      const undeclared = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 422, json: { message: 'Unexpected inputs provided: ["apps"]' } } });
+      t('a 422 — cloud\'s file declaring no such input, the unverified reading wrong — is a FAILED action, exit 5, with the platform\'s sentence', [undeclared.exit, undeclared.rows[0]?.status, undeclared.rows[0]?.result.includes('Unexpected inputs')], [EXIT_ACTION_FAILED, 422, true]);
+      const noGrant = await run(deploy(), { ...onCloud, [DISPATCHES]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
+      t('a 403 — the installation not covering cloud with actions write — is a FAILED action, exit 5', [noGrant.exit, noGrant.rows[0]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, true]);
+      const refused = async (payload, needle) => {
+        const r = await run(payload, { ...allowed, ...onCloud, [DISPATCHES]: { status: 204, json: null } });
+        return [r.exit, r.seen.length, r.logs.some((l) => l.includes('REFUSED') && l.includes(needle))];
+      };
+      t('⛔ apps all, and another ref, are refused with zero requests, exit 2', [await refused(deploy({ inputs: { apps: 'all' } }), 'actions[0].inputs.apps must be "affected"'), await refused(deploy({ ref: 'develop' }), 'actions[0].ref must be one of "main"')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
+      t('⛔ deploy-staging.yml on THIS repository, and release.yml\'s refresh on cloud, are refused with zero requests, exit 2 — the file judged against the stroke\'s own repository', [await refused(deploy({}, REPO), 'is not a workflow the relay starts on "objectstack-ai/objectstack"'), await refused(deploy({ workflow: 'release.yml', inputs: { refresh_version_pr: true } }), 'is not a workflow the relay starts on "objectstack-ai/cloud"')], [[EXIT_REFUSED, 0, true], [EXIT_REFUSED, 0, true]]);
     }
 
     // ── the failed-jobs re-run ──────────────────────────────────────────────

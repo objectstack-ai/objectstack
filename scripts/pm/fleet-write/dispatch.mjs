@@ -342,10 +342,14 @@
  * The Version Packages refresh is such a stroke — an actions file of
  * `[{ "op": "workflow_dispatch", "workflow": "release.yml", "ref": "main",
  * "inputs": { "refresh_version_pr": true } }]`, the one inputs object the op
- * table admits for that file (`WORKFLOW_DISPATCH_INPUTS`, `ops.mjs`): it
+ * table admits for that file (`WORKFLOW_DISPATCH_BY_REPO`, `ops.mjs`): it
  * starts the bookkeeping lane alone, and its run is read back from
  * `release.yml`'s own run list the same way. Any other inputs are refused here
- * before anything is sent.
+ * before anything is sent. cloud's staging deploy is the same stroke sent with
+ * `--repo objectstack-ai/cloud` — `[{ "op": "workflow_dispatch", "workflow":
+ * "deploy-staging.yml", "ref": "main", "inputs": { "apps": "affected" } }]` —
+ * and its run is read back from CLOUD's run list, the stroke's own target; the
+ * same file on any other repository is refused here.
  *
  * ## The no-run conformance — every sender, one answer
  *
@@ -2094,7 +2098,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the wiring: the POST is paced and on the roster, the reads are not, the token never reaches the log': 5,
   'the CLI: a dry run sends nothing, usage, the exit ladder, the session derived from the container, a route read behind a dead proxy refuses': 11,
   'the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen': 27,
-  "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 11,
+  "the started run: an action naming a workflow is read back as the newest workflow_dispatch run of that file created since the dispatch — the target repo's run list, read after the relay run completed and re-read within a bounded window; found is success naming id, url and actor; none in the window or an unreadable list is UNCONFIRMED (6) after ONE dispatch; a stroke naming no workflow reads none": 13,
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
@@ -2794,6 +2798,15 @@ export async function selfTest() {
       t('a run list that does not answer is UNVERIFIED (unread) naming the call, exit 6 — never success', [down.state, down.runs?.rows?.[0]?.cls, down.runs?.rows?.[0]?.why?.includes('HTTP 503'), exitForResult(down)], ['unverified', 'unread', true, EXIT_UNCONFIRMED]);
       const comment = await drive(OK_RUN, { file: paceFile });
       t('a stroke naming no workflow reads no run list: runs none, no such GET', [comment.runs?.state, comment.seen.some((s) => s.call.includes('/actions/workflows/'))], ['none', false]);
+      // Another repository's workflow: cloud's staging deploy is read back from CLOUD's run list, the stroke's own target.
+      const CLOUD = 'objectstack-ai/cloud';
+      const STAGING = { op: 'workflow_dispatch', workflow: 'deploy-staging.yml', ref: 'main', inputs: { apps: 'affected' } };
+      const CLOUD_RUNS = `GET /repos/${CLOUD}/actions/workflows/deploy-staging.yml/runs`;
+      const staged = packRequest({ repo: CLOUD, session: SESSION, actions: [STAGING], requestId: 'fw-test-1' });
+      const onCloud = await drive({ ...OK_RUN, store: { [CLOUD_RUNS]: { status: 200, json: { total_count: 1, workflow_runs: [wfRun(9201, 12_000, { html_url: `https://github.test/${CLOUD}/actions/runs/9201` })] } } } }, { stroke: staged.payload });
+      t("a cloud staging deploy packs, and its started run is read from CLOUD's deploy-staging.yml run list — the stroke's target, never the board's", [staged.ok, onCloud.state, onCloud.runs?.rows?.[0]?.run?.id, onCloud.seen.some((s) => s.call === CLOUD_RUNS), onCloud.seen.some((s) => s.call.startsWith(`GET /repos/${REPO}/actions/workflows/`))], [true, 'success', 9201, true, false]);
+      const misplaced = packRequest({ repo: REPO, session: SESSION, actions: [STAGING], requestId: 'fw-test-1' });
+      t('…and the packer refuses the same action on the board repository before anything is sent, naming the repository', [misplaced.ok, misplaced.errors.some((e) => e.includes('is not a workflow the relay starts on "objectstack-ai/objectstack"'))], [false, true]);
       // The CLI, end to end: --json carries the started run, and the exit a seat reads.
       writeFileSync(join(dir, 'start.json'), JSON.stringify([{ op: 'workflow_dispatch', workflow: FILE, ref: 'main' }]), 'utf8');
       const cliStart = async (store) => {
