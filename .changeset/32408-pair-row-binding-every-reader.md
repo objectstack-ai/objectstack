@@ -4,7 +4,7 @@
 
 fix(objectql)!: every reader of the registry's overlay slot binds a row of an App's customization pair by the exact read's owner rule (ADR-0150 D4)
 
-Clause-②: yes (narrowing) — one refusal where a registration was admitted before: with the bare-name holders sealed, a package whose only members of an email template's name are locales the App ships none of, while the App's pair stores a row of that locale declaring another package of the App as its base (`overrides.package`), is refused `422 NAMESPACE_CONFLICT` naming the App as an addition to the App's template (#28802), where it was admitted because the pair's row counted as the App's own member. First-party packages in that position: 0.
+Clause-②: yes (narrowing) — one refusal where a registration was admitted before: with the bare-name holders sealed, a package whose only members of an email template's name are locales the App ships none of, while the App's pair stores a row of that locale declaring another package of the App as its base (`overrides.package`), is refused `422 NAMESPACE_CONFLICT` naming the App as an addition to the App's template (#28802), where it was admitted because the pair's row counted as the App's own member. First-party packages in that position: 0. Beside it, a read withholds a row it served: with every package of the App that holds the name disabled, a row of the App's pair is that disabled holder's, so the bare read and an addition's address withhold it as they withhold any name only disabled packages hold (listed below).
 Metadata-protocol: narrowed
 
 <!-- adr-0087: registered pair-row-locale-addition-refused -->
