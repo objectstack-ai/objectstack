@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 263,
-    "droppedRefinementSites": 1050,
+    "droppedRefinementSites": 1054,
     "refinementSitesThatDidProject": 728,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
