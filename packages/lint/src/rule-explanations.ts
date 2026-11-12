@@ -6056,9 +6056,12 @@ const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
     'Three ways forward. To read the current value, make the field a `formula`: it is current on every read, ' +
       'but a `formula` cannot be totalled. To keep a stored copy current, make it a snapshot field written by a ' +
       'flow on the related object that runs when the value changes and updates the records that point at it. ' +
-      'To repair stored values that have drifted, run `os migrate stored-expressions --changed --apply`, ' +
-      'which recomputes and writes every row whose stored value differs from its expression (it needs the ' +
-      'database URL). Without `--apply` the command is a dry run: it counts those rows and writes nothing.',
+      'To repair stored values that have drifted, run `os migrate stored-expressions --object OBJECT --field ' +
+      'FIELD --changed --apply`, which recomputes and writes every row of that field whose stored value ' +
+      'differs from its expression (it needs the database URL). Keep it scoped: without `--object` and ' +
+      '`--field`, `--changed` recomputes every stored computed value in the database that differs, and one ' +
+      'reading the clock always differs, so it moves to the time of the run. Without `--apply` the command ' +
+      'is a dry run: it counts those rows and writes nothing.',
   ],
 };
 
@@ -6083,7 +6086,10 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
       '--strict`, `os validate --strict`) fails on every warning, this one included. A `formula` field reading ' +
       'the same inputs is not judged.',
     'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +
-      'a stored value current as time passes, recompute it with a scheduled flow that updates the records.',
+      'a stored value current as time passes, recompute it with a scheduled flow that updates the records. ' +
+      '`os migrate stored-expressions --changed --apply` recomputes such a value to the time of the run, so ' +
+      'a repair of another field\'s drift is scoped with `--object` and `--field`, which leaves this one as ' +
+      'it was written.',
   ],
 };
 

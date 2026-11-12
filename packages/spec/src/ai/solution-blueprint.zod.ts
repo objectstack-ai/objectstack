@@ -253,8 +253,8 @@ const STORED_EXPRESSION_RULE =
   + '销售额 = 销量 × 单价 is a "currency" field with "record.quantity * record.unit_price". Name the return type, not '
   + '"number" for every value: a date expression on a "number" field is refused at every write. A stored expression '
   + 'reads only this record\'s own fields: a value from a related record stays a "formula" (shown, not totalled) or '
-  + 'comes through a "summary" or a flow, and an input that changes over time (the current date, the acting user) '
-  + 'is frozen at the write.';
+  + 'is a snapshot field written by a flow on the related object when that value changes, and an input that changes '
+  + 'over time (the current date, the acting user) is frozen at the write.';
 
 /**
  * The refusal of a `defaultValue` that does not fit the field (ruling B on

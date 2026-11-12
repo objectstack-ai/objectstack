@@ -23,8 +23,11 @@
  *    recompute engine, and the lane warns because a first-party title is
  *    stored on purpose in this shape (an import matches a record by its stored
  *    title) and the drift is repairable (`os migrate stored-expressions
- *    --changed --apply`; without `--apply` it is a dry run that writes nothing). The hop is judged through the definitions the registry
- *    SERVES the object with (`fieldDefOf`): a field an object extension adds
+ *    --object OBJECT --field FIELD --changed --apply`, scoped to the one
+ *    field, since an unscoped `--changed` also recomputes every clock-reading
+ *    stored value; without `--apply` it is a dry run that writes nothing).
+ *    The hop is judged through the definitions the registry SERVES the
+ *    object with (`fieldDefOf`): a field an object extension adds
  *    and a reference column the registry injects (`owner_id`, `created_by`,
  *    `updated_by`) count like a declared one. A read of the hop's `id` is the
  *    reference this row stores, so it is not one.
@@ -190,13 +193,15 @@ function listed(items: readonly string[]): string {
  * SERVES IT (the declared field, an extension's, or an injected reference
  * column), so a hop is judged through the declaration the engine plans it by
  * (`referenceTargetOf`, the spec's one arbiter of "what does this field point
- * at").
+ * at"). `objectName` names the object in the repair the cross-record finding
+ * prescribes, which is scoped to this one field (`--object` / `--field`).
  */
 export function storedExpressionInputIssues(
   fieldName: string,
   def: Record<string, unknown>,
   source: string | undefined,
   fieldDefOf: (name: string) => unknown,
+  objectName?: string,
 ): StoredExpressionInputIssue[] {
   // The engine's own test (`planStoredExpressions`): every field that is not a
   // `formula` and declares an `expression`.
@@ -229,7 +234,9 @@ export function storedExpressionInputIssues(
         + `record's last write. To read the current value, make \`${fieldName}\` a \`formula\` field (computed on `
         + 'every read; a `formula` cannot be totalled). To keep a stored copy current, write it as a snapshot '
         + `field with a flow on ${where} that updates the records pointing at it when the value changes. To `
-        + 'repair values that have drifted, run `os migrate stored-expressions --changed --apply` (without '
+        + `repair values that have drifted, run \`os migrate stored-expressions --object ${objectName ?? 'OBJECT'} `
+        + `--field ${fieldName} --changed --apply\` (scoped to this field: without \`--object\` and \`--field\`, `
+        + '`--changed` recomputes every stored value that differs, and one reading the clock always does; without '
         + '`--apply` it is a dry run that writes nothing).',
     });
   }

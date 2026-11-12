@@ -3578,6 +3578,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       ? [...optionHolders, { root: 'parent', types: masterTypes, owner: master }]
       : optionHolders;
 
+    // The served body is `typedObjects[objectPosition]`: `objectsAsServed`
+    // answers its objects positionally with `recordsOf(stack.objects)`, and
+    // `objectsWithoutTiedFields` keeps the positions. Read through
+    // `fieldEntries`, so the #5017 key scan sees no new read.
+    const servedSelf = typedObjects[objectPosition];
     /**
      * [#32529] This object's fields by name AS THE REGISTRY SERVES THEM — what a
      * stored expression's hop is judged through, since the engine plans the hop
@@ -3587,11 +3592,6 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * columns the registry injects (`owner_id`, `created_by`, `updated_by` are
      * `lookup`s to `sys_user`), which never shadow a declared one.
      */
-    // The served body is `typedObjects[objectPosition]`: `objectsAsServed`
-    // answers its objects positionally with `recordsOf(stack.objects)`, and
-    // `objectsWithoutTiedFields` keeps the positions. Read through
-    // `fieldEntries`, so the #5017 key scan sees no new read.
-    const servedSelf = typedObjects[objectPosition];
     const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
     for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
     for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
@@ -3674,7 +3674,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // record, of the clock, of the acting user or of a permission is
         // warned. A `formula` answers nothing here.
         const storedSource = celSourceOf(f.expression);
-        for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name))) {
+        for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name), objectName)) {
           issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });
         }
       }
