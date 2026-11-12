@@ -31,7 +31,7 @@
 
 import { overlayMemberWhere } from './migrations/overlay-index.js';
 import { storedRowDocument } from './item-lock.js';
-import { installedManifestsOf, itemDiscriminator } from '@objectstack/metadata-core';
+import { installedManifestsOf, isTenantAuthored, itemDiscriminator } from '@objectstack/metadata-core';
 import { isPackageScopedType } from '@objectstack/core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec/ui';
@@ -494,7 +494,15 @@ export class ProtocolRegistryHydrationFacet {
         // pull reports it (#20913).
         const rowName = String((data as any).name);
         const scoped = isPackageScopedType(canonicalType);
-        if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) return false;
+        // A copy of it registered before the package arrived (the write-through
+        // of a save the seal did not refuse yet) is lifted, so the registry
+        // answers the package's item whichever came first.
+        if (scoped && canonicalType !== 'flow' && !options.packageId && host.declinesStoredRow(type, rowName, { type, package_id: null, metadata: data })) {
+            if (isTenantAuthored(registry.getItem?.(type, rowName)) && typeof registry.removeRuntimeShadow === 'function') {
+                registry.removeRuntimeShadow(type, rowName, bundleMemberOf(type, data));
+            }
+            return false;
+        }
         // [#23074] The artifact of the row's OWN bundle member: an overlay of
         // a member the package does not ship has none, so it registers as the
         // tenant row it is ({@link mergeArtifactProtection}). It used to take
