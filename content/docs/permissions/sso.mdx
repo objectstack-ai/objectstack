@@ -316,25 +316,6 @@ const done = await fetch('http://localhost:3000/api/v1/auth/admin/sso/verify-dom
 // → { success: true, data: { providerId, verified: true, message } }
 ```
 
-What verification decides, with it on:
-
-- **A provider signs nobody in until its domain is verified.** Step 2 proves
-  every domain the provider lists, and one verified flag covers the whole list.
-  Editing a provider's domain list clears the flag until every listed domain is
-  proven again.
-- **A provider creates an account only for an email address at a domain it has
-  proven.** The address's domain must equal one of the provider's listed,
-  verified domains. A subdomain counts only when it is itself listed and
-  verified, and a parent never counts for a listed subdomain. Case, a trailing
-  dot, and the Unicode and punycode forms of a name are one domain. Any other
-  new account is refused with `error=EMAIL_DOMAIN_NOT_ALLOWED`, and nothing is
-  created. No audience posture, invitation or `allowJit` setting relaxes this.
-- **Accounts that already exist are not re-checked.** A person who already has
-  an account signs in as before.
-
-So if your people first sign in with addresses at a subdomain or at another
-domain, list each such domain on the provider and verify it.
-
 Both take `providerId` and refuse with **400 `INVALID_REQUEST`** when it is
 missing. Step 2 reports `NO_PENDING_VERIFICATION` if you call it before step 1,
 and `DOMAIN_VERIFICATION_FAILED` when the TXT record is not visible yet — retry
@@ -351,6 +332,30 @@ caller gets **401 `UNAUTHENTICATED`** and a signed-in non-platform-admin **403
 `PERMISSION_DENIED`** — identity is answered before capability, so a stranger
 cannot use these routes to probe which features an environment has enabled.
 </Callout>
+
+What verification decides, with it on:
+
+- **A provider signs nobody in until its domain is verified.** Step 2 proves
+  every domain the provider lists, and one verified flag covers the whole list.
+  Editing a provider's domain list clears the flag until every listed domain is
+  proven again.
+- **A provider creates an account only for an email address at a domain it has
+  proven.** The address's domain must equal one of the provider's listed,
+  verified domains. A subdomain counts only when it is itself listed and
+  verified, and a parent never counts for a listed subdomain. A listed entry
+  counts only for the host the provider proved, so write each entry as a bare
+  host name (`acme.com`, not `https://acme.com` and not `acme.com:443`): an
+  entry written any other way proves nothing. Case, and the Unicode and
+  punycode forms of an internationalised name, are one domain; an address
+  written in any other spelling of a domain (a trailing dot, full-width
+  letters) is refused. Any other new account is refused with
+  `error=EMAIL_DOMAIN_NOT_ALLOWED`, and nothing is created. No audience
+  posture, invitation, first-user carve-out or `allowJit` setting relaxes this.
+- **Accounts that already exist are not re-checked.** A person who already has
+  an account signs in as before.
+
+So if your people first sign in with addresses at a subdomain or at another
+domain, list each such domain on the provider as a bare host name and verify it.
 
 ### Why an OIDC sign-in was refused
 

@@ -45,12 +45,23 @@ const deps = (over: Partial<SsoAccountDomainRuleDeps> = {}): SsoAccountDomainRul
 const REFUSED = { error: EMAIL_DOMAIN_NOT_ALLOWED, errorDescription: SSO_ACCOUNT_DOMAIN_REFUSAL_DESCRIPTION };
 
 describe('an address is compared in the one spelling the provider list is parsed in', () => {
-  it('case, a trailing dot, and punycode against Unicode are one domain', () => {
+  it('case, and punycode against Unicode for an internationalised name, are one domain', () => {
     expect(ssoAddressDomain('Bob@ACME.Com')).toBe('acme.com');
-    expect(ssoAddressDomain('bob@acme.com.')).toBe('acme.com');
     expect(ssoAddressDomain('bob@bücher.de')).toBe('xn--bcher-kva.de');
+    expect(ssoAddressDomain('bob@BÜCHER.de')).toBe('xn--bcher-kva.de');
     expect(ssoAddressDomain('bob@XN--BCHER-KVA.de')).toBe('xn--bcher-kva.de');
     expect(ssoProviderProvenDomains(row({ domain: 'Bücher.DE.' }), PROVIDER)).toEqual(['xn--bcher-kva.de']);
+  });
+
+  it('a domain part that only folds into a spelling has no domain: full-width letters, a variation selector, a trailing dot', () => {
+    for (const email of [
+      'bob@\uFF41\uFF43\uFF4D\uFF45.com',
+      'bob@acme\uFE0F.com',
+      'bob@acme.com.',
+      'bob@127.1',
+    ]) {
+      expect(ssoAddressDomain(email), JSON.stringify(email)).toBeNull();
+    }
   });
 
   it('the domain is everything after the last @', () => {
@@ -88,6 +99,31 @@ describe("a provider's verified domains are its listed domains, only when domain
     for (const domain_verified of [false, 0, null, '1', 'true', undefined]) {
       expect(ssoProviderProvenDomains(row({ domain_verified }), PROVIDER), String(domain_verified)).toEqual([]);
     }
+  });
+
+  it('an entry counts only for the host the provider proved: one not written as a bare host proves nothing', () => {
+    for (const domain of [
+      'victim.example\\@evil.example',
+      'victim.example\\evil.example',
+      'victim.example@evil.example',
+      'victim.example?evil.example',
+      'victim.example#evil.example',
+      'victim%2eexample',
+      'victim.example:443',
+      'victim.example/x',
+      'https://victim.example',
+      '\uFF56ictim.example',
+    ]) {
+      expect(ssoProviderProvenDomains(row({ domain }), PROVIDER), domain).toEqual([]);
+      expect(ssoAddressAtProvenDomain('ceo@victim.example', ssoProviderProvenDomains(row({ domain }), PROVIDER)), domain).toBe(false);
+    }
+  });
+
+  it('a good entry beside one that proves nothing still counts', () => {
+    const proven = ssoProviderProvenDomains(row({ domain: 'victim.example\\@evil.example, acme.com' }), PROVIDER);
+    expect(proven).toEqual(['acme.com']);
+    expect(ssoAddressAtProvenDomain('bob@acme.com', proven)).toBe(true);
+    expect(ssoAddressAtProvenDomain('ceo@victim.example', proven)).toBe(false);
   });
 
   it("none, for another provider's row or no row", () => {

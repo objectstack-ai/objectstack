@@ -11,19 +11,28 @@
  * sign-in through an `@better-auth/sso` provider (SAML or OIDC) is admitted
  * only when the address's domain is one of the provider's verified domains:
  *
- *   - a provider's verified domains are every entry of its comma-separated
+ *   - a provider's verified domains are the entries of its comma-separated
  *     `sys_sso_provider.domain`, if and only if its `domain_verified` reads on.
  *     One flag covers the whole list (the verification proves every listed
  *     domain, and editing the list clears it). Otherwise it has none;
+ *   - an entry counts only for the host the provider proved: it must already
+ *     be written as a bare host name (letters, digits, marks, `.` and `-`,
+ *     one trailing root dot allowed) in its one spelling. An entry written any
+ *     other way (a URL, a port, a path, a user part, an escape) proves
+ *     nothing, and the other entries of the list still count;
  *   - the address's domain is everything after its last `@`. It is refused
- *     unless it is already a bare host: letters, digits, marks, `.` and `-`
- *     only, so a port, a path, a query, an escape or whitespace never reaches
- *     the comparison;
- *   - both sides are compared in one spelling, the one the provider list is
- *     parsed in ({@link providerDomains}): the bare lower-case ASCII host, a
- *     trailing root dot dropped, an internationalised name in its punycode
- *     form. Then by equality only: a subdomain counts only when it is itself
- *     listed (and verified), and a parent never counts for a listed child.
+ *     unless it is already a bare host in its one spelling: a port, a path, a
+ *     query, an escape, whitespace or a trailing dot never reaches the
+ *     comparison;
+ *   - the one spelling of a host is the bare lower-case ASCII host the
+ *     provider list is parsed into ({@link providerDomains}), and a host
+ *     counts only when it is written that way, or is an internationalised name
+ *     written in Unicode whose punycode form reads back as exactly what was
+ *     written (`bücher.de` and `xn--bcher-kva.de` are one domain). A host that
+ *     only folds into a spelling (full-width letters, an invisible variation
+ *     selector) is refused. Then by equality only: a subdomain counts only
+ *     when it is itself listed (and verified), and a parent never counts for a
+ *     listed child.
  *
  * ## Where it is judged
  *
@@ -49,6 +58,7 @@
  * no domain.
  */
 
+import { domainToUnicode } from 'node:url';
 import { EMAIL_DOMAIN_NOT_ALLOWED, extractEmailDomain } from './audience-posture.js';
 import { SSO_PROVIDER_OBJECT } from './sso-client-secret.js';
 import { providerDomains } from './sso-provider-lifecycle.js';
@@ -70,37 +80,75 @@ export const SSO_ACCOUNT_DOMAIN_REFUSAL_DESCRIPTION =
   'domain it has proven. Nothing was created.';
 
 /**
- * An address's domain part, when it is already a bare host: one or more
- * letters, marks, digits, `.` or `-`. One character class, no backtracking.
+ * A host written as a bare host: one or more letters, marks, digits, `.` or
+ * `-`. One character class, no backtracking.
  */
 const BARE_HOST_CHARS = /^[\p{L}\p{M}\p{N}.-]+$/u;
 
 /**
- * The address's domain in the one spelling the provider list is compared in,
- * or `null` when the address has none or its domain part is not already a
- * bare host (empty, or holding a port, a path, a query, an escape, a comma or
- * whitespace). `Bob@ACME.com.` and `bob@acme.com` are one domain; so are
- * `bücher.de` and `xn--bcher-kva.de`.
+ * `host` in its one spelling, or `null` when it is not already written that
+ * way. `host` is lower-cased first; it must then be a bare host whose parse
+ * ({@link providerDomains}, the WHATWG host parser) changes nothing, or a
+ * Unicode internationalised name whose punycode form reads back as exactly
+ * `host`. Any other fold (full-width letters, a variation selector, a percent
+ * escape, a numeric IPv4 shorthand, a trailing dot) answers `null`.
  */
-export function ssoAddressDomain(email: unknown): string | null {
-  const domain = extractEmailDomain(email);
-  if (!domain || !BARE_HOST_CHARS.test(domain)) return null;
+function oneSpelling(host: string): string | null {
+  const lowered = host.toLowerCase();
+  if (!lowered || !BARE_HOST_CHARS.test(lowered)) return null;
   // No comma can reach here, so the provider-list parse yields one entry at most.
-  const [spelled] = providerDomains(domain);
-  return spelled ? spelled : null;
+  const [spelled] = providerDomains(lowered);
+  if (!spelled) return null;
+  if (spelled === lowered) return spelled;
+  const unicode = domainToUnicode(spelled);
+  return unicode === lowered && unicode !== spelled ? spelled : null;
 }
 
 /**
- * The domains a provider row has proven: every parsed entry of its `domain`
- * when `domain_verified` reads on (`1` / `true`), otherwise none. A row that
- * is not the provider's own (another `provider_id`) has proven nothing.
+ * The address's domain in its one spelling, or `null` when the address has
+ * none or its domain part is not already written that way (empty, or holding
+ * a port, a path, a query, an escape, a comma, whitespace or a trailing dot).
+ * `Bob@ACME.com` and `bob@acme.com` are one domain; so are `bücher.de` and
+ * `xn--bcher-kva.de`.
+ */
+export function ssoAddressDomain(email: unknown): string | null {
+  const domain = extractEmailDomain(email);
+  if (!domain || typeof email !== 'string') return null;
+  // `extractEmailDomain` trims: whitespace around the domain part is refused here.
+  if (email.slice(email.lastIndexOf('@') + 1).toLowerCase() !== domain) return null;
+  return oneSpelling(domain);
+}
+
+/**
+ * One stored `domain` entry as the host it proves, or `null` when it proves
+ * none: trimmed, one trailing root dot dropped, and then written in its one
+ * spelling ({@link oneSpelling}). An entry written as a URL, with a port, a
+ * path, a user part or an escape proves nothing.
+ */
+function provenEntryHost(entry: string): string | null {
+  const trimmed = entry.trim();
+  return oneSpelling(trimmed.endsWith('.') ? trimmed.slice(0, -1) : trimmed);
+}
+
+/**
+ * The domains a provider row has proven: every entry of its `domain` that
+ * names the host the provider proved ({@link provenEntryHost}), when
+ * `domain_verified` reads on (`1` / `true`); otherwise none. A row that is not
+ * the provider's own (another `provider_id`) has proven nothing.
  */
 export function ssoProviderProvenDomains(row: unknown, providerId: string): string[] {
   if (!row || typeof row !== 'object' || !providerId) return [];
   const record = row as Record<string, unknown>;
   if (record.provider_id !== providerId) return [];
   if (!ssoToggleStoredOn(record[SSO_DOMAIN_VERIFIED_FIELD])) return [];
-  return providerDomains(record[SSO_DOMAIN_FIELD]);
+  const domain = record[SSO_DOMAIN_FIELD];
+  if (typeof domain !== 'string') return [];
+  const proven = new Set<string>();
+  for (const entry of domain.split(',')) {
+    const host = provenEntryHost(entry);
+    if (host) proven.add(host);
+  }
+  return [...proven];
 }
 
 /** Whether `email` is at one of `provenDomains`, compared in one spelling, by equality. */

@@ -1247,6 +1247,9 @@ describe('with SSO domain verification on, an OIDC provider creates an account o
     ['an asserted email that is not an address', 'bob.acme.com'],
     ['a domain part with a port', 'bob@acme.com:443'],
     ['a domain part with a path', 'bob@acme.com/x'],
+    ['a domain part with a trailing dot', 'bob@acme.com.'],
+    ['a full-width spelling of a listed domain', 'bob@\uFF41\uFF43\uFF4D\uFF45.com'],
+    ['an address at a listed entry that is not written as a bare host', 'ceo@victim.example', 'victim.example\\@evil.example'],
   ];
   for (const [what, email, domain] of refused) {
     it(`refuses ${what}, and writes no user, account, membership or session`, async () => {
@@ -1255,16 +1258,31 @@ describe('with SSO domain verification on, an OIDC provider creates an account o
     });
   }
 
-  it('case, a trailing dot, and punycode against Unicode are one domain', async () => {
+  it('case, and punycode against Unicode for an internationalised name, are one domain', async () => {
     for (const [domain, email] of [
       ['acme.com', 'Bob@ACME.com'],
-      ['acme.com', 'bob@acme.com.'],
       ['bücher.de', 'bob@xn--bcher-kva.de'],
       ['xn--bcher-kva.de', 'bob@bücher.de'],
     ]) {
       const rp = await verifiedRp(domain);
       expectAdmitted(await signInThroughIdp(rp, await idToken({ email })));
     }
+  });
+
+  it('no carve-out: the first human of a deployment, at an outside domain, is refused', async () => {
+    // JIT off: without the rule, the first-human carve-out alone would admit.
+    const rp = await makeRp({ config: VERIFICATION_ON, provider: { domainVerified: true, allowJit: false } });
+    const email = 'bob@other.example';
+    expectRefused(rp, await signInThroughIdp(rp, await idToken({ email })));
+    expect(rp.engine.tables.get('sys_user') ?? []).toEqual([]);
+  });
+
+  it('no carve-out: an outside-domain address holding a pending invitation is refused', async () => {
+    // JIT off: without the rule, the invitation alone would admit.
+    const rp = await verifiedRp('acme.com', { allowJit: false });
+    const email = 'bob@other.example';
+    await inviteForAudienceGate(rp.engine, email);
+    expectRefused(rp, await signInThroughIdp(rp, await idToken({ email })));
   });
 
   it('CONTROL (stays green under ablation): a provider whose domain is not verified signs nobody in', async () => {
