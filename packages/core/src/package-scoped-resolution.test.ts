@@ -235,7 +235,9 @@ describe('the types narrowed to the namespace (ADR-0150 D2/D9)', () => {
       expect(isPackageScopedType(type), type).toBe(true);
       expect(isNamespaceScopedBareNameType(type), type).toBe(true);
     }
-    expect(isNamespaceScopedBareNameType('flow')).toBe(false);
+    // [#31696] The flow has narrowed (it is in the set above); a webhook has not.
+    expect(isNamespaceScopedBareNameType('flow')).toBe(true);
+    expect(isNamespaceScopedBareNameType('webhook')).toBe(false);
     expect(isNamespaceScopedBareNameType(undefined)).toBe(false);
   });
 });

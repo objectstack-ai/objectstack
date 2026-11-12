@@ -25,6 +25,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ApiEndpointSchema } from '@objectstack/spec/api';
 
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// dispatcher chain this file reaches loads it dynamically.
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 import { executeEndpointTarget, type EndpointExecutionContext } from './endpoint-executor.js';
 import { flowServiceForCaller, flowSlotView } from './flow-slot-view.js';
