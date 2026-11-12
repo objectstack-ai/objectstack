@@ -435,7 +435,15 @@ export function readStoreEntry(
   if (found.length === 0) {
     return { found: false, settled: answers.some((answer) => answer === 'settled') };
   }
-  if (!isPackageCaller(packageId)) refuseAcrossOwners(store, type, name, found.map((answer) => answer.key));
+  if (!isPackageCaller(packageId)) {
+    const keys = found.map((answer) => answer.key);
+    refuseAcrossOwners(store, type, name, keys);
+    // [ADR-0150 D3, #32365] The environment's own item answers first: a
+    // package-less slot beside one package's answers, whatever object each
+    // binds the name to, never the one written last between them.
+    const packageless = keys.filter((key) => slotPackageOf(key) === undefined);
+    if (packageless.length > 0) return { found: true, data: store.get(writtenLast(store, packageless)) };
+  }
   return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
 }
 
@@ -456,26 +464,43 @@ export function readStoreEntry(
 function refuseAcrossOwners(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
   if (!OWNER_KEYED_SLOT_TYPES.has(type) || keys.length < 2) return;
   const objectsOf = new Map<string, Array<string | undefined>>();
+  const packagelessObjects: Array<string | undefined> = [];
   for (const key of keys) {
     const packageId = slotPackageOf(key);
-    if (packageId === undefined) continue;
+    if (packageId === undefined) {
+      packagelessObjects.push(boundObjectOf(store.get(key)));
+      continue;
+    }
     const objects = objectsOf.get(packageId) ?? [];
     objects.push(boundObjectOf(store.get(key)));
     objectsOf.set(packageId, objects);
   }
   if (objectsOf.size < 2) return;
+  // [#32365] …and the environment's own item beside them is named too: a
+  // refusal names every candidate, and with two packages it answers no one.
   const base: Omit<PackageScopedRefusal, 'message'> = {
     status: 'refused',
     reason: 'ambiguous-in-environment',
     type: type as PackageScopedResolvableType,
     name,
     callerPackageId: null,
-    candidates: [...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
+    candidates: [
+      ...[...objectsOf.keys()].map((packageId) => ({ kind: 'package' as const, packageId })),
+      ...(packagelessObjects.length > 0 ? [{ kind: 'environment' as const }] : []),
+    ],
   };
+  const sentences = [packageScopedActionOwnersSentence(objectsOf)];
+  if (packagelessObjects.length > 0) sentences.push(environmentOwnerSentence(packagelessObjects));
   throw new PackageScopedNameRefusedError({
     ...base,
-    message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsOf)}`,
+    message: `${packageScopedRefusalMessage(base)} ${sentences.join(' ')}`,
   });
+}
+
+/** [#32365] The sentence a refusal appends for the environment's own item(s) of an action name. */
+function environmentOwnerSentence(objects: ReadonlyArray<string | undefined>): string {
+  const named = [...new Set(objects)].map((object) => (object === undefined ? 'no object' : `object "${object}"`));
+  return `The environment's own item binds it to ${named.join(' and ')}.`;
 }
 
 /**
@@ -500,6 +525,16 @@ function readIdentity(
     packageScopedHolderSource(holders.map((holder) => [holder, slotKey(holder, identity)] as const)),
     () => new Set<string>(),
   );
-  if (resolution.status === 'refused') throw new PackageScopedNameRefusedError(resolution);
+  if (resolution.status === 'refused') {
+    // [ADR-0150 D3, #32365] The identity's package-less slot beside two
+    // packages' answers no one either (a customization it cannot say whose),
+    // and the refusal names it: every candidate is named.
+    if (!store.has(identity)) throw new PackageScopedNameRefusedError(resolution);
+    const base: Omit<PackageScopedRefusal, 'message'> = {
+      ...resolution,
+      candidates: [...resolution.candidates, { kind: 'environment' as const }],
+    };
+    throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+  }
   return resolution.status === 'resolved' ? { key: resolution.item as string } : undefined;
 }

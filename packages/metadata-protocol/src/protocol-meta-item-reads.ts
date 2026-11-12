@@ -137,17 +137,25 @@ function isDisabledHolder(registry: ActionHolderRegistry | undefined, packageId:
  * @throws {PackageScopedNameRefusedError} when two or more enabled packages hold the name.
  * @throws `objectLessRefused` when it is set and the packages alone are fewer than two.
  */
-export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, name: string, objectLessRefused?: unknown): void {
+export function refuseActionHeldByPackages(
+    host: Pick<ProtocolHost, 'engine'>,
+    name: string,
+    objectLessRefused?: unknown,
+    packageless?: PackagelessActionHolder,
+): void {
     const registry = actionHolderRegistry(host);
-    const holders = registry
-        ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id))
-        : [];
-    if (!registry || holders.length < 2) {
+    const holders = enabledActionHolders(registry, name);
+    // [#32365] A package-less item the bare read may not answer beside a
+    // package holder is one more holder ({@link judgeBareActionRead}).
+    const packagelessHolds = packageless !== undefined && holders.length > 0;
+    if (!registry || (holders.length < 2 && !packagelessHolds)) {
         if (objectLessRefused !== undefined) throw objectLessRefused;
         return;
     }
     const narrower = objectLessRefused === undefined ? undefined : packageScopedRefusalOf(objectLessRefused);
-    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind !== 'package' || !holders.includes(candidate.packageId));
+    const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind === 'package'
+        ? !holders.includes(candidate.packageId)
+        : !(packagelessHolds && candidate.kind === packageless.candidate.kind));
     const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(registry.getPackageScopedItem('action', name, id))]] as const));
     const base: Omit<PackageScopedRefusal, 'message'> = {
         status: 'refused',
@@ -155,11 +163,127 @@ export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, n
         type: 'action',
         name,
         callerPackageId: null,
-        candidates: [...holders.map((packageId) => ({ kind: 'package' as const, packageId })), ...extra],
+        candidates: [
+            ...holders.map((packageId) => ({ kind: 'package' as const, packageId })),
+            ...extra,
+            ...(packagelessHolds ? [packageless.candidate] : []),
+        ],
     };
+    const owners = [packageScopedActionOwnersSentence(objectsByPackage)];
+    if (packagelessHolds) owners.push(packagelessOwnerSentence(packageless));
     throw new PackageScopedNameRefusedError({
         ...base,
-        message: `${packageScopedRefusalMessage(base)} ${packageScopedActionOwnersSentence(objectsByPackage)}`,
+        message: `${packageScopedRefusalMessage(base)} ${owners.join(' ')}`,
+    });
+}
+
+/**
+ * [ADR-0150 D3, #32365] The package-less item of an action name the bare read
+ * weighs beside its package holders: whose it is (the environment's own, or
+ * the platform's), as a refusal names it, and the object it binds the name to.
+ */
+export interface PackagelessActionHolder {
+    readonly candidate: { readonly kind: 'environment' } | { readonly kind: 'platform' };
+    readonly object: string | undefined;
+    readonly item: unknown;
+}
+
+/** The sentence a refusal appends for the package-less holder it names. */
+function packagelessOwnerSentence(packageless: PackagelessActionHolder): string {
+    const whose = packageless.candidate.kind === 'environment' ? 'The environment\'s own item' : 'The platform\'s item';
+    return `${whose} binds it to ${packageless.object === undefined ? 'no object' : `object "${packageless.object}"`}.`;
+}
+
+/** The enabled packages holding an action name in the registry, in its order (#25308: a disabled package holds nothing). */
+function enabledActionHolders(registry: ActionHolderRegistry | undefined, name: string): string[] {
+    return registry ? (registry.packageScopedHoldersOf('action', name) ?? []).filter((id) => !isDisabledHolder(registry, id)) : [];
+}
+
+/**
+ * The registry's package-less entry of an action name: the bare slot's item
+ * (which `getItem` answers first) when it carries no package — none, `''` or
+ * the `sys_metadata` provenance sentinel — else `undefined`.
+ */
+function packagelessActionEntry(host: Pick<ProtocolHost, 'engine'>, name: string): unknown {
+    const registry = (host.engine as { registry?: { getItem?(type: string, name: string): unknown } } | undefined)?.registry;
+    if (typeof registry?.getItem !== 'function') return undefined;
+    const item = registry.getItem('action', name);
+    if (item === null || typeof item !== 'object') return undefined;
+    const stamped = (item as { _packageId?: unknown })._packageId;
+    return typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' ? undefined : item;
+}
+
+/**
+ * [ADR-0150 D3/D5, #32365] The bare by-name read of an action (`GET
+ * /meta/action/NAME`, its `/layers`): judged over EVERY holder of the name,
+ * the package-less one included, before any layer is read. Answers the item
+ * the read serves when the rule picks one, `undefined` when it leaves the
+ * layers' own answer standing, and throws the refusal otherwise:
+ *
+ *  - **the environment's own item** (a package-less registry entry the
+ *    environment's store holds an active package-less row of, on the same
+ *    object or none) answers first beside ONE package holder (D3), whatever
+ *    object each binds the name to. Beside two or more it is refused, naming
+ *    every package AND the environment: the refusal names every candidate.
+ *  - **the platform's item** (a package-less entry the store holds no row
+ *    of: host code or a plugin) beside any package holder is refused naming
+ *    both — the rule #31697 applies to an object-less one, now on any object.
+ *  - **one enabled package holder and no package-less item**: that holder's
+ *    item ({@link ActionHolderRegistry.getPackageScopedItem}), never the
+ *    registry's first composite, which is a DISABLED package's when it
+ *    registered first (the face would then withhold it, and the read answered
+ *    no item though an enabled package holds the name).
+ *  - two or more enabled package holders: refused, as {@link refuseActionHeldByPackages}.
+ *
+ * The store is read only when a package-less item stands beside a package
+ * holder, and a read that throws travels to the caller (ADR-0110 D3).
+ *
+ * @throws {PackageScopedNameRefusedError} as above.
+ * @throws `objectLessRefused` when it is set and nothing wider refuses.
+ */
+export async function judgeBareActionRead(
+    host: Pick<ProtocolHost, 'engine' | 'readItemActiveRows'>,
+    name: string,
+    objectLessRefused?: unknown,
+): Promise<{ item: unknown } | undefined> {
+    const registry = actionHolderRegistry(host);
+    const holders = enabledActionHolders(registry, name);
+    const entry = holders.length > 0 ? packagelessActionEntry(host, name) : undefined;
+    let packageless: PackagelessActionHolder | undefined;
+    if (entry !== undefined) {
+        const object = actionObjectOf(entry);
+        const environment = storesPackagelessActionRow(await host.readItemActiveRows('action', name), object);
+        if (environment && holders.length === 1 && objectLessRefused === undefined) return { item: entry };
+        packageless = { candidate: environment ? { kind: 'environment' } : { kind: 'platform' }, object, item: entry };
+    }
+    refuseActionHeldByPackages(host, name, objectLessRefused, packageless);
+    if (registry && holders.length === 1 && entry === undefined) {
+        const item = registry.getPackageScopedItem('action', name, holders[0]!);
+        if (item !== undefined) return { item };
+    }
+    return undefined;
+}
+
+/**
+ * Does the environment's store hold an active package-less row of the action
+ * that binds its name to `object` (`undefined`: none)? Such a row is the
+ * environment's own item; a package-less registry entry with none behind it
+ * is the platform's (objectql's `storesObjectLessPackagelessRow`, on any
+ * object).
+ */
+function storesPackagelessActionRow(
+    rows: readonly { package_id?: string | null; metadata?: unknown }[] | undefined,
+    object: string | undefined,
+): boolean {
+    return (rows ?? []).some((row) => {
+        if (row?.package_id !== null && row?.package_id !== undefined && row?.package_id !== '') return false;
+        let body: unknown;
+        try {
+            body = typeof row?.metadata === 'string' ? JSON.parse(row.metadata) : row?.metadata;
+        } catch {
+            return false;
+        }
+        return body !== null && typeof body === 'object' && actionObjectOf(body) === object;
     });
 }
 
@@ -173,15 +297,19 @@ export function refuseActionHeldByPackages(host: Pick<ProtocolHost, 'engine'>, n
  * For an `action` the store counts every package holding a slot, the disabled
  * ones too, while a disabled package holds nothing to a by-name action read
  * ({@link refuseActionHeldByPackages} has already judged the enabled ones): a
- * refusal that names fewer than two enabled packages, and nothing else, falls
- * through as before.
+ * refusal that names fewer than two enabled packages falls through as before,
+ * [#32365] the environment's item it may name beside them included — that one
+ * is the bare read's own judge's ({@link judgeBareActionRead}).
  */
 export function rethrowPackageScopedRefusal(host: Pick<ProtocolHost, 'engine'>, type: string, error: unknown): void {
     const refusal = packageScopedRefusalOf(error);
     if (refusal === undefined) return;
     if (type === 'action') {
         const registry = actionHolderRegistry(host);
-        const live = refusal.candidates.filter((c) => c.kind !== 'package' || !isDisabledHolder(registry, c.packageId));
+        // [#32365] Counted over the packages alone: the environment's item the
+        // store names beside them refuses only with two enabled packages, and
+        // with fewer the bare read's own judge answers it.
+        const live = refusal.candidates.filter((c) => c.kind === 'package' && !isDisabledHolder(registry, c.packageId));
         if (live.length < 2) return;
     }
     throw error;
@@ -266,6 +394,12 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // object-less judge's refusal is merged into that one (review 6781770671
     // S5), so a third package bound to an object is named beside two
     // object-less holders; alone, it is thrown as before.
+    // [ADR-0150 D3, #32365] …over every holder, the package-less item
+    // included: the environment's own answers first beside one package, the
+    // platform's is refused beside any, and one enabled package's answers
+    // even when a disabled package's registered first ({@link judgeBareActionRead}).
+    // Step 3 serves that answer in place of `getItem`'s.
+    let bareActionAnswer: { item: unknown } | undefined;
     if (!request.packageId && request.type === 'action') {
         let objectLessRefused: unknown;
         if (typeof registry?.refuseAmbiguousObjectLessAction === 'function') {
@@ -276,7 +410,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 objectLessRefused = error;
             }
         }
-        refuseActionHeldByPackages(host, request.name, objectLessRefused);
+        bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused);
     }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)
@@ -776,6 +910,8 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
         // first-composite read and no plural-spelling retry beside it.
         if (packagelessScopedRead) {
             item = packagelessScopedRead.item;
+        } else if (bareActionAnswer) {
+            item = bareActionAnswer.item;
         } else {
             item = host.engine.registry.getItem(request.type, request.name, request.packageId, member);
             if (item === undefined) {

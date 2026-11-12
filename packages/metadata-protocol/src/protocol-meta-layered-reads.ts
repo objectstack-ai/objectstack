@@ -56,7 +56,7 @@ import {
 import type { ProtocolHost } from './protocol-host.js';
 import { admitExactQualifier, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
-import { refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
+import { judgeBareActionRead, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
 import { boundPackageOf } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
@@ -160,7 +160,14 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // [ADR-0150 D3, #32244] …and, as there, an action name two enabled
     // packages hold on any object key is refused naming each with its object
     // ({@link refuseActionHeldByPackages}).
-    if (!request.packageId && request.type === 'action') refuseActionHeldByPackages(host, request.name);
+    // [ADR-0150 D3, #32365] …judged over every holder, the package-less item
+    // included, as the plain read judges it ({@link judgeBareActionRead}):
+    // the item it answers is this read's code layer below, never the
+    // registry's first composite (a disabled package's, when it registered
+    // first) nor a package's artifact beside the environment's own item.
+    const bareActionAnswer = !request.packageId && request.type === 'action'
+        ? await judgeBareActionRead(host, request.name)
+        : undefined;
     await admitExactQualifier(host, { type: request.type, name: request.name, packageId: request.packageId, member });
 
     // [ADR-0131 D6] Environment → code: the overlay layer is the
@@ -248,9 +255,19 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             item !== undefined && isTenantAuthored(item) ? undefined : item;
         const namedMemberOnly = (item: unknown): unknown =>
             member !== undefined && item !== undefined && !isWantedMember(item) ? undefined : item;
-        const artifact = host.lookupArtifactItem(request.type, request.name, request.packageId, wantedMember);
+        // [#32365] The bare action read's judged answer: the one enabled
+        // holder's artifact (looked up at that holder), or the environment's
+        // own item (a runtime registration; a stored row is the overlay layer).
+        const judgedPackageId = typeof (bareActionAnswer?.item as { _packageId?: unknown } | undefined)?._packageId === 'string'
+            ? (bareActionAnswer!.item as { _packageId: string })._packageId
+            : undefined;
+        const artifact = bareActionAnswer !== undefined && judgedPackageId === undefined
+            ? undefined
+            : host.lookupArtifactItem(request.type, request.name, request.packageId || judgedPackageId, wantedMember);
         let regItem = (artifact !== undefined && isWantedMember(artifact) ? artifact : undefined)
-            ?? namedMemberOnly(runtimeOnly(host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
+            ?? namedMemberOnly(runtimeOnly(bareActionAnswer !== undefined
+                ? bareActionAnswer.item
+                : host.engine.registry.getItem(request.type, request.name, request.packageId, member)));
         if (regItem === undefined) {
             const alt = PLURAL_TO_SINGULAR[request.type] ?? SINGULAR_TO_PLURAL[request.type];
             if (alt) regItem = namedMemberOnly(runtimeOnly(host.engine.registry.getItem(alt, request.name, request.packageId, member)));
