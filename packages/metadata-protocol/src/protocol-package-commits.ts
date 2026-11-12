@@ -77,6 +77,7 @@ import {
     mutationEventMember,
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
+import { mutationEventPackage } from './protocol-mutation-package.js';
 import { compareAuditInstants, isoFromValidDate } from './protocol-version-tokens.js';
 import {
     clientFacingFailureCode,
@@ -1454,7 +1455,8 @@ export class ProtocolPackageCommitsFacet {
                     // #6602 gate this parameter carries asks "is this row
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
-                    await host.restoreArtifactRegistryView(it.type, it.name, null, member);
+                    // [#32366] For the package whose commit is reverted.
+                    await host.restoreArtifactRegistryView(it.type, it.name, null, commitPackageId, member);
                     // [#14179] …and announce it on the ONE choke point,
                     // {@link emitMetadataMutation}, exactly as the sibling
                     // delete caller {@link deleteMetaItem} does after its own
@@ -1487,6 +1489,8 @@ export class ProtocolPackageCommitsFacet {
                             state: 'deleted',
                             organizationId: null,
                             ...mutationEventMember(it.type, member),
+                            // [#32451] The commit's package: the row this revert removed.
+                            ...mutationEventPackage(commitPackageId),
                         });
                     }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
@@ -1648,6 +1652,8 @@ export class ProtocolPackageCommitsFacet {
                         state: 'active',
                         organizationId: null,
                         ...mutationEventMember(it.type, member),
+                        // [#32451] The commit's package: the row this revert restored.
+                        ...mutationEventPackage(commitPackageId),
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
                     revertedMembers.push(member);
@@ -2077,6 +2083,8 @@ export class ProtocolPackageCommitsFacet {
                 state: 'active',
                 organizationId: null,
                 ...mutationEventMember(singularType, member),
+                // [#32451] The binding of the row the rollback restored.
+                ...mutationEventPackage(rollbackPackageId),
             });
             return {
                 success: true,

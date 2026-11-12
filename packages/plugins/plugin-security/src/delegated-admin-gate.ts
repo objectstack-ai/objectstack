@@ -1259,14 +1259,18 @@ export class DelegatedAdminGate {
         }
       } else {
         const setName = grantSetNameOf(row) ?? '';
-        // [ADR-0150 D8 R1] The holder the grant names; for an insert the write
-        // seam re-stamps the column from the name with no caller, so that
-        // holder is judged as well.
+        // [ADR-0150 D8 R1, #32538] The holder the grant names, and that holder
+        // alone. The write seam (`stored-permission-set-package-stamp.ts`)
+        // keeps a package the writer names when it holds the name and refuses
+        // one that does not, at any holder count; it never re-stamps it from
+        // the name (#32164). A column that names no holder of the name reads
+        // as no package, so the set judged is the one the reader resolves,
+        // and a grant naming none is judged by its name — two holders refused,
+        // naming both.
         const column = grantPackageOf(row);
         const reason = !setName
           ? 'the grant names no permission set'
-          : (await this.organizationBoundaryFailure(setName, storedPermissionSetScope(column)))
-            ?? (t.next && column !== undefined ? await this.organizationBoundaryFailure(setName) : null);
+          : await this.organizationBoundaryFailure(setName, storedPermissionSetScope(column));
         if (reason) {
           return mayName(t, side, GRANT_SET_NAME_FIELD)
             ? { reason, meta: { permissionSet: setName } }

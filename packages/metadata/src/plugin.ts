@@ -14,7 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, namesSeveralPackagesHold, storedItemPackageId } from './package-slotted-store.js';
+import { PACKAGE_SLOTTED_STORE_TYPES, bundleEntryKey, isBundledStoreType, pluralEntryKeys, storedItemPackageId } from './package-slotted-store.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
@@ -802,7 +802,11 @@ export class MetadataPlugin implements Plugin {
         this.manager = new NodeMetadataManager({
             rootDir,
             watch: effectiveWatch,
-            formats: ['yaml', 'json', 'typescript', 'javascript']
+            formats: ['yaml', 'json', 'typescript', 'javascript'],
+            // [#32154] The kernel's logger arrives in `init()`; until then the
+            // manager holds its debug/info lines and replays them through it,
+            // so they follow the boot's level.
+            awaitHostLogger: true,
         });
 
         // Initialize with default type registry
@@ -813,6 +817,9 @@ export class MetadataPlugin implements Plugin {
         // [#10772] Retained for `destroy()`, which the kernel calls with no
         // context. Assigned before anything that can throw.
         this.initCtx = ctx;
+        // [#32154] Every line of the manager follows the kernel's level from
+        // here, the lines it held since construction included.
+        this.manager.useHostLogger(ctx.logger);
         ctx.logger.info('Initializing Metadata Manager', {
             root: this.options.rootDir || process.cwd(),
             watch: this.options.watch,
@@ -1740,10 +1747,18 @@ const STORED_ROW_LOADER = 'database';
  */
 function contestedNames(type: string, items: unknown[]): ReadonlySet<string> {
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || isBundledStoreType(type)) return new Set();
-    return namesSeveralPackagesHold(items.map((item) => ({
-        name: typeof (item as any)?.name === 'string' ? (item as any).name : null,
-        packageId: storedItemPackageId(item),
-    })));
+    // `pluralEntryKeys` keys a name no package or one package holds once (a
+    // package-less item beside one holder takes that holder's key, D4), and a
+    // name two or more packages hold once per holder: a name of two or more
+    // keys is a name two or more packages hold.
+    const keysOf = new Map<string, Set<string>>();
+    const names = items.map((item) => (item as { name?: unknown } | null)?.name);
+    pluralEntryKeys(type, items.map((item, at) => ({ name: names[at], data: item }))).forEach((key, at) => {
+        const name = names[at];
+        if (key === undefined || typeof name !== 'string') return;
+        keysOf.set(name, (keysOf.get(name) ?? new Set()).add(key));
+    });
+    return new Set([...keysOf].filter(([, keys]) => keys.size > 1).map(([name]) => name));
 }
 
 /**
