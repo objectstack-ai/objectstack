@@ -97,10 +97,33 @@ export interface ObjectStackHonoOptions {
 }
 
 /**
+ * The transport's peer address for a Hono context, when the runtime exposes
+ * one — read as `@objectstack/plugin-hono-server`'s adapter reads it
+ * (`@hono/node-server` puts the Node `IncomingMessage` on `c.env.incoming`).
+ * A runtime that exposes nothing yields `undefined`, never a fabricated value.
+ */
+function readTransportPeerAddress(c: any): string | undefined {
+  try {
+    const incoming = c?.env?.incoming;
+    const address = incoming?.socket?.remoteAddress ?? incoming?.connection?.remoteAddress;
+    return typeof address === 'string' && address.length > 0 ? address : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Auth service interface with handleRequest method
  */
 interface AuthService {
-  handleRequest(request: Request): Promise<Response>;
+  /**
+   * `transport` is what the transport knows about the request that a Fetch
+   * `Request` does not carry — its peer address (`IHttpRequest.remoteAddress`).
+   * `AuthPlugin`'s `AuthManager` reads it (its mount-layer checks and the
+   * client-address trust rule judge by it); an implementation that declares
+   * one parameter ignores it.
+   */
+  handleRequest(request: Request, transport?: { remoteAddress?: string }): Promise<Response>;
   /**
    * Does the auth service's OWN router serve this path? (#15928)
    *
@@ -1015,7 +1038,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
 
       if (authService && typeof authService.handleRequest === 'function') {
-        const response = await authService.handleRequest(c.req.raw);
+        // The transport's peer goes along: the auth service establishes the
+        // request's client address from it under its own trust rule.
+        const remoteAddress = readTransportPeerAddress(c);
+        const response = await authService.handleRequest(c.req.raw, remoteAddress ? { remoteAddress } : {});
         const forwarded = () => new Response(response.body, {
           status: response.status,
           headers: response.headers,

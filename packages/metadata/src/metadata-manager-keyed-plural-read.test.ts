@@ -387,3 +387,109 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
         expect((await manager.listNames(TYPE)).sort()).toEqual(['from_code', 'from_db']);
     });
 });
+
+/**
+ * [#32517 location 2, ADR-0150 D3/D4] An unbundled type stored per
+ * `(package, name)` — `api`, `agent`, `skill`, `action`, `permission` — keeps
+ * one item per package's slot in the artifact door's `MemoryLoader`, but the
+ * unscoped plural reads (`MemoryLoader.loadMany` / `loadManyKeyed`, and the
+ * manager's `loadMany` / `loadManyKeyed`, which keyed every loader's items by
+ * name) folded two packages' items of one name into one: the package saved
+ * last. They now answer one item per `(package, name)`; a one-holder name
+ * answers what it answered.
+ */
+describe('[#32517] the unscoped plural reads answer every package\'s item of an unbundled by-package type', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset'];
+  const NAME = 'shared_item';
+  const item = (packageId: string | undefined, extra: Record<string, unknown> = {}) => ({
+    name: NAME,
+    label: packageId ?? 'environment',
+    ...(packageId === undefined ? {} : { _packageId: packageId, _provenance: 'package' }),
+    ...extra,
+  });
+  const labels = (items: unknown[]) => (items as Array<{ label: string }>).map((i) => i.label);
+  const keyedLabels = (entries: Array<{ name: string; data: unknown }>) =>
+    entries.map((entry) => `${entry.name}=${(entry.data as { label: string }).label}`);
+
+  /** A loader that holds bodies by name only and names no package — a file tree's shape. */
+  function plainLoader(bodies: Array<Record<string, unknown>>): MetadataLoader {
+    return {
+      contract: { name: 'plain', protocol: 'file:', capabilities: { read: true, write: false, watch: false, list: true } },
+      load: async (_type: string, name: string) => ({ data: bodies.find((b) => b.name === name) ?? null }),
+      loadMany: async () => bodies,
+      loadManyKeyed: async () => bodies.map((data) => ({ name: data.name as string, data })),
+      exists: async (_type: string, name: string) => bodies.some((b) => b.name === name),
+      stat: async () => null,
+      list: async () => bodies.map((b) => b.name as string),
+    } as unknown as MetadataLoader;
+  }
+
+  async function door(type: string, ...holders: Array<string | undefined>): Promise<MemoryLoader> {
+    const loader = new MemoryLoader();
+    for (const holder of holders) await loader.save(type, NAME, item(holder));
+    return loader;
+  }
+
+  it('the slotted set these pins iterate is the live one, minus the bundled type', async () => {
+    const { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } = await import('./package-slotted-store.js');
+    expect([...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type)).sort()).toEqual([...UNBUNDLED].sort());
+  });
+
+  for (const order of [[A, B], [B, A]] as const) {
+    it.each(UNBUNDLED)(`%s: two packages saved ${order[0] === A ? 'alpha then beta' : 'beta then alpha'} — every plural read answers both, in the order first saved (BASE: the one saved last)`, async (type) => {
+      const loader = await door(type, ...order);
+      const manager = new MetadataManager({ formats: ['json'], loaders: [loader] });
+      expect(labels(await loader.loadMany(type))).toEqual([...order]);
+      expect(keyedLabels(await loader.loadManyKeyed(type))).toEqual(order.map((p) => `${NAME}=${p}`));
+      expect(labels(await manager.loadMany(type))).toEqual([...order]);
+      expect(keyedLabels(await manager.loadManyKeyed(type))).toEqual(order.map((p) => `${NAME}=${p}`));
+      // The by-name read is unchanged: the item saved last.
+      expect(((await loader.load(type, NAME)).data as { label: string }).label).toBe(order[1]);
+    });
+  }
+
+  it.each(UNBUNDLED)('%s: CONTROL — one holder: one item, and a package-less copy of the name in an earlier loader is that holder\'s (D4), the earlier loader\'s kept as before', async (type) => {
+    const loader = await door(type, A);
+    expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).loadMany(type))).toEqual([A]);
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(plainLoader([item(undefined)]));
+    manager.registerLoader(loader);
+    expect(labels(await manager.loadMany(type))).toEqual(['environment']);
+    expect(keyedLabels(await manager.loadManyKeyed(type))).toEqual([`${NAME}=environment`]);
+  });
+
+  it('action: CONTROL — one package\'s action bound to two objects is one item of the unscoped plural read, the binding saved last (as main; `list` serves both)', async () => {
+    const loader = new MemoryLoader();
+    await loader.save('action', NAME, item(A, { objectName: 'account', label: 'account' }));
+    await loader.save('action', NAME, item(A, { objectName: 'contact', label: 'contact' }));
+    expect(labels(await loader.loadMany('action'))).toEqual(['contact']);
+    expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).loadMany('action'))).toEqual(['contact']);
+    expect(labels(await new MetadataManager({ formats: ['json'], loaders: [loader] }).list('action')).sort()).toEqual(['account', 'contact']);
+  });
+
+  for (const packagelessFirst of [true, false]) {
+    it(`action: CONTROL — a package-less action and one package's of one name, on two objects, saved ${packagelessFirst ? 'package-less first' : 'package first'}: one item, the one saved last (BASE: the same)`, async () => {
+      const loader = new MemoryLoader();
+      const env = item(undefined, { objectName: 'account', label: 'environment on account' });
+      const own = item(A, { objectName: 'contact', label: 'alpha on contact' });
+      for (const body of packagelessFirst ? [env, own] : [own, env]) await loader.save('action', NAME, body);
+      const last = packagelessFirst ? 'alpha on contact' : 'environment on account';
+      const manager = new MetadataManager({ formats: ['json'], loaders: [loader] });
+      expect(labels(await loader.loadMany('action'))).toEqual([last]);
+      expect(labels(await manager.loadMany('action'))).toEqual([last]);
+      expect(keyedLabels(await manager.loadManyKeyed('action'))).toEqual([`${NAME}=${last}`]);
+    });
+  }
+
+  it('CONTROL — a type outside the slotted set keeps one item per name across loaders, the first loader\'s', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerLoader(plainLoader([item(A)]));
+    const loader = new MemoryLoader();
+    await loader.save('view', NAME, item(B));
+    manager.registerLoader(loader);
+    expect(labels(await manager.loadMany('view'))).toEqual([A]);
+    expect(keyedLabels(await manager.loadManyKeyed('view'))).toEqual([`${NAME}=${A}`]);
+  });
+});

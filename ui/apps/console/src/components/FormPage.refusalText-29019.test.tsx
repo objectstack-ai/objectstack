@@ -254,3 +254,56 @@ describe('#29019 — every other refusal', () => {
     expect(banner).not.toContain('<');
   });
 });
+
+/**
+ * objectstack#32684 — a file the field's `accept` does not admit is refused
+ * `400 ERR_FILE_CONSTRAINT`, and its sentence says "is not permitted by the
+ * accept list". It used to read as a denial; it is the server's reason now.
+ * The envelope names no field on the wire (only `error` and `code`), so the
+ * reason is said in the banner and no row is marked.
+ */
+describe('#32684 — a refused file type reads the server\'s reason, not a denial', () => {
+  const FILE_CONSTRAINT = {
+    status: 400,
+    body: {
+      error:
+        "File type 'text/plain' is not permitted by the accept list declared for 'invoice_file' (.pdf, .ofd, .png, .jpg, .jpeg)",
+      code: 'ERR_FILE_CONSTRAINT',
+    },
+  };
+
+  it('says the server\'s sentence in the banner and the toast, and marks no row', async () => {
+    stubInternal(FILE_CONSTRAINT);
+    await fillAndSubmit();
+
+    const banner = await bannerText();
+    expect(banner).toBe(FILE_CONSTRAINT.body.error);
+    expect(banner).not.toBe("You don't have permission to save this record.");
+    expect(toastText()).toBe(banner);
+    expect(document.querySelectorAll('[id$="-error"]')).toHaveLength(0);
+  });
+
+  it('zh: the reader is not told they lack permission', async () => {
+    createI18n({ defaultLanguage: 'zh', detectBrowserLanguage: false });
+    stubInternal(FILE_CONSTRAINT);
+    await fillAndSubmit('提交');
+
+    const banner = await bannerText();
+    expect(banner).not.toBe('您没有权限保存这条记录。');
+    expect(banner).toBe(FILE_CONSTRAINT.body.error);
+  });
+
+  it('CONTROL: a 4xx with denial text and no code still reads the localized denial (B′)', async () => {
+    stubInternal({ status: 400, body: { error: 'Writing qar8_fsb is not permitted for this profile' } });
+    await fillAndSubmit();
+
+    expect(await bannerText()).toBe("You don't have permission to save this record.");
+  });
+
+  it('CONTROL: a 403 that also says "not permitted" still reads the localized denial', async () => {
+    stubInternal({ status: 403, body: { ...FILE_CONSTRAINT.body, code: 'PERMISSION_DENIED' } });
+    await fillAndSubmit();
+
+    expect(await bannerText()).toBe("You don't have permission to save this record.");
+  });
+});

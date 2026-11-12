@@ -242,12 +242,18 @@ describe.skipIf(!sharedMongod)('the package-less grant index — against a real 
     expect(await outcome(() => coll(driver).insertOne(grant('f', { organization_id: 'org_1', permission_set_package: 'com.acme.crm' })))).toBe(11000);
   });
 
-  it('admits nothing the old key refused, with a non-null and a missing organization (epic condition 1)', async () => {
+  // [#32164, red-line review E2] The last two rows: what the store alone
+  // admits that the old key refused, a packaged grant beside a package-less
+  // one; the engine's write seam refuses it above the store
+  // (`plugin-security`'s `stored-permission-set-package-stamp.ts`).
+  it('among package-less grants admits nothing the old key refused, with a non-null and a missing organization (epic condition 1); the store alone admits a packaged grant beside a package-less one', async () => {
     const rows: Array<[string, Record<string, unknown>]> = [
       ['n1', { organization_id: 'org_2' }],
       ['n2', { organization_id: 'org_2' }],
       ['z1', {}],
       ['z2', {}],
+      ['m1', { organization_id: 'org_2', permission_set_package: 'com.acme.crm' }],
+      ['m2', { organization_id: 'org_2', permission_set_package: 'com.acme.crm' }],
     ];
     const answers: Array<{ id: string; old: 'ok' | number; now: 'ok' | number }> = [];
     for (const [id, extra] of rows) {
@@ -263,6 +269,8 @@ describe.skipIf(!sharedMongod)('the package-less grant index — against a real 
       // Both keys exempt a grant missing its organization (NULL-distinct, #29278).
       { id: 'z1', old: 'ok', now: 'ok' },
       { id: 'z2', old: 'ok', now: 'ok' },
+      { id: 'm1', old: 11000, now: 'ok' },
+      { id: 'm2', old: 11000, now: 11000 },
     ]);
   });
 });

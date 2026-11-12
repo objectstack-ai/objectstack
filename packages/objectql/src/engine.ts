@@ -361,6 +361,7 @@ import { ObjectRepositoryFacet } from './engine-object-repository.js';
 import { ScopedContextFacet } from './engine-scoped-context.js';
 // [#30052 codemod] The scoped facets' hosts, one per instance, which each class's static block builds.
 import { objectRepositoryHost, scopedContextHost } from './engine-scoped-hosts.js';
+import { captureStoredExpressions, type StoredExpressionCapture } from './stored-expression-backfill.js';
 
 // [#29986 codemod] The statics of `ObjectQL` its facet modules read, private ones included, as
 // the class declares them (an indexed access on the class). The static block at the end of
@@ -755,7 +756,16 @@ export class ObjectQL implements IObjectQLEngine {
     return HooksAndFunctionsFacet.registerFunction.call(hooksAndFunctionsHost.of(this), name, handler, packageIdOrOptions);
   }
 
-  /** Look up a registered function by name. */
+  /**
+   * Look up a registered function by name, with no package: the last
+   * registration of the name. [ADR-0150 D3/D4, #31700; epic seat ruling R2-C]
+   * A name two packages hold (two namespaces may each bind one) is refused,
+   * `409 RESOURCE_CONFLICT` naming every holder, never answered with one of
+   * them; a reader that knows its package resolves through
+   * {@link functionHoldersOf}.
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
+   */
   resolveFunction(name: string): HookHandler | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
     return HooksAndFunctionsFacet.resolveFunction.call(hooksAndFunctionsHost.of(this), name);
@@ -767,7 +777,9 @@ export class ObjectQL implements IObjectQLEngine {
    * it"; a caller that must also report what the call did (the automation
    * engine's `script` node, feeding the #4354 run summary) needs the
    * declaration, and reading it off the same registry keeps the two from
-   * drifting.
+   * drifting. Refused alike for a name two packages hold (above).
+   *
+   * @throws {PackageScopedNameRefusedError} for a name two packages hold.
    */
   resolveFunctionEntry(name: string): Readonly<FunctionEntry> | undefined {
     // [#29986 codemod] The body moved to `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -783,8 +795,8 @@ export class ObjectQL implements IObjectQLEngine {
    * over, in the calling flow's package. A snapshot, taken at the call. The flow
    * `script` node resolves through it (#32073), and `bindHooksToEngine` reads
    * a hook's own package's entry from it. `resolveFunction` and
-   * `resolveFunctionEntry` keep answering the one last-registered entry per
-   * name.
+   * `resolveFunctionEntry` answer the one last-registered entry per name, and
+   * refuse a name two packages hold (#31700).
    */
   functionHoldersOf(name: string): PackageScopedHolderSource<Readonly<FunctionEntry>> {
     // [#31716] The body lives in `engine-hooks-and-functions.ts` (see `HooksAndFunctionsHost`).
@@ -1705,6 +1717,20 @@ export class ObjectQL implements IObjectQLEngine {
     onFault?: (field: string, message: string) => void,
   ): Promise<Array<Record<string, unknown>>> {
     return SecurityResolversFacet.computeStoredExpressionsOver.call(securityResolversHost.of(this), object, rows, context, onFault);
+  }
+
+  /**
+   * [#32527] Capture `object`'s stored computed fields before a metadata door
+   * makes a change to it live, and hand back the fill that change owes:
+   * {@link StoredExpressionCapture.fillChanged}, called once the change is
+   * served, fills every stored row of each stored computed field that now
+   * computes something new (added, turned from a formula, its expression
+   * changed) with the write's own computation — `stored-expression-backfill.ts`
+   * carries the contract. The metadata protocol reaches it through its host
+   * engine, which cannot import this package.
+   */
+  captureStoredExpressions(object: string): StoredExpressionCapture {
+    return captureStoredExpressions(this, this.logger, object);
   }
 
   private formulaOptionLabels(

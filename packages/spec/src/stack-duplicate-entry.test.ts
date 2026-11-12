@@ -39,8 +39,9 @@ const manifest = {
   namespace: 'dupe',
   name: 'duplicate-entry-test',
   version: '1.0.0',
-  // A module package: an `app` package's single-app count would refuse two
-  // DISTINCT apps, which the control rows need to accept.
+  // A module package. The single-app count holds it to one app as it holds an
+  // `app` package (ADR-0019 D3 as amended), so the `apps` control rows below
+  // meet that count instead of being accepted, and say so.
   type: 'module' as const,
 };
 
@@ -341,8 +342,38 @@ describe('defineStack - a duplicate identity inside one named collection is refu
   );
 });
 
+/**
+ * The rows whose distinct-identity pair is accepted outright. `apps` is the one
+ * left out: two apps under two names pass this check and meet the single-app
+ * count, which refuses a second app in any `app` or `module` package (ADR-0019
+ * D3 as amended), so its controls assert that refusal instead.
+ */
+const ACCEPTED_CONTROL_ROWS = BATCH.filter((row) => row.key !== 'apps');
+
+/** The single-app refusal a distinct-identity `apps` pair meets, naming both apps in order. */
+function expectSingleAppCount(r: Refusal | null, names: readonly string[]): void {
+  expect(r, 'the stack is refused').not.toBeNull();
+  expect(r!.code).toBe('STACK_SINGLE_APP_VIOLATION');
+  expect(r!.status).toBe(422);
+  expect(r!.issues).toHaveLength(1);
+  expect(r!.issues![0]).toContain(`(${names.map((n) => `'${n}'`).join(', ')})`);
+}
+
 describe('defineStack - CONTROL: distinct identities and the out-of-batch collections are accepted unchanged', () => {
-  it.each(BATCH.map((row) => [row.key, row] as const))(
+  it('apps: two apps under two names pass this check and meet the single-app count instead', () => {
+    const row = BATCH.find((candidate) => candidate.key === 'apps')!;
+    const r = refusal(stackOf(row, [row.entry, row.otherIdentity(row.entry)]));
+    expectSingleAppCount(r, ['dupe_app', 'dupe_app_two']);
+  });
+
+  it('apps: the map form under two keys meets the single-app count too, each key its entry\'s name', () => {
+    const row = BATCH.find((candidate) => candidate.key === 'apps')!;
+    const { name: _drop, ...body } = row.entry;
+    const r = refusal({ manifest, objects: [thing], apps: { dupe_app: body, dupe_app_two: body } });
+    expectSingleAppCount(r, ['dupe_app', 'dupe_app_two']);
+  });
+
+  it.each(ACCEPTED_CONTROL_ROWS.map((row) => [row.key, row] as const))(
     '%s: two entries under two identities are accepted, in order',
     (_key, row) => {
       const second = row.otherIdentity(row.entry);
@@ -363,7 +394,7 @@ describe('defineStack - CONTROL: distinct identities and the out-of-batch collec
     ]);
   });
 
-  it.each(mapRows.map((row) => [row.key, row] as const))(
+  it.each(mapRows.filter((row) => ACCEPTED_CONTROL_ROWS.includes(row)).map((row) => [row.key, row] as const))(
     '%s: the map form under two keys is accepted, each key its entry\'s name',
     (_key, row) => {
       const strip = ({ name: _drop, ...rest }: Entry) => rest;
