@@ -555,11 +555,12 @@ describe('#6250 — the 409 body echoes nothing the driver said', () => {
  *
  * ## Degradation is the contract, not a fallback
  *
- * `uniqueViolationColumn` answers `undefined` whenever the dialect named an
- * INDEX (MySQL always; SQLite's `index 'x'` form; Postgres' constraint-name
- * form), named a COMPOSITE of more than one authored column (the implied
- * `organization_id` part of an organization-scoped unique field is not one),
- * or emitted prose it does not parse. Every one of
+ * `uniqueViolationField` (what this branch reads since the organization-scoped
+ * unique field started naming its field) answers `undefined` whenever the
+ * dialect named an INDEX (MySQL always; SQLite's `index 'x'` form; Postgres'
+ * constraint-name form), named a COMPOSITE of more than one authored column
+ * (the implied `organization_id` part of an organization-scoped unique field
+ * is set aside, so that key is not one), or emitted prose it does not parse. Every one of
  * those must produce the unnamed sentence and **no `field` key at all** — a
  * wrong field name is worse than none, because it sends the user to correct an
  * input that was never the problem. That is why the negative half below asserts

@@ -300,7 +300,8 @@ function bareIdentifier(raw: string): string {
  * declaration adds in front of the authored column (ADR-0120 D3, keyed plain
  * since ADR-0131 D1): `(organization_id, invoice_no)`. It is the SCOPE of the
  * uniqueness, not a value anybody typed — the platform stamps it from the
- * writer's organization — so it is never the answer to "which column?".
+ * writer's organization. {@link uniqueViolationField} sets it aside;
+ * {@link uniqueViolationColumn} does not.
  */
 const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
 
@@ -308,40 +309,38 @@ const IMPLIED_ORGANIZATION_KEY_PART = 'organization_id';
  * Reduce one dialect's list of constraint targets to THE conflicting column,
  * or `undefined` when there is not exactly one that is determinably a column.
  *
- * A composite of AUTHORED columns resolves to `undefined` on purpose: there is
- * no single offending column, and picking the first is the same class of wrong
- * answer as returning an index name — it points a form at `tenant_id` when what
- * the user typed twice was `email`.
+ * A composite key resolves to `undefined` on purpose: there is no single
+ * offending column, and picking the first is the same class of wrong answer as
+ * returning an index name — it points a form at `tenant_id` when what the user
+ * typed twice was `email`.
  *
- * The implied organization key part is not an authored column, so it is set
- * aside before counting: an organization-scoped unique field's composite
- * `(organization_id, invoice_no)` names `invoice_no`, the one value the user
- * entered — the field the declaration was written on. What is left must still
- * be exactly one column: `(organization_id, department, code)` keeps naming
- * none, and a key whose ONLY part is `organization_id` ("one row per
- * organization") still names that column, since then it is the authored one.
- * Only `organization_id` is set aside: an object whose `tenancy.tenantField`
- * names another column keys on that column, which this text cannot tell from
- * an authored one, so such a composite keeps naming none.
+ * `setAsideOrganization` is {@link uniqueViolationField}'s question: the
+ * implied organization key part is dropped before counting, so
+ * `(organization_id, invoice_no)` answers `invoice_no`, while
+ * `(organization_id, department, code)` still answers `undefined` and a key
+ * whose ONLY part is `organization_id` still answers that column.
  */
-function soleColumn(targets: string): string | undefined {
+function soleColumn(targets: string, setAsideOrganization: boolean): string | undefined {
     const names = targets.split(',').map(bareIdentifier);
-    const authored = names.length > 1 ? names.filter((n) => n !== IMPLIED_ORGANIZATION_KEY_PART) : names;
-    if (authored.length !== 1) return undefined;
-    const [name] = authored;
+    const counted =
+        setAsideOrganization && names.length > 1
+            ? names.filter((name) => name !== IMPLIED_ORGANIZATION_KEY_PART)
+            : names;
+    if (counted.length !== 1) return undefined;
+    const [name] = counted;
     return PLAIN_IDENTIFIER.test(name) ? name : undefined;
 }
 
-function columnFromText(text: string): string | undefined {
+function columnFromText(text: string, setAsideOrganization: boolean): string | undefined {
     const sqlite = SQLITE_TARGETS.exec(text);
     if (sqlite) {
         const targets = sqlite[1].trim();
         // `index 'idx_email_unique'` is an index name, not a column. Refuse.
-        return SQLITE_INDEX_FORM.test(targets) ? undefined : soleColumn(targets);
+        return SQLITE_INDEX_FORM.test(targets) ? undefined : soleColumn(targets, setAsideOrganization);
     }
 
     const postgres = POSTGRES_DETAIL_TARGETS.exec(text);
-    if (postgres) return soleColumn(postgres[1]);
+    if (postgres) return soleColumn(postgres[1], setAsideOrganization);
 
     // MySQL deliberately has no limb here — see the doc comment on
     // `uniqueViolationColumn`. `Duplicate entry 'x' for key 'i'` names `i`,
@@ -349,26 +348,26 @@ function columnFromText(text: string): string | undefined {
     return undefined;
 }
 
-function findUniqueViolationColumn(error: unknown, depth: number): string | undefined {
+function findUniqueViolationColumn(error: unknown, depth: number, setAsideOrganization: boolean): string | undefined {
     if (error === null || error === undefined || depth > MAX_CAUSE_DEPTH) return undefined;
 
-    if (typeof error === 'string') return columnFromText(error);
+    if (typeof error === 'string') return columnFromText(error, setAsideOrganization);
     if (typeof error !== 'object') return undefined;
 
     const err = error as { message?: unknown; detail?: unknown; cause?: unknown };
 
     if (typeof err.message === 'string') {
-        const fromMessage = columnFromText(err.message);
+        const fromMessage = columnFromText(err.message, setAsideOrganization);
         if (fromMessage !== undefined) return fromMessage;
     }
     // node-postgres keeps the `DETAIL:` line off the message and on its own
     // field, so for the driver we actually ship this is where the column is.
     if (typeof err.detail === 'string') {
-        const fromDetail = columnFromText(err.detail);
+        const fromDetail = columnFromText(err.detail, setAsideOrganization);
         if (fromDetail !== undefined) return fromDetail;
     }
 
-    return findUniqueViolationColumn(err.cause, depth + 1);
+    return findUniqueViolationColumn(err.cause, depth + 1, setAsideOrganization);
 }
 
 /**
@@ -388,12 +387,13 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  * caller's, not this module's: **an index name mistaken for a column is worse
  * than no answer at all.**
  *
- *  - the engine's unique envelope and the REST / import refusals report it as
- *    the refusal's `field`, the key a form focuses its input by. An index name
- *    there points the user at a field that does not exist on the object, so
- *    they cannot act on it; `undefined` merely leaves `field` out. [#26867] The
- *    column is the field's API key, so it is never the end user's sentence —
- *    that names the field by the label the engine resolves from it.
+ *  - the import refusals and the trash restore report it as the refusal's
+ *    `field`, the key a form focuses its input by. An index name there points
+ *    the user at a field that does not exist on the object, so they cannot act
+ *    on it; `undefined` merely leaves `field` out. [#26867] The column is the
+ *    field's API key, so it is never the end user's sentence — that names the
+ *    field by the label the engine resolves from it. (The engine's unique
+ *    envelope and the HTTP data doors ask {@link uniqueViolationField}.)
  *  - #5495's autonumber-retry branch asks a yes/no question of the answer —
  *    "is the conflicting column the autonumber field?" — and an index name
  *    produces a *wrong retry decision*, not a vaguer one.
@@ -410,16 +410,13 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  *
  * A **composite** key is `undefined` for the same reason: `Key (tenant_id,
  * email)=(…)` has no single offending column, and naming the first is the same
- * class of wrong answer.
- *
- * Except the composite an organization-scoped unique FIELD builds: its key is
- * the implied `organization_id` part plus the one authored column, so
- * `UNIQUE constraint failed: t.organization_id, t.invoice_no` (SQLite) and
- * `Key (organization_id, invoice_no)=(…)` (Postgres) both name `invoice_no`.
- * The organization part is the scope the platform stamped, never what the user
- * typed, so naming the other part is not a guess — it is the field the
- * declaration sits on. More than one authored column left over is still a
- * composite and still `undefined`.
+ * class of wrong answer. That includes an organization-scoped unique field's
+ * `(organization_id, FIELD)`, and here the `undefined` is load-bearing: the
+ * autonumber routing reads a named column as "every reservation on this field
+ * collided", and in a batch spanning two organizations the column cannot say
+ * WHICH organization's counter collided — `undefined` sends it to the per-row
+ * data probe, which can. The user-facing question is a different one, answered
+ * by {@link uniqueViolationField}.
  *
  * ## What it reads
  *
@@ -437,14 +434,61 @@ function findUniqueViolationColumn(error: unknown, depth: number): string | unde
  * @example
  * ```ts
  * const column = uniqueViolationColumn(error);
- * return {
- *   error: 'A record with this value already exists',
- *   code: 'UNIQUE_VIOLATION',
- *   ...(column ? { field: column } : {}),
- * };
+ * if (column !== undefined && column !== reservation.field) throw error; // not ours
  * ```
  */
 export function uniqueViolationColumn(error: unknown): string | undefined {
     if (!isUniqueViolationError(error)) return undefined;
-    return findUniqueViolationColumn(error, 0);
+    return findUniqueViolationColumn(error, 0, false);
+}
+
+/**
+ * Which FIELD a unique-violation refusal should name to the writer — the
+ * column {@link uniqueViolationColumn} would name, except that the implied
+ * organization key part is set aside first.
+ *
+ * A field declared `unique: 'organization'` (or `unique: true`) is enforced by
+ * the composite `(organization_id, FIELD)`, so the driver reports
+ * `UNIQUE constraint failed: t.organization_id, t.invoice_no` (SQLite) or
+ * `Key (organization_id, invoice_no)=(…)` (Postgres). The organization part is
+ * the scope the platform stamped from the writer's organization, never a value
+ * the writer typed, so the field the refusal is about is determinable: the
+ * other part, `invoice_no` — the field the declaration sits on. The engine's
+ * unique envelope (`DuplicateRecordError.field` and its `fieldLabel`) and the
+ * HTTP data doors' `409 UNIQUE_VIOLATION` body read this answer.
+ *
+ * Every other refusal of {@link uniqueViolationColumn} stands, for the same
+ * "a wrong field name is worse than none" reason:
+ *
+ *  - more than one AUTHORED column left over is still a composite —
+ *    `(organization_id, department, code)` names none;
+ *  - only `organization_id` is set aside: an object whose
+ *    `tenancy.tenantField` names another column keys on that column, which the
+ *    driver's text cannot tell from an authored one, so such a composite names
+ *    none;
+ *  - a key whose ONLY part is `organization_id` names that column;
+ *  - index names (MySQL, SQLite's `index 'x'`, Postgres' constraint name) and
+ *    expression parts (the legacy `COALESCE(organization_id, '__global__')`)
+ *    name none.
+ *
+ * ⛔ Not a routing answer: the autonumber retry must keep asking
+ * {@link uniqueViolationColumn}, whose composite `undefined` is what sends a
+ * batch spanning several organizations to the per-row data probe.
+ *
+ * @param error - the thrown value, of any shape.
+ * @returns the field the refusal names, or `undefined` when none is determinable.
+ *
+ * @example
+ * ```ts
+ * const field = uniqueViolationField(error);
+ * return {
+ *   error: 'A record with this value already exists',
+ *   code: 'UNIQUE_VIOLATION',
+ *   ...(field ? { field } : {}),
+ * };
+ * ```
+ */
+export function uniqueViolationField(error: unknown): string | undefined {
+    if (!isUniqueViolationError(error)) return undefined;
+    return findUniqueViolationColumn(error, 0, true);
 }

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { isUniqueViolationError, uniqueViolationField } from '@objectstack/types';
 import { objectDisplayLabel } from './engine-validation-messages.js';
 import { resolveFieldLabel, type ValidationMessageContext } from './validation/record-validator.js';
 
@@ -57,8 +57,8 @@ import { resolveFieldLabel, type ValidationMessageContext } from './validation/r
  *    where the envelope leaves the engine its `cause` is cut like any driver
  *    error (`redactPropagatedDriverFault`): the class, the codes and the
  *    database's diagnostic stay, the bound statement and values do not.
- *  - **`field`** — the conflicting column, and ONLY when
- *    {@link uniqueViolationColumn} determinably named one. An index name is
+ *  - **`field`** — the conflicting field, and ONLY when
+ *    {@link uniqueViolationField} determinably named one. An index name is
  *    never reported as a column (MySQL's `for key 'idx_email_unique'`,
  *    Postgres' constraint name, a composite of authored columns): that
  *    function's contract is that a wrong field name is worse than none, and
@@ -66,7 +66,9 @@ import { resolveFieldLabel, type ValidationMessageContext } from './validation/r
  *    key `(organization_id, FIELD)` does name FIELD — the organization part is
  *    the implied scope, not a value the writer typed — so the refusal of a
  *    duplicate invoice number reads "A record with this Invoice Number
- *    already exists" over HTTP, through `fieldLabel` below.
+ *    already exists" over HTTP, through `fieldLabel` below. ⛔ The autonumber
+ *    retry does not read this `field`: it asks `uniqueViolationColumn` of the
+ *    driver error on `cause`, whose composite answer stays `undefined`.
  *  - **`developerMessage`** — the remedy half, split off exactly as the
  *    engine's `DELETE_RESTRICTED` refusal splits it: `message` is the sentence
  *    a user-facing surface renders, `developerMessage` is the one addressed to
@@ -207,7 +209,7 @@ export function envelopeUniqueViolation(
 ): unknown {
   if (error instanceof DuplicateRecordError) return error;
   if (!isUniqueViolationError(error)) return error;
-  const field = uniqueViolationColumn(error);
+  const field = uniqueViolationField(error);
   return new DuplicateRecordError(object, error, field, displayLabels(schema, object, field, messages));
 }
 
