@@ -160,17 +160,22 @@ export function useFormViewDraft({
   React.useLayoutEffect(() => {
     heldRef.current = held;
   });
-  // The view the installed buffer was read for: a re-read of that view on the pulse keeps it shown.
-  const loadedViewRef = React.useRef('');
+  // What the installed buffer was read under: every load input but the pulse
+  // (`base`), and the pulse (`refresh`). Only a run whose pulse alone moved is
+  // a re-read on the pulse; a conflict's "reload", a publish or a new view
+  // replaces the buffer whatever it holds.
+  const loadedRef = React.useRef<{ base: string; refresh: number } | null>(null);
 
   React.useEffect(() => {
     setFailure(null);
     if (!viewId) {
-      loadedViewRef.current = '';
+      loadedRef.current = null;
       setBuffer({ for: '', row: null, dirty: false, hasDraft: false });
       return;
     }
-    const refreshOnly = loadedViewRef.current === viewId;
+    const base = `${viewId}#${packageId}#${publishNonce}#${reloadNonce}#${customizing}`;
+    const loaded = loadedRef.current;
+    const refreshOnly = loaded !== null && loaded.base === base && loaded.refresh !== refreshNonce;
     let cancelled = false;
     (async () => {
       try {
@@ -209,7 +214,7 @@ export function useFormViewDraft({
         // buffer; its save is pinned to the read it was made on.
         if (refreshOnly && heldRef.current) return;
         recordRead('view', viewId, readAt, draftRead.pin);
-        loadedViewRef.current = viewId;
+        loadedRef.current = { base, refresh: refreshNonce };
         readAtRef.current = { viewId, at: readAt };
         setBuffer({ for: `form-view:${viewId}`, row, dirty: false, hasDraft: !!draft });
       } catch (e) {

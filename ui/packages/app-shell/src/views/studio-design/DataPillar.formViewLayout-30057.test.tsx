@@ -29,7 +29,9 @@
  *    and saved as stored, with the author's labels; one whose stored copy the
  *    layers do not serve installs no buffer and is shown;
  *  - objectstack#32610: a draft of the view the in-tab copilot writes is
- *    re-read on the assistant bus's pulse, so the canvas shows its sections.
+ *    re-read on the assistant bus's pulse, so the canvas shows its sections;
+ *    CONTROL: a conflict's "reload" over a dirty buffer still installs the
+ *    saved version (only the pulse is held by the buffer, never a reload).
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -40,6 +42,7 @@ import '@object-ui/components';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { MetadataClient, type MetadataError } from '@object-ui/data-objectstack';
 
 const PKG = 'com.qa.deals';
 const PAIR = 'com.qa.deals.custom';
@@ -374,5 +377,47 @@ describe('the Form tab follows a form view draft the copilot writes (objectstack
 
     await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details', 'Risk review']));
     expect(viewDraftReads()).toBe(before + 1);
+  });
+});
+
+/** The 409 the draft door answers for a stale pin, run through the real client's error parser. */
+async function conflictRefusal(type: string, name: string, head: string): Promise<MetadataError> {
+  const client = new MetadataClient({
+    baseUrl: 'http://localhost:3000',
+    fetch: (async () =>
+      new Response(JSON.stringify({ error: `${type}/${name} has been modified since you loaded it.`, code: 'METADATA_CONFLICT', currentVersion: head }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch,
+  });
+  return client.save(type, name, {}, { mode: 'draft' }).then(
+    () => {
+      throw new Error('the stub door accepted the save');
+    },
+    (e: unknown) => e as MetadataError,
+  );
+}
+
+describe('CONTROL: the pulse hold never holds a conflict reload of the form view (objectstack#32610)', () => {
+  it('a dirty buffer refused as stale is replaced by the saved version when the author picks "reload"', async () => {
+    serveObject([defaultViewItem()]);
+    await openForm();
+    await waitFor(() => expect(sectionTitles()).toEqual(['Basic info', 'Money details']));
+
+    // Another editor saved the view meanwhile: the door refuses this buffer's pin.
+    const theirs = defaultViewItem();
+    theirs.config.sections = [{ name: 'theirs', label: 'Their section', fields: ['notes'] }];
+    srv.drafts.set(`${OBJECT}.form`, { served: theirs, stored: theirs });
+    const refusal = await conflictRefusal('view', `${OBJECT}.form`, 'v8');
+    mockClient.save.mockImplementationOnce(async () => {
+      throw refusal;
+    });
+
+    await userEvent.click(screen.getByTestId('form-designer-add-section-footer'));
+    await screen.findByTestId('draft-conflict-dialog', undefined, { timeout: 8000 });
+    await userEvent.click(screen.getByTestId('draft-conflict-reload'));
+
+    await waitFor(() => expect(sectionTitles()).toEqual(['Their section']), { timeout: 8000 });
+    expect(screen.queryByTestId('draft-conflict-dialog')).toBeNull();
   });
 });
