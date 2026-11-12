@@ -282,7 +282,17 @@ function packageScopedRegistryOf(engine: unknown): { served: PackageScopedRegist
         && typeof r.getEnvironmentScopedItem === 'function'
         && typeof r.getPackage === 'function'
         && typeof r.getAllPackages === 'function')) return undefined;
-    const every = reg as PackageScopedRegistry;
+    const raw = reg as PackageScopedRegistry;
+    // [#32183] The registry's own holder read answers the SERVED holders, a
+    // disabled package left out; the durable reading asks it for every holder.
+    const every: PackageScopedRegistry = {
+        getPackage: (id) => raw.getPackage(id),
+        getAllPackages: () => raw.getAllPackages(),
+        packageScopedHoldersOf: (type, name, callerPackageId, options) =>
+            raw.packageScopedHoldersOf(type, name, callerPackageId, { ...options, includeDisabledPackages: true }),
+        getPackageScopedItem: (type, name, packageId, member) => raw.getPackageScopedItem(type, name, packageId, member),
+        getEnvironmentScopedItem: (type, name, member) => raw.getEnvironmentScopedItem(type, name, member),
+    };
     const isDisabled = typeof r.isPackageDisabled === 'function'
         ? (packageId: string) => (r.isPackageDisabled as (id: string) => boolean).call(reg, packageId) === true
         : () => false;
