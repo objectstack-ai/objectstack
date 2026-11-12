@@ -302,9 +302,11 @@ describe('validate_expression MCP tool (#1928)', () => {
 describe('validate_expression answers the gate on relationship traversal (#32640)', () => {
   const REQ = 'rtbw_leave_req';
   const BAL = 'rtbw_leave_bal';
+  // Required, so the gate's null-guard pass (which the tool does not run)
+  // has nothing to say and the two verdicts compare whole.
   const reqFields = {
-    leave_type: { type: 'text', label: 'Leave type' },
-    days: { type: 'number', label: 'Days' },
+    leave_type: { type: 'text', label: 'Leave type', required: true },
+    days: { type: 'number', label: 'Days', required: true },
     balance: { type: 'lookup', label: 'Balance', reference: BAL },
   };
   const balFields = {
@@ -397,9 +399,22 @@ describe('validate_expression answers the gate on relationship traversal (#32640
   // Nothing hydrates a flow condition: the gate does not run the traversal
   // checks there, and neither does the tool.
   it('leaves a flow condition to the gate verdict there (no traversal check)', async () => {
-    const r = await validate(runtime, bridge, {
-      objectName: REQ, expression: 'balance != null && days > 1', site: 'flow_condition',
-    });
+    const expression = READ_TWICE[1]!;
+    const r = await validate(runtime, bridge, { objectName: REQ, expression, site: 'flow_condition' });
     expect(r.errors.map((e: { code: string }) => e.code)).not.toContain('traversal-bare-and-traversed');
+    const gate = gateVerdicts(validateStackExpressions({
+      objects: [{ name: REQ, fields: reqFields }, { name: BAL, fields: balFields }],
+      flows: [{
+        name: 'f',
+        type: 'autolaunched',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: REQ, triggerType: 'record-after-update', condition: expression } },
+          { id: 'end', type: 'end' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'end' }],
+      }],
+    }));
+    expect(gate.filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
+    expect(verdicts(r).filter(([, m]) => /read BOTH through the relationship/.test(m!))).toEqual([]);
   });
 });
