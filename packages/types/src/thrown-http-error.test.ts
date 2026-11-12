@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import { declaredUserMessage, packageScopedRefusalCandidates, resolveThrownHttpError } from './thrown-http-error.js';
 import { thrownAnswerOf } from './actions-door-answer.js';
+import { mapDataError } from './data-error-classification.js';
 
 const USER_TEXT = '该记录已锁定，请联系管理员。';
 
@@ -134,6 +135,19 @@ describe('[#32250] resolveThrownHttpError carries a package-scoped refusal\'s ca
             expect(resolveThrownHttpError(thrown).details, name).toBeUndefined();
             expect(packageScopedRefusalCandidates(thrown), name).toBeUndefined();
         }
+    });
+
+    it('CONTROL: the shape with no declared status carries none, through the resolver, `thrownAnswerOf` and `mapDataError` alike', () => {
+        const undeclared = () => Object.assign(new Error(REFUSAL.message), { code: 'RESOURCE_CONFLICT', refusal: REFUSAL });
+        expect(packageScopedRefusalCandidates(undeclared())).toBeUndefined();
+        expect(resolveThrownHttpError(undeclared()).details).toBeUndefined();
+        expect(thrownAnswerOf(undeclared(), 500).details).toBeUndefined();
+        expect(mapDataError(undeclared(), 'acct').body.details).toBeUndefined();
+        // A declared 4xx under either spelling the resolver reads still carries them; a declared 5xx does not.
+        const statusCode = Object.assign(undeclared(), { statusCode: 409 });
+        expect(resolveThrownHttpError(statusCode).details).toEqual({ candidates: CANDIDATES });
+        expect(mapDataError(statusCode, 'acct').body.details).toEqual({ candidates: CANDIDATES });
+        expect(resolveThrownHttpError(Object.assign(undeclared(), { status: 500 })).details).toBeUndefined();
     });
 
     it('CONTROL: a refusal\'s candidates sit beside the context the resolver already carried', () => {

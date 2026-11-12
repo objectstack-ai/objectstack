@@ -58,7 +58,7 @@ const BASE = {
 const REFUSAL = { ...BASE, message: packageScopedRefusalMessage(BASE) };
 const SENTENCE = REFUSAL.message;
 
-type Throw = 'class' | 'shape' | 'bare-conflict' | 'none';
+type Throw = 'class' | 'shape' | 'undeclared-shape' | 'bare-conflict' | 'none';
 let throwing: Throw = 'none';
 
 /** What the hooks throw for a record whose `title` (or id) asks for a refusal. */
@@ -67,6 +67,7 @@ function refusal(): Error {
   if (throwing === 'shape') {
     return Object.assign(new Error(SENTENCE), { code: 'RESOURCE_CONFLICT', status: 409, refusal: REFUSAL });
   }
+  if (throwing === 'undeclared-shape') return Object.assign(new Error(SENTENCE), { code: 'RESOURCE_CONFLICT', refusal: REFUSAL });
   return Object.assign(new Error('The record is in conflict.'), { code: 'RESOURCE_CONFLICT', status: 409 });
 }
 
@@ -183,6 +184,32 @@ describe('[#32250] /data names the candidates of a package-scoped refusal — sq
       }
     });
   }
+
+  /**
+   * The same shape with no declared status (no `status`, no `statusCode`):
+   * every exit gates `details.candidates` on a declared 4xx alike, so neither
+   * the whole-request doors nor a row's error carry them.
+   */
+  describe('CONTROL: the refusal\'s shape with no declared status carries no candidates', () => {
+    for (const [name, method, path, params, body] of WHOLE_REQUEST) {
+      it(`${name}: no details`, async () => {
+        throwing = 'undeclared-shape';
+        const answer = await call(method, path, params, body);
+        expect(answer.status, JSON.stringify(answer.body)).toBeGreaterThanOrEqual(400);
+        expect(answer.body?.details, JSON.stringify(answer.body)).toBeUndefined();
+      });
+    }
+
+    for (const [name, path, body] of PER_ROW) {
+      it(`${name}: the row's error carries no details`, async () => {
+        throwing = 'undeclared-shape';
+        const answer = await call('POST', path, {}, body);
+        const errors = answer.body?.results?.[0]?.errors;
+        expect(errors, JSON.stringify(answer.body)).toHaveLength(1);
+        expect(errors[0].details, JSON.stringify(answer.body)).toBeUndefined();
+      });
+    }
+  });
 
   describe('CONTROL: every other /data 409 answers as before', () => {
     const UNIQUE = {

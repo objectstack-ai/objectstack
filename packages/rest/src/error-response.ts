@@ -276,8 +276,8 @@ export interface RouteErrorOptions {
 /**
  * The holders of a package-scoped refusal, or `undefined` for any other thrown
  * value. [#32250] Asked of `@objectstack/types`' one recogniser — by shape
- * (`code === 'RESOURCE_CONFLICT'` with a `refusal` whose `status` is
- * `'refused'`), which core's `PackageScopedNameRefusedError` satisfies, and so
+ * (`code === 'RESOURCE_CONFLICT'`, a declared 4xx status, and a `refusal`
+ * whose `status` is `'refused'`), which core's `PackageScopedNameRefusedError` satisfies, and so
  * does an error that crossed a second copy of `@objectstack/core` — the read
  * `resolveThrownHttpError`, the `/data` classification and the batch row error
  * make, so the doors cannot recognise two different sets.

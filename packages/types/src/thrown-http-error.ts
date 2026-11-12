@@ -215,18 +215,23 @@ export interface ThrownHttpError {
  * `/actions`, `/automation` and activation doors answer
  * (`[{ kind: 'package', packageId }, …]`, verbatim from the refusal).
  *
- * Recognised by SHAPE — `code === 'RESOURCE_CONFLICT'` with a `refusal` whose
- * `status` is `'refused'` and whose `candidates` is a list — because this
- * package depends on nothing but `@objectstack/spec` and cannot name core's
- * class. The class satisfies the shape, and so does an error that crossed a
- * second copy of `@objectstack/core`. Read here, by {@link
- * resolveThrownHttpError}, by the `/data` classification and by the batch row
- * error, so no door carries a second recogniser.
+ * Recognised by SHAPE — `code === 'RESOURCE_CONFLICT'`, a declared 4xx status,
+ * and a `refusal` whose `status` is `'refused'` and whose `candidates` is a
+ * list — because this package depends on nothing but `@objectstack/spec` and
+ * cannot name core's class. The class satisfies the shape, and so does an
+ * error that crossed a second copy of `@objectstack/core`. Read here, by
+ * {@link resolveThrownHttpError}, by the `/data` classification and by the
+ * batch row error, so no door carries a second recogniser.
  */
 export function packageScopedRefusalCandidates(error: unknown): readonly unknown[] | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
-  const e = error as { code?: unknown; refusal?: { status?: unknown; candidates?: unknown } | null };
+  const e = error as { code?: unknown; status?: unknown; statusCode?: unknown; refusal?: { status?: unknown; candidates?: unknown } | null };
   if (e.code !== 'RESOURCE_CONFLICT') return undefined;
+  // A declared 4xx, read in the two spellings {@link resolveThrownHttpError}
+  // reads (`status`, else `statusCode`), so the resolver, the `/data`
+  // classification and the batch row error gate the member alike.
+  const declared = typeof e.status === 'number' ? e.status : typeof e.statusCode === 'number' ? e.statusCode : undefined;
+  if (declared === undefined || declared < 400 || declared >= 500) return undefined;
   const refusal = e.refusal;
   if (typeof refusal !== 'object' || refusal === null || refusal.status !== 'refused') return undefined;
   return Array.isArray(refusal.candidates) ? refusal.candidates : undefined;
