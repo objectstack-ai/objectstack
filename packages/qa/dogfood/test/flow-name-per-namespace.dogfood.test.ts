@@ -379,8 +379,10 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     expect(viaMcp.payload?.action).toBe(SCREEN_ACTION);
     expect((await automation().getRun(agentRun))?.status).toBe('completed');
 
-    // [R3] Two runs paused while alpha alone holds LATE (its bare key), then iota installs the name.
-    const [lateRun, lateAgentRun] = [await startPaused(LATE_ACTION, LATE), await startPaused(LATE_ACTION, LATE)];
+    // [R3] Four runs paused while alpha alone holds LATE (its bare key), then iota installs the name.
+    const [lateRun, lateAgentRun, lateCancelRun, lateAddressRun] = [
+      await startPaused(LATE_ACTION, LATE), await startPaused(LATE_ACTION, LATE), await startPaused(LATE_ACTION, LATE), await startPaused(LATE_ACTION, LATE),
+    ];
     expect((await automation().getRun(lateRun))?.flowName).toBe(LATE);
     const installed = await call('POST', '/marketplace/install-local', inline('iota', { flows: [screenFlow('iota', LATE)] }));
     expect(installed.status, JSON.stringify(installed.body)).toBeLessThan(300);
@@ -396,10 +398,19 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     }
     const lateResumed = await call('POST', `/automation/${LATE}/runs/${lateRun}/resume`, { inputs: { note: 'done' } });
     expect(lateResumed.status, JSON.stringify(lateResumed.body)).toBe(200);
+    // The bare cancel and alpha's address resume act on alpha's runs; the finished run reads at both doors.
+    const cancelled = await call('POST', `/automation/${LATE}/runs/${lateCancelRun}/cancel`, {});
+    const addressResumed = await call('POST', `/automation/alpha/${LATE}/runs/${lateAddressRun}/resume`, { inputs: { note: 'done' } });
+    expect([cancelled.status, addressResumed.status], JSON.stringify([cancelled.body, addressResumed.body])).toEqual([200, 200]);
+    for (const prefix of [`/automation/alpha/${LATE}`, `/automation/${LATE}`]) {
+      const read = await call('GET', `${prefix}/runs/${lateRun}`);
+      expect([read.status, read.body?.data?.status], `${prefix} ${JSON.stringify(read.body)}`).toEqual([200, 'completed']);
+    }
     // MCP resume_run admits alpha's own flow action for alpha's run.
     const lateViaMcp = await tool('resume_run', { runId: lateAgentRun, values: { note: 'done' } });
     expect([lateViaMcp.isError, lateViaMcp.payload?.action], lateViaMcp.text).toEqual([false, LATE_ACTION]);
-    expect([(await automation().getRun(lateRun))?.status, (await automation().getRun(lateAgentRun))?.status]).toEqual(['completed', 'completed']);
+    const statuses = await Promise.all([lateRun, lateAgentRun, lateCancelRun, lateAddressRun].map(async (id) => (await automation().getRun(id))?.status));
+    expect(statuses).toEqual(['completed', 'completed', 'cancelled', 'completed']);
 
     // [R8] The history row the boot found with no package was bound to alpha, LATE's one holder then; with iota
     // holding the name too, it is alpha's run at alpha's address and the bare door, and nobody's at iota's.
