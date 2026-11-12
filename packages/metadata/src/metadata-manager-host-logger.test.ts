@@ -87,7 +87,7 @@ describe('[#32154] MetadataManager follows the host logger level', () => {
     expect(host.lines).toEqual([{ level: 'info', message: REGISTERED }]);
 
     (manager as any).logger.debug('after the handoff');
-    expect(host.lines.at(-1)).toEqual({ level: 'debug', message: 'after the handoff' });
+    expect(host.lines[host.lines.length - 1]).toEqual({ level: 'debug', message: 'after the handoff' });
   });
 
   it('⛔ a warning never waits for the host: it prints at once, through the manager`s own logger', () => {
@@ -108,6 +108,6 @@ describe('[#32154] MetadataManager follows the host logger level', () => {
     manager.useHostLogger(host.logger as any);
     expect((manager as any).logger).toBe(before);
     before.info('from a loader holding the early reference');
-    expect(host.lines.at(-1)).toEqual({ level: 'info', message: 'from a loader holding the early reference' });
+    expect(host.lines[host.lines.length - 1]).toEqual({ level: 'info', message: 'from a loader holding the early reference' });
   });
 });
