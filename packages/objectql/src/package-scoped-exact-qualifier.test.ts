@@ -1854,11 +1854,16 @@ describe('[#32568] a package-less row at a holder\'s exact address: declined for
     // runs: the served holder set is the enabled one, so an overlay type's
     // row is that holder's customization (served at its address, and laid in
     // under its envelope), and a sealed type's row is declined. Re-enabled,
-    // no hydration state survives: the overlay row is refused naming both,
-    // and each sealed holder serves its own.
+    // the protocol's exact read answers one thing per state: the overlay row
+    // is refused naming both, and each sealed holder serves its own. Not
+    // pinned here, and not healed by this card: an overlay type's copy stays
+    // in the enabled holder's registry slot after the re-enable, so that
+    // slot, the list scoped to it and its execution list answer the
+    // environment's row as its own until the next unscoped hydration (the
+    // re-enable heal, a follow-up under #32568).
     const BOTH = [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }];
     for (const type of ['email_template', 'action', 'queue']) {
-      it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state, none left behind by the hydration`, async () => {
+      it(`${type}, two holders, one disabled while the read-side hydrator runs, then re-enabled: one answer per state on the exact read`, async () => {
         const overlay = type === 'email_template';
         if (overlay) {
           tpl(A);
