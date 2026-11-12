@@ -439,27 +439,123 @@ describe('SolutionBlueprintSchema', () => {
         .toEqual({ path: ['objects', 0, 'stageField'], code: 'invalid_format' });
     });
 
-    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused there', () => {
-      // The blueprint does not judge the kinds itself (strict structured
-      // output cannot express a cross-key rule); the object schema the applier
-      // writes through does. This pins that the two keys land on the object
-      // schema's own spellings — `stageField` on the object, `kind` on the
-      // option — so a plain copy is all an applier has to do.
-      const toObject = (bp: ReturnType<typeof loanObject>) => {
-        const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [bp] }).objects[0];
-        return {
-          name: parsed.name,
-          fields: Object.fromEntries(parsed.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
-          stageField: parsed.stageField,
-        };
-      };
-      expect(ObjectSchema.safeParse(toObject(loanObject())).success).toBe(true);
+    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused at both doors', () => {
+      // The two keys land on the object schema's own spellings — `stageField`
+      // on the object, `kind` on the option — so a plain copy is all an
+      // applier has to do, and the copy parses.
+      const toObject = (bp: ReturnType<typeof loanObject>) => ({
+        name: bp.name,
+        fields: Object.fromEntries(bp.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
+        stageField: bp.stageField,
+      });
+      const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [loanObject()] }).objects[0];
+      expect(ObjectSchema.safeParse(toObject(parsed as ReturnType<typeof loanObject>)).success).toBe(true);
 
+      // [#32764] An option missing its kind is refused by the blueprint parse
+      // `apply_blueprint` runs, before anything is staged, at the option's own
+      // array path; the object schema refuses the same option at its map path.
       const forgot = LOAN_STAGES.map((o) => (o.value === 'written_off' ? { label: o.label, value: o.value } : o));
+      expect(firstIssue({ summary: 's', objects: [loanObject(forgot)] }))
+        .toEqual({ path: ['objects', 0, 'fields', 1, 'options', 3, 'kind'], code: 'custom' });
       const refused = ObjectSchema.safeParse(toObject(loanObject(forgot)));
       expect(refused.success).toBe(false);
       expect(refused.error?.issues.map((i) => ({ path: i.path, code: i.code })))
         .toEqual([{ path: ['fields', 'status', 'options', 3, 'kind'], code: 'custom' }]);
+    });
+
+    describe('[#32764] the blueprint object runs the object schema\'s stage-field rule', () => {
+      /** Every issue of a lenient blueprint parse of one object, as `{ path, code }`. */
+      const issues = (object: Record<string, unknown>) => {
+        const result = SolutionBlueprintSchema.safeParse({ summary: 's', objects: [object] });
+        return result.success ? [] : result.error.issues.map((i) => ({ path: i.path, code: i.code }));
+      };
+      /** The same object as an `ObjectSchema` body: the field array keyed by name. */
+      const asObject = (object: { name: string; fields: Array<Record<string, unknown>>; stageField?: string }) => ({
+        name: object.name,
+        fields: Object.fromEntries(object.fields.map(({ name, ...field }) => [name as string, { label: name, ...field }])),
+        ...(object.stageField !== undefined ? { stageField: object.stageField } : {}),
+      });
+
+      it('refuses one issue per option without kind, each at that option\'s own path', () => {
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        expect(issues(loanObject(noKinds))).toEqual([0, 1, 2, 3].map((i) => (
+          { path: ['objects', 0, 'fields', 1, 'options', i, 'kind'], code: 'custom' }
+        )));
+      });
+
+      it('accepts the same stage field once every option declares its kind', () => {
+        expect(issues(loanObject())).toEqual([]);
+      });
+
+      it('locates the option by the field\'s index in the ARRAY, wherever the stage field sits', () => {
+        const forgot = LOAN_STAGES.map((o, i) => (i === 0 ? { label: o.label, value: o.value } : o));
+        const object = {
+          name: 'loan',
+          fields: [
+            { name: 'status', type: 'select' as const, options: forgot },
+            { name: 'title', type: 'text' as const },
+          ],
+          stageField: 'status',
+        };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'fields', 0, 'options', 0, 'kind'], code: 'custom' }]);
+      });
+
+      it('refuses a stage field that holds no single option code, at stageField', () => {
+        const object = loanObject(LOAN_STAGES.map(({ label, value }) => ({ label, value })));
+        object.fields[1] = { ...object.fields[1], type: 'multiselect' as never };
+        expect(issues(object)).toEqual([{ path: ['objects', 0, 'stageField'], code: 'custom' }]);
+      });
+
+      it('leaves alone what the object schema leaves alone: no stageField, an undeclared one, a field with no options', () => {
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const { stageField: _omit, ...withoutStageField } = loanObject(noKinds);
+        expect(issues(withoutStageField)).toEqual([]);
+        expect(issues(loanObject(noKinds, { stageField: 'phase' }))).toEqual([]);
+        const optionless = loanObject(noKinds);
+        optionless.fields[1] = { name: 'status', type: 'select' as const } as never;
+        expect(issues(optionless)).toEqual([]);
+      });
+
+      it('agrees with ObjectSchema on every case: refused by one iff refused by the other, with as many issues', () => {
+        // One rule, not two that agree today: the blueprint hands its field
+        // array to the very function `ObjectSchema` runs. This walks the
+        // cases that function distinguishes and holds the verdicts equal.
+        const noKinds = LOAN_STAGES.map(({ label, value }) => ({ label, value }));
+        const oneMissing = LOAN_STAGES.map((o, i) => (i === 2 ? { label: o.label, value: o.value } : o));
+        let refusedCases = 0;
+        const cases: Array<{ type: string; options?: Array<Record<string, unknown>>; stageField?: string }> = [
+          { type: 'select', options: LOAN_STAGES },
+          { type: 'select', options: noKinds },
+          { type: 'select', options: oneMissing },
+          { type: 'radio', options: noKinds },
+          { type: 'radio', options: LOAN_STAGES },
+          { type: 'multiselect', options: noKinds },
+          { type: 'select' },
+          { type: 'text' },
+          { type: 'select', options: noKinds, stageField: 'missing_field' },
+        ];
+        for (const c of cases) {
+          const object = {
+            name: 'loan',
+            fields: [
+              { name: 'title', type: 'text' },
+              { name: 'status', type: c.type, ...(c.options ? { options: c.options } : {}) },
+            ],
+            stageField: c.stageField ?? 'status',
+          };
+          // Only the stage rule's two issue sites are compared: the object
+          // schema judges the field itself too (a select with no options),
+          // which is not this rule and not the blueprint's to repeat.
+          const stageRule = (path: PropertyKey[]) => path.at(-1) === 'kind' || path.at(-1) === 'stageField';
+          const blueprint = issues(object).filter((i) => stageRule(i.path)).length;
+          const result = ObjectSchema.safeParse(asObject(object));
+          const viaObject = result.success ? 0 : result.error.issues.filter((i) => stageRule(i.path)).length;
+          expect({ case: c, blueprint }).toEqual({ case: c, blueprint: viaObject });
+          refusedCases += blueprint > 0 ? 1 : 0;
+        }
+        // The walk is not vacuous: four of the cases above are refusals.
+        expect(refusedCases).toBe(4);
+      });
     });
   });
 });

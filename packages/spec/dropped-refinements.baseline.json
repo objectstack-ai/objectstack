@@ -22,6 +22,7 @@
     },
     "ai/BlueprintObject": {
       "sites": [
+        "",
         "fields.element",
         "fields.element.summaryOperations.filter.lazy"
       ]
@@ -68,6 +69,7 @@
     },
     "ai/SolutionBlueprint": {
       "sites": [
+        "objects.element",
         "objects.element.fields.element",
         "objects.element.fields.element.summaryOperations.filter.lazy",
         "views.element.filters.element"

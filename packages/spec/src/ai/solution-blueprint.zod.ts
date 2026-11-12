@@ -6,6 +6,7 @@ import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { checkLiteralDefaultValue } from '../data/default-value-shape';
 import { isRuntimeDefaultToken } from '../data/default-value-tokens';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { refuseStageFieldWithoutKinds } from '../data/stage-field-kinds';
 import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
 import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
 
@@ -43,9 +44,11 @@ const optionKindEnum = () => SelectOptionSchema.shape.kind.unwrap();
 
 /**
  * What the object schema refuses about the field a blueprint object's
- * `stageField` names (`refuseStageFieldWithoutKinds`, `data/object.zod.ts`):
- * one sentence both object shapes and both option shapes state, so the two
- * halves of the rule (the pointer and the kinds) read the same on every side.
+ * `stageField` names (`refuseStageFieldWithoutKinds`, `data/stage-field-kinds.ts`),
+ * and what the lenient blueprint object now refuses too (it runs that same
+ * function): one sentence both object shapes and both option shapes state, so
+ * the two halves of the rule (the pointer and the kinds) read the same on
+ * every side.
  */
 const STAGE_FIELD_RULE =
   'The object schema refuses the object unless the field `stageField` names is a single-value `select` or `radio` '
@@ -344,6 +347,42 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
 }).superRefine(refuseUnfitDefaultValue, { when: () => true }));
 export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
+/**
+ * [#32764] The object schema's stage-field option-kind rule, run on the
+ * blueprint object: the SAME function `ObjectSchema` runs
+ * (`refuseStageFieldWithoutKinds`), handed the blueprint's field ARRAY as the
+ * field map that function reads. Before it, a blueprint whose `stageField`
+ * named a select with a kind-less option parsed here, `apply_blueprint` staged
+ * the object's views and nav entry, and the object write alone refused, so the
+ * build answered `drafted` with dependents pointing at an object that was never
+ * written. Refusing at parse stages nothing.
+ *
+ * Each issue lands where the blueprint carries the value: an option's own
+ * `kind` at `['fields', <index>, 'options', <i>, 'kind']`, the pointer at
+ * `['stageField']`. A field name declared twice is judged by its first entry
+ * (the applier keys fields by name, so the second is not a second field).
+ * The strict mirror cannot state this cross-key rule (per-leaf only); its
+ * describes teach it, and this parse, the one `apply_blueprint` runs, refuses it.
+ */
+function refuseBlueprintStageFieldWithoutKinds(object: unknown, ctx: z.RefinementCtx): void {
+  if (typeof object !== 'object' || object === null) return;
+  const { name, stageField, fields } = object as Record<string, unknown>;
+  if (!Array.isArray(fields)) return;
+  const indexOf = new Map<string, number>();
+  fields.forEach((field: unknown, index: number) => {
+    const fieldName = (field as { name?: unknown } | null)?.name;
+    if (typeof fieldName === 'string' && !indexOf.has(fieldName)) indexOf.set(fieldName, index);
+  });
+  // `Object.fromEntries` defines own data properties, so a field named
+  // `__proto__` (legal snake_case) is a key here, never the map's prototype.
+  const fieldMap = Object.fromEntries([...indexOf].map(([fieldName, index]) => [fieldName, fields[index]]));
+  refuseStageFieldWithoutKinds(name, stageField, fieldMap, ctx, {
+    fieldKey: (fieldName) => indexOf.get(fieldName) ?? fieldName,
+    noLifecycle: 'Or omit `stageField` if this object has no linear lifecycle.',
+  });
+}
+
+/**
 /** A proposed business object (table) with its fields. */
 export const BlueprintObjectSchema = lazySchema(() => z.object({
   name: z.string().regex(SNAKE_CASE).describe('Object machine name (snake_case)'),
@@ -360,7 +399,7 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
   // schema's `false` ("no linear lifecycle") has no blueprint spelling.
   stageField: z.string().regex(SNAKE_CASE).optional()
     .describe(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options its \`kind\`. Omitting it leaves stage detection to a guess from field names (status / stage / state / phase).`),
-}));
+}).superRefine(refuseBlueprintStageFieldWithoutKinds));
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
 /**
