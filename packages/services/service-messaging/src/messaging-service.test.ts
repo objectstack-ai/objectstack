@@ -5,7 +5,12 @@ import { MessagingService, NOTIFICATION_EVENT_OBJECT } from './messaging-service
 import { InboxCallerError } from './inbox-caller.js';
 import { MemoryNotificationOutbox } from './memory-outbox.js';
 import type { Delivery, MessagingChannel, SendResult } from './channel.js';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 
 function silentLogger() {
     return { info: () => {}, warn: () => {}, error: () => {} };
@@ -1591,10 +1596,14 @@ describe('[#32512] inbox readers and a deleted organization', () => {
                 return created;
             },
             async update(object: string, data: Row, options: any = {}) {
+                assertEngineUpdateDispatch(data, options);
                 for (const r of store[object] ?? []) if (sqlMatch(r, options.where)) Object.assign(r, data);
                 return 1;
             },
-            async delete() { return 0; },
+            async delete(_object: string, options: any = {}) {
+                assertEngineDeleteDispatch(options);
+                return 0;
+            },
             async count() { return 0; },
             async aggregate() { return []; },
         };
