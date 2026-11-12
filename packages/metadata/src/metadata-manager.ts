@@ -76,7 +76,7 @@ import { TypeScriptSerializer } from './serializers/typescript-serializer.js';
 import type { MetadataSerializer } from './serializers/serializer-interface.js';
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
 import type { MetadataLoader, MetadataKeyedItem } from './loaders/loader-interface.js';
-import { DatabaseLoader } from './loaders/database-loader.js';
+import { DatabaseLoader, type MetadataHistoryAddress } from './loaders/database-loader.js';
 import { isAmbiguousMetadataStemError } from './loaders/ambiguous-metadata-stem.js';
 import { generateSimpleDiff, generateDiffSummary } from './utils/metadata-history-utils.js';
 import type {
@@ -87,6 +87,7 @@ import type {
 import { EndpointMatcher } from './endpoint-matcher.js';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
+  isPackageCaller,
   bundleEntryKey,
   isBundledStoreType,
   keyIdentityOf,
@@ -100,6 +101,7 @@ import {
   storeRemovalKeys,
   storeSlotKey,
   storeWriteKey,
+  environmentStoreKey,
 } from './package-slotted-store.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
@@ -1085,9 +1087,9 @@ export class MetadataManager implements IMetadataService {
    * `(package, name)` the item's package slot), dropping any key the write
    * replaces. Whether an item was replaced — the `added` / `changed` split.
    */
-  private writeRegistryEntry(type: string, name: string, data: unknown): boolean {
+  private writeRegistryEntry(type: string, name: string, data: unknown, slot?: string): boolean {
     let typeStore = this.registry.get(type);
-    const { key, replaces } = storeWriteKey(typeStore, type, name, data);
+    const { key, replaces } = slot === undefined ? storeWriteKey(typeStore, type, name, data) : { key: slot, replaces: [] };
     if (!typeStore) this.registry.set(type, (typeStore = new Map()));
     const existed = typeStore.has(key) || replaces.length > 0;
     for (const replaced of replaces) typeStore.delete(replaced);
@@ -4081,11 +4083,17 @@ export class MetadataManager implements IMetadataService {
   /**
    * Get version history for a metadata item.
    * Returns a timeline of all changes made to the item.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` reads that package's versions only (`null`: the
+   * environment's, recorded under no package); naming none, a
+   * name more than one row slot holds is refused 409 naming every holder
+   * (`PackageScopedNameRefusedError`), and one holder answers as before.
    */
   async getHistory(
     type: string,
     name: string,
-    options?: MetadataHistoryQueryOptions
+    options?: MetadataHistoryQueryOptions & MetadataHistoryAddress
   ): Promise<MetadataHistoryQueryResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4099,12 +4107,20 @@ export class MetadataManager implements IMetadataService {
       limit: options?.limit,
       offset: options?.offset,
       includeMetadata: options?.includeMetadata,
+      packageId: options?.packageId,
     });
   }
 
   /**
    * Rollback a metadata item to a specific version.
    * Restores the metadata definition from the history snapshot.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` names whose row is restored, and the version must be
+   * that package's ("not found" otherwise). Naming none, the name's one row is
+   * restored; several are refused 409 naming every holder, and so is a version
+   * of a package that holds no row of the name (`not-held-by-qualifier`) —
+   * ⛔ never written into another package's row.
    */
   async rollback(
     type: string,
@@ -4113,7 +4129,7 @@ export class MetadataManager implements IMetadataService {
     options?: {
       changeNote?: string;
       recordedBy?: string;
-    }
+    } & MetadataHistoryAddress
   ): Promise<unknown> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4121,10 +4137,15 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the target version snapshot directly from the history table
-    const targetVersion = await dbLoader.getHistoryRecord(type, name, version);
+    const address = historyAddressOf(options);
+    const targetVersion = await dbLoader.getHistoryRecord(type, name, version, address);
 
     if (!targetVersion) {
-      throw new Error(`Version ${version} not found in history for ${type}/${name}`);
+      // [#32351 F1] An addressed read leaves out a version attributed to no
+      // package; on a name several row slots hold it is refused naming every
+      // holder, not answered "not found".
+      if (address !== undefined) await dbLoader.refuseUnattributedVersion(type, name, version);
+      throw new Error(`Version ${version} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!targetVersion.metadata) {
@@ -4140,11 +4161,24 @@ export class MetadataManager implements IMetadataService {
       restoredMetadata,
       version,
       options?.changeNote,
-      options?.recordedBy
+      options?.recordedBy,
+      address,
     );
 
-    // Update in-memory registry with the restored metadata
-    this.writeRegistryEntry(type, name, restoredMetadata);
+    // Update in-memory registry with the restored metadata. [#32351] A
+    // package's restored version that names no package itself (a package-less
+    // customization of that package's row) is filed under that package's slot,
+    // as the row it was written to is. [S4] One restored by the environment
+    // address is filed under the bare slot, as its row is, even when one
+    // package holds the name (the write rule would file it under that package's).
+    const slotted = PACKAGE_SLOTTED_STORE_TYPES.has(type);
+    if (slotted && isPackageCaller(address?.packageId)) {
+      this.writeRegistryEntry(type, name, withEntryPackage({ name, data: restoredMetadata, packageId: address.packageId }));
+    } else if (slotted && address !== undefined) {
+      this.writeRegistryEntry(type, name, restoredMetadata, environmentStoreKey(type, name, restoredMetadata));
+    } else {
+      this.writeRegistryEntry(type, name, restoredMetadata);
+    }
 
     return restoredMetadata;
   }
@@ -4152,12 +4186,18 @@ export class MetadataManager implements IMetadataService {
   /**
    * Compare two versions of a metadata item.
    * Returns a diff showing what changed between versions.
+   *
+   * [ADR-0150 D3/D4, #32351] For a type stored per `(package, name)`,
+   * `options.packageId` compares two of that package's versions ("not found"
+   * for another's); naming none, a name more than one row slot holds is
+   * refused 409 naming every holder.
    */
   async diff(
     type: string,
     name: string,
     version1: number,
-    version2: number
+    version2: number,
+    options?: MetadataHistoryAddress
   ): Promise<MetadataDiffResult> {
     const dbLoader = this.getDatabaseLoader();
     if (!dbLoader) {
@@ -4165,15 +4205,16 @@ export class MetadataManager implements IMetadataService {
     }
 
     // Fetch the two version snapshots directly from the history table
-    const v1 = await dbLoader.getHistoryRecord(type, name, version1);
-    const v2 = await dbLoader.getHistoryRecord(type, name, version2);
+    const address = historyAddressOf(options);
+    const v1 = await dbLoader.getHistoryRecord(type, name, version1, address);
+    const v2 = await dbLoader.getHistoryRecord(type, name, version2, address);
 
     if (!v1) {
-      throw new Error(`Version ${version1} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version1} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v2) {
-      throw new Error(`Version ${version2} not found in history for ${type}/${name}`);
+      throw new Error(`Version ${version2} not found in history for ${type}/${name}${historyAddressSuffix(type, address)}`);
     }
 
     if (!v1.metadata || !v2.metadata) {
@@ -4197,6 +4238,21 @@ export class MetadataManager implements IMetadataService {
       summary,
     };
   }
+}
+
+/**
+ * [#32351] The package address a history door forwards to the database
+ * loader: only `packageId`, so the loader's answer never depends on what else
+ * the caller's options carry; `undefined` when none is named.
+ */
+function historyAddressOf(options?: MetadataHistoryAddress): MetadataHistoryAddress | undefined {
+  return options?.packageId === undefined ? undefined : { packageId: options.packageId };
+}
+
+/** [#32351] The "not found" message's address, for a by-package type read by address; empty otherwise. */
+function historyAddressSuffix(type: string, address?: MetadataHistoryAddress): string {
+  if (address?.packageId === undefined || !PACKAGE_SLOTTED_STORE_TYPES.has(type)) return '';
+  return isPackageCaller(address.packageId) ? ` (package ${address.packageId})` : ' (environment)';
 }
 
 /**
