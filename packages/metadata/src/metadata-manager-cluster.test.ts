@@ -669,7 +669,8 @@ describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (
     });
 
     it('a `deleted` event that carries no removal (a file or repository event, an origin predating the field) keeps B\'s door copy answering', async () => {
-        const { bus, b } = await bootDoorCluster('view', [doorItem('view', 'unlinked')], { sharedStore: true });
+        // No shared store: B's door copy is the only loader that can answer.
+        const { bus, b } = await bootDoorCluster('view', [doorItem('view', 'unlinked')], { sharedStore: false });
         await bus.publish('metadata.changed', {
             originNode: 'node-X',
             type: 'view',
@@ -677,6 +678,7 @@ describe('MetadataManager — a peer\'s removal deletes this node\'s in-memory (
         });
         await flush();
         expect(b.watched).toEqual(['deleted unlinked']);
+        expect(((await b.door.load('view', 'unlinked')).data as any)?.label).toBe('alpha view unlinked');
         expect(await readsOf(b.mgr, 'view', 'unlinked')).toEqual(answering('alpha view unlinked'));
     });
 
