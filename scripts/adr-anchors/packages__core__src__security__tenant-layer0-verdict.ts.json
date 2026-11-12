@@ -1,0 +1,9 @@
+{
+  "file": "packages/core/src/security/tenant-layer0-verdict.ts",
+  "adrs": [
+    "ADR-0093",
+    "ADR-0095",
+    "ADR-0131"
+  ],
+  "invariant": "Layer 0 is ONE verdict (ADR-0131 D8) that every reader of the tenant wall computes from this function — plugin-security's filter and write pre-test, and the engine's driver options. Under `single` it walls nothing between organizations, but a person who holds no current membership in any organization (`isOutsideEveryOrganization`) is denied the organization's tenant rows, as the walled postures deny them: a person's data access requires a current membership in the organization under every posture (ADR-0093 D8.1, as amended). System contexts and the platform operator (ADR-0095 D3 `PLATFORM_ADMIN`) are never outside; objects outside tenancy stay outside the wall."
+}

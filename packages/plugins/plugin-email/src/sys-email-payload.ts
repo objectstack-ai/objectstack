@@ -174,7 +174,10 @@ export type EncodedAttachments =
    * deletes.
    */
   | { kind: 'storage'; json: string; keys: string[]; totalBytes: number }
-  /** Content this codec cannot represent; nothing is written to the row. */
+  /**
+   * Content this codec cannot represent; nothing is written to the row. A
+   * message carrying it is not sent (see {@link encodeAttachmentsForRow}).
+   */
   | { kind: 'unsupported'; detail: string };
 
 /** `sha256:<hex>` of the raw bytes. */
@@ -238,12 +241,11 @@ export function collectAttachmentParts(
 /**
  * Encode a message's attachments for `sys_email.attachments_json`.
  *
- * Never throws: an attachment this codec cannot carry (too large, or a
- * `content` value outside the declared `string | Buffer` contract) is reported
- * as a verdict, because the caller's response is to fall back to inline
- * delivery — which is today's behaviour and always whole — not to fail the
- * send. Failing a send that works today would be a regression dressed as
- * strictness.
+ * Never throws: an attachment this codec cannot carry is reported as a
+ * verdict. Too large (`over-limit`): the caller falls back to inline delivery,
+ * which is always whole. A `content` value outside the declared
+ * `string | Buffer` contract (`unsupported`): never delivered — `send` refuses
+ * it in `normalizeMessage`, and stops on this verdict as a second check.
  */
 export function encodeAttachmentsForRow(
   attachments: EmailAttachment[] | undefined,

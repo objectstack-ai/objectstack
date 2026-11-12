@@ -7,7 +7,7 @@
  *
  * | Row | Table . name column | Gains | Rows asked |
  * |:--|:--|:--|:--|
- * | R8 | `sys_automation_run.flow_name` | `flow_package` | `paused` rows: a paused run resumes by it; terminal history rows are not backfilled (a new one is written with its package, #31696) |
+ * | R8 | `sys_automation_run.flow_name` | `flow_package` | every row, paused and terminal: a paused run resumes by it, and a history row reads as its package's run once a second package holds the name (#31696) |
  * | R9 | `sys_flow_credential.flow_name` | `flow_package` | every row |
  * | R11 | `sys_connector_connection.connector_name` | `connector_package` | every row |
  *
@@ -21,8 +21,10 @@
  * the one holder of the name in this environment when the backfill runs:
  * objectql's `resolvePackageScopedName` (ADR-0150 D3, the one rule every
  * reader of the epic shares), asked as a caller with no package, over the
- * whole registry — for a flow through {@link AutomationEngine.flowHolder}, for
- * a connector through {@link connectorNameResolver}. An environment override
+ * whole registry — for a flow through {@link AutomationEngine.durableFlowHolder},
+ * for a connector through {@link connectorNameResolver} — over every holder, a
+ * disabled package's included (#32183): the binding is written once, and a
+ * disable is reversible. An environment override
  * of P's flow is the overlay of P's item, not a second one (D4), so its rows
  * bind to P. ⛔ Not {@link AutomationEngine.armedFlowPackage}: that answers
  * the package a reference written IN the armed body resolves from, a caller's
@@ -73,7 +75,7 @@ export interface StoredReference {
     readonly nameColumn: string;
     /** The column this backfill fills. */
     readonly packageColumn: string;
-    /** The rows asked, beyond "the package column is null" (R8: paused runs only). */
+    /** The rows asked, beyond "the package column is null" (none of the three narrows it). */
     readonly where?: Record<string, unknown>;
 }
 
@@ -85,7 +87,6 @@ export const STORED_AUTOMATION_REFERENCES: readonly StoredReference[] = Object.f
         object: 'sys_automation_run',
         nameColumn: 'flow_name',
         packageColumn: 'flow_package',
-        where: { status: 'paused' },
     },
     { row: 'R9', type: 'flow', object: 'sys_flow_credential', nameColumn: 'flow_name', packageColumn: 'flow_package' },
     { row: 'R11', type: 'connector', object: 'sys_connector_connection', nameColumn: 'connector_name', packageColumn: 'connector_package' },

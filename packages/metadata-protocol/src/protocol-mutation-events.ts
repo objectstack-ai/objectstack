@@ -27,6 +27,22 @@ export interface MetadataMutationEvent {
      * for every type with no members, as on every by-name door.
      */
     member?: string;
+    /**
+     * [#32451, ADR-0150 D4] The package the mutated row is bound to — part of
+     * the row's ADDRESS, as `member` is, so a peer converging on this signal
+     * re-reads THAT package's row of a type stored per `(package, name)`.
+     *
+     * - a package id: the row is bound to that package;
+     * - `null`: the row is known to be bound to NO package (D8). Never sent for
+     *   a binding the producer does not know or cannot single out;
+     * - absent: the producer does not know the binding — a writer that
+     *   predates this field. A receiver judges absence by `=== undefined`, so
+     *   a key present with the value `undefined` is absent too.
+     *
+     * Producers stamp the binding the write resolved, through `boundPackageOf`,
+     * never a request's value verbatim.
+     */
+    packageId?: string | null;
 }
 
 /**
@@ -51,9 +67,12 @@ export const METADATA_MUTATION_CLUSTER_CHANNEL = 'metadata.mutated';
  * re-reads the row from its own `sys_metadata` and re-runs the registry
  * write-through from that read, so the shared database stays the single
  * source of truth. `event` carries only the row's ADDRESS (type/name/state/
- * org scope); no body ever rides this channel, which is also what makes
- * at-least-once delivery and duplicates harmless by construction — replaying
- * the same address converges to the same registry state.
+ * org scope, the bundle `member`, and [#32451, ADR-0150 D4] the `packageId`
+ * the row is bound to); no body ever rides this channel, which is also what
+ * makes at-least-once delivery and duplicates harmless by construction —
+ * replaying the same address converges to the same registry state. The
+ * package is address, not trust: the peer reads the row at that address and
+ * registers the binding of the row it read.
  */
 export interface ClusterMetadataMutationPayload {
     /** Origin nodeId — used for loopback suppression. */

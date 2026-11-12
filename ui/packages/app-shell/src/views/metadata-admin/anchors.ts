@@ -19,7 +19,22 @@
  * Hand-rolled declarations are clearer than schema-walking heuristics.
  */
 
+import { checkPageRecordPlacesComponent } from '@objectstack/spec/ui';
 import { registerMetadataResource, anchorByField } from './registry.js';
+
+/**
+ * Whether `regions` place a component on a `full` record page, by the spec's
+ * own reading: `checkPageRecordPlacesComponent` is the refusal the save door
+ * raises at `regions` for a `full` record page that places none.
+ */
+function fullRecordPagePlacesComponent(object: string, regions: unknown): boolean {
+  let refused = false;
+  checkPageRecordPlacesComponent(
+    { type: 'record', kind: 'full', object, regions },
+    { value: undefined, issues: [], addIssue: () => { refused = true; } },
+  );
+  return !refused;
+}
 
 
 export function registerBuiltinAnchors(): void {
@@ -203,6 +218,12 @@ export function registerBuiltinAnchors(): void {
     // designer's "Convert to full page" action (`PagePreview`). Seeding every
     // record page with the synthesized regions forked it from the default on
     // the day it was created.
+    //
+    // Where no copy placing a component can be made — no object chosen, the
+    // object not readable, or a synthesized page that places none — the `full`
+    // page starts `slotted` instead: the same default page on the day it is
+    // created, and a body the save door accepts. A `full` record page that
+    // places no component is refused there (`checkPageRecordPlacesComponent`).
     createSeed: async (draft, { client }) => {
       // List/interface page: pre-bind the chosen object as the data source so
       // the new page renders immediately (the author then curates columns,
@@ -215,11 +236,13 @@ export function registerBuiltinAnchors(): void {
       // stated here rather than left to the draft, so a record page reaching
       // this hook without a kind (the spec create seed says `full`) still
       // starts as the default page.
-      if (draft.kind !== 'full') return { kind: 'slotted' };
-      if (!draft?.object) return {};
+      const slotted = { kind: 'slotted' };
+      if (draft.kind !== 'full') return slotted;
+      if (!draft?.object) return slotted;
+      const object = String(draft.object);
       try {
-        const objectDef = await client.get('object', String(draft.object));
-        if (!objectDef || typeof objectDef !== 'object') return {};
+        const objectDef = await client.get('object', object);
+        if (!objectDef || typeof objectDef !== 'object') return slotted;
         const { buildDefaultPageSchema } = await import('@object-ui/plugin-detail');
         // The running app's detail sections, from the one derivation it uses
         // (objectui#12442) — without them an object with no `fieldGroups`
@@ -232,12 +255,12 @@ export function registerBuiltinAnchors(): void {
           deriveStudioDetailSections(objectDef as any, { moreDetails: MORE_DETAILS_DEFAULT_LABEL }),
         );
         const synth = buildDefaultPageSchema(objectDef as any, sections ? { sections: sections as any } : undefined) as Record<string, any>;
-        const seed: Record<string, unknown> = {};
-        if (Array.isArray(synth?.regions) && synth.regions.length) seed.regions = synth.regions;
+        if (!fullRecordPagePlacesComponent(object, synth?.regions)) return slotted;
+        const seed: Record<string, unknown> = { regions: synth.regions };
         if (synth?.template) seed.template = synth.template;
         return seed;
       } catch {
-        return {};
+        return slotted;
       }
     },
   });

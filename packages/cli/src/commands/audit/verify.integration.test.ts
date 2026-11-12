@@ -18,7 +18,8 @@
  *      the run exits 1;
  *   3. a usage error, a declared archive this boot cannot reach, and a run
  *      with no data key to open the stored checkpoints, exit 2 with no verdict;
- *   4. a project that seals nothing exits 0 and says so;
+ *   4. a project that seals nothing exits 0 and says so, and no run starts
+ *      the sealer: a due row stays unsealed and no run reports on sealing;
  *   5. `--out` writes the proof bundle, with no stored value and no wrapped
  *      secret in it, and `--bundle` re-judges it with no boot, from an empty
  *      directory with no data key: the right `--trusted-key` exits 0, a wrong
@@ -192,6 +193,7 @@ let mainDb: string;
 let archiveDb: string;
 let sealed: { checkpoints: number; archived: number | null };
 let archivedIds: string[];
+let checkpointsAfterRuns: number;
 type RunName = 'clean' | 'cleanHuman' | 'tampered' | 'badDate' | 'reversed' | 'noKey' | 'unreachable' | 'nothing';
 type BundleRunName =
   | 'right' | 'rightHuman' | 'wrong' | 'tampered' | 'noTrustedKey' | 'keyWithoutBundle' | 'withOut' | 'scoped' | 'withDatabaseUrl' | 'badKey';
@@ -216,6 +218,17 @@ beforeAll(async () => {
     archivedIds = (cold.prepare(`SELECT id FROM ${LEDGER} ORDER BY id`).all() as Array<{ id: string }>).map((r) => r.id);
   } finally {
     cold.close();
+  }
+
+  // A row of a window that is due and not yet sealed: a sealer armed on this
+  // one-shot boot, with a crypto provider, would seal it into a checkpoint.
+  const due = new Database(mainDb);
+  try {
+    const H = 3600000;
+    const at = new Date(Math.floor(Date.now() / H) * H - 2 * H + 60000).toISOString();
+    due.prepare(`INSERT INTO ${LEDGER} (id, created_at, tenant_id, action, payload) VALUES ('due', ?, 'org_a', 'update', 'unsealed')`).run(at);
+  } finally {
+    due.close();
   }
 
   cleanBundle = join(dir, 'clean.proof.json');
@@ -285,6 +298,13 @@ beforeAll(async () => {
   dirs.push(plain);
   writeArtifact(plain, [], [{ name: 'os31908_plain', fields: { name: { type: 'text' } } }]);
   runs.nothing = await verify(plain, join(plain, 'main.db'), ['--json']);
+
+  const after = new Database(mainDb, { readonly: true });
+  try {
+    checkpointsAfterRuns = (after.prepare('SELECT COUNT(*) AS n FROM sys_audit_checkpoint').get() as { n: number }).n;
+  } finally {
+    after.close();
+  }
 }, HOOK_TIMEOUT_MS);
 
 afterAll(() => {
@@ -348,6 +368,13 @@ describe('os audit verify over a sealed ledger and its archive (ADR-0154 D9)', (
     expect(run.code, run.stderr.slice(-2000)).toBe(2);
     expect(doc(run)).toMatchObject({ error: 'crypto_provider_refused' });
     expect(doc(run).message).toMatch(/^The ledger holds checkpoints, and this run cannot open their seeds or signing keys/);
+  });
+
+  it('3d. no run starts the sealer: a due, unsealed row stays unsealed, and no run says a word about sealing (ADR-0154 D3)', () => {
+    // The command boots plugin-audit with `armSealer: false`: a read-only check
+    // is not a second server, and writes no checkpoint (nor, on a first run, a key).
+    expect(checkpointsAfterRuns).toBe(sealed.checkpoints);
+    for (const [name, run] of Object.entries(runs)) expect(run.stderr, name).not.toContain('AuditSealer');
   });
 
   it('4. a project that seals nothing exits 0 and says so', () => {

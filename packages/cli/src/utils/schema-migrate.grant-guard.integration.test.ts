@@ -34,6 +34,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { bootSchemaStack } from './schema-migrate.js';
+import { collectSchemaSyncIndexes } from './schema-sync-indexes.js';
 
 // [#10126] Pay the first transform of these dist-resolved workspace deps at
 // MODULE LOAD: `bootSchemaStack` reaches them through dynamic `import()`s,
@@ -159,5 +160,72 @@ describe('[#32164] the package-less grant guard on a one-shot CLI boot (runPlatf
     } finally {
       await stack.shutdown();
     }
+  }, CASE_TIMEOUT_MS);
+});
+
+/**
+ * [#32460] What `os migrate plan` lists of the guard, read through the plan's
+ * own boot posture (deferred DDL + `readOnlyProbe`, the served composition) and
+ * the plan's own collector, with `applyPerformsWork` taken from the boot as the
+ * plan takes it. The card's rule: the plan lists the step `apply` builds, and
+ * once the guard stands `apply` sends nothing, so the plan lists nothing.
+ */
+describe('[#32460] os migrate plan lists the guard os migrate apply builds, and nothing once it stands', () => {
+  /** The plan's boot over `file`, its listing, and its shutdown. */
+  async function planListing(file: string) {
+    const stack = await oneShot(file, { deferSchemaDdl: true, readOnlyProbe: true, composeDeclaredDatasources: true });
+    try {
+      const drift = await stack.detectManagedDrift();
+      const applyPerformsWork = drift.length > 0 || stack.pendingSchemaWork.length > 0;
+      return {
+        applyPerformsWork,
+        steps: await collectSchemaSyncIndexes({
+          schemaSync: stack.schemaSync,
+          applyPerformsWork,
+          pending: stack.pendingSchemaWork,
+          engine: () => stack.kernel.getService('objectql'),
+        }),
+      };
+    } finally {
+      await stack.shutdown();
+    }
+  }
+
+  it('a fresh database: the guard is listed on the grant table the same apply creates', async () => {
+    const file = join(dir, 'plan-fresh.db');
+    const { steps } = await planListing(file);
+
+    expect(steps).toEqual([expect.objectContaining({ table: GRANTS, index: GUARD, status: 'build', onCreatedTable: true })]);
+  }, CASE_TIMEOUT_MS);
+
+  it('an upgraded grant table without the guard: listed; after apply builds it, the plan lists nothing', async () => {
+    const file = join(dir, 'plan-upgrade.db');
+    await (await oneShot(file, {})).shutdown();
+    await onOwnConnection(file, (knex) => knex.raw(`DROP INDEX ${GUARD}`));
+    expect(await grantState(file)).toEqual({ table: true, guard: false });
+
+    const before = await planListing(file);
+    expect(before.applyPerformsWork, 'the fixture needs apply to have work, or apply never flushes').toBe(true);
+    expect(before.steps).toEqual([expect.objectContaining({ table: GRANTS, index: GUARD, status: 'build' })]);
+    expect(before.steps[0]).not.toHaveProperty('onCreatedTable');
+    // The plan built nothing.
+    expect(await grantState(file)).toEqual({ table: true, guard: false });
+
+    // `os migrate apply`'s boot and flush: the guard is built.
+    const apply = await oneShot(file, { deferSchemaDdl: true });
+    try {
+      await apply.flushSchemaDdl();
+    } finally {
+      await apply.shutdown();
+    }
+    expect(await grantState(file)).toEqual({ table: true, guard: true });
+
+    // Present: apply's build sends no DDL, so the plan lists no step. The app's
+    // table is dropped first so the plan has work again: with nothing to apply,
+    // no step is listed whatever the guard's state, and this would prove nothing.
+    await onOwnConnection(file, (knex) => knex.raw('DROP TABLE m32164a_task'));
+    const after = await planListing(file);
+    expect(after.applyPerformsWork, 'the fixture needs apply to have work, or the listing is empty by construction').toBe(true);
+    expect(after.steps).toEqual([]);
   }, CASE_TIMEOUT_MS);
 });

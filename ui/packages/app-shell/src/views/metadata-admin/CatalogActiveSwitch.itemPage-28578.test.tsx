@@ -65,6 +65,8 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 
 let ledgerRows: Record<string, unknown>[] = [];
 const posts: Array<{ url: string; body?: string }> = [];
+/** objectstack#32537 — when set, the door refuses a write that names no package with this envelope. */
+let bareNameRefusal: unknown = null;
 
 import { CatalogItemActiveSwitch } from './CatalogActiveSwitch';
 import { t, tFormat } from './i18n';
@@ -83,6 +85,7 @@ beforeEach(() => {
   };
   ledgerRows = [{ metadata_type: 'sharing_rule', name: 'open_accounts', active: false }];
   posts.length = 0;
+  bareNameRefusal = null;
   adapter.find.mockClear();
   Object.values(toasts).forEach((f) => f.mockClear());
   vi.stubGlobal(
@@ -96,6 +99,7 @@ beforeEach(() => {
       }
       if (method === 'POST' && String(url).startsWith('/api/v1/security/_activation/')) {
         posts.push({ url: String(url), body: init?.body as string | undefined });
+        if (bareNameRefusal && !String(url).includes('?package=')) return json(409, bareNameRefusal);
         const enabled = JSON.parse(String(init?.body ?? '{}')).enabled;
         return json(200, { success: true, data: { enabled } });
       }
@@ -191,6 +195,91 @@ describe('where the area item pages mount it (source pin)', () => {
     expect(areaSections).toMatch(/position: \[catalogActiveSection\('position'\)/);
     expect(areaSections).toMatch(/sharing_rule: \[catalogActiveSection\('sharing_rule'\)\]/);
     const matrix = readFileSync(path.join(here, 'PermissionMatrixEditor.tsx'), 'utf8');
-    expect(matrix).toContain('<CatalogItemActiveSwitch type="permission" name={name} />');
+    // objectstack#32537 — with the holder the editor shows (`assignmentsHolding`).
+    expect(matrix).toContain('<CatalogItemActiveSwitch type="permission" name={name} holding={assignmentsHolding} />');
+  });
+});
+
+describe('a permission set more than one package holds (objectstack#32537)', () => {
+  const said = 'Permission set "sales_rep" is held by more than one package; name one with ?package=.';
+  beforeEach(() => {
+    ledgerRows = [{ metadata_type: 'permission', name: 'sales_rep', package_id: 'com.acme.crm', active: false }];
+    bareNameRefusal = {
+      success: false,
+      error: {
+        code: 'RESOURCE_CONFLICT',
+        message: said,
+        details: {
+          candidates: [
+            { kind: 'package', packageId: 'com.acme.crm' },
+            { kind: 'package', packageId: 'com.acme.sales' },
+          ],
+        },
+      },
+    };
+  });
+
+  it("asks which holder the door's refusal names, sends nothing more until one is picked, then switches that holder", async () => {
+    render(<CatalogItemActiveSwitch type="permission" name="sales_rep" label="Sales Rep" />);
+    fireEvent.click(await switchOf('sales_rep', 'false'));
+    const dialog = await screen.findByTestId('perm-holder-pick-dialog');
+    expect(dialog.textContent).toContain(said);
+    expect(posts).toHaveLength(1);
+    // ⛔ Nothing is chosen for the administrator.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(posts).toHaveLength(1);
+
+    fireEvent.click(screen.getByTestId('perm-holder-pick-com.acme.crm'));
+    await waitFor(() => expect(posts).toHaveLength(2));
+    expect(posts[1]).toEqual({
+      url: '/api/v1/security/_activation/permission/sales_rep?package=com.acme.crm',
+      body: '{"enabled":true}',
+    });
+    // From then on the switch is that holder's, read by its own ledger row.
+    await switchOf('sales_rep@com.acme.crm', 'true');
+    expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull();
+  });
+
+  it('Cancel on the pick writes nothing more and leaves the switch as it was', async () => {
+    render(<CatalogItemActiveSwitch type="permission" name="sales_rep" label="Sales Rep" />);
+    fireEvent.click(await switchOf('sales_rep', 'false'));
+    fireEvent.click(await screen.findByTestId('perm-holder-pick-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull());
+    expect(posts).toHaveLength(1);
+    await switchOf('sales_rep', 'false');
+  });
+
+  it("takes the host's holding: reads that holder's row and writes its package, with no pick", async () => {
+    // The other holder's row is on; the shown holder's (com.acme.crm) is off.
+    ledgerRows = [
+      ...ledgerRows,
+      { metadata_type: 'permission', name: 'sales_rep', package_id: 'com.acme.sales', active: true },
+    ];
+    render(
+      <CatalogItemActiveSwitch
+        type="permission"
+        name="sales_rep"
+        label="Sales Rep"
+        holding={{ packageId: 'com.acme.crm', holders: ['com.acme.crm', 'com.acme.sales'] }}
+      />,
+    );
+    fireEvent.click(await switchOf('sales_rep@com.acme.crm', 'false'));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({
+      url: '/api/v1/security/_activation/permission/sales_rep?package=com.acme.crm',
+      body: '{"enabled":true}',
+    });
+    await switchOf('sales_rep@com.acme.crm', 'true');
+    expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull();
+  });
+
+  it('CONTROL: a name the door addresses by itself is switched by the name alone, with no pick', async () => {
+    bareNameRefusal = null;
+    render(<CatalogItemActiveSwitch type="permission" name="sales_rep" label="Sales Rep" />);
+    fireEvent.click(await switchOf('sales_rep', 'false'));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toEqual({ url: '/api/v1/security/_activation/permission/sales_rep', body: '{"enabled":true}' });
+    await switchOf('sales_rep', 'true');
+    expect(screen.queryByTestId('perm-holder-pick-dialog')).toBeNull();
   });
 });

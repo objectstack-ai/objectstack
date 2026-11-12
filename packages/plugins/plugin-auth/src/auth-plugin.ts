@@ -45,7 +45,9 @@ import {
 } from '@objectstack/platform-objects/apps';
 import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platform-objects/pages';
 import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
-import { inProcessSessionReadInput, resolveThrownHttpError } from '@objectstack/types';
+import { inProcessSessionReadInput, resolveThrownHttpError, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
+// [#32637] The private per-kernel route table `auth.handleRequest` answers through.
+import { Hono } from 'hono';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
 import type { AuthSessionApi, IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
@@ -59,6 +61,7 @@ import {
   // auth-manager.ts. This file no longer carries an independent copy.
   DEFAULT_AUTH_BASE_PATH,
   type AuthManagerOptions,
+  type AuthRouteSurface,
 } from './auth-manager.js';
 import { isDefaultOrganizationBootstrapTrigger } from './ensure-default-organization.js';
 import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
@@ -475,6 +478,31 @@ function isLoopbackIssuer(issuer: string): boolean {
 }
 
 /**
+ * [#32637] The env binding of the private route table under which a request
+ * carries the transport its caller handed `auth.handleRequest`
+ * (`{ remoteAddress? }`). A symbol, so no binding a runtime puts in `env` can
+ * stand in for it.
+ */
+const AUTH_SURFACE_TRANSPORT = Symbol('objectstack.auth.surfaceTransport');
+
+/**
+ * [#32637] Which table one call of the auth route registration fills:
+ *
+ *   - `host` — the composed HTTP server's app (self-host, from `kernel:ready`,
+ *     only with `registerRoutes`): the root-path discovery documents too, and a
+ *     route's failure answered there as before.
+ *   - `private` — the per-kernel table `auth.handleRequest` answers through,
+ *     built in `init()` for every composition: no root-path discovery (a host
+ *     serves its own), no host sign-in page to send a signed-out browser to,
+ *     an exception reaching `handleRequest`'s caller as a rejection, and no
+ *     start-up lines (the host table's registration says them once).
+ *
+ * Both are the same calls in the same order, so nothing is reachable through
+ * `handleRequest` that the self-hosted mount does not serve.
+ */
+type AuthRouteTable = 'host' | 'private';
+
+/**
  * The transport's peer address for a Hono context, when the runtime exposes
  * one: the value `IHttpRequest.remoteAddress` carries on every request the
  * transport's own seams build.
@@ -486,9 +514,19 @@ function isLoopbackIssuer(issuer: string): boolean {
  * `c.env.incoming`). Every access is guarded: a runtime that exposes nothing
  * yields `undefined`, which the client-address trust rule reads as "no peer",
  * never as a value to fabricate.
+ *
+ * [#32637] On the private route table `auth.handleRequest` answers through,
+ * the transport is the one its caller handed `handleRequest`, carried in the
+ * table's env under {@link AUTH_SURFACE_TRANSPORT}; that binding is the only
+ * source read there.
  */
 function readTransportPeerAddress(c: any): string | undefined {
   try {
+    const forwarded = c?.env?.[AUTH_SURFACE_TRANSPORT];
+    if (forwarded !== undefined) {
+      const address = forwarded?.remoteAddress;
+      return typeof address === 'string' && address.length > 0 ? address : undefined;
+    }
     const incoming = c?.env?.incoming;
     const address = incoming?.socket?.remoteAddress ?? incoming?.connection?.remoteAddress;
     return typeof address === 'string' && address.length > 0 ? address : undefined;
@@ -895,6 +933,13 @@ export class AuthPlugin implements Plugin {
     this.authManager.setSsoProviderDeleteFloor((providerId, locale) =>
       ssoProviderDeleteRefusal(floorDeps, providerId, locale),
     );
+    // [#32637] `auth.handleRequest` serves this plugin's WHOLE auth surface: the
+    // route registration that fills the self-hosted mount, run once more on a
+    // private table bound to the manager before the service is published, so
+    // a host that forwards its auth path to the service (a multi-tenant host,
+    // the `@objectstack/hono` embed, the dispatcher's `/auth` domain) serves
+    // every route self-host serves, with the same mount-layer checks.
+    this.bindAuthRouteSurface(ctx);
 
     // Register auth service
     ctx.registerService('auth', this.authManager);
@@ -3693,10 +3738,14 @@ export class AuthPlugin implements Plugin {
     ctx.logger.info(`Personal view delete door mounted at DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}`);
   }
 
+  /**
+   * The self-hosted mount: the auth routes on the composed HTTP server's raw
+   * Hono app, from `kernel:ready` (`registerRoutes`). The probe for the raw app
+   * stays here; the routes are {@link mountAuthRoutes}, the same registration
+   * {@link bindAuthRouteSurface} runs on the private table.
+   */
   private registerAuthRoutes(httpServer: IHttpServer, ctx: PluginContext): void {
     if (!this.authManager) return;
-
-    const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;
 
     // Get raw Hono app to use native wildcard routing
     // Type assertion is safe here because we explicitly require Hono server as a dependency
@@ -3708,7 +3757,52 @@ export class AuthPlugin implements Plugin {
       );
     }
 
-    const rawApp = (httpServer as any).getRawApp();
+    this.mountAuthRoutes((httpServer as any).getRawApp(), ctx, 'host');
+  }
+
+  /**
+   * [#32637] Build the private per-kernel route table and bind it to the
+   * manager, so `auth.handleRequest` answers this plugin's whole auth surface.
+   *
+   * The table is {@link mountAuthRoutes} on a Hono app of its own, complete
+   * before this returns (Hono refuses a route once its matcher is built, and
+   * nothing requests the table before `init()` finishes). Its error handler
+   * rethrows, so an exception reaches `handleRequest`'s caller as a rejection
+   * rather than as Hono's own `500` text. What the table owns, for
+   * `ownsRoute`, is read off the table itself: every route it registered with
+   * a method, never the middlewares or the catch-all (registered for every
+   * method).
+   */
+  private bindAuthRouteSurface(ctx: PluginContext): void {
+    const manager = this.authManager;
+    if (!manager) return;
+    const table = new Hono();
+    table.onError((error) => {
+      throw error;
+    });
+    this.mountAuthRoutes(table, ctx, 'private');
+    const owned = new Set(
+      table.routes.filter((route) => route.method !== 'ALL').map((route) => `${route.method} ${route.path}`),
+    );
+    const surface: AuthRouteSurface = {
+      // `async`: a handler that throws synchronously is a rejection too.
+      fetch: async (request, transport) =>
+        table.fetch(request, { [AUTH_SURFACE_TRANSPORT]: { ...(transport ?? {}) } }),
+      owns: (method, pathname) =>
+        owned.has(`${method.toUpperCase() === 'HEAD' ? 'GET' : method.toUpperCase()} ${pathname}`),
+    };
+    manager.bindRouteSurface(surface);
+  }
+
+  /**
+   * The auth routes, on one table — the host app's or the private one (see
+   * {@link AuthRouteTable}): the mount-layer middlewares, the platform's own
+   * mounts, and the better-auth catch-all, in that order.
+   */
+  private mountAuthRoutes(rawApp: any, ctx: PluginContext, table: AuthRouteTable): void {
+    if (!this.authManager) return;
+
+    const basePath = this.options.basePath || DEFAULT_AUTH_BASE_PATH;
 
     // ── ADR-0069 D5 — network gating (IP allow-list) ──────────────────────
     // Reject auth requests from a client address outside the configured
@@ -3723,8 +3817,8 @@ export class AuthPlugin implements Plugin {
     // `server.trustProxy` is declared, the transport's peer address otherwise.
     // An address that cannot be established is refused like one outside the
     // ranges (`isClientIpAllowed`), with an operator log line naming both
-    // settings. The wildcard route below hands the same peer to
-    // `handleRequest`, so the D7 login audit stamps this same address.
+    // settings. The wildcard route below hands the same peer to the vendor
+    // entry, so the D7 login audit stamps this same address.
     if (typeof rawApp.use === 'function') rawApp.use(`${basePath}/*`, async (c: any, next: any) => {
       const mgr = this.authManager;
       if (
@@ -3837,7 +3931,8 @@ export class AuthPlugin implements Plugin {
         return c.json({ success: true, data: config });
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        return c.json({ success: false, error: { code: 'AUTH_CONFIG_ERROR', message: err.message } }, 500);
+        ctx.logger.error('[AuthPlugin] config failed', err);
+        return c.json({ success: false, error: { code: 'AUTH_CONFIG_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -3908,7 +4003,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] set-initial-password failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4011,7 +4106,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] toggle-disabled failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4039,18 +4134,23 @@ export class AuthPlugin implements Plugin {
 
     // ── [#24877] ADR-0069 D5/D7 — better-auth's universal handler for the
     // request a raw mount below serves, WITH that request's transport. Every
-    // in-process bridge re-dispatches through `AuthManager.handleRequest` with
-    // the transport of the request it serves — a bridge that hands a helper a
-    // handler takes it from here; one that delegates the request itself passes
-    // `transportOf(c)` inline, as the catch-all at the end of this method
-    // does — so `handleRequest` establishes the re-dispatched request's client
-    // address by the platform's trust rule (`resolveClientAddress`): forwarded
-    // headers only when the deployment declares `server.trustProxy`, the
-    // connection peer otherwise. `handleRequest(req)` alone leaves the rule no
-    // peer to judge on. Pinned per bridge by
-    // `bridge-redispatch-transport.pin.test.ts`.
+    // in-process bridge re-dispatches through the vendor entry
+    // (`AuthManager.handleVendorRequest`) with the transport of the request it
+    // serves — a bridge that hands a helper a handler takes it from here; one
+    // that delegates the request itself passes `transportOf(c)` inline, as the
+    // catch-all at the end of this method does — so the vendor entry
+    // establishes the re-dispatched request's client address by the platform's
+    // trust rule (`resolveClientAddress`): forwarded headers only when the
+    // deployment declares `server.trustProxy`, the connection peer otherwise.
+    // A handler handed no transport leaves the rule no peer to judge on.
+    // Pinned per bridge by `bridge-redispatch-transport.pin.test.ts`.
+    //
+    // [#32637] The vendor entry, never `handleRequest`: that one answers
+    // through the private route table, where a bridge's re-dispatch would meet
+    // this very table again (a gate-then-delegate mount on the vendor's own
+    // path would call itself) and the mount-layer checks would run twice.
     const handleWithTransportOf = (c: any): AuthRequestHandler => (request) =>
-      this.authManager!.handleRequest(request, transportOf(c));
+      this.authManager!.handleVendorRequest(request, transportOf(c));
 
     // ────────────────────────────────────────────────────────────────────
     // SSO admin: register an external OIDC IdP from the flat metadata form
@@ -4092,7 +4192,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/register bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4131,7 +4231,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] unlock-user failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4176,7 +4276,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] set-user-manager failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4201,7 +4301,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] list-platform-admins failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4336,7 +4436,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] admin/client-address failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -4454,7 +4554,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/scim/mint-credential failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
       rawApp.post(`${basePath}/admin/scim/revoke-credential`, async (c: any) => {
@@ -4467,7 +4567,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/scim/revoke-credential failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4500,7 +4600,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error(`[AuthPlugin] ${label} failed`, err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       };
       rawApp.post(`${basePath}/admin/scim/set-group-mapping`, groupMappingHandler('admin/scim/set-group-mapping', 'runSetIdpGroupMapping'));
@@ -4637,7 +4737,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/create-user failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4696,7 +4796,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/ban-user failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4713,7 +4813,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/unban-user failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4776,11 +4876,11 @@ export class AuthPlugin implements Plugin {
         try {
           const gated = await gateAdmin(c);
           if (gated instanceof Response) return gated;
-          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
+          return await this.authManager!.handleVendorRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/remove-user failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4853,11 +4953,11 @@ export class AuthPlugin implements Plugin {
               return c.json(answer, 200);
             }
           }
-          return await this.authManager!.handleRequest(c.req.raw, transportOf(c));
+          return await this.authManager!.handleVendorRequest(c.req.raw, transportOf(c));
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/has-permission failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4871,7 +4971,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/set-user-password failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
 
@@ -4932,7 +5032,7 @@ export class AuthPlugin implements Plugin {
         } catch (error) {
           const err = error instanceof Error ? error : new Error(String(error));
           ctx.logger.error('[AuthPlugin] admin/import-users failed', err);
-          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+          return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
         }
       });
     }
@@ -4965,7 +5065,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] organization/add-member failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5030,7 +5130,10 @@ export class AuthPlugin implements Plugin {
           },
           {
             authMountPath: basePath,
-            server: rawApp,
+            // [#32637] The private table declares it serves no sign-in page:
+            // whatever host forwarded this request owns its pages, so nothing
+            // is asked and a signed-out navigation is answered 401.
+            server: table === 'host' ? rawApp : null,
             serverEnv: c.env,
             onUnserved: (path, reason) => {
               if (reportedNoHandoffSignInPage) return;
@@ -5078,7 +5181,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/register-saml bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5107,7 +5210,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/request-domain-verification bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5125,7 +5228,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/verify-domain bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5149,7 +5252,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/get-groups-claim bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5162,7 +5265,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/set-groups-claim bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5182,7 +5285,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/get-attribute-mapping bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5195,7 +5298,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/set-attribute-mapping bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5220,7 +5323,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/update-provider bridge failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5241,7 +5344,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sso/delete-impact read failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5389,7 +5492,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-oauth-application/register failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5405,8 +5508,8 @@ export class AuthPlugin implements Plugin {
     // See `sys-session-revoke.ts` for the lanes and refusals.
     //
     // [#24877] The owner lane's re-dispatch goes through the manager slice's
-    // `handleRequest`, so the slice handed over is the manager's own seams
-    // with `handleRequest` bound to this request's transport
+    // vendor entry, so the slice handed over is the manager's own seams
+    // with `handleVendorRequest` bound to this request's transport
     // (`handleWithTransportOf` above) — the same handler every other bridge
     // re-dispatches through.
     rawApp.post(`${basePath}/sys-session/revoke`, async (c: any) => {
@@ -5418,7 +5521,7 @@ export class AuthPlugin implements Plugin {
               getApi: () => manager.getApi(),
               getAuthContext: () => manager.getAuthContext(),
               getDataEngine: () => manager.getDataEngine(),
-              handleRequest: handleWithTransportOf(c),
+              handleVendorRequest: handleWithTransportOf(c),
             },
             basePath,
           ),
@@ -5428,7 +5531,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] sys-session/revoke failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5507,7 +5610,7 @@ export class AuthPlugin implements Plugin {
     // can't carry params). That bounced with `[body.email] ... received
     // undefined`, breaking every resend affordance. This wrapper defaults the
     // address to the caller's own session email when the body omits it, then
-    // re-dispatches through the real route (via handleRequest, which bypasses
+    // re-dispatches through the real route (via the vendor entry, which bypasses
     // this wrapper — no recursion). An explicit `email` passes through
     // untouched, so the admin / verify-screen path is unchanged.
     rawApp.post(`${basePath}/send-verification-email`, async (c: any) => {
@@ -5520,7 +5623,7 @@ export class AuthPlugin implements Plugin {
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('[AuthPlugin] send-verification-email failed', err);
-        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: INTERNAL_ERROR_MESSAGE } }, 500);
       }
     });
 
@@ -5555,7 +5658,7 @@ export class AuthPlugin implements Plugin {
         // transport's peer address: `handleRequest` establishes the client
         // address from it by the same trust rule the D5 gate above judged
         // with, and the D7 login audit stamps that address.
-        const response = await this.authManager!.handleRequest(c.req.raw, transportOf(c));
+        const response = await this.authManager!.handleVendorRequest(c.req.raw, transportOf(c));
 
         // [#15417] Yield only a 404 that DISCLAIMS OWNERSHIP. `ownsRoute` asks
         // better-auth's live `auth.api` — the same seam the route ledger and the
@@ -5570,7 +5673,7 @@ export class AuthPlugin implements Plugin {
         // come back `200 {}`, which is the silent-success shape #15417 is
         // about. ⛔ The mount is untouched and still claims `${basePath}/*`;
         // what narrowed is which 404 may be handed on.
-        if (response.status === 404 && !(await this.authManager!.ownsRoute(c.req.raw))) {
+        if (response.status === 404 && !(await this.authManager!.ownsVendorRoute(c.req.raw))) {
           await next();
           // A non-404 downstream means something else answered — hand that back.
           // NOT `c.finalized`: reaching the end of the chain with nothing
@@ -5628,14 +5731,20 @@ export class AuthPlugin implements Plugin {
 
         return response;
       } catch (error) {
+        // [#32637] On the private table an exception is not answered here: it
+        // reaches `handleRequest`'s caller as a rejection (the table's error
+        // handler rethrows too), and that host turns it into its own public
+        // error body.
+        if (table === 'private') throw error;
         const err = error instanceof Error ? error : new Error(String(error));
         ctx.logger.error('Auth request error:', err);
-        
-        // Return error response
+
+        // The error's own text stays in the log line above: the caller is told
+        // the request failed, never why.
         return new Response(
           JSON.stringify({
             success: false,
-            error: err.message,
+            error: INTERNAL_ERROR_MESSAGE,
           }),
           {
             status: 500,
@@ -5666,12 +5775,20 @@ export class AuthPlugin implements Plugin {
     // and ahead of the first request. A throw here — a route that cannot
     // mount — propagates out of the hook and fails the boot, the same as the
     // routes above; ⛔ never `void` it, and ⛔ never catch-and-log it.
+    //
+    // [#32637] The host table only: the documents live at the issuer's ROOT,
+    // outside `basePath`, so the private table `auth.handleRequest` answers
+    // through carries none — a host that forwards to it serves its own.
     const oidcEnabled = resolveOidcProviderEnabled(this.options.plugins);
-    if (oidcEnabled) {
+    if (oidcEnabled && table === 'host') {
       this.registerOidcDiscoveryRoutes(rawApp, ctx);
     }
 
-    ctx.logger.info(`Auth routes registered: All requests under ${basePath}/* forwarded to better-auth`);
+    // Said once, by the host table's registration; the private table is the
+    // same registration and says nothing.
+    if (table === 'host') {
+      ctx.logger.info(`Auth routes registered: All requests under ${basePath}/* forwarded to better-auth`);
+    }
   }
 
   /**

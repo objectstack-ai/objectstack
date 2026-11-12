@@ -38,8 +38,8 @@ fallback **input** to posture resolution. See
 
 | | `single` (default) | `group` | `isolated` |
 |---|---|---|---|
-| Layer 0 organization wall | none — the layer is inert | `organization_id IN accessible_org_ids` (union / MOAC) | `organization_id = <active organization>` |
-| Read reach | the whole dataset, subject to RBAC | every organization the caller currently holds a membership in | the active organization only |
+| Layer 0 organization wall | none between organizations — it denies only a person who holds no current membership | `organization_id IN accessible_org_ids` (union / MOAC) | `organization_id = <active organization>` |
+| Read reach | the whole dataset, subject to RBAC, for a current member | every organization the caller currently holds a membership in | the active organization only |
 | Shape | one logical tenant; sub-units modelled as business units in one tree | organizations are membership / invitation boundaries over one shared dataset | legal-entity / sovereignty isolation — the hard wall |
 | `organization_id` filled in on write | yes — the Default Organization | yes | yes |
 | Enterprise `@objectstack/organizations` | not needed | **required** | **required** |
@@ -275,7 +275,7 @@ they are working in, never a guess (ADR-0093 D3 amendment). See [Create a User D
 | Policy | Behavior |
 |---|---|
 | `'auto'` (default) | New member-less users are bound to the single-org default organization. |
-| `'invite-only'` | Users are **never** auto-bound; membership comes only from invitations, `add-member`, SSO provisioning, or host hooks. Choose this for a deployment whose end-users are deliberately not teammates. |
+| `'invite-only'` | Users are **never** auto-bound; membership comes only from invitations, `add-member`, SSO provisioning, or host hooks. Each person who should reach the data still needs a membership — for end-users who are deliberately not teammates, of the grade that fits them, such as the [`external` tier](/docs/permissions/authentication#membership-tiers-are-a-closed-list). |
 
 Set it as an `AuthPlugin` option, as the `auth.membership_policy` platform
 setting, or via the `OS_AUTH_MEMBERSHIP_POLICY` env override:
@@ -289,20 +289,49 @@ sign-up reconciler and the backfill below without a restart. An unrecognized
 value is rejected rather than coerced: the deployment keeps its current policy
 and the reconciler refuses to auto-bind under it.
 
-<Callout type="info" title="Membership is not access control in the single posture">
-With no wall to enforce, membership does not gate data access — RBAC permission
-sets do. Membership drives the Members list, the active organization a session
-resolves, and invitations.
+<Callout type="info" title="Membership gates data access in every posture, single included">
+Under every tenancy posture, a person's data access requires a current
+membership in the organization, judged on each request (ADR-0093 D8.1, as
+amended). A person who holds no current membership — someone removed from the
+Members list, or a user an `invite-only` deployment has not yet added — reads
+none of the organization's data and their writes get `403 PERMISSION_DENIED`,
+the same answers the walled postures give. Inside the organization, RBAC
+permission sets decide what a member may do. Membership also drives the Members
+list, the active organization a session resolves, and invitations. System
+contexts and platform operators keep their own rules.
 </Callout>
 
 ### Backfill for pre-existing users
 
-On boot (`kernel:ready`), deployments with `membershipPolicy: 'auto'` backfill
-memberships for any pre-existing member-less users (e.g. accounts created before
-the reconciler existed), binding them to the default organization. It is bounded,
-idempotent, and self-guards: it no-ops under `invite-only`, and under any walled
-request `defaultOrgId()` is `null` so there is nothing to bind to. Opt out with
+Once per deployment, deployments with `membershipPolicy: 'auto'` backfill
+memberships for the member-less users that predate the reconciler, binding them
+to the default organization. The pass runs at `kernel:ready` and records its
+verdict in the deployment's `sys_migration` ledger (`adr-0093-membership-backfill`);
+every later trigger — the re-run when an app's seed data lands included — reads
+that record and does nothing. A verdict is also recorded under `invite-only` (so
+switching to `auto` later never sweeps those users in) and when organizations
+exist but none is an unambiguous target. Opt out with
 `OS_SKIP_MEMBERSHIP_BACKFILL=1`.
+
+There is no later sweep, by design: a scan cannot tell a user who was never bound
+from someone whose membership ended, and binding the second would give back
+access the membership rule took away. Since membership gates data access in every
+posture, these people reach no data until an administrator adds them:
+
+- a user whose creation-time bind failed (the reconciler is best-effort), or whom
+  the backfill failed to bind;
+- a `sys_user` row inserted directly after the backfill was recorded — for
+  example by an app's seed data, including a seed that finishes in the background
+  after boot;
+- users created under `invite-only`, including before a switch to `auto`;
+- every pre-existing member-less user while `OS_SKIP_MEMBERSHIP_BACKFILL=1` is
+  set, or while the ledger cannot be read;
+- people removed from the organization.
+
+Find them by comparing **Setup → Users** with **Setup → Members** (or `sys_user`
+with `sys_member`), and add each one with an invitation or
+`POST /api/v1/auth/organization/add-member` (platform administrator), at the
+membership grade that fits.
 
 <Callout type="warn" title="There is a second, unrelated boot-time backfill">
 The platform also runs a **seed tenancy repair** at `kernel:ready` — a different

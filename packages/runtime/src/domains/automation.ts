@@ -27,6 +27,9 @@ import {
     type AutomationAddressRefusal,
     type AutomationAddressRegistry,
 } from './automation-address.js';
+// [#31696] One holder's flow of a shared name, served from its own slot; a
+// start's admission walks callees from the calling flow's package.
+import { flowSlotView, flowWalkReads, runSlotView } from '../flow-slot-view.js';
 // [ADR-0126 §5] The shared activation write-authority gate — one
 // implementation, one refusal envelope, per-door wording. See its header for
 // the posture rule and the measurement behind it (commit 02b41232d).
@@ -52,7 +55,8 @@ import { unknownQueryParamRefusalMessage } from '@objectstack/rest';
 import {
     validationFailure, validationFailureDetails, fieldsFromZodIssues, VALIDATION_FAILED_STATUS,
 } from '../validation-failure.js';
-import { ExecutionStatus } from '@objectstack/spec/automation';
+import { ExecutionStatus, collectFlowGraphs, type FlowNodeParsed } from '@objectstack/spec/automation';
+import { nearestName } from '@objectstack/formula';
 import { ListRunsRequestSchema, standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import type { ResumeFailureDetails } from '@objectstack/spec/api';
 import { parseEnumParam, parseIntegerParam, parseStringParam } from '../query-param.js';
@@ -231,6 +235,14 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     if (Array.isArray(ec?.positions) && ec.positions.length) automationContext.positions = ec.positions;
     if (Array.isArray(ec?.permissions) && ec.permissions.length) automationContext.permissions = ec.permissions;
     if (ec?.tenantId) automationContext.tenantId = ec.tenantId;
+    // [ADR-0093 D8.1, as amended] The caller's membership set, already
+    // resolved for this request — forwarded, never re-derived, and forwarded
+    // EMPTY too: an empty set is the answer "no current membership", which the
+    // organization wall reads under every posture. So the run's data operations
+    // are judged by the membership rule as this request is.
+    // `SeededRunContext.accessible_org_ids` (`@objectstack/service-automation`)
+    // names its readers.
+    if (Array.isArray(ec?.accessible_org_ids)) automationContext.accessible_org_ids = [...ec.accessible_org_ids];
     // [#28099] The caller's posture rung, already resolved beside the grants
     // above — forwarded, never re-derived or raised, absent when the request
     // carries none. The run carries those grants, so its setup does not
@@ -2192,6 +2204,167 @@ function flowDefinitionRefusal(err: any): unknown {
 }
 
 /**
+ * The slice of the messaging service the notify channel check reads:
+ * `MessagingService.getKnownChannels()` in `@objectstack/service-messaging`,
+ * declared structurally because this package takes no dependency on it (the
+ * `notify` node's own `MessagingServiceSurface` does the same). Every channel
+ * the service knows: the ones registered directly, and each lazy provider
+ * (`email`, `sms`, `push`) whether or not its transport is installed yet.
+ */
+interface NotifyChannelRegistry {
+    getKnownChannels(): ReadonlyArray<{ id: string; configured: boolean }>;
+}
+
+/** One channel name a `notify` node's `channels` carries, and where. */
+interface NotifyChannelEntry {
+    readonly channel: string;
+    /** Its key path below the node's `config.channels`: `[]` for the string form, `[i]` for a list member. */
+    readonly at: readonly number[];
+}
+
+/**
+ * The channel names a `notify` node's `channels` value holds, read the way the
+ * node's executor reads them at run time (`toStringList` in
+ * `service-automation`'s `notify-node.ts`): a string or a list of strings,
+ * read raw, each trimmed, blank entries dropped. An absent value names no
+ * channel (the node then delivers to the inbox, the messaging default), so
+ * nothing here is judged for it.
+ */
+function notifyChannelEntries(value: unknown): NotifyChannelEntry[] {
+    if (Array.isArray(value)) {
+        const entries: NotifyChannelEntry[] = [];
+        value.forEach((member, index) => {
+            if (member == null) return;
+            const channel = String(member).trim();
+            if (channel) entries.push({ channel, at: [index] });
+        });
+        return entries;
+    }
+    if (typeof value === 'string' && value.trim()) return [{ channel: value.trim(), at: [] }];
+    return [];
+}
+
+/**
+ * Refuse, at the `/automation` definition write doors, a `notify` node that
+ * names a channel this deployment does not register (ruling 6810493176, letter
+ * B): a `400 VALIDATION_FAILED` that names each node and channel, located at
+ * the node's `config.channels`, and lists the registered channels as the fix.
+ * `undefined` when there is nothing to refuse, or nothing to judge against.
+ *
+ * A channel is code a plugin registers with the messaging service, never data
+ * an administrator adds later, so a name no plugin registers can only be a
+ * typo or a missing plugin: at run time every delivery on it fails with
+ * `channel 'NAME' not registered`, and the node records a warning, after the
+ * flow was saved and armed with no word to its author. Positions and queues an
+ * approval node names are a different kind of name — runtime data an
+ * administrator adds and removes — and are not judged here.
+ *
+ * ## Why the registry is complete when this reads it
+ *
+ * The channel registry fills during the boot (`messaging-service.ts` says why a
+ * mount may arrive after `kernel:ready`), so an absence is a verdict only once
+ * nothing can still register. Three facts make it one here:
+ *
+ *  - **The kernel's own boot fact.** The check runs only when
+ *    `isRequestKernelReady(context)` answers `true` — the request kernel's
+ *    `hasBootPhaseSettled('kernel:ready')`: every plugin's `start()` and every
+ *    `kernel:ready` handler has run, and no plugin can be added to a kernel
+ *    once its boot has begun (`ObjectKernel.use`). The messaging plugin
+ *    registers the inbox in `init()` and its `email`, `sms` and `push`
+ *    providers from its own `kernel:ready` handler. Before that, or on a deps
+ *    that cannot answer, nothing is judged.
+ *  - **Known, not mounted.** It reads `getKnownChannels()`, which lists a lazy
+ *    provider whose transport is not installed yet (`email` with no email
+ *    service): such a channel can start sending without a flow edit once its
+ *    transport is configured, so a node naming it is never refused for it.
+ *    Only a name the messaging service knows no channel or provider for is.
+ *  - **No registry, no verdict.** With no messaging service the `notify` node
+ *    delivers nothing whatever it names (it records a skipped step), and a
+ *    messaging service with no `getKnownChannels()` (another implementation of
+ *    the service) cannot be enumerated: neither is judged. Nor is a reader
+ *    that throws or answers something other than a list: an unreadable
+ *    registry gives no verdict, and the save goes on as before.
+ *
+ * Read per request and recorded nowhere: the answer is the registry as it
+ * stands at this save (AGENTS.md, "Startup registry reads").
+ *
+ * Judged at the save doors only, never in `registerFlow`: the boot pull
+ * registers a package's flows from the automation plugin's `start()`, before
+ * the messaging plugin's `kernel:ready` handler has registered its providers,
+ * and a stored row re-registered later must keep binding as it did when it
+ * was saved. Every node is judged, at any region depth (`collectFlowGraphs`).
+ */
+async function refuseUnknownNotifyChannels(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    name: string,
+    flow: unknown,
+): Promise<HttpDispatcherResult | undefined> {
+    if (!flow || typeof flow !== 'object') return undefined;
+    if (deps.isRequestKernelReady?.(context) !== true) return undefined;
+    let messaging: Partial<NotifyChannelRegistry> | undefined;
+    try {
+        messaging = await deps.resolveService(context, 'messaging');
+    } catch {
+        messaging = undefined;
+    }
+    if (typeof messaging?.getKnownChannels !== 'function') return undefined;
+    // A reader that throws, or answers anything but a list, is a registry this
+    // door cannot read: not judged, like a service with no reader at all. The
+    // save goes on as it did before this check existed, and a delivery on an
+    // unknown channel still reports itself at run time. Members that are not a
+    // `{ id: string }` are not channels and are left out of the roster.
+    let read: unknown;
+    try {
+        read = messaging.getKnownChannels();
+    } catch {
+        return undefined;
+    }
+    if (!Array.isArray(read)) return undefined;
+    const known = (read as unknown[]).filter(
+        (entry): entry is { id: string; configured: boolean } =>
+            !!entry && typeof entry === 'object' && typeof (entry as { id?: unknown }).id === 'string',
+    );
+    const knownIds = known.map((entry) => entry.id);
+
+    const lines: string[] = [];
+    const fields: Array<{ field: string; code: string; message: string }> = [];
+    for (const graph of collectFlowGraphs(flow as { nodes?: readonly FlowNodeParsed[] })) {
+        graph.nodes.forEach((node, index) => {
+            if (node.type !== 'notify') return;
+            const config = node.config as { channels?: unknown } | undefined;
+            for (const { channel, at } of notifyChannelEntries(config?.channels)) {
+                if (knownIds.includes(channel)) continue;
+                const field = [...graph.path, 'nodes', index, 'config', 'channels', ...at].join('.');
+                const where = graph.scope ? ` (in ${graph.scope})` : '';
+                const near = nearestName(channel, knownIds);
+                const line =
+                    `node '${node.id}' (\`notify\`)${where} names channel '${channel}' at ${field}, which no plugin ` +
+                    `registers in this deployment${near ? ` — did you mean '${near}'?` : ''}`;
+                lines.push(line);
+                fields.push({ field, code: 'invalid_value', message: line });
+            }
+        });
+    }
+    if (lines.length === 0) return undefined;
+
+    const roster = known.length === 0
+        ? 'This deployment registers no channel.'
+        : `The channels this deployment registers: ${known
+            .map((entry) => `\`${entry.id}\`${entry.configured ? '' : ' (no transport configured yet)'}`)
+            .join(', ')}.`;
+    const message =
+        `Flow '${name}' rejected: ${lines.length} notify channel(s) no plugin registers:\n` +
+        lines.map((line) => `  - ${line}`).join('\n') + '\n' +
+        `${roster} Name one of them in the node's \`channels\`, or install the plugin that provides the channel ` +
+        `and save the flow again. A delivery on a channel nothing registers fails at every run.`;
+    return {
+        handled: true,
+        response: deps.errorFromThrown(validationFailure(message, fields), VALIDATION_FAILED_STATUS),
+    };
+}
+
+/**
  * [#20679, ADR-0126 §2] THE LOCKED BASE at this domain's definition-write and
  * removal doors — `PUT /:name`, `DELETE /:name`, and `POST /` onto a name the
  * engine already holds (a create onto an existing name is an overwrite).
@@ -2501,7 +2674,10 @@ async function flowWriteRefusal(
  *  - **Engine first, store second.** The engine's registration is the
  *    stricter validation (strict parse, cycles, regions, node config keys,
  *    predicates), so a definition it refuses is never stored; that refusal is
- *    answered as a 400 by {@link flowDefinitionRefusal}.
+ *    answered as a 400 by {@link flowDefinitionRefusal}. Then the one check
+ *    only a save makes: a `notify` node naming a channel no plugin registers
+ *    is refused as a 400 ({@link refuseUnknownNotifyChannels}), and the
+ *    registration is undone as for a refused save.
  *  - **A save that fails undoes the registration** and relays the store's own
  *    failure, so no answer reports a write that will not survive: a new name
  *    is withdrawn, and a name the engine already held gets that definition
@@ -2546,6 +2722,23 @@ async function registerAndSaveFlow(
         return {
             refused: { handled: true, response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS) },
         };
+    }
+    // A `notify` node naming a channel no plugin registers is refused here,
+    // after the engine's verdict (so a definition it refuses answers that
+    // first) and on the flow it parsed, and undone like a refused save: the
+    // engine gets back what it held, and nothing is stored. Guarded like
+    // `land()` below: a check that throws undoes the registration first, so
+    // no exit leaves a registered-but-unsaved definition.
+    let unknownChannel: HttpDispatcherResult | undefined;
+    try {
+        unknownChannel = await refuseUnknownNotifyChannels(deps, context, name, registered);
+    } catch (e) {
+        restoreFlowRegistration(automationService, name, held);
+        throw e;
+    }
+    if (unknownChannel) {
+        restoreFlowRegistration(automationService, name, held);
+        return { refused: unknownChannel };
     }
     let packageId: string | undefined;
     if (land) {
@@ -2909,6 +3102,8 @@ async function respondToFlowTrigger(
     flowName: string,
     body: any,
     context: HttpProtocolContext,
+    /** [#31696] The holder table the start admission's callees resolve over. */
+    registry?: AutomationAddressRegistry,
 ): Promise<HttpDispatcherResult> {
     if (await flowIsUnknown(automationService, flowName)) {
         return {
@@ -2945,6 +3140,8 @@ async function respondToFlowTrigger(
             flowStartRecordKeys(automationContext),
             context?.executionContext,
             (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
+            // [#31696] Callees read from the calling flow's package, as the run reads them.
+            flowWalkReads(automationService, async () => registry),
         );
     } catch (err) {
         return { handled: true, response: deps.errorFromThrown(err, 500) };
@@ -3606,7 +3803,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         if (refusal) return refusal;
     }
 
-    const automationService = await deps.getService(context, CoreServiceName.enum.automation);
+    let automationService = await deps.getService(context, CoreServiceName.enum.automation);
     // [#4058] Empty slot — or a slot filled by a self-declared non-handler
     // (`handlerReady: false`, ADR-0076 D12), which is the same amount of
     // automation capability. This domain is the sharpest case for the rule: a
@@ -3620,19 +3817,44 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (!isServiceServeable(automationService)) return capabilityUnavailable(deps, 'automation');
 
     // [ADR-0150 D5, epic child G1] THE ADDRESS, judged: an addressed path is
-    // served only when its qualifier names the one holder the bare name
-    // resolves to — then it is exactly its bare path below — and is refused
-    // otherwise (`404` when nothing there holds the name, else `409` naming
-    // every candidate). A bare by-name run or read whose name the resolver
-    // refuses (two packages hold it) is answered `409` naming every candidate,
-    // the same answer (D5). The definition writes (`PUT` / `DELETE /:name`,
-    // the clone) are left to their own `409` and its remedy
-    // (`flowWriteRefusal`), unchanged.
+    // served when its qualifier names the one holder the bare name resolves
+    // to — then it is exactly its bare path below — and is refused otherwise
+    // (`404` when nothing there holds the name, else `409` naming every
+    // candidate). A bare by-name run or read whose name the resolver refuses
+    // (two packages hold it) is answered `409` naming every candidate, the
+    // same answer (D5). The definition writes (`PUT` / `DELETE /:name`, the
+    // clone) are left to their own `409` and its remedy (`flowWriteRefusal`),
+    // unchanged.
+    //
+    // [ADR-0150 D4/D9, #31696] A flow name two packages hold, addressed by the
+    // namespace of one of them: the by-name runs and reads (the doors the bare
+    // `409` covers) are served from that holder's own slot, every step of the
+    // door reading the one flow (`../flow-slot-view.ts`). The definition
+    // writes keep the `409`, as does an engine with no slot entries.
+    //
+    // [ADR-0150 D4, #31696] A BARE run door (`/:name/runs/:runId/…`: the run
+    // read, resume, cancel, restore-suspension and the screen read) on such a
+    // name acts on the run's own slot: a run id names exactly one run, and
+    // the run carries its slot key, so it is no guess at a name. A run of
+    // another flow, or one whose key no one holder's slot is filed under,
+    // keeps the `409`.
     {
-        const refusal = address.qualifier && address.item
+        const admission = address.qualifier && address.item
             ? admitAutomationAddress(addressRegistry, address.qualifier, address.item)
             : bareByNameRefusal(addressRegistry, parts, m);
-        if (refusal) return { handled: true, response: automationAddressRefusalResponse(deps, refusal) };
+        if (admission?.status === 'slot') {
+            const slotted = bareByNameItem(parts, m)?.type === 'flow' && address.item
+                ? flowSlotView(automationService, admission.packageId, address.item.name)
+                : undefined;
+            if (!slotted) return { handled: true, response: automationAddressRefusalResponse(deps, { status: 409, refusal: admission.refusal }) };
+            automationService = slotted;
+        } else if (admission) {
+            const byRun = !address.qualifier && admission.status === 409 && parts[1] === 'runs' && parts[2]
+                ? await runSlotView(automationService, parts[0], parts[2], admission.refusal.candidates.flatMap((c) => (c.kind === 'package' ? [c.packageId] : [])))
+                : undefined;
+            if (!byRun) return { handled: true, response: automationAddressRefusalResponse(deps, admission) };
+            automationService = byRun;
+        }
     }
 
     // Legacy: POST /automation/trigger/:name — the shape
@@ -3674,7 +3896,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     if (parts[0] === 'trigger' && parts[1] && m === 'POST') {
         const triggerName = parts[1];
         if (typeof automationService.execute === 'function') {
-            return respondToFlowTrigger(deps, automationService, triggerName, body, context);
+            return respondToFlowTrigger(deps, automationService, triggerName, body, context, addressRegistry);
         }
     }
 
@@ -3888,7 +4110,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         // legacy `POST /trigger/:name` above so the two routes cannot drift.
         if (parts[1] === 'trigger' && m === 'POST') {
             if (typeof automationService.execute === 'function') {
-                return respondToFlowTrigger(deps, automationService, name, body, context);
+                return respondToFlowTrigger(deps, automationService, name, body, context, addressRegistry);
             }
         }
 

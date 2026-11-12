@@ -98,6 +98,7 @@ export {
 // the driver's native scope (`DriverOptions.tenantId` / `tenantIds`).
 export {
   computeTenantLayer0Verdict,
+  isOutsideEveryOrganization,
   type TenantLayer0Input,
 } from './tenant-layer0-verdict.js';
 

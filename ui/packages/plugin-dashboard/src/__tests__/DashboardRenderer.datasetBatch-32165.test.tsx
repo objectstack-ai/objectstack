@@ -18,7 +18,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import { notifyDataChanged } from '@object-ui/react';
 import type { DashboardComponentSchema } from '@object-ui/types';
@@ -30,13 +30,29 @@ import '../index';
 import { DashboardRenderer } from '../DashboardRenderer';
 import { DashboardGridLayout } from '../DashboardGridLayout';
 
-beforeEach(() => {
-  // The dimension-label metadata probe falls back to the global fetch; answer
-  // it locally so no case reaches the network.
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' })));
-});
+/**
+ * The dimension-label metadata probe (`useDatasetDimensionMeta`) falls back to
+ * the global `fetch` for `GET /api/v1/meta/object/deal`, because these fakes
+ * carry no `getObjectSchema`. The double that answers it is installed ONCE,
+ * here at module scope, and is deliberately NEVER torn down: there is no
+ * `vi.unstubAllGlobals()` in this file, and adding one back re-opens
+ * objectstack#32462.
+ *
+ * ⛔ Why the per-test `beforeEach` stub / `afterEach` unstub pair escaped. The
+ * probe is a passive effect that starts only once a widget's rows commit (the
+ * base object arrives with the answer). When a body returns between that
+ * commit and React's passive-effect flush, which waits on a scheduler yield
+ * and so on timing, the effect is still pending. This file's `afterEach` runs
+ * first (Vitest runs `afterEach` hooks in reverse registration order), so the
+ * unstub put the real `fetch` back, and `cleanup()`'s act flush then ran the
+ * pending effect, which bound `apiFetch ?? fetch` to the real socket. Measured
+ * with the scheduler forced to yield: every escape started inside that flush.
+ * With one double for the whole file there is no window: a read the teardown
+ * flush starts is served by the same double.
+ */
+vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' })));
+
 afterEach(() => {
-  vi.unstubAllGlobals();
   cleanup();
 });
 
@@ -66,7 +82,7 @@ function makeSource({ batch = true, refuse, refusal }: { batch?: boolean; refuse
     if (dataset === refuse) throw refusal;
     return answerFor(dataset, selection);
   });
-  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>, _options?: { packageId?: string }) =>
+  const batchDoor = vi.fn(async (queries: Array<{ dataset: string; selection: Selection }>, _options?: { packageId?: string; callerPackage?: string }) =>
     queries.map(({ dataset, selection }) => (dataset === refuse
       ? { status: 'rejected' as const, reason: refusal }
       : { status: 'fulfilled' as const, value: answerFor(dataset, selection) })));
@@ -114,12 +130,35 @@ describe('one dashboard render sends its dataset queries as one batch (objectsta
     expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
   });
 
-  it('sends the dashboard package with the batch, the one every widget query is read from', async () => {
+  it('sends the dashboard package with the batch as the reader\'s package, the caller every widget query is resolved for', async () => {
     const { source, batchDoor } = makeSource();
     const served = { ...DASHBOARD, _packageId: 'crm' } as unknown as DashboardComponentSchema;
     render(<DashboardRenderer schema={served} dataSource={source} />);
     await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
-    expect(batchDoor.mock.calls[0][1]).toEqual({ packageId: 'crm' });
+    expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
+  });
+
+  it('the grid layout surface sends the dashboard package with its batch as the reader\'s package too', async () => {
+    const { source, batchDoor } = makeSource();
+    const served = { ...DASHBOARD, _packageId: 'crm' } as unknown as DashboardComponentSchema;
+    render(<DashboardGridLayout schema={served} dataSource={source} />);
+    await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
+    expect(batchDoor.mock.calls[0][1]).toEqual({ callerPackage: 'crm' });
+    // Settle the widgets' follow-up metadata reads inside the test.
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
+  });
+
+  it('control: a package-less dashboard sends its batch with no options at all', async () => {
+    const { source, batchDoor } = makeSource();
+    render(<DashboardRenderer schema={DASHBOARD} dataSource={source} />);
+    await waitFor(() => expect(batchDoor).toHaveBeenCalledTimes(1));
+    expect(batchDoor.mock.calls[0][1]).toBeUndefined();
+    expect(await screen.findByText('pipeline-row')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryAllByTestId('dataset-loading')).toHaveLength(0));
   });
 
   it('the grid layout surface batches the same way', async () => {
