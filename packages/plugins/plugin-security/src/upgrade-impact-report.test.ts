@@ -427,6 +427,27 @@ describe('webhook: a sys_webhook row holding a declared name', () => {
     expect(report.reEnablements.map((r) => [r.name, r.packageId, r.candidates])).toEqual([['acme_deal_won', VENDOR, ['acme_deal_closed']]]);
   });
 
+  // [#31699 round 3, S2] A suspected re-enablement is one of the orphan's
+  // package's names no switch covers, covered by (package, name): its own row,
+  // or a row naming no package (ADR-0150 D8), never another package's row.
+  it('[FROM covered TO a candidate] another package\'s switch of a name covers none of this package\'s; a row naming no package does', async () => {
+    const shipping = { items: [
+      { type: 'webhook', name: 'acme_deal_closed', packageId: VENDOR },
+      { type: 'webhook', name: 'acme_deal_closed', packageId: OTHER_VENDOR },
+    ] };
+    const byOther = deployment({
+      ledger: [switchedOff('webhook', 'acme_deal_won', VENDOR), switchedOff('webhook', 'acme_deal_closed', OTHER_VENDOR)],
+      registry: shipping,
+    });
+    expect((await collectUpgradeImpactFindings(byOther.engine, byOther)).reEnablements.map((r) => [r.name, r.packageId, r.candidates]))
+      .toEqual([['acme_deal_won', VENDOR, ['acme_deal_closed']]]);
+    const byNone = deployment({
+      ledger: [switchedOff('webhook', 'acme_deal_won', VENDOR), switchedOff('webhook', 'acme_deal_closed', null)],
+      registry: shipping,
+    });
+    expect((await collectUpgradeImpactFindings(byNone.engine, byNone)).reEnablements).toEqual([]);
+  });
+
   it('CONTROL — one holder: its switch is no orphan, a switch of another package\'s name it now ships is no candidate', async () => {
     const d = deployment({
       ledger: [switchedOff('webhook', 'acme_deal_won', VENDOR), switchedOff('webhook', 'acme_deal_closed', null)],
