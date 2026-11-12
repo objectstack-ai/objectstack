@@ -101,7 +101,9 @@ beforeEach(() => {
     const connectorHolder = connectorNameResolver(ctx);
     // The plugin's holderOf, verbatim (`registerStoredReferenceBackfill`).
     holderOf = (type, name) =>
-        storedReferenceHolderOf(type === 'flow' ? automation.flowHolder(name) : connectorHolder(name, null));
+        storedReferenceHolderOf(type === 'flow'
+            ? automation.durableFlowHolder(name)
+            : connectorHolder(name, null, { includeDisabledPackages: true }));
 });
 
 const engines: ObjectQL[] = [];
@@ -326,6 +328,135 @@ describe('the boot pass', () => {
         const after = await backfillStoredReferencePackagesAtBoot(engine, () => true, holderOf, logger);
         expect(after.map((r) => r.row)).toEqual(['R9', 'R11']);
         expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('sys_automation_run.flow_package backfill did not finish'), { error: 'table gone' });
+    });
+});
+
+/**
+ * [#32183, contract review M2] A disable is reversible, so it moves no
+ * binding: the backfills behind R8–R11 ask every holder, a disabled package's
+ * included, while the execute reads (`flowHolder`, the connector resolver
+ * asked without the option) keep judging the served holders. Both
+ * registration orders of a clash.
+ *
+ * BASE (branch head 340f7cbc, measured): a flow or a connector whose only
+ * holder was disabled at boot was left null and reported as held by nothing;
+ * a sealed clash with one holder disabled was bound to the enabled holder, for
+ * good. On main (de141e32) each answered as pinned here.
+ */
+describe('#32183 — a disable moves no binding: R8–R11 ask every holder', () => {
+    const D = 'com.acme.parked';
+    const PARKED = 'parked_flow'; // shipped by D alone; D is disabled at boot
+    const REVERSED = 'reversed_sync'; // shipped by B, then by A
+    const at = new Date('2026-11-09T12:00:00.000Z');
+    const inside = new Date(at.getTime() - 24 * 3600_000).toISOString();
+    const W = '2026-11-08T12:00:00.000Z';
+    let servedConnector: ReturnType<typeof connectorNameResolver>;
+
+    beforeEach(() => {
+        registry.installPackage(manifest(D), 'code');
+        const flow = (name: string, packageId: string) => ({ name, label: name, type: 'autolaunched', nodes: [], edges: [], _packageId: packageId });
+        registry.registerItem('flow', flow(PARKED, D), 'name' as never, D);
+        registry.registerItem('flow', flow(REVERSED, B), 'name' as never, B);
+        registry.registerItem('flow', flow(REVERSED, A), 'name' as never, A);
+        registry.registerItem('connector', { name: 'parked_api', label: 'parked_api', type: 'api', authentication: { type: 'none' }, actions: [], _packageId: D }, 'name' as never, D);
+        registry.disablePackage(D);
+        registry.disablePackage(B);
+        servedConnector = connectorNameResolver({ getService: (name: string) => (name === 'objectql' ? { registry } : undefined) } as any);
+    });
+
+    it('the execute reads judge the served holders; the durable read judges every holder', () => {
+        expect(automation.flowHolder(PARKED)?.status).toBe('not-found');
+        expect(automation.durableFlowHolder(PARKED)).toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: D } });
+        for (const name of [TWO_HOLDERS, REVERSED]) {
+            expect([name, automation.flowHolder(name)]).toMatchObject([name, { status: 'resolved', holder: { kind: 'package', packageId: A } }]);
+            expect([name, automation.durableFlowHolder(name)?.status]).toEqual([name, 'refused']);
+            // [main #32302 merged in] The credential save door's stamp is the
+            // served holder's package, as its refusal is the served refusal.
+            expect([name, automation.flowHolderPackage(name)]).toEqual([name, A]);
+        }
+        expect(automation.flowHolderPackage(PARKED)).toBeNull();
+        expect(servedConnector('parked_api', null)?.status).toBe('not-found');
+        expect(servedConnector('parked_api', null, { includeDisabledPackages: true }))
+            .toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: D } });
+        expect(servedConnector('mailer', null)).toMatchObject({ status: 'resolved', holder: { kind: 'package', packageId: A } });
+        expect(servedConnector('mailer', null, { includeDisabledPackages: true })?.status).toBe('refused');
+    });
+
+    it('R10 at the trigger: the dispatch coordinates read every holder, as the re-key does; a disable moves no key', () => {
+        const coordinates = () => Object.fromEntries([PARKED, TWO_HOLDERS, REVERSED, ONE_HOLDER].map((name) => [name, automation.flowDispatchHolder(name)]));
+        const disabled = coordinates();
+        // The disabled D's own flow keeps its scope, the bare key claimed first.
+        expect(disabled[PARKED]).toEqual({ packageId: D, claimBare: true });
+        // A clash with one holder disabled keeps the collision guard: the bare key is never claimed.
+        expect(disabled[TWO_HOLDERS]).toEqual({ packageId: null, claimBare: false });
+        expect(disabled[REVERSED]).toEqual({ packageId: null, claimBare: false });
+        // CONTROL: re-enabled, every coordinate is the same.
+        registry.enablePackage(D);
+        registry.enablePackage(B);
+        expect(coordinates()).toEqual(disabled);
+        expect(disabled[ONE_HOLDER]).toEqual({ packageId: A, claimBare: true });
+    });
+
+    it('R8, R9: a flow only a disabled package holds binds to it; a clash with one holder disabled stays null, both named', async () => {
+        const engine = await boot();
+        for (const [id, name] of [['r1', PARKED], ['r2', TWO_HOLDERS], ['r3', REVERSED]] as const) {
+            await engine.insert(RUNS.object, run(id, name, 'paused'), { context: SYS_ORG });
+        }
+        const credential = (id: string, flowName: string) => ({
+            id, flow_name: flowName, state: 'active', node_id: 'n1', credential_key: 'token', position: 'pos_a', value: 'secret-value', created_at: NOW,
+        });
+        for (const [id, name] of [['c1', PARKED], ['c2', TWO_HOLDERS], ['c3', REVERSED]] as const) {
+            await engine.insert(CREDENTIALS.object, credential(id, name), { context: SYS_ORG });
+        }
+
+        const runs = await backfillStoredReferencePackages(engine, RUNS, holderOf);
+        const credentials = await backfillStoredReferencePackages(engine, CREDENTIALS, holderOf);
+
+        expect(await column(engine, RUNS.object, 'flow_package')).toEqual({ r1: D, r2: null, r3: null });
+        expect(await column(engine, CREDENTIALS.object, 'flow_package')).toEqual({ c1: D, c2: null, c3: null });
+        for (const report of [runs, credentials]) {
+            expect(report.bound).toEqual([{ name: PARKED, rows: 1, packageId: D }]);
+            expect(report.ambiguous).toEqual([
+                { name: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+                // Named in registration order.
+                { name: REVERSED, rows: 1, candidates: [`package "${B}"`, `package "${A}"`] },
+            ]);
+            expect(report.unheld).toEqual([]);
+        }
+    });
+
+    it('R10: the re-key copies the key of a flow only a disabled package holds to its scope, and leaves a clash\'s bare key', async () => {
+        const engine = await boot();
+        for (const flow of [PARKED, TWO_HOLDERS, REVERSED]) {
+            await engine.insert('sys_flow_dispatch', { id: `schedule:${flow}:${W}`, dispatched_at: inside, created_at: inside }, { context: SYSTEM_CTX });
+        }
+
+        const report = await rekeyFlowDispatchesByPackage(engine, (flow) => holderOf('flow', flow), at);
+
+        const ids = ((await engine.find('sys_flow_dispatch', { where: {}, context: SYSTEM_CTX })) as Array<Record<string, unknown>>).map((r) => String(r.id));
+        expect(ids.sort()).toEqual([`schedule:${D}:${PARKED}:${W}`, `schedule:${PARKED}:${W}`, `schedule:${REVERSED}:${W}`, `schedule:${TWO_HOLDERS}:${W}`].sort());
+        expect(report.rekeyed).toEqual([{ flow: PARKED, rows: 1, packageId: D }]);
+        // Walked in key order; each clash's candidates named in registration order.
+        expect([...report.ambiguous].sort((x, y) => x.flow.localeCompare(y.flow))).toEqual([
+            { flow: REVERSED, rows: 1, candidates: [`package "${B}"`, `package "${A}"`] },
+            { flow: TWO_HOLDERS, rows: 1, candidates: [`package "${A}"`, `package "${B}"`] },
+        ]);
+    });
+
+    it('R11: a connector only a disabled package holds binds to it; a clash with one holder disabled stays null, both named', async () => {
+        const engine = await boot();
+        const connection = (id: string, name: string) => ({
+            id, organization_id: ORG, connector_name: name, grant: 'authorization_code', status: 'connected', revision: 1,
+        });
+        for (const row of [connection('k1', 'parked_api'), connection('k2', 'mailer')]) {
+            await engine.insert(CONNECTIONS.object, row, { context: SYS_ORG });
+        }
+
+        const report = await backfillStoredReferencePackages(engine, CONNECTIONS, holderOf);
+
+        expect(await column(engine, CONNECTIONS.object, 'connector_package')).toEqual({ k1: D, k2: null });
+        expect(report.bound).toEqual([{ name: 'parked_api', rows: 1, packageId: D }]);
+        expect(report.ambiguous).toEqual([{ name: 'mailer', rows: 1, candidates: [`package "${A}"`, `package "${B}"`] }]);
     });
 });
 
