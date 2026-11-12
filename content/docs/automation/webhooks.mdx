@@ -441,8 +441,9 @@ For each incoming event the subscriber:
 ### 4.3 Stage 3 — Persist
 
 A single enqueue per match. The `(source, dedup_key)` uniqueness
-constraint — where `dedup_key` is `<webhookId>:<object>:<recordId>:<action>:<ts>`
-— absorbs duplicate event deliveries from `at-least-once` semantics. After this
+constraint — where `dedup_key` is `<webhookId>:<object>:<recordId>:<action>:<ts>`,
+or, past the column's 191 characters, a fixed-length `sha256:` digest of that
+string — absorbs duplicate event deliveries from `at-least-once` semantics. After this
 stage the event producer is no longer involved; the rest is the dispatcher's
 problem.
 

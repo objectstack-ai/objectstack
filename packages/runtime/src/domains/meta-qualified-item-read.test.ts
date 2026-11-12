@@ -589,8 +589,9 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
  * namespaces hold: the bare item read and the published read
  * (`GET /meta/webhook/NAME/published`, which asks the protocol's bare item read
  * for the item's package) both answer `409 RESOURCE_CONFLICT` naming both,
- * never the first registered package's. Measured the same over this registry
- * on main; what the install door narrows is that the state is reachable.
+ * never the first registered package's. With the three type sets at main's
+ * (webhook not package-scoped), the same registry answers `200` with the first
+ * registered package's declaration, and this pin goes red: that is the move.
  */
 describe('#31699 — a webhook name two packages hold: the item read and the published read answer 409', () => {
     it('bare `GET /meta/webhook/NAME` and `GET /meta/webhook/NAME/published`: 409 naming both; the namespace address reads one', async () => {
