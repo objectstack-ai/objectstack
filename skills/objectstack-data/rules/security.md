@@ -29,6 +29,7 @@ export const salesUser = definePermissionSet({
   (`security-anchor-high-privilege`) and the binding refuse it. With none, invited
   members get nothing until an admin assigns each; no gate counts them. Its
   `systemPermissions` may name only app capabilities declared under `capabilities:`.
+- `tabPermissions` hides an app from the set's holders, never gates it: objectstack-ui → Navigation.
 - `enable.apiMethods` also restricts the HTTP surface.
 
 ## Assigning a permission set to a user
@@ -72,7 +73,7 @@ none applies the policies restrict nothing — an
 `select` policies.
 
 ```typescript
-// in a permission set (definePermissionSet)
+// in a permission set
 rowLevelSecurity: [
   {
     name: 'own_records',
@@ -135,7 +136,7 @@ export default ObjectSchema.create({
 ```
 
 ```typescript
-// in a permission set — a policy reads the set with `in`
+// in a permission set
 rowLevelSecurity: [
   { name: 'portal_orders', object: 'order', operation: 'select', using: 'account in current_user.portal_account_ids' },
   // the person is a record: roster `employee` declares
@@ -251,7 +252,7 @@ filter: [{ field: 'api_key', operator: 'is_not_null' }]  // list view
 
 **Per-field access gating — `requiredPermissions` (ADR-0066 D3).** A field
 declaring `requiredPermissions` is **masked on read and denied on write** unless
-the caller holds ALL listed capabilities — an AND-gate that is strictest-wins
+the caller holds ALL listed capabilities — strictest-wins
 over permission-set field grants.
 
 ```typescript
@@ -308,7 +309,7 @@ tenancy: { enabled: false },
 requiredPermissions: ['manage_platform_settings'], // capability AND-gate → members get 403
 ```
 
-> ⚠️ **Both keys are load-bearing — neither works alone.** `tenancy: { enabled:
+> ⚠️ **Both keys are load-bearing.** `tenancy: { enabled:
 > false }` alone switches the wall off for **every** caller, so any set with a
 > wildcard (`'*'`) read grant — the shipped `viewer_readonly`, an app-declared
 > default profile, a customer-authored set; not `member_default`, which is
