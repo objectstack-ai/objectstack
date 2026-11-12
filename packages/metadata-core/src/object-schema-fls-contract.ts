@@ -274,7 +274,13 @@ export type FlsContractVerdict =
     /** Every declared field survives — the passthrough tiers (D4 exemptions, D6 tier 1/2, D8). */
     | { kind: 'unmasked' }
     /** D6 tier 3 — the exit refuses: 5xx, no body carrying `fields`. */
-    | { kind: 'fault' };
+    | { kind: 'fault' }
+    /**
+     * [ruling record 6787890900] The caller may not read the object, so it does
+     * not exist for them: a list leaves it out, and a read of it is answered
+     * exactly as the outlet answers a name that names no object.
+     */
+    | { kind: 'absent' };
 
 export interface ObjectSchemaMaskCase {
     /** Stable id — this is what a forgotten exit fails by. */
@@ -285,6 +291,11 @@ export interface ObjectSchemaMaskCase {
     readonly context: Record<string, unknown>;
     /** What `security.getMetadataReadableFields` answers for `account`. */
     readonly readable: FlsContractReadable;
+    /**
+     * [ruling record 6787890900] What `security.canReadObject` answers for
+     * `account`, or that it throws. Omitted = `true`, the object is readable.
+     */
+    readonly readableObject?: boolean | 'throw';
     /** ADR-0106 D8 — masking off for this deployment. */
     readonly maskingDisabled?: boolean;
     readonly expect: FlsContractVerdict;
@@ -382,12 +393,76 @@ export const OBJECT_SCHEMA_MASK_CASES: readonly ObjectSchemaMaskCase[] = [
         maskingDisabled: true,
         expect: { kind: 'unmasked' },
     },
+    {
+        id: 'unreadable-object/absent',
+        why: 'Ruling record 6787890900 — an object the caller may not read does not exist for them: every list leaves it out, and a read of it answers exactly as a name that names no object, even when every one of its fields would be readable.',
+        context: { userId: 'u_portal', systemPermissions: [] },
+        readable: [...FLS_CONTRACT_ALL_FIELDS],
+        readableObject: false,
+        expect: { kind: 'absent' },
+    },
+    {
+        id: 'unreadable-object/fields-undetermined-absent',
+        why: 'Ruling record 6787890900 — the object verdict does not depend on the field universe: an unreadable object stays absent while its field visibility is undetermined (D6 tier 2), never served unmasked.',
+        context: { userId: 'u_portal', systemPermissions: [] },
+        readable: undefined,
+        readableObject: false,
+        expect: { kind: 'absent' },
+    },
+    {
+        id: 'unreadable-object/guest-fallback-absent',
+        why: 'Ruling record 6787890900 with D7 — a caller resolving to zero permission sets is judged by the same object read the data plane asks; an object it may not read is absent.',
+        context: { userId: 'u_guest', positions: [], permissions: [], systemPermissions: [] },
+        readable: ['id', 'name'],
+        readableObject: false,
+        expect: { kind: 'absent' },
+    },
+    {
+        id: 'object-read-throws/tier-3',
+        why: 'D6 — an object read that cannot be evaluated is the 5xx fault: never an empty list and never a false "no such object".',
+        context: { userId: 'u_portal', systemPermissions: [] },
+        readable: [...FLS_CONTRACT_ALL_FIELDS],
+        readableObject: 'throw',
+        expect: { kind: 'fault' },
+    },
+    {
+        id: 'unreadable-object/write-capable-author-exempt',
+        why: 'D4 unchanged — whoever may write a schema is served every object whole, readable or not, so the author exemption precedes the object read.',
+        context: { userId: 'u_author', systemPermissions: ['manage_metadata'] },
+        readable: ['id'],
+        readableObject: false,
+        expect: { kind: 'unmasked' },
+    },
+    {
+        id: 'unreadable-object/platform-admin-exempt',
+        why: 'D4 unchanged — Studio/Setup authoring is served every object, judged by the same `systemPermissions` reading as the field exemption.',
+        context: { userId: 'u_admin', systemPermissions: ['studio.access'] },
+        readable: ['id'],
+        readableObject: false,
+        expect: { kind: 'unmasked' },
+    },
+    {
+        id: 'unreadable-object/masking-disabled-D8',
+        why: 'D8 unchanged — a deployment that opts out of the metadata-plane mask is served every object; the security service is not consulted.',
+        context: { userId: 'u_portal', systemPermissions: [] },
+        readable: ['id'],
+        readableObject: false,
+        maskingDisabled: true,
+        expect: { kind: 'unmasked' },
+    },
 ];
 
 /** What an exit answered when the contract drove it. */
 export type ObjectSchemaMaskOutcome =
     | { kind: 'document'; document: unknown }
-    | { kind: 'fault'; status: number };
+    | { kind: 'fault'; status: number }
+    /**
+     * [ruling record 6787890900] The outlet answered as for a name that names
+     * no object: for a read, byte-identical to its answer for a name it holds
+     * nothing for (the harness compares the two); for a list, a list without
+     * the object.
+     */
+    | { kind: 'absent' };
 
 /** One schema-serving outlet under test. */
 export interface ObjectSchemaMaskExit {
@@ -420,6 +495,17 @@ export function assertObjectSchemaMaskCase(
     outcome: ObjectSchemaMaskOutcome,
 ): void {
     const where = `${exitName} :: ${testCase.id}`;
+    if (testCase.expect.kind === 'absent') {
+        if (outcome.kind !== 'absent') {
+            throw new Error(
+                `${where}: expected the object to be ABSENT (answered as a name that names no object), got ${outcome.kind}. ${testCase.why}`,
+            );
+        }
+        return;
+    }
+    if (outcome.kind === 'absent') {
+        throw new Error(`${where}: expected the object to exist for this caller, the exit answered it as absent. ${testCase.why}`);
+    }
     if (testCase.expect.kind === 'fault') {
         if (outcome.kind !== 'fault') {
             throw new Error(
@@ -512,7 +598,9 @@ function findIdentifierResidue(value: unknown, name: string, path = '$'): string
  * Registers `getMetadataReadableFields` (ADR-0106 D7's entry point) AND
  * `getReadableFields` at the same answer, so an exit that feature-detects
  * either one is driven identically — the fallback path is exercised by the
- * dedicated plugin-security suite, not by making outlets disagree here.
+ * dedicated plugin-security suite, not by making outlets disagree here. Its
+ * `canReadObject` answers the case's `readableObject` (ruling record
+ * 6787890900), `true` when the case names none.
  * Returns `undefined` for the no-service tier so the caller can register
  * nothing at all.
  */
@@ -525,5 +613,9 @@ export function securityDoubleFor(testCase: ObjectSchemaMaskCase): Record<string
     return {
         getReadableFields: async () => answer(),
         getMetadataReadableFields: async () => answer(),
+        canReadObject: async () => {
+            if (testCase.readableObject === 'throw') throw new Error('security service unhealthy (test)');
+            return testCase.readableObject !== false;
+        },
     };
 }

@@ -758,6 +758,59 @@ done, left (orphan, conflicting scope, union incomplete), refused (unreadable, u
 derivation, verify failed) and, under `--apply`, not written (changed during the run,
 write failed). It never prints a value, a ciphertext or a row id.
 
+#### `os audit verify`
+
+Checks the sealed audit ledger (ADR-0154). An object that declares `lifecycle.seal` has
+its rows sealed, one window at a time, into signed checkpoints. This command recomputes
+every checkpoint from the rows the database holds now, in the hot store and in the
+`archive` datasource, and judges each row. **It is read-only: it writes no row.**
+
+```bash
+os audit verify                                     # every chain, the deployment chain included
+os audit verify --org org_123 --org org_456          # only these organizations' chains
+os audit verify --from 2026-11-01 --to 2026-11-08    # only the rows of these windows
+os audit verify --json                               # the machine-readable report
+```
+
+**Options:**
+- `--org <id>` — check only this organization's chains (repeatable). Without it, every
+  chain is checked, the deployment chain included.
+- `--from <iso>`, `--to <iso>` — judge only the rows of the windows this range overlaps
+  (ISO-8601). Links and signatures are still checked over each whole chain.
+- `--database-url <url>`, `--json`
+
+Each row a checkpoint lists reads as one of:
+
+| Verdict | Meaning |
+|---------|---------|
+| `unmodified` | The row is as it was sealed |
+| `late` | The row arrived after its window was sealed, and a later checkpoint sealed it |
+| `redacted` | A signed redaction amendment explains the rewrite of a value column |
+| `expired` | A signed expiry amendment removed the row's range under its own retention policy |
+| `modified` | The row differs from what was sealed |
+| `missing` | The row is in neither the hot store nor the archive |
+
+A row in a sealed window that no checkpoint lists is reported `late` and **unsealed**: on
+the host alone it cannot be told from a forged insert.
+
+Trust comes only from the deployment's own signing key. A key is trusted only when its
+wrapped private half opens with the crypto provider `os serve` seals with (the declaring
+plugin's, or the existing data key from `OS_SECRET_KEY` or the persisted key file; this
+command never mints a key). A key row added to the database by hand is named and trusted
+by nothing. The command prints the fingerprints of the keys it trusted, so you can
+publish them out of band.
+
+Exit codes:
+
+- **0**: every chain, link and signature verifies under a trusted key, and every row is
+  `unmodified`, `late` (sealed), `redacted` or `expired`. Also 0 when nothing is sealed.
+- **1**: a row is `modified`, `missing` or `late` and unsealed, or a link or signature
+  fails. The report names every row that is not `unmodified` and every fault.
+- **2**: no verdict is given. The cause is one of these: a usage error, a stack that would
+  not boot, a crypto provider that cannot open what is sealed, an archive datasource a
+  sealed object declares that this run did not connect (every archived row would read
+  `missing`), or a check that stopped partway.
+
 ### Build & Validate
 
 | Command | Description |
