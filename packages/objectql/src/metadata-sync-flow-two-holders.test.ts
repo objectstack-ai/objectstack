@@ -17,6 +17,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 import { MetadataManager, DatabaseLoader } from '@objectstack/metadata';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectQLPlugin } from './plugin.js';
 import { SchemaRegistry, sealBareNameHoldersAtColdBoot } from './registry.js';
 import type { ObjectQL } from './engine.js';
@@ -38,7 +39,8 @@ const readEngine = (rows: Array<Record<string, unknown>>) => {
       const hits = rows.filter((r) => matches(r, q?.where ?? {}));
       return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
     },
-    async findOne(_table: string, q: any) {
+    async findOne(table: string, q: any) {
+      assertEngineFindOnePredicate(table, q);
       return rows.find((r) => matches(r, q?.where ?? {})) ?? null;
     },
     async count(_table: string, q: any) {
