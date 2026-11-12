@@ -12,7 +12,7 @@
  * the COMPILED header query over the whole set in both orders: 86/61/31/7/1,
  * order-independent, every unit present.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import { StandardErrorCode } from '../api/errors.zod';
 import { ListViewSchema } from './view.zod';
 import type { ColumnSummary } from './view.zod';
@@ -30,7 +30,7 @@ import {
   listViewGroupKeyPredicate,
   listViewGroupOrderColumn,
 } from './view-grouping-query';
-import type { ListViewGroupHeaderRow } from './view-grouping-query';
+import type { ColumnSummaryValue, ListViewGroupHeaderRow } from './view-grouping-query';
 
 // ─── The acceptance fixture ──────────────────────────────────────────────────
 
@@ -401,6 +401,35 @@ describe('count_filled / count_empty / percent_filled / percent_empty — ONE CO
     expect(deriveColumnSummary(row, 'min', 'amount')).toBeUndefined();
     expect(deriveColumnSummary(row, 'none', 'amount')).toBeUndefined();
     expect(deriveColumnSummary(row, 'count_filled', 'notes')).toBeUndefined();
+  });
+
+  it('declares what each member answers: a number for counts and arithmetic, the stored value for min / max', () => {
+    // The shape a grouped header answers over a `date` and a `datetime` field:
+    // the extreme is the stored value of the extreme row, not a number.
+    const row: ListViewGroupHeaderRow = {
+      business_unit: 'x',
+      count: 3,
+      sum_amount: 7,
+      min_due_date: '2026-01-02',
+      max_created_at: '2026-11-01T08:00:00.000Z',
+      count_notes: 2,
+    };
+    expect(deriveColumnSummary(row, 'min', 'due_date')).toBe('2026-01-02');
+    expect(deriveColumnSummary(row, { type: 'max', field: 'created_at' }, 'id')).toBe('2026-11-01T08:00:00.000Z');
+
+    expectTypeOf(deriveColumnSummary(row, 'sum', 'amount')).toEqualTypeOf<number | null | undefined>();
+    expectTypeOf(deriveColumnSummary(row, 'count', 'amount')).toEqualTypeOf<number | null | undefined>();
+    expectTypeOf(deriveColumnSummary(row, 'count_unique', 'amount')).toEqualTypeOf<number | null | undefined>();
+    expectTypeOf(deriveColumnSummary(row, { type: 'percent_empty', field: 'notes' }, 'id'))
+      .toEqualTypeOf<number | null | undefined>();
+    expectTypeOf(deriveColumnSummary(row, 'min', 'due_date')).toEqualTypeOf<unknown>();
+    expectTypeOf(deriveColumnSummary(row, { type: 'max', field: 'created_at' }, 'id')).toEqualTypeOf<unknown>();
+    expectTypeOf(deriveColumnSummary(row, 'none', 'amount')).toEqualTypeOf<null | undefined>();
+    // A summary typed as the whole vocabulary may be `min` / `max`: it reads `unknown`.
+    const anyMember = 'sum' as ColumnSummary;
+    expectTypeOf(deriveColumnSummary(row, anyMember, 'amount')).toEqualTypeOf<unknown>();
+    expectTypeOf<ColumnSummaryValue<'avg' | 'count_filled'>>().toEqualTypeOf<number>();
+    expectTypeOf<ColumnSummaryValue<'sum' | 'max'>>().toEqualTypeOf<unknown>();
   });
 
   it('a summary on a field named like the derived column collides loudly', () => {

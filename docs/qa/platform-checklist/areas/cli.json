@@ -2626,7 +2626,7 @@
       "title": "The address grammar reserves its segments: a bucket 2/3 name led by _ is refused at defineStack and os validate; a namespace that spells a grammar literal is refused by os validate and os build (exit 1, no artifact) and at the running install door, while a package the boot registers keeps booting with a warning; and lint's namespace-prefix rule judges only capabilities and positions",
       "since": "v18.4",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["developer at the CLI", "admin (the seeded admin): the install leg"],
@@ -2660,7 +2660,7 @@
         {
           "clause": "the running install door refuses a namespace that spells a grammar literal with 422 naming it",
           "oracle": "api",
-          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth and trigger)",
+          "verify": "os package install answers 422 PLUGIN_REGISTER_FAILED whose message names the namespace hooks (packages/cloud-connection/src/marketplace-install-local-plugin.ts answers a register refusal of an inline manifest so; the registry raises 422 NAMESPACE_CONFLICT through packages/spec/src/kernel/address-grammar.ts#validateNamespaceNotAddressLiteral; #NAMESPACE_REFUSED_LITERALS holds actions, connectors, global, hooks, oauth, runs and trigger)",
           "evidence": "the 422 body"
         },
         {
@@ -2698,6 +2698,12 @@
           "date": "2026-11-10",
           "change": "initial — ADR-0150 child P, the G1 install refusal and the build doors' refusal (#31765, #31959, #31968). Scoped sweep #32019 (epic #32022 M1, theme 1: ADR-0150 package namespaces), read from source at 60f8149e and, after #31968 landed, at 0f7389cc; no live run made",
           "ref": "#32019"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-11",
+          "change": "the install-door clause's list of NAMESPACE_REFUSED_LITERALS gains runs: the inbound hook's namespace position now carries it (the run doors of a flow named hooks serve it there), so the same judge refuses it at the same three doors. Steps, fixtures and the other clauses are unchanged; read from source, no live run made",
+          "ref": "#32075"
         }
       ]
     },
