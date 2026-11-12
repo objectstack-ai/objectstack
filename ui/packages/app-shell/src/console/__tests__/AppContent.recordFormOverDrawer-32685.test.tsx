@@ -200,8 +200,8 @@ function NavProbe() {
   const location = useLocation();
   useEffect(() => {
     nav.current = navigate;
+    probe.where = `${location.pathname}${location.search}`;
   });
-  probe.where = `${location.pathname}${location.search}`;
   return null;
 }
 
