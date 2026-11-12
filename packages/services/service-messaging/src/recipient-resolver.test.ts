@@ -155,8 +155,9 @@ describe('RecipientResolver', () => {
 /**
  * A membership table read the way a driver reads it: `where` is matched key by
  * key (equality), `orderBy` sorts, `offset` / `limit` page, and `fields`
- * projects. Unlike {@link fakeData} it honors every key of the query, so a
- * pin that the tenant filter or the paging matters can go red.
+ * projects. Unlike {@link fakeData}'s it honors every key of the query, so a
+ * pin that the tenant filter or the paging matters can go red. Only `find` is
+ * restated: every other verb is {@link fakeData}'s own.
  */
 function membershipTable(rows: Array<Record<string, unknown>>, opts: { throwAtOffset?: number } = {}) {
     const calls: Array<{ object: string; query: any; options: any }> = [];
@@ -181,16 +182,11 @@ function membershipTable(rows: Array<Record<string, unknown>>, opts: { throwAtOf
     return {
         calls,
         engine: {
+            ...fakeData().engine,
             async find(object: string, query: any, options: any) {
                 calls.push({ object, query, options });
                 return answer(object, query);
             },
-            async findOne() { return null; },
-            async insert() { return {}; },
-            async update() { return {}; },
-            async delete() { return {}; },
-            async count() { return 0; },
-            async aggregate() { return []; },
         } as any,
     };
 }
