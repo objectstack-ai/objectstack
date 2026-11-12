@@ -640,6 +640,8 @@ export type {
     StoredExpressionBackfillLogger,
     StoredExpressionBackfillOptions,
     StoredExpressionHoleSample,
+    // [#32527] What `ObjectQL#captureStoredExpressions` hands a metadata door.
+    StoredExpressionCapture,
 } from './stored-expression-backfill.js';
 // [ADR-0144, ruling 6492000994] The explicit code backfill behind
 // `os migrate record-currency-codes`: rows stored before an amount switched to

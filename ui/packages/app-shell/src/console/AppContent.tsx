@@ -9,7 +9,7 @@
  */
 
 import { Routes, Route, Navigate, matchRoutes, useNavigate, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { useState, useEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, lazy, Suspense, useMemo, createElement, type ComponentType, type ReactNode } from 'react';
 import { useAssistant } from '../assistant/assistantBus.js';
 import { ModalForm } from '@object-ui/plugin-form';
 import { Empty, EmptyTitle, EmptyDescription, Button, DataErrorState } from '@object-ui/components';
@@ -72,6 +72,7 @@ import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, 
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
+import { NO_RECORD_DRAWERS_OPENING, RecordDrawerOpeningProvider, useRecordFormOpensOverDrawers, type RecordDrawersOpening } from '../views/recordDrawerStack.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -808,6 +809,13 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   const [refreshKey, setRefreshKey] = useState(0);
 
   const isDialogOpen = !!recordFormParam;
+  // objectstack#32685 — the form opens over the record drawer the URL names,
+  // after it, as it does from a click: on a reload the drawer is drawn a
+  // moment after the form would be, and the layer opened last is on top. The
+  // form waits until the route's element is shown (not its skeleton, not a
+  // suspended boundary) and every drawer that element mounts is drawn.
+  const [recordDrawersOpening, setRecordDrawersOpening] = useState<RecordDrawersOpening>(NO_RECORD_DRAWERS_OPENING);
+  const [routeSlotShown, setRouteSlotShown] = useState(false);
   // objectui#12291 — a seeded create's values, carried by the history entry
   // that opened the overlay (`handleEdit` below). The object the router keeps
   // for that entry, so its identity holds until the entry changes.
@@ -956,6 +964,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     ? allObjects.find((o: any) => o.name === formObjectParam)
     : currentObjectDef;
   const isChildFormTask = !!formObjectParam && formObjectParam !== currentObjectDef?.name;
+  const recordFormShown = useRecordFormOpensOverDrawers(
+    isDialogOpen && !!formObjectDef && routeReadsSettled && routeSlotShown,
+    recordDrawersOpening,
+  );
 
   // objectstack#27138 — the record the overlay edits may be held by a pending
   // approval that locks it. The record's field projection leaves that lock out
@@ -1518,6 +1530,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentUserId={user?.id ?? null}
         currentOrgId={activeOrganization?.id ?? null}
       >
+      <RecordDrawerOpeningProvider value={setRecordDrawersOpening}>
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}
@@ -1652,6 +1665,10 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 <Route path="*" element={<RouteNotFound />} />
               </Routes>
                 )}
+                {/* objectstack#32685 — after the route's element in the same
+                    boundary: shown in the commit that shows the route, never
+                    while it is suspended. */}
+                <RouteSlotShown onShownChange={setRouteSlotShown} />
               </RouteFader>
             </Suspense>
           </ErrorBoundary>
@@ -1709,7 +1726,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 title: editingRecord
                   ? t('form.editTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) })
                   : t('form.createTitle', { object: servedObjectLabel(formObjectDef, language, objectLabel) }),
-                open: isDialogOpen,
+                open: recordFormShown,
                 onOpenChange: (open: boolean) => { if (!open) closeRecordForm(); },
                 // objectui#6514 — the same declared-key gate `RecordFormPage`
                 // runs, through the same helper. This read `f.visible`, a key
@@ -1756,6 +1773,7 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
             />
           )}
       </ConsoleLayout>
+      </RecordDrawerOpeningProvider>
       </FilterScopeProvider>
     </ExpressionProvider>
   );
@@ -2181,6 +2199,18 @@ function RouteObjectReadFailed({ answer, onRetry }: { answer: AnsweredLoadFailur
 function searchParamsHasRecordForm(search: string): boolean {
   const sp = new URLSearchParams(search);
   return sp.has(RECORD_FORM_PARAM) || sp.has(RECORD_FORM_OBJECT_PARAM);
+}
+
+/**
+ * objectstack#32685 — reports whether the route slot's element is shown: from
+ * the commit that shows it until it is hidden (unmounted, or suspended).
+ */
+function RouteSlotShown({ onShownChange }: { onShownChange: (shown: boolean) => void }) {
+  useLayoutEffect(() => {
+    onShownChange(true);
+    return () => onShownChange(false);
+  }, [onShownChange]);
+  return null;
 }
 
 /**
