@@ -729,9 +729,10 @@ describe('[#32666] the fix line names what a button can start elevated', () => {
     return findings[0];
   };
 
-  it.each(['update_record', 'create_record'] as const)('an autolaunched %s names a screen or api flow beside runAs:\'system\'', (nodeType) => {
+  it.each(['update_record', 'create_record'] as const)('an autolaunched %s names a screen or api flow and the subflow route beside runAs:\'system\'', (nodeType) => {
     const { hint } = findingFor('autolaunched', nodeType);
     expect(hint).toContain(BUTTON_ENTRY_CLAUSE);
+    expect(hint).toContain('subflow node');
     expect(hint).toContain("runAs:'system'");
     expect(hint).toContain(nodeType);
   });
@@ -748,6 +749,7 @@ describe('[#32666] the fix line names what a button can start elevated', () => {
       const { hint } = findingFor(flowType, nodeType);
       expect(hint, `${flowType} ${nodeType}`).toMatch(/^Declare the flow runAs:'system'/);
       expect(hint, `${flowType} ${nodeType}`).not.toContain(BUTTON_ENTRY_CLAUSE);
+      expect(hint, `${flowType} ${nodeType}`).not.toContain('subflow node');
     }
   });
 

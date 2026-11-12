@@ -111,8 +111,10 @@ export const READONLY_INSERT_STRIP_OUTCOME = 'so the row is created WITHOUT this
  * `PERMISSION_DENIED`. Of the three, `autolaunched` is the one a record action
  * button (`type: 'flow'`) names, so its remedy says which elevated flow a
  * button or action CAN start: a `screen` or `api` flow, the two entry types the
- * admission leaves to the flow's own `requiredPermissions`. A `record_change`
- * or `schedule` flow starts on its own trigger, where elevation is admitted, so
+ * admission leaves to the flow's own `requiredPermissions`, or an elevated flow
+ * a user-run flow's `subflow` node calls (the child's `runAs` decides its
+ * writes: `crud-runas.test.ts` in service-automation). A `record_change` or
+ * `schedule` flow starts on its own trigger, where elevation is admitted, so
  * its remedy is unchanged.
  *
  * ⛔ Not a copy of the admission's type set: this judges one type and names the
@@ -377,12 +379,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
             hint: isCreate
               ? buttonStarted
                 ? `Stamp '${fieldName}' in a beforeInsert hook on '${objectName}', or remove it from this ` +
-                  `create_record node; runAs:'system' needs ${ELEVATED_BUTTON_ENTRY} when a button or action starts it`
+                  `create_record node; runAs:'system' from a button needs ${ELEVATED_BUTTON_ENTRY} or a subflow node`
                 : `Declare the flow runAs:'system', stamp '${fieldName}' in a beforeInsert hook on '${objectName}', ` +
                   `or remove it from this create_record node`
               : buttonStarted
-                ? `Declare the flow runAs:'system' if automation maintains '${fieldName}' (a button or action starts ` +
-                  `an elevated flow only as ${ELEVATED_BUTTON_ENTRY}), or remove it from this update_record node`
+                ? `Declare the flow runAs:'system' (a button starts an elevated flow only as ${ELEVATED_BUTTON_ENTRY}, ` +
+                  `or through a subflow node), or remove '${fieldName}' from this update_record node`
                 : `Declare the flow runAs:'system' if automation maintains '${fieldName}', or remove it from this ` +
                   `update_record node`,
           });
