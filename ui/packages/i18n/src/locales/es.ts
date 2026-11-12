@@ -4085,6 +4085,7 @@ const es = {
       get_authoring_rules: "Consultar las reglas de autoría",
       get_metadata_schema: "Consultar el formato de los metadatos",
       get_package: "Revisar el paquete",
+      get_record_history: "Leer el historial del registro",
       list_metadata: "Listar los metadatos existentes",
       list_objects: "Listar los objetos existentes",
       list_packages: "Listar los paquetes existentes",

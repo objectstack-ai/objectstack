@@ -4080,6 +4080,7 @@ const pt = {
       get_authoring_rules: "Consultar as regras de autoria",
       get_metadata_schema: "Consultar o formato dos metadados",
       get_package: "Revisar o pacote",
+      get_record_history: "Ler o histórico do registro",
       list_metadata: "Listar os metadados existentes",
       list_objects: "Listar os objetos existentes",
       list_packages: "Listar os pacotes existentes",

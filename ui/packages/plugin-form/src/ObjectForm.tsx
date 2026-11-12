@@ -18,7 +18,7 @@ import type { ObjectFormSchema, FormField, FormSchema, DataSource } from '@objec
 import { SchemaRenderer, useSafeFieldLabel } from '@object-ui/react';
 import { pickLocalized, useObjectTranslation, useLocalization, withHomeAmountSource } from '@object-ui/i18n';
 import { useRecordInvalidation } from './recordInvalidation';
-import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject } from '@object-ui/fields';
+import { mapFieldTypeToFormType, buildValidationRules, formatFileSize, fieldHelpText, withFollowedParentObject, withFormObject, PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 import { isExpressionComputedField } from '@object-ui/core';
 import { useIsMobile, toast } from '@object-ui/components';
 import { resolveSuccessNavigate } from './successBehavior';
@@ -53,6 +53,7 @@ import { hasSectionGroupReference, resolveSectionGroupReferences } from './secti
 import {
   snapshotLoadedRecord,
   advanceLoadedRecord,
+  withoutSeededHolderPackage,
   type LoadedRecordSnapshot,
 } from './sanitize';
 import { formWritePayload } from './writePayload';
@@ -564,13 +565,20 @@ const ObjectFormBody: React.FC<ObjectFormComponentProps> = ({
  * A simple form's opening values: the seeded defaults (empty on an edit),
  * overlaid with the record the form holds or the caller supplied. The form
  * renders these, and a create save judges a picked owner against them
- * (objectui#12359).
+ * (objectui#12359). A CREATE form (`createObjectName` set) for a
+ * permission-set grant opens without the grant's package column
+ * (objectstack#32795, `withoutSeededHolderPackage`); an edit's are untouched.
  */
 function formOpeningValues(
   schemaDefaults: Record<string, unknown>,
   initialData: Record<string, unknown> | null | undefined,
+  createObjectName: string | null,
 ): Record<string, unknown> {
-  return { ...schemaDefaults, ...(initialData ?? {}) };
+  return withoutSeededHolderPackage(
+    { ...schemaDefaults, ...(initialData ?? {}) },
+    createObjectName,
+    PERMISSION_SET_GRANT_COLUMNS,
+  );
 }
 
 const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource?: DataSource }> = ({
@@ -1008,7 +1016,13 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
           // An amount that follows its parent's currency (ADR-0144 D2 as
           // amended) also carries the parent object, so its widget can read
           // the parent's code for the id the form holds.
-          field: withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
+          // A `permission-ref` field also carries the object this form edits
+          // (objectstack#32795), so the widget tells the grant's name column
+          // from a column of the same name on another object.
+          field: withFormObject(
+            withFollowedParentObject(withHomeAmountSource(field, objectSchema.fields, name), objectSchema.fields),
+            schema.objectName,
+          ),
           // A per-field widget override. `form.tsx` resolves `widget || type`, so this makes the
           // auto-generated (no-form-view) form honor the override just like the
           // authored-section path already does (sectionFields.ts).
@@ -1206,7 +1220,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   // What the form OPENS with: the seeded defaults, overlaid with the caller's
   // record. A create save judges a picked owner against exactly this
   // (objectui#12359), so both readers spell it through `formOpeningValues`.
-  const finalDefaultValues = formOpeningValues(schemaDefaults, initialData);
+  const finalDefaultValues = formOpeningValues(schemaDefaults, initialData, isCreateForm ? schema.objectName : null);
 
   // The ONE field-gate step every layout draws through (objectui#10612):
   // field-level security plus the ADR-0092 D4 managed-object lock, which this
@@ -1303,7 +1317,7 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       // and a seeded one left alone is not (objectui#12359). Rebuilt from the
       // same two inputs `finalDefaultValues` reads, not from that object, so
       // this callback does not change identity on every render.
-      createBaseline: formOpeningValues(schemaDefaults, initialData),
+      createBaseline: formOpeningValues(schemaDefaults, initialData, isCreateFormMode(schema) ? schema.objectName : null),
     });
 
     try {

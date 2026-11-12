@@ -81,3 +81,9 @@ export type {
   RuntimeStackContext,
 } from './runtime-gate.js';
 export type { AuthoringFinding, AuthoringSeverity } from './authoring-rules.js';
+// [ruling record 6819749037] The user-facing sentence of a finding, for the
+// door that holds the request: it hands in the request's locale and the
+// workspace default, and puts the answer on the wire as
+// `RuntimeAuthoringIssueSchema.userMessage`.
+export { findingUserMessage } from './finding-user-text.js';
+export type { UserTextParams } from './finding-user-text.js';

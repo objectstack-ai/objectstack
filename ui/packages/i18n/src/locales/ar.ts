@@ -4337,6 +4337,7 @@ const ar = {
       get_authoring_rules: "الاطلاع على قواعد التأليف",
       get_metadata_schema: "الاطلاع على تنسيق البيانات الوصفية",
       get_package: "مراجعة معلومات الحزمة",
+      get_record_history: "قراءة سجل تعديلات هذا السجل",
       list_metadata: "سرد البيانات الوصفية الموجودة",
       list_objects: "سرد الكائنات الموجودة",
       list_packages: "سرد الحزم الموجودة",
