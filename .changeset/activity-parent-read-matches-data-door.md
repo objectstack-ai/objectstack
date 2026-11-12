@@ -14,7 +14,7 @@ Metadata-protocol: none
 Who moves:
 
 - **Activity stream (`sys_activity`)**: every reader, administrators included, stops being served rows about records of an object the data door does not serve. Rows about every other object are served exactly as before.
-- **Compliance ledger (`sys_audit_log`)**: a reader the ledger's parent-record gate narrows stops being served rows about records of such an object. A holder of the ledger's audit capability (`view_all_audit_log`, which platform administrators hold by default) is decided before the gate and still reads every ledger row its grant and row scope reach. Rows about no record are served as before.
+- **Compliance ledger (`sys_audit_log`)**: a reader the ledger's parent-record gate narrows, organization administrators included, stops being served rows about records of an object the data door serves to no one: such a record counts as one the reader cannot open. That includes a reader's own OAuth consent-use rows (`credential_use` rows about `sys_oauth_consent`); the auth door's authorized-clients view still shows each client's last use. An explicit grant of the ledger's audit capability (`view_all_audit_log`) gives those rows back. Its holders, platform administrators by default, are decided before the gate and still read every ledger row their grant and row scope reach. Rows about no record are served as before.
 - **Comments (`sys_comment`)**: no reader is served a comment on a record of such an object, on stamped and unstamped rows alike.
 
 Nothing else moves: the object-level read check, the engine's own read scope, system reads and `current_user.can()` keep their answers, and no object's `enable` block changes.
