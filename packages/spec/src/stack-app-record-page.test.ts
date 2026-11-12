@@ -37,7 +37,8 @@ const recordPage = (name: string, object: string, extra: Record<string, unknown>
   label: name,
   type: 'record' as const,
   object,
-  regions: [],
+  // One component: a `full` record page places at least one (it draws nothing else).
+  regions: [{ name: 'main', components: [{ type: 'record:details' }] }],
   ...extra,
 });
 
@@ -85,7 +86,7 @@ describe('PageSchema.apps — the key', () => {
   it.each([
     ['a home page', { name: 'pg', label: 'P', type: 'home', apps: ['duly'] }, "`type: 'home'`"],
     ['an app page', { name: 'pg', label: 'P', type: 'app', apps: ['duly'] }, "`type: 'app'`"],
-    ['a record page bound to no object', { name: 'pg', label: 'P', type: 'record', apps: ['duly'] }, 'bound to no `object`'],
+    ['a record page bound to no object', { name: 'pg', label: 'P', type: 'record', apps: ['duly'], regions: [{ name: 'main', components: [{ type: 'record:details' }] }] }, 'bound to no `object`'],
   ])('is refused on %s, at `apps`, in the registry door\'s sentence', (_label, page, subject) => {
     const issues = issuesOf(page);
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', 'apps']]);
