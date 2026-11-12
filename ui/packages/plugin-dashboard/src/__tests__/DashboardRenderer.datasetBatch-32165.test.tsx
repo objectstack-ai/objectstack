@@ -18,7 +18,7 @@
  */
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import { notifyDataChanged } from '@object-ui/react';
 import type { DashboardComponentSchema } from '@object-ui/types';
@@ -30,13 +30,29 @@ import '../index';
 import { DashboardRenderer } from '../DashboardRenderer';
 import { DashboardGridLayout } from '../DashboardGridLayout';
 
-beforeEach(() => {
-  // The dimension-label metadata probe falls back to the global fetch; answer
-  // it locally so no case reaches the network.
-  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' })));
-});
+/**
+ * The dimension-label metadata probe (`useDatasetDimensionMeta`) falls back to
+ * the global `fetch` for `GET /api/v1/meta/object/deal`, because these fakes
+ * carry no `getObjectSchema`. The double that answers it is installed ONCE,
+ * here at module scope, and is deliberately NEVER torn down: there is no
+ * `vi.unstubAllGlobals()` in this file, and adding one back re-opens
+ * objectstack#32462.
+ *
+ * ⛔ Why the per-test `beforeEach` stub / `afterEach` unstub pair escaped. The
+ * probe is a passive effect that starts only once a widget's rows commit (the
+ * base object arrives with the answer). When a body returns between that
+ * commit and React's passive-effect flush, which waits on a scheduler yield
+ * and so on timing, the effect is still pending. This file's `afterEach` runs
+ * first (Vitest runs `afterEach` hooks in reverse registration order), so the
+ * unstub put the real `fetch` back, and `cleanup()`'s act flush then ran the
+ * pending effect, which bound `apiFetch ?? fetch` to the real socket. Measured
+ * with the scheduler forced to yield: every escape started inside that flush.
+ * With one double for the whole file there is no window: a read the teardown
+ * flush starts is served by the same double.
+ */
+vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' })));
+
 afterEach(() => {
-  vi.unstubAllGlobals();
   cleanup();
 });
 

@@ -10,7 +10,9 @@
  * of the same name as it stood, re-indented one level, with `this.<member>`
  * read as `host.<member>` and nothing else changed
  * (`node scripts/host-split.mjs check <base> <member> protocol-meta-layered-reads.ts`
- * proves it). Each method stays on the class with its docblock and signature,
+ * proves it at the cut). Since then, [#32183] added one step to each body: a
+ * name a disabled package also holds is read at the served holder's address.
+ * Each method stays on the class with its docblock and signature,
  * which the published `.d.ts` prints, and hands its body the host
  * (`protocol-host.ts`).
  *
@@ -68,16 +70,22 @@ import { boundPackageOf, withRowBinding } from './protocol-package-bindings.js';
 import type { RowlessExpandedView } from './protocol-stored-overlay-types.js';
 import { type ServedOverrideRow, isServedOverrideRowOf } from './served-override.js';
 import { installedManifestsOfEngine } from './installed-manifests.js';
+import { isAnotherHoldersCopy, servedHolderAddressOf } from './protocol-meta-item-face.js';
 import { packagelessAddressAmbiguityRefusal } from './sys-metadata-repository.js';
 
 /** The body of `ObjectStackProtocolImplementation#packagelessLayeredReadRefusal`; the method's docblock there is its contract. */
-export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'packagelessAddress'>, request: {
+export async function packagelessLayeredReadRefusal(host: Pick<ProtocolHost, 'engine' | 'packagelessAddress'>, request: {
         type: string;
         name: string;
         /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
         member?: string;
     }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
     const { type, name } = canonicalizeMetaRequestType(request);
+    // [#32183] A name a disabled package also holds is read at the served
+    // holder's address ({@link getMetaItemLayered}), so the read names its
+    // package and the stored rows of other packages (the disabled holder's
+    // among them) leave it no ambiguity to refuse.
+    if (servedHolderAddressOf(host.engine?.registry, PLURAL_TO_SINGULAR[type] ?? type, name) !== undefined) return undefined;
     const member = resolveBundleMemberSelector(type, request.member);
     const address = await host.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
     return address.candidates.length > 1
@@ -144,6 +152,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     if (request.type === 'object' && isObjectOfDisabledPackage(host.engine?.registry, request.name)) {
         throw objectPackageDisabledError(request.name);
     }
+    // [#32183] Naming no package, a name a disabled package also holds is read
+    // at the served holder's address, the one the by-name read serves
+    // ({@link servedHolderAddressOf}): its code layer, its overlay rows and its
+    // lock. The code layer is otherwise the first composite in registration
+    // order, which can be the disabled holder's.
+    const servedAddress = request.packageId ? undefined : servedHolderAddressOf(host.engine?.registry, request.type, request.name);
+    if (servedAddress !== undefined) request = { ...request, packageId: servedAddress };
     // [#26699] Ruling 6116165299 (Q2 i), extended to this read by the
     // option-A ruling on #26649: ONE member of a bundled type, the
     // selector's or else the canonical one, read exactly as
@@ -211,7 +226,14 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             // `effective` is `overlay ?? code`, so an object with no
             // overlay row — the ordinary shape — is corrected by this
             // single fold on both layers the diagnostic reports.
-            if (isWantedMember(fromService.data)) {
+            // [#32183, contract review M4] …and, read at the served holder's
+            // address, when it is that holder's: the service keys most types
+            // by name alone, so its copy can be the body a disabled holder
+            // registered last ({@link isAnotherHoldersCopy}). The artifact
+            // lookup below reads the served holder's.
+            if (isWantedMember(fromService.data)
+                && !(servedAddress !== undefined
+                    && isAnotherHoldersCopy(host.engine?.registry, request.type, request.name, servedAddress, fromService.data))) {
                 code = host.foldObjectExtendersFromRegistry(
                     request.type, request.name, fromService.data,
                 );
