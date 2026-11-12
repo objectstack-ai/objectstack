@@ -20,7 +20,13 @@ const packages = vi.hoisted(() => ({ list: [] as Array<Record<string, unknown>> 
 
 vi.mock('./packages-io', async (importOriginal) => {
   const mod = await importOriginal<typeof import('./packages-io')>();
-  return { ...mod, fetchPackages: vi.fn(async () => packages.list) };
+  return {
+    ...mod,
+    fetchPackages: vi.fn(async () => packages.list),
+    // The landing reads the list's ids beside its entries (the same request,
+    // objectstack#32615): both are answered by this double, never the network.
+    fetchListedPackageIds: vi.fn(async () => new Set(packages.list.map((p) => String(p.id)))),
+  };
 });
 
 // The create dialog is closed throughout; its form stack is not under test.
