@@ -283,8 +283,12 @@ conversion 是消费者跟的;D3 条目是升级方的 agent 读的。三个都�
       点不出名字的 glob 另配 `heldBy` 证人。⛔ 半径未申报的 tree-scoped pin 不是完成的退役。
 - [ ] **Examples** —— `examples/app-showcase/**` 必须停止编写该键。墓碑路线上
       `tsc` 替你找齐。
-- [ ] **已发布 skills** —— 教这个键的 `skills/*/SKILL.md`(表格、`defineX` 示例)
-      —— 由 `check:skill-examples` 与 `check:skill-refs` 把门。
+- [ ] **已发布 skills** —— 另立 `domain:skills` 卡,⛔ 不进退役 PR;先后按门禁实测,两类相反:
+      `os:check` 示例写着键 ⇒ `check:skill-examples` 红退役 PR:skills 卡先落、只删键,退役卡
+      `Blocked-by:` 它。登记的穷举段(`check:skill-identifier-liveness`)与顶层键表先删活成员即红 ⇒
+      退役先落,skills 卡 `Blocked-by:` 退役卡;值走 `enumWithRetiredValues` 则绑定 stale,退役 PR
+      照处方改指。顶层键墓碑仍算已声明,删它欠维护者的 `NOT_AUTHORED` 行 ⇒ `needs_decision`。
+      `_index.md`(`check:skill-refs`)随退役 PR 重生成;未标记块与普通表无门禁,grep 后排在退役后。
 - [ ] **Docs** —— `content/docs/**` 的散文、表格与代码块 —— **除了
       `content/docs/releases/`,代码 PR 永不碰它**(AGENTS.md Documentation
       Guardrails)。release notes 在发布时从 changesets + D2/D3 registry 集中编写,你的
@@ -318,11 +322,7 @@ pnpm --filter @objectstack/spec check:generated  # 一条命令跑齐,首个失�
 pnpm check:i18n && pnpm --filter @objectstack/spec test
 ```
 
-⛔ 永不手搓一份 `check:*` 名单逐个跑:手工配对是 AGENTS.md 明禁的,而一条命令一次
-报全部过期产物,正是 CI 做不到的事。`check:generated` 的输出会点名它**不**跑的五个
-纯源码审计 —— `check:liveness`、`check:empty-state`、`check:skill-examples`、
-`check:exported-any`、`check:dual-source-exports` —— 它们没有生成器,那里的失败是
-真发现、不是过期产物,按 §4 那一行整组另跑。
+⛔ 永不手搓 `check:*` 名单逐个跑(AGENTS.md 明禁);它不跑的五个纯源码审计照 §4 整组另跑。
 
 ## 6. 各费过一轮红构建的陷阱
 
