@@ -531,12 +531,16 @@ export function packageScopedRefusalMessage(refusal: Omit<PackageScopedRefusal, 
   const subject = `The ${typeLabel(refusal.type)} "${refusal.name}"`;
   const named = refusal.candidates.map(describePackageScopedHolder).join('; ');
   const platform = refusal.candidates.some((c) => c.kind === 'platform');
+  // A count of candidates is a count of PACKAGES only when every candidate
+  // is one: the environment's own item, the platform's or a stack's
+  // residual beside them makes it a count of holders.
+  const counted = refusal.candidates.every((c) => c.kind === 'package') ? 'packages' : 'holders';
   switch (refusal.reason) {
     case 'ambiguous-in-closure':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in the declared dependency closure of ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in the declared dependency closure of ` +
         `package "${refusal.callerPackageId}"${platform ? ' and the platform' : ''}: ${named}. Nothing picks one of them: address it by its package.`;
     case 'ambiguous-in-environment':
-      return `${subject} is held by ${refusal.candidates.length} ${platform ? 'holders' : 'packages'} in this environment and the caller names ` +
+      return `${subject} is held by ${refusal.candidates.length} ${counted} in this environment and the caller names ` +
         `no package: ${named}. Nothing picks one of them: address it by its package.`;
     case 'outside-closure':
       return `${subject} is held outside the declared dependency closure of package "${refusal.callerPackageId}": ` +

@@ -91,6 +91,9 @@ import {
   isBundledStoreType,
   keyIdentityOf,
   readStoreEntry,
+  inheritStoreWriteOrder,
+  judgesLoaderSlots,
+  platformSlotsOf,
   recordStoreWrite,
   slotPackageOf,
   slotStoreOf,
@@ -1102,6 +1105,15 @@ export class MetadataManager implements IMetadataService {
   async get(type: string, name: string, packageId?: string | null): Promise<unknown | undefined> {
     // [#7378 row 2] Read the store `register` wrote: the canonical type.
     type = canonicalMetadataServiceType(type);
+    // [ADR-0150 D3, #32560] A read naming no package of an action name a
+    // package holds in memory is judged over the registry AND the loaders
+    // (`judgesLoaderSlots`): another package's item stored only in a loader
+    // is a second holder, the environment's own item stored only in a loader
+    // answers first, and a package-less registry slot no loader stores is
+    // the platform's, refused beside the package.
+    if (judgesLoaderSlots(this.registry.get(type), type, name, packageId)) {
+      return (await this.loadSlottedDiagnosed(type, name, packageId)).data ?? undefined;
+    }
     // Check in-memory registry first
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return entry.data;
@@ -1152,7 +1164,12 @@ export class MetadataManager implements IMetadataService {
     type = canonicalMetadataServiceType(type);
     // Check in-memory registry first — a hit here consulted no loader, so
     // there is nothing to be degraded about. [ADR-0150 D3] `packageId` as on
-    // `get`, read by the same rule.
+    // `get`, read by the same rule. [#32560] …and judged over the loaders
+    // too where `get` judges it so.
+    if (judgesLoaderSlots(this.registry.get(type), type, name, packageId)) {
+      const { data, degraded, errors } = await this.loadSlottedDiagnosed(type, name, packageId);
+      return { data: data ?? undefined, degraded, errors };
+    }
     const entry = readStoreEntry(this.registry.get(type), type, name, packageId);
     if (entry.found) return { data: entry.data, degraded: false, errors: [] };
 
@@ -1191,7 +1208,12 @@ export class MetadataManager implements IMetadataService {
     packageId?: string | null,
   ): Promise<{ data: unknown | null; degraded: boolean; errors: string[] }> {
     const { slots, errors } = await this.loaderSlotsNamed(type, name);
-    const entry = readStoreEntry(this.slotViewOf(type, name, slots), type, name, packageId);
+    const loaderStore = slotStoreOf(type, name, slots);
+    // [#32560] A package-less registry slot is the platform's when no loader
+    // stores it — judged only over loaders that all answered: with one down,
+    // the slot is read as the environment's, as before.
+    const platformKeys = errors.length === 0 ? platformSlotsOf(this.registry.get(type), type, name, loaderStore) : undefined;
+    const entry = readStoreEntry(this.slotViewOf(type, name, loaderStore), type, name, packageId, platformKeys);
     return entry.found
       ? { data: entry.data, degraded: false, errors }
       : { data: null, degraded: errors.length > 0, errors };
@@ -1238,14 +1260,16 @@ export class MetadataManager implements IMetadataService {
   private slotViewOf(
     type: string,
     name: string,
-    slots: Iterable<{ readonly packageId?: string; readonly data: unknown }>,
+    loaderStore: ReadonlyMap<string, unknown>,
   ): Map<string, unknown> {
     const registryStore = this.registry.get(type);
     const view = new Map<string, unknown>();
     for (const key of storeKeysNamed(registryStore, type, name)) view.set(key, registryStore!.get(key));
-    for (const [key, data] of slotStoreOf(type, name, slots)) {
+    for (const [key, data] of loaderStore) {
       if (!view.has(key)) view.set(key, data);
     }
+    // [#32560] "Written last" over the view is the registry's own order.
+    inheritStoreWriteOrder(view, registryStore);
     return view;
   }
 
@@ -1876,11 +1900,19 @@ export class MetadataManager implements IMetadataService {
     name: string,
     packageId?: string | null,
   ): Promise<{ keys: string[]; packageId?: string }> {
-    const removal = storeRemovalKeys(this.registry.get(type), type, name, packageId);
+    const registryStore = this.registry.get(type);
+    const removal = storeRemovalKeys(registryStore, type, name, packageId);
     if (!PACKAGE_SLOTTED_STORE_TYPES.has(type) || removal.packageId !== undefined) return removal;
-    const { slots } = await this.loaderSlotsNamed(type, name);
-    storeRemovalKeys(this.slotViewOf(type, name, slots), type, name);
-    return removal;
+    const { slots, errors } = await this.loaderSlotsNamed(type, name);
+    const loaderStore = slotStoreOf(type, name, slots);
+    // [#32560] Judged as a read naming none judges it: a package-less
+    // registry slot no loader stores is the platform's (refused beside a
+    // package), and beside one package the removal takes the package-less
+    // slots the read answers — of the registry's, those the view's rule
+    // picks.
+    const platformKeys = errors.length === 0 ? platformSlotsOf(registryStore, type, name, loaderStore) : undefined;
+    const judged = storeRemovalKeys(this.slotViewOf(type, name, loaderStore), type, name, undefined, platformKeys);
+    return { keys: judged.keys.filter((key) => registryStore?.has(key) === true) };
   }
 
   /**
