@@ -259,13 +259,17 @@ describe('DatasetReportRenderer reads the date dimension as the report\'s reader
         ? new Response(JSON.stringify({ item: { name: 'opportunity_metrics', dimensions: [{ name: dimension, type: 'date' }] } }), { status: 200 })
         : new Response('{}', { status: 404 });
     });
-    const tree = (packageId: string) => (
-      <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
-        <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
-          <DatasetReportRenderer report={{ ...BASE, _packageId: packageId, dateRange: { defaultRange: 'last_90_days' } }} dataSource={src as any} />
-        </SchemaRendererProvider>
-      </I18nProvider>
-    );
+    const tree = (packageId: string) => {
+      // The served decoration rides the report as data, the way `renderReport` hands it.
+      const report: Record<string, unknown> = { ...BASE, _packageId: packageId, dateRange: { defaultRange: 'last_90_days' } };
+      return (
+        <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
+          <SchemaRendererProvider dataSource={undefined} apiFetch={apiFetch}>
+            <DatasetReportRenderer report={report} dataSource={src as any} />
+          </SchemaRendererProvider>
+        </I18nProvider>
+      );
+    };
     const { rerender } = render(tree('com.acme.app'));
     await waitFor(() => expect(sent).toHaveLength(1));
     rerender(tree('com.acme.other'));
