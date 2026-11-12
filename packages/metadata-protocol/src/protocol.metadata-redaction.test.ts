@@ -230,6 +230,11 @@ describe('#8154 — the seam this card consumes', () => {
         expect(hasMetadataRedactor('datasources')).toBe(true);
     });
 
+    it('[#31699, #31527 B-shape item 4] registers no redactor for `email_template`, so a save never takes the carry-forward\'s code-layer read (`readCodeLayerForCarryForward`) for it, whatever package the save names', () => {
+        expect(hasMetadataRedactor('email_template')).toBe(false);
+        expect(hasMetadataRedactor('email_templates')).toBe(false);
+    });
+
     it('registers no redactor for an ordinary type, and leaves its body by reference', () => {
         expect(hasMetadataRedactor('view')).toBe(false);
         const body = { name: 'v', label: 'V' };
