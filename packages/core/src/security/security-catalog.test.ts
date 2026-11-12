@@ -535,3 +535,90 @@ describe('security catalog read — permission sets by (package, name) through t
     });
   });
 });
+
+/**
+ * [ADR-0150 D3/D4, #31698] The metadata service keeps a permission set per
+ * `(package, name)` (the security catalog echo of each stored row, on an
+ * environment kernel), and a read naming no package of a name two packages'
+ * slots hold is refused there, naming each (`409 RESOURCE_CONFLICT`). The
+ * catalog answers that as the registry's two holders are answered: a refusal
+ * naming both, conferring nothing — and a stored column reads its own
+ * package's slot. BASE: the refusal was caught as an unreadable store
+ * (`AuthzStoreUnavailableError`, a fail-closed outage), and a column naming a
+ * package whose set lives only in the metadata service read as stale.
+ */
+describe('[#31698] two packages\' slots of a set in the metadata service: the D3 answer, never an outage', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  /** A slotted metadata service: a read naming a package serves its slot, else the package-less one; naming none, refused across two. */
+  function slotted(slots: Record<string, Def>): SecurityCatalogMetadataService {
+    const holders = Object.keys(slots).filter((k) => k !== '');
+    const read = (name: string, packageId?: string) => {
+      if (packageId !== undefined) return slots[packageId] ?? slots[''];
+      if (holders.length > 1) {
+        throw Object.assign(new Error(`permission set "${name}" is held by more than one package`), {
+          code: 'RESOURCE_CONFLICT', status: 409,
+          refusal: { reason: 'ambiguous-in-environment', candidates: holders.map((packageId) => ({ kind: 'package', packageId })) },
+        });
+      }
+      return slots[holders[0] ?? ''];
+    };
+    return {
+      async get(_type, name, packageId) { return read(name, packageId); },
+      async list() { return Object.values(slots); },
+      async getDiagnosed(_type, name, packageId) { return { data: read(name, packageId), degraded: false, errors: [] }; },
+    };
+  }
+  /** A package-scoped registry that holds no permission set: an environment kernel's, for a set stored only as a row. */
+  const silentRegistry = (): SecurityCatalogRegistry & SecurityCatalogPackageScopedRegistry => ({
+    ...registry({}),
+    packageScopedHoldersOf: () => [],
+    getPackageScopedItem: () => undefined,
+    getEnvironmentScopedItem: () => undefined,
+    getArtifactItem: () => undefined,
+    getPackage: () => undefined,
+    getAllPackages: () => [],
+  });
+  const two = () => slotted({
+    [A]: { name: 'ops_reader', label: 'alpha', _packageId: A },
+    [B]: { name: 'ops_reader', label: 'beta', _packageId: B },
+  });
+
+  it('a reference naming no package is refused naming both packages, and confers nothing (BASE: an unreadable store)', async () => {
+    const reader = createSecurityCatalogReader({ registry: silentRegistry(), metadata: two() });
+    const answer = await resolveCatalogReference(reader, 'permission', 'ops_reader');
+    expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    if (answer.status !== 'refused') return;
+    expect(answer.holders).toEqual([{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }]);
+    expect(await reader.resolve('permission', 'ops_reader')).toBeUndefined();
+  });
+
+  it('a stored column reads its own package\'s slot, and no other', async () => {
+    const warn = vi.fn();
+    const reader = createSecurityCatalogReader({ registry: silentRegistry(), metadata: two(), logger: { warn } });
+    expect(await reader.resolve('permission', 'ops_reader', storedPermissionSetScope(A))).toMatchObject({ source: 'metadata', packageId: A, definition: { label: 'alpha' } });
+    expect(await reader.resolve('permission', 'ops_reader', storedPermissionSetScope(B))).toMatchObject({ source: 'metadata', packageId: B, definition: { label: 'beta' } });
+    expect(warn, 'a column that names its own slot is not stale').not.toHaveBeenCalled();
+  });
+
+  it('a column naming a package with no slot is stale: read as a null column — refused across the two, said once', async () => {
+    const warn = vi.fn();
+    const reader = createSecurityCatalogReader({ registry: silentRegistry(), metadata: two(), logger: { warn } });
+    const answer = await resolveCatalogReference(reader, 'permission', 'ops_reader', storedPermissionSetScope('com.acme.gone'));
+    expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('CONTROL one package\'s slot: a reference naming no package resolves it, as before', async () => {
+    const reader = createSecurityCatalogReader({ registry: silentRegistry(), metadata: slotted({ [A]: { name: 'ops_reader', _packageId: A } }) });
+    expect(await reader.resolve('permission', 'ops_reader')).toMatchObject({ source: 'metadata', packageId: A });
+  });
+
+  it('CONTROL any other failed read is still an outage, never a refusal', async () => {
+    const reader = createSecurityCatalogReader({
+      registry: silentRegistry(),
+      metadata: metadata({}, { get: async () => { throw new Error('store down'); } }),
+    });
+    expect(isAuthzStoreUnavailableError(await rejection(reader.resolve('permission', 'ops_reader')))).toBe(true);
+  });
+});

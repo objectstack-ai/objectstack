@@ -198,9 +198,10 @@ export interface SecurityCatalogRegistry {
  * present they are what lets a degraded read be told apart from a miss.
  */
 export interface SecurityCatalogMetadataService {
-  get(type: string, name: string): unknown;
+  /** [ADR-0150 D4, #31698] `packageId`: that package's slot of a type stored per `(package, name)`. */
+  get(type: string, name: string, packageId?: string): unknown;
   list(type: string): unknown;
-  getDiagnosed?(type: string, name: string): Promise<{ data?: unknown; degraded?: boolean; errors?: readonly string[] }>;
+  getDiagnosed?(type: string, name: string, packageId?: string): Promise<{ data?: unknown; degraded?: boolean; errors?: readonly string[] }>;
   listDiagnosed?(type: string): Promise<{ items?: readonly unknown[]; degraded?: boolean; errors?: readonly string[] }>;
 }
 
@@ -415,6 +416,29 @@ function unreadable(source: SecurityCatalogSourceName, type: SecurityCatalogType
 }
 
 /**
+ * [ADR-0150 D3/D5, #31698] The holders a metadata-service read naming no
+ * package was refused across (`409 RESOURCE_CONFLICT`, its `refusal`'s
+ * candidates), or `undefined` for any other error.
+ */
+function storeRefusalHolders(error: unknown): PackageScopedHolder[] | undefined {
+  const failure = error as { code?: unknown; refusal?: { candidates?: unknown } } | null;
+  const candidates = failure?.refusal?.candidates;
+  if (failure?.code !== 'RESOURCE_CONFLICT' || !Array.isArray(candidates)) return undefined;
+  const holders = candidates.filter((c): c is PackageScopedHolder =>
+    !!c && typeof c === 'object'
+    && ((c as { kind?: unknown }).kind === 'environment'
+      || ((c as { kind?: unknown }).kind === 'package' && typeof (c as { packageId?: unknown }).packageId === 'string')));
+  return holders.length > 1 ? holders : undefined;
+}
+
+/** [#31698] A metadata-service read refused across two or more holders: the D3 answer the catalog reports. */
+class MetadataHoldersRefusal extends Error {
+  constructor(readonly holders: readonly PackageScopedHolder[]) {
+    super('refused across holders');
+  }
+}
+
+/**
  * Build the catalog read over the two in-process readers.
  *
  * Refuses, at construction, a source that lacks a member the read calls — a
@@ -508,20 +532,26 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     return servable(found, name);
   };
 
-  const fromMetadata = async (type: SecurityCatalogType, name: string): Promise<Definition | undefined> => {
+  const fromMetadata = async (type: SecurityCatalogType, name: string, packageId?: string): Promise<Definition | undefined> => {
     let data: unknown;
     let degraded = false;
     let errors: readonly string[] = [];
     try {
+      const at = packageId !== undefined ? [packageId] as const : [] as const;
       if (typeof metadata.getDiagnosed === 'function') {
-        const diagnosed = await metadata.getDiagnosed(type, name);
+        const diagnosed = await metadata.getDiagnosed(type, name, ...at);
         data = diagnosed?.data;
         degraded = diagnosed?.degraded === true;
         errors = Array.isArray(diagnosed?.errors) ? diagnosed.errors : [];
       } else {
-        data = await metadata.get(type, name);
+        data = await metadata.get(type, name, ...at);
       }
     } catch (error) {
+      // [ADR-0150 D3/D5, #31698] A read naming no package of a name two
+      // packages' slots hold is refused by the store, naming each: that is
+      // the D3 answer, never an outage.
+      const holders = storeRefusalHolders(error);
+      if (holders) throw new MetadataHoldersRefusal(holders);
       throw unreadable('metadata', type, error);
     }
     if ((data === undefined || data === null) && degraded) {
@@ -597,6 +627,14 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
       }
       const definition = servable(item, name);
       if (definition) return { status: 'resolved', entry: entry('permission', definition, 'registry') };
+      // [ADR-0150 D4, #31698] …or that package's slot in the metadata
+      // service, where an environment kernel keeps its stored rows: the item
+      // it serves for the package, when it is that package's own.
+      const stored = await fromMetadata('permission', name, exact).catch((error: unknown) => {
+        if (error instanceof MetadataHoldersRefusal) return undefined;
+        throw error;
+      });
+      if (stored && ownerOf(stored) === exact) return { status: 'resolved', entry: entry('permission', stored, 'metadata') };
       // A stale column — the set moved to another package on an upgrade, or
       // was renamed and its name taken by another — is read as an unbound
       // row: the rule below grants the one holder and refuses two, naming
@@ -646,7 +684,30 @@ export function createSecurityCatalogReader(sources: SecurityCatalogSources): Se
     // only, so its body is the environment's: it answers a caller with no
     // package, and for a package's reference it is the D3 (a) refusal, naming
     // the environment — reported, never served and never hidden as a miss.
-    const declared = await fromMetadata('permission', name);
+    // [ADR-0150 D3, #31698] Two packages' slots of the name there are refused,
+    // naming each, as the registry's two holders are: nothing is picked, and
+    // nothing is conferred.
+    let declared: Definition | undefined;
+    try {
+      declared = await fromMetadata('permission', name);
+    } catch (error) {
+      if (!(error instanceof MetadataHoldersRefusal)) throw error;
+      const ambiguous = {
+        status: 'refused' as const,
+        reason: 'ambiguous-in-environment' as const,
+        type: 'permission' as const,
+        name,
+        callerPackageId: caller,
+        candidates: error.holders,
+      };
+      return {
+        status: 'refused',
+        reason: ambiguous.reason,
+        candidates: ambiguous.candidates.map(describePackageScopedHolder),
+        message: packageScopedRefusalMessage(ambiguous),
+        holders: ambiguous.candidates,
+      };
+    }
     if (!declared) return { status: 'not-found' };
     if (caller === null) return { status: 'resolved', entry: entry('permission', declared, 'metadata') };
     const environment: PackageScopedHolder = { kind: 'environment' };
