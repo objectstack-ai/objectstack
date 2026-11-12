@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import { PackageScopedNameRefusedError } from '@objectstack/core';
 import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
 import { PACKAGE_SLOTTED_STORE_TYPES } from './package-slotted-store.js';
 
 const ALPHA = 'com.acme.alpha';
@@ -175,12 +176,27 @@ describe('[#32365] the bare action read weighs the environment\'s own item', () 
   });
   const refusalOf = (manager: MetadataManager) =>
     manager.get('action', 'digest').then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+  /**
+   * [#32560] A manager over a store loader, and the environment's own item:
+   * stored there as well as registered. A package-less item only registered
+   * in memory is the platform's, not the environment's.
+   */
+  const withStore = () => {
+    const store = new MemoryLoader();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [store] });
+    const environment = async (item: Record<string, unknown>) => {
+      await store.save('action', 'digest', item);
+      manager.registerInMemory('action', 'digest', item);
+    };
+    return { manager, environment };
+  };
 
   it('the environment\'s item on one object beside one package\'s on another answers the bare read, in either write order', async () => {
     for (const order of [['env', 'alpha'], ['alpha', 'env']]) {
-      const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+      const { manager, environment } = withStore();
       for (const which of order) {
-        manager.registerInMemory('action', 'digest', which === 'env' ? at(undefined, 'env', 'contact') : at(ALPHA, 'alpha', 'account'));
+        if (which === 'env') await environment(at(undefined, 'env', 'contact'));
+        else manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
       }
       expect(((await manager.get('action', 'digest')) as any)?.label, `written ${order.join(' then ')}`).toBe('env');
       expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label, 'a read naming A answers A\'s own slot first').toBe('alpha');
@@ -188,10 +204,10 @@ describe('[#32365] the bare action read weighs the environment\'s own item', () 
   });
 
   it('beside two packages on two objects, the refusal names both packages AND the environment', async () => {
-    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const { manager, environment } = withStore();
     manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
     manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'contact'));
-    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'lead'));
+    await environment(at(undefined, 'env', 'lead'));
     const err = await refusalOf(manager);
     expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
     expect(err!.refusal.candidates).toEqual([
@@ -201,8 +217,10 @@ describe('[#32365] the bare action read weighs the environment\'s own item', () 
   });
 
   it('beside two packages on the one same key (object-less), the refusal names the environment too', async () => {
-    const manager = twoHolders();
-    manager.registerInMemory('action', 'digest', at(undefined, 'env'));
+    const { manager, environment } = withStore();
+    manager.registerInMemory('action', 'digest', shipped(ALPHA, 'alpha'));
+    manager.registerInMemory('action', 'digest', shipped(BETA, 'beta'));
+    await environment(at(undefined, 'env'));
     const err = await refusalOf(manager);
     expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
     expect(err!.refusal.candidates).toEqual([
@@ -212,10 +230,10 @@ describe('[#32365] the bare action read weighs the environment\'s own item', () 
   });
 
   it('[contract review F1] beside two packages on ONE object, with the environment\'s item on another object: the refusal names the environment too', async () => {
-    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    const { manager, environment } = withStore();
     manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
     manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'account'));
-    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'lead'));
+    await environment(at(undefined, 'env', 'lead'));
     const err = await refusalOf(manager);
     expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
     expect(err!.refusal.candidates).toEqual([
@@ -315,5 +333,151 @@ describe('[#32352] removing an action counts its holders by package over every s
     manager.registerInMemory('action', 'digest', bound(ALPHA, 'on two', 'two_item'));
     await manager.unregister('action', 'digest');
     expect(await labels(manager)).toEqual([]);
+  });
+});
+
+/**
+ * [#32560, ADR-0150 D3] The bare read (and removal) of an action name a
+ * package holds in memory is judged over the registry AND the loaders, and a
+ * package-less slot is the environment's own item only where a loader stores
+ * it; one only registered in memory (host code, a plugin) is the platform's.
+ *
+ * BASE (the #32365 read): the registry alone answered once it held a slot of
+ * the name, and every package-less slot was the environment's — the
+ * platform's item answered beside a package, a loader's environment item
+ * beside an in-memory package was not seen, a second package held only in a
+ * loader was not counted (a pick between two packages), and a removal naming
+ * none beside one package took every slot.
+ */
+describe('[#32560] the bare action read and removal judge the loaders\' slots and tell the platform\'s item from the environment\'s', () => {
+  const at = (packageId: string | undefined, label: string, objectName?: string) => ({
+    name: 'digest', label, type: 'script', target: `${label}_impl`,
+    ...(objectName ? { objectName } : {}), ...(packageId ? { _packageId: packageId } : {}),
+  });
+  const failure = (run: () => Promise<unknown>) =>
+    run().then(() => undefined, (e: unknown) => e as PackageScopedNameRefusedError);
+  const labels = async (manager: MetadataManager) => ((await manager.list('action')) as any[]).map((item) => item.label);
+  const withStore = () => {
+    const store = new MemoryLoader();
+    const manager = new MetadataManager({ formats: ['json'], loaders: [store] });
+    return { store, manager };
+  };
+
+  it('item 1 — a package-less item no loader stores (the platform\'s) beside A\'s is refused naming A and the platform, on get and getDiagnosed (BASE: the platform\'s item answered)', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'platform', 'contact'));
+    for (const run of [() => manager.get('action', 'digest'), () => manager.getDiagnosed('action', 'digest')]) {
+      const err = await failure(run);
+      expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+      expect([err!.code, err!.status, err!.refusal.reason]).toEqual(['RESOURCE_CONFLICT', 409, 'ambiguous-in-environment']);
+      expect(err!.refusal.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'platform' }]);
+      expect(err!.message).toContain('held by 2 holders');
+      expect(err!.message).toContain('The platform\'s item binds it to object "contact"');
+    }
+    expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label, 'a read naming A answers A').toBe('alpha');
+  });
+
+  it('item 2 — A\'s item in memory and the environment\'s only in a loader: the environment\'s answers first (BASE: A\'s)', async () => {
+    const { store, manager } = withStore();
+    await store.save('action', 'digest', at(undefined, 'env', 'contact'));
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('env');
+    expect(((await manager.getDiagnosed('action', 'digest')).data as any)?.label).toBe('env');
+    expect(((await manager.get('action', 'digest', ALPHA)) as any)?.label).toBe('alpha');
+  });
+
+  it('item 2\' — A\'s item in memory and B\'s only in a loader: refused naming both (BASE: A\'s answered, a pick between two packages)', async () => {
+    const { store, manager } = withStore();
+    await store.save('action', 'digest', at(BETA, 'beta', 'contact'));
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    const err = await failure(() => manager.get('action', 'digest'));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }]);
+    expect(err!.message).toContain('held by 2 packages');
+  });
+
+  it('item 4 — a refusal naming the environment beside two packages counts holders, not packages', async () => {
+    const { store, manager } = withStore();
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'contact'));
+    await store.save('action', 'digest', at(undefined, 'env', 'lead'));
+    const err = await failure(() => manager.get('action', 'digest'));
+    expect(err!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'environment' },
+    ]);
+    expect(err!.message).toContain('The action "digest" is held by 3 holders in this environment');
+    expect(err!.message).not.toContain('packages in this environment');
+  });
+
+  it('item 5a — a removal naming none beside two packages names the environment too, as the read does, and removes nothing (BASE: the packages only)', async () => {
+    const { store, manager } = withStore();
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(BETA, 'beta', 'contact'));
+    await store.save('action', 'digest', at(undefined, 'env', 'lead'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'lead'));
+    const removal = await failure(() => manager.unregister('action', 'digest'));
+    const read = await failure(() => manager.get('action', 'digest'));
+    expect(removal).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(removal!.refusal.candidates).toEqual(read!.refusal.candidates);
+    expect(removal!.refusal.candidates).toEqual([
+      { kind: 'package', packageId: ALPHA }, { kind: 'package', packageId: BETA }, { kind: 'environment' },
+    ]);
+    expect(removal!.message).toContain('The environment\'s own item binds it to object "lead"');
+    expect(await labels(manager)).toEqual(['alpha', 'beta', 'env']);
+  });
+
+  it.each([
+    ['on another object', 'contact'],
+    ['object-less', undefined],
+  ] as const)('item 5b — a removal naming none of A\'s action beside the environment\'s %s removes the environment\'s only, the item the bare read answers (BASE: both)', async (_shape, envObject) => {
+    const { store, manager } = withStore();
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    await store.save('action', 'digest', at(undefined, 'env', envObject));
+    manager.registerInMemory('action', 'digest', at(undefined, 'env', envObject));
+    expect(((await manager.get('action', 'digest')) as any)?.label, 'the bare read answers the environment\'s').toBe('env');
+    await manager.unregister('action', 'digest');
+    expect(await labels(manager)).toEqual(['alpha']);
+    expect((await store.loadSlots('action', 'digest')).map((slot) => slot.data.label)).toEqual([]);
+    expect(((await manager.get('action', 'digest')) as any)?.label, 'A\'s action is left, and answers').toBe('alpha');
+  });
+
+  it('item 5b — a removal naming none of A\'s action beside the platform\'s item is refused as the read is, and removes nothing (BASE: both removed)', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'platform', 'contact'));
+    const err = await failure(() => manager.unregister('action', 'digest'));
+    expect(err).toBeInstanceOf(PackageScopedNameRefusedError);
+    expect(err!.refusal.candidates).toEqual([{ kind: 'package', packageId: ALPHA }, { kind: 'platform' }]);
+    expect(await labels(manager)).toEqual(['alpha', 'platform']);
+  });
+
+  it('CONTROL — the environment\'s item a loader stores beside A\'s answers first, as #32365 serves it', async () => {
+    const { store, manager } = withStore();
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    await store.save('action', 'digest', at(undefined, 'env', 'contact'));
+    manager.registerInMemory('action', 'digest', at(undefined, 'env', 'contact'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('env');
+  });
+
+  it('CONTROL — the platform\'s item alone (no package holds the name) answers, as before; so does one package alone', async () => {
+    const manager = new MetadataManager({ formats: ['json'], loaders: [] });
+    manager.registerInMemory('action', 'digest', at(undefined, 'platform', 'contact'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('platform');
+    const alone = new MetadataManager({ formats: ['json'], loaders: [] });
+    alone.registerInMemory('action', 'digest', at(ALPHA, 'alpha', 'account'));
+    expect(((await alone.get('action', 'digest')) as any)?.label).toBe('alpha');
+    await alone.unregister('action', 'digest');
+    expect(await labels(alone)).toEqual([]);
+  });
+
+  it('CONTROL — one package binding the name to two objects answers the one written last, over the loaders too', async () => {
+    const { store, manager } = withStore();
+    await store.save('action', 'digest', at(ALPHA, 'stored', 'lead'));
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'one', 'account'));
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'two', 'contact'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('two');
+    manager.registerInMemory('action', 'digest', at(ALPHA, 'one again', 'account'));
+    expect(((await manager.get('action', 'digest')) as any)?.label).toBe('one again');
   });
 });

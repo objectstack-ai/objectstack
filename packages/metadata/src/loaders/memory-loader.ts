@@ -241,16 +241,21 @@ export class MemoryLoader implements MetadataLoader {
    * another package's item; with none, by the
    * registry's removal rule (`storeRemovalKeys`): every slot of the name
    * while at most one package holds it, refused
-   * (`PackageScopedNameRefusedError`) when two or more do.
+   * (`PackageScopedNameRefusedError`) when two or more do. [#32560] With
+   * `options.packagelessOnly`, the name's package-less slots only: the
+   * manager judged the removal over every store, so a door that holds a
+   * package's item alone keeps it.
    */
   async delete(type: string, name: string, options?: MetadataLoaderDeleteOptions): Promise<void> {
     const typeStore = this.storage.get(type);
     if (typeStore) {
       if (PACKAGE_SLOTTED_STORE_TYPES.has(type)) {
         const packageId = options?.packageId;
-        const keys = packageId === undefined
-          ? storeRemovalKeys(typeStore, type, name).keys
-          : storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId);
+        const keys = packageId !== undefined
+          ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === packageId)
+          : options?.packagelessOnly === true
+            ? storeKeysNamed(typeStore, type, name).filter((key) => slotPackageOf(key) === undefined)
+            : storeRemovalKeys(typeStore, type, name).keys;
         for (const key of keys) typeStore.delete(key);
       } else {
         typeStore.delete(name);
