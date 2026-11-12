@@ -1294,6 +1294,40 @@ describe('[#32407] a package-less item of a two-holder name of a narrowed type o
     expect([thrown?.status, thrown?.code], String(thrown)).toEqual([409, 'RESOURCE_CONFLICT']);
   });
 
+  // [#32183 × #32407, ADR-0150 D3] The package-less row's owners are the
+  // SERVED holders (`packageLessRowOwners`), for a type `judgesPackageLessRows`
+  // judges because it narrowed (`action`) as for one whose readers are wired
+  // (rows 26 and 32): with the other holder disabled the row is the enabled
+  // holder's customization, and the disabled holder's address answers its
+  // withheld item; re-enabled, both refuse naming both. FROM (`main` with
+  // #32407): both refused naming both, the disabled holder included.
+  it.each([['enabled holder first', [A, B]], ['disabled holder first', [B, A]]] as const)('[#32183] one of the two holders disabled (%s): the environment\'s item is the enabled holder\'s on its exact address, the disabled holder\'s answers its withheld item; re-enabled, both refused naming both', async (_order, order) => {
+    envAction();
+    for (const id of order) shipAction(id);
+    registry.disablePackage(B);
+    expect(labelOf(await read(A))).toBe('env action');
+    const withheld = await read(B);
+    expect(labelOf(withheld)).toBeUndefined();
+    expect(JSON.stringify(withheld ?? null)).not.toMatch(/(env|alpha|beta) action/);
+    registry.enablePackage(B);
+    for (const at of [A, B]) {
+      const err = await refusalOf(() => read(at));
+      expect([err.status, err.refusal.reason], at).toEqual([409, 'ambiguous-in-closure']);
+      expect(err.refusal.candidates.map((c) => (c as { packageId?: string }).packageId).sort(), at).toEqual([A, B]);
+    }
+  });
+
+  it.each([['enabled holder first', [A, B]], ['disabled holder first', [B, A]]] as const)('[#32183] one of the two holders disabled (%s): the layered read at the enabled holder reports a package-less stored row as its overlay; re-enabled, refused naming both', async (_order, order) => {
+    for (const id of order) shipAction(id);
+    storeAction(null, 'stored action');
+    registry.disablePackage(B);
+    const answer = await (protocol.getMetaItemLayered({ type: 'action', name: 'approve', packageId: A } as never) as Promise<{ overlay?: { label?: string } | null }>);
+    expect(answer.overlay?.label).toBe('stored action');
+    registry.enablePackage(B);
+    const err = await refusalOf(() => protocol.getMetaItemLayered({ type: 'action', name: 'approve', packageId: A } as never));
+    expect([err.status, err.refusal.reason]).toEqual([409, 'ambiguous-in-closure']);
+  });
+
   describe('the layered read (`?layers=true&package=X`) judges the exact address as the plain read does (epic read S2)', () => {
     const tpl = (packageId: string) => registry.registerItem('email_template', {
       name: 'welcome', label: `${packageId.split('.').pop()} en-US`, locale: 'en-US', subject: 's', bodyHtml: '<p>x</p>',
