@@ -130,8 +130,8 @@ const OWNER_KEYED_SLOT_TYPES: ReadonlySet<string> = new Set(['action']);
  */
 const OBJECT_LESS_OWNERS: ReadonlySet<string> = new Set(['global', '*']);
 
-/** The object an action item is bound to; `undefined` for an object-less one. */
-function boundObjectOf(data: unknown): string | undefined {
+/** The object an action item is bound to (its stored envelope peeled); `undefined` for an object-less one. */
+export function boundObjectOf(data: unknown): string | undefined {
   const body = peelStoredEnvelope(data).body as { objectName?: unknown; object?: unknown } | null | undefined;
   if (!body || typeof body !== 'object') return undefined;
   for (const owner of [body.objectName, body.object]) {
