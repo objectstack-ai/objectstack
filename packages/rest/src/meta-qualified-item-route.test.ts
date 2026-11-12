@@ -557,3 +557,54 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= (ADR-0150 D3)', () => 
         expect(labelOf(await drive(ITEM, { type: 'dataset', name: 'pipeline' }, { package: A }))).toBe('alpha dataset');
     });
 });
+
+/**
+ * [#32365, ADR-0150 D3/D5] The bare `GET /meta/action/:name` and its `/layers`,
+ * judged over every holder, on this transport too: a package-less item the
+ * environment's store holds no row of (the platform's) beside a package's is
+ * refused naming both, and beside two packages' it is named with them; one
+ * enabled holder answers though a disabled package registered first.
+ *
+ * BASE (main 89d815c5): 200 with the platform's item; 409 naming the two
+ * packages only; 200 with no item (and the DISABLED package's body on `/layers`).
+ */
+describe('#32365 — the bare action read weighs the package-less holder and serves the one enabled holder', () => {
+    const shipAction = (packageId: string | undefined, objectName: string) => registry.registerItem('action', {
+        name: 'approve', label: packageId?.split('.').pop() ?? 'platform', type: 'script', objectName, target: 'approve',
+        body: { language: 'js', source: 'return 1;', capabilities: [] },
+    }, 'name' as never, packageId);
+    const pkg = (packageId: string) => ({ kind: 'package', packageId });
+    const LAYERS = '/api/v1/meta/:type/:name/layers';
+
+    it('the platform\'s item on `contact` beside A\'s on `account`: 409 naming A and the platform, on both doors', async () => {
+        shipAction(A, 'account');
+        shipAction(undefined, 'contact');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, codeOf(answer), answer.body?.details?.candidates], JSON.stringify(answer.body))
+            .toEqual([409, 'RESOURCE_CONFLICT', [pkg(A), { kind: 'platform' }]]);
+        expect(messageOf(answer)).toContain('The platform\'s item binds it to object "contact"');
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect([layers.status, codeOf(layers)], JSON.stringify(layers.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+    });
+
+    it('beside two packages\' on two objects: 409 naming both packages and the package-less holder', async () => {
+        shipAction(A, 'account');
+        shipAction(B, 'contact');
+        shipAction(undefined, 'lead');
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, answer.body?.details?.candidates], JSON.stringify(answer.body))
+            .toEqual([409, [pkg(A), pkg(B), { kind: 'platform' }]]);
+    });
+
+    it('a disabled package registered before the one enabled holder: both doors answer the enabled holder', async () => {
+        shipAction(B, 'contact');
+        shipAction(A, 'account');
+        registry.disablePackage(B);
+        const answer = await drive(ITEM, { type: 'action', name: 'approve' });
+        expect([answer.status, labelOf(answer)], JSON.stringify(answer.body)).toEqual([200, 'alpha']);
+        const layers = await drive(LAYERS, { type: 'action', name: 'approve' });
+        expect(layers.status, JSON.stringify(layers.body)).toBe(200);
+        expect(JSON.stringify(layers.body)).toContain('"label":"alpha"');
+        expect(JSON.stringify(layers.body)).not.toContain('"label":"beta"');
+    });
+});
