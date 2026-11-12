@@ -26,6 +26,7 @@ import {
     type PackageScopedRefusal,
 } from '@objectstack/core';
 import { itemDiscriminator } from '@objectstack/metadata-core';
+import { boundObjectOf, storedItemPackageId } from '@objectstack/metadata/stored-item-package';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 // [#24395] The draft row's per-key provenance, read back for the strict draft read.
 import { storedDraftChanges } from './draft-changes.js';
@@ -288,28 +289,30 @@ export async function judgeBareActionRead(
     return undefined;
 }
 
-/** The package an action item carries (its `_packageId` stamp, else an envelope's `packageId`); `undefined` for none or the sentinel. */
-function actionItemPackageOf(item: unknown): string | undefined {
-    const carried = item as { _packageId?: unknown; packageId?: unknown } | null | undefined;
-    for (const candidate of [carried?._packageId, carried?.packageId]) {
-        if (typeof candidate === 'string' && candidate !== '' && candidate !== 'sys_metadata') return candidate;
-    }
-    return undefined;
-}
-
 /**
  * [ADR-0150 D3, #32365] Does the MetadataService's answer to a bare action
  * read agree with the judged answer ({@link judgeBareActionRead})? The
  * service is read before the registry, and holds its own copies, so its bare
- * answer may be another package's item (a disabled package's, or the one
- * package's beside the environment's own item) where the rule answers
- * otherwise. It is served only when it is package-less (the environment's
- * own item, which answers first) or the judged holder's own; anything else is
- * not this read's answer, and the judged answer is served in its place.
+ * answer may be another holder's item (a disabled package's, the one
+ * package's beside the environment's own item, or a package's customization
+ * the store keeps in that package's slot) where the rule answers otherwise.
+ *
+ * Both items are read the way the store reads them
+ * ({@link storedItemPackageId}: the stored envelope's `packageId`, flat or
+ * under the publish envelope, else the body's stamp). The answer fits when it
+ * carries the judged holder's package; a package-less answer fits a judged
+ * package holder (its customization, or the environment's item the registry
+ * does not hold), and fits a package-less judged answer only when it binds
+ * the same object ({@link boundObjectOf}) — a package-less body on a
+ * package's object is that package's customization, never the environment's
+ * item. Anything else is not this read's answer, and the judged answer is
+ * served in its place.
  */
 export function serviceAnswerFitsBareAction(judged: { item: unknown }, data: unknown): boolean {
-    const served = actionItemPackageOf(data);
-    return served === undefined || served === actionItemPackageOf(judged.item);
+    const served = storedItemPackageId(data);
+    const holder = storedItemPackageId(judged.item);
+    if (served !== undefined) return served === holder;
+    return holder !== undefined || boundObjectOf(data) === boundObjectOf(judged.item);
 }
 
 /**

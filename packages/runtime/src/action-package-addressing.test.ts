@@ -862,6 +862,71 @@ describe('[#32365] the bare action read weighs the package-less holder and serve
             expect(layers.effective).toMatchObject({ label: 'alpha' });
         });
 
+        /**
+         * [contract review N1] The service's copy is judged by the package the
+         * store reads off it (`storedItemPackageId`: the stored envelope's
+         * `packageId`, else the body's stamp, the publish envelope peeled), and
+         * a package-less copy beside a package-less judged answer only when it
+         * binds the judged item's object: a package-less body the store keeps
+         * in a package's slot (that package's customization, on its object) is
+         * not the environment's item.
+         */
+        const enveloped = (packageId: string, label: string, objectName: string) => ({
+            name: 'approve', state: 'active', metadata: item(packageId, label, objectName),
+        });
+
+        it('[contract review N1] case 1 — the service holds A\'s copy under the publish envelope: both reads answer the environment\'s, code layer included', async () => {
+            const manager = await withService();
+            install(A);
+            ship(A, 'account');
+            shipPackageless('env', 'contact');
+            storeEnvironmentRow('contact');
+            manager.registerInMemory('action', 'approve', enveloped(A, 'alpha', 'account'));
+            expect((await read()).item).toMatchObject({ label: 'env', objectName: 'contact' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'env', objectName: 'contact' });
+            expect(layers.overlay, 'overlay').toBeNull();
+        });
+
+        it('[contract review N1] case 3 — the service holds the disabled B\'s copy under the publish envelope: both reads answer A\'s, code layer included', async () => {
+            const manager = await withService();
+            install(B);
+            install(A);
+            ship(B, 'contact');
+            ship(A, 'account');
+            engine.registry.disablePackage(B);
+            manager.registerInMemory('action', 'approve', enveloped(B, 'beta', 'contact'));
+            expect((await read()).item).toMatchObject({ label: 'alpha', objectName: 'account' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'alpha', objectName: 'account' });
+            expect(layers.overlay, 'overlay').toBeNull();
+        });
+
+        it('[contract review N1] case 1 — the service holds A\'s customization (a package-less body in A\'s slot, on `account`): both reads answer the environment\'s, code layer included', async () => {
+            const manager = await withService();
+            install(A);
+            ship(A, 'account');
+            shipPackageless('env', 'contact');
+            storeEnvironmentRow('contact');
+            manager.registerInMemory('action', 'approve', item(A, 'alpha', 'account'));
+            manager.registerInMemory('action', 'approve', item(undefined, 'alpha-custom', 'account'));
+            expect((await read()).item).toMatchObject({ label: 'env', objectName: 'contact' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'env', objectName: 'contact' });
+            expect(layers.overlay, 'overlay').toBeNull();
+        });
+
+        it('[contract review N1] CONTROL — the one holder\'s customization in the service (a package-less body in A\'s slot): both reads answer it', async () => {
+            const manager = await withService();
+            install(A);
+            ship(A, 'account');
+            manager.registerInMemory('action', 'approve', item(A, 'alpha', 'account'));
+            manager.registerInMemory('action', 'approve', item(undefined, 'alpha-custom', 'account'));
+            expect((await read()).item).toMatchObject({ label: 'alpha-custom' });
+            const layers = await layered();
+            expect(layers.code, 'code layer').toMatchObject({ label: 'alpha-custom' });
+        });
+
         it('[contract review F3] case 3 — the service holds both, the disabled B\'s first: both reads answer A\'s', async () => {
             const manager = await withService();
             install(B);
