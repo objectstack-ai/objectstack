@@ -326,8 +326,8 @@ async function assertOneGrantPerSet(
 /** A holder a non-system write names that the caller cannot read: the engine's reference check answers it (module doc). */
 async function holderLeftToEngine(engine: StampEngine, ctx: any, holder: unknown): Promise<boolean> {
   if (ctx?.session?.isSystem === true) return false;
-  const user = keyOf(holder);
-  return user !== null && (await holderLeftToReferenceCheck(engine, ctx, holder, user));
+  // The holder's id as written: the reading the grant table's other hooks share.
+  return keyOf(holder) !== null && (await holderLeftToReferenceCheck(engine, ctx, holder, String(holder)));
 }
 
 /** The one-grant check of an insert (module doc, "One grant of a set per user and organization"). */

@@ -388,6 +388,18 @@ describe('[S1] the activation door — a package and the environment hold one na
                 [expect.any(String), CRM, true],
             ]);
         });
+
+        it('[S3] beside the environment\'s own row, a switched-off sentinel row keeps it off: 409 reading that row by the name alone, never "every holder"; nothing written', async () => {
+            const h = h0();
+            h.tables[LEDGER].push(
+                { id: 'env', metadata_type: 'permission', name: ONE, package_id: null, active: false },
+                { id: 'sentinel', metadata_type: 'permission', name: ONE, package_id: SENTINEL, active: false },
+            );
+            const res = answer(await flip(h, ONE, {}, { enabled: true }));
+            expect(res).toMatchObject({ status: 409, code: 'RESOURCE_CONFLICT' });
+            expect(res.message).toContain('one naming no package, which is read by the name alone (ADR-0150 D3)');
+            expect(h.writes).toEqual([]);
+        });
     });
 });
 
