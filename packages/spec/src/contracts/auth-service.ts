@@ -161,6 +161,10 @@ export interface PrincipalSession {
 export interface IAuthService {
     /**
      * Handle an incoming HTTP authentication request
+     *
+     * An implementation answers its whole auth route surface here, the routes
+     * it mounts itself as well as its library's, so a host that forwards its
+     * auth path to this method serves what the implementation's own mount does.
      * @param request - Standard Request object
      * @returns Standard Response object
      */
