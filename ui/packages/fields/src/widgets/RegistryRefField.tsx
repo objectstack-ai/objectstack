@@ -24,6 +24,7 @@ import {
   PopoverTrigger,
   cn,
 } from '@object-ui/components';
+import { columnIdentity } from '@object-ui/core';
 import { SchemaRendererContext, type ApiFetch } from '@object-ui/react';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec';
 import { MCP_AGENT_PERMISSION_SETS } from '@objectstack/spec/ai';
@@ -305,6 +306,19 @@ function namesAPackage(value: unknown): boolean {
   return typeof value === 'string' && value.trim() !== '';
 }
 
+/**
+ * The record column this widget is bound to: its key in the form's record
+ * (react-hook-form's `name`, which the record form spreads onto the widget),
+ * else its field definition's identity, read by the one reader
+ * (`columnIdentity`). The form key comes first because ObjectForm hands the
+ * widget the object schema's field definition, which need not carry a name of
+ * its own.
+ */
+function boundColumnOf(formKey: unknown, field: unknown): string | undefined {
+  if (typeof formKey === 'string' && formKey !== '') return formKey;
+  return columnIdentity(field);
+}
+
 export interface RegistryRefFieldProps extends FieldWidgetComponentProps<string> {
   /** The registry type whose items this field names (`position`, `permission`). */
   registryType: string;
@@ -334,11 +348,8 @@ export function RegistryRefField({
   // `(package, name)` (file header): the sibling column that stores the
   // holder's package, the package the record names there, and whether this
   // form can write it (the record form's sibling writer, on a create only).
-  // The field is named by its key in the form's record (react-hook-form's
-  // `name`), else by its metadata: an object schema's field definition need
-  // not carry its own name.
   const holders = holdersByName(registryType, listed);
-  const packageField = holders ? holderPackageFieldOf(props.name || props.field?.name) : null;
+  const packageField = holders ? holderPackageFieldOf(boundColumnOf(props.name, props.field)) : null;
   const storedPackage = packageField ? dependentValues?.[packageField] : undefined;
   const writePackage = packageField !== null && typeof onAutofill === 'function' ? onAutofill : null;
 
