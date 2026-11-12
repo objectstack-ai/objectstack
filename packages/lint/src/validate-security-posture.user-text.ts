@@ -353,8 +353,8 @@ export const SECURITY_POSTURE_USER_TEXT: UserTextCatalog = Object.freeze({
           `que o conjunto leia o campo se esse acesso for intencional.`,
         edit:
           `No conjunto de permissões "${p.permissionSet}", deixar o campo "${p.field}" como somente leitura não tem ` +
-          `efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus titulares editem todos ` +
-          `os campos desse objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura ou ` +
+          `efeito: a permissão "${b}" do conjunto em "${p.object}" permite que todos os seus titulares editem todos os ` +
+          `campos desse objeto. Remova "${b}" e conceda o acesso aos registros com um escopo de leitura ou ` +
           `gravação, ou exclua a restrição do campo se esse acesso for intencional.`,
         both:
           `No conjunto de permissões "${p.permissionSet}", ocultar o campo "${p.field}" e deixá-lo como somente ` +
