@@ -229,9 +229,12 @@ export function packageScopedRefusalCandidates(error: unknown): readonly unknown
   if (e.code !== 'RESOURCE_CONFLICT') return undefined;
   // A declared 4xx, read in the two spellings {@link resolveThrownHttpError}
   // reads (`status`, else `statusCode`), so the resolver, the `/data`
-  // classification and the batch row error gate the member alike.
+  // classification and the batch row error gate the member alike. The
+  // interval is read as membership (`>= 400 && < 500`), so a number that
+  // compares false both ways (`NaN`) is outside it, as it is for the
+  // classification.
   const declared = typeof e.status === 'number' ? e.status : typeof e.statusCode === 'number' ? e.statusCode : undefined;
-  if (declared === undefined || declared < 400 || declared >= 500) return undefined;
+  if (declared === undefined || !(declared >= 400 && declared < 500)) return undefined;
   const refusal = e.refusal;
   if (typeof refusal !== 'object' || refusal === null || refusal.status !== 'refused') return undefined;
   return Array.isArray(refusal.candidates) ? refusal.candidates : undefined;

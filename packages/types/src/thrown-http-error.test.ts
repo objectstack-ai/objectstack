@@ -150,6 +150,22 @@ describe('[#32250] resolveThrownHttpError carries a package-scoped refusal\'s ca
         expect(resolveThrownHttpError(Object.assign(undeclared(), { status: 500 })).details).toBeUndefined();
     });
 
+    it('CONTROL: a status outside the 4xx interval read as a number (NaN, a string, null) carries none, on all three exits alike', () => {
+        const odd: Array<[string, Record<string, unknown>]> = [
+            ['status NaN', { status: Number.NaN }],
+            ['statusCode NaN', { statusCode: Number.NaN }],
+            ['status \'409\'', { status: '409' }],
+            ['status null', { status: null }],
+        ];
+        for (const [name, extra] of odd) {
+            const thrown = () => Object.assign(new Error(REFUSAL.message), { code: 'RESOURCE_CONFLICT', refusal: REFUSAL }, extra);
+            expect(packageScopedRefusalCandidates(thrown()), name).toBeUndefined();
+            expect(resolveThrownHttpError(thrown()).details, name).toBeUndefined();
+            expect(thrownAnswerOf(thrown(), 500).details, name).toBeUndefined();
+            expect(mapDataError(thrown(), 'acct').body.details, name).toBeUndefined();
+        }
+    });
+
     it('CONTROL: a refusal\'s candidates sit beside the context the resolver already carried', () => {
         const thrown = Object.assign(shaped(), { issues: [{ path: ['x'], message: 'y' }] });
         expect(resolveThrownHttpError(thrown).details).toEqual({ issues: [{ path: ['x'], message: 'y' }], candidates: CANDIDATES });
