@@ -31,10 +31,11 @@
  *  - **enumerate**: every slot of a name answers to that name
  *    ({@link storedNameOf}, {@link storeKeysNamed}).
  *  - **remove** ({@link storeRemovalKeys}): a removal naming a package drops
- *    that package's slot only — ⛔ never another package's item; a removal
- *    naming none drops every slot of the name while at most one package holds
- *    it, and is refused naming every holder when two or more do (D3), so it
- *    never takes both and never picks one.
+ *    every slot that package holds of the name (an action's object-bound ones
+ *    included) — ⛔ never another package's item; a removal naming none drops
+ *    every slot of the name while at most one package holds any of them, and
+ *    is refused naming every holder when two or more do (D3), so it never
+ *    takes both and never picks one.
  *
  * [#32246] The loaders under the registry hold these types by the same rules:
  * the artifact door's `MemoryLoader` under these keys, `DatabaseLoader` one
@@ -75,8 +76,11 @@
  * name bound to two objects are two names that never meet (objectql's
  * `actionOwnerScopedRegistry`). So an action BOUND to an object is slotted by
  * its object and name ({@link slotIdentityOf}); an object-less action by its
- * name alone, exactly as `api`. The D3 refusal fires only among slots of one
- * identity: two packages on the object-less name, or on one object and name.
+ * name alone, exactly as `api`. A write's and a by-identity read's D3 refusal
+ * fires only among slots of one identity: two packages on the object-less
+ * name, or on one object and name. A removal counts packages over every
+ * identity of the name instead ({@link storeRemovalKeys}), as `DatabaseLoader`'s
+ * one row per `(package, name)` does.
  * A by-name read that cannot see the object, of a name bound to more than one
  * owner, answers the item written last under the name — what the bare-name
  * map answered — when one package holds every one of them; it refuses when
@@ -448,9 +452,13 @@ function isPackageCaller(packageId: string | null | undefined): packageId is str
  * removed by one package — that package, which the storage half deletes by
  * and the `deleted` announcement names.
  *
- *  - **naming a package**: that package's slot only ([#32517] every member
- *    of it); no key when it holds no slot of the name. ⛔ Never another package's item, and never the name's
- *    bare slot (the environment's own item, or a customization of a holder).
+ *  - **naming a package**: every slot that package holds of the name — for an
+ *    action, its object-less slot and each object-bound one (#32352), as
+ *    `DatabaseLoader`'s one row per `(package, name)` and the door's
+ *    `MemoryLoader` hold them; [#32517] a bundled type's every member of the
+ *    slot; no key when it holds no slot of the name.
+ *    ⛔ Never another package's item, and never the name's bare slot (the
+ *    environment's own item, or a customization of a holder).
  *  - **naming none**: every slot of the name while at most one package holds
  *    it — the one item the bare-name map held, removed as it was. With two or
  *    more package holders the removal is refused before anything is touched,
@@ -458,6 +466,17 @@ function isPackageCaller(packageId: string | null | undefined): packageId is str
  *    `ambiguous-in-environment`, `409`): it never takes both, and it never
  *    picks one — not even where a read naming no package would resolve to a
  *    unique non-baseline holder, because a removal acts on what it names.
+ *    [#32352] Holders are counted by PACKAGE over every slot of the name: an
+ *    action two packages hold — on one object, on two objects, or one bound
+ *    and one object-less — is two holders, as the by-name read counts them
+ *    ({@link readStoreEntry}) and as `DatabaseLoader`'s row key `(package,
+ *    name)` counts them, so the manager's judgment and the loader's own
+ *    refusal agree. Over a store of items (the registry, the door's
+ *    `MemoryLoader`, the manager's view of every loader) the refusal also
+ *    names the object each package binds the name to; over `DatabaseLoader`'s
+ *    row store, whose values are rows, it names the packages only. One
+ *    package binding the name to several objects is one holder, and [#32517]
+ *    one package holding several members of a bundle is one holder.
  *
  * A type outside {@link PACKAGE_SLOTTED_STORE_TYPES} keeps one item per name:
  * the name's key, whatever package is named, and no package to delete by.
@@ -472,23 +491,47 @@ export function storeRemovalKeys(
   packageId?: string | null,
 ): { keys: string[]; packageId?: string } {
   if (!PACKAGE_SLOTTED_STORE_TYPES.has(type)) return { keys: storeKeysNamed(store, type, name) };
+  const keys = storeKeysNamed(store, type, name);
   if (isPackageCaller(packageId)) {
-    const slot = slotKey(packageId, name);
-    return { keys: storeKeysNamed(store, type, name).filter((key) => slotOfKey(key) === slot), packageId };
+    return { keys: keys.filter((key) => slotPackageOf(key) === packageId), packageId };
   }
-  const holders = store ? packageSlotsOf(store, name) : [];
-  if (holders.length > 1) {
-    const base: Omit<PackageScopedRefusal, 'message'> = {
-      status: 'refused',
-      reason: 'ambiguous-in-environment',
-      type: type as PackageScopedResolvableType,
-      name,
-      callerPackageId: null,
-      candidates: holders.map((holder) => ({ kind: 'package' as const, packageId: holder })),
-    };
-    throw new PackageScopedNameRefusedError({ ...base, message: packageScopedRefusalMessage(base) });
+  if (store) refuseSeveralPackages(store, type, name, keys);
+  return { keys };
+}
+
+/**
+ * [ADR-0150 D3, #32198, #32352] Refuse a removal naming no package of a name
+ * `keys` (every slot of it) show two or more packages holding — on any of the
+ * name's identities. Each package is named in the store's order; an action's
+ * refusal also names the object each package binds the name to, when any slot
+ * is bound (the by-name read's sentence, {@link refuseAcrossOwners}).
+ *
+ * @throws {PackageScopedNameRefusedError} two or more packages hold the name.
+ */
+function refuseSeveralPackages(store: ReadonlyMap<string, unknown>, type: string, name: string, keys: readonly string[]): void {
+  const objectsOf = new Map<string, Array<string | undefined>>();
+  for (const key of keys) {
+    const holder = slotPackageOf(key);
+    if (holder === undefined) continue;
+    const objects = objectsOf.get(holder) ?? [];
+    objects.push(OWNER_KEYED_SLOT_TYPES.has(type) ? boundObjectOf(store.get(key)) : undefined);
+    objectsOf.set(holder, objects);
   }
-  return { keys: storeKeysNamed(store, type, name) };
+  if (objectsOf.size < 2) return;
+  const base: Omit<PackageScopedRefusal, 'message'> = {
+    status: 'refused',
+    reason: 'ambiguous-in-environment',
+    type: type as PackageScopedResolvableType,
+    name,
+    callerPackageId: null,
+    candidates: [...objectsOf.keys()].map((holder) => ({ kind: 'package' as const, packageId: holder })),
+  };
+  const anyBound = [...objectsOf.values()].some((objects) => objects.some((object) => object !== undefined));
+  const message = packageScopedRefusalMessage(base);
+  throw new PackageScopedNameRefusedError({
+    ...base,
+    message: anyBound ? `${message} ${packageScopedActionOwnersSentence(objectsOf)}` : message,
+  });
 }
 
 /**
