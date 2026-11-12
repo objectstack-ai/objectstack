@@ -1599,6 +1599,88 @@ describe('[#32540] one package\'s action name bound to several objects keeps a r
     expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
   });
 
+  // [#32540 C3; contract record 6820015366 item 1] The plural read's column-only bind, over rows as every released writer left them.
+  it.each([
+    ['the package\'s bound row on o2', 'o2', 'o2'],
+    ['the package\'s object-less row', undefined, null],
+  ] as const)('C3 — `bindReadRowPackage` of a legacy package-less row on o1 beside %s, every `bundle_member` NULL under the unique key: bound, its object named in the same update, the package\'s row named first (main: no-op, one slot; before this fix: UNIQUE constraint failed)', async (_shape, objectName, named) => {
+    const ctx = await boot([], async (driver) => {
+      await driver.create('sys_metadata', {
+        id: 'bound', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(objectName)),
+        state: 'active', version: 1, source: 'database', checksum: 'x',
+      });
+      await driver.create('sys_metadata', {
+        id: 'legacy-o1', type: 'action', name: NAME, metadata: JSON.stringify(item('o1')),
+        state: 'active', version: 2, source: 'database', checksum: 'y',
+      });
+    });
+    const [handed] = (await ctx.loader.loadMany('action')) as object[];
+    await ctx.loader.bindReadRowPackage('action', NAME, handed!);
+    const byId = (id: string) => ctx.rows('action').find((row) => row.id === id);
+    expect([byId('legacy-o1')?.package_id, byId('legacy-o1')?.bundle_member]).toEqual([A, 'o1']);
+    expect(byId('bound')?.bundle_member ?? null).toBe(named);
+  });
+
+  describe('C8 — a row written before, bound to an object longer than `bundle_member` stores, refuses only a write into the place it holds', () => {
+    const long = `o_${'x'.repeat(99)}`;
+    const legacyLong = (driver: IDataDriver) => driver.create('sys_metadata', {
+      id: 'legacy-long', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item(long)),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    });
+
+    it('a save of another object is stored beside it; the long row is left as it is, never truncated (head 17256ba20: refused)', async () => {
+      const ctx = await boot([['o2']], legacyLong);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o2:alpha@o2']);
+    });
+
+    it('a rollback restoring another object\'s binding recreates it beside the long row (head 17256ba20: refused)', async () => {
+      const ctx = await boot([], legacyLong);
+      await ctx.loader.registerRollback('action', NAME, item('o1', 'alpha@o1 restored'), 1);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`, 'com.acme.alpha|o1:alpha@o1 restored']);
+    });
+
+    it('the object-less binding, saved or recreated by a rollback, is refused naming the long row, its object and the limit; nothing is written (main: it overwrote the long row)', async () => {
+      const ctx = await boot([], legacyLong);
+      const refusal = new RegExp(`action "${NAME}" of package "${A}" cannot store its object-less binding: row legacy-long, .*object "${long}" \\(101 characters\\), longer than the 100`);
+      await expect(ctx.loader.save('action', NAME, item(undefined))).rejects.toThrow(refusal);
+      await expect(ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1)).rejects.toThrow(refusal);
+      expect(ctx.stored()).toEqual([`com.acme.alpha|-:alpha@${long}`]);
+      expect(ctx.history('action')).toEqual([]);
+    });
+
+    it('a rollback recreating a binding on an object longer than the column stores is refused before any write (C8 on the rollback path)', async () => {
+      const ctx = await boot([['o1']]);
+      await expect(ctx.loader.registerRollback('action', NAME, item(long), 1)).rejects.toThrow(
+        new RegExp(`action "${NAME}" is bound to object "${long}" \\(101 characters\\), but sys_metadata\\.bundle_member stores at most 100`),
+      );
+      expect(ctx.stored()).toEqual(['com.acme.alpha|o1:alpha@o1']);
+      expect(ctx.history('action').map((row) => row.version)).toEqual([1]);
+    });
+  });
+
+  it('a package-less row on o1, then the package saves o2: the row is kept and named o1, the package\'s o2 binding is its own row (main: the o2 save took the row over)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'loose-o1', type: 'action', name: NAME, metadata: JSON.stringify({ ...item('o1'), _packageId: undefined, label: 'loose@o1' }),
+      state: 'active', version: 1, source: 'database', checksum: 'x',
+    }));
+    expect(ctx.stored()).toEqual(['com.acme.alpha|o2:alpha@o2', 'undefined|o1:loose@o1']);
+  });
+
+  it('a rollback to an object-less body in a slot holding only bound rows recreates the object-less binding as its own row (main: restored over the one row)', async () => {
+    const ctx = await boot([['o1']]);
+    await ctx.loader.registerRollback('action', NAME, item(undefined, 'alpha@global restored'), 1);
+    expect(ctx.stored()).toEqual(['com.acme.alpha|-:alpha@global restored', 'com.acme.alpha|o1:alpha@o1']);
+  });
+
+  it('the naming pass names any writer\'s row of the slot, the column only: a protocol overlay row (`source` sys-metadata-repo) on o1 is named o1 when the package saves o2 (carried with the overlay write path by #32609)', async () => {
+    const ctx = await boot([['o2']], (driver) => driver.create('sys_metadata', {
+      id: 'overlay-o1', type: 'action', name: NAME, package_id: A, metadata: JSON.stringify(item('o1', 'overlay@o1')),
+      state: 'active', version: 1, source: 'sys-metadata-repo', checksum: 'x',
+    }));
+    const overlay = ctx.rows('action').find((row) => row.id === 'overlay-o1');
+    expect([overlay?.bundle_member, overlay?.source, JSON.parse(String(overlay?.metadata)).label]).toEqual(['o1', 'sys-metadata-repo', 'overlay@o1']);
+  });
+
   it('a removal naming the package takes every binding\'s row; the name stays one holder (#32352)', async () => {
     const ctx = await boot([['o1'], ['o2'], [undefined]]);
     await ctx.manager.unregister('action', NAME, { packageId: A });

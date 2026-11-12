@@ -98,7 +98,7 @@ import {
   type PackageScopedRefusal,
   type PackageScopedResolvableType,
 } from '@objectstack/core';
-import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
+import { ITEM_KEY_DISCRIMINATORS, SysMetadataObject, itemDiscriminator } from '@objectstack/metadata-core';
 import { peelStoredEnvelope } from './stored-envelope.js';
 
 /**
@@ -325,6 +325,24 @@ export function storedRowMemberOf(type: string, item: unknown, column?: unknown)
     return OBJECT_LESS_OWNERS.has(owner) ? null : owner;
   }
   return boundObjectOf(item) ?? null;
+}
+
+/** [#32540 C8] The longest member `sys_metadata.bundle_member` stores (its declared `maxLength`). */
+export const STORED_MEMBER_MAX_LENGTH = SysMetadataObject.fields.bundle_member.maxLength as number;
+
+/**
+ * [#32540 C3/C8] The `bundle_member` an action row holds once the loader has
+ * named it, as the store's unique key reads it: the object it is bound to
+ * ({@link storedRowMemberOf}) when the column can store that name, else `null`.
+ * A row written before the loader named objects, bound to an object longer
+ * than {@link STORED_MEMBER_MAX_LENGTH}, cannot be named: it keeps the
+ * object-less binding's place in its package's bucket of the key, and only a
+ * write into that place collides with it. `undefined` for every other type.
+ */
+export function namedRowColumnOf(type: string, item: unknown, column?: unknown): string | null | undefined {
+  if (!OWNER_KEYED_SLOT_TYPES.has(type)) return undefined;
+  const member = storedRowMemberOf(type, item, column);
+  return typeof member === 'string' && member.length <= STORED_MEMBER_MAX_LENGTH ? member : null;
 }
 
 /**

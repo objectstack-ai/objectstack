@@ -21,8 +21,12 @@ const CONTROL_TYPE = ['view', 'object'].find((type) => !PACKAGE_SLOTTED_STORE_TY
 const A = 'com.acme.alpha';
 const B = 'com.acme.beta';
 
-/** In-memory `sys_metadata`: equality and `$in` per field, nothing else. */
-function rowStore(seed: Array<Record<string, unknown>>) {
+/**
+ * In-memory `sys_metadata`: equality and `$in` per field, nothing else. With
+ * `uniqueKey`, an update is refused as the overlay unique index
+ * `(type, name, package_id, bundle_member)` refuses it.
+ */
+function rowStore(seed: Array<Record<string, unknown>>, options: { uniqueKey?: boolean } = {}) {
   const rows = new Map(seed.map((row) => [String(row.id), { ...row }]));
   const matches = (row: Record<string, unknown>, where: Record<string, unknown> = {}) =>
     Object.entries(where).every(([key, value]) => {
@@ -43,6 +47,10 @@ function rowStore(seed: Array<Record<string, unknown>>) {
     count: async (_table: string, query: any) => [...rows.values()].filter((row) => matches(row, query?.where)).length,
     update: async (_table: string, id: string, data: Record<string, unknown>) => {
       const updated = { ...rows.get(id), ...data };
+      const keyOf = (of: Record<string, unknown>) => JSON.stringify([of.type, of.name, of.package_id ?? '', of.bundle_member ?? '']);
+      if (options.uniqueKey && [...rows.values()].some((other) => other.id !== id && keyOf(other) === keyOf(updated))) {
+        throw new Error('rowStore: UNIQUE constraint failed: sys_metadata.type, name, package_id, bundle_member');
+      }
       rows.set(id, updated);
       return updated;
     },
@@ -54,7 +62,11 @@ function rowStore(seed: Array<Record<string, unknown>>) {
     syncSchema: async () => undefined,
     execute: async () => undefined,
   };
-  return { store, packageOf: (id: string) => rows.get(id)?.package_id ?? null };
+  return {
+    store,
+    packageOf: (id: string) => rows.get(id)?.package_id ?? null,
+    memberOf: (id: string) => rows.get(id)?.bundle_member ?? null,
+  };
 }
 
 const row = (id: string, type: string, body: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
@@ -196,5 +208,42 @@ describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object i
     expect(result.bound.map((entry) => entry.id)).toEqual(['legacy-o1']);
     expect(result.left).toEqual([{ id: 'legacy-o1-again', type: 'action', name: 'shared_action', reason: 'slot-taken' }]);
     expect(packageOf('legacy-o1')).toBe(A);
+  });
+
+  // [#32540 C3; contract record 6820015366 item 1] Rows as every released writer left them: `bundle_member` NULL on all.
+  it.each([
+    ['the package\'s bound row on o2', { name: 'shared_action', objectName: 'o2', _packageId: A }, 'o2'],
+    ['the package\'s object-less row', { name: 'shared_action', _packageId: A }, null],
+  ] as const)('with every `bundle_member` NULL under the unique key, a legacy row on o1 beside %s is bound, its object named in the same update, the package\'s row named first (BEFORE this fix: update-failed on the unique key)', async (_shape, body, named) => {
+    const { store, packageOf, memberOf } = rowStore([
+      row('bound', 'action', body, { package_id: A }),
+      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
+    ], { uniqueKey: true });
+    const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
+    expect(result.left).toEqual([]);
+    expect(result.bound.map((entry) => entry.id)).toEqual(['legacy-o1']);
+    expect([packageOf('legacy-o1'), memberOf('legacy-o1')]).toEqual([A, 'o1']);
+    expect(memberOf('bound')).toBe(named);
+  });
+
+  it('an object-less legacy row beside the package\'s bound row on o2, every `bundle_member` NULL: the bound row is named o2 first, then the legacy row is bound object-less', async () => {
+    const { store, packageOf, memberOf } = rowStore([
+      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', _packageId: A }, { package_id: A }),
+      row('legacy', 'action', { name: 'shared_action', _packageId: A }),
+    ], { uniqueKey: true });
+    const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
+    expect(result).toEqual({ bound: [{ id: 'legacy', type: 'action', name: 'shared_action', packageId: A }], left: [] });
+    expect([packageOf('legacy'), memberOf('legacy'), memberOf('bound-o2')]).toEqual([A, null, 'o2']);
+  });
+
+  it('C8 — a legacy row bound to an object longer than `bundle_member` stores keeps the object-less place: left `slot-taken` beside the package\'s object-less row, nothing truncated', async () => {
+    const long = `o_${'x'.repeat(99)}`;
+    const { store, packageOf, memberOf } = rowStore([
+      row('bound', 'action', { name: 'shared_action', _packageId: A }, { package_id: A }),
+      row('legacy-long', 'action', { name: 'shared_action', objectName: long, _packageId: A }),
+    ], { uniqueKey: true });
+    const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
+    expect(result.left).toEqual([{ id: 'legacy-long', type: 'action', name: 'shared_action', reason: 'slot-taken' }]);
+    expect([packageOf('legacy-long'), memberOf('legacy-long')]).toEqual([null, null]);
   });
 });

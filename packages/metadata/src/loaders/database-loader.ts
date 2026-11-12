@@ -29,8 +29,10 @@ import type { MetadataLoader, MetadataKeyedItem, MetadataLoaderDeleteOptions } f
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
   isBundledStoreType,
+  namedRowColumnOf,
   refuseSeveralSlots,
   slotPackageOf,
+  STORED_MEMBER_MAX_LENGTH,
   storedItemPackageId,
   storedRowMemberOf,
   storeRemovalKeys,
@@ -1199,7 +1201,9 @@ export class DatabaseLoader implements MetadataLoader {
    * [#31699 R7-A; epic ruling 6809488921] Bind the empty `package_id` column of
    * the legacy row a plural read handed `item` out from to the package that
    * row's own stored body names: the column only — no body, no version, no
-   * history row, no insert (#32347's column-only update). ⛔ Never from
+   * history row, no insert (#32347's column-only update). [#32540] An action
+   * row's object is named in `bundle_member` in the same update, after the
+   * package's rows of the name written before their object was named. ⛔ Never from
    * `item`'s stamp as it stands now, never a row the read did not hand out,
    * [#32488] never another writer's row (`source` other than `'database'`, as
    * the operator migration reads it), and never into a slot another row of the
@@ -1215,10 +1219,25 @@ export class DatabaseLoader implements MetadataLoader {
     // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
     // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
     if (row.source !== 'database') return;
-    // [#32540] An action's member is its bound object: one package's rows of one name on two objects are two slots' rows.
-    const memberOf = (of: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
-    if (rows.some((other) => other !== row && other.package_id === read.packageId && memberOf(other) === memberOf(row))) return;
-    await this._update(this.tableName, read.id, { package_id: read.packageId });
+    // [#32540] An action's member is its bound object: one package's rows of one
+    // name on two objects are two slots' rows. Read as the store's unique key
+    // holds it once named (`namedRowColumnOf`): a row whose object the column
+    // cannot store keeps the object-less binding's place.
+    const memberOf = (of: Record<string, unknown>) => {
+      const column = namedRowColumnOf(type, this.rowToData(of), of.bundle_member);
+      return column !== undefined ? column : (storedRowMemberOf(type, this.rowToData(of), of.bundle_member) ?? null);
+    };
+    const target = memberOf(row);
+    const ofPackage = rows.filter((other) => other !== row && other.package_id === read.packageId);
+    if (ofPackage.some((other) => memberOf(other) === target)) return;
+    // [#32540 C3] Binding the package is a write of the package's slot: its rows
+    // written before their object was named are named first, and this row's
+    // object is named in the same update — otherwise two of the package's
+    // bindings would share the object-less place of the unique key.
+    const owned = namedRowColumnOf(type, this.rowToData(row), row.bundle_member) !== undefined;
+    if (owned) await this.nameUnnamedRows(type, name, unnamedRowsOf(type, ofPackage, (of) => this.rowToData(of)));
+    const naming = owned && typeof target === 'string' && row.bundle_member !== target ? { bundle_member: target } : {};
+    await this._update(this.tableName, read.id, { package_id: read.packageId, ...naming });
     this.invalidate(type, name);
   }
 
@@ -1574,11 +1593,6 @@ export class DatabaseLoader implements MetadataLoader {
     // does an action's: its member is the object the restored body is bound
     // to, never another binding's row.
     const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, restoredData) : undefined;
-    // [#32540 C3] A rollback is a write of the slot too: its rows written
-    // before their object was named are named first.
-    if (member !== undefined && !isBundledStoreType(type)) {
-      await this.nameUnnamedRows(type, name, unnamedRowsOf(type, await this._find(this.tableName, { where: this.baseFilter(type, name) }), (row) => this.rowToData(row)));
-    }
     const rowsOfName = member === undefined ? [] : await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const existing = member === undefined
       ? await this._findOne(this.tableName, { where: this.baseFilter(type, name) })
@@ -1591,6 +1605,17 @@ export class DatabaseLoader implements MetadataLoader {
 
     if (!existing && !restoresBinding) {
       throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
+    }
+    if (restoresBinding) {
+      // [#32540 C8] Refused before any write: an object the column cannot
+      // store, or an object-less binding whose place an unnameable row holds.
+      if (typeof member === 'string') refuseUnstorableMember(type, name, member);
+      this.refuseUnnameableHolder(type, name, rowsOfName, { packageColumn: rowsOfName[0]!.package_id, column: member });
+    }
+    // [#32540 C3] A rollback is a write of the slot too: its rows written
+    // before their object was named are named first.
+    if (member !== undefined && !isBundledStoreType(type)) {
+      await this.nameUnnamedRows(type, name, unnamedRowsOf(type, rowsOfName, (row) => this.rowToData(row)));
     }
 
     const previousChecksum = existing?.checksum as string | undefined;
@@ -1609,7 +1634,6 @@ export class DatabaseLoader implements MetadataLoader {
         state: 'active',
       });
     } else {
-      if (typeof member === 'string') refuseUnstorableMember(type, name, member);
       const slotRow = rowsOfName[0]!;
       const packageId = storedRowPackageId(slotRow);
       await this._create(this.tableName, {
@@ -1725,13 +1749,49 @@ export class DatabaseLoader implements MetadataLoader {
    * the column only — no body, no version, no history row. Until it is named
    * such a row sits in the object-less binding's bucket of the store's unique
    * key, so it is named before any write of the slot.
+   *
+   * [#32540 C8] A row bound to an object longer than the column stores cannot
+   * be named and is left as it is: ⛔ never refused here, never truncated. It
+   * keeps the object-less place, and only a write into that place is refused
+   * ({@link refuseUnnameableHolder}); every other write of the slot goes on.
    */
   private async nameUnnamedRows(type: string, name: string, rows: ReadonlyArray<{ id: string; member: string }> | undefined): Promise<void> {
-    for (const row of rows ?? []) {
-      refuseUnstorableMember(type, name, row.member);
+    const nameable = (rows ?? []).filter((row) => row.member.length <= STORED_MEMBER_MAX_LENGTH);
+    for (const row of nameable) {
       await this._update(this.tableName, row.id, { bundle_member: row.member });
     }
-    if ((rows ?? []).length > 0) this.invalidate(type, name);
+    if (nameable.length > 0) this.invalidate(type, name);
+  }
+
+  /**
+   * [#32540 C8] Refuse a write that puts an action row into the object-less
+   * place (`bundle_member` NULL) of a package's bucket of the unique key when
+   * that place is held by a row the loader cannot name — written before it
+   * named objects, bound to an object longer than the column stores — naming
+   * that row, its object and the limit. Any other write is not refused.
+   */
+  private refuseUnnameableHolder(
+    type: string,
+    name: string,
+    rows: ReadonlyArray<Record<string, unknown>>,
+    into: { packageColumn: unknown; column: string | null | undefined },
+    except?: Record<string, unknown> | null,
+  ): void {
+    if (into.column !== null) return;
+    const bucket = (column: unknown) => (typeof column === 'string' ? column : '');
+    for (const row of rows) {
+      if (row === except || bucket(row.package_id) !== bucket(into.packageColumn)) continue;
+      if (typeof row.bundle_member === 'string' && row.bundle_member !== '') continue;
+      const member = storedRowMemberOf(type, this.rowToData(row), row.bundle_member);
+      if (typeof member !== 'string' || member.length <= STORED_MEMBER_MAX_LENGTH) continue;
+      const where = bucket(into.packageColumn) === '' ? 'with no package' : `of package "${bucket(into.packageColumn)}"`;
+      throw new Error(
+        `${type} "${name}" ${where} cannot store its object-less binding: row ${String(row.id)}, written before `
+          + `sys_metadata.bundle_member named a binding's object, is bound to object "${member}" (${member.length} characters), `
+          + `longer than the ${STORED_MEMBER_MAX_LENGTH} the column stores, so it cannot be named and holds the object-less `
+          + `binding's place in the store's unique key. Remove that binding's row first.`,
+      );
+    }
   }
 
   /**
@@ -1783,7 +1843,6 @@ export class DatabaseLoader implements MetadataLoader {
       // version. Every other type: the name's one row, as before.
       const slot = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? await this.slottedSaveTarget(type, name, data) : undefined;
       if (typeof slot?.member === 'string') refuseUnstorableMember(type, name, slot.member);
-      await this.nameUnnamedRows(type, name, slot?.unnamed);
       const existing = slot
         ? slot.existing
         : await this._findOne(this.tableName, {
@@ -1792,6 +1851,15 @@ export class DatabaseLoader implements MetadataLoader {
       const binding = slot?.packageId !== undefined && existing?.package_id !== slot.packageId
         ? { package_id: slot.packageId }
         : {};
+      // [#32540 C8] Only a write that moves a row into a place an unnameable
+      // row holds is refused: an insert, or a re-bind of the row's package.
+      if (slot?.unnamed !== undefined && !isBundledStoreType(type) && (!existing || Object.keys(binding).length > 0)) {
+        this.refuseUnnameableHolder(type, name, slot.rows, {
+          packageColumn: slot.packageId ?? existing?.package_id,
+          column: existing ? namedRowColumnOf(type, this.rowToData(existing), existing.bundle_member) : slot.member,
+        }, existing);
+      }
+      await this.nameUnnamedRows(type, name, slot?.unnamed);
 
       if (existing) {
         // Skip the write when the stored CONTENT is identical (prevents phantom
@@ -1991,9 +2059,6 @@ function unnamedRowsOf(
   }
   return unnamed;
 }
-
-/** [#32540 C8] The longest member `sys_metadata.bundle_member` stores (its declared `maxLength`). */
-const STORED_MEMBER_MAX_LENGTH = SysMetadataObject.fields.bundle_member.maxLength as number;
 
 /**
  * [#32540 C8] Refuse an action binding whose object name `sys_metadata.bundle_member`
