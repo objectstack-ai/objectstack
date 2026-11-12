@@ -7,6 +7,7 @@ import { MetadataManager } from '../metadata-manager.js';
 import { MemoryLoader } from './memory-loader.js';
 import { MetadataPlugin } from '../plugin.js';
 import { PACKAGE_SLOTTED_STORE_TYPES, isBundledStoreType } from '../package-slotted-store.js';
+import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 import { FilesystemLoader } from './filesystem-loader.js';
 import { JSONSerializer } from '../serializers/json-serializer.js';
 // Paid at collection, not inside a case's window: `plugin.ts` imports it lazily (check:test-source-alias).
@@ -2069,6 +2070,12 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   const BETA = 'com.beta.app';
   const HOST = 'com.host.app';
   const UNBUNDLED = [...PACKAGE_SLOTTED_STORE_TYPES].filter((type) => !isBundledStoreType(type));
+  /**
+   * The ones the boot pass reads: it walks `DEFAULT_METADATA_TYPE_REGISTRY`, and `webhook` (#31699 PR 2)
+   * is slotted without being listed there, so the pass registers none of its rows and its reads stay
+   * the loader's, as before it was slotted.
+   */
+  const BOOT_PASS_READS = UNBUNDLED.filter((type) => DEFAULT_METADATA_TYPE_REGISTRY.some((entry) => entry.type === type));
   let driver: IDataDriver;
 
   // Bound by the `package_id` column; the body names no package (the protocol writes none).
@@ -2134,8 +2141,19 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
   });
 
   it('the types are taken from the tree', () => {
-    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission']));
+    expect(UNBUNDLED).toEqual(expect.arrayContaining(['api', 'agent', 'skill', 'action', 'permission', 'webhook']));
     expect(UNBUNDLED).not.toContain('email_template');
+    expect(BOOT_PASS_READS).toEqual(UNBUNDLED.filter((type) => type !== 'webhook'));
+  });
+
+  it('CONTROL — webhook: the boot pass registers none of its rows, so a read stays the loader\'s, as before it was slotted', async () => {
+    await seed('webhook', ALPHA, 1);
+    await seed('webhook', BETA, 2);
+    const before = await stored('webhook');
+    const m = await bootPass();
+    expect([...((m as any).registry.get('webhook')?.keys() ?? [])]).toEqual([]);
+    expect(await stored('webhook')).toEqual(before);
+    expect(driver.update).not.toHaveBeenCalled();
   });
 
   it('a body whose name is another row\'s key is never stamped with that row\'s package (contract review F3)', async () => {
@@ -2154,6 +2172,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
         });
         // Main's answer for the name: the body `loadMany` keeps first, unstamped.
         expect(await manager().loadMany(type)).toEqual([{ name: 'a', label: 'stray' }]);
+        if (!BOOT_PASS_READS.includes(type)) continue;
         const m = await bootPass();
         expect([...((m as any).registry.get(type)?.keys() ?? [])]).toEqual(['a']);
       }
@@ -2190,7 +2209,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.update).not.toHaveBeenCalled();
     });
 
-    it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: the boot pass registers the row under its own package, never the host's or none (BEFORE: ALPHA's read served BETA's body)`, async () => {
       await seed(type, ALPHA, 1);
       await seed(type, BETA, 2);
       const before = await stored(type);
@@ -2215,7 +2234,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       expect(driver.create).toHaveBeenCalledTimes(2);
     });
 
-    it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
+    if (BOOT_PASS_READS.includes(type)) it(`${type}: one holder — the boot pass writes nothing, and a bare read answers the unique holder, now stamped with its package (BEFORE: unstamped)`, async () => {
       await seed(type, ALPHA, 1);
       const before = await stored(type);
       const m = await bootPass();
