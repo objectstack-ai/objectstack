@@ -3582,8 +3582,21 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
      * walk it always ran at — so the build's findings and their order are
      * unchanged.
      */
-    /** This object's fields by name — what a stored expression's hop is judged through. */
-    const fieldDefs = new Map<string, AnyRec>(fieldList);
+    /**
+     * [#32529] This object's fields by name AS THE REGISTRY SERVES THEM — what a
+     * stored expression's hop is judged through, since the engine plans the hop
+     * over the registered schema: the served body first (the declared fields
+     * with every `objectExtensions` field folded in, a tie between two
+     * packages left out), then a declared field the fold left out, then the
+     * columns the registry injects (`owner_id`, `created_by`, `updated_by` are
+     * `lookup`s to `sys_user`), which never shadow a declared one.
+     */
+    // The served body is found by the tabled `obj` receiver's own `name`, and
+    // read through `fieldEntries`, so the #5017 key scan sees no new read.
+    const servedSelf = typedObjects.find((obj) => obj.name === objectName);
+    const fieldDefs = new Map<string, AnyRec>(servedSelf ? fieldEntries(servedSelf) : []);
+    for (const [n, def] of fieldList) if (!fieldDefs.has(n)) fieldDefs.set(n, def);
+    for (const [n, def] of injectedColumnDefsFor(obj)) if (!fieldDefs.has(n)) fieldDefs.set(n, def as AnyRec);
     const judgeFieldFormula = (fname: string, f: AnyRec): void => {
       if (f.expression) {
         // `expression` is the key `FieldSchema` declares for a computed field —
@@ -3652,8 +3665,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
         // [#32529, #32554] A STORED field's `expression` (any field but a
         // `formula`) is computed at the write and kept: a read of another
-        // record is refused, and a read of the clock, the acting user or a
-        // permission is warned. A `formula` answers nothing here.
+        // record, of the clock, of the acting user or of a permission is
+        // warned. A `formula` answers nothing here.
         const storedSource = celSourceOf(f.expression);
         for (const finding of storedExpressionInputIssues(fname, f, storedSource, (name) => fieldDefs.get(name))) {
           issues.push({ where: fieldWhere, message: finding.message, source: storedSource ?? '', severity: finding.severity, rule: finding.rule });

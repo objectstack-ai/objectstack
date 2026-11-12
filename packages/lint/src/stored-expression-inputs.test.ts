@@ -5,7 +5,7 @@
  * is computed at the write and kept, so the build judges the two inputs the
  * write cannot keep current (`stored-expression-inputs.ts`):
  *
- *  - a read of another record through a reference is refused, under
+ *  - a read of another record through a reference is warned, under
  *    `stored-expression-cross-record-input` — the measured case is a leave
  *    request reading `record.employee.daily_hours`, which stayed 40 after the
  *    employee's hours moved to 30;
@@ -70,25 +70,63 @@ const ofRule = (rule: string, probe: Record<string, unknown>) => findingsOf(prob
 const RULES = [STORED_EXPRESSION_CROSS_RECORD_INPUT, STORED_EXPRESSION_VOLATILE_INPUT];
 const neither = (probe: Record<string, unknown>) => findingsOf(probe).filter((i) => RULES.includes(i.rule ?? ''));
 
-describe('a stored expression reading another record is refused (#32529)', () => {
-  it('⭐ the measured case: `record.employee.daily_hours` on a stored number is refused, at the key the author edits', () => {
+describe('a stored expression reading another record is warned (#32529)', () => {
+  it('⭐ the measured case: `record.employee.daily_hours` on a stored number is warned, at the key the author edits', () => {
     const expression = 'record.days * record.employee.daily_hours';
-    const errors = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'number', expression });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ severity: 'error', where: WHERE, source: expression });
+    const found = findingsOf({ type: 'number', expression });
+    const warned = found.filter((i) => i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({ severity: 'warning', where: WHERE, source: expression });
     // The path is named, so the author can find the read.
-    expect(errors[0]!.message).toContain('`record.employee.daily_hours`');
+    expect(warned[0]!.message).toContain('`record.employee.daily_hours`');
+    // A warning only: the build does not fail on it.
+    expect(found.filter((i) => (i.severity ?? 'error') === 'error')).toEqual([]);
   });
 
-  it('refuses a read through a `user` field too (the type fixes its target)', () => {
-    const errors = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'text', expression: 'record.approver.name' });
-    expect(errors).toHaveLength(1);
-    expect(errors[0]!.severity).toBe('error');
+  it('warns a read through a `user` field too (the type fixes its target)', () => {
+    const warned = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'text', expression: 'record.approver.name' });
+    expect(warned).toHaveLength(1);
+    expect(warned[0]!.severity).toBe('warning');
   });
 
-  it('refuses the indexed and the optional spellings of the same hop', () => {
-    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'number', expression: "record['employee'].daily_hours" })).toHaveLength(1);
-    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'number', expression: 'record.employee.?daily_hours.orValue(0.0)' })).toHaveLength(1);
+  it('warns the indexed and the optional spellings of the same hop, `record.?a.?b` included', () => {
+    for (const expression of [
+      "record['employee'].daily_hours",
+      'record.employee.?daily_hours.orValue(0.0)',
+      'record.?employee.?daily_hours.orValue(0.0)',
+    ]) {
+      expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'number', expression }), expression).toHaveLength(1);
+    }
+  });
+
+  it('⭐ warns a hop through a reference column the registry injects, on an object that does not declare it', () => {
+    // `owner_id` and `created_by` are injected as `lookup`s to `sys_user`; the
+    // engine plans the hop over the registered schema, so the read is served.
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'text', expression: 'record.owner_id.name' })).toHaveLength(1);
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'text', expression: 'record.created_by.name' })).toHaveLength(1);
+    // The first-party shape: a stored title reading the owner's name optionally.
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, { type: 'text', expression: "record.?owner_id.?name.orValue('')" })).toHaveLength(1);
+  });
+
+  it('CONTROL — `ownership: \'none\'` injects no `owner_id`, so its read is not a hop through a reference', () => {
+    const noOwner = { ...leave({ type: 'text', expression: "record.?owner_id.?name.orValue('')" }), ownership: 'none' };
+    const found = validateStackExpressions(specValid({ objects: [employee, noOwner] }))
+      .filter((i) => i.where === WHERE && i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT);
+    expect(found).toEqual([]);
+    // …while `created_by` (the audit family, which `ownership` does not govern) still is.
+    const audit = { ...leave({ type: 'text', expression: 'record.created_by.name' }), ownership: 'none' };
+    expect(validateStackExpressions(specValid({ objects: [employee, audit] }))
+      .filter((i) => i.where === WHERE && i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT)).toHaveLength(1);
+  });
+
+  it('warns a hop through a reference an object extension adds', () => {
+    const extended = {
+      objects: [employee, leave({ type: 'number', expression: 'record.days * record.backup.daily_hours' })],
+      objectExtensions: [{ extend: 'hr_leave_request', fields: { backup: { type: 'lookup', label: 'Backup', reference: 'hr_employee' } } }],
+    };
+    const found = validateStackExpressions(specValid(extended))
+      .filter((i) => i.where === WHERE && i.rule === STORED_EXPRESSION_CROSS_RECORD_INPUT);
+    expect(found).toHaveLength(1);
   });
 
   it('admits a same-row expression, the reference itself and its `id`', () => {
@@ -99,6 +137,7 @@ describe('a stored expression reading another record is refused (#32529)', () =>
 
   it('does not judge a `formula` field reading the same hop: it is computed on every read', () => {
     expect(neither({ type: 'formula', expression: 'record.days * record.employee.daily_hours' })).toEqual([]);
+    expect(neither({ type: 'formula', expression: 'record.owner_id.name' })).toEqual([]);
   });
 });
 
@@ -120,7 +159,7 @@ describe('a stored expression reading a volatile input is warned (#32554)', () =
   });
 
   it('warns every spelling the engine mounts the user under, the other clock functions and a permission', () => {
-    for (const expression of ['user.id', 'ctx.user.id', 'os.user.id']) {
+    for (const expression of ['user.id', 'ctx.user.id', 'os.user.id', "os['user'].id", "ctx['user'].id", "ctx[?'user'].?id.orValue('')"]) {
       expect(ofRule(STORED_EXPRESSION_VOLATILE_INPUT, { type: 'text', expression }), expression).toHaveLength(1);
     }
     for (const expression of ['now()', 'daysFromNow(3)', 'daysAgo(3)']) {

@@ -16,16 +16,23 @@
  * keeps what they were at the write:
  *
  *  - **A read of another record** (`record.employee.daily_hours`), the one hop
- *    the plan preloads. When that record changes, nothing computes this row
- *    again, so the stored value goes stale with no signal. Refused (`error`,
- *    {@link STORED_EXPRESSION_CROSS_RECORD_INPUT}): the direction ruled on the
- *    card is to refuse at authoring and to name `summary` or a flow on the
- *    related object, never to build a cross-record recompute engine. A read of
- *    the hop's `id` is the reference this row stores, so it is not one.
+ *    the plan preloads, read as the writer. When that record changes, nothing
+ *    computes this row again, so the stored value goes stale with no signal.
+ *    Warned (`warning`, {@link STORED_EXPRESSION_CROSS_RECORD_INPUT}): the
+ *    ruling is to refuse or warn at authoring, never to build a cross-record
+ *    recompute engine, and the lane warns because a first-party title is
+ *    stored on purpose in this shape (an import matches a record by its stored
+ *    title) and the drift is repairable (`os migrate stored-expressions
+ *    --changed`). The hop is judged through the definitions the registry
+ *    SERVES the object with (`fieldDefOf`): a field an object extension adds
+ *    and a reference column the registry injects (`owner_id`, `created_by`,
+ *    `updated_by`) count like a declared one. A read of the hop's `id` is the
+ *    reference this row stores, so it is not one.
  *  - **A volatile input** — the clock (`now()`, `today()`, `daysFromNow()`,
  *    `daysAgo()`, the four stdlib functions that read the evaluation's `now`),
  *    the acting user (`current_user`, `user`, `ctx.user`, `os.user`, the four
- *    spellings `buildScope` mounts the one `EvalUser` under), and the acting
+ *    spellings `buildScope` mounts the one `EvalUser` under, each member also
+ *    counted in its index spelling `ctx['user']` / `os['user']`), and the acting
  *    user's permissions (`can()`, `hasCapability()`, the two receiver methods
  *    the permission binding answers). Each holds the value of the moment of
  *    the write, where the same expression on a `formula` is computed again on
@@ -44,7 +51,7 @@
 import { analyzeRelationshipTraversals, parseCelToAst } from '@objectstack/formula';
 import { referenceTargetOf } from '@objectstack/spec/data';
 
-/** A stored field's `expression` reads another record through a reference: refused. */
+/** A stored field's `expression` reads another record through a reference: warned. */
 export const STORED_EXPRESSION_CROSS_RECORD_INPUT = 'stored-expression-cross-record-input';
 
 /** A stored field's `expression` reads the clock, the acting user or a permission: warned. */
@@ -85,7 +92,7 @@ interface VolatileRead {
 export interface StoredExpressionInputIssue {
   rule: typeof STORED_EXPRESSION_CROSS_RECORD_INPUT | typeof STORED_EXPRESSION_VOLATILE_INPUT;
   message: string;
-  severity: 'error' | 'warning';
+  severity: 'warning';
 }
 
 interface CelNode {
@@ -122,10 +129,14 @@ function volatileReads(ast: unknown): VolatileRead[] {
       if (typeof args === 'string' && USER_ROOTS.has(args) && !bound.has(args)) note('user', args);
       return;
     }
-    if ((op === '.' || op === '.?') && Array.isArray(args)) {
+    if ((op === '.' || op === '.?' || op === '[]' || op === '[?]') && Array.isArray(args)) {
       const root = idName(args[0]);
-      if (root && USER_NAMESPACE_ROOTS.has(root) && !bound.has(root) && args[1] === 'user') {
+      if (root && USER_NAMESPACE_ROOTS.has(root) && !bound.has(root) && memberName(op, args[1]) === 'user') {
         note('user', `${root}.user`);
+        return;
+      }
+      if (op === '[]' || op === '[?]') {
+        walk(args, bound);
         return;
       }
       walk(args[0], bound);
@@ -157,6 +168,12 @@ function volatileReads(ast: unknown): VolatileRead[] {
   return out;
 }
 
+/** The member a `.`/`.?` access names, or the string literal a `[]`/`[?]` index names. */
+function memberName(op: string, member: unknown): string | undefined {
+  if (op === '.' || op === '.?') return typeof member === 'string' ? member : undefined;
+  return isCelNode(member) && member.op === 'value' && typeof member.args === 'string' ? member.args : undefined;
+}
+
 /** `a`, `a and b`, `a, b and c`. */
 function listed(items: readonly string[]): string {
   if (items.length <= 1) return items.join('');
@@ -169,9 +186,11 @@ function listed(items: readonly string[]): string {
  * a field with no `expression`, and for a source that is not CEL or does not
  * parse (the expression pass owns that verdict).
  *
- * `fieldDefOf` resolves a field of the same object by name, so a hop is judged
- * through the declaration the engine plans it by (`referenceTargetOf`, the
- * spec's one arbiter of "what does this field point at").
+ * `fieldDefOf` resolves a field of the same object by name AS THE REGISTRY
+ * SERVES IT (the declared field, an extension's, or an injected reference
+ * column), so a hop is judged through the declaration the engine plans it by
+ * (`referenceTargetOf`, the spec's one arbiter of "what does this field point
+ * at").
  */
 export function storedExpressionInputIssues(
   fieldName: string,
@@ -204,13 +223,13 @@ export function storedExpressionInputIssues(
     const where = targets.length === 1 ? `'${targets[0]}'` : 'the related object';
     issues.push({
       rule: STORED_EXPRESSION_CROSS_RECORD_INPUT,
-      severity: 'error',
-      message: `${stored}. It reads ${listed(reads)}, a value of another record, and a change to that record `
-        + 'does not compute this one again, so the stored value goes stale with nothing to say so. Keep a stored '
-        + `\`expression\` to its own record's fields. To show the related value, make \`${fieldName}\` a `
-        + '`formula` field (computed on every read; a `formula` cannot be totalled). To total it, compute it on '
-        + `${where}: a \`summary\` field there rolls up this object's own stored values. To keep a copy here, `
-        + `write it with a flow on ${where} that runs when the value changes.`,
+      severity: 'warning',
+      message: `${stored}. It reads ${listed(reads)}, a value of another record, read as the writer, and a change `
+        + 'to that record does not compute this one again: the stored value keeps what that record held at this '
+        + `record's last write. To read the current value, make \`${fieldName}\` a \`formula\` field (computed on `
+        + 'every read; a `formula` cannot be totalled). To keep a stored copy current, write it as a snapshot '
+        + `field with a flow on ${where} that updates the records pointing at it when the value changes. To `
+        + 'repair values that have drifted, run `os migrate stored-expressions --changed`.',
     });
   }
 

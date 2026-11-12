@@ -6021,30 +6021,34 @@ const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
 
 const STORED_EXPRESSION_CROSS_RECORD_INPUT_EXPLANATION: RuleExplanation = {
   rule: 'stored-expression-cross-record-input',
-  covers: 'why a stored expression reads only its own record',
+  covers: 'why a stored expression that reads another record drifts',
   paragraphs: [
     'A field that is not a `formula` and declares an `expression` is a stored computed field: the engine ' +
       'computes the expression from the row each write stores, on every insert and every update by id, and ' +
-      'stores the result in the column, which is what lets a `summary`, a dataset or a report total it. A ' +
-      '`formula` field is the other kind: it has no column and is computed on every read.',
+      'stores the result in the column, which is what lets a `summary`, a dataset or a report total it, and ' +
+      'an import match a record by it. A `formula` field is the other kind: it has no column and is computed ' +
+      'on every read.',
     'A stored expression may read one relationship hop, `record.employee.daily_hours`, and the write reads ' +
-      'that value from the related record when it computes. Nothing computes the row again when the related ' +
-      'record changes: there is no list of the rows that read it, and the platform does not recompute rows ' +
-      'across records. The stored value keeps the old input and every total over it drifts, with no fault and ' +
-      'no log. So the hop is refused where the expression is written, by `os validate`, `os build` and the ' +
-      'object save door.',
-    'Counted: a read through a `lookup`, `master_detail`, `user` or `tree` field of the same object, at one hop ' +
-      'or more, by any spelling the engine resolves (`record.a.b`, `record.a.?b`, `record[\'a\'].b`). Not ' +
-      'counted: a read of the reference itself (`record.employee`) or of its `id` (`record.employee.id`), ' +
-      'which is the value this row stores, and a read through a field that is not a reference (an object or ' +
-      'JSON value is part of this row). A `formula` field reading the same hop is not judged: it is computed ' +
-      'on every read, so it never goes stale.',
-    'Three ways to write it instead. To show the related value, make the field a `formula`: it is current on ' +
-      'every read, but a `formula` cannot be totalled. To total it, compute it on the related object: a ' +
-      '`summary` field there rolls up this object\'s own stored values (for example the leave days), and a ' +
-      '`formula` beside it combines that total with the related object\'s own field (the daily hours). To keep ' +
-      'a copy on this record, write it with a flow on the related object that runs when the value changes and ' +
-      'updates the records that point at it.',
+      'that value from the related record, as the writer, when it computes. Nothing computes the row again ' +
+      'when the related record changes: there is no list of the rows that read it, and the platform does not ' +
+      'recompute rows across records. The stored value keeps what the related record held at this record\'s ' +
+      'last write, and every total over it drifts, with no fault and no log. So the build and the object save ' +
+      'door warn where the expression is written. A warning, not a refusal: a stored title that reads the ' +
+      'owner\'s name is sometimes meant (an import matches a record by its stored title), and the drift can be ' +
+      'repaired.',
+    'Counted: a read through a reference field of the object as the registry serves it, at one hop or more, ' +
+      'by any spelling the engine resolves (`record.a.b`, `record.?a.?b`, `record[\'a\'].b`): a `lookup`, ' +
+      '`master_detail`, `user` or `tree` field the object declares, one an object extension adds, and a ' +
+      'reference column the registry injects (`owner_id`, `created_by`, `updated_by`, each a `lookup` to ' +
+      '`sys_user`). Not counted: a read of the reference itself (`record.employee`) or of its `id` ' +
+      '(`record.employee.id`), which is the value this row stores, and a read through a field that is not a ' +
+      'reference (an object or JSON value is part of this row). A `formula` field reading the same hop is not ' +
+      'judged: it is computed on every read, so it never goes stale.',
+    'Three ways forward. To read the current value, make the field a `formula`: it is current on every read, ' +
+      'but a `formula` cannot be totalled. To keep a stored copy current, make it a snapshot field written by a ' +
+      'flow on the related object that runs when the value changes and updates the records that point at it. ' +
+      'To repair stored values that have drifted, run `os migrate stored-expressions --changed`, which ' +
+      'recomputes every row whose stored value differs from its expression (it needs the database URL).',
   ],
 };
 
@@ -6058,12 +6062,13 @@ const STORED_EXPRESSION_VOLATILE_INPUT_EXPLANATION: RuleExplanation = {
       'agree; for one that reads an input that changes without a write, they do not.',
     'Counted, as the engine binds them for a stored expression: the clock, through `now()`, `today()`, ' +
       '`daysFromNow()` and `daysAgo()`, so the stored value is the date or time of the last write; the acting ' +
-      'user, under any of its four spellings `current_user`, `user`, `ctx.user` and `os.user`, so the stored ' +
+      'user, under any of its four spellings `current_user`, `user`, `ctx.user` and `os.user` (an index ' +
+      'spelling such as `os[\'user\']` included), so the stored ' +
       'value is about the user who last wrote the record, not the one reading it; and the acting user\'s ' +
       'permissions, through `can()` and `hasCapability()`, so it holds the writer\'s permission at that write. ' +
       'Not counted: `os.org`, the writer\'s organization, which is the record\'s own; and `label()`, which ' +
       'reads the declared option labels for a stored value, never the reader\'s locale.',
-    'A warning, not a refusal: a value of the moment of the write is sometimes what is meant (who last ' +
+    'A warning, as a read of another record is: a value of the moment of the write is sometimes what is meant (who last ' +
       'changed the record), and the build and the save door both pass it. A `formula` field reading the same ' +
       'inputs is not judged.',
     'To show the current value, make the field a `formula` (current on every read, but not summable). To keep ' +

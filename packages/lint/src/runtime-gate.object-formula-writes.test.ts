@@ -288,19 +288,28 @@ describe('#32529 / #32554 — the object door judges a stored expression\'s inpu
     runRuntimeAuthoringRules({ type: 'object', item: leave(expression, type), context: { objects: [employee] } });
   const ofRule = <T extends { rule: string }>(rule: string, fs: readonly T[]): T[] => fs.filter((f) => f.rule === rule);
 
-  it('⭐ LIT — a stored expression reading another record is REFUSED at the door, under its own rule id', () => {
+  it('⭐ LIT — a stored expression reading another record is an ADVISORY at the door, under its own rule id, never a 422', () => {
     const result = gateLeave('record.days * record.employee.daily_hours');
 
-    const errs = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.errors);
-    expect(errs, dump(result)).toHaveLength(1);
-    expect(errs[0]).toMatchObject({ severity: 'error', where: LEAVE_WHERE, path: LEAVE_WHERE });
+    const advised = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories);
+    expect(advised, dump(result)).toHaveLength(1);
+    expect(advised[0]).toMatchObject({ severity: 'warning', where: LEAVE_WHERE, path: LEAVE_WHERE });
+    expect(result.errors, dump(result)).toEqual([]);
   });
 
-  it('⭐ LIT — a re-save of an object STORED with the hop is refused too: the parse is not narrowed, the next save is judged', () => {
+  it('⭐ LIT — a hop through the injected `owner_id` is advised too, on an object that does not declare it', () => {
+    const result = gateLeave("record.?owner_id.?name.orValue('')", 'text');
+
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
+  });
+
+  it('⭐ LIT — a re-save of an object STORED with the hop still saves: the advisory is repeated, nothing is refused', () => {
     const stored = leave('record.days * record.employee.daily_hours');
     const result = runRuntimeAuthoringRules({ type: 'object', item: stored, context: { objects: [employee, stored] } });
 
-    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.errors), dump(result)).toHaveLength(1);
+    expect(ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, result.advisories), dump(result)).toHaveLength(1);
+    expect(result.errors, dump(result)).toEqual([]);
   });
 
   it('⭐ LIT — a stored expression reading the clock is an ADVISORY at the door, never a refusal', () => {
@@ -319,7 +328,7 @@ describe('#32529 / #32554 — the object door judges a stored expression\'s inpu
 
   it('⭐ PARITY — the door finding IS the build finding for the same body', () => {
     const body = leave('record.days * record.employee.daily_hours');
-    const atDoor = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, gateLeave('record.days * record.employee.daily_hours').errors);
+    const atDoor = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, gateLeave('record.days * record.employee.daily_hours').advisories);
     const stack = { objects: [employee, body] };
     const atBuild = ofRule(STORED_EXPRESSION_CROSS_RECORD_INPUT, runAuthoringRules('build', { normalized: stack, parsed: stack }));
 
