@@ -501,3 +501,66 @@ describe('notify click-through defaults to the trigger record', () => {
         expect(messaging.emitted[0].source).toEqual({ object: 'repair_ticket', id: 't_7' });
     });
 });
+
+/**
+ * [ADR-0150 D3, #31699] The template name is resolved at delivery, outside the
+ * run, so the node records the package it resolves from beside the reference:
+ * the package whose own body of the flow is armed — never the definition's
+ * stamps, never an authored payload key.
+ */
+describe('notify records the package its email template resolves from (ADR-0150 D3, #31699)', () => {
+    const P = 'com.acme.alpha';
+    let engine: AutomationEngine;
+    let messaging: ReturnType<typeof fakeMessaging>;
+    const templated = (payload?: Record<string, unknown>) => notifyFlow({
+        recipients: ['user_1'], channels: ['email'], template: 'welcome', ...(payload ? { payload } : {}),
+    });
+
+    beforeEach(() => {
+        messaging = fakeMessaging();
+        engine = new AutomationEngine(createTestLogger());
+        registerNotifyNode(engine, createCtx(messaging.service));
+        engine.setPackagedFlowSource((name) => (name === 'notify_flow' ? P : undefined));
+    });
+
+    it('a package\'s own armed body: the payload names that package beside the template', async () => {
+        engine.registerFlow('notify_flow', templated(), { source: 'package', packageId: P } as never);
+        expect(engine.armedFlowPackage('notify_flow')).toBe(P);
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload).toMatchObject({ template: 'welcome', templateCallerPackageId: P });
+    });
+
+    it('an environment body over the packaged name (or a body stamped with the package) names no package', async () => {
+        engine.registerFlow('notify_flow', { ...templated(), _packageId: P } as never);
+        expect(engine.armedFlowPackage('notify_flow')).toBeUndefined();
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload.template).toBe('welcome');
+        expect(messaging.emitted[0].payload).not.toHaveProperty('templateCallerPackageId');
+    });
+
+    it('a key of that name in the literal payload is dropped, never forwarded as the caller package', async () => {
+        engine.registerFlow('notify_flow', templated({ templateCallerPackageId: 'com.other.beta', kept: 'yes' }));
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload).not.toHaveProperty('templateCallerPackageId');
+        expect(messaging.emitted[0].payload.kept).toBe('yes');
+    });
+
+    it('a template reference written in the literal payload (which the channels read alike) names the armed package too (contract review F-A)', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({
+            recipients: ['user_1'], channels: ['email'], title: 'Hi', payload: { template: 'welcome', templateCallerPackageId: 'com.other.beta' },
+        }), { source: 'package', packageId: P } as never);
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload).toMatchObject({ template: 'welcome', templateCallerPackageId: P });
+    });
+
+    it('CONTROL — the inline path names no caller package even from a package\'s own body', async () => {
+        engine.registerFlow('notify_flow', notifyFlow({ recipients: ['user_1'], title: 'Hi' }), { source: 'package', packageId: P } as never);
+        const result = await engine.execute('notify_flow');
+        expect(result.success, String(result.error)).toBe(true);
+        expect(messaging.emitted[0].payload).not.toHaveProperty('templateCallerPackageId');
+    });
+});

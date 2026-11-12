@@ -148,6 +148,14 @@ export interface MetadataLoader {
   loadManySlots?<T = any>(type: string): Promise<MetadataKeyedItem<T>[]>;
 
   /**
+   * [#31699 R7-A] Bind the empty `package_id` column of the legacy row this
+   * loader's plural read handed `item` out from to the package that row's own
+   * stored body names, the column only. Optional; `MetadataManager.register`
+   * calls it in place of the write-through it skips (`skipSourceLoader`).
+   */
+  bindReadRowPackage?(type: string, name: string, item: object): Promise<void>;
+
+  /**
    * Check if item exists
    * @param type The metadata type
    * @param name The item name
@@ -230,8 +238,11 @@ export interface MetadataLoader {
    * `register()` — see the note on `save?` above.
    *
    * Loaders on the other protocols (`file:`, `memory:`, `http:`, `s3:`) are not
-   * gated: `MetadataManager` never writes to them at runtime, so it never has a
-   * deletion of its own to take back.
+   * gated: `MetadataManager` never saves to them at runtime. `unregister()`
+   * also deletes from a `memory:` loader that implements `delete()` (the
+   * artifact door's store), for every type (#32246, #32353), so that a
+   * removed item stops answering; a `memory:` loader without `delete()` is
+   * skipped, and the `file:`, `http:` and `s3:` loaders are never deleted from.
    *
    * [ADR-0150 D4, #32198] `options.packageId` is passed only when one package's
    * item of a type stored per `(package, name)` is removed while another

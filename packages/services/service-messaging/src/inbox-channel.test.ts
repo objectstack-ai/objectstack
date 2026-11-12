@@ -238,6 +238,21 @@ describe('inbox channel', () => {
             expect(data.inserts[0].row.body_md).toBe('text body');
         });
 
+        it('hands the package the notify node recorded to renderTemplate as callerPackageId (ADR-0150 D3, #31699)', async () => {
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
+            const r = fakeRenderer();
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+            const named = delivery({
+                title: 'deal.won', body: '',
+                payload: { template: 'deal.won_email', templateCallerPackageId: 'com.acme.alpha' },
+            });
+            expect((await ch.send(silentCtx(), named)).ok).toBe(true);
+            // CONTROL: none recorded, no key.
+            expect((await ch.send(silentCtx(), templateDelivery())).ok).toBe(true);
+            expect(r.calls[0].callerPackageId).toBe('com.acme.alpha');
+            expect(r.calls[1]).not.toHaveProperty('callerPackageId');
+        });
+
         it('falls back to the deployment default locale when the recipient has none (#13881 rung 2)', async () => {
             const data = fakeData(undefined, userWithLocale(undefined));
             const r = fakeRenderer();
