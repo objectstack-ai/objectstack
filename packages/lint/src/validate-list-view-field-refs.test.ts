@@ -28,7 +28,7 @@ import {
 import { SORT_FIELD_UNKNOWN } from './validate-sortable-fields.js';
 import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
 import { explainRule } from './rule-explanations.js';
-import { AGGREGATE_FIELD_TYPE_COMPATIBILITY, FieldType, isMultiValueField } from '@objectstack/spec/data';
+import { AGGREGATE_FIELD_TYPE_COMPATIBILITY, FieldType, VIRTUAL_FIELD_AGGREGATE_REMEDY, isMultiValueField } from '@objectstack/spec/data';
 
 // [#22161] Each finding of the two ids is one verdict sentence; the reasoning
 // it used to carry is the id's `os explain` entry. Every direct call below
@@ -1184,7 +1184,10 @@ describe('[#25786] a grouping level ordered by another field', () => {
     const [finding, ...rest] = findingsFor(ordered('score'));
     expect(rest).toEqual([]);
     expect(finding.rule).toBe(LIST_VIEW_GROUP_ORDER_UNORDERABLE);
-    expect(finding.hint).toMatch(/^The field is computed on read and stores no value/);
+    expect(finding.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    // A group order asks `min` / `max`: the stored answer is a field of the formula's RETURN type
+    // (a `date` field for a date formula), never `number` for every formula.
+    expect(finding.hint).toContain('a field of its return type');
   });
 
   it('a dotted `orderBy` is refused at the data door\'s ingress, whatever its head', () => {
@@ -1559,7 +1562,7 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     const [onRate] = refused(withColumns({ field: 'rate', summary: 'sum' }));
     expect(onRate.hint).toBe('Point "sum" at a numeric field that adds (not a percent), or aggregate "rate" with one its `percent` type accepts: count, count_unique, avg, min, max.');
     const [onFormula] = refused(withColumns({ field: 'score', summary: 'avg' }));
-    expect(onFormula.hint).toMatch(/^The field is computed on read and stores no value/);
+    expect(onFormula.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
   });
 
   it('names the summaries the declaration accepts, read off the door\'s verdict', () => {
@@ -1568,11 +1571,16 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     const [onMulti] = refused(withColumns({ field: 'watchers', summary: 'count_unique' }));
     expect(onMulti.hint).toBe('Point "count_unique" at a field that stores one scalar value, or aggregate "watchers" with one its `lookup` with `multiple: true` declaration accepts: count.');
     // [#32449] The fix line names ColumnSummary members only — never the function `count_distinct`, which the
-    // schema refuses there. The spec's one virtual-field sentence (`VIRTUAL_FIELD_AGGREGATE_REMEDY`) is shared
-    // by every surface and printed verbatim, so it is the one hint this does not hold.
-    const own = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED && !x.hint.startsWith('The field is computed on read'));
+    // schema refuses there. That holds for the spec's one virtual-field sentence (`VIRTUAL_FIELD_AGGREGATE_REMEDY`)
+    // too, printed verbatim on every surface: it names no count by an aggregate spelling, so every hint is held.
+    const own = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
     expect(own.length).toBeGreaterThan(5);
+    expect(own.some((f) => f.hint === VIRTUAL_FIELD_AGGREGATE_REMEDY), 'the virtual-field hint is among them').toBe(true);
     for (const f of own) expect(f.hint, f.hint).not.toContain('count_distinct');
+    // `os explain` holds that sentence verbatim, for the summary and for the group order that prints it too.
+    for (const rule of [LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED, LIST_VIEW_GROUP_ORDER_UNORDERABLE]) {
+      expect(explainRule(rule)?.paragraphs.join('\n'), rule).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    }
   });
 
   it('judges nothing that compares no value: none, count and the four derived members, over any field', () => {

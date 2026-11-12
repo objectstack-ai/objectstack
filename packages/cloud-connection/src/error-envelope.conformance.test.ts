@@ -200,6 +200,8 @@ async function mountCloudConnection(opts: {
     };
     const grantRows: Record<string, any[]> = opts.userId
         ? {
+            // A current membership in the organization the session acts in (ADR-0093 D8.1, as amended).
+            sys_member: [{ id: 'mem_1', user_id: opts.userId, organization_id: 'o1', role: 'member' }],
             sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: 'o1' }],
             sys_permission_set: [{
                 id: 'ps_1',

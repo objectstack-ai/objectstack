@@ -4277,6 +4277,16 @@
       "pinned": 2
     },
     {
+      "file": "packages/plugins/plugin-security/src/get-queryable-fields.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-security/src/get-writable-fields.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/guest-grants-channel.test.ts",
       "verb": "findOne",
       "pinned": 1

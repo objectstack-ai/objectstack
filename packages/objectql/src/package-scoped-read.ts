@@ -23,7 +23,8 @@
  * `datasetName` through the protocol's by-name read, which is this resolver's
  * for the types listed here), and `permission` (#32162), whose in-memory store
  * `@objectstack/metadata` now keeps per `(package, name)` too, so a package's
- * qualified read serves its own grants. A later child adds its own types to the list in
+ * qualified read serves its own grants, and `flow` (#31696), which joins in
+ * the same change that narrows its one-holder rule to the namespace. A later child adds its own types to the list in
  * its own change; until then a type's by-name read stays
  * `SchemaRegistry.getItem`'s, exactly as before (`SchemaRegistry.resolveItem`).
  *
@@ -81,8 +82,8 @@ import {
  * The types whose by-name readers consult `(package, name)` today — child E8's
  * nine (#31680), as the registry spells them, then `api` (#32069), child B's
  * `email_template` (#31699), the picklist (#32070), `mapping` (#32071),
- * `dataset` (#32072) and `permission` (#32162). Each later child of epic
- * #31527 appends its own.
+ * `dataset` (#32072), `permission` (#32162) and child B's `flow` (#31696).
+ * Each later child of epic #31527 appends its own.
  */
 export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   'app',
@@ -109,6 +110,10 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   // #32162: the bare `/meta/permission/NAME` read and the save door's
   // held-grants read; `guest_portal` keeps one holder (platform-requested).
   'permission',
+  // [ADR-0150 D9, #31696] child B's flow: the bare `/meta/flow/NAME` read, its
+  // qualified address and the save door's held reads resolve by package, in
+  // the change that narrows the flow's one-holder rule to the namespace.
+  'flow',
   // [ADR-0150 D9, #31699 PR 2] `/meta/webhook/NAME`; the dispatcher, the
   // redelivery veto and the activation door read by `(package, name)` in
   // plugin-webhooks' `declared-webhooks.ts`.

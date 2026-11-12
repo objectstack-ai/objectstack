@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { computeTenantLayer0Verdict, type TenantLayer0Input } from '@objectstack/core';
+import { computeTenantLayer0Verdict, isOutsideEveryOrganization, type TenantLayer0Input } from '@objectstack/core';
 import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { RLS_DENY_FILTER } from './rls-compiler.js';
@@ -72,8 +72,15 @@ export function tenantLayer0FilterOf(verdict: TenantLayer0Verdict): Record<strin
  */
 export interface TenantLayer0Facts {
   tenancyPosture: TenantLayer0Input['tenancyPosture'];
-  /** The execution context: `tenantId` and `accessible_org_ids` are read. */
-  context: { tenantId?: unknown; accessible_org_ids?: unknown } | null | undefined;
+  /**
+   * The execution context: `tenantId` and `accessible_org_ids` are read, and
+   * [ADR-0093 D8.1, as amended] whether it is a person outside every
+   * organization (`isOutsideEveryOrganization`, `@objectstack/core`).
+   */
+  context:
+    | { tenantId?: unknown; accessible_org_ids?: unknown; userId?: unknown; isSystem?: unknown; posture?: unknown }
+    | null
+    | undefined;
   /** The object's security posture, as `getObjectSecurityMeta` answers it. */
   meta: {
     isPrivate: boolean;
@@ -99,6 +106,12 @@ export function tenantLayer0InputOf(facts: TenantLayer0Facts): TenantLayer0Input
     // [ADR-0105 D2] The `group` wall's predicate. Resolved by
     // `resolveAuthzContext` and carried on the context — never re-derived here.
     accessibleOrgIds: context?.accessible_org_ids as readonly string[] | undefined,
+    // [ADR-0093 D8.1, as amended] A person's data access requires a current
+    // membership in the organization, under every posture. The walled rungs
+    // already deny a person with none; under `single` this is the
+    // organization's one wall. Read off the resolver's membership set, never
+    // re-derived here.
+    outsideEveryOrganization: isOutsideEveryOrganization(context),
     // [#7835] A FEDERATED object's `organization_id` may be the registry's
     // injected anchor rather than a remote column — present in the field set,
     // absent from the store the query actually runs against (the platform
@@ -134,14 +147,16 @@ export function tenantLayer0InputOf(facts: TenantLayer0Facts): TenantLayer0Input
 /**
  * Compute the Layer 0 (tenant) filter to AND onto a read/write.
  *
- * - `null` → Layer 0 contributes nothing (`single` posture; non-tenant object;
- *   or an exempt platform admin). The caller applies only Layer 1.
+ * - `null` → Layer 0 contributes nothing (`single` posture for a caller who
+ *   holds a membership; non-tenant object; or an exempt platform admin). The
+ *   caller applies only Layer 1.
  * - `{ organization_id: <id> }` → the `isolated` wall, AND-composed unconditionally.
  * - `{ organization_id: { $in: [...] } }` → the `group` union wall (ADR-0105 D2).
  * - {@link RLS_DENY_FILTER} → a walled posture on a tenant object, but the
  *   context carries no organization scope to enforce with (no active org under
- *   `isolated`, empty access set under `group`) → fail closed (zero rows /
- *   write denied).
+ *   `isolated`, empty access set under `group`); or, under `single`, a person
+ *   outside every organization on a tenant object (ADR-0093 D8.1, as amended)
+ *   → fail closed (zero rows / write denied).
  *
  * Only the PREDICATE widens between `isolated` and `group`; the composition
  * rules do not. Layer 0 is still computed independently of the RLS compiler,

@@ -105,7 +105,7 @@ const pkg = (id: string, decl: Partial<Record<FlowType, string[]>> = {}, extra: 
   return out;
 };
 
-/** Has `type`'s rule narrowed to the namespace (ADR-0150 child B: `email_template`, #31699)? */
+/** Has `type`'s rule narrowed to the namespace (ADR-0150 child B: `email_template`, #31699; `flow`, #31696)? */
 const narrowed = (type: FlowType) => (NAMESPACE_SCOPED_BARE_NAME_TYPES as readonly string[]).includes(type);
 
 /**
@@ -325,6 +325,97 @@ describe.each(TYPES)('%s — after the cold boot, a second package declaring a n
   });
 });
 
+describe('the narrowing — a flow holds one name per namespace (ADR-0150 D2/D9, child B, #31696)', () => {
+  const type = 'flow' as const;
+  const name = 'shared_flow';
+
+  it('the switch holds flow, and neither the webhook nor the connector', () => {
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('flow');
+    for (const other of ['webhook', 'connector'] as const) expect(narrowed(other), other).toBe(false);
+  });
+
+  it('two packages of two namespaces each install the name after the seal, and each holds its own flow', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    expect(registry.getPackage('com.acme.beta')).toBeDefined();
+    const held = registry.listItems<{ _packageId?: string; label?: string; name?: string }>(type)
+      .filter((item) => item.name === name)
+      .map((item) => [item._packageId, marker(item)]);
+    expect(held).toEqual([['com.acme.alpha', 'alpha flow'], ['com.acme.beta', 'beta flow']]);
+  });
+
+  it('the by-name read resolves by package: each holder reads its own flow, and a read naming no package is refused 409 naming both', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    expect(marker(registry.resolveItem(type, name, 'com.acme.alpha'))).toBe('alpha flow');
+    expect(marker(registry.resolveItem(type, name, 'com.acme.beta'))).toBe('beta flow');
+    const err = await caught(() => registry.resolveItem(type, name)) as (Refusal & { refusal?: { candidates?: Holder[] } }) | undefined;
+    expect([err?.code, err?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(err!.refusal!.candidates).toEqual([
+      { kind: 'package', packageId: 'com.acme.alpha' },
+      { kind: 'package', packageId: 'com.acme.beta' },
+    ]);
+  });
+
+  it('the item seam admits an installed package of another namespace', async () => {
+    const { registry, register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+    expect(await caught(() => registry.registerItem(type, body(type, name, 'beta'), 'name', 'com.acme.beta'))).toBeUndefined();
+  });
+
+  it('a co-owner of the holder\'s namespace is still refused beside two namespaces\' holders, naming only its own namespace\'s holder', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { [type]: [name] }))).toBeUndefined();
+    const err = await register(rival(type, 'com.acme.gamma', { [type]: [name] }));
+    expectRefusal(err, 'com.acme.gamma', { kind: 'package', packageId: 'com.acme.alpha' }, `alpha_${name}`);
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual([{ kind: 'package', packageId: 'com.acme.alpha' }]);
+  });
+
+  it('a package with no namespace is still refused beside a holder, and a holder with no namespace still refuses one', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+    const bare = pkg('com.acme.plain', { [type]: [name] });
+    delete bare.namespace;
+    expectRefusal(await register(bare), 'com.acme.plain', { kind: 'package', packageId: 'com.acme.alpha' });
+
+    const other = await boot();
+    const holder = pkg('com.acme.plain', { [type]: [name] });
+    delete holder.namespace;
+    expect(await other.register(holder)).toBeUndefined();
+    expectRefusal(await other.register(pkg('com.acme.beta', { [type]: [name] })), 'com.acme.beta', { kind: 'package', packageId: 'com.acme.plain' });
+  });
+
+  it('the cold boot of two namespaces\' holders boots with no bare-name warning, and the seal reports no clash', async () => {
+    const { registry, bareNameWarnings } = await boot([pkg('com.acme.alpha', { [type]: [name] }), pkg('com.acme.beta', { [type]: [name] })]);
+    expect(bareNameWarnings()).toEqual([]);
+    expect(registry.sealBareNameHolders().filter((c) => c.type === type)).toEqual([]);
+  });
+
+  it('a built-in name is still refused to a package of any namespace', async () => {
+    const builtIns = BUILT_IN_BARE_NAMES.flow as Set<string>;
+    builtIns.add('platform_flow');
+    try {
+      const { register } = await boot();
+      expectRefusal(await register(pkg('com.acme.beta', { [type]: ['platform_flow'] })), 'com.acme.beta', { kind: 'built-in' });
+    } finally {
+      builtIns.delete('platform_flow');
+    }
+  });
+
+  it.each(['webhook', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
+    expectRefusal(
+      await register(pkg('com.acme.beta', { [other]: [`shared_${other}`] })),
+      'com.acme.beta', { kind: 'package', packageId: 'com.acme.alpha' }, `beta_shared_${other}`,
+    );
+  });
+});
+
 describe('connector — a descriptor and a provider-bound instance hold the name alike', () => {
   it('a second package\'s provider-bound instance under a held descriptor name is refused, and the reverse', async () => {
     const { register } = await boot();
@@ -470,10 +561,11 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
   const member = (tag: string, n: string, locale: string) => body('email_template', n, tag, { locale });
   const ofBeta = (decl: Record<string, unknown>) => pkg('com.acme.beta', {}, decl);
 
-  it('the switch holds email_template and webhook (#31699 PR 2), and neither flow nor connector', () => {
+  it('the switch holds email_template, the flow (#31696) and webhook (#31699 PR 2), and not the connector', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('email_template');
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('flow');
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
-    for (const other of ['flow', 'connector'] as const) expect(narrowed(other), other).toBe(false);
+    expect(narrowed('connector'), 'connector').toBe(false);
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own bundle', async () => {
@@ -634,7 +726,7 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
     );
   });
 
-  it.each(['flow', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+  it.each(['connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
     expectRefusal(

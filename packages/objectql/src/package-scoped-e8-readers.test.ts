@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162) and `webhook` (#31699 PR 2). */
-const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'webhook'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162), `flow` (#31696) and `webhook` (#31699 PR 2). */
+const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'flow', 'webhook'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -263,6 +263,44 @@ describe('narrowing (3) — D3 step 3: one holder outside the package caller\'s 
   }
 });
 
+/**
+ * [ADR-0150 D9, child B #31696] `flow` joins the readers in the change that
+ * narrows its one-holder rule to the namespace, so two namespaces' packages
+ * may each hold a flow name. Its by-name read takes E8's three narrowings,
+ * each declared on the card and the PR.
+ */
+describe('flow joins the readers (ADR-0150 D9, child B #31696)', () => {
+  it('a caller with no package is refused a name two packages ship, naming both; each package reads its own', async () => {
+    ship('flow', 'onboard', A);
+    ship('flow', 'onboard', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'flow', name: 'onboard' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('flow', 'onboard'), 'ambiguous-in-environment', [A, B]);
+    expect(labelOf(await facade.get('flow', 'onboard', A))).toBe('alpha flow');
+    expect(labelOf(await facade.get('flow', 'onboard', B))).toBe('beta flow');
+  });
+
+  it('D3 (a): a package caller never resolves to the environment\'s own flow; a caller with no package is served it', async () => {
+    install(P);
+    envItem('flow', 'local');
+    await expectRefusal(() => facade.get('flow', 'local', P), 'outside-closure', ['the environment']);
+    expect(labelOf(await facade.get('flow', 'local'))).toBe('env flow');
+  });
+
+  it('D3 step 3: one holder outside the package caller\'s declared closure is refused; inside it, served', async () => {
+    install(P);
+    ship('flow', 'solo', A);
+    await expectRefusal(() => facade.get('flow', 'solo', P), 'outside-closure', [A]);
+    install('com.acme.dependent', [A]);
+    expect(labelOf(await facade.get('flow', 'solo', 'com.acme.dependent'))).toBe('alpha flow');
+  });
+
+  it('CONTROL — one holder is served to a caller with no package, as before', async () => {
+    ship('flow', 'solo', A);
+    expect(labelOf(await facade.get('flow', 'solo'))).toBe('alpha flow');
+    expect(labelOf((await protocol.getMetaItem({ type: 'flow', name: 'solo' }))?.item)).toBe('alpha flow');
+  });
+});
+
 describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by-name read resolves member by member', () => {
   /** One member of `packageId`'s bundle `name` (its composite slot), or the environment's own when `packageId` is undefined. */
   const tpl = (name: string, locale: string, packageId?: string) => {
@@ -319,9 +357,9 @@ describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/N
 });
 
 describe('the types E8 does not wire keep the legacy read', () => {
-  it('a view (bucket 1) and a flow (child E1) are read by getItem, untouched', async () => {
-    ship('flow', 'onboard', A);
-    expect(labelOf(await facade.get('flow', 'onboard', P))).toBe('alpha flow');
+  it('a view (bucket 1) and a webhook (child B, not yet wired) are read by getItem, untouched', async () => {
+    ship('webhook', 'onboard', A);
+    expect(labelOf(await facade.get('webhook', 'onboard', P))).toBe('alpha webhook');
   });
 });
 
