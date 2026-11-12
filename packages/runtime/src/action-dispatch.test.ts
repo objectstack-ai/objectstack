@@ -152,7 +152,7 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
         const request: any = { request: {}, environmentId: 'platform', executionContext: ec };
         const deps: any = {
             resolveService: async (_ctx: any, name: string) =>
-                (name === 'automation' ? automation : name === 'protocol' ? protocol : undefined),
+                (name === 'automation' ? automation : name === 'protocol' ? protocol : name === 'audit' ? audit : undefined),
             getObjectQL: async () => ql,
         };
         try {
@@ -169,7 +169,10 @@ function makeRig(actions: any[], opts: RigOptions = {}) {
         }
     };
 
-    return { viaRest, viaHost, viaMcp, ran, rows, kernel, scopes };
+    /** Every data read the rig's engine answered, the subject-record load included. */
+    const reads = () => ql.find.mock.calls.length + ql.findOne.mock.calls.length;
+
+    return { viaRest, viaHost, viaMcp, ran, reads, rows, kernel, scopes };
 }
 
 const gated = { name: 'gated_ping', label: 'Gated', type: 'script', target: 'gated_ping', requiredPermissions: ['manage_x'], ai: EXPOSED };
@@ -604,5 +607,102 @@ describe('MCP run_action: the AI-door rules that stay', () => {
         const ok = { name: 'ok', type: 'script', target: 'ok', ai: EXPOSED };
         const mcp: any = await makeRig([ok]).viaMcp(MEMBER_EC, 'ok');
         expect(mcp).toEqual({ status: 200, answer: { ok: true, action: 'ok', objectName: OBJECT, result: { ran: 'script' } } });
+    });
+});
+
+describe('[ADR-0151 D3 rule 3] an AI service account does not confirm an action for itself, at every door', () => {
+    /** An AI service account: an agent principal acting for itself. */
+    const ACCOUNT_EC = { userId: 'bot_1', principalKind: 'agent', systemPermissions: [] as string[] };
+    /** An OAuth-delegated agent: it acts for the person it names. */
+    const DELEGATED_EC = {
+        userId: 'user_1', principalKind: 'agent', onBehalfOf: { userId: 'user_1', principalKind: 'human' }, systemPermissions: [] as string[],
+    };
+    const confirmed = { name: 'confirmed', label: 'Confirmed', type: 'script', target: 'confirmed', ai: { ...EXPOSED, requiresConfirmation: true } };
+    const declaresNone = { name: 'undeclared', label: 'Undeclared', type: 'script', target: 'undeclared', ai: EXPOSED };
+    const declaresFalse = { name: 'declared_safe', label: 'Declared safe', type: 'script', target: 'declared_safe', ai: { ...EXPOSED, requiresConfirmation: false } };
+    const CODE = 'ACTION_CONFIRMATION_REQUIRED';
+
+    it('REST /actions refuses an account with the confirmation member and without it: 428, nothing run, no record read, no invocation row', async () => {
+        for (const body of [{ recordId: 'r1' }, { recordId: 'r1', confirm: true }]) {
+            const rig = makeRig([confirmed]);
+            const answer = await rig.viaRest(ACCOUNT_EC, 'confirmed', { body });
+            expect({ status: answer.status, code: answer.body.error!.code }, JSON.stringify(body)).toEqual({ status: 428, code: CODE });
+            expect(String(answer.body.error!.message)).not.toMatch(/retry/i);
+            expect(rig.ran()).toBe(0);
+            expect(rig.reads()).toBe(0);
+            expect(rig.rows).toHaveLength(0);
+        }
+    });
+
+    it('MCP run_action refuses an account with the confirmation member and without it: 428, nothing run, no record read, no invocation row', async () => {
+        for (const input of [{ recordId: 'r1' }, { recordId: 'r1', confirm: true }]) {
+            const rig = makeRig([confirmed]);
+            const mcp: any = await rig.viaMcp(ACCOUNT_EC, 'confirmed', input);
+            expect({ status: mcp.status, code: mcp.code }, JSON.stringify(input)).toEqual({ status: 428, code: CODE });
+            expect(mcp.details).toEqual({ actionName: 'confirmed', objectName: OBJECT, confirmationMember: 'confirm' });
+            expect(String(mcp.message)).not.toMatch(/retry/i);
+            expect(rig.ran()).toBe(0);
+            expect(rig.reads()).toBe(0);
+            expect(rig.rows).toHaveLength(0);
+        }
+    });
+
+    it('a host door refuses an account under each posture, with the confirmation member and without it', async () => {
+        for (const posture of ['rest', 'ai', undefined] as const) {
+            for (const confirm of [true, undefined]) {
+                const rig = makeRig([confirmed]);
+                const answer = await rig.viaHost(ACCOUNT_EC, 'confirmed', {
+                    recordId: 'r1',
+                    ...(posture ? { posture } : {}),
+                    ...(confirm ? { confirm } : {}),
+                });
+                expect({ status: answer.status, code: answer.body.error!.code }, `${posture} ${confirm}`).toEqual({ status: 428, code: CODE });
+                expect(rig.ran()).toBe(0);
+                expect(rig.reads()).toBe(0);
+                expect(rig.rows).toHaveLength(0);
+            }
+        }
+    });
+
+    it('CONTROL: a person runs with the confirmation member at MCP, and runs with or without it at REST', async () => {
+        const mcp = makeRig([confirmed]);
+        expect((await mcp.viaMcp(MEMBER_EC, 'confirmed', { confirm: true })).status).toBe(200);
+        expect(mcp.ran()).toBe(1);
+        const refused: any = await makeRig([confirmed]).viaMcp(MEMBER_EC, 'confirmed');
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 428, code: CODE });
+        expect(String(refused.message)).toMatch(/retry/i);
+        for (const body of [{}, { confirm: true }]) {
+            const rest = makeRig([confirmed]);
+            expect((await rest.viaRest(MEMBER_EC, 'confirmed', { body })).status).toBe(200);
+            expect(rest.ran()).toBe(1);
+        }
+        // The record read the account's refusals above never made is one this
+        // rig counts: the same call from a person reads it.
+        const read = makeRig([confirmed]);
+        await read.viaRest(MEMBER_EC, 'confirmed', { body: { recordId: 'r1' } });
+        expect(read.reads()).toBeGreaterThan(0);
+    });
+
+    it('CONTROL: a delegated agent behaves as before at both doors', async () => {
+        const rest = makeRig([confirmed]);
+        expect((await rest.viaRest(DELEGATED_EC, 'confirmed')).status).toBe(200);
+        expect(rest.ran()).toBe(1);
+        const refused: any = await makeRig([confirmed]).viaMcp(DELEGATED_EC, 'confirmed');
+        expect({ status: refused.status, code: refused.code }).toEqual({ status: 428, code: CODE });
+        const mcp = makeRig([confirmed]);
+        expect((await mcp.viaMcp(DELEGATED_EC, 'confirmed', { confirm: true })).status).toBe(200);
+        expect(mcp.ran()).toBe(1);
+    });
+
+    it('CONTROL: an account runs an action that declares no confirmation, or `false`, at REST, MCP and a host door', async () => {
+        for (const action of [declaresNone, declaresFalse]) {
+            const rest = makeRig([action]);
+            expect((await rest.viaRest(ACCOUNT_EC, action.name)).status, action.name).toBe(200);
+            const mcp = makeRig([action]);
+            expect((await mcp.viaMcp(ACCOUNT_EC, action.name)).status, action.name).toBe(200);
+            const host = makeRig([action]);
+            expect((await host.viaHost(ACCOUNT_EC, action.name, { posture: 'ai' })).status, action.name).toBe(200);
+            expect(rest.ran() + mcp.ran() + host.ran()).toBe(3);
+        }
     });
 });

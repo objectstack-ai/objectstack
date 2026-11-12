@@ -1657,7 +1657,9 @@ function notResumableRunMessage(runId: string): string {
  *     was not started by a flow action, and the call is refused 403.
  *     The confirmation gate applies here too because the flow's writes happen
  *     after the screen, so on resume. A run started with `confirm: true` still
- *     needs `confirm: true` to resume.
+ *     needs `confirm: true` to resume. An AI service account never confirms
+ *     an action for itself (ADR-0151 D3 rule 3), so its resume of a gated
+ *     action is refused whatever it sends.
  *  4. **The subject record, read again as the caller.** This is #16370's rule,
  *     with the same two shared functions: `loadActionSubjectRecord` and
  *     `refuseDeniedSubjectLoad`. A record the caller could read when the run
@@ -1878,7 +1880,9 @@ function resumeAdmissionRefusal(
     if (permission) return resumeDoorError(deps, permission, 403);
     const disabled = actionExec.disabledActionRefusal(deps, activationEngine, action);
     if (disabled) return resumeDoorError(deps, disabled.message, disabled.status, { code: disabled.code });
-    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName);
+    // [ADR-0151 D3 rule 3] The caller's envelope rides along: an AI service
+    // account never confirms for itself, so it is refused whatever it sends.
+    const confirmation = actionExec.actionConfirmationRefusal(deps, action, request, objectName, ec);
     if (confirmation) {
         return resumeDoorError(deps, confirmation.message, confirmation.status, {
             code: confirmation.code,
