@@ -2116,6 +2116,7 @@ describe('[#32458] an unbundled slotted type\'s rows bound by the column only', 
       const m = await bootPass();
       expect(await read(m, type)).toEqual([ALPHA, ALPHA]);
       expect(await read(m, type, ALPHA)).toEqual([ALPHA, ALPHA]);
+      expect(await read(m, type, 'com.gamma.app')).toBeUndefined();
       expect(await stored(type)).toEqual(before);
       expect(driver.update).not.toHaveBeenCalled();
     });
