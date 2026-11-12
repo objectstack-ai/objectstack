@@ -89,6 +89,9 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 /** The sqlite phrasing of "`sys_metadata` is not there" — a bare driver `Error`. */
 const DRIVER_TEXT = 'SQLITE_ERROR: no such table: sys_metadata';

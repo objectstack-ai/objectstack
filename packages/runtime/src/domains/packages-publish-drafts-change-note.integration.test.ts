@@ -19,6 +19,9 @@
 
 // Pays the lint root's first load at collection, never inside a clocked case.
 import '../lint-root-preload.testkit.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
