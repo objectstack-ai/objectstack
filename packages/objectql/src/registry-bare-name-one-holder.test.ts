@@ -441,6 +441,17 @@ describe('the narrowing — the picklist family holds one name per namespace (AD
       expect(registry.packageScopedHoldersOf(type, name)).toEqual(['com.acme.alpha']);
     });
 
+    it('the item seam admits a tenant-authored body under an installed package of another namespace, as it admits any (row 20 → row 1); each package reads its own item', async () => {
+      const { registry, register } = await boot();
+      expect(await register(pkg('com.acme.alpha', { [type]: [name] }))).toBeUndefined();
+      expect(await register(pkg('com.acme.beta'))).toBeUndefined();
+      const authored: Record<string, unknown> = { ...body(type, name, 'beta'), _provenance: 'org' };
+      expect(await caught(() => registry.registerItem(type, authored, 'name', 'com.acme.beta'))).toBeUndefined();
+      expect(registry.packageScopedHoldersOf(type, name).sort()).toEqual(['com.acme.alpha', 'com.acme.beta']);
+      expect(registry.getItem<{ label: string }>(type, name, 'com.acme.alpha')?.label).toBe(labelOf('alpha'));
+      expect(registry.getItem<{ label: string }>(type, name, 'com.acme.beta')?.label).toBe(labelOf('beta'));
+    });
+
     it('the cold boot of two namespaces\' holders boots with no bare-name warning, and the seal reports no clash', async () => {
       const { registry, bareNameWarnings } = await boot([pkg('com.acme.alpha', { [type]: [name] }), pkg('com.acme.beta', { [type]: [name] })]);
       expect(bareNameWarnings()).toEqual([]);

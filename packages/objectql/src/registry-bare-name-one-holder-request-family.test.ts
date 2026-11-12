@@ -527,6 +527,21 @@ describe('the narrowing — the API and the function hold one name per namespace
     expect(ql.resolveFunction('alpha_only_fn')).toBeTypeOf('function');
   });
 
+  it('[R2-C, row 19] the bare engine function read refuses any two package holders: a same-namespace pair registered directly through ObjectQL#registerFunction (no bind to judge it) is refused alike (FROM the last-registered TO 409)', async () => {
+    const { ql, register } = await boot();
+    expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
+    expect(await register(coOwner('com.acme.alpha', 'com.acme.gamma'))).toBeUndefined();
+    ql.registerFunction('direct_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+    ql.registerFunction('direct_fn', fn('gamma'), { packageId: 'app:com.acme.gamma' });
+    const err = await caught(() => ql.resolveFunctionEntry('direct_fn'));
+    expect(err?.status).toBe(409);
+    expect(err!.message).toContain('package "com.acme.alpha"');
+    expect(err!.message).toContain('package "com.acme.gamma"');
+    // CONTROL — one package registering the name directly answers as before.
+    ql.registerFunction('direct_one_fn', fn('alpha'), { packageId: 'app:com.acme.alpha' });
+    expect(ql.resolveFunctionEntry('direct_one_fn')?.packageId).toBe('app:com.acme.alpha');
+  });
+
   it('a function co-owner of the holder\'s namespace is still refused at the bind, naming only its own namespace\'s holder', async () => {
     const { ql, register } = await boot();
     expect(await register(pkg('com.acme.alpha'))).toBeUndefined();
