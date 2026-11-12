@@ -334,8 +334,11 @@ export function RegistryRefField({
   // `(package, name)` (file header): the sibling column that stores the
   // holder's package, the package the record names there, and whether this
   // form can write it (the record form's sibling writer, on a create only).
+  // The field is named by its key in the form's record (react-hook-form's
+  // `name`), else by its metadata: an object schema's field definition need
+  // not carry its own name.
   const holders = holdersByName(registryType, listed);
-  const packageField = holders ? holderPackageFieldOf(props.field?.name) : null;
+  const packageField = holders ? holderPackageFieldOf(props.name || props.field?.name) : null;
   const storedPackage = packageField ? dependentValues?.[packageField] : undefined;
   const writePackage = packageField !== null && typeof onAutofill === 'function' ? onAutofill : null;
 

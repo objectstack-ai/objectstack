@@ -30,7 +30,7 @@ import { PERMISSION_SET_GRANT_COLUMNS } from '@object-ui/fields';
 
 import { ObjectForm } from '../ObjectForm';
 import { formWritePayload } from '../writePayload';
-import { createHolderPackagePayload } from '../sanitize';
+import { createHolderPackagePayload, sanitizeFormData } from '../sanitize';
 
 /** The grant's columns as plugin-security declares them, trimmed to what the form reads. */
 const GRANT_SCHEMA = {
@@ -125,10 +125,18 @@ describe('formWritePayload — the holder package on a grant create (objectstack
       permission_set: 'sales_user',
     });
     expect(save(values, { canEdit: (f) => f !== 'permission_set' }).writePayload).toStrictEqual({});
-    // An inline form passes no definition: nothing proves the column exists.
-    expect(save(values, { customFields: [{ name: 'permission_set' }] }).writePayload).toStrictEqual({
-      permission_set: 'sales_user',
-    });
+    // An inline form passes no definition, so nothing here proves the column
+    // exists or reads it `readonly`: it adds nothing, and the payload is the
+    // strip's own, exactly as before.
+    expect(save(values, { customFields: [{ name: 'permission_set' }] }).writePayload).toStrictEqual(
+      sanitizeFormData(values, null),
+    );
+    expect(
+      createHolderPackagePayload({ permission_set: 'sales_user' }, {}, 'sys_user_permission_set', PERMISSION_SET_GRANT_COLUMNS, {
+        values,
+        objectSchema: null,
+      }),
+    ).toStrictEqual({ permission_set: 'sales_user' });
     // A definition without the column.
     const { permission_set_package: _omit, ...rest } = GRANT_SCHEMA.fields;
     expect(save(values, { objectSchema: { ...GRANT_SCHEMA, fields: rest } }).writePayload).toStrictEqual({
