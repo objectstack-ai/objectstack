@@ -109,6 +109,10 @@ export const PACKAGE_SCOPED_READ_TYPES = Object.freeze([
   // #32162: the bare `/meta/permission/NAME` read and the save door's
   // held-grants read; `guest_portal` keeps one holder (platform-requested).
   'permission',
+  // [ADR-0150 D9, #31699 PR 2] `/meta/webhook/NAME`; the dispatcher, the
+  // redelivery veto and the activation door read by `(package, name)` in
+  // plugin-webhooks' `declared-webhooks.ts`.
+  'webhook',
 ] as const);
 
 /** A type whose by-name readers consult `(package, name)` ({@link PACKAGE_SCOPED_READ_TYPES}). */

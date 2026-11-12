@@ -761,6 +761,104 @@ describe('the catalog activation door — a declared webhook', () => {
     });
 });
 
+// [ADR-0150 D3/D4/D5, #31699 PR 2] A declared webhook name two packages of two
+// namespaces declare: each holder's switch is its own row, `(webhook,
+// package_id, name)`; the bare address refuses the name naming both (it was a
+// 503), and `webhook/:ns/:name` addresses one holder. The reader double
+// answers as plugin-webhooks' `DeclaredWebhookSource` does (its pins in
+// `declared-webhooks.test.ts`); the booted pin is the flow-family dogfood.
+describe('the catalog activation door — a declared webhook two packages declare (ADR-0150, #31699)', () => {
+    const HOOK = 'task_changed';
+    const A = 'com.acme.alpha';
+    const B = 'com.acme.beta';
+    const OWNERS: Record<string, string[]> = { alpha: [A], beta: [B], gamma: ['com.acme.gamma'], shared: [A, B] };
+    const refusalOf = (holders: string[]) => ({
+        status: 'refused', reason: 'ambiguous-in-environment', type: 'webhook', name: HOOK, callerPackageId: null,
+        candidates: holders.map((packageId) => ({ kind: 'package', packageId })),
+        message: `The webhook "${HOOK}" is held by ${holders.length} packages: ${holders.join('; ')}.`,
+    });
+    /** The reader over `holders` of {@link HOOK}, and a harness whose registry knows {@link OWNERS}. */
+    const bootWith = (holders: string[], rows: Row[] = []) => {
+        const slots = holders.map((packageId) => ({ webhook: { name: HOOK }, packageId, active: true }));
+        const h = boot('single', {}, {
+            declaredWebhooks: {
+                async list() { return slots; },
+                async declaredWebhookNamed(name: string) {
+                    if (name !== HOOK || slots.length === 0) return null;
+                    if (slots.length === 1) return slots[0];
+                    throw Object.assign(new Error('ambiguous'), { code: 'RESOURCE_CONFLICT', status: 409, refusal: refusalOf(holders) });
+                },
+            },
+        });
+        h.engine.registry.getNamespaceOwners = (ns: string) => OWNERS[ns] ?? [];
+        h.tables[LEDGER].push(...rows.map((r, i) => ({ id: `seed_${i}`, metadata_type: 'webhook', name: HOOK, ...r })));
+        return h;
+    };
+    const ledger = (h: Harness) => h.tables[LEDGER].map((r) => [r.package_id ?? null, r.active]);
+    const candidatesOf = (r: any) => (r?.response?.body?.error?.details?.candidates ?? r?.response?.body?.error?.candidates ?? [])
+        .map((c: any) => c.packageId);
+
+    // The reader's refusal carries `refusal` since #31699 (it was a 503 without it:
+    // `declared-webhooks.test.ts` pins the field, the flow-family dogfood the booted door).
+    it('the bare address of a name two packages declare is refused 409 naming both, nothing written', async () => {
+        const h = bootWith([A, B]);
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+        expect([statusOf(res), codeOf(res)]).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(candidatesOf(res)).toEqual([A, B]);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('`webhook/:ns/:name` switches exactly that namespace\'s holder: its own row, the other\'s untouched', async () => {
+        const h = bootWith([A, B], [{ package_id: B, active: false }]);
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/alpha/${HOOK}`);
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'webhook', name: HOOK, packageId: A, enabled: false });
+        expect(ledger(h)).toEqual([[B, false], [A, false]]);
+
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/beta/${HOOK}`, { enabled: true }))).toBe(200);
+        expect(ledger(h)).toEqual([[B, true], [A, false]]);
+    });
+
+    it('[Q1] under two holders a row naming no package is neither\'s: a holder\'s switch writes its own row beside it', async () => {
+        const h = bootWith([A, B], [{ package_id: null, active: false }]);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/alpha/${HOOK}`, { enabled: true }))).toBe(200);
+        expect(ledger(h)).toEqual([[null, false], [A, true]]);
+    });
+
+    it('a namespace whose packages declare none of it is 409 naming the holders; two co-owners holding it are 409 naming each; an unknown namespace is 404', async () => {
+        const h = bootWith([A, B]);
+        const notHeld = await flip(h, TENANT_ADMIN(), `/_activation/webhook/gamma/${HOOK}`);
+        expect([statusOf(notHeld), candidatesOf(notHeld)]).toEqual([409, [A, B]]);
+        expect(messageOf(notHeld)).toContain('is not held by package "com.acme.gamma"');
+        const shared = await flip(h, TENANT_ADMIN(), `/_activation/webhook/shared/${HOOK}`);
+        expect([statusOf(shared), candidatesOf(shared)]).toEqual([409, [A, B]]);
+        expect(messageOf(shared)).toContain('share the namespace');
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/nowhere/${HOOK}`))).toBe(404);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), '/_activation/webhook/alpha/our_own_hook'))).toBe(404);
+        expect(h.writes).toEqual([]);
+    });
+
+    it('CONTROL — one holder: the bare address answers as before, and takes its row naming no package over (D8)', async () => {
+        const h = bootWith([A], [{ package_id: null, active: true }]);
+        const res = await flip(h, TENANT_ADMIN(), `/_activation/webhook/${HOOK}`);
+        expect(statusOf(res)).toBe(200);
+        expect(res.response?.body?.data).toEqual({ type: 'webhook', name: HOOK, enabled: false });
+        expect(ledger(h)).toEqual([[A, false]]);
+    });
+
+    it('CONTROL — one holder: its namespace address writes the same row', async () => {
+        const h = bootWith([A], [{ package_id: null, active: true }]);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/webhook/alpha/${HOOK}`))).toBe(200);
+        expect(ledger(h)).toEqual([[A, false]]);
+    });
+
+    it('the namespace address is the webhook\'s alone: any other type with four segments is the shape 400', async () => {
+        const h = bootWith([A]);
+        expect(statusOf(await flip(h, TENANT_ADMIN(), `/_activation/sharing_rule/alpha/${HOOK}`))).toBe(400);
+        expect(h.writes).toEqual([]);
+    });
+});
+
 // [ADR-0142 D1] A DECLARED ownership queue is switched through the same door and
 // the same ledger: `:type` `queue`, the name resolved by the `ownership-queue`
 // service's `declaredQueueNamed`, which answers a switched-off queue too so the

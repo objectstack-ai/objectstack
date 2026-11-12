@@ -99,9 +99,11 @@ import { peelStoredEnvelope } from './stored-envelope.js';
  * then every namespace-scoped type (#32151, #31697; see "Which types" above):
  * `agent`, `skill`, the object-less `action`, and `email_template` (#31699,
  * ADR-0150 child B), which joins in the same change that adds it to
- * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162).
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`; then `permission` (#32162); then
+ * `webhook` (#31699 PR 2), so a host with no registry lists each package's
+ * declaration of one name.
  */
-export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission']);
+export const PACKAGE_SLOTTED_STORE_TYPES: ReadonlySet<string> = new Set(['api', 'agent', 'skill', 'action', 'email_template', 'permission', 'webhook']);
 
 /** The provenance sentinel a rehydrated row carries in place of a package. */
 const OVERLAY_SENTINEL = 'sys_metadata';

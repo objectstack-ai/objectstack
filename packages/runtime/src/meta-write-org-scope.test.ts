@@ -809,13 +809,13 @@ describe('#10503 · ADR-0131 D6 no spelling carries an organization through the 
             // the contract does not map, which is what keeps a plugin-
             // registered kind addressable. The fold is a lookup, never a
             // guesser, and this pins that the boundary did not grow one.
-            expect(canonicalMetaUrlType('webhook')).toBe('webhook');
-            const store = publishedStore('webhook', 'stripe');
+            expect(canonicalMetaUrlType('queue')).toBe('queue');
+            const store = publishedStore('queue', 'stripe');
             const res = responseOf(await makeStack(ACTIVE_ORG, store.service)
-                .dispatcher.handleMetadata('/webhook/stripe/published', ctx(ACTIVE_ORG), 'GET'));
+                .dispatcher.handleMetadata('/queue/stripe/published', ctx(ACTIVE_ORG), 'GET'));
 
             expect(res.status).toBe(200);
-            expect(store.asked).toEqual([['webhook', 'stripe']]);
+            expect(store.asked).toEqual([['queue', 'stripe']]);
         });
     });
 });

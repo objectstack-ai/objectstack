@@ -53,6 +53,21 @@
  * Who may call it is exactly who may call the flow and action doors: the
  * caller's `manage_metadata`, then the ADR-0126 §5 posture rule (inert under
  * `single`, the platform operator under a wall). ⛔ No new authority.
+ *
+ * ## A declared webhook two packages declare (ADR-0150 D3/D4/D5, #31699)
+ *
+ * Two packages of two namespaces may each declare a webhook of one name, and
+ * the dispatcher reads each one's switch from its own row,
+ * `(webhook, package_id, name)`. So the webhook store is addressed by
+ * `(package, name)` ({@link WEBHOOK_LEDGER_ADDRESSING}): switching one
+ * holder's webhook never touches the other's row. The bare
+ * `webhook/:name` answers a name two packages declare `409
+ * RESOURCE_CONFLICT`, naming both (it was a `503`: the reader's refusal
+ * carried no `refusal`), and `POST /security/_activation/webhook/:ns/:name`
+ * addresses the holder in namespace `:ns` ({@link resolveQualifiedWebhook}).
+ * A row naming no package becomes the holder's own when the name has that one
+ * holder (`adoptPackageless`, ADR-0150 D8), as the name-addressed store wrote
+ * it before; under two holders it is neither's and is never written for one.
  */
 
 import { AUDIENCE_ANCHOR_POSITIONS, GUEST_POSITION } from '@objectstack/spec/identity';
@@ -154,6 +169,57 @@ function declaredSharingRuleReaderOf(service: unknown): DeclaredSharingRuleReade
  */
 interface DeclaredWebhookReader {
     declaredWebhookNamed(name: string): Promise<{ webhook: { name: string }; packageId?: string } | null>;
+    /** Every declaration, one per `(package, name)` slot (#31699): read by the qualified door. */
+    list?(): Promise<Array<{ webhook: { name: string }; packageId?: string }>>;
+}
+
+/**
+ * [ADR-0150 D4, #31699] The webhook type's ledger rows are addressed by
+ * `(package, name)`, as flows' are (`flow-activation-store.ts`): the
+ * dispatcher reads each holder's switch from its own row. Only this type and
+ * the stores that already were; every other type's store stays name-addressed.
+ */
+export const WEBHOOK_LEDGER_ADDRESSING = { addressing: 'package-and-name' } as const;
+
+/**
+ * [ADR-0150 D5, #31699] The declared webhook `POST /security/_activation/
+ * webhook/:ns/:name` addresses: among the packages of namespace `namespace`
+ * (the registry's `getNamespaceOwners`), the one that declares `name`. Two —
+ * a shareable namespace's co-owners — are refused naming each
+ * (`ambiguous-in-namespace`); none is refused naming the holders there are
+ * (`not-held-by-qualifier`), or answered `404` when nothing declares the name
+ * or no package declares the namespace. `holders` is how many slots the name
+ * has, for the write's `adoptPackageless`.
+ */
+async function resolveQualifiedWebhook(
+    reader: DeclaredWebhookReader,
+    ql: any,
+    namespace: string,
+    name: string,
+): Promise<
+    | { readonly entry: { name: string; packageId: string }; readonly holders: number }
+    | { readonly refusal: PackageScopedRefusal }
+    | { readonly missing: string }
+> {
+    const owners: string[] = typeof ql?.registry?.getNamespaceOwners === 'function'
+        ? ql.registry.getNamespaceOwners(namespace) ?? []
+        : [];
+    if (owners.length === 0) return { missing: `no installed package declares the namespace '${namespace}'` };
+    const slots = (await reader.list!()).filter((d) => d.webhook.name === name);
+    const holding = slots.flatMap((d) => (d.packageId !== undefined && owners.includes(d.packageId) ? [d.packageId] : []));
+    if (holding.length === 1) return { entry: { name, packageId: holding[0] }, holders: slots.length };
+    if (holding.length === 0 && slots.length === 0) return { missing: `nothing declares it in namespace '${namespace}'` };
+    const candidates: PackageScopedHolder[] = (holding.length > 1 ? holding : slots.map((d) => d.packageId))
+        .map((packageId) => (packageId === undefined ? { kind: 'environment' as const } : { kind: 'package' as const, packageId }));
+    const base = {
+        status: 'refused' as const,
+        reason: holding.length > 1 ? 'ambiguous-in-namespace' as const : 'not-held-by-qualifier' as const,
+        type: 'webhook' as const,
+        name,
+        callerPackageId: holding.length > 1 ? null : owners[0],
+        candidates,
+    };
+    return { refusal: { ...base, message: packageScopedRefusalMessage(base) } };
 }
 
 function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | undefined {
@@ -330,7 +396,8 @@ function ledgerUnregistered(ql: any): boolean {
  *     type is refused with the position wording, which says nothing a refused
  *     caller could not read off the route ledger.
  *  2. **Shape**: `['_activation', type, name]`, `type` a catalog type, and
- *     not an audience anchor (`everyone` / `guest`), which this door refuses.
+ *     not an audience anchor (`everyone` / `guest`), which this door refuses;
+ *     or `['_activation', 'webhook', ns, name]` (#31699).
  *  3. **Body**: {@link readActivationBody}.
  *  4. **Declaration**, through the catalog reader the security plugin binds to
  *     the engine — the one `resolveUserAuthzGrants` reads, so this door and
@@ -358,18 +425,24 @@ export async function handleCatalogActivationWrite(
     if (postureRefusal) return postureRefusal;
 
     // ── 2. shape ────────────────────────────────────────────────────────────
-    if (parts.length !== 3 || !isCatalogActivationType(requestedType) || !parts[2]) {
+    // [ADR-0150 D5, #31699] A declared webhook is also addressed by its
+    // namespace: `['_activation', 'webhook', ns, name]`.
+    const qualified = parts.length === 4 && requestedType === 'webhook' && !!parts[2] && !!parts[3];
+    if (!qualified && (parts.length !== 3 || !isCatalogActivationType(requestedType) || !parts[2])) {
         return {
             handled: true,
             response: deps.error(
                 `Path must be /security/_activation/:type/:name, with :type one of ` +
-                `${Object.keys(CATALOG_ACTIVATION_SUBJECTS).map((t) => `\`${t}\``).join(', ')}`,
+                `${Object.keys(CATALOG_ACTIVATION_SUBJECTS).map((t) => `\`${t}\``).join(', ')}` +
+                (requestedType === 'webhook' ? ', or /security/_activation/webhook/:namespace/:name' : ''),
                 400,
             ),
         };
     }
-    const type: CatalogActivationType = requestedType;
-    const name = parts[2];
+    const type = requestedType as CatalogActivationType;
+    const namespace = qualified ? parts[2] : undefined;
+    const name = qualified ? parts[3] : parts[2];
+    let adoptPackageless = false;
 
     // ── 2b. the audience anchors ────────────────────────────────────────────
     // [ADR-0090 D5/D9] `everyone` is the authenticated baseline every signed-in
@@ -407,7 +480,48 @@ export async function handleCatalogActivationWrite(
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
     let entry: { name: string; packageId?: string } | undefined;
-    if (isDeclarationType(type)) {
+    if (namespace !== undefined) {
+        const reader = declaredWebhookReaderOf(await deps.resolveService(context, 'declaredWebhooks'));
+        if (!reader || typeof reader.list !== 'function') {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of webhook '${name}' — no declared-webhook reader is bound to this ` +
+                    `deployment. Refusing rather than writing an activation row for a name nobody can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        let address: Awaited<ReturnType<typeof resolveQualifiedWebhook>>;
+        try {
+            address = await resolveQualifiedWebhook(reader, ql, namespace, name);
+        } catch (err: any) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Cannot verify the declaration of webhook '${name}' — the declared webhooks could not be read ` +
+                    `(${err?.message ?? String(err)}). Refusing rather than writing an activation row for a name nobody ` +
+                    `can confirm exists.`,
+                    503,
+                    { code: 'SERVICE_UNAVAILABLE' },
+                ),
+            };
+        }
+        if ('refusal' in address) return refusedNameAnswer(deps, address.refusal);
+        if ('missing' in address) {
+            return {
+                handled: true,
+                response: deps.error(
+                    `Webhook '${name}' is not declared in namespace '${namespace}': ${address.missing}. There is nothing ` +
+                    `to switch ${enabled ? 'on' : 'off'}. ${DECLARATION_LOOKUPS.webhook.authoredRemedy}`,
+                    404,
+                ),
+            };
+        }
+        entry = address.entry;
+        adoptPackageless = address.holders === 1;
+    } else if (isDeclarationType(type)) {
         const declaration = DECLARATION_LOOKUPS[type];
         const service = declaration.service ? await deps.resolveService(context, declaration.service) : undefined;
         let pending: Promise<{ name: string; packageId?: string } | null> | undefined;
@@ -444,6 +558,9 @@ export async function handleCatalogActivationWrite(
                 ),
             };
         }
+        // [ADR-0150 D8] A bare name resolves to a package only while that
+        // package is its one holder: its row naming no package is its own.
+        adoptPackageless = type === 'webhook' && entry?.packageId !== undefined;
         if (!entry) {
             const noun = declaration.noun.charAt(0).toUpperCase() + declaration.noun.slice(1);
             return {
@@ -518,13 +635,13 @@ export async function handleCatalogActivationWrite(
         // type and name, never by package. The write runs for the caller,
         // elevated, so the row and its audit row name the administrator who
         // switched the item (`activationWriteContext`).
-        await new ObjectStoreMetadataActivationStore(ql, type).setActive(
+        await new ObjectStoreMetadataActivationStore(ql, type, type === 'webhook' ? WEBHOOK_LEDGER_ADDRESSING : undefined).setActive(
             {
                 name: entry.name,
                 ...(entry.packageId !== undefined ? { packageId: entry.packageId } : {}),
                 active: enabled,
             },
-            { context: activationWriteContext(context) },
+            { context: activationWriteContext(context), ...(adoptPackageless ? { adoptPackageless } : {}) },
         );
     } catch (err: unknown) {
         // A failed write must never read as a successful flip, and its code and
@@ -535,5 +652,13 @@ export async function handleCatalogActivationWrite(
         // declares no status is a store failure, 503 SERVICE_UNAVAILABLE.
         return { handled: true, response: deps.errorFromThrown(err, 503) };
     }
-    return { handled: true, response: deps.success({ type, name: entry.name, enabled }) };
+    return {
+        handled: true,
+        response: deps.success({
+            type,
+            name: entry.name,
+            ...(namespace !== undefined ? { packageId: entry.packageId } : {}),
+            enabled,
+        }),
+    };
 }

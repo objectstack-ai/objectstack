@@ -49,8 +49,8 @@ const P = 'com.acme.caller';
 
 /** The nine types this card wires, as the registry spells them. */
 const E8_TYPES = ['app', 'page', 'dashboard', 'report', 'book', 'analytics_cube', 'tool', 'skill', 'agent'] as const;
-/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072) and `permission` (#32162). */
-const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission'] as const;
+/** The types wired since, each by its own card: `api` (#32069), the email template (#31699), the picklist's bare read (#32070), `mapping` (#32071), `dataset` (#32072), `permission` (#32162) and `webhook` (#31699 PR 2). */
+const WIRED_SINCE = ['api', 'email_template', 'picklist', 'mapping', 'dataset', 'permission', 'webhook'] as const;
 /** Of them, the ones phase 1's one-holder refusal does not cover: two package holders can exist today. */
 const UNCOVERED = E8_TYPES.filter((t) => !(BARE_NAME_REGISTRY_TYPES as readonly string[]).includes(t));
 
@@ -300,6 +300,21 @@ describe('email_template joins the readers (ADR-0150 D9, child B #31699): the by
   it('CONTROL — the environment\'s own template is served to a caller with no package', async () => {
     tpl('local', 'en-US');
     expect(labelOf((await protocol.getMetaItem({ type: 'email_template', name: 'local' }))?.item)).toBe('env en-US');
+  });
+});
+
+describe('webhook joins the readers (ADR-0150 D9, #31699 PR 2): `/meta/webhook/NAME`', () => {
+  it('[FROM first-registered TO 409] a caller with no package is refused a name two packages ship, naming both', async () => {
+    ship('webhook', 'task_changed', A);
+    ship('webhook', 'task_changed', B);
+    await expectRefusal(() => protocol.getMetaItem({ type: 'webhook', name: 'task_changed' }), 'ambiguous-in-environment', [A, B]);
+    await expectRefusal(() => facade.get('webhook', 'task_changed'), 'ambiguous-in-environment', [A, B]);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'task_changed', packageId: B }))?.item)).toBe('beta webhook');
+  });
+
+  it('CONTROL — one holder is served to a caller with no package, as before', async () => {
+    ship('webhook', 'solo', A);
+    expect(labelOf((await protocol.getMetaItem({ type: 'webhook', name: 'solo' }))?.item)).toBe('alpha webhook');
   });
 });
 

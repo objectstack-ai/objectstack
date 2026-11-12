@@ -588,7 +588,9 @@ export class AutoEnqueuer {
     private projectDeclared(d: DeclaredWebhook): CachedSubscription | null {
         const wh = d.webhook;
         const sub = this.parseRow({
-            id: declaredWebhookRefId(wh.name),
+            // [ADR-0150 D5, #31699] One subscription per slot: `declared:PKG/NAME`
+            // for a package's declaration, `declared:NAME` for the environment's.
+            id: declaredWebhookRefId(wh.name, d.packageId),
             name: wh.name,
             object_name: wh.object ?? null,
             triggers: wh.triggers ?? [],

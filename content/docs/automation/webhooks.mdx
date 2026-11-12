@@ -91,12 +91,16 @@ A webhook reaches the dispatcher one of two ways:
   stored. A declared webhook is read-only: switch it on or off for the
   deployment with
   `POST /api/v1/security/_activation/webhook/:name` and body
-  `{ "enabled": true | false }`, which writes one `sys_metadata_activation` row
-  of type `webhook` and overrides the declared `isActive` in either direction
+  `{ "enabled": true | false }`, or, when packages of two namespaces each
+  declare the name, `POST /api/v1/security/_activation/webhook/:ns/:name`
+  (the bare address then answers `409` naming both). It writes that holder's
+  own `sys_metadata_activation` row of type `webhook` and overrides the
+  declared `isActive` in either direction
   (ADR-0131 D6, regime C — the door, its authority tiers and its refusals are
   the ones the declared-sharing-rule switch uses). To change one, author a copy
   under a new name as a `sys_webhook` row and switch the declared one off.
-  Deliveries of a declared webhook carry `ref_id = declared:<name>`.
+  Deliveries of a declared webhook carry `ref_id = declared:<package>/<name>`,
+  or `declared:<name>` for one the environment declares (ADR-0150).
 - **Authored by an organization** — a `sys_webhook` row (§3.1), switched by its
   own `active` field.
 

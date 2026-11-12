@@ -64,8 +64,15 @@
  *
  * ## A declared webhook's deliveries (ADR-0131 D2/D6)
  * A declared webhook has no `sys_webhook` row: its deliveries carry
- * `ref_id = declared:<name>` (`declaredWebhookRefId`), and the guard asks the
- * same questions of the declaration, through the reader the dispatcher uses.
+ * `ref_id = declared:<package>/<name>`, or `declared:<name>` for the
+ * environment's own (`declaredWebhookRefId`), and the guard asks the same
+ * questions of the declaration, through the reader the dispatcher uses. A
+ * `ref_id` naming a package is judged by exactly that package's declaration
+ * (ADR-0150 D5), never another holder's. One naming no package — the
+ * environment's, or a delivery written before the package coordinate, the
+ * 18.x ceremony's re-source among them — is judged by the declaration a
+ * caller with no package resolves (D3): with one holder exactly as before;
+ * with two it is refused naming both, and sent to neither.
  * Not declared any more is case 1, switched off (the activation ledger, or a
  * declared `isActive: false` no ledger row overrides) is case 2. Case 3 cannot
  * arise: the signing key is code, held with the declaration. A delivery whose
@@ -77,7 +84,8 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import {
-    declaredWebhookNameOfRefId,
+    DeclaredWebhookAmbiguousError,
+    declaredWebhookAddressOfRefId,
     type DeclaredWebhookReader,
 } from './declared-webhooks.js';
 import {
@@ -120,8 +128,8 @@ export function createWebhookRedeliverGuard(
     return async (row) => {
         if (row.source !== 'webhook') return undefined;
 
-        const declaredName = declaredWebhookNameOfRefId(row.refId);
-        if (declaredName !== undefined) return judgeDeclared(declared, declaredName);
+        const address = declaredWebhookAddressOfRefId(row.refId);
+        if (address !== undefined) return judgeDeclared(declared, address);
 
         const subscription = (await engine.findOne(
             subscriptionsObject,
@@ -189,13 +197,30 @@ export function createWebhookRedeliverGuard(
 /**
  * The guard's answer for a delivery a declared webhook produced (see the module
  * doc). A lookup that throws propagates: "we could not check" never reads as
- * "allowed".
+ * "allowed". A delivery naming no package of a name two packages declare is
+ * refused naming both (ADR-0150 D3): it belongs to one of them, and nothing
+ * says which.
  */
 async function judgeDeclared(
     declared: DeclaredWebhookReader | undefined,
-    name: string,
+    address: { packageId?: string; name: string },
 ): Promise<string | undefined> {
-    const declaration = declared ? await declared.declaredWebhookNamed(name) : null;
+    const { name } = address;
+    let declaration;
+    try {
+        declaration = !declared
+            ? null
+            : address.packageId !== undefined
+                ? await declared.declaredWebhookAt(address.packageId, name)
+                : await declared.declaredWebhookNamed(name);
+    } catch (err) {
+        if (!(err instanceof DeclaredWebhookAmbiguousError)) throw err;
+        return (
+            `this delivery of declared webhook '${name}' names no package, and the name is declared by more than one: `
+            + `${err.message} It is refused rather than sent to a holder picked for it. New events are delivered per `
+            + 'package, each under its own reference.'
+        );
+    }
     if (!declaration) {
         return (
             `the declared webhook '${name}' this delivery belongs to is no longer declared by the application, so `

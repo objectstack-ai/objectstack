@@ -33,35 +33,55 @@
  * applied, a malformed item skipped with one warning per name per process,
  * never a crashed refresh.
  *
- * ## One declaration per name, by `(package, name)` (ADR-0150 D3/D4)
+ * ## One declaration per `(package, name)` slot (ADR-0150 D3/D4/D5, #31699)
  *
- * A webhook is addressed by `(package, name)`. Which declaration a name
- * serves is answered by the ONE package-scoped resolver
- * (`resolvePackageScopedName`, `@objectstack/objectql`), never by list order:
- * every reader here (the dispatcher, the redelivery veto, the activation door,
- * the name guard) is context-free, so it asks as a caller with no package —
- * the environment's own item, else the unique package holder, else a refusal
- * naming every candidate. A refused name is not dispatched (reported once per
- * name per process), and {@link DeclaredWebhookReader.declaredWebhookNamed}
- * throws {@link DeclaredWebhookAmbiguousError} for it, so no door reads "not
- * declared" for a name two packages declare. While phase 1's one-holder
- * refusal stands (`webhook` is one of its types) no two packages hold a name,
- * so this answers every name as before. Items the registry does not hold (the
- * metadata service's, on a host whose registry holds no webhook) have no
- * package coordinate to resolve: one item per name serves, and a name listed
- * twice is refused the same way, never first-picked.
+ * A webhook is addressed by `(package, name)`, and two packages of two
+ * namespaces may each declare one name (`webhook` is one of
+ * `NAMESPACE_SCOPED_BARE_NAME_TYPES`). {@link DeclaredWebhookReader.list}
+ * answers one entry per SLOT: each package holder's own declaration (the
+ * registry's `getPackageScopedItem`, its overlay included), and the
+ * environment's own (`getEnvironmentScopedItem`). The dispatcher subscribes
+ * each slot under its own id, `declared:PKG/NAME` for a package's and
+ * `declared:NAME` for the environment's ({@link declaredWebhookRefId}), so
+ * two holders of one name are two webhooks, each with its own URL, secret and
+ * switch, and a delivery's `ref_id` names the slot that produced it.
+ *
+ * A by-name read that names no package
+ * ({@link DeclaredWebhookReader.declaredWebhookNamed}: the activation door's
+ * bare address, the name guard, a delivery made before the package
+ * coordinate) asks the ONE package-scoped resolver
+ * (`resolvePackageScopedName`, `@objectstack/objectql`) as a caller with no
+ * package: the environment's own item, else the unique package holder, else
+ * {@link DeclaredWebhookAmbiguousError} naming every candidate, never the
+ * first listed. {@link DeclaredWebhookReader.declaredWebhookAt} reads one
+ * slot exactly. Items the registry does not hold (the metadata service's, on
+ * a host whose registry holds no webhook) are slotted by their `_packageId`:
+ * each package's item of a name is its slot, and a name listed twice for one
+ * holder, or for the environment beside a package, is refused the same way,
+ * never first-picked.
  *
  * ## The switch: regime C (ADR-0131 D6)
  *
  * A declared webhook is read-only. It is switched on or off for the deployment
  * by one `sys_metadata_activation` row of type {@link WEBHOOK_ACTIVATION_TYPE},
  * written through the activation door (`POST /api/v1/security/_activation/
- * webhook/:name`), and changed by a clone under a new name — an organization's
- * own `sys_webhook` row. A ledger row overrides the declared `isActive` in both
- * directions, so a webhook shipped inactive is activated by a row with
- * `active: true`. No row means the declared default. The read follows the
- * sharing-rule reader's rules: a composition with no ledger object issues no
- * read, and a read that fails switches nothing for this pass.
+ * webhook/:name`, or `webhook/:ns/:name` for one namespace's), and changed by
+ * a clone under a new name — an organization's own `sys_webhook` row. A
+ * ledger row overrides the declared `isActive` in both directions, so a
+ * webhook shipped inactive is activated by a row with `active: true`. No row
+ * means the declared default. The read follows the sharing-rule reader's
+ * rules: a composition with no ledger object issues no read, and a read that
+ * fails switches nothing for this pass.
+ *
+ * Each slot's switch is its OWN row, `(package_id, name)` (ADR-0150 D4; the
+ * environment's row names no package). A slot with no row of its own reads
+ * the name's other rows, those naming no package (when the environment does
+ * not hold the name) or a package that holds no slot of it any more, as the
+ * flow engine reads them ({@link webhookSlotSwitch}): while the name has one
+ * slot they are its switch (D8: the row a name-keyed reader wrote before;
+ * the boot backfill binds a package-less one); under two or more slots they
+ * are no slot's own, so a row switched off keeps every such slot off and a
+ * row switched on turns none on (epic red line 1), said once per name.
  *
  * ## Every posture: deployment-wide
  *
@@ -123,16 +143,32 @@ export const WEBHOOK_ACTIVATION_TYPE = 'webhook';
  */
 export const DECLARED_WEBHOOK_REF_PREFIX = 'declared:';
 
-/** The subscription id (and delivery `ref_id`) of the declared webhook `name`. */
-export function declaredWebhookRefId(name: string): string {
-    return `${DECLARED_WEBHOOK_REF_PREFIX}${name}`;
+/**
+ * The subscription id (and delivery `ref_id`) of a declared webhook slot
+ * (ADR-0150 D5, #31699): `declared:PKG/NAME` for package `packageId`'s
+ * declaration, `declared:NAME` for the environment's own. Neither a webhook
+ * name (`SnakeCaseIdentifierSchema`) nor a package id (`MANIFEST_ID_PATTERN`)
+ * can hold a `/`, so the first one splits the two.
+ */
+export function declaredWebhookRefId(name: string, packageId?: string): string {
+    return `${DECLARED_WEBHOOK_REF_PREFIX}${packageId ? `${packageId}/` : ''}${name}`;
 }
 
-/** The declared webhook name a delivery `ref_id` addresses, or `undefined` for a row's. */
-export function declaredWebhookNameOfRefId(refId: string): string | undefined {
-    return refId.startsWith(DECLARED_WEBHOOK_REF_PREFIX)
-        ? refId.slice(DECLARED_WEBHOOK_REF_PREFIX.length) || undefined
-        : undefined;
+/**
+ * The declaration a delivery `ref_id` addresses, or `undefined` for a row's:
+ * `{ packageId, name }` for `declared:PKG/NAME`, and `{ name }` for
+ * `declared:NAME` — the environment's own declaration, or a delivery written
+ * before the package coordinate (the 18.x ceremony's re-source among them),
+ * which a reader resolves as a caller with no package. Split at the first
+ * `/`: a malformed tail (`declared:/x`, `declared:a/b/c`) keeps what it says,
+ * so it addresses no slot and reads as no longer declared.
+ */
+export function declaredWebhookAddressOfRefId(refId: string): { packageId?: string; name: string } | undefined {
+    if (!refId.startsWith(DECLARED_WEBHOOK_REF_PREFIX)) return undefined;
+    const rest = refId.slice(DECLARED_WEBHOOK_REF_PREFIX.length);
+    if (!rest) return undefined;
+    const slash = rest.indexOf('/');
+    return slash < 0 ? { name: rest } : { packageId: rest.slice(0, slash), name: rest.slice(slash + 1) };
 }
 
 interface Logger {
@@ -155,14 +191,21 @@ export interface DeclaredWebhook {
  * webhooks exist or which are switched on.
  */
 export interface DeclaredWebhookReader {
-    /** Every valid declaration, each with its switch resolved. */
+    /** Every valid declaration, one per `(package, name)` slot, each with its switch resolved. */
     list(): Promise<DeclaredWebhook[]>;
     /**
-     * The declaration named `name`, switched on or off, or `null` when nothing
-     * declares it. Throws {@link DeclaredWebhookAmbiguousError} when the name
-     * resolves to no single declaration (ADR-0150 D3).
+     * The declaration named `name` for a caller with no package, switched on
+     * or off, or `null` when nothing declares it. Throws
+     * {@link DeclaredWebhookAmbiguousError} when the name resolves to no single
+     * declaration (ADR-0150 D3).
      */
     declaredWebhookNamed(name: string): Promise<DeclaredWebhook | null>;
+    /**
+     * [ADR-0150 D5] Exactly the declaration package `packageId` holds under
+     * `name` (`null`: the environment's own), switched on or off, or `null`
+     * when that holder declares none. Never another holder's.
+     */
+    declaredWebhookAt(packageId: string | null, name: string): Promise<DeclaredWebhook | null>;
 }
 
 /**
@@ -179,11 +222,14 @@ export class DeclaredWebhookAmbiguousError extends Error {
     readonly webhook: string;
     /** Every holder of the name, in the resolver's order. */
     readonly candidates: readonly PackageScopedHolder[];
+    /** The resolver's refusal, which a door answers `409` with (#31699: was a `503`). */
+    readonly refusal: PackageScopedRefusal;
     constructor(refusal: PackageScopedRefusal) {
         super(refusal.message);
         this.name = 'DeclaredWebhookAmbiguousError';
         this.webhook = refusal.name;
         this.candidates = refusal.candidates;
+        this.refusal = refusal;
     }
 }
 
@@ -205,44 +251,94 @@ function packageScopedRegistryOf(engine: unknown): PackageScopedRegistry | undef
         : undefined;
 }
 
-/**
- * Which raw declaration serves `name` (ADR-0150 D3, a caller with no
- * package): the resolver's answer when the registry holds the name; else the
- * one listed item; else a refusal naming every listed holder.
- */
-function chooseDeclaration(
-    name: string,
-    listed: readonly unknown[],
-    registry: PackageScopedRegistry | undefined,
-): { item: unknown } | { refusal: PackageScopedRefusal } {
-    if (registry) {
-        const resolved = resolvePackageScopedName(registry, { type: 'webhook', name });
-        if (resolved.status === 'resolved') return { item: resolved.item };
-        if (resolved.status === 'refused') return { refusal: resolved };
-        // not-found: the listed items are not the registry's (the metadata service's).
-    }
-    if (listed.length === 1) return { item: listed[0] };
-    const candidates: PackageScopedHolder[] = [];
-    const seen = new Set<string>();
-    for (const item of listed) {
-        const pkg = (item as { _packageId?: unknown })?._packageId;
-        const holder: PackageScopedHolder = typeof pkg === 'string' && pkg !== '' && pkg !== 'sys_metadata'
-            ? { kind: 'package', packageId: pkg }
-            : { kind: 'environment' };
-        const key = holder.kind === 'package' ? holder.packageId : '';
-        if (seen.has(key)) continue;
-        seen.add(key);
-        candidates.push(holder);
-    }
+/** One `(package, name)` slot of a declared name: its raw item and its holder (`null`: the environment). */
+interface DeclaredSlot {
+    readonly raw: unknown;
+    readonly packageId: string | null;
+}
+
+/** The holder a listed item names: its `_packageId`, or `null` (none, `''`, or the `sys_metadata` overlay sentinel). */
+function listedHolderOf(item: unknown): string | null {
+    const pkg = (item as { _packageId?: unknown })?._packageId;
+    return typeof pkg === 'string' && pkg !== '' && pkg !== 'sys_metadata' ? pkg : null;
+}
+
+/** The refusal of a name no single listed declaration answers, naming every holder. */
+function listedRefusal(name: string, holders: ReadonlyArray<string | null>): PackageScopedRefusal {
     const refusal = {
         status: 'refused' as const,
         reason: 'ambiguous-in-environment' as const,
         type: 'webhook' as const,
         name,
         callerPackageId: null,
-        candidates,
+        candidates: holders.map((h): PackageScopedHolder => (h === null ? { kind: 'environment' } : { kind: 'package', packageId: h })),
     };
-    return { refusal: { ...refusal, message: packageScopedRefusalMessage(refusal) } };
+    return { ...refusal, message: packageScopedRefusalMessage(refusal) };
+}
+
+/**
+ * The slots of `name` (module doc), and the one a caller with no package is
+ * served (ADR-0150 D3): `{ packageId }` (`null`: the environment's), or the
+ * refusal naming every candidate. The registry answers when it holds the
+ * name; else the listed items do, one slot per holder, and a holder listed
+ * twice, or the environment beside a package, refuses the whole name.
+ */
+function slotsOf(
+    name: string,
+    listed: readonly unknown[],
+    registry: PackageScopedRegistry | undefined,
+): { slots: DeclaredSlot[]; bare?: { packageId: string | null } | { refusal: PackageScopedRefusal } } {
+    if (registry) {
+        const env = registry.getEnvironmentScopedItem('webhook', name);
+        const slots: DeclaredSlot[] = env !== undefined ? [{ raw: env, packageId: null }] : [];
+        for (const packageId of registry.packageScopedHoldersOf('webhook', name)) {
+            const raw = registry.getPackageScopedItem('webhook', name, packageId);
+            if (raw !== undefined) slots.push({ raw, packageId });
+        }
+        if (slots.length > 0) {
+            const resolved = resolvePackageScopedName(registry, { type: 'webhook', name });
+            if (resolved.status === 'refused') return { slots, bare: { refusal: resolved } };
+            if (resolved.status === 'not-found') return { slots };
+            return { slots, bare: { packageId: resolved.holder.kind === 'package' ? resolved.holder.packageId : null } };
+        }
+        // Not the registry's (the metadata service's items): slotted as listed.
+    }
+    const byHolder = new Map<string | null, unknown[]>();
+    for (const item of listed) {
+        const holder = listedHolderOf(item);
+        byHolder.set(holder, [...(byHolder.get(holder) ?? []), item]);
+    }
+    const holders = [...byHolder.keys()];
+    if ([...byHolder.values()].some((items) => items.length > 1) || (byHolder.has(null) && holders.length > 1)) {
+        return { slots: [], bare: { refusal: listedRefusal(name, holders) } };
+    }
+    const slots = [...byHolder].map(([packageId, [raw]]) => ({ raw, packageId }));
+    return { slots, bare: slots.length === 1 ? { packageId: slots[0].packageId } : { refusal: listedRefusal(name, holders) } };
+}
+
+/**
+ * [ADR-0131 D6, ADR-0150 D4/D8] The switch of slot `slot` of a name whose
+ * slots are `slots` (`null`: the environment's), from the name's ledger rows
+ * by package (`null`: a row naming no package): `undefined` is the declared
+ * `isActive`. The slot's own row answers. With none, the rows that are no
+ * slot's own (naming no package while the environment declares nothing of the
+ * name, or naming a package that holds no slot of it) answer while the name
+ * has one slot, as the name-keyed reader read them (a row switched off by any
+ * of them is off); under two or more slots a row switched off keeps the slot
+ * off and one switched on turns nothing on (epic red line 1).
+ */
+export function webhookSlotSwitch(
+    rows: ReadonlyMap<string | null, boolean> | undefined,
+    slot: string | null,
+    slots: ReadonlyArray<string | null>,
+): boolean | undefined {
+    if (!rows) return undefined;
+    const own = rows.get(slot);
+    if (own !== undefined) return own;
+    const unowned = [...rows].filter(([packageId]) => !slots.includes(packageId)).map(([, active]) => active);
+    if (unowned.length === 0) return undefined;
+    if (slots.length <= 1) return unowned.every(Boolean);
+    return unowned.every(Boolean) ? undefined : false;
 }
 
 /**
@@ -285,15 +381,22 @@ export function readDeclaredWebhookNames(engine: unknown, metadataService: unkno
 
 /**
  * The reader the plugin binds: the declarations from
- * {@link readDeclaredWebhookItems}, the switch from the activation ledger.
+ * {@link readDeclaredWebhookItems}, one per slot, the switch from the
+ * activation ledger.
  */
 export class DeclaredWebhookSource implements DeclaredWebhookReader {
     /** Names already reported as failing validation — said once per process. */
     private readonly invalidReported = new Set<string>();
-    /** Names already reported as resolving to no single declaration — said once per process. */
+    /** Names already reported as resolving to no slot at all — said once per process. */
     private readonly refusalReported = new Set<string>();
-    /** The names the last read refused (ADR-0150 D3), each with its refusal. */
+    /** Names already reported as switched by a row no slot owns, under two slots — said once per process. */
+    private readonly unownedReported = new Set<string>();
+    /** The names the last read refused to a caller with no package (ADR-0150 D3), each with its refusal. */
     private refusals = new Map<string, PackageScopedRefusal>();
+    /** Per name, the slot a caller with no package is served: its package, `null` for the environment's. */
+    private bare = new Map<string, string | null>();
+    /** Per name, the holder of every slot the last read found (`null`: the environment). */
+    private slots = new Map<string, Array<string | null>>();
 
     constructor(
         private readonly engine: unknown,
@@ -304,11 +407,13 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
     async list(): Promise<DeclaredWebhook[]> {
         const parsed = this.parseDeclared();
         if (parsed.length === 0) return [];
-        const switched = await readWebhookActivation(this.engine, this.logger);
+        const ledger = await readWebhookActivation(this.engine, this.logger);
+        for (const [name, rows] of ledger) this.reportUnownedRows(name, rows);
         return parsed.map(({ webhook, packageId }) => ({
             webhook,
             ...(packageId !== undefined ? { packageId } : {}),
-            active: switched.get(webhook.name) ?? webhook.isActive !== false,
+            active: webhookSlotSwitch(ledger.get(webhook.name), packageId ?? null, this.slots.get(webhook.name) ?? [])
+                ?? webhook.isActive !== false,
         }));
     }
 
@@ -317,75 +422,105 @@ export class DeclaredWebhookSource implements DeclaredWebhookReader {
         const declared = await this.list();
         const refusal = this.refusals.get(name);
         if (refusal) throw new DeclaredWebhookAmbiguousError(refusal);
-        return declared.find((d) => d.webhook.name === name) ?? null;
+        if (!this.bare.has(name)) return null;
+        const holder = this.bare.get(name);
+        return declared.find((d) => d.webhook.name === name && (d.packageId ?? null) === holder) ?? null;
+    }
+
+    async declaredWebhookAt(packageId: string | null, name: string): Promise<DeclaredWebhook | null> {
+        if (!name) return null;
+        const declared = await this.list();
+        return declared.find((d) => d.webhook.name === name && (d.packageId ?? null) === packageId) ?? null;
+    }
+
+    /** A row no slot owns, under two or more slots (module doc, "The switch"): said once per name. */
+    private reportUnownedRows(name: string, rows: ReadonlyMap<string | null, boolean>): void {
+        const slots = this.slots.get(name) ?? [];
+        const unowned = [...rows.keys()].filter((packageId) => !slots.includes(packageId));
+        if (slots.length < 2 || unowned.length === 0 || this.unownedReported.has(name)) return;
+        this.unownedReported.add(name);
+        const rowsNamed = unowned.map((p) => (p === null ? 'naming no package' : `naming package "${p}"`)).join(', ');
+        const holders = slots.map((p) => (p === null ? 'the environment' : `"${p}"`)).join(', ');
+        this.logger?.warn?.(
+            `[webhook] declared webhook '${name}' has an activation row that is no holder's own (${rowsNamed}), and ` +
+                `${slots.length} holders declare it (${holders}). Such a row switched the name's one holder; under two ` +
+                'nothing says which, so a row switched off keeps every holder with no row of its own off, and one ' +
+                'switched on turns none on (ADR-0150 D4). Switch each holder through its own address: POST ' +
+                `/api/v1/security/_activation/webhook/<namespace>/${name}.`,
+            { name, holders: slots, rows: unowned },
+        );
     }
 
     private parseDeclared(): Array<{ webhook: WebhookParsed; packageId?: string }> {
         const out: Array<{ webhook: WebhookParsed; packageId?: string }> = [];
-        const raws = readDeclaredWebhookItems(this.engine, this.metadataService);
         const listedByName = new Map<string, unknown[]>();
-        for (const raw of raws) {
+        const nameless: unknown[] = [];
+        for (const raw of readDeclaredWebhookItems(this.engine, this.metadataService)) {
             const name = (raw as { name?: unknown })?.name;
-            if (typeof name !== 'string' || name === '') continue;
-            const listed = listedByName.get(name);
-            if (listed) listed.push(raw);
-            else listedByName.set(name, [raw]);
+            if (typeof name !== 'string' || name === '') nameless.push(raw);
+            else listedByName.set(name, [...(listedByName.get(name) ?? []), raw]);
         }
         const registry = packageScopedRegistryOf(this.engine);
         const refusals = new Map<string, PackageScopedRefusal>();
-        const answered = new Set<string>();
-        for (const listedRaw of raws) {
-            let raw = listedRaw;
-            const listedName = (listedRaw as { name?: unknown })?.name;
-            // A name serves ONE declaration (ADR-0150 D3): asked once, at its
-            // first listing; a nameless item goes on to fail validation below.
-            if (typeof listedName === 'string' && listedName !== '') {
-                if (answered.has(listedName)) continue;
-                answered.add(listedName);
-                const chosen = chooseDeclaration(listedName, listedByName.get(listedName) ?? [listedRaw], registry);
-                if ('refusal' in chosen) {
-                    refusals.set(listedName, chosen.refusal);
-                    if (!this.refusalReported.has(listedName)) {
-                        this.refusalReported.add(listedName);
-                        this.logger?.warn?.(
-                            `[webhook] declared webhook '${listedName}' is not dispatched: ${chosen.refusal.message}`,
-                            { name: listedName, candidates: chosen.refusal.candidates },
-                        );
-                    }
-                    continue;
+        const bare = new Map<string, string | null>();
+        const slotsByName = new Map<string, Array<string | null>>();
+        for (const [name, listed] of listedByName) {
+            const { slots, bare: served } = slotsOf(name, listed, registry);
+            slotsByName.set(name, slots.map((s) => s.packageId));
+            if (served && 'refusal' in served) {
+                refusals.set(name, served.refusal);
+                if (slots.length === 0 && !this.refusalReported.has(name)) {
+                    this.refusalReported.add(name);
+                    this.logger?.warn?.(
+                        `[webhook] declared webhook '${name}' is not dispatched: ${served.refusal.message}`,
+                        { name, candidates: served.refusal.candidates },
+                    );
                 }
-                raw = chosen.item;
+            } else if (served) {
+                bare.set(name, served.packageId);
             }
-            let webhook: WebhookParsed;
-            try {
-                webhook = WebhookSchema.parse(raw);
-            } catch (err: any) {
-                const name = String((raw as { name?: unknown })?.name ?? '');
-                if (!this.invalidReported.has(name)) {
-                    this.invalidReported.add(name);
-                    this.logger?.warn?.('[webhook] declared webhook failed validation — not dispatched', {
-                        name: name || undefined,
-                        error: err?.message ?? String(err),
-                    });
-                }
-                continue;
+            for (const { raw, packageId } of slots) {
+                const webhook = this.parseItem(raw);
+                if (webhook) out.push({ webhook, ...(packageId !== null ? { packageId } : {}) });
             }
-            const pkg = (raw as { _packageId?: unknown })._packageId;
-            out.push({ webhook, ...(typeof pkg === 'string' && pkg ? { packageId: pkg } : {}) });
         }
+        for (const raw of nameless) this.parseItem(raw);
         this.refusals = refusals;
+        this.bare = bare;
+        this.slots = slotsByName;
         return out;
+    }
+
+    /** One raw item through `WebhookSchema`, or `undefined` with one warning per name per process. */
+    private parseItem(raw: unknown): WebhookParsed | undefined {
+        try {
+            return WebhookSchema.parse(raw);
+        } catch (err: any) {
+            const name = String((raw as { name?: unknown })?.name ?? '');
+            if (!this.invalidReported.has(name)) {
+                this.invalidReported.add(name);
+                this.logger?.warn?.('[webhook] declared webhook failed validation — not dispatched', {
+                    name: name || undefined,
+                    error: err?.message ?? String(err),
+                });
+            }
+            return undefined;
+        }
     }
 }
 
 /**
- * [ADR-0131 D6 regime C] The declared webhooks the activation ledger switches,
- * by name: `true` on, `false` off; a name with no row is absent. Read as the
- * sharing-rule reader reads the same ledger: a composition with no ledger object
- * issues no read, and a read that fails switches nothing for this pass.
+ * [ADR-0131 D6 regime C, ADR-0150 D4] The declared webhooks the activation
+ * ledger switches: per name, per the package each row names (`null`: none),
+ * `true` on, `false` off; a name with no row is absent. Read as the
+ * sharing-rule reader reads the same ledger: a composition with no ledger
+ * object issues no read, and a read that fails switches nothing for this pass.
  */
-export async function readWebhookActivation(engine: unknown, logger?: Logger): Promise<Map<string, boolean>> {
-    const out = new Map<string, boolean>();
+export async function readWebhookActivation(
+    engine: unknown,
+    logger?: Logger,
+): Promise<Map<string, Map<string | null, boolean>>> {
+    const out = new Map<string, Map<string | null, boolean>>();
     const ql = engine as {
         registry?: { getObject?: (name: string) => unknown };
         find?: (object: string, query: unknown) => Promise<unknown>;
@@ -395,14 +530,18 @@ export async function readWebhookActivation(engine: unknown, logger?: Logger): P
     try {
         const rows = await ql.find(METADATA_ACTIVATION_TABLE, {
             filter: { metadata_type: WEBHOOK_ACTIVATION_TYPE },
-            fields: ['metadata_type', 'name', 'active'],
+            fields: ['metadata_type', 'name', 'package_id', 'active'],
             limit: 100000,
             context: SYSTEM_CTX,
         });
-        for (const row of (Array.isArray(rows) ? rows : []) as Array<{ metadata_type?: unknown; name?: unknown; active?: unknown }>) {
+        type Row = { metadata_type?: unknown; name?: unknown; package_id?: unknown; active?: unknown };
+        for (const row of (Array.isArray(rows) ? rows : []) as Row[]) {
             if (row.metadata_type !== undefined && row.metadata_type !== WEBHOOK_ACTIVATION_TYPE) continue;
             if (typeof row.name !== 'string' || !row.name) continue;
-            out.set(row.name, !(row.active === false || row.active === 0));
+            const packageId = typeof row.package_id === 'string' && row.package_id !== '' ? row.package_id : null;
+            const byPackage = out.get(row.name) ?? new Map<string | null, boolean>();
+            byPackage.set(packageId, !(row.active === false || row.active === 0));
+            out.set(row.name, byPackage);
         }
     } catch (err: any) {
         logger?.warn?.(
@@ -492,9 +631,17 @@ export function bindDeclaredWebhookNameGuard(
             const previous = ctx?.previous as Record<string, unknown> | undefined;
             if (!previous || typeof previous !== 'object' || data.name === previous.name) return;
         }
-        if (await declared.declaredWebhookNamed(data.name)) {
-            throw new DeclaredWebhookNameConflictError(data.name, insert ? 'create' : 'rename');
-        }
+        // [ADR-0150 D3, #31699] A name two packages declare is declared: the
+        // by-name read refuses to pick one of them, and the write is refused
+        // for the name, as for one holder's.
+        const taken = await declared.declaredWebhookNamed(data.name).then(
+            (d) => d !== null,
+            (err: unknown) => {
+                if (err instanceof DeclaredWebhookAmbiguousError) return true;
+                throw err;
+            },
+        );
+        if (taken) throw new DeclaredWebhookNameConflictError(data.name, insert ? 'create' : 'rename');
     };
     const opts = { object, packageId: DECLARED_WEBHOOK_NAME_GUARD_PACKAGE, priority: 100 };
     engine.registerHook('beforeInsert', guard(true), opts);

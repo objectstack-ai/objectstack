@@ -470,9 +470,10 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
   const member = (tag: string, n: string, locale: string) => body('email_template', n, tag, { locale });
   const ofBeta = (decl: Record<string, unknown>) => pkg('com.acme.beta', {}, decl);
 
-  it('the switch holds email_template, and none of this family\'s other three types', () => {
+  it('the switch holds email_template and webhook (#31699 PR 2), and neither flow nor connector', () => {
     expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('email_template');
-    for (const other of ['flow', 'webhook', 'connector'] as const) expect(narrowed(other), other).toBe(false);
+    expect(NAMESPACE_SCOPED_BARE_NAME_TYPES).toContain('webhook');
+    for (const other of ['flow', 'connector'] as const) expect(narrowed(other), other).toBe(false);
   });
 
   it('two packages of two namespaces each install the name after the seal, and each holds its own bundle', async () => {
@@ -623,7 +624,17 @@ describe('the narrowing — an email template holds one name per namespace (ADR-
     });
   });
 
-  it.each(['flow', 'webhook', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
+  it('[#31699 PR 2, FROM 422 TO admitted] a webhook has narrowed: a package of another namespace installs the name; a co-owner of the holder\'s namespace is still refused', async () => {
+    const { register } = await boot();
+    expect(await register(pkg('com.acme.alpha', { webhook: ['shared_webhook'] }))).toBeUndefined();
+    expect(await register(pkg('com.acme.beta', { webhook: ['shared_webhook'] }))).toBeUndefined();
+    expectRefusal(
+      await register(rival('webhook', 'com.acme.alphamod', { webhook: ['shared_webhook'] })),
+      'com.acme.alphamod', { kind: 'package', packageId: 'com.acme.alpha' },
+    );
+  });
+
+  it.each(['flow', 'connector'] as const)('CONTROL — a %s has not narrowed: a package of another namespace is still refused its name', async (other) => {
     const { register } = await boot();
     expect(await register(pkg('com.acme.alpha', { [other]: [`shared_${other}`] }))).toBeUndefined();
     expectRefusal(
