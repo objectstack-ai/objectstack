@@ -1557,7 +1557,7 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
 
   it('`sum` over a `percent` is refused — a rate does not add — and `formula` carries the store-it remedy', () => {
     const [onRate] = refused(withColumns({ field: 'rate', summary: 'sum' }));
-    expect(onRate.hint).toBe('Point "sum" at a numeric field, or aggregate "rate" with one its `percent` type accepts: count, count_distinct, avg, min, max.');
+    expect(onRate.hint).toBe('Point "sum" at a numeric field that adds (not a percent), or aggregate "rate" with one its `percent` type accepts: count, count_distinct, avg, min, max.');
     const [onFormula] = refused(withColumns({ field: 'score', summary: 'avg' }));
     expect(onFormula.hint).toMatch(/^The field is computed on read and stores no value/);
   });
@@ -1625,11 +1625,18 @@ describe('[#32449] a column summary whose function the aggregate door refuses', 
     }
   });
 
+  it('the longest declaration spelling (`multiple: true`) leaves room for ordinary names within 200 characters', () => {
+    const objects = [{ name: 'duly_task', label: 'Task', fields: [{ name: 'opportunity_watchers_list', type: 'lookup', reference: 'duly_person', multiple: true, label: 'W' }] }, OBJECTS[1]];
+    const [f] = refused(validateListViewFieldRefs(stackWith({ data: { provider: 'object', object: 'duly_task' }, columns: [{ field: 'opportunity_watchers_list', summary: 'count_unique' }] }, objects)));
+    expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+    expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+  });
+
   it('`os explain` carries the reasoning, and every verdict fired is one line of at most 200 characters', () => {
     const entry = explainRule(LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);
     expect(entry, 'no `os explain` entry').toBeDefined();
     const text = entry!.paragraphs.join('\n');
-    for (const fact of ['`COLUMN_SUMMARY_AGGREGATION`', '`count_unique` to `count_distinct`', '`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'collation', '`multiple: true`', 'STORED']) {
+    for (const fact of ['`COLUMN_SUMMARY_AGGREGATION`', '`count_unique` to `count_distinct`', '`AGGREGATE_FIELD_TYPE_COMPATIBILITY`', '`400 INVALID_FIELD`', 'boolean and toggle', 'collation', '`multiple: true`', 'STORED', 'fit one page', 'whatever the row count']) {
       expect(text, fact).toContain(fact);
     }
     const mine = fired.filter((x) => x.rule === LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED);

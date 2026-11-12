@@ -349,6 +349,13 @@
  * column's own `field` — the resolution both compilers apply. When the
  * engine's aggregate door refuses the pair it answers `400 INVALID_FIELD`, so
  * the grouped view renders no group and the footer falls back to the page.
+ * An ungrouped view whose matched set fits one page sends neither query: its
+ * footer is computed in the browser (`useColumnSummary`), where such a pair
+ * may still draw a figure (`count_unique` over a multi-select, by value).
+ * That figure lasts only while the set fits one page and the view is not
+ * grouped, which is a property of the row count, not of the declaration, so
+ * the declaration is refused all the same (seat ruling on this card, the
+ * reading the value-provider grid took).
  * {@link LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED}, `error`, judged by the door's
  * own verdict (`aggregateAcceptsDeclaration`, `aggregate-pair-verdict.ts`: the
  * aggregate × field-type table through `isAggregateCompatibleWithFieldType`,
@@ -1350,8 +1357,8 @@ export function validateListViewFieldRefs(
       where,
       path,
       message:
-        `summary ${spelled} over "${field}" (${declaredAs(shape)}) is refused by the aggregate door: the group ` +
-        'header and footer queries answer 400 INVALID_FIELD',
+        `summary ${spelled} over "${field}" (${declaredAs(shape)}) is refused by the aggregate door ` +
+        '(400 INVALID_FIELD)',
       hint: refusedAggregateRemedy(fn, field, shape),
     });
   };

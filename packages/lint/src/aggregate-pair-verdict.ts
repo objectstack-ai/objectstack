@@ -20,10 +20,13 @@
  *     passes `min` / `max`, exactly as they pass the door;
  *   - the DECLARATION half — `isMultiValueField`: a multi-capable type flagged
  *     `multiple: true` is a list stored as JSON, which the per-TYPE table
- *     cannot see. Only `count_distinct` is moved by it (the other value rows
- *     accept no multi-capable type, and `count` compares no value), the same
- *     reading `validate-dataset-measure-aggregates.ts`' `acceptsDeclaration`
- *     gives a dataset measure.
+ *     cannot see. It takes the verdict the row gives the multi-option class,
+ *     derived from the table as the door derives it (`rowAcceptsMultiValue`):
+ *     a row that refuses any multi-option type refuses the declaration too.
+ *     Today that moves `count_distinct` alone (the other value rows accept no
+ *     multi-capable type, and `count` accepts every type), the same reading
+ *     `validate-dataset-measure-aggregates.ts`' `acceptsDeclaration` gives a
+ *     dataset measure.
  *
  * What neither surface judges is the door's own "cannot answer": no declared
  * type, or a type outside `FieldType` (a driver-internal alias). Callers ask
@@ -33,6 +36,7 @@
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
   FieldType,
+  MULTI_OPTION_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
   virtualFieldAggregateRemedy,
@@ -60,10 +64,18 @@ export function isJudgeableAggregateType(type: unknown): type is string {
   return typeof type === 'string' && DECLARED_FIELD_TYPES.has(type);
 }
 
+/** Does the table's `fn` row accept the multi-value class — every multi-option type? The door's own reading. */
+function rowAcceptsMultiValue(fn: string): boolean {
+  for (const type of MULTI_OPTION_TYPES) {
+    if (!isAggregateCompatibleWithFieldType(fn, type)) return false;
+  }
+  return true;
+}
+
 /** May `fn` be applied to a field declared as `shape`? The door's two halves. */
 export function aggregateAcceptsDeclaration(fn: string, shape: AggregatedFieldShape): boolean {
   if (!isAggregateCompatibleWithFieldType(fn, shape.type)) return false;
-  return !(fn === 'count_distinct' && isMultiValueField({ type: shape.type, multiple: shape.multiple === true }));
+  return !(isMultiValueField({ type: shape.type, multiple: shape.multiple === true }) && !rowAcceptsMultiValue(fn));
 }
 
 /** The declaration as the words say it: the type, and the flag when the field carries it. */
@@ -75,6 +87,7 @@ export function declaredAs(shape: AggregatedFieldShape): string {
 function retargetLead(fn: string): string {
   if (fn === 'count_distinct') return 'Count distinct values of a field that stores one scalar value';
   if (fn === 'min' || fn === 'max') return `Point "${fn}" at a numeric, date/time or boolean field`;
+  if (fn === 'sum') return 'Point "sum" at a numeric field that adds (not a percent)';
   return `Point "${fn}" at a numeric field`;
 }
 

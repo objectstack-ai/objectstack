@@ -1104,8 +1104,8 @@ function validateGridAggregations(stack: AnyRec): SortableFieldFinding[] {
           where: `page "${pageName}" · object-grid`,
           path: `${path}.properties.aggregations[${ai}]`,
           message:
-            `"${fn}" over "${field}" (${declaredAs(shape)} on "${objectName}") is refused by the aggregate ` +
-            'door: 400 INVALID_FIELD on the server, a figure the pair cannot mean in the browser',
+            `"${fn}" over "${field}" (${declaredAs(shape)} on "${objectName}") is refused by the aggregate door ` +
+            '(400 INVALID_FIELD on the server)',
           hint: refusedAggregateRemedy(fn, field, shape),
         });
       });

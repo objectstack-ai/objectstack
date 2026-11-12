@@ -2800,8 +2800,9 @@ const SORT_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
 /**
  * [#32449] The table's rows in words — shared by the two authoring surfaces
  * whose declarations reach the engine's `aggregate` door (an `object-grid`'s
- * `aggregations`, a list view's column summaries); held to
- * `AGGREGATE_FIELD_TYPE_COMPATIBILITY` by both rules' tests.
+ * `aggregations`, a list view's column summaries). Written by hand from
+ * `AGGREGATE_FIELD_TYPE_COMPATIBILITY`: the rules' tests check that its key
+ * facts are present, not that its type lists equal the table's.
  */
 const AGGREGATE_PAIR_ROWS =
   'Before that door, the same pair answered a number that depends on the backend: `sum` over a text ' +
@@ -4045,10 +4046,13 @@ const LIST_VIEW_SUMMARY_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'column\'s own `field`. The engine\'s `aggregate` door asks the aggregate × field-type table ' +
       '(`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, `@objectstack/spec/data`) about every pair and refuses one ' +
       'it refuses with `400 INVALID_FIELD`, so the grouped view renders no group and the footer falls ' +
-      'back to the page\'s figure.',
+      'back to the page\'s figure. An ungrouped view whose rows fit one page sends neither query and ' +
+      'computes its footer in the browser, where such a pair can still show a figure (`count_unique` over ' +
+      'a multi-select counts distinct lists); that figure lasts only until the set outgrows the page or ' +
+      'the view is grouped, so the declaration is refused whatever the row count.',
     AGGREGATE_PAIR_ROWS,
     'The fix is a field of a type the function accepts (`summary: { type, field }` aggregates another ' +
-      'field), or a summary the field accepts. A `formula` field stores no value, whatever its ' +
+      'field), or a summary the field accepts: `count`, or a filled / empty count, takes any field. A `formula` field stores no value, whatever its ' +
       '`returnType`, so a total over it has to be STORED as a number field (kept by a hook). Not judged: ' +
       '`none`, `count` and the four filled / empty members, which compare no value; a field that does ' +
       'not resolve (`list-view-field-unknown`); a dotted name; and a field with no declared type or one ' +

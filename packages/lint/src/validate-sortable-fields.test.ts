@@ -1225,6 +1225,16 @@ describe('validateSortableFields — object-grid aggregations over a refused fie
     }
   });
 
+  it('[#32449] the longest declaration spelling (`multiple: true`) leaves room for ordinary names within 200 characters', () => {
+    const stack = {
+      objects: [{ name: 'crm_opportunity_snapshot', fields: { opportunity_watchers_list: { type: 'lookup', label: 'W', reference: 'crm_opportunity', multiple: true } } }],
+      pages: [{ name: 'board', type: 'app', regions: [{ name: 'main', components: [{ type: 'object-grid', properties: { objectName: 'crm_opportunity_snapshot', aggregations: [{ field: 'opportunity_watchers_list', type: 'count_distinct' }] } }] }] }],
+    };
+    const [f] = validateSortableFields(stack).filter((x) => x.rule === GRID_AGGREGATION_FIELD_TYPE_REFUSED);
+    expect(f.message.length, f.message).toBeLessThanOrEqual(200);
+    expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+  });
+
   it('[#32449] a `type` outside the table\'s vocabulary is the schema\'s refusal, not this verdict', () => {
     expect(gridFindings([{ field: 'title', type: 'median' }, { field: 'title', type: ['sum'] }])).toEqual([]);
   });
