@@ -684,18 +684,14 @@ function errorResultFromThrown(err: unknown, request: string, objectName?: strin
   // context on a fault.
   const details = answer.status < 500 ? (err as { details?: unknown } | null | undefined)?.details : undefined;
   const result = codedErrorResult({ ...envelope, ...(details !== undefined ? { details } : {}) });
-  const relay = answer.code === FLOW_FAILED ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
+  // [#32757] Read, never stamped: `FLOW_FAILED` (a flow that RAN and failed)
+  // is the one arm whose `details` are the run's artefacts; `satisfies` keeps
+  // the spelling checked against the registered vocabulary.
+  const relay = answer.code === ('FLOW_FAILED' satisfies ErrorCode) ? flowFailureRelaySentence(details, answer.userMessage) : undefined;
   return relay === undefined
     ? result
     : { ...result, content: [...result.content, { type: 'text' as const, text: `${FLOW_FAILURE_RELAY_LEAD}${relay}` }] };
 }
-
-/**
- * [#32757] The code a flow run that RAN and failed answers with (the ledger's
- * `FLOW_FAILED`), the one arm whose `details` are the run's artefacts. Typed as
- * the registered vocabulary, so a misspelling fails to compile.
- */
-const FLOW_FAILED: ErrorCode = 'FLOW_FAILED';
 
 /**
  * [#32757] The lead of the plain sentence a failed flow run's tool error
