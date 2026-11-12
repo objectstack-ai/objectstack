@@ -27,6 +27,13 @@
  * a row whose package already has a row of the same name (binding it would
  * make two rows of one slot), and a row whose update fails.
  *
+ * A bundled type (`email_template`, keyed by `locale`) holds a row per member
+ * in one slot, as `DatabaseLoader.save` writes it (#32489): its slot is
+ * `(package, name, member)`, the member read off the row's `bundle_member`
+ * column else its body (`storedBundleMemberOf`), the store's unique key. So a
+ * `fr-FR` row binds beside the package's bound `en-US` row of the name, and a
+ * second `fr-FR` row is still left.
+ *
  * Safe to run any number of times: a bound row is no longer a candidate. An
  * operator runs it; ⛔ `DatabaseLoader` does not run it on its own, so a
  * loader's reads cost what they cost.
@@ -37,7 +44,12 @@
  */
 
 import type { DriverQuery } from '@objectstack/spec/contracts';
-import { PACKAGE_SLOTTED_STORE_TYPES, storedItemPackageId } from '../package-slotted-store.js';
+import {
+  PACKAGE_SLOTTED_STORE_TYPES,
+  isBundledStoreType,
+  storedBundleMemberOf,
+  storedItemPackageId,
+} from '../package-slotted-store.js';
 
 /** The two reads/writes this migration needs; an `IDataDriver` is one. */
 export interface DatabaseLoaderRowStore {
@@ -68,8 +80,8 @@ export async function migrateDatabaseLoaderRowPackages(
   const rows = await store.find(table, { where: { type: { $in: [...PACKAGE_SLOTTED_STORE_TYPES] } } });
   const result: DatabaseLoaderRowPackagesResult = { bound: [], left: [] };
 
-  // Every package already holding a row of each name, so a binding never
-  // makes a second row of one slot.
+  // Every slot already held — `(package, name)`, plus the member for a bundled
+  // type — so a binding never makes a second row of one slot.
   const taken = new Set<string>();
   for (const row of rows) {
     const column = boundColumn(row);
@@ -106,8 +118,21 @@ function boundColumn(row: Record<string, unknown>): string | undefined {
   return typeof column === 'string' && column !== '' && column !== 'sys_metadata' ? column : undefined;
 }
 
+/** The slot `row` holds once bound to `packageId`; a bundled type's names the member too (#32489). */
 function slotOf(row: Record<string, unknown>, packageId: string): string {
-  return JSON.stringify([row.type, row.name, packageId]);
+  const type = String(row.type);
+  if (!isBundledStoreType(type)) return JSON.stringify([type, row.name, packageId]);
+  return JSON.stringify([type, row.name, packageId, storedBundleMemberOf(type, parsedBody(row.metadata), row.bundle_member) ?? null]);
+}
+
+/** The stored body as an object, or `undefined` when it does not parse (the member is then the column's, else canonical). */
+function parsedBody(stored: unknown): unknown {
+  if (typeof stored !== 'string') return stored;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The package a stored body names, or `undefined` when it names none or does not parse. */
