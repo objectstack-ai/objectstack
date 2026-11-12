@@ -583,3 +583,30 @@ describe('[#32310] GET /meta/dataset/:name?callerPackage= on the dispatcher (ADR
         expect(labelOf(await read('/dataset/pipeline', { package: A }))).toBe('alpha dataset');
     });
 });
+
+/**
+ * [#32250, ADR-0150 D5; Refs #32622] The dispatcher's layered read of a name
+ * two packages register answers the read's `409 RESOURCE_CONFLICT` naming both
+ * holders as `details.candidates`, as the item read does. The refusal leaves
+ * through `errorFromThrown`, which composes `details` from
+ * `resolveThrownHttpError`. Only this cell of #32622 is covered here: a stored
+ * row's layered refusal, and the REST `/layers` door, are not.
+ */
+describe('#32250 — the dispatcher /layers 409 names the holders', () => {
+    it('a name two packages register: 409 RESOURCE_CONFLICT with both as details.candidates', async () => {
+        ship('dashboard', 'sales', A);
+        ship('dashboard', 'sales', B);
+        const answer = await read('/dashboard/sales/layers');
+        expect([answer.status, answer.body?.error?.code], JSON.stringify(answer.body)).toEqual([409, 'RESOURCE_CONFLICT']);
+        expect(answer.body?.error?.details?.candidates).toEqual([
+            { kind: 'package', packageId: A },
+            { kind: 'package', packageId: B },
+        ]);
+    });
+
+    it('CONTROL — one holder: its layers are served', async () => {
+        ship('dashboard', 'sales', A);
+        const answer = await read('/dashboard/sales/layers');
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+    });
+});
