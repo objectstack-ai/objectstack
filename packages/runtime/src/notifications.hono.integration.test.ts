@@ -8,6 +8,9 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { MessagingServicePlugin, MessagingService } from '@objectstack/service-messaging';
 import { createRestApiPlugin } from '@objectstack/rest';
+// Paid at collection, not inside a clocked case: the dispatcher's package
+// domain imports it lazily (`check:test-source-alias`).
+import '@objectstack/metadata';
 
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
