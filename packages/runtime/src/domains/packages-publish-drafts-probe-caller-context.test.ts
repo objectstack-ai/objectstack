@@ -32,6 +32,9 @@ import { AnalyticsService } from '@objectstack/service-analytics';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { HttpDispatcher } from '../http-dispatcher.js';
+// Paid at collection, not inside a clocked case: the dispatcher's package domain
+// reaches it through a dynamic import (check:test-source-alias).
+import '@objectstack/metadata';
 
 /** The object read admission walls off from everyone but the reader. */
 const GATED = 'task_item';
