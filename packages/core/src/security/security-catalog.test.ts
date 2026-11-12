@@ -381,6 +381,8 @@ describe('security catalog read — permission sets by (package, name) through t
     if (answer.status === 'refused') {
       expect(answer.message).toContain(P);
       expect(answer.message).toContain('declared_set');
+      // [#32164] The same candidate, structured.
+      expect(answer.holders).toEqual([{ kind: 'environment' }]);
     }
     expect(await resolveCatalogReference(reader, 'permission', 'nowhere_set', at())).toEqual({ status: 'not-found' });
   });
@@ -496,6 +498,17 @@ describe('security catalog read — permission sets by (package, name) through t
       const answer = await resolveCatalogReference(reader, 'permission', 'shared', storedPermissionSetScope(''));
       expect(answer).toMatchObject({ status: 'refused', reason: 'ambiguous-in-environment' });
       if (answer.status === 'refused') expect(answer.candidates).toEqual([expect.stringContaining(Q), expect.stringContaining(R)]);
+    });
+
+    it('[#32164] a refusal carries its candidates structured beside the display strings, in the same order', async () => {
+      const reader = createSecurityCatalogReader({ registry: stored(), metadata: metadata({}) });
+      const answer = await resolveCatalogReference(reader, 'permission', 'shared');
+      expect(answer.status).toBe('refused');
+      if (answer.status !== 'refused') return;
+      expect(answer.holders).toEqual([{ kind: 'package', packageId: Q }, { kind: 'package', packageId: R }]);
+      expect(answer.candidates).toEqual([`package "${Q}"`, `package "${R}"`]);
+      // A resolution that is not a refusal carries no holders member.
+      expect(await resolveCatalogReference(reader, 'permission', 'q_only')).not.toHaveProperty('holders');
     });
 
     it('a null column with one holder resolves by D3, as today; a writer\'s package is the D3 caller (R3)', async () => {
