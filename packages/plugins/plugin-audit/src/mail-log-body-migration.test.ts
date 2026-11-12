@@ -195,9 +195,10 @@ describe('migrateMailLogBodyCopies (driven, paged)', () => {
     const report = await migrateMailLogBodyCopies(engine, logger());
     expect(report).toEqual({
       apply: false,
-      byObject: { sys_audit_log: { scanned: 4, rewritten: 3 }, sys_activity: { scanned: 3, rewritten: 2 } },
+      byObject: { sys_audit_log: { scanned: 4, rewritten: 3, refused: 0 }, sys_activity: { scanned: 3, rewritten: 2, refused: 0 } },
       scanned: 7,
       rewritten: 5,
+      refused: 0,
       failures: 0,
     });
     expect(JSON.stringify(tables)).toBe(before);
@@ -295,9 +296,10 @@ describe('migrateArchivedMailLogBodyCopies (an archive datasource, through its d
     const report = await migrateArchivedMailLogBodyCopies(cold, logger(), { objects: ['sys_audit_log'] });
     expect(report).toEqual({
       apply: false,
-      byObject: { sys_audit_log: { scanned: 4, rewritten: 3 } },
+      byObject: { sys_audit_log: { scanned: 4, rewritten: 3, refused: 0 } },
       scanned: 4,
       rewritten: 3,
+      refused: 0,
       failures: 0,
     });
     expect(isDeepStrictEqual(await allRows(cold), before)).toBe(true);
@@ -341,7 +343,7 @@ describe('migrateArchivedMailLogBodyCopies (an archive datasource, through its d
     const cold = new SqliteWasmDriver({ filename: ':memory:' });
     await cold.connect();
     const report = await migrateArchivedMailLogBodyCopies(cold, logger(), { apply: true });
-    expect(report).toMatchObject({ scanned: 0, rewritten: 0, failures: 0 });
+    expect(report).toMatchObject({ scanned: 0, rewritten: 0, refused: 0, failures: 0 });
   });
 
   it('any other refused archive read is a failure, never a clean report', async () => {

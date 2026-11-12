@@ -4409,6 +4409,16 @@ export default class Serve extends Command {
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 
+      // The ONE secret crypto provider, built below (`createHostCryptoProvider`,
+      // after the stack's plugins are checked) and declared here, because the
+      // AuditPlugin of 5d is composed before it exists and reads it when its
+      // sealer starts, at `kernel:ready` [ADR-0154 D2, D6].
+      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
+      // `OS_MIGRATE_AND_EXIT=1` makes this boot a one-shot job (it exits below,
+      // once the plugins have started): the audit sealer is not armed on it
+      // [ADR-0154 D3], as on every one-shot command.
+      const migrateAndExit = process.env.OS_MIGRATE_AND_EXIT === '1';
+
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
       // 'auth' tier is enabled and no auth plugin is already configured.
       // The Console expects /api/v1/auth/* to be served by better-auth via
@@ -4886,10 +4896,15 @@ export default class Serve extends Command {
             // `Serve.CAPABILITY_PROVIDERS.audit` — the `requires:` resolver is
             // NOT auth-gated and already carries the `configKey` mechanism
             // `analytics` uses — not this line.
+            //
+            // [ADR-0154 D2, D6] The one option it IS handed is not config: the
+            // host's own crypto provider, which the sealer seals its seeds and
+            // signing key under. It is read when the sealer starts, since the
+            // provider is built further down.
             try {
               const auditPkg = '@objectstack/plugin-audit';
               const { AuditPlugin } = await import(/* webpackIgnore: true */ auditPkg);
-              await kernel.use(new AuditPlugin());
+              await kernel.use(new AuditPlugin({ cryptoProvider: () => hostCrypto?.provider, armSealer: !migrateAndExit }));
               trackPlugin('Audit');
             } catch {
               // optional
@@ -5311,13 +5326,13 @@ export default class Serve extends Command {
       // for customer-managed keys — by registering it as the kernel service
       // CRYPTO_PROVIDER_SERVICE during its init; without one this host keeps
       // its own LocalCryptoProvider (AES-256-GCM keyed off `OS_SECRET_KEY` or a
-      // persisted key file), exactly as before the seam existed. All three
-      // consumers hold `hostCrypto.provider`, which chooses once every plugin
+      // persisted key file), exactly as before the seam existed. Every
+      // consumer holds `hostCrypto.provider` (declared above 5d, for the audit
+      // sealer), which chooses once every plugin
       // has initialized (`createHostCryptoProvider`). The fallback is the
       // deferred LocalCryptoProvider: built at that choice, not here, because
       // the key file is settled only once the database is open (the settings
       // service's `start()`).
-      let hostCrypto: ReturnType<typeof createHostCryptoProvider> | undefined;
       let hostCryptoUnavailable: unknown;
       try {
         const { deferredLocalCryptoProvider } = await import(
@@ -5439,10 +5454,14 @@ export default class Serve extends Command {
           // host's one crypto provider (above), not a LocalCryptoProvider of its
           // own: a provider a plugin registers then holds the settings' keys
           // too. Without a registration the shared one is that same local
-          // provider — same constructor, same key source.
+          // provider — same constructor, same key source. [ADR-0154 D2, D6]
+          // So does an AuditPlugin `requires: ['audit']` mounts: its sealer
+          // seals checkpoint seeds and the signing key under it.
           const ctorArg: any = cap === 'settings' && hostCrypto
             ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider }
-            : arg;
+            : cap === 'audit' && hostCrypto
+              ? { ...(arg ?? {}), cryptoProvider: hostCrypto.provider, armSealer: !migrateAndExit }
+              : arg;
           const provider = ctorArg !== undefined ? new Ctor(ctorArg) : new Ctor();
           await kernel.use(provider);
           resolverMounted.push(provider);
@@ -5937,7 +5956,7 @@ export default class Serve extends Command {
       // then exit. The HTTP server has already bound `port` at this point
       // but we never accept a request — shutdown immediately so the
       // deploy pipeline can move on.
-      if (process.env.OS_MIGRATE_AND_EXIT === '1') {
+      if (migrateAndExit) {
         // This path exits before the banner, so it has to replay the boot
         // diagnostics itself — a deploy pipeline is precisely where a
         // degraded-boot warning must not vanish (#4012).

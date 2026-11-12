@@ -62,9 +62,10 @@ export async function buildDataMigrationPlugins(
     // The plugin's own write hooks exclude both tables (`SKIP_OBJECTS`), so
     // arming it cannot recurse on the rewrite; nothing else here is armed, the
     // same "a migration is not a second server" discipline the automation arm
-    // takes above.
+    // takes above. [ADR-0154 D3] Its sealer is not armed either: a one-shot
+    // run writes no checkpoint (`os audit verify` boots this set too).
     const { AuditPlugin } = await import('@objectstack/plugin-audit');
-    plugins.push(new AuditPlugin());
+    plugins.push(new AuditPlugin({ armSealer: false }));
   }
   if (opts.automation === true) {
     // `os migrate meta --stored` needs the automation ENGINE, never the
