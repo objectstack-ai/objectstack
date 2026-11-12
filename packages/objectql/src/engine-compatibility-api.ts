@@ -185,11 +185,33 @@ export async function syncSchemas(
   }
 }
 
+/**
+ * [#32590] What `syncObjectSchema` asks of the sync beyond creating and adding.
+ * `applyPublishedColumnChanges`: also bring the existing table's columns to the
+ * declaration for every divergence the driver classes `safe` — the metadata
+ * publish's request, never the boot's.
+ */
+export interface SyncObjectSchemaOptions {
+  applyPublishedColumnChanges?: boolean;
+}
+
+/**
+ * [#32590] The column changes a publish asked the driver to apply: the ones it
+ * applied, and the ones it did not (the dialect cannot, or the DDL failed),
+ * each with the driver's own finding text. The shape of a driver-sql drift
+ * entry, read structurally.
+ */
+export interface PublishedColumnChangeReport {
+  applied: ReadonlyArray<{ table: string; column?: string; op: { type: string } }>;
+  skipped: ReadonlyArray<{ table: string; column?: string; op: { type: string }; message: string }>;
+}
+
 /** The body of `ObjectQL#syncObjectSchema`; the method's docblock there is its contract. */
 export async function syncObjectSchema(
   this: Pick<CompatibilityApiHost, '_registry' | 'getDriverForObject'>,
   objectName: string,
-): Promise<void> {
+  options: SyncObjectSchemaOptions = {},
+): Promise<PublishedColumnChangeReport | undefined> {
   // The storage layer's object, as {@link syncSchemas} reads it.
   const obj = this._registry.getStorageObject(objectName) as any;
   if (!obj) return;
@@ -208,6 +230,11 @@ export async function syncObjectSchema(
   if (typeof (driver as any).syncSchema !== 'function') return;
   const tableName = StorageNameMapping.resolveTableName(obj);
   await (driver as any).syncSchema(tableName, obj);
+  // [#32590] A driver without the door (memory, Mongo) has no column type or
+  // constraint to bring to the declaration, so there is nothing to report.
+  if (options.applyPublishedColumnChanges !== true) return;
+  if (typeof (driver as any).applyPublishedColumnChanges !== 'function') return;
+  return (driver as any).applyPublishedColumnChanges({ ...obj, name: tableName }) as Promise<PublishedColumnChangeReport>;
 }
 
 /** The body of `ObjectQL#removePackage`; the method's docblock there is its contract. */

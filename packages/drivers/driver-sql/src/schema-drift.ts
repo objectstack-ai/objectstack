@@ -189,6 +189,27 @@ export type DriftOp =
    */
   | { type: 'manual_column_type_change'; table: string; column: string; to: string; from: string }
   /**
+   * Widen a `date` column under a field that now declares `datetime` (#32590)
+   * to the column `createColumn` builds for a `datetime`: `timestamptz` on
+   * Postgres, `DATETIME(3)` on MySQL. Postgres and MySQL only — SQLite stores
+   * the canonical text in any declared column type, so its `date` column holds
+   * a time of day already and nothing is reported there.
+   *
+   * The field-type change table promises `date` → `datetime` passes cleanly
+   * (`content/docs/data-modeling/field-type-decision-tree.mdx`), and this is the
+   * column half of that promise. Until this op existed the divergence was
+   * reported by NOTHING, and every write to the field lost its time of day: the
+   * database casts an instant bound into a `date` column to its calendar day,
+   * with no error and no warning.
+   *
+   * `safe` by the class's own definition — a loosening that cannot lose data
+   * and cannot fail: every stored day converts (as midnight UTC, the instant
+   * the canonical form gives a bare day) and no value is refused. A publish of
+   * the object applies it (`SqlDriver.applyPublishedColumnChanges`), as do dev
+   * auto-reconcile and `os migrate apply`.
+   */
+  | { type: 'widen_date_to_datetime'; table: string; column: string }
+  /**
    * REPORT ONLY (#12121). The column is a `varchar(n)` under a TEXT-family
    * field that declared NO usable bound — the shape `createColumn` emits as
    * TEXT — so the column caps writes the declaration allows, and **the platform
@@ -1087,7 +1108,39 @@ export function diffManagedTable(args: {
     // explicit physical constraint — NOT against `required`, which is the
     // write-time contract and implies nothing about the column) ──────────
     const expectNullable = field.storage?.notNull !== true;
-    if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
+    if (expectNullable && !col.nullable && field.storage?.notNull === false && fieldName !== ceremonyOwnedNullability) {
+      // [#32590] The author DECLARED the column nullable — `storage: { notNull:
+      // false }`, written out, not merely absent. The column constraint is the
+      // declaration's to own (ADR-0113 D2), so this column is the "deliberately
+      // relax" ADR-0113 D5 names, said by the author, and the two reasons the
+      // undeclared branch below gives for never applying it do not hold here:
+      // there is no `storage.notNull` left to ratify the constraint with, and
+      // no protection someone else added that a `safe` class would strip — the
+      // declaration removed it in so many words. Relaxing NOT NULL cannot lose
+      // data and cannot fail, which is the `safe` class, so a publish of the
+      // object applies it. Until then every write that omits the field is
+      // refused by the database, `required: false` notwithstanding.
+      //
+      // ⛔ Only the explicit `false`. An ABSENT `storage.notNull` stays the
+      // undeclared case below, unchanged: `needs_confirm`, or silent under
+      // `required: true` — that is every pre-protocol-17 source, whose NOT NULL
+      // its author once meant.
+      out.push({
+        kind: 'nullability_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: 'NULL',
+        actual: 'NOT NULL',
+        severity: 'warning',
+        category: 'safe',
+        op: { type: 'relax_not_null', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: the column is NOT NULL but the metadata declares ` +
+          `\`storage: { notNull: false }\`, so the database refuses every write that omits the field. ` +
+          `Relaxing the column cannot lose data: publishing the object applies it, or run "os migrate apply".`,
+      });
+    } else if (expectNullable && !col.nullable && field.required !== true && fieldName !== ceremonyOwnedNullability) {
       // Column STRICTER than its declaration — and the field is not even
       // write-gated, so an omitting write reaches the DB and dies as a raw
       // driver error instead of a clean validation 400. That surprise is
@@ -1339,6 +1392,46 @@ export function diffManagedTable(args: {
             `rather than wrapping it — rows written through ObjectStack already hold valid JSON — and ` +
             `drop any index on the column first, since a json column cannot carry a plain btree. ` +
             `"os migrate plan" lists this entry; "os migrate apply" reports it as skipped.`,
+      });
+    }
+
+    // ── base type: a `datetime` field over a `date` column (#32590) ──────
+    //
+    // `createColumn` gives a `date` field a `date` column, and the additive sync
+    // never revisits an existing column, so a field retyped `date` → `datetime`
+    // — a change the field-type change table says passes cleanly — keeps its
+    // `date` column. On Postgres and MySQL that column is load-bearing: the
+    // server casts every instant bound into it to its calendar day, so the
+    // field reads back as a bare day and every time of day ever written to it is
+    // gone, with no error. Measured on live Postgres 16 on the pre-fix tree:
+    // `'2026-11-13T01:00:00.000Z'` written after the publish read back
+    // `'2026-11-13'`. SQLite keeps the canonical text whatever the declared
+    // column type, so nothing is reported there.
+    //
+    // `safe` — see the op's own note: the widening keeps every stored day and
+    // refuses no value — so a publish of the object applies it.
+    if (
+      declaredType === 'datetime'
+      && !declaresJsonColumn
+      && (dialect === 'postgres' || dialect === 'mysql')
+      && String(col.type).toLowerCase() === 'date'
+    ) {
+      const widened = dialect === 'mysql' ? 'datetime(3)' : 'timestamptz';
+      out.push({
+        kind: 'type_mismatch',
+        remoteName: table,
+        table,
+        column: fieldName,
+        expected: widened,
+        actual: col.type,
+        severity: 'warning',
+        category: 'safe',
+        op: { type: 'widen_date_to_datetime', table, column: fieldName },
+        message:
+          `${table}.${fieldName}: metadata declares \`datetime\` but the column is \`${col.type}\`, so the ` +
+          `database keeps only the calendar day of every value written to it and drops its time of day. ` +
+          `Widening the column to \`${widened}\` keeps every stored day (as midnight UTC) and refuses no value: ` +
+          `publishing the object applies it, or run "os migrate apply".`,
       });
     }
 

@@ -689,6 +689,11 @@ export const REMOTE_DRIFT_OP_ANSWERS = {
   widen_varchar: 'needs-table-rebuild',
   narrow_varchar: 'needs-table-rebuild',
   drop_column_default: 'needs-table-rebuild',
+  // [#32590] Never emitted by the SQLite differ: a SQLite `date` column already
+  // holds the canonical datetime text, so the widening is Postgres / MySQL
+  // only. Answered as the varchar widths are, since a SQLite column's declared
+  // type changes only with the table rebuild.
+  widen_date_to_datetime: 'needs-table-rebuild',
   manual_column_type_change: 'report-only',
   manual_widen_varchar_to_text: 'report-only',
   unbuildable_index: 'report-only',

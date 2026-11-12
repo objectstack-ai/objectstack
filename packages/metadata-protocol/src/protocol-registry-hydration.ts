@@ -1743,6 +1743,15 @@ export class ProtocolRegistryHydrationFacet {
      * `published[]` element, [#30693] `publishPackageDrafts`). A sync that ran, or
      * a type with no storage, returns `undefined`, so a clean answer is
      * unchanged.
+     *
+     * [#32590] The sync also brings an EXISTING table's columns to the
+     * published declaration, for the divergences the driver classes `safe`
+     * (`SqlDriver.applyPublishedColumnChanges`): without it a field published
+     * `date` → `datetime` kept a `date` column that dropped every time of day,
+     * and `storage: { notNull: false }` kept a NOT NULL that refused every write
+     * omitting the field. A change the datasource could not apply returns the
+     * {@link publishedColumnChangesNotAppliedNotice} warning instead, on the same
+     * doors.
      */
     static async ensureObjectStorage(host: Pick<ProtocolHost, 'engine' | 'ensureObjectStorage'>, type: string, name: string): Promise<RuntimeAuthoringIssue | undefined> {
         // [#8862] The `&& type !== 'objects'` limb is GONE. Both call sites
@@ -1761,8 +1770,25 @@ export class ProtocolRegistryHydrationFacet {
         if (type === OBJECT_EXTENSION_TYPE) return host.ensureObjectStorage('object', name);
         if (type !== 'object') return;
         try {
-            await host.engine.syncObjectSchema(name);
-            return undefined;
+            // [#32590] The publish asks for the column half too: an existing
+            // table's columns follow the published declaration for every
+            // divergence the driver classes `safe` (a `date` → `datetime`
+            // widening, a NOT NULL the declaration dropped), so the change
+            // table's "passes cleanly" holds for the table, not only the save.
+            const columns: PublishedColumnChanges | undefined = await host.engine.syncObjectSchema(name, { applyPublishedColumnChanges: true });
+            const notApplied = columns?.skipped ?? [];
+            if (notApplied.length === 0) return undefined;
+            // `error` by the same question as the refused sync below: the publish
+            // answers success and the object is served while its table keeps the
+            // old column contract there. Said once per publish of the object.
+            console.error(
+                `[Protocol] object '${name}' was published but its table did NOT follow the declaration for `
+                + `${notApplied.length} column change(s) — the publish answered success, so the object looks usable `
+                + 'while those columns keep the previous contract. Fix: resolve the reason the datasource gave '
+                + "(logged above this line by the driver), then publish the object again; 'os migrate plan' lists each change.",
+                notApplied.map((d) => d.message).join(' | '),
+            );
+            return publishedColumnChangesNotAppliedNotice(name, notApplied);
         } catch (err: any) {
             // [#22985] `error`, not `warn`, by the one question AGENTS.md
             // "Degradation log levels" turns this on: the publish still
@@ -1988,6 +2014,51 @@ export class ProtocolRegistryHydrationFacet {
  * groups or suppresses the notice by.
  */
 export const OBJECT_STORAGE_SYNC_REFUSED = 'object-storage-sync-refused';
+
+/**
+ * [#32590] The column changes a publish asked the engine to apply
+ * (`syncObjectSchema` with `applyPublishedColumnChanges`), read structurally:
+ * the driver's drift entries, applied and not.
+ */
+export interface PublishedColumnChanges {
+    applied: ReadonlyArray<{ table: string; column?: string; op: { type: string } }>;
+    skipped: ReadonlyArray<{ table: string; column?: string; op: { type: string }; message: string }>;
+}
+
+/**
+ * [#32590] The rule id of the advisory a save or publish answers with when the
+ * object's table did not follow its declaration for a column change the driver
+ * classes `safe`. Stable across releases, like {@link OBJECT_STORAGE_SYNC_REFUSED}.
+ */
+export const OBJECT_COLUMN_CHANGES_NOT_APPLIED = 'object-column-changes-not-applied';
+
+/**
+ * [#32590] The caller's half of a column change the publish could not apply —
+ * the datasource cannot perform it (the Turso REMOTE transport runs no table
+ * rebuild) or its DDL failed: one `warning` on the answer's `advisories`,
+ * beside the `error` line the operator reads, on the same doors and in the
+ * same shape as {@link objectStorageSyncRefusedNotice}. Names each column and
+ * the change; the datasource's reason stays in the server log.
+ */
+export function publishedColumnChangesNotAppliedNotice(
+    name: string,
+    notApplied: PublishedColumnChanges['skipped'],
+): RuntimeAuthoringIssue {
+    const changes = notApplied.map((d) => `'${d.column ?? d.table}' (${d.op.type})`).join(', ');
+    return {
+        rule: OBJECT_COLUMN_CHANGES_NOT_APPLIED,
+        severity: 'warning',
+        where: `object "${name}"`,
+        path: '',
+        message:
+            `object '${name}' was saved and is served, but its table did not follow the declaration for `
+            + `${changes}: those columns keep their previous type or constraint, so writes to them are refused or `
+            + 'stored the old way until the change is applied.',
+        hint:
+            "The server log names the datasource's reason. Run 'os migrate plan', which lists each change with what "
+            + 'can apply it, or publish the object again once the reason is resolved.',
+    };
+}
 
 /**
  * [#30635] The caller's half of a refused object-storage sync: one `warning`

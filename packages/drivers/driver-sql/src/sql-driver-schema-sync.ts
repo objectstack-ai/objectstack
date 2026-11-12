@@ -207,7 +207,9 @@ export interface SchemaSyncHost {
   createNullSafeUniqueIndex: SqlDriver['createNullSafeUniqueIndex'];
   readonly dateFields: SqlDriver['dateFields'];
   readonly datetimeFields: SqlDriver['datetimeFields'];
+  readonly deferredDdl: SqlDriver['deferredDdl'];
   readonly deferredSchemaObjects: SqlDriver['deferredSchemaObjects'];
+  detectManagedDrift: SqlDriver['detectManagedDrift'];
   detectTableDrift: SqlDriver['detectTableDrift'];
   detectTableIndexDrift: SqlDriver['detectTableIndexDrift'];
   readonly dialectName: SqlDriver['dialectName'];
@@ -496,10 +498,13 @@ export async function restoreBareIndexAfterFailedTighten(this: Pick<SchemaSyncHo
 }
 
 /** The body of `SqlDriver#applyDriftOpInPlace`; the method's docblock there is its contract. */
-export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndexDriftOp' | 'dialectName' | 'isMysql' | 'isPostgres' | 'knex' | 'logger'>, op: DriftOp): Promise<boolean> {
+export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndexDriftOp' | 'dialectName' | 'isMysql' | 'isPostgres' | 'knex' | 'logger' | 'managedObjectFields' | 'nowColumnDefault'>, op: DriftOp): Promise<boolean> {
   // Index ops need no dialect-specific ALTER — route them to the portable path.
   if (isIndexDriftOp(op)) return this.applyIndexDriftOp(op);
   const { table, column } = op;
+  if (op.type === 'widen_date_to_datetime' && (this.isPostgres || this.isMysql)) {
+    return widenDateColumnToDatetime.call(this, table, column);
+  }
   if (this.isPostgres) {
     switch (op.type) {
       case 'relax_not_null':
@@ -555,6 +560,80 @@ export async function applyDriftOpInPlace(this: Pick<SchemaSyncHost, 'applyIndex
   }
   this.logger.warn(`[schema-drift] ${op.type} on ${table}.${column} is unsupported on dialect '${this.dialectName}' — skipped`);
   return false;
+}
+
+/**
+ * [#32590] The in-place arm of `widen_date_to_datetime`: give a `date` column
+ * the column `createColumn` builds for a `datetime` field — `timestamptz` on
+ * Postgres, `DATETIME(3)` on MySQL — keeping every stored day and restating
+ * the declaration's default for the new type, as the SQLite rebuild restates a
+ * rebuilt column's default.
+ *
+ * Every stored day becomes midnight UTC, the instant the canonical form gives a
+ * bare day (ADR-0053: a zone-naive value IS UTC). On Postgres that is spelled
+ * out — `col::timestamp AT TIME ZONE 'UTC'` — because the bare cast
+ * `date::timestamptz` reads midnight in the SESSION's time zone, so the same
+ * column would move a different number of hours on every server. MySQL's
+ * `DATETIME` is zone-naive and holds the UTC wall clock this driver writes, so
+ * its own `DATE` → `DATETIME` conversion (midnight) is already that instant.
+ *
+ * Re-read before it alters: two servers of one cluster both apply a publish
+ * (the mutation replay re-runs the storage sync), and on Postgres the cast
+ * above applied twice to a column already widened would shift every value by
+ * the session's offset. So the Postgres arm takes the table lock first and
+ * alters only a column still `date`; a column already widened answers `true`
+ * (the state the op asks for holds) and anything else answers `false`
+ * (skipped). MySQL's `MODIFY` to the type it already has changes nothing.
+ */
+async function widenDateColumnToDatetime(
+  this: Pick<SchemaSyncHost, 'isPostgres' | 'knex' | 'managedObjectFields' | 'nowColumnDefault'>,
+  table: string,
+  column: string,
+): Promise<boolean> {
+  const dv = this.managedObjectFields.get(table)?.[column]?.defaultValue;
+  // The rules `applyDeclaredColumnDefault` applies when it builds the column.
+  let declaredDefault: string | null = null;
+  if (dv !== undefined && dv !== null) {
+    if (isNowDefaultValue(dv)) declaredDefault = this.nowColumnDefault('datetime').toQuery();
+    else if (!isRuntimeDefaultToken(dv) && typeof dv !== 'object') declaredDefault = this.knex.raw('?', [dv]).toQuery();
+  }
+  if (this.isPostgres) {
+    return this.knex.transaction(async (trx) => {
+      await trx.raw('LOCK TABLE ?? IN ACCESS EXCLUSIVE MODE', [table]);
+      const found = await trx.raw(
+        'SELECT data_type, column_default FROM information_schema.columns '
+          + 'WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?',
+        [table, column],
+      );
+      const row = found?.rows?.[0];
+      const dataType = String(row?.data_type ?? '').toLowerCase();
+      if (dataType.startsWith('timestamp')) return true;
+      if (dataType !== 'date') return false;
+      if (row.column_default != null) await trx.raw('ALTER TABLE ?? ALTER COLUMN ?? DROP DEFAULT', [table, column]);
+      await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? TYPE timestamptz USING (??::timestamp AT TIME ZONE 'UTC')`, [table, column, column]);
+      if (declaredDefault !== null) await trx.raw(`ALTER TABLE ?? ALTER COLUMN ?? SET DEFAULT ${declaredDefault}`, [table, column]);
+      return true;
+    });
+  }
+  // MySQL: `MODIFY` restates the WHOLE column, so the nullability is read and
+  // repeated (a `MODIFY` without it would make the column nullable) and the
+  // default is the declaration's.
+  const [rows] = await this.knex.raw(
+    'SELECT DATA_TYPE AS data_type, IS_NULLABLE AS is_nullable FROM information_schema.COLUMNS '
+      + 'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+    [table, column],
+  );
+  const row = rows?.[0];
+  const dataType = String(row?.data_type ?? '').toLowerCase();
+  if (dataType === 'datetime') return true;
+  if (dataType !== 'date') return false;
+  const nullability = row.is_nullable === 'NO' ? 'NOT NULL' : 'NULL';
+  await this.knex.raw(
+    `ALTER TABLE ?? MODIFY ?? DATETIME(${MYSQL_DATETIME_PRECISION}) ${nullability}`
+      + (declaredDefault === null ? '' : ` DEFAULT ${declaredDefault}`),
+    [table, column],
+  );
+  return true;
 }
 
 /** The body of `SqlDriver#rebuildSqliteTablePatched`; the method's docblock there is its contract. */
@@ -1375,6 +1454,28 @@ export async function reconcileAndWarnDrift(this: Pick<SchemaSyncHost, 'applyMig
   }
 }
 
+/** The body of `SqlDriver#applyPublishedColumnChanges`; the method's docblock there is its contract. */
+export async function applyPublishedColumnChanges(this: Pick<SchemaSyncHost, 'applyMigrationEntries' | 'deferredDdl' | 'detectManagedDrift' | 'logger'>, obj: { name: string; fields?: Record<string, any>; indexes?: any[] }): Promise<{ applied: ManagedDriftEntry[]; skipped: ManagedDriftEntry[] }> {
+  // A deferred-DDL driver (`os migrate plan`) records schema work and runs
+  // none; its sync above recorded this object, so there is nothing to apply.
+  if (this.deferredDdl) return { applied: [], skipped: [] };
+  // Through the public, overridable doors on purpose: a driver whose drift is
+  // read and applied over another transport (the Turso REMOTE face) answers
+  // both, and says which entries it cannot perform.
+  const drift = await this.detectManagedDrift([obj]);
+  const changes = drift.filter((d) => d.category === 'safe' && !isIndexDriftOp(d.op));
+  if (changes.length === 0) return { applied: [], skipped: [] };
+  const result = await this.applyMigrationEntries(changes, { allowDestructive: false });
+  for (const d of result.applied) {
+    // Through the PROPERTY, with the `warn` fallback, as `reconcileAndWarnDrift`
+    // reports its own applied entries.
+    const line = `[schema-drift] the publish of '${obj.name}' applied ${d.op.type} on ${d.table}.${d.column ?? ''}`;
+    if (this.logger.info) this.logger.info(line);
+    else this.logger.warn(line);
+  }
+  return result;
+}
+
 /**
  * The body of `SqlDriver#applyMigrationEntries`; the method's docblock there is
  * its contract.
@@ -2153,9 +2254,12 @@ export function registerExternalObject(this: Pick<SchemaSyncHost, 'autoNumberFie
   this.fractionalNumericFields[key] = fractionalCols;
   this.autoNumberFields[key] = autoNumberCols;
   this.tenantFieldByTable[key] = tenantField;
-  if (dateCols.length) this.dateFields[key] = new Set(dateCols);
-  if (datetimeCols.length) this.datetimeFields[key] = new Set(datetimeCols);
-  if (timeCols.length) this.timeFields[key] = new Set(timeCols);
+  // [#32590] Assigned unconditionally, like the lists above: a re-registration
+  // that declares no field of a kind any more must clear that kind's set, or
+  // the retyped field keeps its old write coercion (`registerManagedObjectMetadata`).
+  this.dateFields[key] = new Set(dateCols);
+  this.datetimeFields[key] = new Set(datetimeCols);
+  this.timeFields[key] = new Set(timeCols);
 }
 
 /** The body of `SqlDriver#previewDeferredSchemaWork`; the method's docblock there is its contract. */
