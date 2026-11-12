@@ -443,6 +443,13 @@ export function readStoreEntry(
     // binds the name to, never the one written last between them.
     const packageless = keys.filter((key) => slotPackageOf(key) === undefined);
     if (packageless.length > 0) return { found: true, data: store.get(writtenLast(store, packageless)) };
+  } else {
+    // [#32365] …and a read naming a package is served that package's own
+    // item first (D3 step 1), never the environment's item on another object
+    // because it was written last; the package-less slot answers only where
+    // the package holds no slot of the name.
+    const own = found.filter((answer) => slotPackageOf(answer.key) === packageId);
+    if (own.length > 0) return { found: true, data: store.get(writtenLast(store, own.map((answer) => answer.key))) };
   }
   return { found: true, data: store.get(writtenLast(store, found.map((answer) => answer.key))) };
 }
@@ -526,10 +533,10 @@ function readIdentity(
     () => new Set<string>(),
   );
   if (resolution.status === 'refused') {
-    // [ADR-0150 D3, #32365] The identity's package-less slot beside two
-    // packages' answers no one either (a customization it cannot say whose),
-    // and the refusal names it: every candidate is named.
-    if (!store.has(identity)) throw new PackageScopedNameRefusedError(resolution);
+    // [ADR-0150 D3, #32365] An action identity's package-less slot beside
+    // two packages' answers no one either (a customization it cannot say
+    // whose), and the refusal names it: every candidate is named.
+    if (!OWNER_KEYED_SLOT_TYPES.has(type) || !store.has(identity)) throw new PackageScopedNameRefusedError(resolution);
     const base: Omit<PackageScopedRefusal, 'message'> = {
       ...resolution,
       candidates: [...resolution.candidates, { kind: 'environment' as const }],

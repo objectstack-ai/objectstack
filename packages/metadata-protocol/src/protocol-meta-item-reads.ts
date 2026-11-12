@@ -78,6 +78,7 @@ interface ActionHolderRegistry {
     packageScopedHoldersOf(type: string, name: string): string[];
     getPackageScopedItem(type: string, name: string, packageId: string): unknown;
     isPackageDisabled?(packageId: string): boolean;
+    getArtifactItem?(type: string, name: string, currentPackageId?: string): unknown;
 }
 
 /** The engine registry's action-holder reads; `undefined` when it lacks them. */
@@ -156,7 +157,7 @@ export function refuseActionHeldByPackages(
     const extra = (narrower?.candidates ?? []).filter((candidate) => candidate.kind === 'package'
         ? !holders.includes(candidate.packageId)
         : !(packagelessHolds && candidate.kind === packageless.candidate.kind));
-    const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(registry.getPackageScopedItem('action', name, id))]] as const));
+    const objectsByPackage = new Map(holders.map((id) => [id, [actionObjectOf(holderOwnItem(registry, name, id))]] as const));
     const base: Omit<PackageScopedRefusal, 'message'> = {
         status: 'refused',
         reason: 'ambiguous-in-environment',
@@ -192,6 +193,20 @@ export interface PackagelessActionHolder {
 function packagelessOwnerSentence(packageless: PackagelessActionHolder): string {
     const whose = packageless.candidate.kind === 'environment' ? 'The environment\'s own item' : 'The platform\'s item';
     return `${whose} binds it to ${packageless.object === undefined ? 'no object' : `object "${packageless.object}"`}.`;
+}
+
+/**
+ * [#32365] A package holder's own item of an action name, as a refusal names
+ * its object: its package-scoped item when that carries the package, else its
+ * own artifact (`getArtifactItem` at the package, which reads the composite
+ * slot before the bare one) — never a package-less entry the registry binds
+ * to it.
+ */
+function holderOwnItem(registry: ActionHolderRegistry, name: string, packageId: string): unknown {
+    const scoped = registry.getPackageScopedItem('action', name, packageId);
+    if ((scoped as { _packageId?: unknown } | null | undefined)?._packageId === packageId) return scoped;
+    const artifact = typeof registry.getArtifactItem === 'function' ? registry.getArtifactItem('action', name, packageId) : undefined;
+    return (artifact as { _packageId?: unknown } | null | undefined)?._packageId === packageId ? artifact : scoped;
 }
 
 /** The enabled packages holding an action name in the registry, in its order (#25308: a disabled package holds nothing). */
@@ -245,11 +260,20 @@ export async function judgeBareActionRead(
     host: Pick<ProtocolHost, 'engine' | 'readItemActiveRows'>,
     name: string,
     objectLessRefused?: unknown,
+    face: 'served' | 'execution' = 'served',
 ): Promise<{ item: unknown } | undefined> {
     const registry = actionHolderRegistry(host);
     const holders = enabledActionHolders(registry, name);
     const entry = holders.length > 0 ? packagelessActionEntry(host, name) : undefined;
     let packageless: PackagelessActionHolder | undefined;
+    if (entry !== undefined && face === 'execution') {
+        // The execution face (the `/actions/:object/NAME` route's declaration
+        // read) keeps main's answer beside a package-less item: the route
+        // sees the object and judges the declaration it gets by it. Aligning
+        // it with the served face is followed up separately by its owner seat.
+        refuseActionHeldByPackages(host, name, objectLessRefused);
+        return undefined;
+    }
     if (entry !== undefined) {
         const object = actionObjectOf(entry);
         const environment = storesPackagelessActionRow(await host.readItemActiveRows('action', name), object);
@@ -410,7 +434,7 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 objectLessRefused = error;
             }
         }
-        bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused);
+        bareActionAnswer = await judgeBareActionRead(host, request.name, objectLessRefused, opts.face);
     }
     const packagelessScopedRead: { item: unknown } | undefined =
         !request.packageId && typeof registry?.readsByPackage === 'function' && registry.readsByPackage(request.type)

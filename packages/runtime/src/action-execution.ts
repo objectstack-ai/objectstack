@@ -5883,7 +5883,6 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
                 return routeOwnerOfRefusedRead(refusal, {
                     obj, actionName, ownsRoute, objectName,
                     readAt: (packageId) => byName.call(protocol, { type: 'action', name: actionName, packageId }),
-                    readPackageless: () => packagelessRegistryAction(ql, actionName),
                 });
             }
             return { action: undefined, obj, degraded: true, reason: err?.message ?? String(err) };
@@ -5943,23 +5942,6 @@ export async function resolveRouteActionDeclaration(deps: ActionExecutionDeps,
 }
 
 /**
- * [#32365] The registry's package-less entry of an action name — the bare
- * slot's item, which `getItem` answers first, when it carries no package
- * (none, `''` or the `sys_metadata` sentinel) — else `undefined`.
- */
-function packagelessRegistryAction(ql: any, actionName: string): unknown {
-    let item: any;
-    try {
-        item = ql?.registry?.getItem?.('action', actionName);
-    } catch {
-        return undefined;
-    }
-    if (item === null || typeof item !== 'object') return undefined;
-    const stamped = item._packageId;
-    return typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' ? undefined : item;
-}
-
-/**
  * [ADR-0150 D3, #32244] The declaration a route names when the protocol's bare
  * by-name read refused its action name. That read cannot see the object, so it
  * refuses a name two packages hold on any object key: A's `notify` on X beside
@@ -5970,13 +5952,9 @@ function packagelessRegistryAction(ql: any, actionName: string): unknown {
  * the router reaches a handler in. `bareRouteHolderRefusal` has already found
  * fewer than two holders on this route's key, so the call is not ambiguous.
  *
- * [#32365] The platform's or the environment's item has no address of its
- * own: it is the registry's package-less entry of the name (`readPackageless`),
- * read once and judged like a package candidate's — the environment's item on
- * `lead` beside two packages' on `account` and `contact` leaves each of the
- * three routes its own declaration. The refusal stands when a candidate is of
- * another kind, when a package-less candidate's item cannot be read, or when
- * two candidates own the route on one rung. No candidate owning the route is no declaration, as when
+ * The refusal stands when a candidate is not a package (the platform's or the
+ * environment's item has no address of its own) or two candidates own the
+ * route on one rung. No candidate owning the route is no declaration, as when
  * the bare read served another object's action. A candidate its own address
  * says it does not hold (`not-held-by-qualifier`) owns nothing, so another
  * candidate that owns the route answers; with none, the bare read's refusal
@@ -5993,23 +5971,14 @@ async function routeOwnerOfRefusedRead(
         objectName: string;
         ownsRoute: (action: any) => boolean;
         readAt: (packageId: string) => Promise<unknown>;
-        /** [#32365] The registry's package-less entry of the name, or `undefined`. */
-        readPackageless: () => unknown;
     },
 ): Promise<RouteActionDeclaration> {
-    const { obj, actionName, objectName, ownsRoute, readAt, readPackageless } = args;
-    const packageless = refusal.candidates.filter((c) => c.kind === 'environment' || c.kind === 'platform');
-    if (refusal.candidates.length < 2 || packageless.length > 1
-        || refusal.candidates.some((c) => c.kind !== 'package' && c.kind !== 'environment' && c.kind !== 'platform')) {
+    const { obj, actionName, objectName, ownsRoute, readAt } = args;
+    if (refusal.candidates.length < 2 || refusal.candidates.some((c) => c.kind !== 'package')) {
         return { action: undefined, obj, refusal };
     }
     const owners: any[] = [];
     let unread = false;
-    if (packageless.length === 1) {
-        const item: any = readPackageless();
-        if (item === null || typeof item !== 'object' || item.name !== actionName) return { action: undefined, obj, refusal };
-        if (ownsRoute(item)) owners.push(item);
-    }
     for (const candidate of refusal.candidates) {
         if (candidate.kind !== 'package') continue;
         let envelope: unknown;
