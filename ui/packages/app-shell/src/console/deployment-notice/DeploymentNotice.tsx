@@ -20,8 +20,9 @@
  * small line, with a way to show the notice again in this browser.
  *
  * On Home it sits in the page's 1120 px content column, like every other card
- * above the apps, and while it draws its email line it claims the `mail` item
- * (`../home/homeItemClaims`), so the first-run checklist does not repeat it.
+ * above the apps. It says nothing about mail: an unset email service is not a
+ * finding this console draws (`deploymentNotice.ts`, objectstack#32643), and the
+ * first-run checklist's optional Email delivery row is where mail is set up.
  *
  * @module
  */
@@ -31,7 +32,6 @@ import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
 import { Button } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { Check, Copy, HardDrive, Info } from 'lucide-react';
-import { useHomeItemClaim } from '../home/homeItemClaims.js';
 import {
   deploymentVariablesText,
   fetchDeploymentNotice,
@@ -69,10 +69,6 @@ function findingText(f: DeploymentFinding, t: (key: string, opts?: Record<string
     case 'file_storage_local':
       return t('deploymentNotice.finding.fileStorageLocal', {
         defaultValue: "Uploaded files are kept on this server's disk.",
-      });
-    case 'email_not_configured':
-      return t('deploymentNotice.finding.emailNotConfigured', {
-        defaultValue: 'No email service is set up, so invitations and password resets are not sent by email.',
       });
   }
 }
@@ -115,11 +111,6 @@ export function DeploymentNotice({ placement }: DeploymentNoticeProps) {
     isResolved && isAdmin && userId && state && state.production && state.findings.length > 0,
   );
   const isHidden = drawn && hidden === state?.fingerprint;
-  // On Home, the email line is said here; the checklist stands aside for it.
-  useHomeItemClaim(
-    'mail',
-    placement === 'home' && drawn && !isHidden && !!state?.findings.some((f) => f.id === 'email_not_configured'),
-  );
 
   if (!isResolved || !isAdmin || !userId || !state || !state.production || state.findings.length === 0) return null;
 

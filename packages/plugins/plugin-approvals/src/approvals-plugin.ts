@@ -629,7 +629,7 @@ export class ApprovalsServicePlugin implements Plugin {
         } catch (err: any) {
           ctx.logger.warn?.(
             '[approvals] the sys_approval_request.process_package backfill did not finish: open requests that name no '
-            + 'package keep naming none, every reader still reads the flow by name as before, and the next boot tries again.',
+            + 'package keep naming none, each reads its flow through its run, and the next boot tries again.',
             { error: err?.message ?? String(err) },
           );
         }

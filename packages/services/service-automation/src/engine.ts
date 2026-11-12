@@ -2657,8 +2657,16 @@ export type PackagedFlowSource = (name: string, packageId?: string) => string | 
  * registry ({@link AutomationEngine.setFlowNameResolver}); `undefined` means
  * the host serves no registry to ask, and the engine's own flow map answers as
  * before. ⛔ Never a second implementation of the rule.
+ *
+ * [#32183] It judges the served holders: a disabled package holds no name.
+ * `options.includeDisabledPackages` asks it over every holder instead, the
+ * question a durable judgment asks ({@link AutomationEngine.durableFlowHolder}).
  */
-export type FlowNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+export type FlowNameResolver = (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined;
 
 /**
  * [ADR-0150 D3, epic #31527 child E5] The same reader for the `connector` type:
@@ -2667,9 +2675,13 @@ export type FlowNameResolver = (name: string, callerPackageId: string | null) =>
  * automation plugin attaches `resolvePackageScopedName` over the ObjectQL
  * registry ({@link AutomationEngine.setConnectorNameResolver}); `undefined`
  * means the host serves no registry to ask. ⛔ Never a second implementation
- * of the rule.
+ * of the rule. [#32183] `options` as {@link FlowNameResolver}'s.
  */
-export type ConnectorNameResolver = (name: string, callerPackageId: string | null) => PackageScopedResolution | undefined;
+export type ConnectorNameResolver = (
+    name: string,
+    callerPackageId: string | null,
+    options?: { readonly includeDisabledPackages?: boolean },
+) => PackageScopedResolution | undefined;
 
 /**
  * [#28405] The stored body of flow `name` whose content identity is
@@ -2827,9 +2839,18 @@ export class AutomationEngine implements IAutomationService {
      * armed; a bare name two slots hold is refused at every bare entry point,
      * naming both, and never picks one.
      */
-    private readonly flowSlots = new FlowSlotTable((name) => this.flowHolder(name)?.status === 'refused');
+    // [#32183, R4-G] `heldByMany` reads every holder, a disabled package's
+    // included: a disable keeps that package's slot armed, so it never folds
+    // a shared name back to one bare entry (`main`'s answer).
+    private readonly flowSlots = new FlowSlotTable((name) => this.durableFlowHolder(name)?.status === 'refused');
     /** [#31696] Slot keys whose trigger decline ({@link activateFlowTrigger}) has been said. */
     private readonly sharedSlotTriggerWarned = new Set<string>();
+    /**
+     * [#31696] Where each key a slot change moved off went, for a run still
+     * in flight under its start key ({@link flowKeyNow}). A key moved onto
+     * drops its own entry, so the chain never loops.
+     */
+    private readonly movedFlowKeys = new Map<string, string>();
     /**
      * [#11997] Shadowing receipts, keyed by the flow's slot key.
      *
@@ -3558,6 +3579,8 @@ export class AutomationEngine implements IAutomationService {
             const flowPackage = flowRunPackage(run.context);
             if (flowPackage !== undefined) run = { ...run, flowPackage };
         }
+        const filed = this.flowKeyNow(run.flowName);
+        if (filed !== run.flowName) run = { ...run, flowName: filed };
         // The body lives in ./run-resume.ts (#25222).
         const readStore = () => this.store;
         const host: ThisParameterType<typeof persistSuspendedRun> = {
@@ -4986,10 +5009,28 @@ export class AutomationEngine implements IAutomationService {
             for (const [runId, run] of this.suspendedRuns) {
                 if (run.flowName === from) this.suspendedRuns.set(runId, { ...run, flowName: to });
             }
+            // Every run the ring holds moves with it, finished runs included;
+            // a run still in flight, or a consumed pause put back later, is
+            // filed where it lands ({@link flowKeyNow}).
+            for (let i = 0; i < this.executionLogs.length; i++) {
+                const entry = this.executionLogs[i];
+                if (entry.flowName === from) this.executionLogs[i] = { ...entry, flowName: to };
+            }
+            this.movedFlowKeys.delete(to);
+            this.movedFlowKeys.set(from, to);
         }
         for (const { to } of moved) {
             if (this.flows.has(to)) this.activateFlowTrigger(to);
         }
+    }
+
+    /**
+     * [#31696] The key a run started under `key` is filed under now: `key`
+     * while a slot holds it, else where the slot changes moved it.
+     */
+    private flowKeyNow(key: string): string {
+        for (let next = this.movedFlowKeys.get(key); next !== undefined && !this.flows.has(key); next = this.movedFlowKeys.get(key)) key = next;
+        return key;
     }
 
     /**
@@ -4999,7 +5040,9 @@ export class AutomationEngine implements IAutomationService {
      */
     private sharedFlowNameRefusal(name: string, callerPackageId: string | null): PackageScopedRefusal {
         // [M1] Every holder the registry names, a holder whose body was refused included.
-        const held = this.flowHolder(name);
+        // [#32183, R4-G] A disabled holder too: its slot stays armed, so the
+        // refusal names it, as on `main`.
+        const held = this.durableFlowHolder(name);
         const candidates = held?.status === 'refused' ? held.candidates : this.flowSlots.slotsOf(name).map((slot) =>
             slot.packageId === null ? { kind: 'environment' as const } : { kind: 'package' as const, packageId: slot.packageId },
         );
@@ -5029,7 +5072,10 @@ export class AutomationEngine implements IAutomationService {
             const refusal = this.flowNameRefusal(name, callerPackageId);
             return refusal ? { refusal } : { key: name };
         }
-        const resolution = this.flowNameResolver?.(name, callerPackageId);
+        // [#32183, R4-G] A name two slots hold resolves over every holder, a
+        // disabled package's included: a disable keeps its slot armed and
+        // moves no caller's answer (`main`'s). The served judgment is #32670's.
+        const resolution = this.flowNameResolver?.(name, callerPackageId, { includeDisabledPackages: true });
         if (resolution?.status === 'refused') return { refusal: resolution };
         if (resolution?.status === 'resolved' && resolution.holder.kind === 'package') {
             const key = this.flowSlots.keyOf(name, resolution.holder.packageId);
@@ -5838,11 +5884,26 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
-     * [ADR-0150 D8 row R10] The package of {@link flowHolder}'s answer when
+     * [#32183, ADR-0150 D8 rows R7–R10] {@link flowHolder}'s question asked
+     * over every holder, a disabled package's included: the read of a durable
+     * judgment, a package column a backfill writes once and never moves. A
+     * disable is reversible, so it moves no binding: a flow only a disabled
+     * package holds still binds to it, and a name an enabled and a disabled
+     * package both hold stays ambiguous. {@link flowHolder} and the execute
+     * doors keep judging the served holders. Read-only; records nothing.
+     */
+    durableFlowHolder(name: string): PackageScopedResolution | undefined {
+        return this.flowNameResolver?.(name, null, { includeDisabledPackages: true });
+    }
+
+    /**
+     * [ADR-0150 D8 row R9] The package of {@link flowHolder}'s answer when
      * one package holds `name`, else `null`: an environment-authored flow, a
      * flow registered straight into the engine, a name two packages hold and a
-     * name nothing holds all answer `null`, so their dispatch keys keep the
-     * bare shape. ⛔ No first-registered fallback: a refusal is `null`.
+     * name nothing holds all answer `null`. The credential channel's row stamp
+     * reads it (served, #32183); the dispatch key's coordinates read every
+     * holder ({@link flowDispatchHolder}). ⛔ No first-registered fallback: a
+     * refusal is `null`.
      */
     flowHolderPackage(name: string): string | null {
         const answer = this.flowHolder(name);
@@ -5879,9 +5940,15 @@ export class AutomationEngine implements IAutomationService {
             const slot = this.flowSlots.slot(name);
             if (slot) return { packageId: slot.packageId, claimBare: false, name: slot.name };
         }
-        const answer = this.flowHolder(name);
+        // [#32183] Over every holder, a disabled package's included
+        // (`durableFlowHolder`): a dispatch key names a row of the ledger, the
+        // row the re-key backfill scopes over every holder, and a disable is
+        // reversible, so it moves no key. A flow only a disabled package holds
+        // keeps that package's scope; a name an enabled and a disabled package
+        // hold keeps the collision guard, as on `main`.
+        const answer = this.durableFlowHolder(name);
         if (answer?.status === 'refused') return { packageId: this.armedFlowPackage(name) ?? null, claimBare: false };
-        return { packageId: this.flowHolderPackage(name), claimBare: true };
+        return { packageId: answer?.status === 'resolved' && answer.holder.kind === 'package' ? answer.holder.packageId : null, claimBare: true };
     }
 
     /**
@@ -9612,6 +9679,9 @@ export class AutomationEngine implements IAutomationService {
         context?: AutomationContext,
         consumedSuspension?: SuspendedRun,
     ): ExecutionLogEntry {
+        // [#31696] A run whose key moved in flight is recorded where it moved.
+        const filed = this.flowKeyNow(entry.flowName);
+        if (filed !== entry.flowName) entry = { ...entry, flowName: filed };
         // The body lives in ./run-history.ts (#25222).
         const readStore = () => this.store;
         const host: ThisParameterType<typeof recordLog> = {

@@ -122,13 +122,13 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
 
   it('control: a code-shipped set stays packaged, alone and beside a stored row of its name', () => {
     expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([shippedArtifact()])))
-      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr', packageIds: ['com.example.ehr'] });
     // A legacy overlay of a shipped name is hydrated wearing the artifact's
     // envelope, and the artifact is in the same list: still packaged, in either order.
     const legacyOverlay = shippedArtifact({ systemPermissions: ['overlaid'] });
     for (const items of [[legacyOverlay, shippedArtifact()], [shippedArtifact(), legacyOverlay]]) {
       expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl(items)))
-        .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+        .toEqual({ status: 'packaged', packageId: 'com.example.ehr', packageIds: ['com.example.ehr'] });
     }
   });
 
@@ -138,7 +138,7 @@ describe('[#21789] the lock judges "shipped by a code package" from the row\'s p
     expect(classifyPackagedPermissionSet('workspace_rep', ql, read(hydratedRuntimePackageRow())))
       .toEqual({ status: 'org' });
     expect(classifyPackagedPermissionSet('ehr_quality_inspector', ql, read(shippedArtifact())))
-      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr', packageIds: ['com.example.ehr'] });
   });
 
   it('the metadata door accepts a runtime-package set and still refuses a code-shipped one with 403 NOT_OVERRIDABLE', async () => {
@@ -179,9 +179,9 @@ describe('[ADR-0086 D3] the lock never reads a set\'s body `packageId` as its pa
 
   it('CONTROL: the binding decides, and a body key naming another package does not move it', () => {
     expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([packagedSet()])))
-      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr', packageIds: ['com.example.ehr'] });
     expect(classifyPackagedPermissionSet('ehr_quality_inspector', makeQl([packagedSet({ packageId: 'com.example.other' })])))
-      .toEqual({ status: 'packaged', packageId: 'com.example.ehr' });
+      .toEqual({ status: 'packaged', packageId: 'com.example.ehr', packageIds: ['com.example.ehr'] });
   });
 });
 
@@ -270,5 +270,60 @@ describe('the lock refusal carries its guidance as `userMessage` on the wire env
     expect(rejection).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
     expect(resolveThrownHttpError(rejection)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
     expect(String(rejection.message)).toContain('schema registry returned no list of declared permission sets');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// [ADR-0150 D2/D3, #31698] A name two packages declare: every holder is named
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A set is one per `(package, name)`: two packages may each declare one of a
+ * name (a cross-namespace pair). The lock refuses an edit of that name through
+ * the metadata door, and its refusal names EVERY declaring package. On a kernel
+ * with no readable registry, the layered read naming no package is refused
+ * across the holders (`409`, ADR-0150 D5); each holder's layers are then read at
+ * its package. BASE: the refusal named the first package in registry order,
+ * and the registry-less refusal answered "provenance unknown".
+ */
+describe('[#31698] a name two packages declare: the lock names every holder', () => {
+  const A = 'com.acme.alpha';
+  const B = 'com.acme.beta';
+  const declared = (packageId: string) => shippedArtifact({ name: 'ops_reader', _packageId: packageId });
+  const twoHolderRefusal = () => Object.assign(new Error('permission set "ops_reader" is held by more than one package'), {
+    code: 'RESOURCE_CONFLICT', status: 409,
+    refusal: { reason: 'ambiguous-in-environment', candidates: [{ kind: 'package', packageId: A }, { kind: 'package', packageId: B }] },
+  });
+
+  it('with a registry: the verdict and the 403 name both packages (BASE: the first one only)', async () => {
+    const ql = makeQl([declared(A), declared(B)]);
+    expect(classifyPackagedPermissionSet('ops_reader', ql)).toEqual({ status: 'packaged', packageId: A, packageIds: [A, B] });
+    const refusal = await lockGate(ql)({ type: 'permission', name: 'ops_reader', body: {} }).catch((e: unknown) => e);
+    expect(refusal).toBeInstanceOf(PackagedPermissionSetLockedError);
+    expect((refusal as Error).message).toContain(`declared by packages '${A}' and '${B}'`);
+  });
+
+  it('with no registry: each holder\'s layers are read at its package, and the 403 names both (BASE: provenance unknown)', async () => {
+    const asked: Array<string | undefined> = [];
+    const gate = lockGate(makeQl(null), async (req: { name: string; packageId?: string }) => {
+      asked.push(req.packageId);
+      if (req.packageId === undefined) throw twoHolderRefusal();
+      return { type: 'permission', name: req.name, code: declared(req.packageId), overlay: null, effective: declared(req.packageId) };
+    });
+    const refusal = await gate({ type: 'permission', name: 'ops_reader', body: {} }).catch((e: unknown) => e);
+    expect(asked).toEqual([undefined, A, B]);
+    expect(refusal).toBeInstanceOf(PackagedPermissionSetLockedError);
+    expect((refusal as Error).message).toContain(`declared by packages '${A}' and '${B}'`);
+  });
+
+  it('CONTROL one holder: the refusal text is unchanged; a failed per-holder read is still provenance-unknown', async () => {
+    const one = await lockGate(makeQl([declared(A)]))({ type: 'permission', name: 'ops_reader', body: {} }).catch((e: unknown) => e);
+    expect((one as Error).message).toContain(`declared by package '${A}' and is locked`);
+    const gate = lockGate(makeQl(null), async (req: { name: string; packageId?: string }) => {
+      if (req.packageId === undefined) throw twoHolderRefusal();
+      throw new Error('store down');
+    });
+    const unknown = await gate({ type: 'permission', name: 'ops_reader', body: {} }).catch((e: unknown) => e);
+    expect(unknown).toBeInstanceOf(PackagedPermissionSetProvenanceUnknownError);
   });
 });

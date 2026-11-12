@@ -5,12 +5,18 @@ import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/a
 import type {
   AttachedFile,
   AttachFileInput,
+  IApprovalService,
   IDataEngine,
   ISecurityService,
   IStorageService,
 } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { FILE_REFERENCE_TYPES, RAW_FILE_VALUES_CONTEXT_KEY, isFileIdToken } from '@objectstack/spec/data';
+import {
+  FILE_REFERENCE_TYPES,
+  RAW_FILE_VALUES_CONTEXT_KEY,
+  isFileIdToken,
+  type DroppedFieldsEvent,
+} from '@objectstack/spec/data';
 import {
   StorageMetadataStore,
   updateFileIfUnchanged,
@@ -61,15 +67,24 @@ import {
  *    the `/files/:fileId/url` door mints, with the record-governed lifetime.
  *  - **Minting a link.** For the attachments list, `assertMayAttach` (the
  *    `sys_attachment` insert's own two questions). For a file field, the
- *    parent-EDIT verdict the attach rule asks (`mayEditAttachmentParent`) and
- *    the field's writability as the security service answers it.
+ *    parent-EDIT verdict the attach rule asks (`mayEditAttachmentParent`),
+ *    the field's writability as the security service answers it, the field's
+ *    own `readonly` declaration, and [#32734] whether a pending approval
+ *    locks the record (`IApprovalService.getRecordLock`, the judgement the
+ *    record-lock hook enforces). A conditional lock (`readonlyWhen`) has no
+ *    judgement a door can ask without writing, so it is judged when the link
+ *    is used.
  *  - **Using a link.** The upload acts as the user who minted it: their grants
  *    are resolved again at that moment (the plugin binds
  *    {@link RecordFileAccessDeps.resolveUserContext}, the `runAs: 'user'`
  *    automation precedent), and the existing writers run under them —
  *    `attachFileAs` for an attachment, the record's own update for a field,
  *    whose file-reference hooks claim the file. So a revoked grant refuses the
- *    upload, and every gate on the write judges that user.
+ *    upload, and every gate on the write judges that user. [#32734] The field
+ *    write is strict (`strictReadonlyWrites`): a field the engine would strip
+ *    (`readonly`, a TRUE `readonlyWhen`) refuses the whole write instead of
+ *    answering success with nothing attached, and the stored upload is
+ *    discarded.
  *
  * ## The link is a pending `sys_file` row
  *
@@ -269,6 +284,13 @@ export interface RecordFileAccessDeps {
     | (AttachmentSecurityLike & Partial<Pick<ISecurityService, 'getWritableFields'>>)
     | null
     | undefined;
+  /**
+   * [#32734] The approvals service, for whether a pending approval locks the
+   * record a field link would write. Absent (no approvals plugin), or without
+   * `getRecordLock`: no lock is judged when the link is minted, and the
+   * record-lock hook still refuses the write when it is used.
+   */
+  getApprovals?(): Partial<Pick<IApprovalService, 'getRecordLock'>> | null | undefined;
   logger: { warn(message: string): void; debug?(message: string): void };
   /** Clock (tests). */
   now?(): number;
@@ -301,6 +323,28 @@ function refuseUnusableLink(): never {
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+/**
+ * [#32734] When `err` is the engine's strict-write refusal
+ * (`strictReadonlyWrites`: the update would have stripped a caller-supplied
+ * field, so it wrote nothing), throw the link's refusal for it: the field is
+ * read-only, `FIELD_NOT_ACCESSIBLE` / 403, the reason taken from the
+ * refusal's own `drops`. The engine's message speaks to a developer about
+ * write options, so it is not the one the link's holder reads. Anything else
+ * returns, for the caller to rethrow as it was.
+ */
+function readonlyRefusalOf(err: unknown, object: string, field: string): void {
+  const e = err as { code?: unknown; drops?: unknown } | null;
+  if (!e || e.code !== 'ERR_READONLY_FIELD_REJECTED') return;
+  const drops = Array.isArray(e.drops) ? (e.drops as DroppedFieldsEvent[]) : [];
+  refuse(
+    'FIELD_NOT_ACCESSIBLE',
+    403,
+    drops.some((d) => d?.reason === 'readonly_when')
+      ? `Nothing was attached: ${object}.${field} is read-only on this record in its current state, so it cannot take a file.`
+      : `Nothing was attached: ${object}.${field} is read-only, so it cannot take a file.`,
+  );
 }
 
 /** These verbs serve a user; nothing here acts as the system. */
@@ -592,7 +636,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
     const engine = this.engineOrRefuse();
     const field = 'field' in target ? target.field : undefined;
 
-    if (field !== undefined) requireFileField(engine, object, field);
+    const fieldDef = field !== undefined ? requireFileField(engine, object, field) : undefined;
     // A record the caller cannot read answers as one that does not exist, at
     // this door as at `get_record`.
     await this.readRecordAs(engine, object, recordId, caller);
@@ -622,6 +666,26 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       const writable = await this.deps.getSecurity?.()?.getWritableFields?.(object, caller);
       if (Array.isArray(writable) && !writable.includes(field)) {
         refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: you cannot edit that field.`);
+      }
+      // [#32734] A `readonly` field takes no value from a user's write: the
+      // update strips it, so a link to it could never attach anything.
+      if (fieldDef?.readonly === true) {
+        refuse('FIELD_NOT_ACCESSIBLE', 403, `You cannot attach a file to ${object}.${field}: the field is read-only.`);
+      }
+      // [#32734] Nor does a record a pending approval locks: every edit of it
+      // is refused until the approval is decided, recalled or rejected. The
+      // approvals service's own answer, judged as the record-lock hook judges
+      // a write; `null` is a record the caller cannot read, refused above.
+      const approvals = this.deps.getApprovals?.();
+      if (approvals && typeof approvals.getRecordLock === 'function') {
+        const lock = await approvals.getRecordLock(object, recordId, caller);
+        if (lock?.locked === true) {
+          refuse(
+            'RECORD_LOCKED',
+            409,
+            `You cannot attach a file to ${object}/${recordId} now: it is locked while an approval is in progress.`,
+          );
+        }
       }
     }
 
@@ -831,7 +895,15 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
         const current = await this.readRecordAs(engine, state.object, state.record_id, user);
         value = [...fileIdsIn(current[field]), fileId];
       }
-      const updated = await engine.update(state.object, { [field]: value }, { where: { id: state.record_id }, context: user });
+      // [#32734] Strict: a field the update would strip (`readonly`, or a
+      // `readonlyWhen` that holds now) refuses the whole write rather than
+      // answering success with the field left as it was, so an upload is never
+      // answered as attached when the field did not take it.
+      const updated = await engine.update(
+        state.object,
+        { [field]: value },
+        { where: { id: state.record_id }, context: user, strictReadonlyWrites: true },
+      );
       // A row the user's update no longer reaches (deleted, or out of their
       // scope since the link was minted) is refused, never answered as landed.
       if (updated == null || updated === 0) {
@@ -839,6 +911,7 @@ export class RecordFileAccess implements ICallerRecordFileService, UploadLinkDoo
       }
     } catch (err) {
       await this.discard(storage, store, fileId, key, writeContext);
+      readonlyRefusalOf(err, state.object, field);
       throw err;
     }
     return { object: state.object, recordId: state.record_id, fileId, size, field };

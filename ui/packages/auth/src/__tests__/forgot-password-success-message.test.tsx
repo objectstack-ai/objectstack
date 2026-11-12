@@ -194,3 +194,72 @@ describe('ForgotPasswordForm — success screen on a deployment that sends no ma
     expect(screen.queryByText("A reset link can't be emailed here")).toBeNull();
   });
 });
+
+/**
+ * objectstack#32645 — one reset request at a time. A fast double click fires
+ * the form's submit twice before React re-renders, so a disabled button alone
+ * cannot stop the second request; the handler ignores a submit while one is
+ * pending, and takes the next one once that request has answered.
+ */
+describe('ForgotPasswordForm — a submit while a reset request is pending is ignored (objectstack#32645)', () => {
+  /** A reset request the case answers by hand. */
+  function pendingReset() {
+    let settle!: { resolve: () => void; reject: (error: Error) => void };
+    const forgotPassword = vi.fn(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          settle = { resolve, reject };
+        }),
+    );
+    return { forgotPassword, settle: () => settle };
+  }
+
+  function renderWith(forgotPassword: AuthClient['forgotPassword']) {
+    const client = createMockClient({ forgotPassword });
+    const view = render(
+      <AuthProvider authUrl="/api/auth" client={client}>
+        <ForgotPasswordForm />
+      </AuthProvider>,
+    );
+    return { client, view };
+  }
+
+  it('two synchronous submits send one reset request', async () => {
+    const reset = pendingReset();
+    renderWith(reset.forgotPassword);
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'twice@example.com' } });
+    const button = screen.getByRole('button', { name: 'Send Reset Link' });
+    const form = button.closest('form') as HTMLFormElement;
+
+    // Both in one synchronous turn: no render happens between them.
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    expect(reset.forgotPassword).toHaveBeenCalledTimes(1);
+    expect(reset.forgotPassword).toHaveBeenCalledWith('twice@example.com');
+
+    // While it is pending the button says so and cannot be pressed.
+    const pendingButton = await screen.findByRole('button', { name: 'Sending…' });
+    expect((pendingButton as HTMLButtonElement).disabled).toBe(true);
+
+    reset.settle().resolve();
+    expect(await screen.findByText('Check your email')).toBeTruthy();
+    expect(reset.forgotPassword).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes the next submit once the pending request has failed', async () => {
+    const reset = pendingReset();
+    renderWith(reset.forgotPassword);
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'retry@example.com' } });
+    const form = screen.getByRole('button', { name: 'Send Reset Link' }).closest('form') as HTMLFormElement;
+
+    fireEvent.submit(form);
+    reset.settle().reject(new Error('Too many requests. Please try again later.'));
+    expect(await screen.findByText('Too many requests. Please try again later.')).toBeTruthy();
+
+    const button = screen.getByRole('button', { name: 'Send Reset Link' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.submit(form);
+    expect(reset.forgotPassword).toHaveBeenCalledTimes(2);
+  });
+});
