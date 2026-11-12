@@ -42,7 +42,11 @@
  * row per `(package, name)`; and a read the registry cannot answer reads the
  * loaders' stored items of the name through {@link readStoreEntry}
  * ({@link slotStoreOf}). A loader's own unscoped read still answers the item
- * of a name written last ({@link lastWrittenOf}), as it did.
+ * of a name written last ({@link lastWrittenOf}), as it did. [#32560] A read
+ * naming no package of an action name a package holds in the registry is
+ * judged over the registry's and the loaders' slots together
+ * ({@link judgesLoaderSlots}), and a package-less registry slot no loader
+ * stores is the platform's, not the environment's ({@link platformSlotsOf}).
  *
  * ⛔ `api`'s endpoint matcher keys its routes by METHOD + path (bucket 1);
  * nothing here resolves a path. What changes is that the matcher now sees
