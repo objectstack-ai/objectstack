@@ -60,6 +60,7 @@ import { ENVIRONMENT_ADDRESS_SEGMENT, readNamespacePositionSegment } from '@obje
 import { installedManifestsOfEngine } from './installed-manifests.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import type { ProtocolHost } from './protocol-host.js';
+import type { ServedOverrideRow } from './served-override.js';
 
 /**
  * The registry reads the exact qualifier judges a qualified read with: who
@@ -370,12 +371,79 @@ export function exactQualifierItem(
         // A provenance sentinel or a package this registry does not hold is not another package's item.
         return item;
     }
+    return admittedHolderItem(registry, request, address, member);
+}
+
+/**
+ * The registry's own item of the holder an exact address admitted: the one
+ * holder's item; two bases the package is a pair of, both holding the name,
+ * refused naming both; `undefined` when only a stored row bound to the
+ * package carries the name.
+ */
+function admittedHolderItem(
+    registry: ExactQualifierRegistry,
+    request: { type: string; name: string },
+    address: ExactQualifierAddress,
+    member: string | undefined,
+): unknown {
     if (address.registryHolders.length > 1) {
         throw refusal(request.type, request.name, address.packageId, 'ambiguous-in-closure',
             address.registryHolders.map((holder) => ({ kind: 'package' as const, packageId: holder })));
     }
     const [holder] = address.registryHolders;
     return holder === undefined ? undefined : registry.getPackageScopedItem(request.type, request.name, holder, member);
+}
+
+/**
+ * [ADR-0126 Regime C, ADR-0150 D4; epic ruling 6817768147 on #32568] Is a
+ * package-less row of `(type, name)` met at a holder's exact address declined
+ * there: a type ADR-0150 addresses by `(package, name)` whose stored row of
+ * the name the reads decline ({@link ProtocolHost.declinesStoredRow}: a sealed
+ * managed item, or a shipped flow name, unless the row is the shipping
+ * package's declared override)?
+ *
+ * Such a row customizes nothing: it is no holder's customization, so D4 has
+ * no ambiguity to report for it, and the address serves its holder's own
+ * item, as with no row stored. Declined on every read at the address, in
+ * every hydration state: the active read and its registry or service copy,
+ * the strict draft read, `previewDrafts`, the layered read and its `draft`
+ * layer. Only the five overlay types' package-less rows are a holder's
+ * customization, judged by {@link packageLessRowOwners} (D4).
+ */
+export function declinesPackageLessRowAt(
+    host: Pick<ProtocolHost, 'declinesStoredRow'>,
+    type: string,
+    name: string,
+    row?: ServedOverrideRow,
+): boolean {
+    return isPackageScopedType(type) && host.declinesStoredRow(type, name, row);
+}
+
+/** Is `row` a stored row bound to no package (its `package_id` column empty)? */
+export function isPackageLessRow(row: unknown): boolean {
+    const bound = (row as { package_id?: unknown } | null | undefined)?.package_id;
+    return bound === undefined || bound === null || bound === '';
+}
+
+/**
+ * [Epic ruling 6817768147 on #32568] The item an exact address serves in
+ * place of a package-less registry or service copy of a row it declines
+ * ({@link declinesPackageLessRowAt}): the copy a hydration put in the
+ * registry's bare slot (stamped `''` or `sys_metadata`, tenant-marked) is the
+ * declined row, so the admitted holder's own item is served, as before the
+ * hydration. `item` is returned unchanged when it is not such a copy.
+ */
+export function declinedCopyReplaced(
+    host: Pick<ProtocolHost, 'engine' | 'isStoredEntryOfDeclinedName'>,
+    request: { type: string; name: string },
+    address: ExactQualifierAddress,
+    item: unknown,
+    member: string | undefined,
+): unknown {
+    if (item === undefined || item === null || typeof item !== 'object') return item;
+    if (!isPackageScopedType(request.type) || !host.isStoredEntryOfDeclinedName(request.type, item)) return item;
+    const registry = exactQualifierRegistry(host);
+    return registry ? admittedHolderItem(registry, request, address, member) : item;
 }
 
 /**

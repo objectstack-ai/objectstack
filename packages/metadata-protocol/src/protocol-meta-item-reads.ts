@@ -45,7 +45,14 @@ import {
 } from './protocol-bundle-members.js';
 import { packagelessContentPackage } from './protocol-environment-rows.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
+import {
+    admitExactQualifier,
+    declinedCopyReplaced,
+    declinesPackageLessRowAt,
+    exactQualifierItem,
+    isPackageLessRow,
+    refuseUnjudgeableByNameRead,
+} from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import {
     bundleMemberOf,
@@ -209,7 +216,7 @@ export async function getMetaItemForExecution(host: Pick<ProtocolHost, 'readMeta
 }
 
 /** The body of `ObjectStackProtocolImplementation#readMetaItem`; the method's docblock there is its contract. */
-export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
+export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt' | 'convertStoredItem' | 'declinesStoredRow' | 'draftPublishVerdict' | 'engine' | 'findPairAddedMemberRow' | 'findServedOverlayRow' | 'foldObjectExtendersFromRegistry' | 'governServedObject' | 'isArtifactBacked' | 'isStoredEntryOfDeclinedName' | 'isStoredFlowEntryOfShippedName' | 'lookupArtifactItem' | 'overlayLockLayerAt' | 'packagelessAddress' | 'readItemActiveRows' | 'readItemFromMetadataService' | 'readVersionToken' | 'registryMemberServedAt' | 'resolveAppPackageIdKey' | 'resolveCascadeDeleteObjects' | 'resolveDisabledActionsReader' | 'resolveFlowRegistrationReader' | 'resolveRowlessExpandedView' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'servedLockState' | 'shippedArtifactsOf' | 'strictDraftReadAddress' | 'throwMetadataServiceUnavailable'>, request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, opts: { face?: 'served' | 'execution' } = {}) {
@@ -482,6 +489,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                     type: request.type, name: request.name, state: 'draft', ...memberOption(member),
                 }))?.row;
             }
+            // [#32568, epic ruling 6817768147] At an exact address a sealed
+            // type's package-less draft is declined, as the active row is
+            // ({@link declinesPackageLessRowAt}): the active read below answers.
+            if (draftRec && exactAddress && servedDraft?.overrideOf === undefined
+                && isPackageLessRow(draftRec)
+                && declinesPackageLessRowAt(host, request.type, request.name, draftRec as ServedOverrideRow)) {
+                draftRec = undefined;
+            }
             if (draftRec) {
                 const draftItem = host.convertStoredItem(
                     String(draftRec.type ?? request.type),
@@ -499,11 +514,18 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                     } else previewed = withRowBinding(previewed, recPkg); // [#28673] the column's package
                     (previewed as any)._draft = true;
                 }
-                return {
-                    type: request.type,
-                    name: request.name,
-                    item: await serveDraft(host.governServedObject(request.type, previewed), draftRec),
-                };
+                // [#32568] …and the draft is judged at the address as the
+                // strict draft read judges it ({@link exactQualifierItem}): an
+                // overlay type's package-less draft of a name two or more
+                // packages hold is refused naming every holder. A draft that
+                // is not the address's own falls through to the active read.
+                if (!exactAddress || exactQualifierItem(host, request, exactAddress, previewed, member) === previewed) {
+                    return {
+                        type: request.type,
+                        name: request.name,
+                        item: await serveDraft(host.governServedObject(request.type, previewed), draftRec),
+                    };
+                }
             }
         } catch (error) {
             // [#5532] Falling through to the active read here would answer
@@ -597,6 +619,21 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
             if (readState === 'draft') {
                 draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
                 servedDraftRow = record as { metadata?: unknown; package_id?: string | null };
+                // [#32568, ADR-0150 D4, epic ruling 6817768147] The strict draft
+                // read at an exact address is judged as the active read judges
+                // what it serves there: a sealed type's package-less draft is
+                // declined ({@link declinesPackageLessRowAt}), an overlay type's
+                // package-less draft of a name two or more packages hold is
+                // refused naming every holder ({@link exactQualifierItem}), and
+                // a draft that is not the address's own is no draft here.
+                if (exactAddress && (
+                    (served?.overrideOf === undefined && isPackageLessRow(record)
+                        && declinesPackageLessRowAt(host, request.type, request.name, record as ServedOverrideRow))
+                    || exactQualifierItem(host, request, exactAddress, item, member) !== item)) {
+                    item = undefined;
+                    draftChanges = undefined;
+                    servedDraftRow = undefined;
+                }
             } else {
                 const stamped = record as { updated_at?: unknown; created_at?: unknown };
                 servedRowChangedAt = canonicalIsoInstant(stamped.updated_at ?? stamped.created_at);
@@ -826,7 +863,14 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
     // [ADR-0150 D5, child G1] An exact read never serves another package's
     // item: a layer above that answered one (the registry's first-composite
     // tier, a by-name service read) is replaced by the admitted holder's.
-    if (exactAddress) item = exactQualifierItem(host, request, exactAddress, item, member);
+    // [#32568, epic ruling 6817768147] …and a registry or service copy of a
+    // package-less row the address declines (a hydration put it in the bare
+    // slot) is that declined row: the admitted holder's own item is served,
+    // as before the hydration ({@link declinedCopyReplaced}).
+    if (exactAddress) {
+        item = exactQualifierItem(host, request, exactAddress,
+            declinedCopyReplaced(host, request, exactAddress, item, member), member);
+    }
 
     if (item === undefined && serviceDegraded?.degraded) {
         host.throwMetadataServiceUnavailable(serviceDegraded.errors);

@@ -54,7 +54,13 @@ import {
     resolveBundleMemberSelector,
 } from './protocol-bundle-members.js';
 import type { ProtocolHost } from './protocol-host.js';
-import { admitExactQualifier, exactQualifierItem, refuseUnjudgeableByNameRead } from './protocol-exact-qualifier.js';
+import {
+    admitExactQualifier,
+    declinesPackageLessRowAt,
+    exactQualifierItem,
+    isPackageLessRow,
+    refuseUnjudgeableByNameRead,
+} from './protocol-exact-qualifier.js';
 import { canonicalizeMetaRequestType } from './protocol-meta-type-schema.js';
 import { refuseActionHeldByPackages, rethrowPackageScopedRefusal } from './protocol-meta-item-reads.js';
 import { rowMatchesOverlayWhere } from './protocol-overlay-merge.js';
@@ -383,9 +389,15 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // (epic ruling 6761802819 on #31699): refused naming every holder, never
     // reported as this holder's overlay. A pair's row the address does not own
     // is not its layer. The raw row is still what `overlay` reports.
+    // [#32568, epic ruling 6817768147] A sealed type's package-less row is
+    // declined at the address ({@link declinesPackageLessRowAt}): it is no
+    // holder's customization, so it is not this holder's overlay either, with
+    // one holder or two. Only an overlay type's is judged by D4.
     if (exactAddress && overlay !== null) {
         const stamped = withRowBinding(overlay, overlayBinding);
-        if (exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
+        const declined = isPackageLessRow({ package_id: overlayBinding })
+            && declinesPackageLessRowAt(host, request.type, request.name, overlayRow);
+        if (declined || exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
             overlay = null;
             overlayScope = null;
             overlayRow = undefined;
@@ -523,6 +535,20 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                     String(draftRow.type ?? request.type),
                     storedRowDocument(draftRow),
                 );
+                // [#32568, ADR-0150 D4, epic ruling 6817768147] At an exact
+                // address the layer is the draft the strict draft read serves
+                // there, judged as that read judges it: a sealed type's
+                // package-less draft is declined, an overlay type's
+                // package-less draft of a name two or more packages hold is
+                // refused naming every holder, and another holder's draft is
+                // no draft here. The layer itself stays the draft as stored.
+                if (exactAddress) {
+                    const stamped = withRowBinding(draft, (draftRow as { package_id?: unknown }).package_id);
+                    if ((isPackageLessRow(draftRow) && declinesPackageLessRowAt(host, request.type, request.name, draftRow as ServedOverrideRow))
+                        || exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
+                        draft = null;
+                    }
+                }
             }
         } catch (error) {
             // [#5707] A read that did not happen is not "no draft pending".
