@@ -401,7 +401,8 @@ describe('#14423 item 2 — `MetadataManager.loadManyKeyed`: the plural read und
 describe('[#32517] the unscoped plural reads answer every package\'s item of an unbundled by-package type', () => {
   const A = 'com.acme.alpha';
   const B = 'com.acme.beta';
-  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset'];
+  // [#31985] `tool` joins with its narrowing.
+  const UNBUNDLED = ['api', 'agent', 'skill', 'action', 'flow', 'permission', 'picklist', 'mapping', 'dataset', 'tool'];
   const NAME = 'shared_item';
   const item = (packageId: string | undefined, extra: Record<string, unknown> = {}) => ({
     name: NAME,

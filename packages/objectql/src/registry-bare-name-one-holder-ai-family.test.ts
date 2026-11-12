@@ -493,6 +493,42 @@ describe('the narrowing — agent, skill and tool hold one name per namespace (A
     expect(refused!.message).toContain('com.acme.alpha');
     expect(refused!.message).toContain('com.acme.beta');
   });
+
+  // [#31985, ADR-0150 D3 as #32183 reads it] Once two namespaces may each
+  // hold a tool name, the two holder reads part: a by-name read judges the
+  // SERVED holders (a disabled package holds no name), the install door every
+  // holder it has installed (a disable is reversible, so it never admits what
+  // the re-enable would refuse).
+  it.each([['enabled holder first', ['com.acme.alpha', 'com.acme.beta']], ['disabled holder first', ['com.acme.beta', 'com.acme.alpha']]] as const)('[#31985] one of two namespaces\' tool holders disabled (%s): the bare read serves the enabled one; re-enabled, refused naming both; the door still counts the disabled one', async (_order, order) => {
+    const { registry, register } = await boot();
+    for (const id of order) expect(await register(pkg(id, { tool: ['shared_tool'] }))).toBeUndefined();
+    registry.disablePackage('com.acme.beta');
+    expect(registry.packageScopedHoldersOf('tool', 'shared_tool')).toEqual(['com.acme.alpha']);
+    expect([...registry.packageScopedHoldersOf('tool', 'shared_tool', null, { includeDisabledPackages: true })].sort())
+      .toEqual(['com.acme.alpha', 'com.acme.beta']);
+    expect(marker(registry.resolveItem('tool', 'shared_tool'))).toBe('alpha tool');
+    expect(marker(registry.resolveItem('tool', 'shared_tool', 'com.acme.alpha'))).toBe('alpha tool');
+
+    // The door: a package with no namespace is refused beside the disabled
+    // holder too, naming it — every installed holder counts there.
+    const bare = pkg('com.acme.plain', { tool: ['shared_tool'] });
+    delete bare.namespace;
+    const err = await register(bare);
+    expect([err?.code, err?.status]).toEqual([NAMESPACE_CONFLICT_CODE, 422]);
+    expect(err!.conflicts!.map((c) => c.existingHolder)).toEqual(
+      expect.arrayContaining([{ kind: 'package', packageId: 'com.acme.alpha' }, { kind: 'package', packageId: 'com.acme.beta' }]),
+    );
+    // …and a third namespace's tool installs beside both.
+    expect(await register(pkg('com.acme.gamma', { tool: ['shared_tool'] }))).toBeUndefined();
+    registry.disablePackage('com.acme.gamma');
+
+    registry.enablePackage('com.acme.beta');
+    const refused = await caught(() => registry.resolveItem('tool', 'shared_tool'));
+    expect([refused?.code, refused?.status]).toEqual(['RESOURCE_CONFLICT', 409]);
+    expect(refused!.message).toContain('com.acme.alpha');
+    expect(refused!.message).toContain('com.acme.beta');
+    expect(refused!.message).not.toContain('com.acme.gamma');
+  });
 });
 
 describe('what the AI family leaves alone', () => {
