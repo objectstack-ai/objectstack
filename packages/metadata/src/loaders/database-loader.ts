@@ -31,8 +31,8 @@ import {
   isBundledStoreType,
   refuseSeveralSlots,
   slotPackageOf,
-  storedBundleMemberOf,
   storedItemPackageId,
+  storedRowMemberOf,
   storeRemovalKeys,
   storeRowKey,
   storeRowWriteKey,
@@ -303,6 +303,18 @@ export interface DatabaseLoaderOptions {
  * `loadManyKeyed` keep one row per `(package, name, member)` — every member of
  * every slot, as `main` answered every row — and a rollback by name of a name
  * with one row slot restores the row of the member its body declares.
+ *
+ * [#32540, ADR-0150 D4/D6] `bundle_member` is a row's identity discriminator
+ * beside `(type, name, package_id)`, read per type by the type's own table and
+ * never guessed from a body field (`storedRowMemberOf`): `email_template`'s
+ * locale (`ITEM_KEY_DISCRIMINATORS`), and an action's bound object (the
+ * owner-keyed types). NULL is the type's row without one — the canonical
+ * locale, the object-less action. So one package's action name bound to
+ * several objects keeps a row per object: `list` serves every binding, while
+ * `load` / `loadMany` / `loadManyKeyed` still answer one per name. A row written
+ * before its object was named reads it off its body, and is named (its column
+ * only) before any write of its slot, so the object-less binding's row never
+ * collides with it on the unique key.
  */
 export class DatabaseLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -1139,6 +1151,7 @@ export class DatabaseLoader implements MetadataLoader {
         if (data === null) continue;
         const name = row.name;
         const packageId = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowPackageId(row) : undefined;
+        const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, data, row.bundle_member) : undefined;
         result.push({
           name: typeof name === 'string' && name !== '' ? name : null,
           data,
@@ -1146,7 +1159,7 @@ export class DatabaseLoader implements MetadataLoader {
             ? {
                 packageId,
                 version: Number(row.version) || 0,
-                ...(isBundledStoreType(type) ? { member: storedBundleMemberOf(type, data, row.bundle_member) ?? null } : {}),
+                ...(member !== undefined ? { member } : {}),
                 // [#31699 R7-A] A legacy row: its package named by its stored body alone.
                 ...(packageId !== undefined && packageId !== row.package_id ? { legacyRowId: String(row.id) } : {}),
               }
@@ -1202,7 +1215,8 @@ export class DatabaseLoader implements MetadataLoader {
     // [#32488 item 3, R8-A] The loader's own rows only, as `migrateDatabaseLoaderRowPackages`
     // binds them: another writer's row whose body carries a copied stamp is bound to nothing.
     if (row.source !== 'database') return;
-    const memberOf = (of: Record<string, unknown>) => storedBundleMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
+    // [#32540] An action's member is its bound object: one package's rows of one name on two objects are two slots' rows.
+    const memberOf = (of: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(of), of.bundle_member) ?? null;
     if (rows.some((other) => other !== row && other.package_id === read.packageId && memberOf(other) === memberOf(row))) return;
     await this._update(this.tableName, read.id, { package_id: read.packageId });
     this.invalidate(type, name);
@@ -1556,33 +1570,66 @@ export class DatabaseLoader implements MetadataLoader {
 
     // [#31699 R3-B] A bundled type's one slot holds a row per member: the
     // rollback restores the row of the member the restored body declares,
-    // never the first row the driver returns (another member's).
-    const member = isBundledStoreType(type) && PACKAGE_SLOTTED_STORE_TYPES.has(type)
-      ? storedBundleMemberOf(type, restoredData)
-      : undefined;
+    // never the first row the driver returns (another member's). [#32540] So
+    // does an action's: its member is the object the restored body is bound
+    // to, never another binding's row.
+    const member = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? storedRowMemberOf(type, restoredData) : undefined;
+    // [#32540 C3] A rollback is a write of the slot too: its rows written
+    // before their object was named are named first.
+    if (member !== undefined && !isBundledStoreType(type)) {
+      await this.nameUnnamedRows(type, name, unnamedRowsOf(type, await this._find(this.tableName, { where: this.baseFilter(type, name) }), (row) => this.rowToData(row)));
+    }
+    const rowsOfName = member === undefined ? [] : await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const existing = member === undefined
       ? await this._findOne(this.tableName, { where: this.baseFilter(type, name) })
-      : (await this._find(this.tableName, { where: this.baseFilter(type, name) }))
-          .find((row) => (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
+      : rowsOfName.find((row) => (storedRowMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member) ?? null;
+    // [#32540 C9] The restored body may be bound to an object the slot holds no
+    // row of (a row written before held one binding and was later re-bound
+    // to another object): it is restored as that binding's own row, in the
+    // slot's one package — ⛔ never written over another binding's row.
+    const restoresBinding = !existing && member !== undefined && !isBundledStoreType(type) && rowsOfName.length > 0;
 
-    if (!existing) {
+    if (!existing && !restoresBinding) {
       throw new Error(`Metadata ${type}/${name}${member === undefined ? '' : ` (member ${member ?? 'canonical'})`} not found for rollback`);
     }
 
-    const previousChecksum = existing.checksum as string | undefined;
+    const previousChecksum = existing?.checksum as string | undefined;
     // [#32246] A by-package type numbers versions per name (see the class
     // doc); the name has one row slot here (refused above).
     const newVersion = PACKAGE_SLOTTED_STORE_TYPES.has(type)
       ? await this.nextNameVersion(type, name)
-      : ((existing.version as number) ?? 0) + 1;
+      : ((existing?.version as number) ?? 0) + 1;
 
-    await this._update(this.tableName, existing.id as string, {
-      metadata: metadataJson,
-      version: newVersion,
-      checksum: newChecksum,
-      updated_at: now,
-      state: 'active',
-    });
+    if (existing) {
+      await this._update(this.tableName, existing.id as string, {
+        metadata: metadataJson,
+        version: newVersion,
+        checksum: newChecksum,
+        updated_at: now,
+        state: 'active',
+      });
+    } else {
+      if (typeof member === 'string') refuseUnstorableMember(type, name, member);
+      const slotRow = rowsOfName[0]!;
+      const packageId = storedRowPackageId(slotRow);
+      await this._create(this.tableName, {
+        id: generateId(),
+        name,
+        type,
+        namespace: slotRow.namespace ?? 'default',
+        scope: (restoredData as any)?.scope ?? slotRow.scope ?? 'platform',
+        metadata: metadataJson,
+        checksum: newChecksum,
+        strategy: 'merge',
+        state: 'active',
+        version: newVersion,
+        source: 'database',
+        ...(packageId !== undefined ? { package_id: packageId } : {}),
+        bundle_member: member,
+        created_at: now,
+        updated_at: now,
+      });
+    }
 
     this.invalidate(type, name);
 
@@ -1619,6 +1666,7 @@ export class DatabaseLoader implements MetadataLoader {
     packageId?: string;
     rows: Array<Record<string, unknown>>;
     member?: string | null;
+    unnamed?: Array<{ id: string; member: string }>;
   }> {
     const rows = await this._find(this.tableName, { where: this.baseFilter(type, name) });
     const bySlot = new Map<string, Record<string, unknown>>();
@@ -1633,12 +1681,25 @@ export class DatabaseLoader implements MetadataLoader {
     // a member with no row in the slot is inserted — ⛔ never written over
     // another member's row. The slot itself is chosen from every row of the
     // name, as for every by-package type.
-    if (isBundledStoreType(type)) {
-      const member = storedBundleMemberOf(type, data) ?? null;
-      const rowOf = (slot: string) => rows.find((row) => storeRowKey(name, storedRowPackageId(row)) === slot
-        && (storedBundleMemberOf(type, this.rowToData(row), row.bundle_member) ?? null) === member);
+    // [#32540, ADR-0150 D4/D6] So does an action's slot: a row per object the
+    // package binds the name to, the object-less one spelled `null`
+    // (`storedRowMemberOf`) — ⛔ never written over another binding's row.
+    const member = storedRowMemberOf(type, data);
+    if (member !== undefined) {
+      const memberOf = (row: Record<string, unknown>) => storedRowMemberOf(type, this.rowToData(row), row.bundle_member) ?? null;
+      const inSlot = (row: Record<string, unknown>, slot: string) => storeRowKey(name, storedRowPackageId(row)) === slot;
+      const rowOf = (slot: string) => rows.find((row) => inSlot(row, slot) && memberOf(row) === member);
       const existing = rowOf(key) ?? replaces.map(rowOf).find(Boolean) ?? null;
-      return { existing, packageId: slotPackageOf(key), rows, member };
+      // [#32540] A row of the slot written before its member was named
+      // (`bundle_member` NULL, a body bound to an object) holds the key of the
+      // object-less member until it is named: the write names it first, so
+      // the object-less binding's row can never collide with it.
+      // A bundled type's row is left as it was (#31699 R3-B reads its member
+      // off its body).
+      const unnamed = isBundledStoreType(type)
+        ? []
+        : unnamedRowsOf(type, rows.filter((row) => [key, ...replaces].some((slot) => inSlot(row, slot))), (row) => this.rowToData(row));
+      return { existing, packageId: slotPackageOf(key), rows, member: member ?? null, unnamed };
     }
     const existing = bySlot.get(key) ?? replaces.map((replaced) => bySlot.get(replaced)).find(Boolean) ?? null;
     return { existing, packageId: slotPackageOf(key), rows };
@@ -1656,6 +1717,21 @@ export class DatabaseLoader implements MetadataLoader {
       bySlot.set(key, [...(bySlot.get(key) ?? []), row]);
     }
     return bySlot;
+  }
+
+  /**
+   * [#32540 C3] Name the object of each row of an action slot written before
+   * the loader named it (`bundle_member` NULL, its body bound to an object):
+   * the column only — no body, no version, no history row. Until it is named
+   * such a row sits in the object-less binding's bucket of the store's unique
+   * key, so it is named before any write of the slot.
+   */
+  private async nameUnnamedRows(type: string, name: string, rows: ReadonlyArray<{ id: string; member: string }> | undefined): Promise<void> {
+    for (const row of rows ?? []) {
+      refuseUnstorableMember(type, name, row.member);
+      await this._update(this.tableName, row.id, { bundle_member: row.member });
+    }
+    if ((rows ?? []).length > 0) this.invalidate(type, name);
   }
 
   /**
@@ -1706,6 +1782,8 @@ export class DatabaseLoader implements MetadataLoader {
       // write fills, the package that row is bound to, and the name's next
       // version. Every other type: the name's one row, as before.
       const slot = PACKAGE_SLOTTED_STORE_TYPES.has(type) ? await this.slottedSaveTarget(type, name, data) : undefined;
+      if (typeof slot?.member === 'string') refuseUnstorableMember(type, name, slot.member);
+      await this.nameUnnamedRows(type, name, slot?.unnamed);
       const existing = slot
         ? slot.existing
         : await this._findOne(this.tableName, {
@@ -1787,7 +1865,8 @@ export class DatabaseLoader implements MetadataLoader {
           source: 'database',
           ...binding,
           // [#31699 R4-A] A bundled type's new row names its member, as the
-          // store's unique key `(type, name, package_id, bundle_member)` reads it.
+          // store's unique key `(type, name, package_id, bundle_member)` reads it;
+          // [#32540] an object-bound action's names its object.
           ...(slot?.member !== undefined ? { bundle_member: slot.member } : {}),
           created_at: now,
           updated_at: now,
@@ -1895,6 +1974,40 @@ function storedRowPackageId(row: Record<string, unknown>): string | undefined {
   return storedItemPackageId(body);
 }
 
+/**
+ * [#32540 C3] Of `rows`, an action slot's, each whose `bundle_member` does not
+ * yet name the object its body is bound to — a row written before the loader
+ * named it — with that object. An object-less row needs no name (NULL).
+ */
+function unnamedRowsOf(
+  type: string,
+  rows: ReadonlyArray<Record<string, unknown>>,
+  bodyOf: (row: Record<string, unknown>) => unknown,
+): Array<{ id: string; member: string }> {
+  const unnamed: Array<{ id: string; member: string }> = [];
+  for (const row of rows) {
+    const member = storedRowMemberOf(type, bodyOf(row), row.bundle_member);
+    if (typeof member === 'string' && row.bundle_member !== member) unnamed.push({ id: String(row.id), member });
+  }
+  return unnamed;
+}
+
+/** [#32540 C8] The longest member `sys_metadata.bundle_member` stores (its declared `maxLength`). */
+const STORED_MEMBER_MAX_LENGTH = SysMetadataObject.fields.bundle_member.maxLength as number;
+
+/**
+ * [#32540 C8] Refuse an action binding whose object name `sys_metadata.bundle_member`
+ * cannot hold, naming the action, the object and the limit: ⛔ never truncated
+ * (two long object names could then share a row).
+ */
+function refuseUnstorableMember(type: string, name: string, member: string): void {
+  if (member.length <= STORED_MEMBER_MAX_LENGTH) return;
+  throw new Error(
+    `${type} "${name}" is bound to object "${member}" (${member.length} characters), but sys_metadata.bundle_member `
+      + `stores at most ${STORED_MEMBER_MAX_LENGTH}: the binding cannot be stored. Bind it to an object whose name has at most ${STORED_MEMBER_MAX_LENGTH} characters.`,
+  );
+}
+
 /** [#32246] One row of {@link DatabaseLoader}'s type-wide read. */
 interface StoredTypeRow {
   /** The row's `name` column; `null` when it holds no usable string. */
@@ -1904,7 +2017,11 @@ interface StoredTypeRow {
   packageId?: string;
   /** For a by-package type, the row's version (the highest is the row saved last). */
   version?: number;
-  /** [#31699 R3-B] For a bundled by-package type, the member the row holds (`null`: the canonical one). */
+  /**
+   * [#31699 R3-B] For a bundled by-package type, the member the row holds (`null`: the canonical one);
+   * [#32540] for an action, the object it is bound to (`null`: object-less). Only a bundled type's
+   * unscoped read keys on it ({@link unscopedTypeRows}).
+   */
   member?: string | null;
   /** [#31699 R7-A] For a by-package type's row whose `package_id` is empty and whose body names `packageId`: its id. */
   legacyRowId?: string;

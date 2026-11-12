@@ -30,7 +30,7 @@
  * A bundled type (`email_template`, keyed by `locale`) holds a row per member
  * in one slot, as `DatabaseLoader.save` writes it (#32489): its slot is
  * `(package, name, member)`, the member read off the row's `bundle_member`
- * column else its body (`storedBundleMemberOf`), the store's unique key. So a
+ * column else its body (`storedRowMemberOf`), the store's unique key. So a
  * `fr-FR` row binds beside the package's bound `en-US` row of the name, and a
  * second `fr-FR` row is still left.
  *
@@ -46,9 +46,8 @@
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import {
   PACKAGE_SLOTTED_STORE_TYPES,
-  isBundledStoreType,
-  storedBundleMemberOf,
   storedItemPackageId,
+  storedRowMemberOf,
 } from '../package-slotted-store.js';
 
 /** The two reads/writes this migration needs; an `IDataDriver` is one. */
@@ -118,11 +117,17 @@ function boundColumn(row: Record<string, unknown>): string | undefined {
   return typeof column === 'string' && column !== '' && column !== 'sys_metadata' ? column : undefined;
 }
 
-/** The slot `row` holds once bound to `packageId`; a bundled type's names the member too (#32489). */
+/**
+ * The slot `row` holds once bound to `packageId`; a bundled type's names the
+ * member too (#32489), and [#32540] an action's the object it is bound to
+ * (`storedRowMemberOf`), so a package's legacy row on one object binds beside
+ * its bound row on another.
+ */
 function slotOf(row: Record<string, unknown>, packageId: string): string {
   const type = String(row.type);
-  if (!isBundledStoreType(type)) return JSON.stringify([type, row.name, packageId]);
-  return JSON.stringify([type, row.name, packageId, storedBundleMemberOf(type, parsedBody(row.metadata), row.bundle_member) ?? null]);
+  const member = storedRowMemberOf(type, parsedBody(row.metadata), row.bundle_member);
+  if (member === undefined) return JSON.stringify([type, row.name, packageId]);
+  return JSON.stringify([type, row.name, packageId, member]);
 }
 
 /** The stored body as an object, or `undefined` when it does not parse (the member is then the column's, else canonical). */

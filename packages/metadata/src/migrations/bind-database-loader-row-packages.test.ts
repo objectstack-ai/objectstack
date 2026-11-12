@@ -176,3 +176,25 @@ describe('migrateDatabaseLoaderRowPackages — a bundled type\'s slot is per mem
     expect(result.left.map((left) => [left.id, left.reason])).toEqual([['legacy', 'slot-taken']]);
   });
 });
+
+/**
+ * [#32540, ADR-0150 D4/D6] One package may bind one action name to several
+ * objects, and `DatabaseLoader` keeps a row per binding (`bundle_member` names
+ * the object). A legacy row of the package on one object is not in the slot
+ * of the package's bound row on another object: it is bound beside it.
+ * BASE (main 874166b6): the slot was `(package, name)` alone, so the legacy
+ * row was left `slot-taken`.
+ */
+describe('migrateDatabaseLoaderRowPackages: an action\'s slot names the object it is bound to (#32540)', () => {
+  it('binds a legacy row of a package\'s action on o1 beside the package\'s bound row on o2, and still leaves a second legacy row on o1', async () => {
+    const { store, packageOf } = rowStore([
+      row('bound-o2', 'action', { name: 'shared_action', objectName: 'o2', _packageId: A }, { package_id: A, bundle_member: 'o2' }),
+      row('legacy-o1', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
+      row('legacy-o1-again', 'action', { name: 'shared_action', objectName: 'o1', _packageId: A }),
+    ]);
+    const result = await migrateDatabaseLoaderRowPackages(store as unknown as IDataDriver);
+    expect(result.bound.map((entry) => entry.id)).toEqual(['legacy-o1']);
+    expect(result.left).toEqual([{ id: 'legacy-o1-again', type: 'action', name: 'shared_action', reason: 'slot-taken' }]);
+    expect(packageOf('legacy-o1')).toBe(A);
+  });
+});
