@@ -65,6 +65,21 @@ const SCREEN_ACTION = 'alpha_run_screen';
 const LATE = 'qa_ns_screen_late';
 const LATE_ACTION = 'alpha_run_screen_late';
 const IOTA = 'com.qa.ns.iota';
+/** [R8] A finished run of LATE whose history row names no package, as a release before `flow_package` wrote it. */
+const LEGACY_RUN = 'qa_ns_legacy_late';
+/** Writes that row once every plugin has started, before the boot's stored-reference backfill (`kernel:bootstrapped`) runs. */
+const legacyHistoryRow = {
+  name: 'com.qa.ns.legacy-history-row', type: 'standard', version: '1.0.0', dependencies: ['com.objectstack.service-automation'],
+  async init(ctx: any) {
+    ctx.hook('kernel:ready', async () => {
+      const at = new Date(Date.now() - 86_400_000).toISOString();
+      await ctx.getService('objectql').insert('sys_automation_run', {
+        id: `run_${LEGACY_RUN}`, flow_name: LATE, status: 'completed', started_at: at, finished_at: at, created_at: at,
+      }, { context: SYSTEM_CTX });
+    });
+  },
+  async start() {},
+};
 const ENDPOINT_PATH = '/apps/alpha/run-shared';
 
 const item = (p: string) => ({
@@ -204,6 +219,7 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
         new AppPlugin(betaStack as never),
         new MarketplaceInstallLocalPlugin({ controlPlaneUrl: 'off', storageDir: join(tempDir, 'installs') }),
         new MCPServerPlugin(),
+        legacyHistoryRow as never,
       ],
     }));
     stack = booted.value;
@@ -384,5 +400,17 @@ describe('a flow name held once per namespace, on a real boot (ADR-0150 D9, #316
     const lateViaMcp = await tool('resume_run', { runId: lateAgentRun, values: { note: 'done' } });
     expect([lateViaMcp.isError, lateViaMcp.payload?.action], lateViaMcp.text).toEqual([false, LATE_ACTION]);
     expect([(await automation().getRun(lateRun))?.status, (await automation().getRun(lateAgentRun))?.status]).toEqual(['completed', 'completed']);
+
+    // [R8] The history row the boot found with no package was bound to alpha, LATE's one holder then; with iota
+    // holding the name too, it is alpha's run at alpha's address and the bare door, and nobody's at iota's.
+    const ql = (await stack.kernel.getServiceAsync('objectql')) as any;
+    expect((await ql.find('sys_automation_run', { where: { id: `run_${LEGACY_RUN}` }, context: SYSTEM_CTX }))[0]?.flow_package).toBe(ALPHA);
+    for (const prefix of [`/automation/alpha/${LATE}`, `/automation/${LATE}`]) {
+      const read = await call('GET', `${prefix}/runs/${LEGACY_RUN}`);
+      expect([read.status, read.body?.data?.status], `${prefix} ${JSON.stringify(read.body)}`).toEqual([200, 'completed']);
+    }
+    const legacyUnderIota = await call('GET', `/automation/iota/${LATE}/runs/${LEGACY_RUN}`);
+    const nobodyRun = await call('GET', `/automation/iota/${LATE}/runs/run_nobody`);
+    expect([legacyUnderIota.status, legacyUnderIota.code, nobodyRun.status >= 400]).toEqual([nobodyRun.status, nobodyRun.code, true]);
   });
 });
