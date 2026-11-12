@@ -34,6 +34,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   ORG_ERROR_MESSAGE_KEYS,
+  orgDeleteRefusalRows,
+  readOrgDeleteRefusal,
   resolveOrgErrorMessage,
 } from '../orgErrorMessage';
 import { builtInLocales } from '@object-ui/i18n/locales';
@@ -265,5 +267,78 @@ describe('#4474 — the mapping table itself', () => {
     for (const [code, entry] of Object.entries(ORG_ERROR_MESSAGE_KEYS)) {
       expect(entry.defaultValue.trim().length, `${code} has an empty defaultValue`).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('objectstack#32648 — the refused organization delete, read by code and listed by label', () => {
+  /** The thrown value `@object-ui/auth` hands over for plugin-auth's 409. */
+  const refused = (extra: Record<string, unknown> = {}): Error => {
+    const err = new Error(
+      'This organization still owns records in sys_environment (2), sys_billing_invoice_line (1). ' +
+        'Delete or move those records first, then delete the organization.',
+    ) as Error & Record<string, unknown>;
+    err.code = 'DELETE_RESTRICTED';
+    err.dependents = [
+      { object: 'sys_environment', count: 2 },
+      { object: 'sys_billing_invoice_line', count: 1 },
+    ];
+    Object.assign(err, extra);
+    return err;
+  };
+
+  it('reads the dependents of a DELETE_RESTRICTED rejection, and never the message', () => {
+    const refusal = readOrgDeleteRefusal(refused());
+    expect(refusal).toEqual({
+      dependents: [
+        { object: 'sys_environment', count: 2 },
+        { object: 'sys_billing_invoice_line', count: 1 },
+      ],
+    });
+    expect(JSON.stringify(refusal)).not.toContain('Delete or move');
+  });
+
+  it('is the refusal even with no usable list, and keeps a producer-marked userMessage', () => {
+    expect(readOrgDeleteRefusal(refused({ dependents: undefined }))).toEqual({ dependents: [] });
+    expect(readOrgDeleteRefusal(refused({ dependents: [{ count: 2 }, 'sys_x'] }))).toEqual({ dependents: [] });
+    expect(readOrgDeleteRefusal(refused({ userMessage: '该组织仍有数据。' }))?.userMessage).toBe('该组织仍有数据。');
+    expect(readOrgDeleteRefusal(refused({ userMessage: ' ' }))).not.toHaveProperty('userMessage');
+  });
+
+  it('answers undefined for every other rejection, whatever its text says', () => {
+    expect(readOrgDeleteRefusal(withCode('ORGANIZATION_ALREADY_EXISTS', 'still owns records'))).toBeUndefined();
+    expect(readOrgDeleteRefusal(new Error('This organization still owns records in sys_domain (2).'))).toBeUndefined();
+    expect(readOrgDeleteRefusal('DELETE_RESTRICTED')).toBeUndefined();
+    expect(readOrgDeleteRefusal(null)).toBeUndefined();
+  });
+
+  it('lists each dependent under its label, and gathers the unlabelled ones on one last line', () => {
+    const labels: Record<string, string> = { sys_environment: '环境', crm_account: '客户' };
+    const rows = orgDeleteRefusalRows(
+      [
+        { object: 'sys_environment', count: 2 },
+        { object: 'sys_billing_invoice_line', count: 1 },
+        { object: 'crm_account', count: 3 },
+        { object: 'sys_domain', count: 2 },
+      ],
+      (object) => labels[object] ?? '',
+      '其他记录',
+    );
+    expect(rows).toEqual([
+      { object: 'sys_environment', label: '环境', count: 2 },
+      { object: 'crm_account', label: '客户', count: 3 },
+      { object: null, label: '其他记录', count: 3 },
+    ]);
+    // An API name is never shown in a label's place.
+    expect(rows.map((r) => r.label).join(' ')).not.toMatch(/sys_|_line|_domain/);
+  });
+
+  it('adds no "other" line when every object resolves, and withholds its count when a member’s is withheld', () => {
+    expect(orgDeleteRefusalRows([{ object: 'a', count: 1 }], () => 'A', 'Other records')).toEqual([
+      { object: 'a', label: 'A', count: 1 },
+    ]);
+    expect(
+      orgDeleteRefusalRows([{ object: 'a', count: 1 }, { object: 'b' }, { object: 'c' }], () => '', 'Other records'),
+    ).toEqual([{ object: null, label: 'Other records' }]);
+    expect(orgDeleteRefusalRows([{ object: 'a' }], () => 'A', 'Other records')).toEqual([{ object: 'a', label: 'A' }]);
   });
 });
