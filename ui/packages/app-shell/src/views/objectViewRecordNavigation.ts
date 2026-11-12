@@ -104,7 +104,7 @@ const RECORD_FORM_PARAMS = [RECORD_FORM_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_
  * — and `origin` is the list's own search without them. A URL that carries no
  * form answers `form: ''` and its search unchanged.
  */
-export function splitRecordFormSearch(search: string): { form: string; origin: URLSearchParams } {
+function splitRecordFormSearch(search: string): { form: string; origin: URLSearchParams } {
     const origin = new URLSearchParams(search);
     const form = new URLSearchParams();
     for (const [key, value] of origin) {
