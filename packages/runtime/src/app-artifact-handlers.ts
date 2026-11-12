@@ -720,8 +720,9 @@ export function judgeJobPull(
  * genuine copy need not stay equal to the body it was copied from. Such a name
  * answers the one holder when the body and the residual's owner are one
  * package, and otherwise a refusal naming the declaring bodies and the
- * residual. A job a body's own array holds still answers that body by
- * identity, as above.
+ * residual — [#32412] each by its own kind: every body a `package`, the
+ * residual `{ kind: 'residual', ownerId: appId }`. A job a body's own array
+ * holds still answers that body by identity, as above.
  */
 export function jobDeclaringPackages(
     bundle: unknown,
@@ -769,7 +770,7 @@ export function jobDeclaringPackages(
         if (residualCarries.has(name as string)) {
             // One holder only when the residual's owner IS the one declaring body.
             if (declarers.length === 1 && declarers[0] === residual) return residual;
-            return jobNameRefusal(name as string, declarers, { packageId: residual });
+            return jobNameRefusal(name as string, declarers, { ownerId: appId, packageId: residual });
         }
         return declarers.length === 1 ? declarers[0] : jobNameRefusal(name as string, declarers);
     };
@@ -777,14 +778,15 @@ export function jobDeclaringPackages(
 
 /**
  * [#32071] The refusal of a job name several package bodies declare: nothing picks one of them.
- * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too — as
- * its owning package when a body carries the artifact's id (then also a candidate), else as the
- * top level that names no package, which no holder kind spells, so the message alone names it.
+ * [#32355] With `residual`, the name the residual carries beside the bodies: it is named too.
+ * [#32412] As a candidate of its own kind, after every declaring body: `{ kind: 'residual',
+ * ownerId }`, the artifact's id — never as a `package`, whether or not a body carries that id
+ * (`packageId`, the package it runs as, which the message names).
  */
 function jobNameRefusal(
     name: string,
     packageIds: readonly string[],
-    residual?: { readonly packageId: string | undefined },
+    residual?: { readonly ownerId: string; readonly packageId: string | undefined },
 ): PackageScopedRefusal {
     const bodies = packageIds.map((packageId) => ({ kind: 'package' as const, packageId }));
     if (residual === undefined) {
@@ -801,9 +803,7 @@ function jobNameRefusal(
         };
     }
     const owner = residual.packageId;
-    const candidates = owner === undefined || packageIds.includes(owner)
-        ? bodies
-        : [...bodies, { kind: 'package' as const, packageId: owner }];
+    const candidates = [...bodies, { kind: 'residual' as const, ownerId: residual.ownerId }];
     const residualHolder = owner === undefined
         ? 'which names no package'
         : `which runs as ${describePackageScopedHolder({ kind: 'package', packageId: owner })}, the body that carries the artifact's id`;

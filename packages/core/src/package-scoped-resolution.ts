@@ -306,16 +306,25 @@ export const RUNTIME_COMPATIBILITY_PACKAGE_ID = '__runtime__';
  * — or the platform: code a plugin or the host registers under no package (an
  * owner-less engine function), reachable from every caller like `sys` (D2;
  * epic seat ruling on #31733, 6729484996).
+ *
+ * [#32412] Or a stack's residual (ADR-0130 D4): the top level of the artifact
+ * whose id is `ownerId`, outside every package body (`UnclaimedTopLevel`,
+ * `ObjectQL#recordResidualOwner`). It is not a package — no package row
+ * answers `ownerId` unless a body carries it, and then the residual is still
+ * not that body — so it is never a `package` holder. The rule here never
+ * answers it; the app-artifact job binder's residual-twin refusal names it.
  */
 export type PackageScopedHolder =
   | Extract<BareNameHolder, { kind: 'package' }>
   | { readonly kind: 'environment' }
-  | { readonly kind: 'platform' };
+  | { readonly kind: 'platform' }
+  | { readonly kind: 'residual'; readonly ownerId: string };
 
 /** How a refusal names a holder. */
 export function describePackageScopedHolder(holder: PackageScopedHolder): string {
   if (holder.kind === 'environment') return 'the environment (an item authored in this environment, bound to no package)';
   if (holder.kind === 'platform') return 'the platform (registered by a plugin or the host, owned by no package)';
+  if (holder.kind === 'residual') return `the top level of stack "${holder.ownerId}" outside every package body (its residual)`;
   return describeBareNameHolder(holder);
 }
 

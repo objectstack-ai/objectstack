@@ -863,7 +863,8 @@ describe('[#32355] a job name a package body declares and the residual carries i
         expect({ code: answers[0].code, status: answers[0].status }).toEqual({ code: 'RESOURCE_CONFLICT', status: 409 });
         expect(answers[0].message).toContain('package "com.example.alpha"');
         expect(answers[0].message).toContain('package "com.example.beta"');
-        // Every job of the name, by name: the refusal, with both packages its candidates.
+        // Every job of the name, by name: the refusal, with the body and the residual its candidates —
+        // [#32412] the residual by its own kind, not as `com.example.beta`, whose body declares no `sync`.
         const of = jobDeclaringPackages(bundle, 'com.example.beta');
         for (const job of bundle.jobs) {
             expect(of(job)).toMatchObject({
@@ -871,13 +872,14 @@ describe('[#32355] a job name a package body declares and the residual carries i
                 reason: 'ambiguous-in-environment',
                 type: 'job',
                 name: 'sync',
-                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'package', packageId: 'com.example.beta' }],
+                candidates: [{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.beta' }],
             });
         }
-        // A residual whose owner is no package (no body carries the top-level id): named all the same.
+        // A residual whose owner is no package (no body carries the top-level id): named all the same —
+        // [#32412] as a candidate too, never a one-candidate "ambiguous" refusal.
         const noPackage = jobDeclaringPackages(bundle, 'com.example.top')(bundle.jobs[1]) as { status?: string; candidates?: unknown; message?: string };
         expect(noPackage.status).toBe('refused');
-        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }]);
+        expect(noPackage.candidates).toEqual([{ kind: 'package', packageId: 'com.example.alpha' }, { kind: 'residual', ownerId: 'com.example.top' }]);
         expect(noPackage.message).toContain('names no package');
     });
 
