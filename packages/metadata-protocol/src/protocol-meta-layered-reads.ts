@@ -382,7 +382,10 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
     // package-less row of a name two or more packages hold is no holder's own
     // (epic ruling 6761802819 on #31699): refused naming every holder, never
     // reported as this holder's overlay. A pair's row the address does not own
-    // is not its layer. The raw row is still what `overlay` reports.
+    // is not its served layer here; the orphan step below may still report
+    // it as a shadowed layer beside the effective one (#28409), which a
+    // package-less row never is (it is bound to no package). Where the row
+    // stays, `overlay` reports it raw, without the stamp.
     if (exactAddress && overlay !== null) {
         const stamped = withRowBinding(overlay, overlayBinding);
         if (exactQualifierItem(host, request, exactAddress, stamped, member) !== stamped) {
