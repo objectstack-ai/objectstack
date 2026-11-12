@@ -150,7 +150,12 @@ one paired with the key its loader holds it under.
 The key is a fact about the **store**, not about the body — it is `register`'s
 own `name` argument — and it travels *beside* `data`, never inside it. `data` is
 exactly what the unkeyed `loadMany` would return for the same item, so no
-consumer ever sees a synthesised `name`.
+consumer ever sees a synthesised `name`. One exception: for a type stored per
+`(package, name)` (`api`, `agent`, `skill`, `action`, `email_template`,
+`permission`), a row the database loader binds to its package by the
+`package_id` column alone reaches `loadMany` stamped with that package
+(`_packageId`), so registering it back fills that package's slot; `loadManyKeyed`
+returns the stored body as stored, without the stamp.
 
 That difference is the point. A stored body with no top-level `name` is legal
 and deliberate — an aggregated `defineView` container has none **by design**,
